@@ -107,6 +107,11 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if item in? seen or node is? hir.FunctionLiteral continue
             seen.push(item) body.push(item)
             if node is? hir.Declare and node.binding_id isnt? none {locals.push(node.binding_id)}
+            # Constructor field names are private locals, including names
+            # used by a later default. They do not expose ambient storage.
+            if node is? hir.ObjectLiteral {
+                loop field in node.fields {if field.binding_id isnt? none {locals.push(field.binding_id)}}
+            }
             if node is? hir.IteratorExpression {
                 let target=hir.node_at(nodes node.target)
                 if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {locals.push(target.binding_id)}

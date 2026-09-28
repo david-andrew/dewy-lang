@@ -1,0 +1,15 @@
+$explicit_copies
+
+# Defaults read this construction's earlier fields, not ambient storage.
+Pair:type=[first:int64 second:int64=first+1]
+size=(items:array<int64>):>int64 & no_effects=>items.length
+forward=(items:array<int64>):>int64 & no_effects=>{
+    let pair=Pair[first=39]
+    return size(items)+pair.second
+}
+work=(items:array<int64>):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?100 {if forward(items) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>work([20 22])

@@ -815,6 +815,9 @@ nonlocal_bindings=(root:addr nodes:array<hir.AST>):>set<addr>=>{
             let node=hir.node_at(nodes item)
             if node is? hir.FunctionLiteral continue
             if node is? hir.Declare and node.binding_id isnt? none {local.push(node.binding_id)}
+            else if node is? hir.ObjectLiteral {
+                loop field in node.fields {if field.binding_id isnt? none {local.push(field.binding_id)}}
+            }
             else if node is? hir.IteratorExpression {
                 let target=hir.node_at(nodes node.target)
                 if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.push(target.binding_id)}

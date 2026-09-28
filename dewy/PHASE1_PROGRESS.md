@@ -36,6 +36,20 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): constructor-private field bindings now participate
+in lexical storage/effect inventories, including parameter default expressions.
+A later field default reading an earlier field is private to its construction;
+nested functions still treat captured fields as external. This removes false
+ambient-effect/copy obligations without hiding actual globals or mutation.
+Hosted checks cover nested defaults, structural literals, globals and captures;
+paired execution also checks zero allocation across repeated calls.
+
+Integration at `b934932d`: three native generations reached an identical
+fixed point, with generations 2/3 taking 47/51 seconds under concurrent load.
+The complete native inventory reports 4,112 copy sites (2,901 records, 562
+arrays, 649 cells), within the 4,500-site gate. Full paired parity is running;
+this checkpoint does not close Phase 1.
+
 Checkpoint (2026-09-28): a separate finite weighted-sum domain now carries
 invariants such as `2*i<=j` through unequal counter steps. It shares entry,
 join, widening, affine-update, alias invalidation, scope retirement, snapshot

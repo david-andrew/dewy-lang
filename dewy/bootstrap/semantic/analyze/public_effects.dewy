@@ -373,11 +373,15 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
             else {scan.private.push(param.binding_id)}
         }
         let pending:array<addr>=[node.body]
+        loop param in params {if param is? hir.BoundParam {pending.push(param.value)}}
         loop pending.length >? 0 {
             let child=pending.pop
             let body=hir.node_at(session.hir child)
             if body is? hir.FunctionLiteral continue
             if body is? hir.Declare and body.binding_id isnt? none {scan.private.push(body.binding_id)}
+            if body is? hir.ObjectLiteral {
+                loop field in body.fields {if field.binding_id isnt? none {scan.private.push(field.binding_id)}}
+            }
             if body is? hir.IteratorExpression {
                 let target=hir.node_at(session.hir body.target)
                 if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {

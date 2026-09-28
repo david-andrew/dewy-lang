@@ -935,6 +935,8 @@ def nonlocal_bindings(root: hir.AST) -> set[int]:
             seen.add(id(node))
             if isinstance(node, hir.Declare):
                 local.add(node.binding_id)
+            elif isinstance(node, hir.ObjectLiteral):
+                local.update(field.binding_id for field in node.fields if field.binding_id is not None)
             elif isinstance(node, hir.IteratorExpression):
                 local.add(node.target.binding_id)
             elif isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:

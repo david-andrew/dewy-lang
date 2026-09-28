@@ -108,6 +108,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             body.append(node)
             if isinstance(node, hir.Declare):
                 local.add(node.binding_id)
+            if isinstance(node, hir.ObjectLiteral):
+                # Later fields/defaults can name earlier fields. These names
+                # belong to this construction, not to an ambient owner.
+                local.update(field.binding_id for field in node.fields)
             if isinstance(node, hir.IteratorExpression):
                 local.add(node.target.binding_id)
             pending.extend(hir.children(node))

@@ -74,13 +74,15 @@ def inventory(root, registry, allocator_scopes=None):
         frame_values = placement.local_values(literal, frame_places.nonescaping, frame_places.fixed_storage, borrowed_arguments)
         frame_literals = set().union(*(placement.literal_storage(node.expr) for node in frame_values.values()))
         word_bindings = set()
-        pending = [literal.body]
+        pending = [literal.body, *(p.value for p in params if isinstance(p, hir.BoundParam))]
         while pending:
             node = pending.pop()
             if isinstance(node, hir.FunctionLiteral):
                 continue
             if isinstance(node, hir.Declare):
                 private.add(node.binding_id)
+            if isinstance(node, hir.ObjectLiteral):
+                private.update(field.binding_id for field in node.fields if field.binding_id is not None)
             if isinstance(node, hir.IteratorExpression):
                 private.add(node.target.binding_id)
                 if word_iterator(node):
