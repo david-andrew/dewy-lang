@@ -4562,6 +4562,16 @@ class _BoundsValidator:
         loop keep `i <= src.length` from its entry through its exit."""
         if self._vacuous(state, key):
             return _ANY_FACT
+        if isinstance(key, DistinctFact):
+            # A join asks about a candidate already selected by another
+            # path. It need not synthesize exclusions for every term pair.
+            for smaller, larger in ((key.left, key.right), (key.right, key.left)):
+                bound = state.get(_order_key(smaller, larger))
+                if bound is not None and bound.lower is not None and bound.lower > 0:
+                    return Interval.exact(1)
+            left = _known_interval(state, key.left, self.max_length)
+            right = _known_interval(state, key.right, self.max_length)
+            return Interval.exact(1) if self._decide_comparison('__ne__', left, right) is True else None
         order = _decode_order_fact(key)
         if order is None:
             return None

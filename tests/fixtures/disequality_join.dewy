@@ -1,0 +1,6 @@
+probe=(a:int64 b:int64 flag:bool):>int64=>{
+    if flag {if a>=?b return 0} else {if a=?b return 0}
+    $assert a not=?b
+    return 42
+}
+main=():>int64=>if probe(4 12 true)=?42 probe(12 4 false) else 0

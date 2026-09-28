@@ -243,6 +243,15 @@ vacuous = (state:State fact:Fact context:Context):>bool => {
 }
 implied = (state:State fact:Fact context:Context):>Evidence => {
     if vacuous(state fact context) return Vacuous
+    if fact is? Distinct {
+        # Only decide the candidate a peer path already carries. This keeps
+        # join inference finite without enumerating all possible exclusions.
+        let forward=lookup(state order(fact.left fact.right))
+        let reverse=lookup(state order(fact.right fact.left))
+        if (forward isnt? none and forward.lower isnt? none and forward.lower >? 0) or (reverse isnt? none and reverse.lower isnt? none and reverse.lower >? 0) return ranges.exact(1)
+        let decision=ranges.decide('not=?' known(state fact.left context) known(state fact.right context))
+        return if decision =? true ranges.exact(1) else none
+    }
     if fact isnt? Order return none
     let smaller = known(state fact.smaller context)
     let larger = known(state fact.larger context)

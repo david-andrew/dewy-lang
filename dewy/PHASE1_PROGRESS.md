@@ -6019,3 +6019,23 @@ required before certifying this new convention on compiler sources.
 The preceding disequality checkpoint `ee5a3fc0` reached a three-generation native
 fixed point (generation 3: 55 s under concurrent checks). Its fresh hosted-built
 driver passed all 43 focused contract/guard checks in 329.18 s including build.
+
+
+## Mixed disequality evidence at joins (2026-09-28)
+
+Joins now preserve an already selected disequality when a peer path proves it
+through a direct strict order or disjoint intervals. No ordering is inferred
+from inequality alone, no all-pairs candidates are synthesized, and equality or
+a merely non-strict peer path still prevents the joined conclusion. Thirty-seven
+hosted disequality/convergence checks and both paired groups pass. Positive and
+non-strict-counterexample fixtures bring the manifest to 257 cases.
+
+`semantic/finite_facts.md` now inventories the implemented contract fragment,
+identities, facts, transfers, joins and candidate/convergence budgets. It separates
+candidate selection from evidence and records remaining linear-combination,
+aggregate-summary, nested-scaling and unsafe-audit work explicitly.
+
+The owning-record checkpoint `36fd8465` reached a three-generation native fixed
+point (generations 2/3: 53/55 s under concurrent checks). Its fresh hosted driver,
+broader hosted suite and 255-case parity run are the current integration gates;
+this join extension has its focused checks but postdates that frozen snapshot.

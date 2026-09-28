@@ -905,6 +905,10 @@ justify `rows[row][column]`; assignments, place writes and loop advancement
 invalidate facts that depend on the changed selector. This is numeric
 evidence for the current selection, not persistent source-level type narrowing.
 
+The implemented vocabulary and its inference limits are recorded in
+[`semantic/finite_facts.md`](semantic/finite_facts.md). This inventory separates
+candidate discovery from proof and keeps the remaining closure work explicit.
+
 The finite fact vocabulary also retains symmetric disequalities between current
 scalar/length routes. Equality exclusions survive joins only with evidence on
 each path, sharpen an established non-strict order, and invalidate with their

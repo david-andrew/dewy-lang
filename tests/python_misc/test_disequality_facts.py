@@ -47,7 +47,17 @@ CASES = [PAIR,
 ]
 CASES.append('probe=(a:int64 b:int64):>int64=>{\n    if a=?b return 0\n    if a>?b return 1\n    $assert a<?b\n    return 42\n}\nmain=():>int64=>probe(4 12)')
 CASES.append(PAIR.replace('    return 42', '    loop i in [0..20) {$assert a not=?b}\n    return 42'))
-ERRORS = [PAIR.replace('    $assert a not=?b', '    $unsafe_assume a=?b'), PAIR.replace('    if a=?b return 0', ''), PAIR.replace('    $assert a not=?b', '    a=b\n    $assert a not=?b'),
+JOIN = """probe=(a:int64 b:int64 flag:bool):>int64=>{
+    if flag {if a>=?b return 0} else {if a=?b return 0}
+    $assert a not=?b
+    return 42
+}
+main=():>int64=>if probe(4 12 true)=?42 probe(12 4 false) else 0"""
+CASES += [JOIN, JOIN.replace('if a>=?b', 'if a<=?b').replace('probe(4 12 true)', 'probe(12 4 true)'),
+    JOIN.replace('if a>=?b return 0', 'a=1 b=2')]
+ERRORS = [JOIN.replace('if a>=?b return 0', 'if a>?b return 0'),
+    JOIN.replace('if a>=?b return 0', 'a=1 b=1'),
+    PAIR.replace('    $assert a not=?b', '    $unsafe_assume a=?b'), PAIR.replace('    if a=?b return 0', ''), PAIR.replace('    $assert a not=?b', '    a=b\n    $assert a not=?b'),
     PAIR.replace('    $assert a not=?b', '    a+=1\n    $assert a not=?b'),
     PAIR.replace('    $assert a not=?b', '    $assert a<?b'),
     CASES[3].replace('        $assert n not=?xs.length', '        xs.push(0)\n        $assert n not=?xs.length'),
