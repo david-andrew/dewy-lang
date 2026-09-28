@@ -6260,3 +6260,17 @@ comparison pass. The final 28-case group adds the positive record snapshot and
 record-default/refined-field regressions. Three fixtures bring the manifest to
 274. The preceding `9ef254b8` integration completed all 269 cases; later changes
 need their own full integration checkpoint.
+
+## Uniform vacuity across element predicates (2026-09-28)
+
+Joins and loop searches now apply the empty-element rule to every supported
+fact kind, including value/length intervals, exclusions and either ordering
+endpoint. A branch that stores nothing does not erase a fact true of all
+existing elements. This does not seed facts on a nonempty path or permit old
+summaries to describe replacement elements.
+
+Validation: the direct hosted/native join/narrow/widen comparison passes with
+new interval, reverse-order and exclusion states. The combined element groups
+pass 52 checks including native execution on x86-64/C. Branches containing a
+foreign value and clear/reinsert paths still reject unsupported claims. Two
+fixtures bring the full manifest to 276 cases.

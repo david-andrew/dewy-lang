@@ -79,6 +79,9 @@ def test_native_fact_state_matches_hosted(tmp_path):
                        bounds._index_fact_key(1, large): interval(None, None),
                        bounds._nonzero_key(1): interval(None, None)})
     states.extend([
+        {length(2): interval(1, 5), element: interval(1, 10),
+         length(element): interval(2, 4), order(1, element): interval(1, None),
+         bounds._distinct_key(1, element): interval.exact(1)},
         {bounds._distinct_key(1, 2): interval.exact(1), order(1, 2): interval(0, None)},
         {bounds._distinct_key(1, length(2)): interval.exact(1)},
         {bounds._distinct_key(length(4), length(2)): interval.exact(1)},

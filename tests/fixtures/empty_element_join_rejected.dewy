@@ -1,0 +1,10 @@
+probe=(a:int64 b:int64 choose:bool):>int64=>{
+    if a<=?b return 0
+    let values:array<int64>=[]
+    if choose {values.push(a)} else {values.push(b)}
+    if values.length=?0 return 42
+    let saved=values[0]
+    $assert saved>?b
+    return 42
+}
+main=():>int64=>probe(8 4 true)

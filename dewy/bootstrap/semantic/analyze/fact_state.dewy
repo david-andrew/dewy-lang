@@ -229,17 +229,22 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
     }
 }
 
-vacuous = (state:State fact:Fact context:Context):>bool => {
-    let subject:Term? = none
-    if fact is? Remainder { subject = fact.subject }
-    else if fact is? Order { subject = fact.smaller }
-    else if fact is? Index { subject = Term[fact.index] }
-    else if fact is? Nonzero { subject = Term[fact.subject] }
-    if subject is? none or subject.projection not=? 'value' return false
-    let root = context.element_roots.get(subject.binding_id)
+empty_element = (state:State subject:addr context:Context):>bool => {
+    let root = context.element_roots.get(subject)
     if root is? none return false
     let length = lookup(state value(Term[root 'length']))
     return length isnt? none and ranges.same_bounds(length ranges.exact(0))
+}
+vacuous = (state:State fact:Fact context:Context):>bool => {
+    # All element endpoints, including length projections, are universally
+    # quantified. A missing element makes its complete predicate vacuous.
+    if fact is? Value return empty_element(state fact.term.binding_id context)
+    if fact is? Nonzero return empty_element(state fact.subject context)
+    if fact is? Index return empty_element(state fact.index context) or empty_element(state fact.sequence context)
+    if fact is? Order return empty_element(state fact.smaller.binding_id context) or empty_element(state fact.larger.binding_id context)
+    if fact is? Distinct return empty_element(state fact.left.binding_id context) or empty_element(state fact.right.binding_id context)
+    if fact is? Remainder return empty_element(state fact.subject.binding_id context) or empty_element(state fact.upper.binding_id context) or empty_element(state fact.offset context)
+    return false
 }
 implied = (state:State fact:Fact context:Context):>Evidence => {
     if vacuous(state fact context) return Vacuous

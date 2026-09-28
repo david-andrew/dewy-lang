@@ -4671,23 +4671,30 @@ class _BoundsValidator:
 
     def _vacuous(self, state: State, key: FactKey) -> bool:
         """Whether an element fact holds of `state` because the array is empty there."""
-        remainder = _decode_remainder_fact(key)
-        subject = remainder[0] if remainder is not None else None
-        if subject is None:
-            order = _decode_order_fact(key)
-            if order is not None:
-                subject = order[0]
-            else:
-                index_fact = _decode_index_fact(key)
-                subject = index_fact[0] if index_fact is not None else None
-        if subject is None or subject < 0:
-            return False
-        binding = self.registry.by_id.get(subject)
-        if binding is None or binding.route_root is None or not self.registry.route_paths.get(subject, ()):
-            return False
-        if self.registry.route_paths[subject][0] != '*':
-            return False
-        return state.get(_length_key(binding.route_root)) == Interval.exact(0)
+        # Every endpoint is universally quantified over its element route.
+        # With no such elements, either side of an order/exclusion is vacuous;
+        # numeric value/length bounds obey the same rule.
+        if isinstance(key, int):
+            terms = (key,)
+        elif isinstance(key, NonzeroFact):
+            terms = (key.binding,)
+        elif isinstance(key, IndexFact):
+            terms = (key.index, _length_key(key.array))
+        elif isinstance(key, OrderFact):
+            terms = (key.smaller, key.larger)
+        elif isinstance(key, DistinctFact):
+            terms = (key.left, key.right)
+        else:
+            assert isinstance(key, RemainderFact)
+            terms = (key.subject, key.upper, key.offset)
+        for term in terms:
+            subject = term if term >= 0 else -term - 1
+            binding = self.registry.by_id.get(subject)
+            if (binding is not None and binding.route_root is not None
+                    and self.registry.route_paths.get(subject, ())[:1] == ('*',)
+                    and state.get(_length_key(binding.route_root)) == Interval.exact(0)):
+                return True
+        return False
 
     def _length_offset_index(self, index: hir.AST, array_id: int) -> int | None:
         """`k` when the index is `xs.length - k` for the same sequence with a constant `k >= 1`.
