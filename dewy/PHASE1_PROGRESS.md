@@ -6420,3 +6420,19 @@ Validation: 23 copy-bound checks and two layout/dictionary-layout checks pass on
 x86-64/C, including repeated sibling types and shared-string classification. The
 copy-bound fixture is now included in the full 296-case parity manifest. A fresh
 integration will cover these modules as part of the complete compiler.
+
+## Allocation profile and a counting correction (2026-09-28)
+
+`tools/allocation_sites.py` attributes a native program's arena allocations
+to source statements by instrumenting its debug µDewy. On the compiler's own
+sources at `86a86d8a`, a self-build makes 402 M allocations totaling about
+32 GB, with 2.6 GB peak live. The breakdown, and why none of it is
+frame-resident yet, is in `bootstrap/PERFORMANCE.md` ("Allocation profile of
+a self-build"). `ROADMAP.md` 1.1 schedules the fixes.
+
+The allocated totals recorded in this ledger from 2026-09-24 to 2026-09-27
+summed every `dewy storage` line of `--timings`. Those lines nest (per-module
+imports, sub-phases), so the totals overstate the real volume about
+threefold. For example, the 87.7 GB recorded for `phase1-u` corresponds to
+roughly 31 GB. Comparisons between the recorded totals still roughly hold.
+Sum only the top-level phases.

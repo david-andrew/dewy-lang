@@ -675,3 +675,110 @@ filter, site list and budget outcome. These are static sites, not execution
 counts; agreement with a summary does not by itself prove every lowering
 path emits a note. Keep runtime allocation/detachment measurements alongside
 the inventories.
+
+## Allocation profile of a self-build (2026-09-28)
+
+Measured at `86a86d8a` with a first-generation native compiler (built by the
+`a4c05062` pair). The compiler allocates about **32 GB in 402 million
+allocations** while compiling its own sources, with 2.6 GB peak live. By
+top-level phase: frontend 9.8 GB, validation 9.9, lowering 8.3, prelude
+analysis 1.6, initialization and reachability 1.1, emission 1.0.
+
+**Reading `--timings` allocation lines.** The `dewy storage` lines nest.
+Each imported module prints `parse`, `imports` and `check` lines, and a
+module's `imports` line covers the modules it imports. Sub-phase lines
+(`validation.*`, `lowering.*`, `bounds.function:*`) repeat bytes already
+counted by their parent. Only the top-level phases add up: `prelude_restore`,
+`prelude_analysis`, `prelude_store`, `patterns`, `frontend`, `validation`,
+`initialization_and_reachability`, `lowering`, `emission` and `backend`.
+The allocated totals in `PHASE1_PROGRESS.md` from 2026-09-24 to 2026-09-27
+(152.1, 122.7, 105.0, 91.2 and 87.7 GB, among others) summed every line and
+overstate the real volume about threefold. They were all counted the same
+way, so comparisons between them roughly hold.
+
+**Method.** `tools/allocation_sites.py` instruments the µDewy text of a debug
+build. Every statement records a site number, and the arena entry points add
+each allocation and its requested bytes to the current site. The instrumented
+compiler attributes 29.1 GB of requests. The arena's own counter reports
+31.9 GB because it counts size-class widths.
+
+By mechanism (the runtime helper the allocating statement calls):
+
+| Mechanism | Bytes | Share | Allocations |
+|---|---|---|---|
+| Record copies (`_copy_object`) | 5.85 GB | 20% | 40.1 M |
+| Array growth (`push`, `reserve`) | 5.72 GB | 20% | 38.8 M |
+| New array descriptors (64 B each) | 5.67 GB | 19% | 88.6 M |
+| New records and unions | 4.21 GB | 14% | 64.8 M |
+| String storage | 2.11 GB | 7% | 33.7 M |
+| Dictionary index rebuilds | 1.64 GB | 6% | 8.1 M |
+| Shared array detaches | 1.53 GB | 5% | 11.5 M |
+| Union cells (new and copied) | 1.08 GB | 4% | 67.3 M |
+
+**No stack placement yet.** Every record, array descriptor and union cell is
+a handle to an arena block whose header carries the size and sharing count
+that copies, detaches and releases rely on. The only frame storage is for
+scalars and exact-length local array literals (`__alloca__` buffers). A
+frame-resident aggregate needs an owner state that is never released, and a
+proof that the value does not escape: returned, stored in a field or
+container, pushed, or captured. The storage model in `status.md` lists this
+as proof-gated placement; only frame regions for strings have landed. The
+profile separates into three groups.
+
+*Allocations that should not happen at all.*
+- **Copies of narrowed AST nodes passed to read-only parameters:** 15.1 M
+  copies of 256 bytes (3.87 GB, 763 sites). The typical site is a traversal
+  such as `captures.locals`: `node` comes from `hir.node_at`, is narrowed by
+  `is?` tests, then goes to `hir.push_children(node @pending)`, which only
+  reads it. The copy report gives "may be used again, and no proven
+  last-use move applies". The 2026-09-20 relative-cast borrow
+  (`PHASE0_MEASUREMENTS.md`) targeted this exact shape. Since narrowed
+  records became record-union handles (2026-09-25), these arguments appear to
+  copy again; confirm the cause before fixing. The largest sites:
+  `emit.collect_forwards` (2.5 M), `predicate_effects.mutated_bindings`
+  (1.1 M), `captures.locals` and `references` (2.3 M together).
+- **Empty array descriptors:** 73.7 M of the 88.6 M descriptors are `[]`
+  (4.72 GB), whether or not anything is pushed later. The largest sources
+  are `hir.children`, the `[]` fields built in `statements.expression`, and
+  `captures.write_targets`. An empty array needs no storage: a shared static
+  empty descriptor, replaced by a real one at the first `push` or `reserve`,
+  would remove them.
+- **Constant array literals inside loops:** `temporary_name` builds
+  `['0' … '9']` on each iteration (4.7 M allocations, 0.32 GB). Constant
+  literals in expression position belong in static data.
+
+*Array growth: many small arrays, few large ones.* Arrays double from an
+initial 8 slots, and a growth step copies the old buffer. The 5.72 GB are
+38.8 M steps, 147 bytes on average. Grouped by each site's average step:
+
+| Average step at the site | Bytes | Steps |
+|---|---|---|
+| First 8-slot buffer only (≤ 72 B) | 1.80 GB | 28.3 M |
+| 72 B to 1 KB | 2.39 GB | 10.3 M |
+| 1 KB to 64 KB | 0.67 GB | 0.2 M |
+| Over 64 KB | 0.85 GB | 3,180 |
+
+- *Short local lists* (the first group) receive their first 8-slot buffer and
+  are dropped in the same function: a node's child ids (`hir.push_children`),
+  parser scratch (`p0.powers`, `reduce_chain`), tokenizer candidates
+  (`t0.consider`, `select`), statement prefixes (`statements.expression`),
+  effect steps (`effects.translated`). These are the natural stack
+  candidates: small, rarely over 8 elements, and non-escaping. A few inline
+  slots in the frame with spill to the arena would remove most of them.
+- *Structures rebuilt from empty* (the second group). The bounds checker is
+  the largest: `fact_state` accounts for 3.52 GB and 28.2 M allocations in
+  total, 1.07 GB of it growth. `join` builds each merged `State` from empty
+  through `put`, so `values`, `next` and the `heads` dictionary each grow
+  8 → 16 → 32 … at every join, and every `put` also allocates a 128-byte
+  `Entry`. The result is bounded by the largest input state, so one
+  reservation would replace the growth chain. `lifecycle_runtime.resource`
+  (0.59 GB, 5.3 M allocations) builds a work list and a `seen` set per query
+  for a fact that depends only on the type id; caching the answer per
+  compile removes it. `bindings` scope stacks, `t2.rewrite_list` and
+  `ty.distribute` follow the same rebuild pattern at smaller scale.
+- *Large tables* (the last two groups): the HIR node table (about 3 MB per
+  growth step), the token arrays, the cache byte writer and some effect
+  collections. Doubling allocates about twice their final size, as
+  expected; the context allocator is the lever for these, not the stack.
+
+The scheduling of each group is recorded in `ROADMAP.md` under 1.1.

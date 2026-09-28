@@ -322,7 +322,11 @@ Sequencing: levers 1, 2 and 5 need no language change and belong to the
 next performance batch after Phase 1.1's current slices; lever 3 lands
 with the context allocator; lever 4 with Phase 2; lever 6 is a standing
 rule from now on. Measure every batch as lines per second on the
-compiler's own sources, C route and direct route separately.
+compiler's own sources, C route and direct route separately, with the
+allocation volume of the top-level `--timings` phases alongside (the
+nested per-module and sub-phase lines must not be summed; see
+`bootstrap/PERFORMANCE.md`). The allocation fixes scheduled under 1.1
+("Allocation profile") join the lever 1, 2 and 5 batch.
 
 ### Direct binary fast path (2026-09-24)
 
@@ -614,8 +618,10 @@ silently.
    lower as views, justified by the effect analysis proving the root is not
    mutated during the borrow. This alone removes the arena-lookup case.
    Second: moves at last use for records, strings, and unions (arrays
-   already have this). Third: scoped arenas for the checker's per-branch
-   temporaries. Each step is measured against the gates before the next.
+   already have this). Third: frame placement for small aggregates that
+   the same escape facts prove never leave their function. Fourth: scoped
+   arenas for the checker's per-branch temporaries. Each step is measured
+   against the gates before the next.
 3. **Ratchet copy-on-write down, do not rip it out.** Keep it behind the
    same descriptor interface as the fallback. Count detachments and shared
    snapshots per kernel. Remove it from a shape only when the static path
@@ -636,6 +642,40 @@ silently.
    enforce the per-module policy on recorded runtime-sized copies, including
    nested storage, without a CLI-only scan. Reporting coverage and ownership
    proof parity remain in progress.
+
+**Allocation profile (2026-09-28).** A self-build allocates about 32 GB in
+402 million allocations, 2.6 GB peak live; the per-site measurement is in
+`bootstrap/PERFORMANCE.md` ("Allocation profile of a self-build"). Nothing
+is frame-resident yet except scalars and exact-length local literals. The
+groups it found, and when each is dealt with:
+
+- *With the current borrow and move slices:* narrowed AST nodes copied
+  into read-only parameters (`hir.push_children(node @pending)` in tree
+  walks; 15 M copies, 3.9 GB). This is the shape the 2026-09-20 relative-
+  cast borrow covered; confirm why it no longer applies to record-union
+  handles, then restore the borrow. It counts against the copy budget like
+  any other unexplained copy.
+- *In the next performance batch, alongside throughput levers 1, 2 and 5:*
+  representation and compiler-code fixes that need no new proofs. An empty
+  `[]` shares one static descriptor and allocates at the first `push` or
+  `reserve` (73.7 M descriptors, 4.7 GB). Constant array literals in
+  expression position become static data. `fact_state.join` reserves its
+  result from the largest input state instead of growing it by doubling
+  (the bounds checker's fact states are 3.5 GB). `lifecycle_runtime.resource`
+  caches its per-type answer for the compile. Measure each against the
+  allocation profile, not only the self-build time.
+- *As the third mechanism above, once the lifetime work below is closed:*
+  frame placement. Small non-escaping local lists get inline frame slots
+  that spill to the arena (28 M growth steps never pass their first 8-slot
+  buffer). Fresh records and arrays returned to a caller that keeps them
+  local are built in caller-provided storage, the destination-result
+  protocol `status.md` describes for caller-region results. Both consume
+  the escape facts the move and view analyses already compute; an
+  unproven case keeps its arena allocation.
+- *With the context allocator (throughput lever 3):* the large tables (HIR
+  nodes, tokens, cache bytes). Their growth is ordinary doubling (0.85 GB
+  in 3,180 steps); per-phase arenas release them wholesale rather than
+  avoiding them.
 
 The difference from the earlier attempt is the order and the gate: each
 mechanism lands against a measured kernel and the compiler's own sources,
