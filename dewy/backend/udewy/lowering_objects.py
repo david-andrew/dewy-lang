@@ -1759,6 +1759,15 @@ class _ObjectLowering:
         if members is not None:
             return self._replace_cell_value(address, value, members, loc, prepared=False)
         if isinstance(field_type, ty.ObjectType):
+            # Acquire the replacement before dropping the old field. A frame
+            # root suffices: its adopted contents move inline immediately.
+            adopted = self._adopt_object_fields(value, field_type, arena=False,
+                                                site='stored in a field')
+            if adopted is not None:
+                prelude, replacement = adopted
+                size, _ = self._object_layout(field_type, value)
+                return [*prelude, *self._release_object_members(address, field_type, loc),
+                        *self._byte_copy_loop(address, replacement, self._int64_literal(loc, size), loc)]
             prelude, source = self._extract_object_pointer(value)
             if not self._object_expression_owns_fresh_storage(value):
                 self._note_copy('record', field_type, 'stored in a field', self._copy_reason(value), loc)

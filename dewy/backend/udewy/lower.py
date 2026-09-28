@@ -3954,7 +3954,7 @@ class _Lowerer(
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
                 field_type = node.target.type
-                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign))
+                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign) or isinstance(field_type, ty.ObjectType))
                 walk(node.value, depth, nested, site)
                 return
             if isinstance(node, hir.ArrayLiteral):

@@ -6137,3 +6137,19 @@ to 28 physical modules. Each passed standalone lowering in both compilers with
 the expanded inline-field copy reporting. Only the policy directive was added;
 no `.copy()` annotations or control-flow rewrites were needed. Whole-graph
 adoption and the final copy inventory remain open.
+
+## Replacing owned record fields (2026-09-28)
+
+Hosted lowering now applies the same last-use adoption proof when replacing an
+existing record field, matching the native replacement path. The replacement
+acquires its contents before the old field is released, then its inline bytes
+move into the destination. A temporary frame root suffices. Later source reads,
+retained views and repeated uses still require a reported independent copy.
+
+All 30 record-field checks pass, including the paired x86-64/C group and two
+allocation-budget positive controls. Both construction and replacement retain
+zero bytes over 100 calls and stay within 64 bytes per measured transfer; turning
+off adoption exceeds the budget. The replacement fixture brings the manifest to
+266 cases. Three-generation integration at the preceding `f899b2b5` snapshot
+completed (generation 3: 59 seconds under concurrent checks); its fresh hosted
+driver, 265-case manifest run and copy inventory are still in progress.

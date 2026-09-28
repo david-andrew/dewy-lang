@@ -36,14 +36,24 @@ BRANCH = HEADER + '''probe=(yes:bool):>int64=>{
 }
 main=():>int64=>if probe(true)=?42 probe(false) else 0'''
 FIXTURE = (Path(__file__).resolve().parents[1] / 'fixtures/record_field_moves.dewy').read_text()
+REPLACEMENT_FIXTURE = (Path(__file__).resolve().parents[1] / 'fixtures/record_field_replacement_moves.dewy').read_text()
+KERNELS = [FIXTURE, REPLACEMENT_FIXTURE]
 STRICT = [MOVE, SHARED, FRESH, EXPLICIT, NESTED, BRANCH]
 COPIES = [LIVE, VIEW, LATER, REPEAT]
+# Replacing an existing field has the same transfer proof, plus releasing
+# the old field after the replacement is acquired.
+for source in [MOVE, SHARED, EXPLICIT, BRANCH]:
+    STRICT.append(source.replace('let target=Outer[source]', "let target=Outer[make()] target.child=source").replace('let target=Outer[source.copy()]', "let target=Outer[make()] target.child=source.copy()"))
+for source in [LIVE, VIEW, LATER, REPEAT]:
+    if source is LATER:
+        continue  # this counterexample specifically reads a later constructor operand
+    COPIES.append(source.replace('let target=Outer[source]', 'let target=Outer[make()] target.child=source'))
 
 @pytest.mark.parametrize('source', STRICT)
 def test_last_use_record_moves_into_field(tmp_path, source):
     execute(tmp_path, 'record-field', codegen(SrcFile(None, '$explicit_copies\n'+source), debug_locations=False))
 
-@pytest.mark.parametrize('source', COPIES + [FIXED, FIXTURE])
+@pytest.mark.parametrize('source', COPIES + [FIXED, *KERNELS])
 def test_record_field_values_and_cleanup(tmp_path, source):
     execute(tmp_path, 'record-field-values', codegen(SrcFile(None, source), debug_locations=False))
 
@@ -53,11 +63,12 @@ def test_live_record_field_copy_is_reported(source):
         codegen(SrcFile(None, '$explicit_copies\n'+source), debug_locations=False)
 
 
-def test_record_field_budget_positive_control(tmp_path, monkeypatch):
-    optimized = codegen(SrcFile(None, FIXTURE), debug_locations=False)
+@pytest.mark.parametrize('fixture', KERNELS)
+def test_record_field_budget_positive_control(tmp_path, monkeypatch, fixture):
+    optimized = codegen(SrcFile(None, fixture), debug_locations=False)
     with monkeypatch.context() as patch:
         patch.setattr(lower._Lowerer, '_adopt_object_fields', lambda *args, **kwargs: None)
-        copied = codegen(SrcFile(None, FIXTURE.replace('$explicit_copies\n', '')), debug_locations=False)
+        copied = codegen(SrcFile(None, fixture.replace('$explicit_copies\n', '')), debug_locations=False)
     execute(tmp_path, 'field-budget', optimized)
     execute(tmp_path, 'field-copy-budget', copied, expected=1)
 
@@ -65,5 +76,5 @@ def test_record_field_budget_positive_control(tmp_path, monkeypatch):
 def test_native_record_field_moves(tmp_path):
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
     check_structural_text(build_program_driver(tmp_path), tmp_path,
-        cases=['$explicit_copies\n'+source for source in STRICT]+COPIES+[FIXED,FIXTURE],
+        cases=['$explicit_copies\n'+source for source in STRICT]+COPIES+[FIXED,*KERNELS],
         errors=['$explicit_copies\n'+source for source in COPIES])
