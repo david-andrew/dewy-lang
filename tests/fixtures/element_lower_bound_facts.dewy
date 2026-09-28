@@ -1,0 +1,11 @@
+Item:type=[value:int64]
+probe=(a:int64 b:int64):>int64=>{
+    if a<=?b return 0
+    let values:array<Item>=[]
+    values.push(Item[a])
+    if values.length=?0 return 0
+    let saved=values[0]
+    $assert saved.value >?b
+    return 42
+}
+main=():>int64=>probe(8 4)

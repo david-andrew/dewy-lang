@@ -71,6 +71,9 @@ def test_native_element_facts_match_hosted(tmp_path):
 
     remainder = bounds._remainder_key(length.binding_id, bounds._length_key(text.binding_id), start.binding_id)
     put(remainder, bounds.Interval(1, None))
+    # Both endpoints can describe the stored value. Preserve the gap's
+    # orientation while substituting the new element/field identity.
+    put(bounds._order_key(start.binding_id, length.binding_id), bounds.Interval(1, None))
     put(bounds._index_fact_key(start.binding_id, text.binding_id), bounds.Interval(None, None))
     put(bounds._nonzero_key(start.binding_id), bounds.Interval.exact(1))
     put(bounds._length_key(array.binding_id), bounds.Interval.exact(0))

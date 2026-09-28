@@ -4525,6 +4525,8 @@ class _BoundsValidator:
             if order is not None:
                 if order[0] == subject:
                     facts[_order_key(0, order[1])] = interval
+                elif order[1] == subject:
+                    facts[_order_key(order[0], 0)] = interval
                 continue
             index_fact = _decode_index_fact(key)
             if index_fact is not None and index_fact[0] == subject:
@@ -4542,7 +4544,8 @@ class _BoundsValidator:
             return _remainder_key(subject, remainder[1], remainder[2])
         order = _decode_order_fact(key)
         if order is not None:
-            return _order_key(subject, order[1])
+            return (_order_key(subject, order[1]) if order[0] == 0
+                    else _order_key(order[0], subject))
         index_fact = _decode_index_fact(key)
         assert index_fact is not None
         return _index_fact_key(subject, index_fact[1])

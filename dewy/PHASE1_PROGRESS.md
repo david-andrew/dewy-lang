@@ -6224,3 +6224,17 @@ That snapshot also reached an identical three-generation native fixed point
 (generation 3: 55 seconds under concurrent checking). Its independently rebuilt
 hosted driver passed the two record-field/element-exclusion groups in 334.49
 seconds including build. The full 269-case manifest is still running.
+
+## Symmetric element ordering (2026-09-28)
+
+Both analyzers now normalize either endpoint of an ordering relation when
+storing/reading/copying array element summaries. A lower bound such as `b < a`
+survives storing `a`, just as an upper bound already did. The gap retains its
+orientation, and the other endpoint keeps its declaration/route identity.
+Foreign elements, indexed/field writes and bound reassignment still invalidate
+unsupported facts; clearing cannot resurrect old bounds.
+
+Validation: all 33 element-order/exclusion checks pass including paired native
+execution on x86-64/C. A separate direct hosted/native fact-state comparison
+also passes. Two fixtures bring the manifest to 271 cases; the full integration
+in progress remains the preceding 269-case snapshot.

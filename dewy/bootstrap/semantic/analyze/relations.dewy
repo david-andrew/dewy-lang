@@ -194,7 +194,9 @@ subject_of = (fact:facts.Fact):>facts.Term? => {
 }
 rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
     if fact is? facts.Distinct return facts.distinct(subject if fact.left.binding_id =? 0 fact.right else fact.left)
-    if fact is? facts.Order return facts.order(subject fact.larger)
+    if fact is? facts.Order {
+        return if fact.smaller.binding_id =? 0 facts.order(subject fact.larger) else facts.order(fact.smaller subject)
+    }
     if fact is? facts.Remainder return facts.remainder(subject fact.upper fact.offset)
     if fact is? facts.Nonzero {
         $runtime_assert subject.projection =? 'value'
@@ -212,6 +214,11 @@ facts_of = (state:facts.State subject:facts.Term):>facts.State => {
         if fact is? facts.Distinct {
             if facts.same_term(fact.left subject) {facts.put(@output facts.distinct(facts.Term[0] fact.right) entry.interval)}
             else if facts.same_term(fact.right subject) {facts.put(@output facts.distinct(facts.Term[0] fact.left) entry.interval)}
+            continue
+        }
+        if fact is? facts.Order {
+            if facts.same_term(fact.smaller subject) {facts.put(@output facts.order(facts.Term[0] fact.larger) entry.interval)}
+            else if facts.same_term(fact.larger subject) {facts.put(@output facts.order(fact.smaller facts.Term[0]) entry.interval)}
             continue
         }
         let term = subject_of(entry.fact)
