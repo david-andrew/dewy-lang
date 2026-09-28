@@ -36,6 +36,24 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): naming a stable parameter projection now preserves
+its storage evidence when forwarding the name or a descendant to a known
+read-only callee. Local views use the same field-access permission as direct
+argument forwarding: an unrelated sibling write need not invalidate the view,
+while overlapping writes, captures, escaping places and unknown callbacks keep
+their ordinary copy/allocation obligations. Allocation contracts and both
+lowerers consume this shared proof. Thirteen hosted acceptance/rejection checks and
+two paired x86-64/C groups pass, including a repeated zero-allocation kernel.
+Projection chains use a dependency worklist: each candidate waits for its
+named owner, so cycles and unknown owners cannot seed a proof. Other owner
+classes remain conservative.
+
+Integration at `4361396c`: three native generations reached an identical fixed
+point, with x86-64/C pipeline execution checks. Generations 2/3 took 49/52 seconds
+under concurrent checking. The complete 326-case parity manifest and broad
+hosted selection are running separately; the named-projection changes postdate
+that frozen source checkpoint.
+
 Checkpoint (2026-09-27): hosted tagged locals now transfer their owned
 payload at a proved last use into a return, binding, record field, or array
 element, matching the native path. The tag cell retains its frame lifetime;

@@ -1,0 +1,15 @@
+$explicit_copies
+
+# Giving a stable projection a name preserves the call's storage proof.
+Box:type=[items:array<int64> count:int64]
+size=(items:array<int64>):>int64 & no_effects=>items.length
+forward=(box:Box):>int64 & no allocates=>{
+    let items=box.items
+    return size(items)+40
+}
+work=(box:Box):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?100 {if forward(box) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>work(Box[[20 22] 0])

@@ -185,17 +185,32 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         # Restrict this boundary to identical stored representations; scoped
         # views and retagging keep their separate lowerer obligations.
         const written=@writes[id]
-        loop item in body {
+        let pending_views:array<addr>=[]
+        loop item in body {if hir.node_at(nodes item) is? hir.Declare {pending_views.push(item)}}
+        let waiting_views:dict<addr array<addr>>=[]
+        loop pending_views.length>?0 {
+            let item=pending_views.pop
             let node=hir.node_at(nodes item)
             if node isnt? hir.Declare or node.binding_id is? none or node.binding_id in? written or node.binding_id in? captured continue
             let value=hir.node_at(nodes node.expr)
             if value isnt? hir.Index|hir.MemberAccess or not ordinary(value.value_type table @eligible) continue
             let path=bindings.access_path(node.expr nodes)
             let source=hir.node_at(nodes path.root)
-            if source isnt? hir.ExpressedIdentifier or source.binding_id is? none or source.binding_id not in? parameters or source.binding_id not in? summaries.by_param_binding continue
-            let owner=parameters[source.binding_id]
-            const incoming=@summaries.by_param_binding[source.binding_id]
-            if not ordinary(owner table @eligible) or not effects.read_only(incoming) continue
+            if source isnt? hir.ExpressedIdentifier or source.binding_id is? none continue
+            if source.binding_id in? parameters {
+                if source.binding_id not in? summaries.by_param_binding continue
+                let owner=parameters[source.binding_id]
+                const incoming=@summaries.by_param_binding[source.binding_id]
+                # Keep the direct-forwarding rule when naming a projection:
+                # sibling writes preserve its bytes, overlapping writes do not.
+                if not ordinary(owner table @eligible) or not stable_projection(incoming path nodes) continue
+            } else if source.binding_id not in? local_views {
+                # One dependency per candidate. Only a proved owner wakes its
+                # readers; cycles or unknown owners cannot establish a loan.
+                if source.binding_id in? waiting_views {let readers=@waiting_views[source.binding_id] readers.push(item)}
+                else {waiting_views[source.binding_id]=[item]}
+                continue
+            }
             let stored:addr?=none
             if value is? hir.Index {
                 let array=types.node_at(table views.structural_base(hir.node_at(nodes value.array).value_type table))
@@ -211,6 +226,10 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if stored is? none or not types.same_type(views.structural_base(stored table) views.structural_base(value.value_type table) table) continue
             if node.annotation isnt? none and not types.same_type(views.structural_base(node.annotation table) views.structural_base(value.value_type table) table) continue
             local_views.push(node.binding_id)
+            if node.binding_id in? waiting_views {
+                const readers=@waiting_views[node.binding_id]
+                loop reader in readers {pending_views.push(reader)}
+            }
         }
         loop item in body {
             let node=hir.node_at(nodes item)
@@ -241,7 +260,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
                             let own=parameters.get(source.binding_id)
                             let local=local_owners.get(source.binding_id)
-                            let stable=local isnt? none and ordinary(local table @eligible)
+                            let stable=source.binding_id in? local_views or (local isnt? none and ordinary(local table @eligible))
                             if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
                                 const incoming=@summaries.by_param_binding[source.binding_id]
                                 stable=stable_projection(incoming path nodes)

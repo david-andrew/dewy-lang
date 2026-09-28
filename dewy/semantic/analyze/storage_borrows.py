@@ -162,7 +162,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # No retagging, lifecycle operation, capture, or escaping address is
         # admitted by this shared proof. More precise scoped views remain a
         # lowerer optimization until their evidence is shared here too.
-        for node in bodies[id(literal)]:
+        pending_views = [node for node in bodies[id(literal)] if isinstance(node, hir.Declare)]
+        waiting_views = {}
+        while pending_views:
+            node = pending_views.pop()
             if (not isinstance(node, hir.Declare) or node.binding_id is None
                     or node.binding_id in writes[id(literal)] or node.binding_id in captured
                     or not isinstance(node.expr, (hir.Index, hir.MemberAccess))
@@ -172,7 +175,20 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             source = path.root
             own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
             incoming = summaries.for_param_binding(own.binding_id) if own else None
-            if own is None or not ordinary(own.type) or incoming is None or not incoming.read_only:
+            if not isinstance(source, hir.ExpressedIdentifier) or source.binding_id is None:
+                continue
+            if own is None and source.binding_id not in local_views:
+                # Each candidate depends on one named owner. Wake it only
+                # when that owner is proved; cycles and unknown owners never
+                # seed a proof. No repeated scan of the complete body.
+                waiting_views.setdefault(source.binding_id, []).append(node)
+                continue
+            # A sibling write does not change this projection's storage.
+            # Use the same route permission as direct argument forwarding;
+            # whole-owner writes, escapes and overlapping routes still fail.
+            if (own is not None and (not ordinary(own.type) or incoming is None
+                    or not incoming.read_only_at(tuple(
+                        INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps)))):
                 continue
             value = node.expr
             shape = ty.structural_base(value.array.type if isinstance(value, hir.Index) else value.value.type)
@@ -185,6 +201,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             if node.annotation is not None and ty.structural_base(node.annotation) != ty.structural_base(value.type):
                 continue
             local_views.add(node.binding_id)
+            pending_views.extend(waiting_views.pop(node.binding_id, ()))
         for node in bodies[id(literal)]:
             if not isinstance(node, hir.FunctionCall):
                 continue
@@ -205,7 +222,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     local = stable_locals[id(literal)].get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     outgoing = summaries.for_param_binding(parameter.binding_id) if parameter else None
                     # An exact union wrapper may lend the same stable payload.
-                    stable = (local is not None and ordinary(local)) or (
+                    stable = (isinstance(source, hir.ExpressedIdentifier)
+                              and source.binding_id in local_views) or (local is not None and ordinary(local)) or (
                         own is not None and ordinary(own.type) and incoming is not None
                         and (incoming.read_only or incoming.read_only_at(tuple(
                             INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps))))
