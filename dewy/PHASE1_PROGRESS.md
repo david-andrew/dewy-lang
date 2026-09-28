@@ -36,6 +36,34 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): allocation contracts and both lowerers share a
+read-only array-selection proof. Complete conditional leaves may borrow
+stable arrays or use bounded scalar frame literals, with lazy arm evaluation
+and owner liveness retained through the selected view. Owning/escaping uses
+keep the existing copy or last-use transfer. Limits are 64 scalar elements per
+literal and 4 KiB of selection literals per function. General statement-bearing
+arms remain owning. Ordinary call results can supply stable private owners
+under the existing whole-call-graph stability proof.
+
+Set/dictionary algebra now borrows operands while constructing its fresh
+result. Only a potentially invalidated left operand needs a snapshot; hosted
+reporting now includes that snapshot instead of silently cloning both inputs.
+Fresh operand owners, including fields of returned records, retain cleanup.
+Native statement legalization also uses a writable initialization slot for
+conditional const declarations; source constness remains checked normally.
+
+An independent hosted-built native driver compiled the updated compiler
+sources, followed by native-built driver generations. Five paired x86-64/C
+groups pass (145.03 seconds), covering array selections, set algebra, ordinary
+conditional moves, named projection loans and record argument loans. Focused
+hosted runs and 50 adjacent dictionary/set checks also pass. Mutation, owning
+return, oversized frame arms, aliasing inputs, effectful later operands and
+repeated-call allocation/retained-storage cases are included. Four fixtures
+extend the full manifest to 348; full frozen integration remains certified at
+`07335a43` until the next complete run. Compiler-wide strict adoption is still
+open; these proofs do not authorize unreported copies or added explicit-copy
+annotations solely to meet a count.
+
 Checkpoint (2026-09-28): frozen revision `07335a43` passes all 344 paired
 compiler acceptance/execution cases. Its native integration build reaches a
 three-generation identical fixed point; generations two and three take 54 and

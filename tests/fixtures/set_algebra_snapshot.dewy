@@ -1,0 +1,6 @@
+let left:set<int64>=set[1 2]
+change=():>set<int64>=>{left.clear() return set[2 3]}
+main=():>int64=>{
+ let result=left & change()
+ return if result.length=?1 and 2 in? result and left.length=?0 42 else 0
+}

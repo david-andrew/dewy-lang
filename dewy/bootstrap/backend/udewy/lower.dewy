@@ -135,6 +135,9 @@ State:type = [
     frame_boxes:dict<addr addr>=[]
     # Fixed scalar arrays proven local share reusable function-frame storage.
     frame_arrays:dict<addr ArrayMemory>=[]
+    flow_views:set<addr>=set[]
+    flow_literals:set<addr>=set[]
+    flow_sources:set<addr>=set[]
     frame_records:dict<addr addr>=[]
     frame_record_bindings:set<addr>=set[]
     nonescaping_places:set<addr>=set[]
@@ -501,7 +504,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.DictRemove return dict_remove(node @state)
     if node is? hir.DictEntries return dict_entries(node @state)
     if node is? hir.DictView return dict_view(node @state)
-    if node is? hir.SetAlgebra return set_algebra(node @state)
+    if node is? hir.SetAlgebra return set_algebra(id node @state)
     if node is? hir.NoneValue|hir.ErrorValue return word(0 node @state)
     if node is? hir.BrandValue {
         # a type as a runtime value: its brand id
@@ -636,6 +639,9 @@ expression = (id:addr @state:State):>addr => {
             let call=hir.node_at(state.input.nodes node.expr)
             $runtime_assert call is? hir.FunctionCall
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
+        } else if node.binding_id isnt? none and node.binding_id in? state.flow_views {
+            value=borrowed_selection(node.expr @state)
+            borrowed=true
         } else if borrowed_route_local(node @state) {
             let lookup=hir.node_at(state.input.nodes node.expr)
             let viewed=lookup is? hir.DictLookup and (get_view_lookup(lookup @state) or default_view_lookup(lookup @state))
@@ -5083,6 +5089,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     let written:set<addr>=set[]
     let local_declarations:array<addr>=[]
     let loan_literals:set<addr>=set[]
+    let selected_literals:set<addr>=set[]
     let pending:array<addr>=[node.body]
     loop parameter in parameters(node) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
     let visited:set<addr>=set[]
@@ -5092,6 +5099,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         visited.push(child)
         let current=hir.node_at(state.input.nodes child)
         if current is? hir.FunctionLiteral continue
+        if child in? state.flow_literals {selected_literals.push(child)}
         if current is? hir.FunctionCall {
             loop argument in state.literal_arguments.get(child set[]) {loan_literals.push(argument)}
         }
@@ -5157,6 +5165,21 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
+    loop initializer in selected_literals {
+        let literal=hir.node_at(state.input.nodes initializer)
+        $runtime_assert literal is? hir.ArrayLiteral
+        let type=array_type(literal.value_type state)
+        $runtime_assert type isnt? none
+        let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+        if layout is? layouts.Pending return reject(literal layout.detail @state)
+        let name=fresh('selection_frame' @state)
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let size=layouts.array_descriptor.size+literal.items.length*layout.size
+        let allocated=intrinsic_call('__alloca__' [word(size literal @state)] word_type literal @state)
+        prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
+        let descriptor=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
+        state.frame_arrays[initializer]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) []]
+    }
     # One bounded root per proven call expression, reused across iterations.
     # Its fields borrow storage and have no lexical cleanup registration.
     loop initializer in loan_literals {
@@ -5169,7 +5192,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         state.frame_records[initializer]=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
     }
     let frame_array_bindings:set<addr>=set[]
-    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments) {
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments selected_reads=state.flow_sources) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let initializer=placement.initializer(declaration.expr state.input.nodes state.input.types)
@@ -5235,6 +5258,18 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             $runtime_assert declaration is? hir.Declare
             if declaration.binding_id is? none continue
             let route:borrowing.Route?=none
+            if declaration.binding_id in? state.flow_views {
+                let leaves=storage_borrows.array_selection(declaration.expr state.input.nodes state.type_nodes)
+                $runtime_assert leaves isnt? none
+                loop leaf in leaves {
+                    let source=borrowing.route(leaf state.input.nodes)
+                    if source isnt? none {
+                        let dependents=borrow_dependents.get(source.binding set[])
+                        dependents.push(declaration.binding_id)
+                        borrow_dependents[source.binding]=dependents
+                    }
+                }
+            }
             if borrowed_route_local(declaration @state) {route=borrowing.route(declaration.expr state.input.nodes)}
             else if borrowed_getter_local(declaration @state) isnt? none {route=getter_route(declaration.expr 0 @state)}
             if route isnt? none {
@@ -5433,6 +5468,9 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.timings=timings
     state.borrowed_arguments=borrowed.arguments
     state.literal_arguments=borrowed.literal_arguments
+    state.flow_views=borrowed.flow_views
+    state.flow_literals=borrowed.flow_literals
+    state.flow_sources=borrowed.flow_sources
     state.nonescaping_places=borrowed.nonescaping_places
     state.fixed_places=borrowed.fixed_places
     state.indirect_calls=borrowed.indirect
@@ -5900,7 +5938,18 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
 }
 # Nested defaults retain lazy setup for later loop arms and the existing
 # rule that `else` runs only when that loop arm never entered.
-flow_value = (id:addr expected:addr @state:State):>addr => {
+# The shared proof excludes statement-bearing arms and element conversions.
+# Evaluate only the selected arm; its frame literal or stable source outlives
+# the resulting local view. Owning uses of that local retain their boundaries.
+borrowed_selection=(id:addr @state:State):>addr=>{
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Flow return lower_flow(node 0 @state borrowed=true)
+    if node is? hir.Block and node.items.length=?1 return borrowed_selection(node.items[0] @state)
+    if node is? hir.ValueCast|hir.RepresentationCast return borrowed_selection(node.expr @state)
+    return expression(id @state)
+}
+flow_value = (id:addr expected:addr @state:State borrowed:bool=false):>addr => {
+    if borrowed return borrowed_selection(id @state)
     let source=hir.node_at(state.input.nodes id)
     let value=if state.cleanup_enabled cleanup_scoped(id @state) else expression(id @state)
     if source.value_type =? expected return value
@@ -5983,9 +6032,9 @@ loop_checkpoint = (node:hir.AST @state:State):>addr => {
         conditional(intrinsic_call('__gt__' [levels word(1 node @state)] boolean node @state) sequence(propagate node @state) node @state)
     ] node @state)
 }
-lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
+lower_flow = (node:hir.Flow position:addr @state:State borrowed:bool=false):>addr => {
     let type=runtime_type(node.value_type node @state)
-    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else flow_value(node.default node.value_type @state)
+    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else flow_value(node.default node.value_type @state borrowed=borrowed)
     let arm=hir.node_at(state.input.nodes node.arms[position])
     $runtime_assert arm is? hir.IfArm|hir.LoopArm
     let test=hir.node_at(state.input.nodes arm.condition)
@@ -6008,7 +6057,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         state.loop_depth+=1
         if state.cleanup_enabled {state.cleanup_loops.push(state.cleanup_frames.length)}
     }
-    let body=flow_value(arm.body node.value_type @state)
+    let body=flow_value(arm.body node.value_type @state borrowed=borrowed)
     if entry.length >? 0 {
         let items=entry
         items.push(body)
@@ -6024,7 +6073,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     # The fallback runs after setup when this arm never enters. Lower it
     # with the iterator frame still active so a return there cleans it too.
     let fallback:addr?=none
-    if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
+    if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state borrowed=borrowed)}
     # `loop c {...} else {...}`: a µDewy loop takes no else. The else arm
     # runs when the loop never enters, as a later flow arm would: the body
     # marks entry, and the fallback follows the loop under that flag.
@@ -6967,11 +7016,12 @@ algebra_entries = (source:DictParts other:DictParts destination:DictParts mode:s
     prefix.push(while_loop(compare('__lt__' cursor length node @state) body node @state))
     return sequence(prefix node @state)
 }
-set_algebra = (node:hir.SetAlgebra @state:State):>addr => {
+set_algebra = (id:addr node:hir.SetAlgebra @state:State):>addr => {
     let prefix:array<addr>=[]
-    # Keep the left value before a later operand can mutate its binding.
-    let left=dict_parts(node.left @prefix @state copy=true)
-    let right=dict_parts(node.right @prefix @state copy=true)
+    # Both operands lend entries to a fresh result. Keep an independent
+    # left value only when evaluation of the right can change its owner.
+    let left=dict_parts(node.left @prefix @state copy=(id in? state.array_snapshots and not temporary_owner(node.left @state)))
+    let right=dict_parts(node.right @prefix @state)
     let output=dict_empty(node.value_type node @prefix @state)
     if node.op =? 'union' {
         prefix.push(algebra_entries(left right output 'all' node @state))
@@ -6982,8 +7032,8 @@ set_algebra = (node:hir.SetAlgebra @state:State):>addr => {
         prefix.push(algebra_entries(left right output 'absent' node @state))
         prefix.push(algebra_entries(right left output 'absent' node @state))
     } else return reject(node 'an unknown container algebra operation' @state)
-    prefix.push(release_value(left.pointer hir.node_at(state.input.nodes node.left).value_type node @state))
-    prefix.push(release_value(right.pointer hir.node_at(state.input.nodes node.right).value_type node @state))
+    if left.owner_type isnt? none {prefix.push(release_value(dict_owner(left) left.owner_type node @state))}
+    if right.owner_type isnt? none {prefix.push(release_value(dict_owner(right) right.owner_type node @state))}
     prefix.push(output.pointer)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }

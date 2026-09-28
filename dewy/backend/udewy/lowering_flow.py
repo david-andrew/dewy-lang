@@ -950,6 +950,14 @@ class _FlowLowering:
         target_type = ty.strip_refinement(target.type)
         if isinstance(target_type, ty.ArrayType):
             source = self._copy_source_expression(item)
+            if local_binding_key(target) in self.borrowed_array_flow_targets:
+                # Every selected owner is stable for the local view. Bounded
+                # scalar literals use their ordinary fixed frame allocation.
+                representation = self._array_use_representation(source)
+                if representation is not None:
+                    source_type = ty.ArrayType(target_type.element, self._raw_array_length(source))
+                    return self._raw_array_descriptor(source, source_type, representation)
+                return self._extract_array_operand(item, target_type)
             if isinstance(source, hir.ExpressedIdentifier) and source.name in self.borrowed_default_inputs:
                 # ABI-provided defaults borrow their supplied argument; the
                 # parameter's presence bit supplies its separate cleanup rule.

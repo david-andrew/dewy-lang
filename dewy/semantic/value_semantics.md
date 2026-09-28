@@ -18,6 +18,23 @@ The implementation bounds these temporary roots to 4 KiB per function and
 reuses them across loop iterations; exceeding that proof budget never grants
 a `no allocates` promise.
 
+A read-only local selection such as `const selected = if flag xs else [42]`
+can borrow each stable input and keep a small fresh arm in reusable frame
+storage. The shared proof covers complete conditionals whose leaves name
+arrays of the same element representation, or contain at most 64 scalar
+items, with a 4 KiB literal budget per function. Only the selected arm runs.
+Mutations, escaping uses and statement-bearing arms retain the ordinary
+ownership rules; returning the selected array still requires an independent
+value or a proved transfer. Allocation contracts consume the same evidence.
+
+Set and dictionary algebra borrow their inputs while constructing an
+independent result. If evaluating the right operand might change the left
+value, the left retains a reported snapshot first. For example,
+`left & clear_left_and_return_right()` observes the original left value.
+Fresh operand owners are released after the operation, including a set field
+of a freshly returned record. Result entries retain their ordinary copy or
+transfer obligations.
+
 Runtime arrays, nested records, dictionaries and tagged unions retain their
 value semantics regardless of placement. This is not a promise that every
 source assignment performs a physical copy.

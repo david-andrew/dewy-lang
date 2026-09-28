@@ -335,7 +335,9 @@ statement_inner = (id:addr @state:State):>array<addr> => {
         if needs_slot(node.expr state) {
             let expr=node_at(node.expr state)
             let type=if node.annotation is? none expr.value_type else node.annotation
-            let result:array<addr>=[put(hir.Declare[node.loc node.value_type node.decltype node.name node.annotation zero(type expr @state) node.binding_id] @state)]
+            # Branches initialize this temporary through assignments. Source
+            # constness was checked already; the legalized slot must be writable.
+            let result:array<addr>=[put(hir.Declare[node.loc node.value_type 'let' node.name node.annotation zero(type expr @state) node.binding_id] @state)]
             append(@result write(node.expr put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @state) @state))
             return result
         }

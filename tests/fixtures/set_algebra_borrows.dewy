@@ -1,0 +1,20 @@
+$explicit_copies
+Box:type=[values:set<int64>]
+make=():>Box=>Box[set[1 2]]
+work=():>int64=>{
+    let left=set[1 2]
+    let right=set[2 3]
+    let intersection=left & right
+    let union=left | right
+    let difference=left - right
+    let symmetric=left xor right
+    left.clear() right.clear()
+    let projected=make().values & set[2 3]
+    return if intersection.length=?1 and 2 in? intersection and union.length=?3 and difference.length=?1 and 1 in? difference and symmetric.length=?2 and 3 in? symmetric and projected.length=?1 and 2 in? projected 42 else 1
+}
+main=():>int64=>{
+    loop i in [0..1000) {if work() not=?42 return 1}
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

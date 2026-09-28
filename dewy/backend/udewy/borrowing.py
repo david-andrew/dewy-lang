@@ -405,7 +405,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             interpolations[id(node)] = node.parts
         elif isinstance(node, hir.StringConcat):
             interpolations[id(node)] = [node.left, node.right]
-        if isinstance(node, hir.StringEqual):
+        if isinstance(node, (hir.StringEqual, hir.SetAlgebra)):
             comparisons[id(node)] = (node.left, node.right)
         elif (isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier)
               and node.func.name in {'__eq__', '__ne__'} and node.func.binding_id is None

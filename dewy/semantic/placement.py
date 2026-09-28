@@ -78,7 +78,7 @@ def literal_storage(value):
     return result
 
 
-def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
+def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None, selected_reads: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
     nodes = []
     captured = set()
     pending = [literal.body]
@@ -108,7 +108,7 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
             size = scalar_record_size(value.type)
         if size is not None and size <= FRAME_STORAGE_BYTES:
             candidates[node.binding_id] = (node, size)
-    allowed, occurrences = {}, {}
+    allowed, occurrences = {identity: 1 for identity in selected_reads}, {}
     blocked = set(captured)
     whole_places = set()
     for node in nodes:
@@ -151,6 +151,6 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
     return result
 
 
-def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
-    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places, borrowed_values).items()
+def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None, selected_reads: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
+    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places, borrowed_values, selected_reads).items()
             if isinstance(ty.structural_base(declaration.expr.type), ty.ArrayType)}

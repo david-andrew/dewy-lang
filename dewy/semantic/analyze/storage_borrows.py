@@ -8,7 +8,7 @@ storage, raw operations, casts of existing storage and unresolved callbacks keep
 this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .. import hir, ty, bindings
 from .effects import INDEX_STEP, _EffectAnalyzer, _literal_params, _unwrap
@@ -78,6 +78,74 @@ class Proofs:
     arguments: dict[int, set[int]]
     local_views: set[int]
     literal_arguments: dict[int, set[int]]
+    flow_views: set[int] = field(default_factory=set)
+    flow_literals: set[int] = field(default_factory=set)
+    flow_sources: set[int] = field(default_factory=set)
+
+
+def array_selection(node):
+    """Leaves of an array selection, without branch-local storage lifetimes.
+
+    A small scalar literal can live in this function's frame; other leaves
+    must name existing arrays. The caller proves their stability. Blocks with
+    statements, loops, factories and conversions of elements stay owning.
+    """
+    shape = ty.structural_base(node.type)
+    if not isinstance(node, hir.Flow) or not isinstance(shape, ty.ArrayType):
+        return None
+    leaves, pending = [], [node]
+    while pending:
+        item = pending.pop()
+        actual = ty.structural_base(item.type)
+        if not isinstance(actual, ty.ArrayType) or actual.element != shape.element:
+            return None
+        if isinstance(item, hir.Flow):
+            if item.default is None or any(not isinstance(arm, hir.IfArm) for arm in item.arms):
+                return None
+            pending.extend([item.default, *(arm.body for arm in item.arms)])
+        elif isinstance(item, hir.Block) and len(item.items) == 1:
+            pending.append(item.items[0])
+        elif isinstance(item, (hir.ValueCast, hir.RepresentationCast)):
+            pending.append(item.expr)
+        elif isinstance(item, hir.ArrayLiteral):
+            if (actual.length != len(item.items) or len(item.items) > 64 or any(isinstance(value, hir.Spread) for value in item.items)
+                    or item.items and actual.element != 'bool' and ty.fixed_integer_layout(actual.element) is None):
+                return None
+            leaves.append(item)
+        elif isinstance(item, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+            leaves.append(item)
+        else:
+            return None
+    return leaves
+
+
+def owning_array_reads(body, analysis, summaries):
+    """An owning use should keep a join's ordinary last-use move protocol."""
+    owning = set()
+    for parent in body:
+        borrowed = set()
+        if isinstance(parent, hir.FunctionCall):
+            targets = analysis._direct_targets(parent)
+            allowed = None
+            for target in targets or ():
+                current = {id(value) for value, param in analysis._pair_arguments(parent, target) or ()
+                           if param is not None and not param.place
+                           and (summary := summaries.for_param_binding(param.binding_id)) is not None
+                           and summary.read_only}
+                allowed = current if allowed is None else allowed & current
+            borrowed = allowed or set()
+        for child in hir.children(parent):
+            if not isinstance(child, hir.ExpressedIdentifier) or child.binding_id is None:
+                continue
+            observed = (
+                isinstance(parent, (hir.Index, hir.ArrayLength)) and child is parent.array
+                or isinstance(parent, hir.MemberAccess) and child is parent.value
+                or isinstance(parent, hir.IteratorExpression) and child is parent.iterable
+                or isinstance(parent, hir.ArrayMethod) and parent.name == 'join' and child is parent.array
+                or id(child) in borrowed)
+            if not observed:
+                owning.add(child.binding_id)
+    return owning
 
 
 def record_loan_fields(node):
@@ -162,7 +230,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         stable_locals[key] = {node.binding_id: node.expr.type for node in body
                              if isinstance(node, hir.Declare) and node.binding_id is not None and not node.view
                              and node.binding_id not in written
-                             and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral))}
+                             # Ordinary calls return independent values. The
+                             # graph check below still excludes unknown/raw
+                             # effects and writes/captures of these locals.
+                             and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral, hir.FunctionCall))}
         for node in body:
             if (isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr)
                     and union_loan_source(node) is None):
@@ -198,6 +269,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             and not (isinstance(node, hir.MemberAccess) and child is node.value)
         }
     result, local_views, literal_arguments = {}, set(), {}
+    flow_views, flow_literals, flow_sources = set(), set(), set()
     for literal in analysis.literals:
         if id(literal) in blocked:
             continue
@@ -268,6 +340,31 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     return False
             return stable
 
+        # A selected local need not own a snapshot when every existing arm
+        # keeps its owner stable and every fresh arm fits bounded frame storage.
+        # Mutating/escaping uses still pay their normal value-boundary cost.
+        flow_bytes = 0
+        selections = [node for node in bodies[id(literal)] if isinstance(node, hir.Declare) and isinstance(node.expr, hir.Flow)]
+        owning_reads = owning_array_reads(bodies[id(literal)], analysis, summaries) if selections else set()
+        for node in selections:
+            if (not isinstance(node, hir.Declare) or node.binding_id is None or node.view
+                    or node.binding_id in writes[id(literal)] or node.binding_id in captured or node.binding_id in owning_reads
+                    or not ordinary(node.expr.type)):
+                continue
+            leaves = array_selection(node.expr)
+            if leaves is None or (node.annotation is not None
+                                  and ty.structural_base(node.annotation) != ty.structural_base(node.expr.type)):
+                continue
+            literals = [item for item in leaves if isinstance(item, hir.ArrayLiteral)]
+            size = sum(64 + 8 * len(item.items) for item in literals)
+            if flow_bytes + size > 4096 or not all(isinstance(item, hir.ArrayLiteral) or stable_value(item) for item in leaves):
+                continue
+            flow_bytes += size
+            flow_views.add(node.binding_id)
+            local_views.add(node.binding_id)
+            flow_literals.update(id(item) for item in literals)
+            flow_sources.update(id(item) for item in leaves if isinstance(item, hir.ExpressedIdentifier))
+
         # Separate from ordinary local placement: at most 4 KiB of fixed
         # call roots per function, reused across loop iterations.
         literal_bytes = 0
@@ -326,4 +423,4 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if loans:
                     literal_arguments[id(node)] = loans
                 result[id(node)] = allowed
-    return Proofs(result, local_views, literal_arguments)
+    return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources)

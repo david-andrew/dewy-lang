@@ -493,6 +493,8 @@ class _Lowerer(
         self.literal_borrowed_fields: dict[int, set[str]] = {}   # object literal id -> runtime-array fields that borrow their storage
         self.borrowed_fields: dict[LocalBindingKey, set[str]] = {}   # object binding -> fields that borrow (never adopted on `return`)
         self.object_flow_targets: set[LocalBindingKey] = set()   # flow temporaries (and bindings) holding an object's pointer
+        self.borrowed_array_flows: set[int] = set()
+        self.borrowed_array_flow_targets: set[LocalBindingKey] = set()
         self.object_literal_contexts: list[
             tuple[hir.AST, ty.ObjectType, dict[int, str]]
         ] = []
@@ -3038,11 +3040,14 @@ class _Lowerer(
         if isinstance(node, hir.DictEntries):
             return replace(node, dictionary=self._require_node(self._transform_node(node.dictionary)))
         if isinstance(node, hir.SetAlgebra):
-            return replace(
+            transformed = replace(
                 node,
                 left=self._require_node(self._transform_node(node.left)),
                 right=self._require_node(self._transform_node(node.right)),
             )
+            if id(node) in self.borrow_plan.comparison_snapshots:
+                self.borrow_plan.comparison_snapshots.add(id(transformed))
+            return transformed
         if isinstance(node, hir.DictView):
             return replace(node, dictionary=self._require_node(self._transform_node(node.dictionary)))
         if isinstance(node, hir.StringLength):
@@ -3461,6 +3466,8 @@ class _Lowerer(
                 self.owned_cells[name] = members
         self.borrowed_fields = {}
         self.object_flow_targets = set()
+        self.borrowed_array_flows = set()
+        self.borrowed_array_flow_targets = set()
         previous_state = (
             self.loop_signal_levels,
             self.loop_signal_kind,
@@ -3724,6 +3731,8 @@ class _Lowerer(
         """The HIR-level twin of `_note_owned_array`, including refined lengths."""
         if not isinstance(node, hir.Declare):
             return None
+        if node.view or node.binding_id in self.storage_borrow_proofs.local_views:
+            return None
         declared = node.annotation or node.expr.type
         if not isinstance(declared, ty.ArrayType):
             return None
@@ -3736,6 +3745,8 @@ class _Lowerer(
         """Whether an array value stored into a field is the field's own storage (moved in, fresh, or cloned from a local) rather than a borrow of a parameter's or another object's."""
         source = self._copy_source_expression(value)
         if isinstance(source, hir.ExpressedIdentifier):
+            if source.binding_id in self.storage_borrow_proofs.flow_views:
+                return False
             if id(source) in self.moved_uses or id(source) in self.moved_payload_uses:
                 return True
             literal = self.current_literal
@@ -3930,6 +3941,11 @@ class _Lowerer(
                 return
             if isinstance(node, hir.Declare):
                 if not nested and node.binding_id is not None:
+                    if node.binding_id in self.storage_borrow_proofs.flow_views:
+                        for leaf in storage_borrows.array_selection(node.expr) or ():
+                            source = borrowing.route(leaf)
+                            if source is not None:
+                                borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                     declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
                     if (node.view or node.binding_id in self.storage_borrow_proofs.local_views or isinstance(declared, (ty.ArrayType, ty.ObjectType, ty.TypeOr))) and self._borrowed_route_local(node, declared):
                         source = borrowing.route(node.expr)
@@ -4629,6 +4645,19 @@ class _Lowerer(
                 if not self._borrowed_route_local(node, declared_type):
                     self._note_owned_object(node, declared_type)
                 return self._lower_object_declare(node, declared_type)
+            if isinstance(declared_type, ty.ArrayType) and node.binding_id in self.storage_borrow_proofs.flow_views:
+                pending = [node.expr]
+                while pending:
+                    item = pending.pop()
+                    if isinstance(item, hir.Flow):
+                        self.borrowed_array_flows.add(id(item))
+                        pending.extend([item.default, *(arm.body for arm in item.arms)])
+                    elif isinstance(item, hir.Block):
+                        pending.extend(item.items)
+                    elif isinstance(item, (hir.ValueCast, hir.RepresentationCast)):
+                        pending.append(item.expr)
+                prelude, value = self._extract_expression(node.expr)
+                return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
             if (
                 isinstance(declared_type, ty.ArrayType)
                 and self._array_representation(node) == 'descriptor'
@@ -5628,6 +5657,8 @@ class _Lowerer(
                 flow_prelude, flow = self._lower_union_flow(node, cell, union_members)
                 return [*prelude, *flow_prelude, flow], replace(cell, type=node.type)
             target = self._new_flow_temp(node)
+            if id(node) in self.borrowed_array_flows:
+                self.borrowed_array_flow_targets.add(local_binding_key(target))
             if isinstance(ty.strip_refinement(node.type), ty.ObjectType):
                 self.object_flow_targets.add(local_binding_key(target))   # a pointer word: each arm builds or copies its object
             declaration = hir.Declare(
@@ -5647,7 +5678,7 @@ class _Lowerer(
             statements = [declaration, *flow_prelude, flow]
             if self._is_owned_string_result(node):
                 return self._string_result_temporary(node, target, statements)
-            if isinstance(node.type, ty.ArrayType):
+            if isinstance(node.type, ty.ArrayType) and id(node) not in self.borrowed_array_flows:
                 return self._array_result_temporary(node, target, statements)
             return statements, target
         if isinstance(node, hir.ShortCircuit):

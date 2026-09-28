@@ -1,0 +1,19 @@
+$explicit_copies
+choose=(xs:array<int64> flag:bool):>int64 & no_effects=>{
+    const selected:array<int64>=if flag xs else [42]
+    if selected.length>?0 return selected[0]
+    return 0
+}
+work=(xs:array<int64>):>int64 & no_effects=>{
+    loop i in [0..2000) {
+        if choose(xs true) not=?42 or choose(xs false) not=?42 return 1
+    }
+    return 42
+}
+main=():>int64=>{
+    let xs:array<int64>=[42]
+    if work(xs) not=?42 return 1
+    let before:int64=_arena_allocated_bytes
+    if work(xs) not=?42 return 2
+    return if _arena_allocated_bytes=?before 42 else 3
+}

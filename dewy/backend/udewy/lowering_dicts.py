@@ -66,7 +66,12 @@ class _DictLowering:
         if not isinstance(object_type, ty.ObjectType) or entry_types is None:
             raise TypeError('INTERNAL ERROR: dictionary node on a non-container')
         key_type, value_type = entry_types
-        prelude, pointer = self._extract_write_route(dictionary)
+        if isinstance(dictionary, hir.MemberAccess) and self._frame_record_temporary(dictionary.value):
+            # A returned parent's fields stay alive through the operation.
+            # Extracting a write route would erase its temporary ownership.
+            prelude, pointer = self._extract_member_access(dictionary)
+        else:
+            prelude, pointer = self._extract_write_route(dictionary)
         if self._object_expression_owns_fresh_storage(dictionary):
             # A returned container's frame holds owned member arrays. Its
             # entry view borrows them until this statement (or loop) ends.
@@ -762,17 +767,25 @@ class _DictLowering:
         result_prelude, result_pointer = self._extract_object_pointer(empty)
         result_name = self._name('set_result', loc)
         result_object = replace(result_name, type=set_type)
-        # Preserve the value read before an effectful later operand changes
-        # its source (`left | clear_left_and_return_right()`).
-        left_copy, left_value = self._clone_object_value(node.left, set_type, arena=True, move=self._object_expression_owns_fresh_storage(node.left))
-        right_copy, right_value = self._clone_object_value(node.right, set_type, arena=True, move=self._object_expression_owns_fresh_storage(node.right))
-        left_prelude, left = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), replace(left_value, type=set_type), 'keys'))
-        right_prelude, right = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), replace(right_value, type=set_type), 'keys'))
+        # Operands are read before writing a fresh result. Only the left
+        # needs a snapshot when evaluating the right can change its owner.
+        # Fresh operands already own their value and use statement cleanup.
+        snapshot = None
+        left_copy = []
+        left_value = node.left
+        if (id(node) in self.borrow_plan.comparison_snapshots
+                and not self._object_expression_owns_fresh_storage(node.left)):
+            self._note_copy('record', node.left.type, 'kept before a set operand',
+                            'the later operand may change the earlier value', node.left.loc)
+            left_copy, snapshot = self._clone_object_value(node.left, set_type, arena=True)
+            left_value = replace(snapshot, type=set_type)
+        left_prelude, left = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), left_value, 'keys'))
+        right_prelude, right = self._dict_parts(hir.MemberAccess(loc, ty.ArrayType(element, None), node.right, 'keys'))
         statements: list[hir.AST] = [
             *result_prelude,
             self._declare(result_name, result_pointer, loc),
             *left_copy, *left_prelude,
-            *right_copy, *right_prelude,
+            *right_prelude,
             *self._dict_ensure_table(left, loc),
             *self._dict_ensure_table(right, loc),
         ]
@@ -830,7 +843,7 @@ class _DictLowering:
             statements.extend(add_members(left, right, when_found=False))
             statements.extend(add_members(right, left, when_found=False))
         size, _offsets = self._object_layout(set_type, node)
-        for snapshot in (left_value, right_value):
+        if snapshot is not None:
             statements.extend(self._release_object_members(snapshot, set_type, loc))
             statements.append(self._arena_release_call(snapshot, self._int64_literal(loc, size), loc))
         return statements, result_name
