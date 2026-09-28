@@ -25,6 +25,7 @@ parameters; this port remains conservative there and borrows a subset.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import chain
 
 from ...semantic import hir, ty
 from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects, analyze_global_writes
@@ -219,8 +220,8 @@ def is_raw_call(node: hir.FunctionCall, plan: Plan, source_bindings: set[int]) -
     return not (isinstance(callee, hir.BoundMethod))
 
 
-def exposed_roots(plan: Plan, source_bindings: set[int]) -> set[int]:
-    """Bindings whose storage address may reach raw operations within their own function."""
+def exposed_roots(root: hir.AST, plan: Plan, source_bindings: set[int]) -> set[int]:
+    """Storage exposed by startup expressions, function bodies, or defaults."""
     exposed: set[int] = set()
 
     def expose(node: hir.AST) -> None:
@@ -230,8 +231,10 @@ def exposed_roots(plan: Plan, source_bindings: set[int]) -> set[int]:
         if binding is not None:
             exposed.add(binding)
 
-    for function in plan.functions.values():
-        for node in _walk_function(function.literal):
+    scopes = chain([_walk_function_subtree(root)],
+                   (_walk_function(function.literal) for function in plan.functions.values()))
+    for scope in scopes:
+        for node in scope:
             if isinstance(node, hir.Assert):
                 continue   # a failed assertion only formats its message
             if isinstance(node, hir.Transmute):
@@ -408,11 +411,14 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
               and len(node.pos_args) == 2):
             comparisons[id(node)] = tuple(node.pos_args)
     # globals: top-level declarations, through unscoped blocks
+    constants: set[int] = set()
     pending: list[hir.AST] = list(root.items)
     while pending:
         item = pending.pop()
         if isinstance(item, hir.Declare) and item.binding_id is not None:
             plan.globals.add(item.binding_id)
+            if item.decltype == 'const' and not item.view:
+                constants.add(item.binding_id)
         elif isinstance(item, hir.Block) and not item.scoped:
             pending.extend(item.items)
     # functions
@@ -452,8 +458,12 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
         places |= function.places
     plan.captured_bindings = captured
     plan.place_bindings = places
-    exposed = exposed_roots(plan, source_bindings)
+    exposed = exposed_roots(root, plan, source_bindings)
     plan.exposed_bindings = exposed
+    # Const module values have process lifetime and cannot be changed through
+    # typed source operations. Raw exposure still defeats that guarantee,
+    # including addresses saved by module initialization.
+    plan.stable_bindings.update(constants - exposed)
     # A single place parameter can be stable too, provided no call can
     # change it through an ambient alias. Unknown calls write the sentinel.
     ambient = analyze_global_writes(root, plan.globals | captured | {-1}, source_reports=True)

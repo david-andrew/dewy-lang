@@ -157,7 +157,7 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
     let functions=captures.analyze(joined session.hir plan.symbols)
     let captured:set<addr>=set[]
     loop function in functions.functions.values {loop binding in function.captures {captured.push(binding)}}
-    let exposed=borrowing.exposed_roots(functions session.hir session.types)
+    let exposed=borrowing.exposed_roots(joined functions session.hir session.types)
     let scopes:dict<addr borrowing.ViewScope>=[]
     loop binding in plan.order {
         $runtime_assert binding in? plan.aliases

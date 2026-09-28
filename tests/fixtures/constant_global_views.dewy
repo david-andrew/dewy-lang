@@ -1,0 +1,22 @@
+$explicit_copies
+# Immutable module owners live for the program. Reads can lend their stored
+# records without cloning nested arrays on every lookup.
+Box:type=const [items:array<int64>]
+const boxes:array<Box>=[Box[[42]]]
+const names:dict<string Box>=['answer'->Box[[42]]]
+read=():>int64=>{
+    $runtime_assert boxes.length>?0
+    const box=@boxes[0]
+    if 'answer' not in? names return 1
+    let named=names['answer']
+    if box.items.length>?0 and named.items.length>?0 {
+        return if box.items[0]=?named.items[0] box.items[0] else 2
+    }
+    return 3
+}
+main=():>int64=>{
+    if read() not=?42 return 1
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..100) {if read() not=?42 return 2}
+    return if _arena_allocated_bytes=?before 42 else 3
+}

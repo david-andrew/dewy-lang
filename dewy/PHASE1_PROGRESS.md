@@ -85,6 +85,20 @@ union-transfer checks and the paired native group pass, with new narrowed
 return and record-field regressions. A new hosted-driver rebuild is required
 before this integration checkpoint can be accepted.
 
+Checkpoint (2026-09-27): both storage-exposure scans now include module
+initialization as well as function bodies and defaults. Previously an address
+saved during startup could mutate a global array while a later value call
+incorrectly borrowed it. Source snapshots now remain independent in that
+case; mutable-local-place validation consumes the same corrected inventory.
+The native scan visits the combined roots once per HIR node. Hosted borrowing
+also now recognizes unexposed `const` module owners as stable, matching the
+existing native rule. Required/inferred record and dictionary views can use
+their process lifetime; raw exposure still prevents that proof. Validation:
+103 hosted surrounding checks, paired startup-exposure/const-view groups on
+x86-64/C, and a zero-allocation repeated const-table lookup kernel. The
+`syntax.dewy` BaseInfo lookup now borrows, but that module still has a separate
+union-result conversion copy and is not marked `$explicit_copies` yet.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was

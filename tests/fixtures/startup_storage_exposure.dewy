@@ -1,0 +1,12 @@
+# Saving an address during module initialization exposes this owner just as
+# doing so in a function does. A later value argument still needs a snapshot.
+let values:array<int64>=[42]
+let pointer=__load_i64__(values transmute int64)
+read=(snapshot:array<int64>):>int64=>{
+    __store_i64__(99 pointer)
+    return if snapshot.length>?0 snapshot[0] else 1
+}
+main=():>int64=>{
+    let answer=read(values)
+    return if answer=?42 and values[0]=?99 42 else 2
+}

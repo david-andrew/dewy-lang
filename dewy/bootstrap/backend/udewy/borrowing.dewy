@@ -148,51 +148,54 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
 # parameter is independently proven unexposed, uncaptured and read-only
 # (see the call-boundary proof below). Binding ids are program-unique,
 # so one set covers every function.
-exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
+exposed_roots = (root:addr plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
     let exposed:set<addr>=set[]
     let expose = (id:addr @exposed:set<addr>):>void => {
         if word_value(hir.node_at(nodes id).value_type type_nodes) return void
         let binding=captures.root_binding(id nodes)
         if binding isnt? none {exposed.push(binding)}
     }
+    # A saved address from module initialization can be used by any later
+    # function. Scan startup alongside all bodies/defaults, once per HIR node.
+    let pending:array<addr>=[root]
     loop [id function] in plan.functions {
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
-        let pending:array<addr>=[literal.body]
+        pending.push(literal.body)
         loop parameter in effects.literal_params(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
-        let seen:set<addr>=set[]
-        loop pending.length >? 0 {
-            let child=pending.pop
-            if child in? seen continue
-            seen.push(child)
-            let node=hir.node_at(nodes child)
-            if node is? hir.FunctionLiteral|hir.GenericFunction continue
-            if node is? hir.RuntimeFailure {
-                if node.message isnt? none {pending.push(node.message)}
-                continue
-            }
-            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {expose(node.expr @exposed)}
-            if node is? hir.FunctionCall {
-                let callee=hir.node_at(nodes node.func)
-                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
-                let raw=false
-                if direct is? none and callee is? hir.ExpressedIdentifier {
-                    let memory=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_'))
-                    let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
-                    raw=memory or unknown or callee.name.startswith('__syscall')
-                } else if direct is? none and callee is? hir.ArrayMethod {
-                    raw=callee.name =? 'sort' and 'key' in? node.kw_args
-                } else if direct is? none and callee isnt? hir.FunctionLiteral {raw=true}
-                if raw and not node.scoped_read {
-                    loop argument in arguments(node) {
-                        let value=hir.node_at(nodes argument)
-                        expose((if value is? hir.Place value.target else argument) @exposed)
-                    }
-                    if callee is? hir.ArrayMethod {expose(callee.array @exposed)}
-                }
-            }
-            hir.push_children(node @pending)
+    }
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let child=pending.pop
+        if child in? seen continue
+        seen.push(child)
+        let node=hir.node_at(nodes child)
+        if node is? hir.FunctionLiteral|hir.GenericFunction continue
+        if node is? hir.RuntimeFailure {
+            if node.message isnt? none {pending.push(node.message)}
+            continue
         }
+        if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {expose(node.expr @exposed)}
+        if node is? hir.FunctionCall {
+            let callee=hir.node_at(nodes node.func)
+            let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+            let raw=false
+            if direct is? none and callee is? hir.ExpressedIdentifier {
+                let memory=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_'))
+                let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
+                raw=memory or unknown or callee.name.startswith('__syscall')
+            } else if direct is? none and callee is? hir.ArrayMethod {
+                raw=callee.name =? 'sort' and 'key' in? node.kw_args
+            } else if direct is? none and callee isnt? hir.FunctionLiteral {raw=true}
+            if raw and not node.scoped_read {
+                loop argument in arguments(node) {
+                    let value=hir.node_at(nodes argument)
+                    expose((if value is? hir.Place value.target else argument) @exposed)
+                }
+                if callee is? hir.ArrayMethod {expose(callee.array @exposed)}
+            }
+        }
+        hir.push_children(node @pending)
     }
     return exposed
 }
@@ -758,7 +761,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # local that is never written, exposed, captured or passed as a place:
     # callees with raw operations receive their arguments by copy. Only the
     # function's own raw exposures of that storage disqualify it.
-    let exposed=exposed_roots(plan nodes type_nodes)
+    let exposed=exposed_roots(root plan nodes type_nodes)
     # A `const` global never changes after startup initialization, so any
     # function may view its storage (a lookup's index cache aside).
     loop binding in plan.constants {if binding not in? exposed {stable.push(binding)}}
