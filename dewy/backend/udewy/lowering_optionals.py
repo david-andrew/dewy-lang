@@ -918,6 +918,19 @@ class _OptionalLowering:
             'a union store whose member representation cannot be selected',
         )
 
+    def _take_cell_payload(self, dest: hir.AST, source: hir.AST, loc: Span) -> list[hir.AST]:
+        """Transfer an independently owned payload; each frame keeps its cell.
+
+        Callers prove identical active-member layouts and that the source
+        has no later use. Clearing only the payload leaves source cleanup
+        well formed, including branches that kept the original owner.
+        """
+        return [
+            self._intrinsic_call('__store_i64__', [self._optional_tag(source, loc), dest], ty.VOID_TYPE, loc),
+            self._store_i64_field(dest, 8, self._load_i64_field(source, 8, loc), loc),
+            self._store_i64_field(source, 8, self._int64_literal(loc, 0), loc),
+        ]
+
     def _union_write(
         self,
         cell: hir.AST,
@@ -1049,10 +1062,7 @@ class _OptionalLowering:
                 if moved_local:
                     self.move_notes.append(MoveNote(self.srcfile, value.loc,
                         f'`{value.name}` is moved when stored in a union: this is its last use, so its payload changes owner', True))
-                return [*prelude,
-                        self._intrinsic_call('__store_i64__', [self._optional_tag(source_word, value.loc), cell], ty.VOID_TYPE, value.loc),
-                        self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),
-                        self._store_i64_field(source_word, 8, self._int64_literal(value.loc, 0), value.loc)]
+                return [*prelude, *self._take_cell_payload(cell, source_word, value.loc)]
             cleanup = self._discarded_call_result(value, source_word) or []
             if not reported:
                 self._note_copy('cell', value.type, 'stored in a union', self._copy_reason(value), value.loc)
@@ -1070,6 +1080,15 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
+            if (not reported and isinstance(value, hir.FunctionCall)
+                    and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
+                    and not self._union_tree_slots(source_members)
+                    and ty.preserves_union_payload(value.type, ty.union(*members))):
+                # Widening adds alternatives, but exact members keep their
+                # program-wide tags and payload layouts. A fresh ordinary
+                # call owns this value, so move it as for a same-union result.
+                # Prepared frame trees and family conversions still retag/copy.
+                return [*prelude, *self._take_cell_payload(cell, source_word, value.loc)]
             if not reported:
                 self._note_copy('cell', value.type, 'converted to a union', self._copy_reason(value), value.loc)
             return [

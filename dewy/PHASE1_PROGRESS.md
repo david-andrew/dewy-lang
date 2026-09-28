@@ -82,8 +82,9 @@ as a descriptor and cleared the cell pointer. The move analysis now keeps
 those representations distinct: taking a narrowed payload requires a
 separate proof and currently retains its ordinary copy. Thirteen hosted
 union-transfer checks and the paired native group pass, with new narrowed
-return and record-field regressions. A new hosted-driver rebuild is required
-before this integration checkpoint can be accepted.
+return and record-field regressions. A fresh hosted-driver rebuild at
+`e4263c30` subsequently passed all 21 focused union-transfer and reporting
+borrow checks (332.19 seconds including the build), closing that regression.
 
 Checkpoint (2026-09-27): both storage-exposure scans now include module
 initialization as well as function bodies and defaults. Previously an address
@@ -98,6 +99,17 @@ their process lifetime; raw exposure still prevents that proof. Validation:
 x86-64/C, and a zero-allocation repeated const-table lookup kernel. The
 `syntax.dewy` BaseInfo lookup now borrows, but that module still has a separate
 union-result conversion copy and is not marked `$explicit_copies` yet.
+
+Checkpoint (2026-09-27): a fresh ordinary call's union result now widens by
+transferring its payload when the active members keep identical tags and
+owned-handle layouts. The same cell-transfer operation handles unchanged
+union results. Family conversions and prepared frame trees retain their
+layout copy; this does not add borrowing or a new source operation.
+`semantic/syntax.dewy` now passes `$explicit_copies` standalone in both
+compilers, bringing adoption to 23 modules. Validation: 61 surrounding hosted
+checks, plus the paired widening group on x86-64/C, including array/record
+payloads, container insertion, fixed-layout conversion and zero retained
+bytes over repeated calls.
 
 ## Strict-copy cleanup
 
