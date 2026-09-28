@@ -876,8 +876,8 @@ checks reservation-bounded `.set_length(n)` commits, and file reads use this
 bulk path on x86-64/C. The paired bulk-read kernels and native fixed point
 pass; other targets retain their previous I/O route.
 
-Required-view obligations now survive unused-function/import pruning in both
-compilers. The native proof graph retains the needed view functions separately
+Required-view and strict-copy obligations now survive unused-function/import
+pruning in both compilers. The native proof graph retains the needed view functions separately
 from runtime emission, and both routes reuse their lowering proof and report.
 Focused paired checks cover conflicts, derived aliases and writes after last
 use. Full integration evidence is tracked in `PHASE1_PROGRESS.md`.

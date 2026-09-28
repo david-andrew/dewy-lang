@@ -113,10 +113,6 @@ def record_loan_fields(node):
     return arrays
 
 
-def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
-    return prove(analysis, summaries).arguments
-
-
 def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     bodies, edges, blocked = {}, {}, set()
     stable_locals = {}

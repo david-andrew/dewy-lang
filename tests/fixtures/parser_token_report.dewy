@@ -1,0 +1,9 @@
+from reporting import SrcFile, Pointer, Span
+import p"../../dewy/bootstrap/parser/cli.dewy" as cli
+
+main=():>int64=>{
+    let source=SrcFile['tokens.dewy' 'answer']
+    let pointers:array<Pointer>=[Pointer[span=Span[0 6] message='identifier']]
+    cli.show_tokens(source pointers 't0')
+    return if pointers.length=?1 and pointers[0].message=?'identifier' 42 else 1
+}

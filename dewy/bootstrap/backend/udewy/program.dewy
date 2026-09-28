@@ -19,6 +19,40 @@ Program:type = const [
     source:SrcFile=SrcFile['input' '']
 ]
 
+# Strict-copy/required-view validation may legalize unused source bodies.
+# Keep their diagnostics, but emit only code reachable from actual runtime
+# roots. Lowered function symbols are unique; the walk also follows function
+# values in arrays, callbacks, generated helpers and recursive components.
+retain_reachable=(program:Program nodes:array<hir.AST>):>Program=>{
+    let functions:dict<string addr>=[]
+    loop function in program.functions {functions[function.symbol]=function.literal}
+    let pending:array<addr>=[]
+    loop id in program.globals {pending.push(id)}
+    loop id in program.startup_items {pending.push(id)}
+    if program.argv_prologue isnt? none {loop id in program.argv_prologue {pending.push(id)}}
+    if program.argv_value isnt? none {pending.push(program.argv_value)}
+    let live:set<string>=set[]
+    if program.user_main_symbol isnt? none and program.user_main_symbol in? functions {
+        live.push(program.user_main_symbol)
+        pending.push(functions[program.user_main_symbol])
+    }
+    let seen:set<addr>=set[]
+    loop pending.length>?0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.ExpressedIdentifier and node.name in? functions and node.name not in? live {
+            live.push(node.name)
+            pending.push(functions[node.name])
+        }
+        hir.push_children(node @pending)
+    }
+    let kept:array<Function>=[]
+    loop function in program.functions {if function.symbol in? live {kept.push(function)}}
+    return Program[kept program.globals program.startup_items program.user_main_symbol program.startup_symbol program.needs_startup program.argv_prologue program.argv_value program.source]
+}
+
 # Startup preserves source order. The native process's argc/argv words are
 # received only when lowering has supplied the conversion to array<string>.
 # No command-line conversion, allocation, or module initialization is hidden

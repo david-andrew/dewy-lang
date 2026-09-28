@@ -5422,6 +5422,10 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         let id=state.capture_plan.named.get(binding)
         if id isnt? none {external.push(id)}
     }
+    # Copy-policy checking uses complete strict bodies, including unused
+    # functions. They need ordinary capture/call/layout handling while
+    # lowering, then disappear from the runtime graph below.
+    state.capture_plan=proof_captures
     timing.finish('lowering.captures' captures_started)
     let borrowing_started=timing.start(timings)
     let borrowed=borrowing.details(proof_root input.nodes input.types proof_captures state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
@@ -5558,7 +5562,9 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
     let normalize_started=timing.start(timings)
-    let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
+    let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value]
+    if proof_root not=?root {assembled=program.retain_reachable(assembled state.nodes)}
+    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files])
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}

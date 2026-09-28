@@ -562,6 +562,9 @@ class ModuleCompiler:
         do not execute at startup; keep only their referenced dependency graph.
         Non-function user initializers always remain, in module load order.
         Callback values and lazy defaults contribute ordinary HIR references.
+        Strict-copy bodies also remain until lowering checks their storage
+        operations. Their dependencies need the same analysis context as a
+        called function; the target compiler can discard their runtime code.
         """
         needed: set[int] = set()
         for record in self.order:
@@ -573,6 +576,8 @@ class ModuleCompiler:
                 if (isinstance(item, hir.Declare) and item.binding_id is not None
                         and isinstance(item.expr, hir.FunctionLiteral)
                         and item.expr.lifecycle is not None):
+                    needed.add(item.binding_id)
+                if record.explicit_copies and self._imported_function(item):
                     needed.add(item.binding_id)
             if record is entry:
                 self._collect_referenced_binding_ids(record.root, needed)

@@ -36,6 +36,25 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): strict-copy obligations now survive unused-function
+and unused-import pruning. Native graph assembly retains strict bodies and
+their dependencies through lowering, then follows lowered runtime references
+to omit unreachable functions. Hosted module assembly likewise retains strict
+imported bodies for lowering, matching its existing entry-module behavior;
+µDewy removes their unreachable executable code. Callback values, recursive
+components, defaults and generated helpers keep their dependency edges.
+
+This exposed two previously hidden source cases. The optional parser token
+report now explicitly snapshots its borrowed pointer array into the owning
+Report; it remains a visible diagnostic-path copy, not a new loan proof.
+The unused `forwarded_values` compatibility wrapper was removed from both
+implementations; all callers already consume the complete `prove` result.
+The full compiler source passes both hosted analysis and native lowering with
+all 38 strict modules checked, including unused bodies. The 47 strict-policy
+and required-view checks, two imported-dependency cases and a paired token
+report regression pass. The parity manifest now contains 335 cases; fresh
+full integration for this checkpoint remains separate.
+
 Checkpoint (2026-09-28): a last-use owned union local can widen into a union
 with more alternatives while preserving the active payload's representation.
 Hosted lowering moves the payload and empties the source cell; native lowering
@@ -71,7 +90,7 @@ The fresh hosted-built driver at `b934932d` passed all 42 weighted-invariant,
 linear-candidate and named-projection checks (331.03 seconds including its
 build). The newer `47e15597` reached a three-generation native fixed point,
 with generations 2/3 taking 49/54 seconds under concurrent checking. Its
-complete 331-case parity run is in progress. These are separate checkpoints;
+complete 331-case parity run passed. These are separate checkpoints;
 Phase 1 remains open.
 
 Checkpoint (2026-09-28): fixed temporary record arguments can lend stable

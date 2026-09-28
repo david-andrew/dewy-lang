@@ -83,14 +83,17 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
         if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions continue
         visit(id functions engine.session.hir @seen @live)
     }
-    # Unused functions still owe explicit storage demands. Add only those
-    # functions and their dependencies to the proof graph, not every unused
-    # library function. The normal runtime graph remains unchanged.
+    # Unused functions still owe explicit storage demands and their module's
+    # copy policy. Add those bodies and dependencies to the checking graph;
+    # legalization removes them from the executable after checking.
+    let strict_sources=explicit_copy_sources(engine)
     let proof_live=live
     let proof_seen=seen
     let additional=false
     loop [binding declaration] in functions {
-        if binding not in? live and requires_view_proof(declaration engine.session.hir) {
+        let source=source_by_item.get(declaration)
+        let strict=source isnt? none and source in? strict_sources
+        if binding not in? live and (strict or requires_view_proof(declaration engine.session.hir)) {
             additional=true proof_live.push(binding)
             visit(declaration functions engine.session.hir @proof_seen @proof_live)
         }

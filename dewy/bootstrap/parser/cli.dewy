@@ -37,5 +37,8 @@ read_input = (argv:array<string> default_stage:Stage):>Input | Error => {
     return Input[SrcFile[path=path.path body=body] stage dump]
 }
 show_tokens = (srcfile:SrcFile pointers:array<Pointer> stage:Stage):>void => {
-    Report[severity='info' srcfile=srcfile title="{stage} tokens" pointers=pointers].render(srcfile)
+    # The report owns its diagnostic snapshot. The incoming parameter is a
+    # borrowed array, and rendering crosses the reporting/I/O boundary; this
+    # is an explicit copy on the optional token-dump path, not an arena view.
+    Report[severity='info' srcfile=srcfile title="{stage} tokens" pointers=pointers.copy()].render(srcfile)
 }

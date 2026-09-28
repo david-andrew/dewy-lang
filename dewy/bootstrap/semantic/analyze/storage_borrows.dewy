@@ -141,7 +141,6 @@ stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr>
     return true
 }
 Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[]]
-forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>prove(analysis summaries nodes table registry).arguments
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
