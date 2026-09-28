@@ -39,6 +39,8 @@ main=():>int64=>visit(Leaf[[42] 1])''')
 CASES.append(CASES[1].replace('read(node alter(@node))', 'read((node as Node) alter(@node))'))
 CASES.append(CASES[2].replace('read(node @node)', 'read(before=node after=@node)'))
 
+CASES.append((ROOT/'tests/fixtures/native_argument_temporaries.dewy').read_text())
+
 @pytest.mark.parametrize('source', CASES)
 def test_narrowed_record_borrow_preserves_snapshot(tmp_path,source):
     execute(tmp_path,'narrowed-record-borrow',codegen(SrcFile(None,source),debug_locations=False))

@@ -4934,7 +4934,10 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
     if argument in? borrowed {
         let loan=storage_borrows.union_loan_source(argument state.input.nodes state.type_nodes)
-        if loan isnt? none {
+        # A route may name an unproven lookup whose fallback/result owns
+        # storage. Borrow its view below when supported; otherwise keep the
+        # ordinary argument temporary and release it after the call.
+        if loan isnt? none and not temporary_owner(loan @state) and not expression_owns(loan @state) {
             let source=hir.node_at(state.input.nodes loan)
             let value=snapshot(expression(loan @state) @prefix @state)
             if cell_members(source.value_type @state) isnt? none or record_union(hir.node_at(state.input.nodes argument).value_type @state) isnt? none return value

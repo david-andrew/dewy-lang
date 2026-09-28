@@ -6529,3 +6529,12 @@ paired borrowing groups, and the final five-case paired kernel pass on x86-64/C.
 Three fixtures bring the manifest to 307 cases. The preceding arithmetic/tag
 snapshot also passed both fresh hosted-built driver groups (319 seconds including
 build); its full 304-case parity run is separate and still in progress.
+
+The first `bbdffdfe` full bootstrap run stopped at the existing argument-temporary
+fixture. Route recovery exposed an owned dictionary-lookup fallback to the
+union-loan shortcut, which passed it without releasing it. That shortcut now
+requires a nonowning source. Owned lookups use the existing proven view path or
+ordinary temporary cleanup. The full temporary fixture is included alongside
+the narrowed-record regressions; both paired groups pass (82 seconds), retaining
+the zero-allocation read-only kernel. This failure was caught before claiming
+a new native fixed point.
