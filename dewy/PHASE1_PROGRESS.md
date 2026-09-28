@@ -6153,3 +6153,24 @@ off adoption exceeds the budget. The replacement fixture brings the manifest to
 266 cases. Three-generation integration at the preceding `f899b2b5` snapshot
 completed (generation 3: 59 seconds under concurrent checks); its fresh hosted
 driver, 265-case manifest run and copy inventory are still in progress.
+
+## Integration and inventory audit (2026-09-28)
+
+At `f899b2b5`, the fresh hosted-built driver passed all three selected groups
+(record fields, nested-loop budget and disequality contracts) in 374.66 seconds
+including build. The earlier `36fd8465` broad hosted snapshot completed with
+4,420 passes, 13 skips and one failure in 3,215.57 seconds: its obsolete
+length-disequality expectation. That expectation and its missing expression
+entailment were fixed and retested at `e3796a0a`. This is not a claim that the
+complete later tree has already passed a fresh broad run.
+
+The expanded inline-field reporting exposes a real inventory-baseline problem:
+`f899b2b5` reports 4,301 sites across 53,255 lines (80.762/KLOC), exceeding the
+unchanged 3,000/60 gates. The self-build succeeding does not close this gate.
+Of its 2,015 field-store notes, 1,336 concern the two-word Span record; the report
+also includes runtime-sized records/cells whose snapshots were previously
+invisible. Preserve the complete report while auditing cost categories and
+remaining transfer opportunities; do not silently erase entries or claim a
+passing budget from the former incomplete inventory. The full report is at
+`/tmp/dewy-record-field-copy-budget.json` in this session. The 265-case paired
+manifest remains running at this snapshot.
