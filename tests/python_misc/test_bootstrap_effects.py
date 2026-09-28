@@ -181,7 +181,12 @@ def emit_hir(root, *, type_value=None, with_names=False):
             return memo[id(item)]
         # Native module provenance is graph metadata rather than a field on
         # its ordinary root Block; it is not an effect-analysis syntax edge.
-        props = ' '.join(f'{"value_type" if f.name == "type" else f.name}={value(getattr(item, f.name), "type" if isinstance(item, hir.TypeValue) and f.name == "value" else f.name)}' for f in dataclasses.fields(item) if f.name != 'item_sources')
+        # Native assertions use RuntimeFailure, while the hosted checker
+        # installs reporter calls. Ordinary call fixtures have no reporter
+        # metadata; do not emit a hosted-only field into their native shape.
+        if isinstance(item, hir.FunctionCall):
+            assert not item.compiler_report, 'installed reporting calls need a RuntimeFailure fixture'
+        props = ' '.join(f'{"value_type" if f.name == "type" else f.name}={value(getattr(item, f.name), "type" if isinstance(item, hir.TypeValue) and f.name == "value" else f.name)}' for f in dataclasses.fields(item) if f.name not in ('item_sources', 'compiler_report'))
         name = f'n{len(memo)}'
         memo[id(item)] = name
         kind = 'Block' if isinstance(item, hir.Program) else type(item).__name__

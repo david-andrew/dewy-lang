@@ -113,6 +113,22 @@ bytes over repeated calls.
 
 ## Strict-copy cleanup
 
+Checkpoint (2026-09-27): projecting an enclosing field contract onto a
+descendant now preserves the complete proposition in both analyzers. Only
+the subject and its projection change; the bound's value/length projection,
+resolved identities, tested type, condition and address-space provenance
+remain intact. The native HIR fixture generator also distinguishes ordinary
+calls from hosted-only installed reporting calls. Validation: the native
+HIR projection/effect comparisons and five surrounding hosted refinement
+checks pass (seven checks total).
+
+Integration at `cabf68ec`: three native generations reached an identical
+fixed point. A separately hosted-built driver passed all 35 focused union,
+reporting-borrow, startup-exposure, const-owner and widening checks. The
+broader hosted suite and 232-case paired manifest are still running; this
+checkpoint does not claim those results yet. Generation 2/3 builds took
+62/87 seconds under concurrent test load, not isolated timing measurements.
+
 The inherited uncommitted CLI-only `$explicit_copies` implementation was
 removed on 2026-09-20, with its patch and tests archived under
 `../dewy-build-artifacts/phase1-2026-09-20`. It depended on incomplete copy

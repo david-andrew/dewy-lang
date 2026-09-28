@@ -286,7 +286,7 @@ def _member_invariant(node: hir.AST) -> tuple[ty.Proposition, ...]:
         parent_field = parent_type.field(parent.name) if parent_type is not None else None
         if parent_field is not None:
             propositions.extend(
-                ty.Proposition('length' if p.of == 'length' else 'self', p.op, p.value, term=p.term, term_id=p.term_id)
+                replace(p, subject='length' if p.of == 'length' else 'self', of='value')
                 for p in parent_field.refinement
                 if p.field == suffix
             )

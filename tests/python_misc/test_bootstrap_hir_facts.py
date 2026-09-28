@@ -1,6 +1,7 @@
 """Compare HIR facts consumed by native bounds transfer with the hosted views."""
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from test_bootstrap_effects import emit_hir
@@ -47,9 +48,20 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
     second_type = ty.ObjectType((*second_type.fields, ty.ObjectField('other', 'bool')))
     forwarded.value.type = ty.union(field_type, second_type)
     exception = hir.ForwardingAccess(LOC, 'int64', forwarded.value, 'count', 'receiver', 6, 'error')
-    nested_type = ty.ObjectType((ty.ObjectField('value', field_type, refinement=(ty.Proposition('.count', '=?', 4),)),))
+    inherited = (
+        ty.Proposition('.count', '=?', 4),
+        ty.Proposition('.count', '<=?', 0, term='limit', term_id=11, term_of='value'),
+        ty.Proposition('.count', '<?', 0, axiom='addr'),
+        ty.Proposition('.count', 'is?', 0, type_='int64', when=True),
+        ty.Proposition('.count', '<=?', 0, of='length', term='sequence', term_id=12),
+    )
+    nested_type = ty.ObjectType((ty.ObjectField('value', field_type, refinement=inherited),))
     parent = hir.MemberAccess(LOC, field_type, identifier('nested', nested_type, 7), 'value')
     nested = hir.MemberAccess(LOC, 'int64', parent, 'count')
+    # Projection changes the subject, not the meaning or identity of the
+    # bound. Compare all fields independently of the native implementation.
+    projected = tuple(replace(p, subject='length' if p.of == 'length' else 'self', of='value') for p in inherited)
+    assert bounds._member_invariant(nested) == (positive, small, *projected)
     excluded_type = ty.TypeAnd([field_type, ty.TypeNot(second_type)])
     excluded = hir.MemberAccess(LOC, 'int64', identifier('excluded', excluded_type, 10), 'count')
     accesses = [ordinary, forwarded, exception, nested, excluded]
@@ -71,6 +83,16 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
     for i, access in enumerate(accesses):
         checks.append(f'    emit_props("field{i}" analysis.member_invariant({names[id(access)]} nodes type_nodes))')
         expected.extend(f'field{i}|{p.subject},{p.op},{p.value}' for p in bounds._member_invariant(access))
+    expected_type = build(ty.RefinedType('int64', (positive, small, *projected)))
+    checks.append(f'''    let expected = types.node_at(type_nodes {expected_type})
+    $runtime_assert expected is? types.RefinedType
+    let projected = analysis.member_invariant({names[id(nested)]} nodes type_nodes)
+    $runtime_assert projected.length =? expected.propositions.length
+    loop i in 0.. and i <? projected.length and i <? expected.propositions.length {{
+        $runtime_assert facts.same_identity(projected[i] expected.propositions[i])
+        $runtime_assert projected[i].term_id =? expected.propositions[i].term_id
+        $runtime_assert projected[i].subject_id =? expected.propositions[i].subject_id
+    }}''')
     for i, called in enumerate((call, keyword)):
         checks.append(f'    let argument{i} = analysis.call_argument({names[id(called)]} "n" nodes type_nodes)')
         checks.append(f'    printl("arg{i}|{{argument{i} =? {names[id(x)]}}}")')

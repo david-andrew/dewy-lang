@@ -159,7 +159,15 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
             if field isnt? none {
                 loop p in field.refinement {
                     if facts.field(p) =? suffix {
-                        output.push(facts.Proposition[subject=(if p.projection =? 'length' 'length' else 'self') op=p.op value=p.value term=p.term term_id=p.term_id])
+                        # Only the subject changes when looking through the
+                        # parent. Keep the bound's projection, type evidence,
+                        # provenance and conditionality intact.
+                        output.push(facts.Proposition[
+                            subject=(if p.projection =? 'length' 'length' else 'self')
+                            op=p.op value=p.value term=p.term term_id=p.term_id
+                            term_projection=p.term_projection tested_type=p.tested_type
+                            when=p.when subject_id=p.subject_id axiom=p.axiom
+                        ])
                     }
                 }
             }
