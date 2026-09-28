@@ -6857,3 +6857,18 @@ Integration follow-up: `2dd7c9ae` reached a three-generation native fixed point,
 including x86-64/C execution checks. Generations 2/3 took 50/55 seconds under
 concurrent checking; these are not isolated performance measurements. Full
 parity at this newer checkpoint is still pending.
+
+Checkpoint (2026-09-28): partial resource transfers through wrappers with drop
+hooks now consume the ordinary transitive parameter-effect summaries. A wrapper
+may keep a hole only when its drop cannot read, mutate, replace or expose that
+route; unknown calls and overlapping access prevent the proof. The hook still
+runs before remaining-field cleanup. No destructor is skipped and no new source
+annotation is needed. Hosted and native lowering use their existing checked hook
+identities; native lookup uses the hoisted hook inventory, not syntax bindings.
+Validation: 11 focused hosted cases and the paired x86-64/C group pass, covering
+conditional moves, returned fields, nested wrappers, runtime-selected elements,
+transitive helper reads, permitted sibling mutation and rejected missing-field
+accesses. Fifty-six surrounding hosted checks and three paired groups pass.
+
+The preceding scope-cleanup checkpoint `7b9799ca` passed all 320 parity cases.
+The newer linear-query checkpoint's complete parity run remains in progress.

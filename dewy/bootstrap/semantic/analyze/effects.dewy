@@ -57,6 +57,9 @@ disjoint_routes = (routes:array<Route> route:Route):>bool => {
 read_only_at = (summary:ParameterEffects route:Route):>bool => {
     return disjoint_routes(summary.mutates route) and disjoint_routes(summary.rebinds route) and disjoint_routes(summary.escapes route)
 }
+accesses_at = (summary:ParameterEffects route:Route):>bool => {
+    return not disjoint_routes(summary.reads route) or not read_only_at(summary route)
+}
 # A word carries no storage: passing it to a raw operation exposes nothing.
 word_type = (id:addr type_nodes:types.Table):>bool => {
     let type=types.node_at(type_nodes types.unfold(types.strip_refinement(id type_nodes) type_nodes))

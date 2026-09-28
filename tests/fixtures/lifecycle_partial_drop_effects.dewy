@@ -1,0 +1,16 @@
+let trace:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Wrapper=type of [first:Token second:Token marker:int64
+    $__drop__ release=():>void=>{trace=trace*10+marker}
+]
+consume=(value:Token):>int64=>value.id
+work=(flag:bool):>int64=>{
+    let owner=Wrapper[Token[1] Token[2] 3]
+    if flag {consume(owner.first);}
+    return owner.second.id
+}
+main=():>int64=>{
+    if work(true) not=?2 or trace not=?132 return 1
+    trace=0
+    return if work(false)=?2 and trace=?321 42 else 2
+}

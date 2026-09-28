@@ -61,6 +61,7 @@ Plan:type = [
     array_suffixes:dict<addr addr>=[]
     argument_writes:dict<addr set<addr>>=[]
     readonly_arguments:set<addr>=set[]
+    hook_effects:dict<addr effects.ParameterEffects>=[]
     component_copies:dict<addr addr>=[]
     generated:array<addr>=[]
     function_source:addr?=none
@@ -546,10 +547,10 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
     }
     return result
 }
-# Only synthesized wrappers may become partially owned at an exit. A custom
-# lifecycle operation still requires its complete receiver. Borrowed bindings
+# A wrapper may become partially owned when its drop cannot access the hole.
+# Copy/move hooks are not invoked by a component transfer. Borrowed bindings
 # and aliases never appear in the owning declaration list.
-returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extraction?=>{
+returning_projection=(id:addr owners:array<addr> session:contexts.Session plan:Plan):>Extraction?=>{
     let value=hir.node_at(session.hir id)
     loop value is? hir.Obligation|hir.ValueCast|hir.RepresentationCast {
         value=hir.node_at(session.hir if value is? hir.Obligation value.value else value.expr)
@@ -560,8 +561,11 @@ returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extr
             let shape=types.node_at(session.types views.structural_base(hir.node_at(session.hir value.value).value_type session.types))
             if shape isnt? types.ObjectType return none
             # A field transfer does not copy/move the wrapper itself. Only
-            # its drop hook requires a complete receiver during cleanup.
-            loop method in shape.methods {if method.lifecycle =? 'drop' return none}
+            # its drop hook constrains the components still needed for cleanup.
+            let selected:array<string>=[]
+            loop step in reverse_path {selected.push(if step is? string step else '[]')}
+            selected.push(value.name)
+            if not drop_ignores(shape selected plan session) return none
             reverse_path.push(value.name)
             value=hir.node_at(session.hir value.value)
         } else {
@@ -633,20 +637,47 @@ restore_flags=(held:array<ComponentFlag> loc:Span @session:contexts.Session):>ar
     }
     return result
 }
-# Wrappers without drop hooks may remain partially live, even with copy/move
-# hooks. A selected component's custom move cleans its remainder on the
+# Wrappers may remain partially live when their drops cannot access the hole.
+# Copy/move hooks do not run at a component transfer. A selected component's custom move cleans its remainder on the
 # consuming edge before the component flag is cleared.
+# The same transitive may-access summary used for borrows decides whether
+# a wrapper's drop can still run with this component absent. Unknown calls,
+# receiver escape and ancestor access prevent the proof; array slots share
+# one wildcard. Ordinary field cleanup still consults presence flags.
+drop_ignores=(shape:types.ObjectType reverse_path:array<string> plan:Plan session:contexts.Session):>bool=>{
+    loop method in shape.methods {
+        if method.lifecycle not=? 'drop' continue
+        if shape.brand is? none return false
+        let hook=plan.owners.get(shape.brand)
+        if hook is? none return false
+        let binding=bindings.find_binding(session.registry hook.binding)
+        if binding is? none or binding.function is? none return false
+        let function=hir.node_at(session.hir binding.function)
+        if function isnt? hir.FunctionLiteral or function.pos_or_kw_args.length=?0 return false
+        let receiver=function.pos_or_kw_args[0].binding_id
+        if receiver is? none return false
+        let summary=plan.hook_effects.get(receiver)
+        if summary is? none return false
+        let path:array<string>=[]
+        let index=reverse_path.length
+        loop index>?0 {index-=1 path.push(reverse_path[index])}
+        if effects.accesses_at(summary effects.Route[path]) return false
+    }
+    return true
+}
 transferable_component=(id:addr session:contexts.Session @plan:Plan):>bool=>{
     let node=hir.node_at(session.hir id)
     if resource(node.value_type session.types @plan.resource_types) is? none return false
     let shape=types.node_at(session.types views.structural_base(node.value_type session.types))
     if shape isnt? types.ObjectType|types.ArrayType|types.TypeOr return false
     let current=node
+    let path:array<string>=[]
     loop current is? hir.MemberAccess|hir.Index {
-        if current is? hir.Index {current=hir.node_at(session.hir current.array) continue}
+        if current is? hir.Index {path.push('[]') current=hir.node_at(session.hir current.array) continue}
         let owner=types.node_at(session.types views.structural_base(hir.node_at(session.hir current.value).value_type session.types))
         if owner isnt? types.ObjectType return false
-        loop method in owner.methods {if method.lifecycle =? 'drop' return false}
+        path.push(current.name)
+        if not drop_ignores(owner path plan session) return false
         current=hir.node_at(session.hir current.value)
     }
     return true
@@ -826,11 +857,11 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
         return
     }
     if candidate is? hir.MemberAccess|hir.Index and id in? plan.consume_sites and frame isnt? none {
-        let projection=returning_projection(id frame.owners session)
+        let projection=returning_projection(id frame.owners session plan)
         if projection isnt? none {
             let prefix:array<addr>=[]
             let selected=freeze_route(id candidate.loc projection.binding @prefix @plan @session)
-            let frozen=returning_projection(selected frame.owners session)
+            let frozen=returning_projection(selected frame.owners session plan)
             $runtime_assert frozen isnt? none
             let result=transfer(selected candidate.value_type @plan @session)
             let saved=capture_result(result candidate.loc @session)
@@ -1772,10 +1803,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                     }
                 }
                 if consumed is? none {
-                    let projection=returning_projection(returned_id owners session)
+                    let projection=returning_projection(returned_id owners session plan)
                     if projection isnt? none {
                         let selected=freeze_route(returned_id current.loc projection.binding @prefix @plan @session)
-                        let frozen=returning_projection(selected owners session)
+                        let frozen=returning_projection(selected owners session plan)
                         $runtime_assert frozen isnt? none
                         let result=transfer(selected plan.result_type @plan @session)
                         extracted=Extraction[frozen.binding frozen.path result not=?selected]
@@ -2536,6 +2567,7 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session prepared:a
     if receivers.length >? 0 {
         let empty=types.primitive('void' @session.types)
         let joined=put(hir.Block[Span[0 0] empty items false] @session)
+        plan.hook_effects=effects.analyze_effects(joined session.hir session.types).by_param_binding
         plan.argument_writes=effects.analyze_global_writes(joined session.hir receivers session.registry)
         plan.readonly_arguments=effects.read_only_places(joined session.hir session.types)
     }

@@ -824,8 +824,8 @@ in both lowerings and the parity tool is the gate.
   and custom moves. Named constants and checked constant-result selectors use
   the same slot identity as literals; selector effects and dependencies still
   run once on the selected path. Length reads keep the container alive without demanding
-  its consumed elements. Dynamic index routes, components behind hooked
-  wrappers, and remaining resource-container mutations still require
+  its consumed elements. Possibly overlapping dynamic index routes and remaining resource-container
+  mutations still require
   further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions
@@ -889,7 +889,10 @@ through nested arrays. Replacing a statically selected containing array or ances
 element transfer now cleans only the old remainder and restores the new value
 across backedges. Possibly overlapping dynamic routes remain conservative;
 this is a remaining lifetime-proof case, not implicit permission to copy a
-resource.
+resource. A component may now transfer through an enclosing drop hook when
+its transitive may-access summary proves that hook does not read, mutate,
+replace or expose the missing route. Drops still run before ordinary remaining-
+field cleanup. Unknown calls and overlapping accesses keep the owner complete.
 
 ### 1.2 The proof engine
 

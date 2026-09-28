@@ -107,6 +107,12 @@ class ParameterEffects:
                    for routes in (self.mutates, self.rebinds, self.escapes)
                    for other in routes)
 
+    def accesses_at(self, route: Route) -> bool:
+        """Whether any observed operation may need this component alive."""
+        return any(route[:len(other)] == other or other[:len(route)] == route
+                   for routes in (self.reads, self.mutates, self.rebinds, self.escapes)
+                   for other in routes)
+
     def add_read(self, route: Route) -> bool:
         return _add_route(self.reads, route)
 

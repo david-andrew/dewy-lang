@@ -112,6 +112,30 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
+    hook_effects = None
+
+    def drop_ignores(shape, path):
+        """A partial receiver is valid only if its drop cannot access the hole.
+
+        Use the same transitive may-access summary as ordinary borrows. An
+        opaque call, receiver escape or ancestor access prevents this proof.
+        Array selections share a wildcard; no index disjointness is assumed.
+        """
+        nonlocal hook_effects
+        if not isinstance(shape, ty.ObjectType):
+            return False
+        hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
+        if hook is None:
+            return True
+        declaration = declarations.get(hook.binding_id)
+        if declaration is None:
+            return False
+        if hook_effects is None:
+            hook_effects = effects.analyze_effects(effect_context or root)
+        receiver = declaration.expr.pos_or_kw_args[0].binding_id
+        summary = hook_effects.for_param_binding(receiver)
+        route = tuple(step if isinstance(step, str) else effects.INDEX_STEP for step in path)
+        return summary is not None and not summary.accesses_at(route)
     recursive_drops = {}
     array_drops = {}
     array_clears = {}
@@ -459,9 +483,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return result
 
     def returning_projection(value, owners):
-        """An exiting owner may surrender a component through wrappers without drops.
+        """An exiting owner may surrender a component its drops cannot access.
 
-        A wrapper's drop hook still needs to see its complete value. Copy/move
+        A wrapper's drop hook still needs every component it may access. Copy/move
         hooks do not run for a field transfer; synthesized cleanup can release
         the remaining fields even when those other hooks are declared.
         Borrowed parameters and aliases are not in the owning declaration set.
@@ -472,9 +496,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         while isinstance(value, (hir.MemberAccess, hir.Index)):
             if isinstance(value, hir.MemberAccess):
                 shape = ty.structural_base(value.value.type)
-                if not isinstance(shape, ty.ObjectType) or any(m.lifecycle == 'drop' for m in shape.methods):
-                    return None
                 path.append(value.name)
+                if not drop_ignores(shape, reversed(path)):
+                    return None
                 value = value.value
             else:
                 path.append(value.index)
@@ -1614,7 +1638,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = replace(body, scoped=True)
         transfers, views, consumes = local_transfers(body, parameter_owners, allowed)
         def component(node):
-            # Only a wrapper's drop needs a complete cleanup receiver. Its
+            # A wrapper's drop needs every component it may access. Its
             # copy/move hooks are not called when one field changes owners.
             # A custom move of the selected component cleans its remainder
             # at the consuming edge before clearing the
@@ -1622,12 +1646,15 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             shape = ty.structural_base(node.type)
             if not isinstance(shape, (ty.ObjectType, ty.ArrayType, ty.TypeOr)):
                 return False
+            path = []
             while isinstance(node, (hir.MemberAccess, hir.Index)):
                 if isinstance(node, hir.Index):
+                    path.append(node.index)
                     node = node.array
                     continue
                 owner_shape = ty.structural_base(node.value.type)
-                if not isinstance(owner_shape, ty.ObjectType) or any(method.lifecycle == 'drop' for method in owner_shape.methods):
+                path.append(node.name)
+                if not drop_ignores(owner_shape, reversed(path)):
                     return False
                 node = node.value
             return True
