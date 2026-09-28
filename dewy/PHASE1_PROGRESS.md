@@ -6678,3 +6678,22 @@ index and disequality invalidation, growth/shrinkage and cancelling endpoints.
 Another 1,000 deterministic mixed-fact length changes exactly match the previous
 hosted implementation. The manifest adds the kernel (313 cases); this follow-up
 has focused verification, beyond the frozen fixed-point checkpoint above.
+
+## Bound constructor-private proof lifetimes (2026-09-28)
+
+Both analyzers now expire a literal's private field bindings after its enclosing
+declaration or assignment has installed the value. Earlier fields remain
+available during default evaluation; completed destination routes and unrelated
+source facts survive. Syntax discovery is cached separately from dynamically
+allocated routes, and expiration scans the fact state once for the whole set.
+Nested function bodies retain their separate analysis. No qualifier budget was
+reduced and no unknown obligation was promoted to evidence.
+
+A 128-constructor experiment previously accumulated 66,304 facts; its peak is
+now 264 (hosted compilation 2.40 s to 0.88 s in this small check). New hosted and
+native-analyzer scaling regressions require linear state size and verify every
+completed record's field intervals. The direct regressions pass on x86-64/C
+(134.15 s including hosted compilation of the native analyzer). All 38 adjacent
+hosted constructor/default, scalar snapshot and array-fact checks pass, as do
+the three paired groups on both backends (71.50 s). The native parity manifest
+now contains 314 cases. Full integration follows this focused checkpoint.

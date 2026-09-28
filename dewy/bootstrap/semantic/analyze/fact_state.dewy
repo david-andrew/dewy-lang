@@ -192,6 +192,24 @@ forget = (@state:State term:Term):>void => {
     loop fact in removed { remove(@state fact) }
 }
 
+# Expire many private bindings in one scan. Calling forget once per field
+# visits unrelated facts repeatedly and can itself become quadratic.
+mentions_any = (fact:Fact bindings:set<addr>):>bool => {
+    if fact is? Value return fact.term.binding_id in? bindings
+    if fact is? Nonzero return fact.subject in? bindings
+    if fact is? Index return fact.index in? bindings or fact.sequence in? bindings
+    if fact is? Order return fact.smaller.binding_id in? bindings or fact.larger.binding_id in? bindings
+    if fact is? Distinct return fact.left.binding_id in? bindings or fact.right.binding_id in? bindings
+    $runtime_assert fact is? Remainder
+    return fact.subject.binding_id in? bindings or fact.upper.binding_id in? bindings or fact.offset in? bindings
+}
+forget_bindings = (@state:State bindings:set<addr>):>void => {
+    if bindings.length=?0 return
+    let removed:array<Fact>=[]
+    loop entry in state.values {if mentions_any(entry.fact bindings) {removed.push(entry.fact)}}
+    loop fact in removed {remove(@state fact)}
+}
+
 # The caller records the new length separately. Both order and remainder
 # gaps describe `upper - subject`, with an unchanged scalar offset for a
 # remainder. The lower bound on that gap changes by the least possible

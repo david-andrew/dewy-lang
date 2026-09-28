@@ -64,6 +64,7 @@ Checker:type = [
     loop_depth:bigint=0
     loop_search_budget:addr=0
     loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
+    literal_fields:dict<addr set<addr>>=[]
     container_receivers:set<addr>=set[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
@@ -235,7 +236,52 @@ value_body = (id:addr @state:facts.State @checker:Checker validate:bool):>void =
     evaluate(id @state @checker validate)
 }
 
+# Construction bindings are live through defaults and the enclosing store.
+# After installation, only destination routes can be observed. Keep syntax
+# discovery cached, but discover routes afresh: analysis can allocate them.
+release_literal_fields = (expression:addr @state:facts.State @checker:Checker):>void => {
+    if expression not in? checker.literal_fields {
+        let roots:set<addr>=set[]
+        let seen:set<addr>=set[]
+        let pending:array<addr>=[expression]
+        loop pending.length>?0 {
+            let id=pending.pop()
+            if id in? seen continue
+            seen.push(id)
+            let node=node_at(id checker)
+            if node is? hir.FunctionLiteral continue
+            if node is? hir.ObjectLiteral {
+                loop field in node.fields {if field.binding_id isnt? none {roots.push(field.binding_id)}}
+            }
+            hir.push_children(node @pending)
+        }
+        checker.literal_fields[expression]=roots
+    }
+    let roots=checker.literal_fields[expression]
+    if roots.length=?0 return
+    let expired=roots
+    loop root in roots {
+        loop route in bindings.routes_under(checker.data.registry root []) {expired.push(route)}
+    }
+    facts.forget_bindings(@state expired)
+    loop root in expired {checker.data.member_calls.pop(root default=0);}
+}
+
 analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
+    let result=analyze_inner(id state @checker validate)
+    let node=node_at(id checker)
+    let expression:addr?=none
+    if node is? hir.Declare {expression=node.expr}
+    else if node is? hir.Assign {expression=node.value}
+    if expression isnt? none and result.normal isnt? none {
+        let remaining=result.normal
+        release_literal_fields(expression @remaining @checker)
+        result.normal=remaining
+    }
+    return result
+}
+
+analyze_inner = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
     let node=node_at(id checker)
     let current=state
     if node is? hir.Block {

@@ -903,6 +903,7 @@ class _BoundsValidator:
         self.loop_depth = 0
         self.loop_search_budget = 0
         self.loop_qualifier_pairs = {}
+        self.literal_fields: dict[int, frozenset[int]] = {}
         self.constant_indices: dict[int, int | None] = {}
         self.call_writes: dict[int, set[int]] = {}
         self.predicate_bindings = predicate_effects.BindingQueries()
@@ -952,7 +953,70 @@ class _BoundsValidator:
         for function in deferred:
             self._analyze_function(function, validate=True, enclosing=final)
 
-    def _analyze(
+    def _release_literal_fields(self, expression: hir.AST, state: State) -> None:
+        """Construction bindings end after the enclosing store consumed its value.
+
+        Defaults need earlier fields while evaluating a literal. Once its value
+        is installed, only the destination routes describe reachable storage.
+        Keeping the private construction names makes unrelated later literals
+        copy their equality edges too, producing a quadratic proof environment.
+        Function bodies have their own analysis; never expire their bindings
+        as if those bodies had executed during construction.
+        """
+        identity = id(expression)
+        roots = self.literal_fields.get(identity)
+        if roots is None:
+            found: set[int] = set()
+            pending = [expression]
+            seen: set[int] = set()
+            while pending:
+                node = pending.pop()
+                if id(node) in seen:
+                    continue
+                seen.add(id(node))
+                if isinstance(node, hir.FunctionLiteral):
+                    continue
+                if isinstance(node, hir.ObjectLiteral):
+                    found.update(field.binding_id for field in node.fields if field.binding_id is not None)
+                pending.extend(hir.children(node))
+            roots = self.literal_fields[identity] = frozenset(found)
+        if not roots:
+            return
+        # Routes are allocated during transfer, so only the syntax is cached.
+        expired = set(roots)
+        for root in roots:
+            expired.update(self.registry.routes_under(root))
+        terms = expired | {_length_key(root) for root in expired}
+        removed = []
+        for fact in state:
+            if isinstance(fact, int):
+                discard = fact in terms
+            elif isinstance(fact, NonzeroFact):
+                discard = fact.binding in expired
+            elif isinstance(fact, IndexFact):
+                discard = fact.index in expired or fact.array in expired
+            elif isinstance(fact, OrderFact):
+                discard = fact.smaller in terms or fact.larger in terms
+            elif isinstance(fact, DistinctFact):
+                discard = fact.left in terms or fact.right in terms
+            else:
+                discard = fact.subject in terms or fact.upper in terms or fact.offset in expired
+            if discard:
+                removed.append(fact)
+        for fact in removed:
+            del state[fact]
+        for root in expired:
+            self.member_facts.pop(root, None)
+
+    def _analyze(self, node: hir.AST, state: State, *, validate: bool) -> State:
+        result = self._analyze_inner(node, state, validate=validate)
+        if isinstance(node, hir.Declare):
+            self._release_literal_fields(node.expr, result)
+        elif isinstance(node, hir.Assign):
+            self._release_literal_fields(node.value, result)
+        return result
+
+    def _analyze_inner(
         self,
         node: hir.AST,
         state: State,

@@ -1,0 +1,57 @@
+# Many constructors read the same scalar. Private field bindings must expire
+# after each store; otherwise equalities between all earlier fields form a
+# quadratic graph. The completed records' field intervals still survive.
+from reporting import Span, SrcFile
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
+import p"../../dewy/bootstrap/semantic/analyze/value_bounds.dewy" as values
+import p"../../dewy/bootstrap/semantic/analyze/predicate_facts.dewy" as predicates
+import p"../../dewy/bootstrap/semantic/analyze/expression_intervals.dewy" as intervals
+import p"../../dewy/bootstrap/semantic/analyze/relations.dewy" as relations
+import p"../../dewy/bootstrap/semantic/analyze/fact_state.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
+import p"../../dewy/bootstrap/semantic/analyze/bounds.dewy" as bounds
+main=():>int64=>{
+    let span=Span[0 0]
+    let type_nodes=types.Table[]
+    let word=types.primitive('int64' @type_nodes)
+    let void_type=types.primitive('void' @type_nodes)
+    let pair=types.object_type([types.ObjectField['first' word] types.ObjectField['second' word]] none false [] [] @type_nodes)
+    let registry=bindings.Registry[]
+    let parameter=bindings.allocate_param(@registry 'value' word span)
+    let nodes:array<hir.AST>=[]
+    let read=hir.append_node(@nodes hir.ExpressedIdentifier[span word 'value' parameter])
+    let statements:array<addr>=[]
+    let destinations:array<addr>=[]
+    loop repeat in 0..127 {
+        let first=bindings.allocate(@registry none 'first' 'value' span)
+        let second=bindings.allocate(@registry none 'second' 'value' span)
+        let owner=bindings.allocate(@registry none 'pair' 'value' span)
+        let literal=hir.append_node(@nodes hir.ObjectLiteral[span pair [hir.ObjectField[span 'first' read first] hir.ObjectField[span 'second' read second]]])
+        statements.push(hir.append_node(@nodes hir.Declare[span void_type 'let' 'pair' pair literal owner]))
+        destinations.push(owner)
+    }
+    let env=values.Environment[nodes type_nodes registry 1024]
+    let data=predicates.Data[env relations.Context[facts.Context[1024]] intervals.Snapshot[] registry]
+    let checker=bounds.Checker[data SrcFile['fixture' ''] word]
+    bounds.configure(@checker)
+    let state=facts.State[]
+    facts.set_value(@state facts.Term[parameter] ranges.Interval[1 100])
+    loop statement in statements {
+        let transferred=bounds.analyze(statement state @checker true)
+        if checker.problem isnt? none or transferred.normal is? none return 1
+        state=transferred.normal
+        if state.values.length>?600 return 2
+    }
+    # The source interval and both fields of each destination remain known.
+    loop owner in destinations {
+        loop name in ['first' 'second'] {
+            let route=bindings.route_id(@checker.data.registry owner [name] word span)
+            let interval=facts.lookup(state facts.value(facts.Term[route]))
+            if interval is? none or interval.lower is? none or interval.upper is? none return 3
+            if interval.lower not=?1 or interval.upper not=?100 return 3
+        }
+    }
+    return 42
+}
