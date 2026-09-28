@@ -71,6 +71,14 @@ remain unknown, even when a stronger solver could establish them.
 
 ## Loop candidates and budgets
 
+Before invariant search, a memoized control summary checks whether a while body
+can advance to its condition. A body with neither fallthrough nor a local
+`continue` is validated once from its incoming state. Nested loops consume their
+local continues and propagate outward targets, so `continue $outer` prevents
+this optimization on the targeted loop. Value facts never supply this structural
+termination evidence. Abstract transfers preserve outward break/continue states
+across while, finite-iterator and general iterator boundaries.
+
 Candidate selection is bounded separately from proof:
 
 - exact entry values select at most 64 changing terms and a linear-size set of
@@ -95,8 +103,8 @@ or unproved candidates cannot justify an obligation.
 
 ## Remaining closure work
 
-Broader linear-combination inference, the depth/scaling behavior of nested loop
-exploration, complete transfer of every fact kind through aggregate element
+Broader linear-combination inference, scaling of nested loops that do have
+advancing edges, complete transfer of every fact kind through aggregate element
 summaries, and consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all
 of Phase 1 merely because the current finite domain reaches a fixed point.

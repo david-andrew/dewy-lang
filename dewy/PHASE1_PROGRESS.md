@@ -6039,3 +6039,27 @@ The owning-record checkpoint `36fd8465` reached a three-generation native fixed
 point (generations 2/3: 53/55 s under concurrent checks). Its fresh hosted driver,
 broader hosted suite and 255-case parity run are the current integration gates;
 this join extension has its focused checks but postdates that frozen snapshot.
+
+## Single-pass loop analysis and outward exits (2026-09-28)
+
+Both analyzers now memoize structural control summaries. A while body with no
+fallthrough or continue targeting its own condition needs one checked transfer,
+without widening/narrowing searches. Nested local continues are consumed by
+their own loops; outward continues prevent this optimization at their target.
+The ten-level nested-break regression drops from 620,010 transfers to 32;
+eighteen levels take 56. This measures transfer visits, not a claim that all
+nested-loop inference is linear. Loops with advancing edges remain scaling work.
+
+This also exposed a hosted correctness bug: nested loop analysis discarded
+outward break/continue states. Both finite and general iterator boundaries and
+while boundaries now preserve them, including iterator-binding cleanup. A
+three-iteration outward-continue program could previously prove its counter was
+still zero; that false assertion is now rejected. Positive and negative tests
+cover while, finite iterator, general iterator and multi-iterator inner loops.
+
+Validation: 72 surrounding hosted checks, 24 final focused checks, and the paired
+single-pass/labeled-exit groups pass. Three fixtures bring the parity manifest to
+260 cases. Complete fresh-build integration remains pending for this checkpoint.
+The preceding owning-record snapshot completed all 255 parity cases and its
+fresh hosted driver passed 35 checks (379.67 seconds including build); its broader
+hosted suite remains running separately.

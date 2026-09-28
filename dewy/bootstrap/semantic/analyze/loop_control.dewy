@@ -1,0 +1,54 @@
+import p"../hir.dewy" as hir
+
+# Structural control only: a body without fallthrough or a continue to its
+# own condition needs validation once, not an inductive-head search. Cache
+# summaries by node identity so nested loops do not rescan their subtrees.
+Summary:type=const [normal:bool continues:set<addr>=set[]]
+Cache:type=dict<addr Summary>
+summarize=(id:addr nodes:array<hir.AST> @cache:Cache):>Summary=>{
+    let cached=cache.get(id)
+    if cached isnt? none return cached
+    let node=hir.node_at(nodes id)
+    let normal=true
+    let continues:set<addr>=set[]
+    if node is? hir.FunctionLiteral|hir.GenericFunction {}
+    else if node is? hir.Continue {normal=false continues.push(node.loop_levels)}
+    else if node is? hir.Break {normal=false}
+    else if node is? hir.Block {
+        loop item in node.items {
+            if not normal break
+            let part=summarize(item nodes @cache)
+            normal=part.normal continues=continues | part.continues
+        }
+    } else if node is? hir.Flow {
+        normal=node.default is? none
+        loop arm_id in node.arms {
+            let arm=hir.node_at(nodes arm_id)
+            $runtime_assert arm is? hir.IfArm|hir.LoopArm
+            let condition=summarize(arm.condition nodes @cache)
+            let body=summarize(arm.body nodes @cache)
+            let edges=condition.continues | body.continues
+            if arm is? hir.LoopArm {
+                normal=true
+                loop level in edges {if level >? 0 {continues.push(level-1)}}
+            } else {normal=normal or body.normal continues=continues | edges}
+        }
+        if node.default isnt? none {
+            let part=summarize(node.default nodes @cache)
+            normal=normal or part.normal continues=continues | part.continues
+        }
+    } else {
+        loop child in hir.children(node) {
+            let part=summarize(child nodes @cache)
+            continues=continues | part.continues
+        }
+        normal=node isnt? hir.Return
+    }
+    let result=Summary[normal continues]
+    cache[id]=result
+    return result
+}
+single_pass=(body:addr nodes:array<hir.AST> @cache:Cache):>bool=>{
+    let result=summarize(body nodes @cache)
+    return not result.normal and 0 not in? result.continues
+}

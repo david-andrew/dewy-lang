@@ -1,0 +1,62 @@
+# Nested bodies cannot advance their own loop. Validation still visits each.
+probe=(flag:bool):>int64=>{
+    loop flag {
+        loop flag {
+            loop flag {
+                loop flag {
+                    loop flag {
+                        loop flag {
+                            loop flag {
+                                loop flag {
+                                    loop flag {
+                                        loop flag {
+                                            loop flag {
+                                                loop flag {
+                                                    loop flag {
+                                                        loop flag {
+                                                            loop flag {
+                                                                loop flag {
+                                                                    loop flag {
+                                                                        loop flag {
+                                                                            loop flag {
+                                                                                break
+                                                                            }
+                                                                            break
+                                                                        }
+                                                                        break
+                                                                    }
+                                                                    break
+                                                                }
+                                                                break
+                                                            }
+                                                            break
+                                                        }
+                                                        break
+                                                    }
+                                                    break
+                                                }
+                                                break
+                                            }
+                                            break
+                                        }
+                                        break
+                                    }
+                                    break
+                                }
+                                break
+                            }
+                            break
+                        }
+                        break
+                    }
+                    break
+                }
+                break
+            }
+            break
+        }
+        break
+    }
+    return 42
+}
+main=():>int64=>if probe(false)=?42 probe(true) else 0

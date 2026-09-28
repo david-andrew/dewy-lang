@@ -1,0 +1,11 @@
+main=():>int64=>{
+    let value:int64=0
+    $outer
+    loop value<?3 {
+        value+=1
+        loop true {continue $outer}
+        break
+    }
+    $assert value>=?1
+    return value+39
+}

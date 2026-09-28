@@ -18,6 +18,7 @@ import p"length_facts.dewy" as lengths
 import p"length_proofs.dewy" as proofs
 import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
+import p"loop_control.dewy" as loop_control
 import p"relations.dewy" as relations
 import p"intervals.dewy" as ranges
 import p"obligations.dewy" as obligations
@@ -59,6 +60,7 @@ Checker:type = [
     # Nested finite-loop exploration shares a budget. On exhaustion the
     # ordinary widening path remains sound, though less precise.
     finite_loop_budget:bigint=64
+    loop_controls:loop_control.Cache=[]
     loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
     container_receivers:set<addr>=set[]
 ]
@@ -1155,7 +1157,8 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
     # forever. Narrowing then recovers bounds imposed by a while guard.
     let pass:addr=0
     let stabilized=false
-    loop pass <? 11 {
+    let single_pass=iterators.length =? 0 and loop_control.single_pass(arm.body checker.data.env.nodes @checker.loop_controls)
+    loop pass <? 11 and not single_pass {
         if pass =? 8 and not stabilized {
             # The budget is not evidence of induction. Delayed dependencies
             # may still invalidate facts after eight transfers. Top is safe;

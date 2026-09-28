@@ -12,7 +12,7 @@ from .. import bindings as sb
 from .. import hir, ty
 from ..errors import UserError, user_error, user_warning
 from ..hir_display import type_to_dewy
-from . import predicate_effects, effects
+from . import predicate_effects, effects, loop_control
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
@@ -888,6 +888,7 @@ class _BoundsValidator:
         # Bound finite-loop exploration across nested loops. Exhausting the
         # budget falls back to widening, never to an assumed proof.
         self.finite_loop_budget = 64
+        self.loop_controls = {}
         self.loop_qualifier_pairs = {}
         self.constant_indices: dict[int, int | None] = {}
         self.call_writes: dict[int, set[int]] = {}
@@ -1946,27 +1947,8 @@ class _BoundsValidator:
         validate: bool,
     ) -> State:
         if len(node.arms) == 1 and isinstance(node.arms[0], hir.LoopArm):
-            arm = node.arms[0]
-            if isinstance(arm.condition, hir.IteratorExpression):
-                return self._analyze_iterator_loop(
-                    arm.condition,
-                    arm.body,
-                    state,
-                    validate=validate,
-                )
-            if isinstance(arm.condition, hir.MultiIteratorExpression):
-                return self._analyze_multi_iterator_loop(
-                    arm.condition,
-                    arm.body,
-                    state,
-                    validate=validate,
-                )
-            return self._analyze_while_loop(
-                arm.condition,
-                arm.body,
-                state,
-                validate=validate,
-            )
+            transfer = self._loop_flow_transfer(node.arms[0], state, validate=validate)
+            return dict(state) if transfer.normal is None else transfer.normal
 
         remaining: State | None = dict(state)
         exits: list[State] = []
@@ -1991,6 +1973,23 @@ class _BoundsValidator:
         elif node.default is None and remaining is not None:
             exits.append(remaining)
         return dict(state) if not exits else self._join_states(exits)
+
+    def _loop_flow_transfer(self, arm: hir.LoopArm, state: State, *, validate: bool) -> _LoopTransfer:
+        """Preserve exits targeting an enclosing loop across this loop boundary."""
+        if isinstance(arm.condition, hir.IteratorExpression):
+            return self._analyze_iterator_loop(arm.condition, arm.body, state, validate=validate)
+        if isinstance(arm.condition, hir.MultiIteratorExpression):
+            return self._analyze_multi_iterator_loop(arm.condition, arm.body, state, validate=validate)
+        return self._analyze_while_loop(arm.condition, arm.body, state, validate=validate)
+
+    def _finish_loop(self, exits: list[State], transfer: _LoopTransfer, target_ids=()) -> _LoopTransfer:
+        breaks = {level - 1: parts for level, parts in transfer.breaks.items() if level > 0}
+        continues = {level - 1: parts for level, parts in transfer.continues.items() if level > 0}
+        for state in [*exits, *(part for parts in breaks.values() for part in parts),
+                      *(part for parts in continues.values() for part in parts)]:
+            for binding in target_ids:
+                state.pop(binding, None)
+        return _LoopTransfer(self._join_states(exits) if exits else None, breaks, continues)
 
     def _mentioned_loop_pairs(self, body):
         cached = self.loop_qualifier_pairs.get(id(body))
@@ -2021,7 +2020,7 @@ class _BoundsValidator:
         state: State,
         *,
         validate: bool,
-    ) -> State:
+    ) -> _LoopTransfer:
         # The guard selects vocabulary too, but contributes no entry proof:
         # the loop may execute zero times. Keep one finite, deduplicated budget
         # across guard and body, with the guard's pairs considered first.
@@ -2033,10 +2032,11 @@ class _BoundsValidator:
                 mentioned.append(pair)
         state = _seed_loop_relations(state, self.assigned, self.registry, mentioned)
         head = dict(state)
+        single_pass = loop_control.single_pass(body, self.loop_controls)
         # Each transfer includes evaluating the condition. Its writes are
         # loop-carried too; applying them only for final body validation
         # misses facts they invalidate indirectly on subsequent iterations.
-        for _ in range(8):
+        for _ in range(0 if single_pass else 8):
             current = dict(head)
             self._eval(condition, current, validate=False)
             true_state = self._refine(current, condition, truth=True)
@@ -2056,13 +2056,14 @@ class _BoundsValidator:
             # The budget is not a convergence proof. A delayed dependency
             # can reach a binding after the eighth transfer. Start from top
             # rather than validate (or narrow) an unstable candidate.
-            head = {}
+            if not single_pass:
+                head = {}
 
         # Narrowing: widening over-approximates (`i += 1` sends `i` to [0, ∞]),
         # so re-run the body from the widened head with the guard applied and
         # keep what comes back — under `loop i <? xs.length` that is [0, cap].
         # A decreasing iteration from a post-fixpoint stays sound.
-        for _ in range(3):
+        for _ in range(0 if single_pass else 3):
             current = dict(head)
             self._eval(condition, current, validate=False)
             true_state = self._refine(current, condition, truth=True)
@@ -2081,6 +2082,7 @@ class _BoundsValidator:
         self._eval(condition, head, validate=validate)
         true_state = self._refine(head, condition, truth=True)
         break_exits: list[State] = []
+        transfer = _LoopTransfer(None, {}, {})
         if true_state is not None:
             transfer = self._loop_transfer(body, true_state, validate=validate)
             break_exits.extend(transfer.breaks.get(0, []))
@@ -2088,7 +2090,7 @@ class _BoundsValidator:
         exits = [*break_exits]
         if false_state is not None:
             exits.append(false_state)
-        return dict(state) if not exits else self._join_states(exits)
+        return self._finish_loop(exits, transfer)
 
     def _analyze_iterator_loop(
         self,
@@ -2097,10 +2099,10 @@ class _BoundsValidator:
         state: State,
         *,
         validate: bool,
-    ) -> State:
+    ) -> _LoopTransfer:
         self._eval(iterator.iterable, state, validate=validate)
         if iterator.count == 0:
-            return dict(state)
+            return _LoopTransfer(dict(state), {}, {})
         target_ids = {iterator.target.binding_id} - {None}
 
         iterated = self._array_id(iterator.iterable) if isinstance(iterator.iterable.type, ty.ArrayType) else None
@@ -2128,7 +2130,7 @@ class _BoundsValidator:
             elif not isinstance(_strip_casts(iterator.iterable), hir.ArrayLiteral):
                 count = None
         if count == 0:
-            return dict(state)
+            return _LoopTransfer(dict(state), {}, {})
         if count is not None and 0 < count <= 8 and count <= self.finite_loop_budget:
             return self._finite_iterator_loop(iterator, body, state, enter, target_ids, count, validate=validate)
         return self._iterate_loop(body, state, enter, target_ids, validate=validate, iterators=(iterator,))
@@ -2145,6 +2147,7 @@ class _BoundsValidator:
         current = dict(state)
         entries = []
         exits = []
+        outward = _LoopTransfer(None, {}, {})
         for step in range(count):
             entry = enter(current)
             if isinstance(iterator.iterable, hir.Range) and iterator.target.binding_id is not None:
@@ -2152,6 +2155,8 @@ class _BoundsValidator:
             entries.append(entry)
             transfer = self._loop_transfer(body, entry, validate=False)
             exits.extend(transfer.breaks.get(0, []))
+            self._merge_exit_maps(outward.breaks, {level: parts for level, parts in transfer.breaks.items() if level > 0})
+            self._merge_exit_maps(outward.continues, {level: parts for level, parts in transfer.continues.items() if level > 0})
             backedges = [*([transfer.normal] if transfer.normal is not None else []), *transfer.continues.get(0, [])]
             if not backedges:
                 break
@@ -2161,10 +2166,7 @@ class _BoundsValidator:
         else:
             exits.append(current)
         self._loop_transfer(body, self._join_states(entries), validate=validate)
-        for exit_state in exits:
-            for binding in target_ids:
-                exit_state.pop(binding, None)
-        return self._join_states(exits) if exits else dict(state)
+        return self._finish_loop(exits, outward, target_ids)
 
     def _iterate_loop(
         self,
@@ -2176,7 +2178,7 @@ class _BoundsValidator:
         validate: bool,
         iterators: tuple[hir.IteratorExpression, ...] = (),
         word_candidates: bool = True,
-    ) -> State:
+    ) -> _LoopTransfer:
         """Widen loop-carried state to a fixed point, then validate the body once.
 
         Without this, an accumulator such as `total = total + step` would be
@@ -2223,10 +2225,7 @@ class _BoundsValidator:
             *([transfer.normal] if transfer.normal is not None else []),
             *transfer.breaks.get(0, []),
         ]
-        for exit_state in exits:
-            for binding_id in target_ids:
-                exit_state.pop(binding_id, None)
-        return self._join_states([state, *exits])
+        return self._finish_loop([dict(state), *exits], transfer, target_ids)
 
     def _analyze_multi_iterator_loop(
         self,
@@ -2235,7 +2234,7 @@ class _BoundsValidator:
         state: State,
         *,
         validate: bool,
-    ) -> State:
+    ) -> _LoopTransfer:
         for iterator in condition.iterators:
             self._eval(iterator.iterable, state, validate=validate)
         target_ids = {
@@ -2478,6 +2477,8 @@ class _BoundsValidator:
             return _LoopTransfer(None, {node.loop_levels: [dict(state)]}, {})
         if isinstance(node, hir.Continue):
             return _LoopTransfer(None, {}, {node.loop_levels: [dict(state)]})
+        if isinstance(node, hir.Flow) and len(node.arms) == 1 and isinstance(node.arms[0], hir.LoopArm):
+            return self._loop_flow_transfer(node.arms[0], state, validate=validate)
         if isinstance(node, hir.Flow) and not any(
             isinstance(arm, hir.LoopArm) for arm in node.arms
         ):
