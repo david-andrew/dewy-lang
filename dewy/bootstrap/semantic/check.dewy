@@ -5620,8 +5620,11 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
 # Refresh named reads with this arm's alternatives while preserving their
 # binding identities. A shadowing pattern name must not redirect a subject.
 projected_read = (id:addr env:Environment @session:contexts.Session):>addr => {
-    let type=types.node_at(session.types views.structural_base(node_at(id session).value_type session.types))
-    if type is? types.ObjectType|types.TypeOr return match_read(id env @session)
+    let declared=node_at(id session).value_type
+    let type=types.node_at(session.types views.structural_base(declared session.types))
+    # String membership facts describe a read just like record alternatives;
+    # the destination's declared store type remains independent below.
+    if type is? types.ObjectType|types.TypeOr or views.string_valued(declared session.types) return match_read(id env @session)
     return id
 }
 match_read = (id:addr env:Environment @session:contexts.Session):>addr => {

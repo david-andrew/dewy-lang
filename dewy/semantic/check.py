@@ -12035,10 +12035,12 @@ def _known_string_length(type_: ty.Type) -> int | None:
 def _refined_route_read(node: hir.AST, *, ctx: Context) -> hir.AST:
     """Consume an existing stable projection fact without changing storage.
 
-    Array lengths have a separate growth contract. Only record alternatives
-    and unions use this read-type rule; writes retain their declared type.
+    Array lengths have a separate growth contract. Record/union alternatives
+    and string membership facts refine the read; writes keep their declared
+    type. A string field may be narrowed to a literal union just like a name.
     """
-    if isinstance(ty.unfold(ty.strip_refinement(node.type)), (ty.ObjectType, ty.TypeOr)):
+    if (isinstance(ty.unfold(ty.strip_refinement(node.type)), (ty.ObjectType, ty.TypeOr))
+            or ty.string_valued(node.type)):
         route = sb.array_route_id(node, ctx.binding_registry, create=False)
         refined = ctx.refinements.get(route) if route is not None else None
         if refined is not None:

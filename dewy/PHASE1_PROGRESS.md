@@ -5791,3 +5791,25 @@ Twenty-five surrounding hosted allocator/replacement/snapshot checks also pass.
 The kernel is in the 244-case manifest. Actual hosted `$allocator` block
 placement remains separate work; this fixes its storage prerequisites without
 claiming the existing placement fallback is gone.
+
+
+## Projected string membership parity (2026-09-28)
+
+The `fea499c5` native pair reached a three-generation fixed point (generations
+2/3 took 52/53 s under concurrent work), but its fresh hosted-driver build found
+a checker parity gap in the new range code. A string field's literal-union
+membership fact was recorded yet ignored by the hosted read path, which only
+consumed record/union facts. String fields now consume those facts too. Native
+field reads already did; its indexed array/dictionary reads now use the same
+rule. Writes still check the declared storage type and invalidate read facts.
+This fixes the underlying projection rule rather than adding a temporary
+variable to work around the range constructor's failed proof.
+
+Focused tests cover assertions, early-return guards, array and dictionary
+selections, optional literal-union results, independent place arguments,
+replacement with another string and rejection after direct/call mutations.
+The fixture raises the parity manifest to 245 cases. The earlier hosted-driver
+failure remains an integration gate until a fresh build with this fix passes.
+Validation for the projection fix: 46 surrounding hosted checks and the paired
+field/index/dictionary group pass on x86-64/C, including both stale-fact
+rejections. The native program driver was rebuilt with the native index change.

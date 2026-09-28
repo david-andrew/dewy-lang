@@ -1,0 +1,9 @@
+# A guarded field read keeps its literal alternatives through construction.
+Box:type=[delims:string]
+Result:type=[delims:('[]'|'[)')?]
+put=(result:Result @state:int64):>Result=>result
+read=(node:Box @state:int64):>Result=>{
+$runtime_assert node.delims is? '[]'|'[)'
+return put(Result[node.delims] @state)
+}
+main=():>int64=>{let state:int64=0 let result=read(Box['[)'] @state) return if result.delims=?'[)' 42 else 1}
