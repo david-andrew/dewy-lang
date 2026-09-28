@@ -1,0 +1,26 @@
+$explicit_copies
+# A dead local's payload can move into a union with more alternatives.
+# Its old cell is emptied so cleanup remains valid on either exit path.
+Box:type=[items:array<int64>]
+make=(flag:bool):>Box|none=>if flag Box[[42]] else none
+widen=(flag:bool):>Box|int64|none=>{
+    let result=make(flag)
+    return result
+}
+exercise=(flag:bool):>int64=>{
+    let values:array<Box|int64|none>=[]
+    values.push(widen(flag))
+    if values.length>?0 {
+        const first=values[0]
+        if first is? Box and first.items.length>?0 return first.items[0]
+    }
+    return 0
+}
+main=():>int64=>{
+    if exercise(true) not=?42 or exercise(false) not=?0 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        if exercise(true) not=?42 or exercise(false) not=?0 return 2
+    }
+    return if _arena_live_bytes=?before 42 else 3
+}

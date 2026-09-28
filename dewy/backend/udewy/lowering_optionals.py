@@ -934,6 +934,18 @@ class _OptionalLowering:
             self._store_i64_field(source, 8, self._int64_literal(loc, 0), loc),
         ]
 
+    def _movable_cell_local(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> bool:
+        """A last-use owner whose active payload keeps its complete layout."""
+        if (not isinstance(value, hir.ExpressedIdentifier) or id(value) not in self.moved_uses
+                or (value.name not in self.owned_aggregate_cells and value.name not in self.owned_cells)):
+            return False
+        stored = self._stored_union_members(value)
+        possible = self._field_union_members(value.type)
+        return (stored is not None and possible is not None
+                and not self._union_tree_slots(stored) and not self._union_tree_slots(members)
+                and not self._union_family_conversions(stored, possible)
+                and ty.preserves_union_payload(value.type, ty.union(*members)))
+
     def _union_write(
         self,
         cell: hir.AST,
@@ -1012,6 +1024,11 @@ class _OptionalLowering:
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         stored_members = self._stored_union_members(value)
         possible = self._field_union_members(value.type)
+        if not reported and stored_members != members and self._movable_cell_local(value, members):
+            prelude, source = self._extract_expression(value)
+            self.move_notes.append(MoveNote(self.srcfile, value.loc,
+                f'`{value.name}` is moved when stored in a union: this is its last use, so its payload changes owner', True))
+            return [*prelude, *self._take_cell_payload(cell, source, value.loc)]
         if stored_members is not None and stored_members != members and possible is not None and all(self._union_target_member(member, members) is not None for member in possible):
             # a narrowed union (`length` after `isnt? none`): its cell still
             # carries the declaration's tags, so the copy retags by those (a

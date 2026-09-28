@@ -36,6 +36,23 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): a last-use owned union local can widen into a union
+with more alternatives while preserving the active payload's representation.
+Hosted lowering moves the payload and empties the source cell; native lowering
+acquires ownership once before converting, reusing its normal last-use rule.
+Live values, retained views, repeated-loop uses and incompatible layouts retain
+copies; explicit copies remain explicit. Thirty-one hosted checks and five
+paired x86-64/C groups pass, including lifecycle and family-layout regressions,
+large bigint alternatives and retained-byte counters across repeated calls.
+Another 32 hosted family-layout/array/lifecycle checks pass.
+
+This batch also exposed a strict-policy coverage gap: native graph assembly
+can discard unused functions before checking their implicit copies, unlike
+hosted lowering. Reachable rejection/value-independence cases are verified;
+unused-body strict checking is the next corrective step. Test selections now
+use exact native-test exclusions where needed: `-k 'not native'` also matches
+that substring inside parametrized source text such as "alternatives".
+
 Checkpoint (2026-09-28): hosted union argument conversion now consumes the
 existing scope-borrow evidence for stable local owners, matching the native
 call planner. Every known target must be read-only, later arguments and live

@@ -1119,6 +1119,15 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     # ownership. An unresolved proof obligation is not: it still has to reach
     # the legalization that rejects it.
     if node is? hir.Block and not node.scoped and node.items.length =? 1 and state.transferred_binding isnt? none return owned_value(node.items[0] @state site)
+    if node is? hir.ValueCast|hir.RepresentationCast {
+        let source=hir.node_at(state.input.nodes node.expr)
+        if cell_members(source.value_type @state) isnt? none and cell_members(node.value_type @state) isnt? none and views.preserves_union_payload(source.value_type node.value_type state.type_nodes) {
+            # Adding alternatives keeps the source's tags and payload layout.
+            # Acquire ownership at the source boundary once: an owned local
+            # can move here, while live/borrowed locals still take their copy.
+            return convert_owned_cell(owned_value(node.expr @state site) source.value_type node.value_type node @state)
+        }
+    }
     if node is? hir.ValueCast|hir.RepresentationCast and object_valued(node.value_type @state) {
         let record=narrowed_record(node.expr @state)
         if record isnt? none return copy_value(read_value(record.handle record.type node.value_type node @state) node.value_type node @state)
