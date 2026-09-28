@@ -1,0 +1,19 @@
+# A length update retains only affected facts while reading the environment.
+# Unrelated numeric evidence must not be copied on each mutation.
+import p"../../dewy/bootstrap/semantic/analyze/fact_state.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
+main=():>int64=>{
+    let state=facts.State[]
+    state.values.reserve(1200)
+    state.next.reserve(1200)
+    loop i in 100..1099 {facts.put(@state facts.value(facts.Term[i]) ranges.Interval[0 10])}
+    facts.put(@state facts.order(facts.Term[1] facts.Term[2 'length']) ranges.Interval[1 none true])
+    let before=_arena_allocated_bytes
+    loop repeat in 0..99 {facts.change_length(@state 2 ranges.exact(1))}
+    let allocated=_arena_allocated_bytes-before
+    let copied=facts.lookup(state facts.order(facts.Term[1] facts.Term[2 'length']))
+    if copied is? none or copied.lower is? none or copied.lower not=?101 or not copied.capped return 1
+    if state.values.length not=?1001 return 2
+    if allocated >?256000 return 3
+    return 42
+}

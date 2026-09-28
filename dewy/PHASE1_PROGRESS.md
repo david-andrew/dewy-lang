@@ -6654,3 +6654,27 @@ pass. The manifest includes the kernel (312 cases). These are scoped allocation
 improvements, not a reduction of the fact vocabulary or a claim that its dense
 relation growth is solved. The large predicate comparison still identifies that
 growth as further proof-engine scaling work.
+
+The `20220d1a` frozen snapshot also reached identical native generations 2 and
+3 (46 and 51 seconds). The expanded predicate-summary comparison passed under
+native compilation as well. An additional 1,000 deterministic mixed-fact
+relational transfers exactly match the preceding hosted implementation,
+including scalar/length terms, large identities, collisions between derived
+keys, and address-cap metadata.
+
+## Retain only affected facts during length changes (2026-09-28)
+
+Length transfer now follows the same selective-update rule. Native analysis
+collects changed entries and removals while reading the environment, then
+publishes them; it no longer detaches the entire values array. Hosted analysis
+updates existing dictionary values in place and defers removals, avoiding a
+whole-state item list. Each transformation still observes its original interval.
+
+A kernel with 1,000 unrelated facts and 100 length changes drops from 896,000
+allocated bytes to 108,800 (about 8.2x). Its expected final bound, cap provenance,
+state size and allocation budget pass under native compilation and hosted
+x86-64/C compilation. The direct state/relational comparisons pass, covering
+index and disequality invalidation, growth/shrinkage and cancelling endpoints.
+Another 1,000 deterministic mixed-fact length changes exactly match the previous
+hosted implementation. The manifest adds the kernel (313 cases); this follow-up
+has focused verification, beyond the frozen fixed-point checkpoint above.

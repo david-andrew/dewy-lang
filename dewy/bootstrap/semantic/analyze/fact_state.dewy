@@ -198,17 +198,20 @@ forget = (@state:State term:Term):>void => {
 # contribution of the sequence's length change.
 change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
     let term = Term[sequence 'length']
-    let entries = state.values
-    loop entry in entries {
+    # Read the environment in place and retain only affected entries.
+    # Publishing after the scan avoids detaching its entire values array.
+    let removed:array<Fact>=[]
+    let changed:array<Entry>=[]
+    loop entry in state.values {
         let fact = entry.fact
         if fact is? Index and fact.sequence =? sequence {
             if change.lower is? none or change.lower <? 0 {
-                remove(@state fact)
+                removed.push(fact)
             }
             continue
         }
         if fact is? Distinct and mentions(fact term) {
-            if change.lower not=?0 or change.upper not=?0 {remove(@state fact)}
+            if change.lower not=?0 or change.upper not=?0 {removed.push(fact)}
             continue
         }
         let subject:Term? = none
@@ -224,9 +227,11 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
         else if change.upper isnt? none { adjustment = -change.upper }
         let lower = entry.interval.lower
         if lower is? none or adjustment is? none {
-            remove(@state fact)
-        } else { put(@state fact ranges.Interval[lower+adjustment none entry.interval.capped or change.capped]) }
+            removed.push(fact)
+        } else { changed.push(Entry[fact ranges.Interval[lower+adjustment none entry.interval.capped or change.capped]]) }
     }
+    loop fact in removed {remove(@state fact)}
+    loop entry in changed {put(@state entry.fact entry.interval)}
 }
 
 empty_element = (state:State subject:addr context:Context):>bool => {

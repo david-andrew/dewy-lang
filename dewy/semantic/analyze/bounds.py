@@ -649,10 +649,13 @@ def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
     The caller stores the new length interval separately.
     """
     term = _length_key(array_id)
-    for key, interval in list(state.items()):
+    # Updating an existing value keeps dictionary iteration stable; defer
+    # only removals. Every transformation reads its own original interval.
+    removed: list[FactKey] = []
+    for key, interval in state.items():
         if isinstance(key, DistinctFact) and term in (key.left, key.right):
             if change.lower != 0 or change.upper != 0:
-                del state[key]
+                removed.append(key)
             continue
         remainder = _decode_remainder_fact(key)
         order = _decode_order_fact(key)
@@ -663,13 +666,16 @@ def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
                 continue
             adjustment = change.lower if coefficient == 1 else None if change.upper is None else -change.upper
             if interval.lower is None or adjustment is None:
-                del state[key]
+                removed.append(key)
             else:
                 state[key] = Interval(interval.lower + adjustment, None, capped=interval.capped or change.capped)
         else:
             index = _decode_index_fact(key)
             if index is not None and index[1] == array_id and (change.lower is None or change.lower < 0):
-                del state[key]
+                removed.append(key)
+
+    for key in removed:
+        del state[key]
 
 
 @dataclass
