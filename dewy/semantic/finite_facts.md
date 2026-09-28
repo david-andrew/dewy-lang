@@ -81,7 +81,11 @@ not a complete aggregate relational domain yet.
 Intervals answer constant range questions. The finite ordered graph answers
 transitive difference questions without a fixed two-edge cutoff; search is
 bounded by its existing edge count. Affine updates retain relations only when
-the arithmetic and its destination cannot wrap. The remainder form connects
+the arithmetic and its destination cannot wrap. A cheap one-edge interval
+reduction handles ordinary counters; when it is insufficient, forward and
+reverse paths through the established graph tighten upper and lower bounds.
+Each endpoint carries its path evidence, including address-cap provenance.
+The edge-count relaxation limit never supplies a convergence assumption. The remainder form connects
 checked sums, offsets and slices without inventing general nonlinear rules.
 
 Disequality does not choose an ordering. It can sharpen a known non-strict integer

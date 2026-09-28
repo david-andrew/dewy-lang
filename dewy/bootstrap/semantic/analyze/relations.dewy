@@ -44,6 +44,62 @@ narrowed_interval = (term:facts.Term state:facts.State context:Context):>ranges.
     }
     return result
 }
+# Fall back to the complete established difference graph when the cheap
+# one-hop reduction cannot prove a machine update exact. Forward paths give
+# upper bounds, reverse paths give lower bounds. Each bound has a concrete
+# path and endpoint interval; the finite edge budget is not a convergence
+# certificate and supplies no additional evidence.
+order_interval = (term:facts.Term state:facts.State context:Context):>ranges.Interval => {
+    let result=interval_of(term state context)
+    loop upper in [true false] {
+        let values:Edges=[] let lengths:Edges=[]
+        let count:addr=0
+        loop entry in state.values {
+            let fact=entry.fact let gap=entry.interval.lower
+            if fact isnt? facts.Order or gap is? none continue
+            let origin=if upper fact.smaller else fact.larger
+            let target=if upper fact.larger else fact.smaller
+            let step=Step[target gap entry.interval.capped]
+            if origin.projection =? 'value' {
+                if origin.binding_id not in? values {values[origin.binding_id]=[]}
+                let edges=@values[origin.binding_id]
+                edges.push(step)
+            } else {
+                if origin.binding_id not in? lengths {lengths[origin.binding_id]=[]}
+                let edges=@lengths[origin.binding_id]
+                edges.push(step)
+            }
+            count+=1
+        }
+        let best_values:dict<addr ranges.Interval>=[] let best_lengths:dict<addr ranges.Interval>=[]
+        if term.projection =? 'value' {best_values[term.binding_id]=ranges.Interval[0 none]}
+        else {best_lengths[term.binding_id]=ranges.Interval[0 none]}
+        let frontier:array<Step>=[Step[term 0]]
+        loop round in 0.. and round <? count {
+            let following:array<Step>=[]
+            loop reached in frontier {
+                let edges=if reached.term.projection =? 'value' values.get(reached.term.binding_id []) else lengths.get(reached.term.binding_id [])
+                loop edge in edges {
+                    let target=edge.term
+                    let candidate=reached.gap+edge.gap
+                    let capped=reached.capped or edge.capped
+                    let previous=if target.projection =? 'value' best_values.get(target.binding_id) else best_lengths.get(target.binding_id)
+                    if previous isnt? none and previous.lower isnt? none and (previous.lower >? candidate or (previous.lower =? candidate and (not previous.capped or capped))) continue
+                    let anchor=interval_of(target state context)
+                    if upper and anchor.upper isnt? none {result=ranges.intersect(result ranges.Interval[none anchor.upper-candidate anchor.capped or capped])}
+                    else if not upper and anchor.lower isnt? none {result=ranges.intersect(result ranges.Interval[anchor.lower+candidate none anchor.capped or capped])}
+                    let evidence=ranges.Interval[candidate none capped]
+                    if target.projection =? 'value' {best_values[target.binding_id]=evidence}
+                    else {best_lengths[target.binding_id]=evidence}
+                    following.push(Step[target candidate capped])
+                }
+            }
+            if following.length =? 0 break
+            frontier=following
+        }
+    }
+    return result
+}
 minimum_length = (sequence:addr state:facts.State context:Context):>bigint => {
     let interval = facts.lookup(state facts.value(facts.Term[sequence 'length']))
     if interval isnt? none {

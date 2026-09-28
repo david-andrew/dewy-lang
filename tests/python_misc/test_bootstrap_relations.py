@@ -40,6 +40,11 @@ def test_native_relations_match_hosted(tmp_path):
     states.extend([chain, {**chain, order(10, 18): interval(-10, None), order(18, 11): interval(-7, None)}])
     capped = {order(10, 11): interval(2, None, capped=True), order(11, 12): interval(-1, None), order(10, 12): interval(0, None)}
     states.extend([capped, {**capped, order(10, 13): interval(3, None), order(13, 12): interval(-2, None)}])
+    states.extend([
+        {**chain, 10: interval(-20, None), 22: interval(None, 40)},
+        {**chain, 10: interval(-20, None, capped=True), 22: interval(None, 40)},
+        {**chain, order(22, length(2)): interval(2, None)},
+    ])
     terms = [1, 3, length(2), length(4), 10, 12, 22, 99]
     gaps = [-1, 0, 1, 3, 12, 13]
     lines, expected = [], []
@@ -50,6 +55,7 @@ def test_native_relations_match_hosted(tmp_path):
             hi = 'none' if value.upper is None else f'({value.upper})'
             lines.append(f'    facts.put(@s{i} {fact(key)[0]} ranges.Interval[{lo} {hi} {str(value.capped).lower()}])')
         for left in terms:
+            expected.append(f'interval|{i}|{term(left)}|{spelling(validator._order_interval(left, state))}')
             for right in terms:
                 bound = validator._order_search(left, right, state)
                 expected.append(f'bound|{i}|{term(left)}|{term(right)}|{spelling(bound) if bound is not None else "unknown"}')
@@ -85,7 +91,12 @@ main = ():>int64 => {{
     let gaps:array<bigint> = [(-1) 0 1 3 12 13]
     loop i in 0.. and i <? states.length {{
         let state = states[i]
-        loop left in terms {{ loop right in terms {{
+        loop left in terms {{
+          let reduced=relations.order_interval(left state context)
+          let lower=if reduced.lower is? none '-' else _bigint_as_string(reduced.lower)
+          let upper=if reduced.upper is? none '+' else _bigint_as_string(reduced.upper)
+          printl("interval|{{i}}|{{term_text(left)}}|{{lower}},{{upper}},{{reduced.capped}}")
+          loop right in terms {{
             let bound=relations.bound(left right state)
             let display:string='unknown'
             if bound isnt? none {{

@@ -587,6 +587,15 @@ assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker
             let operation=node_at(expressions.strip_casts(value checker.data.env.nodes) checker)
             exact=exact and ranges.fits(mathematical values.fixed_bounds(operation.value_type checker.data.env.types)) isnt? none
         }
+        if not exact {
+            before=relations.order_interval(facts.Term[subject] current checker.data.relations)
+            mathematical=ranges.add(before ranges.exact(shift))
+            exact=ranges.fits(mathematical values.fixed_bounds(target.value_type checker.data.env.types)) isnt? none
+            if node.op =? '=' {
+                let operation=node_at(expressions.strip_casts(value checker.data.env.nodes) checker)
+                exact=exact and ranges.fits(mathematical values.fixed_bounds(operation.value_type checker.data.env.types)) isnt? none
+            }
+        }
         if exact {shifted=facts.shifted(current facts.Term[subject] shift)}
     }
     if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}

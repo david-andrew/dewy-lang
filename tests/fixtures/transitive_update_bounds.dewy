@@ -1,0 +1,8 @@
+advance=(a:int8 b:int8 c:int8 d:int8 e:int8):>int64=>{
+    if a<=?b and b<=?c and c<=?d and d<=?e and e<?100 {
+        a+=1
+        $assert a<=?e+1
+    }
+    return 42
+}
+main=():>int64=>advance(0 1 2 3 4)

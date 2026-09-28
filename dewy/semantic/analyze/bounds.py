@@ -4415,7 +4415,57 @@ class _BoundsValidator:
         types = [node.target.type]
         if node.op == '=':
             types.append(_strip_casts(node.value).type)
+        if all(self._fit_type(mathematical, ty.strip_refinement(type_)) is not None for type_ in types):
+            return True
+        # The cheap one-hop reduction covers ordinary counters. If it is
+        # insufficient, use every established path before discarding affine
+        # facts merely because a bound was several guards away.
+        before = self._order_interval(subject, state)
+        mathematical = Interval(_add(before.lower, shift), _add(before.upper, shift))
         return all(self._fit_type(mathematical, ty.strip_refinement(type_)) is not None for type_ in types)
+
+    def _order_interval(self, subject: int, state: State) -> Interval:
+        """Reduce interval bounds along the finite difference graph.
+
+        Forward paths give upper bounds; reverse paths give lower bounds.
+        Every published bound has a concrete path and endpoint interval as
+        evidence. The edge-count limit prevents contradictory cycles from
+        diverging without treating exhaustion as proof of convergence.
+        """
+        result = self._binding_interval(state, subject)
+        forward, reverse = {}, {}
+        count = 0
+        for key, interval in state.items():
+            if isinstance(key, OrderFact) and interval.lower is not None:
+                forward.setdefault(key.smaller, []).append((key.larger, interval))
+                reverse.setdefault(key.larger, []).append((key.smaller, interval))
+                count += 1
+        for upper, edges in ((True, forward), (False, reverse)):
+            best = {subject: Interval(0, None)}
+            frontier = best.copy()
+            for _ in range(count):
+                following = {}
+                for term, distance in frontier.items():
+                    for target, weight in edges.get(term, ()):
+                        candidate = Interval(distance.lower + weight.lower, None,
+                                             capped=distance.capped or weight.capped)
+                        previous = best.get(target)
+                        if previous is not None and (previous.lower > candidate.lower or
+                                previous.lower == candidate.lower and (not previous.capped or candidate.capped)):
+                            continue
+                        anchor = self._binding_interval(state, target)
+                        if upper and anchor.upper is not None:
+                            result = result.intersect(Interval(None, anchor.upper - candidate.lower,
+                                                               capped=anchor.capped or candidate.capped))
+                        elif not upper and anchor.lower is not None:
+                            result = result.intersect(Interval(anchor.lower + candidate.lower, None,
+                                                               capped=anchor.capped or candidate.capped))
+                        best[target] = candidate
+                        following[target] = candidate
+                if not following:
+                    break
+                frontier = following
+        return result
 
     def _shifted_facts(self, state: State, term: int, shift: int) -> State:
         """Substitute a constant shift into both sides of an order relation.

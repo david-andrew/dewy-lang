@@ -6762,3 +6762,25 @@ Validation: four focused hosted checks and their native x86-64/C group pass,
 including a retained-source strict-copy rejection. Thirty-three adjacent
 global, union, array-move and sharing checks also pass. The integration
 manifest now contains 317 cases.
+
+## Transitive evidence for exact updates (2026-09-28)
+
+Both analyzers now use the established difference graph when one-hop interval
+reduction cannot prove an affine update nonwrapping. Forward paths bound the
+subject above; reverse paths bound it below. Each bound retains its endpoint
+and path provenance. A finite edge-count relaxation prevents contradictory
+cycles from diverging; only proved path bounds are returned. Ordinary counters
+keep the existing cheaper path. This retains relations across an `int8` update
+whose limiting guard is five or more ordered terms away, without assuming the
+source assertion or overlooking the arithmetic's own width.
+
+Validation: 45 hosted update/loop/overflow/provenance checks, three paired
+native x86-64/C groups (63.06 seconds), and the direct hosted/native relational
+kernel comparison pass. The kernel includes long chains, reverse bounds,
+length identities, negative gaps and address-cap evidence. It caught and
+helped remove a spurious hosted cap marker on an unknown endpoint. The
+manifest has 318 cases.
+
+The preceding `eb154c85` startup/ownership snapshot reached an identical
+three-generation native fixed point (generations 2/3: 47/50 seconds under
+concurrent checking). Its complete 317-case parity run is still underway.
