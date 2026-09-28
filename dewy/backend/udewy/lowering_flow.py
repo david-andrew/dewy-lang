@@ -950,12 +950,14 @@ class _FlowLowering:
         target_type = ty.strip_refinement(target.type)
         if isinstance(target_type, ty.ArrayType):
             source = self._copy_source_expression(item)
-            if isinstance(source, hir.ExpressedIdentifier) and source.name in self.owned_array_names:
-                # The arm's cleanup releases an owned local after this
-                # assignment: the result needs its own reference to the
-                # storage (a copy-on-write share), not the local's.
-                return self._clone_dynamic_array_value(item, target_type, arena=True)
-            return self._extract_array_operand(item, target_type)
+            if isinstance(source, hir.ExpressedIdentifier) and source.name in self.borrowed_default_inputs:
+                # ABI-provided defaults borrow their supplied argument; the
+                # parameter's presence bit supplies its separate cleanup rule.
+                return self._extract_array_operand(item, target_type)
+            # An expression join owns one descriptor regardless of which arm
+            # runs. Transfer a last-use local, adopt a fresh result, or copy a
+            # live source; never mix borrowed pointers and owned temporaries.
+            return self._transfer_array_value(item, source, target_type, site='kept as a flow result')
         item_type = ty.strip_refinement(item.type)
         if isinstance(target_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:
             # an object-valued flow: the temporary is a pointer word — to the arm's

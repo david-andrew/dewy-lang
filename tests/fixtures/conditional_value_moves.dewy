@@ -1,0 +1,19 @@
+$explicit_copies
+pick=(flag:bool):>array<int64>=>{
+    let a:array<int64>=[42]
+    let b:array<int64>=[42]
+    let selected=if flag a else b
+return selected
+}
+main=():>int64=>{
+    # Warm allocator bookkeeping before measuring retained value storage.
+    {let warm=pick(true) let other=pick(false)}
+    let before=_arena_live_bytes
+    loop repeat in 0..49 {
+        let a=pick(true)
+        let b=pick(false)
+        if a.length not=?1 or b.length not=?1 return 1
+        if a[0] not=?42 or b[0] not=?42 return 2
+    }
+    return if _arena_live_bytes=?before 42 else 3
+}

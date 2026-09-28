@@ -6722,3 +6722,22 @@ storage over repeated renewal. The new loop fixture joins the parity manifest
 three-generation direct native fixed point; generations 2/3 took 51/59 seconds
 under concurrent checking. Its standalone native analyzer scaling kernel also
 returned 42. Full parity and broad hosted checks for that snapshot are ongoing.
+
+## Conditional value moves (2026-09-28)
+
+Both last-use analyses now carry a consuming position through the selected
+arm of an `if` and the final expression of a value block. Conditions and
+preceding statements remain ordinary reads, and loop reuse, later reads and
+live views still prevent transfer. Hosted lowering now gives array-valued
+conditionals one owning descriptor convention, with temporary cleanup for
+reads and adoption for bindings/stores. Descriptor-backed owners retain
+that status when an exact length is inferred. This also removes a redundant
+copy of conditional results that previously lost the first allocation.
+
+Validation: 11 focused hosted checks, 28 adjacent array/default/flow checks,
+34 preceding move/borrow checks, and three paired native groups pass on
+x86-64 and C (56.72 seconds). Repeated-call counters warm allocator metadata
+first, then check that value storage does not accumulate. The parity
+manifest now has 316 cases. The broad hosted run of the preceding
+`ad4c959c` integration finished with 4,631 passed and 13 skipped in 1,865.39
+seconds; this does not claim broad certification of subsequent edits.

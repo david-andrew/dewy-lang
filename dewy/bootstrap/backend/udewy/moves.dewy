@@ -92,6 +92,32 @@ walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AS
         if node.binding_id isnt? none {note_use(inner node.binding_id depth nested true returned @analysis)}
         return
     }
+    # Value conditionals hand over only the selected arm. Conditions are
+    # evaluated first; the result leaves share the enclosing transfer site.
+    if node is? hir.Flow {
+        let conditional=true
+        loop arm in node.arms {if hir.node_at(nodes arm) isnt? hir.IfArm {conditional=false}}
+        if conditional {
+            loop arm_id in node.arms {
+                let arm=hir.node_at(nodes arm_id)
+                $runtime_assert arm is? hir.IfArm
+                walk(arm.condition depth nested nodes @analysis)
+                walk_transfer(arm.body depth nested returned nodes @analysis)
+            }
+            if node.default isnt? none {walk_transfer(node.default depth nested returned nodes @analysis)}
+            return
+        }
+    }
+    if node is? hir.Block and node.items.length>?0 {
+        let last=node.items[node.items.length-1]
+        if hir.node_at(nodes last).value_type =? node.value_type {
+            let preceding:array<addr>=[]
+            loop i in 0.. and i<?node.items.length-1 {preceding.push(node.items[i])}
+            walk_block(preceding depth nested nodes @analysis)
+            walk_transfer(last depth nested returned nodes @analysis)
+            return
+        }
+    }
     walk(id depth nested nodes @analysis)
 }
 
