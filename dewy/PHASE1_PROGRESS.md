@@ -6128,3 +6128,12 @@ remains required for this expanded policy-report coverage.
 The preceding loop-exit checkpoint `3cc21750` completed all 260 parity cases.
 The broader hosted run at `36fd8465` is still running; its obsolete disequality
 expectation was repaired separately at `e3796a0a`.
+
+## Strict-copy adoption checkpoint (2026-09-28)
+
+`semantic/namespaces.dewy`, `semantic/type_names.dewy` and
+`semantic/container_methods.dewy` now enable `$explicit_copies`, bringing adoption
+to 28 physical modules. Each passed standalone lowering in both compilers with
+the expanded inline-field copy reporting. Only the policy directive was added;
+no `.copy()` annotations or control-flow rewrites were needed. Whole-graph
+adoption and the final copy inventory remain open.
