@@ -5674,3 +5674,21 @@ fixture retains zero bytes across 100 calls. Validation: 13 focused hosted
 checks, the paired snapshot and iteration groups on x86-64/C, and 48 surrounding
 hosted dictionary/lifecycle/copy-policy checks pass. Full compiler integration
 remains a separate checkpoint.
+
+
+## Strict-copy adoption: namespace and type dispatch helpers (2026-09-27)
+
+`semantic/namespaces.dewy`, `semantic/type_names.dewy` and
+`semantic/container_methods.dewy` now enable `$explicit_copies`. Each passed
+standalone lowering through both the hosted compiler and the native program
+driver; no copy annotations or algorithm changes were needed. Adoption is now
+28 physical modules. Nine other small-module probes remain unmarked: their
+failures include independently mutated parameter copies, borrowed payloads
+stored into containers, and projected arrays assigned through branch joins.
+Those need deliberate copy boundaries or shared ownership proofs, not a
+blanket policy exemption.
+
+The entry-snapshot integration also caught a missed temporary-helper rename
+in hosted union construction. The caller is corrected, and the counter fixture
+now includes an optional key-set result; paired x86-64/C execution retains
+zero bytes.
