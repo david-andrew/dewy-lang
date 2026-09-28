@@ -1379,6 +1379,12 @@ class _BoundsValidator:
                     return True
                 if self._ordered(subject, bound, 0, state) and self._ordered(bound, subject, 0, state):
                     return False
+            # Expression bounds (for example src.length + 1) already have
+            # checked order rules. Either strict order establishes inequality;
+            # failure to establish an order does not refute it.
+            for op in ('<?', '>?'):
+                if self._proposition_verdict(replace(proposition, op=op), value, interval, state) is True:
+                    return True
             return None
         directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
         if proposition.axiom == 'addr':

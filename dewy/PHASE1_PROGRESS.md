@@ -6085,3 +6085,19 @@ The preceding loop-exit checkpoint `3cc21750` reached a three-generation native
 fixed point (generation 3: 59 seconds under concurrent checks). A fresh
 hosted-built driver passed both loop-exit and mixed-disequality groups in
 337.06 seconds including build. Its 260-case manifest run remains in progress.
+
+## Expression evidence for disequality (2026-09-28)
+
+The broader hosted suite exposed an obsolete test expecting dependent length
+disequality syntax to be unimplemented. The syntax now works, but its example
+also exposed missing entailment: `src.length + 1` already proves strictly greater
+than `src.length`, so it can establish the dependent disequality too. Both
+obligation checkers now reuse the existing checked expression-order rules;
+unknown or false order results never establish the opposite ordering.
+
+Validation: all 36 hosted length-term/disequality checks and the paired contract
+group pass on x86-64/C. Equal expressions and a conditional equal result remain
+rejected. The updated expectation checks both acceptance and refutation; the new
+positive fixture brings the parity manifest to 263 cases. The broader hosted
+run remains tied to the preceding frozen snapshot and still records the old
+expectation as a failure, not a newly certified full-suite pass.

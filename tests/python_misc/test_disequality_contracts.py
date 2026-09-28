@@ -92,6 +92,14 @@ probe=(a:int64):>int64=>{
 }
 main=():>int64=>probe(12)""")
 
+# Expression bounds use the same checked strict-order rules as <=/>= contracts.
+LENGTH_EXPRESSION = """next=(src:string):>uint64<n=>n not=?src.length>=>src.length+1
+main=():>int64=>if next('hello')=?6 42 else 0"""
+CASES.append(LENGTH_EXPRESSION)
+CASES.append(LENGTH_EXPRESSION.replace('src.length+1', 'src.length+2').replace("=?6", "=?7"))
+ERRORS.append(LENGTH_EXPRESSION.replace('src.length+1', 'src.length+0'))
+ERRORS.append(LENGTH_EXPRESSION.replace('src.length+1', 'if src.length=?0 1 else src.length'))
+
 @pytest.mark.parametrize('source', CASES)
 def test_dependent_disequality(tmp_path, source):
     execute(tmp_path, 'disequality-contract', codegen(SrcFile(None, source), debug_locations=False))

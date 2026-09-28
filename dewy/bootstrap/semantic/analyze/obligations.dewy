@@ -221,9 +221,18 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
         let term=facts.Term[p.term_id p.term_projection]
         let bound=relations.interval_of(term state data.relations)
         if p.op =? 'not=?' {
-            let verdict=ranges.decide(p.op target.interval bound)
-            if verdict isnt? none return verdict
-            return comparisons.decide_order(p.op comparisons.Operand[interval=target.interval term=target.term] comparisons.Operand[interval=bound term=term] state data.relations)
+            let decided=ranges.decide(p.op target.interval bound)
+            if decided isnt? none return decided
+            let related=comparisons.decide_order(p.op comparisons.Operand[interval=target.interval term=target.term] comparisons.Operand[interval=bound term=term] state data.relations)
+            if related isnt? none return related
+            # Reuse checked expression-bound rules. Neither unknown nor a
+            # false strict ordering establishes the opposite ordering.
+            let strict_orders:array<propositions.Operator>=['<?' '>?']
+            loop op in strict_orders {
+                let ordered=propositions.Proposition[p.subject op p.value p.projection p.term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom]
+                if verdict(ordered value state assigned @data) =? true return true
+            }
+            return none
         }
         let directions=terms.directions(p.op)
         if directions.length =? 0 return none
