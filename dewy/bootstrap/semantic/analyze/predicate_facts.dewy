@@ -7,6 +7,7 @@ import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
 import p"comparison_facts.dewy" as comparisons
+import p"linear_facts.dewy" as linear
 import p"predicate_paths.dewy" as paths
 import p"call_facts.dewy" as calls
 import p"fact_state.dewy" as facts
@@ -162,7 +163,13 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
     let name=if node.integer_operation is? none function.name else node.integer_operation
     let op=operators.get(name)
     if op is? none or node.pos_args.length not=? 2 return state
-    return comparisons.refine(state op operand(node.pos_args[0] state data) operand(node.pos_args[1] state data) truth data.relations)
+    let left=operand(node.pos_args[0] state data)
+    let right=operand(node.pos_args[1] state data)
+    let decided=ranges.decide(op left.interval right.interval)
+    if decided is? none {decided=comparisons.decide_order(op left right state data.relations)}
+    if decided is? none {decided=linear.decide(op node.pos_args[0] node.pos_args[1] state data.snapshot data.env data.relations)}
+    if decided isnt? none and decided not=?truth return none
+    return comparisons.refine(state op left right truth data.relations)
 }
 
 # The full module visitor retains these immutable inputs separately from

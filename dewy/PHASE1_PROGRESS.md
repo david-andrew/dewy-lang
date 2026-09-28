@@ -6827,3 +6827,18 @@ group pass, including repeated nested-dictionary insertion/replacement,
 record/set replacement and zero retained bytes. The surrounding proof and
 ownership selection passed 127 checks. Two expected-result fixtures join the
 parity manifest; full integration for this checkpoint is still pending.
+
+Checkpoint (2026-09-28): both proof engines now answer bounded linear comparison
+queries over the existing difference graph. Normalization handles addition,
+subtraction, constant multiplication and cancellation, with checked machine
+width at every intermediate. Opposite coefficients consume concrete established
+order paths; unmatched terms retain interval evidence. This is deliberately
+incomplete query entailment, not speculative assumptions or new loop invariants.
+The shared limits are 128 expression visits and 32 distinct terms. Unknown
+operations, opaque calls, expired identities, possible wrapping and budget
+exhaustion cannot establish an assertion. Validation: 21 focused hosted cases,
+the paired x86-64/C group, and 127 surrounding proof/ownership checks pass.
+The cases include weighted sums, strictness, equality, cancellation, transitive
+relations, mutation invalidation, narrow-word overflow and budget exhaustion.
+The finite vocabulary document records the supported fragment and limits; final
+integration and the remaining Phase 1 audit/lifetime work are still open.

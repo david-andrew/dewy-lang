@@ -3949,6 +3949,122 @@ class _BoundsValidator:
                 return name == '__eq__'
         return None
 
+    def _decide_linear_comparison(self, name: str, left: hir.AST, right: hir.AST, state: State) -> bool | None:
+        """Combine established difference bounds in a bounded, exact linear query.
+
+        This is a query, not a new source of assumptions or loop candidates.
+        Every intermediate must fit its actual word representation. Unsupported
+        expressions and exhausted query budgets remain unknown. Pairing opposite
+        coefficients is deliberately incomplete; each used edge is independent
+        evidence and unmatched coefficients retain their ordinary interval bound.
+        """
+        if name not in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}:
+            return None
+        budget = 128
+
+        def simple(node: hir.AST) -> bool:
+            if isinstance(node, (hir.ExpressedIdentifier, hir.Integer)):
+                return True
+            if isinstance(node, hir.MemberAccess):
+                return simple(node.value)
+            if isinstance(node, (hir.ArrayLength, hir.StringLength)):
+                return simple(node.array if isinstance(node, hir.ArrayLength) else node.string)
+            return False
+
+        def form(node: hir.AST) -> tuple[int, dict[int, int], Interval] | None:
+            nonlocal budget
+            budget -= 1
+            if budget < 0:
+                return None
+            if isinstance(node, hir.Obligation):
+                return form(node.value)
+            if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+                return form(node.items[0])
+            if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+                inner = form(node.expr)
+                if inner is None or self._fit_type(inner[2], ty.structural_base(node.type)) is None:
+                    return None
+                return inner
+            if simple(node):
+                number = self._eval(node, dict(state), validate=False)
+                if number is None:
+                    return None
+                if number.lower is not None and number.lower == number.upper:
+                    return number.lower, {}, number
+                term = self._binding_id(node)
+                return None if term is None else (0, {term: 1}, number)
+            if not isinstance(node, hir.FunctionCall) or not isinstance(node.func, hir.ExpressedIdentifier):
+                return None
+            op = node.integer_operation or (node.func.name if node.func.binding_id is None else None)
+            if op not in {'__add__', '__sub__', '__mul__'} or len(node.pos_args) != 2:
+                return None
+            a, b = [form(arg) for arg in node.pos_args]
+            if a is None or b is None:
+                return None
+            number = self._binary_interval(op, a[2], b[2], 'int')
+            if (number is None or self._fit_type(number, ty.structural_base(node.type)) is None):
+                return None
+            if op == '__mul__':
+                if a[1] and b[1]:
+                    return None
+                scale, base = (a[0], b) if not a[1] else (b[0], a)
+                return scale * base[0], {term: scale * coefficient for term, coefficient in base[1].items() if scale * coefficient}, number
+            scale = 1 if op == '__add__' else -1
+            coefficients = dict(a[1])
+            for term, coefficient in b[1].items():
+                coefficients[term] = coefficients.get(term, 0) + scale * coefficient
+                if coefficients[term] == 0:
+                    del coefficients[term]
+            return None if len(coefficients) > 32 else (a[0] + scale * b[0], coefficients, number)
+
+        a, b = form(left), form(right)
+        if a is None or b is None:
+            return None
+        coefficients = dict(a[1])
+        for term, coefficient in b[1].items():
+            coefficients[term] = coefficients.get(term, 0) - coefficient
+        coefficients = {term: coefficient for term, coefficient in coefficients.items() if coefficient}
+        if len(coefficients) > 32:
+            return None
+
+        def lower(sign: int) -> Interval:
+            remaining = {term: sign * coefficient for term, coefficient in coefficients.items()}
+            result = sign * (a[0] - b[0])
+            capped = a[2].capped or b[2].capped
+            # At most 32*32 pairs. Reusing the finite difference graph never
+            # invents a relation between unrelated terms.
+            for positive in remaining:
+                if remaining[positive] <= 0:
+                    continue
+                for negative in remaining:
+                    if remaining[positive] == 0:
+                        break
+                    if remaining[negative] >= 0:
+                        continue
+                    gap = self._order_search(negative, positive, state)
+                    if gap is None or gap.lower is None:
+                        continue
+                    weight = min(remaining[positive], -remaining[negative])
+                    result += weight * gap.lower
+                    capped |= gap.capped
+                    remaining[positive] -= weight
+                    remaining[negative] += weight
+            for term, coefficient in remaining.items():
+                if coefficient == 0:
+                    continue
+                interval = _known_interval(state, term, self.max_length) if term < 0 else self._binding_interval(state, term)
+                endpoint = interval.lower if coefficient > 0 else interval.upper
+                if endpoint is None:
+                    return Interval(None, None, capped=capped or interval.capped)
+                result += coefficient * endpoint
+                capped |= interval.capped
+            return Interval(result, None, capped=capped)
+
+        lo, negative_hi = lower(1), lower(-1)
+        difference = Interval(lo.lower, None if negative_hi.lower is None else -negative_hi.lower,
+                              capped=lo.capped or negative_hi.capped)
+        return self._decide_comparison(name, difference, Interval.exact(0))
+
     def _id_bounded_by_length(self, subject: int, sequence_id: int, gap: int, state: State) -> bool:
         """`sequence.length - subject >= gap` for a term the facts name."""
         return self._ordered(subject, _length_key(sequence_id), gap, state)
@@ -5229,6 +5345,8 @@ class _BoundsValidator:
         decided = self._decide_comparison(name, left_observed, right_observed)
         if decided is None:
             decided = self._decide_ordered_comparison(name, left, right, refined)
+        if decided is None:
+            decided = self._decide_linear_comparison(name, left, right, refined)
         if decided is not None and decided != truth:
             return None  # the operand intervals settle the comparison: this path is impossible
         # `i <? xs.length` holding, or `i >=? xs.length` failing, is the same index fact

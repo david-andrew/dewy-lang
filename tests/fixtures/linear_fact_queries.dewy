@@ -1,0 +1,8 @@
+check=(a:int64<v=>0<=?v<=?100> b:int64<v=>0<=?v<=?100> c:int64<v=>0<=?v<=?100> d:int64<v=>0<=?v<=?100>):>int64=>{
+    if a<=?c and b<=?d { $assert a+b<=?c+d
+        $assert 2*a+3*b<=?2*c+3*d
+        $assert a+b-c<=?d
+        $assert a+b-b=?a }
+    return 42
+}
+main=():>int64=>check(1 2 3 4)

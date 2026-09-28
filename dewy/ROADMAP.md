@@ -960,8 +960,10 @@ scalar/length routes. Equality exclusions survive joins only with evidence on
 each path, sharpen an established non-strict order, and invalidate with their
 subjects. Dependent disequality contracts now use the same evidence for
 parameters, results, predicate arms and checked proof calls; copied scalar
-values retain their own facts after the source changes. Broader linear-combination
-inference and the final finite-vocabulary audit remain closure work.
+values retain their own facts after the source changes. Bounded linear queries now combine established difference paths with constant
+coefficients, checking every intermediate for wrapping. They preserve unknown
+for nonlinear, opaque, invalidated or over-budget queries. Linear loop-candidate
+selection and the final finite-vocabulary audit remain closure work.
 
 ### 1.3 Effects as a real vocabulary
 

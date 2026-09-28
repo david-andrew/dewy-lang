@@ -1,0 +1,116 @@
+import p"../hir.dewy" as hir
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"expression_intervals.dewy" as observations
+import p"value_bounds.dewy" as values
+import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
+import p"relations.dewy" as relations
+
+# Bounded linear queries over already evaluated expressions. These do not
+# generate assumptions or loop candidates. Every arithmetic intermediate must
+# fit its actual word; the form describes mathematical, not modular, arithmetic.
+# Unknown operations, changed identities and exhausted budgets stay unknown.
+Coefficient:type=[term:facts.Term weight:bigint]
+Form:type=[constant:bigint coefficients:array<Coefficient> number:ranges.Interval]
+combine=(@items:array<Coefficient> term:facts.Term weight:bigint):>void=>{
+    loop index in 0.. and index<?items.length {
+        if facts.same_term(items[index].term term) {items[index].weight+=weight return}
+    }
+    items.push(Coefficient[term weight])
+}
+form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr):>Form?=>{
+    if budget=?0 return none
+    budget-=1
+    let node=hir.node_at(env.nodes id)
+    if node is? hir.Obligation return form(node.value snapshot env @budget)
+    if node is? hir.Block and not node.scoped and node.items.length=?1 return form(node.items[0] snapshot env @budget)
+    if node is? hir.ValueCast|hir.RepresentationCast {
+        let inner=form(node.expr snapshot env @budget)
+        if inner is? none or ranges.fits(inner.number values.result_width(node.value_type env.types)) is? none return none
+        return inner
+    }
+    if observations.simple_operand(id env.nodes) {
+        let number=snapshot.numbers.get(id)
+        if number is? none return none
+        if number.lower isnt? none and ranges.same_endpoint(number.lower number.upper) return Form[number.lower [] number]
+        let term=snapshot.terms.get(id)
+        if term is? none return none
+        return Form[term.shift [Coefficient[term.term 1]] number]
+    }
+    if node isnt? hir.FunctionCall or node.pos_args.length not=?2 return none
+    let function=hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return none
+    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(env.registry function.binding_id) return none
+    let operation=if node.integer_operation is? none function.name else node.integer_operation
+    if operation not in? ['__add__' '__sub__' '__mul__'] return none
+    let a=form(node.pos_args[0] snapshot env @budget)
+    let b=form(node.pos_args[1] snapshot env @budget)
+    if a is? none or b is? none return none
+    let number=if operation=?'__add__' ranges.add(a.number b.number) else if operation=?'__sub__' ranges.subtract(a.number b.number) else ranges.multiply(a.number b.number)
+    if ranges.fits(number values.result_width(node.value_type env.types)) is? none return none
+    let result:array<Coefficient>=[]
+    if operation=?'__mul__' {
+        if a.coefficients.length>?0 and b.coefficients.length>?0 return none
+        let scale=if a.coefficients.length=?0 a.constant else b.constant
+        let base=if a.coefficients.length=?0 b else a
+        loop entry in base.coefficients {if scale*entry.weight not=?0 {result.push(Coefficient[entry.term scale*entry.weight])}}
+        return Form[scale*base.constant result number]
+    }
+    let scale:bigint=if operation=?'__add__' 1 else -1
+    let merged=a.coefficients
+    loop entry in b.coefficients {combine(@merged entry.term scale*entry.weight)}
+    loop entry in merged {if entry.weight not=?0 {result.push(entry)}}
+    if result.length>?32 return none
+    return Form[a.constant+scale*b.constant result number]
+}
+
+# Pair opposite coefficients using established difference paths, then use
+# ordinary endpoint bounds for the unmatched terms. This greedy selection is
+# deliberately incomplete. Each contribution has a concrete evidence path;
+# failure to find a pairing never establishes the opposite predicate.
+lower=(value:Form sign:bigint state:facts.State context:relations.Context):>ranges.Interval=>{
+    let remaining=value.coefficients
+    loop i in 0.. and i<?remaining.length {remaining[i].weight*=sign}
+    let result=sign*value.constant
+    let capped=value.number.capped
+    loop i in 0.. and i<?remaining.length {
+        if remaining[i].weight<=?0 continue
+        loop j in 0.. and j<?remaining.length {
+            if remaining[i].weight=?0 break
+            if remaining[j].weight>=?0 continue
+            let gap=relations.bound(remaining[j].term remaining[i].term state)
+            if gap is? none or gap.lower is? none continue
+            let weight=if remaining[i].weight<?-remaining[j].weight remaining[i].weight else -remaining[j].weight
+            result+=weight*gap.lower
+            capped=capped or gap.capped
+            remaining[i].weight-=weight
+            remaining[j].weight+=weight
+        }
+    }
+    loop entry in remaining {
+        if entry.weight=?0 continue
+        let interval=relations.interval_of(entry.term state context)
+        let endpoint=if entry.weight>?0 interval.lower else interval.upper
+        if endpoint is? none return ranges.Interval[none none capped or interval.capped]
+        result+=entry.weight*endpoint
+        capped=capped or interval.capped
+    }
+    return ranges.Interval[result none capped]
+}
+decide=(op:propositions.Operator left:addr right:addr state:facts.State snapshot:observations.Snapshot env:values.Environment context:relations.Context):>bool?=>{
+    let budget:addr=128
+    let a=form(left snapshot env @budget)
+    let b=form(right snapshot env @budget)
+    if a is? none or b is? none return none
+    let merged=a.coefficients
+    loop entry in b.coefficients {combine(@merged entry.term (-entry.weight))}
+    let coefficients:array<Coefficient>=[]
+    loop entry in merged {if entry.weight not=?0 {coefficients.push(entry)}}
+    if coefficients.length>?32 return none
+    let difference=Form[a.constant-b.constant coefficients ranges.subtract(a.number b.number)]
+    let lo=lower(difference 1 state context)
+    let negative_hi=lower(difference (-1) state context)
+    let interval=ranges.Interval[lo.lower (if negative_hi.lower is? none none else -negative_hi.lower) lo.capped or negative_hi.capped]
+    return ranges.decide(op interval ranges.exact(0))
+}

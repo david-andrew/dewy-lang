@@ -92,6 +92,18 @@ Each endpoint carries its path evidence, including address-cap provenance.
 The edge-count relaxation limit never supplies a convergence assumption. The remainder form connects
 checked sums, offsets and slices without inventing general nonlinear rules.
 
+Linear comparison queries can combine these established difference paths with
+integer coefficients: `a<=c` and `b<=d` prove `2*a+3*b<=2*c+3*d` when every
+intermediate operation fits. Normalization accepts addition, subtraction and
+multiplication by a known constant, with cancellation of equal identities.
+It uses at most 128 expression visits and 32 distinct terms per query. Opposite
+coefficients consume concrete order paths; unmatched terms use ordinary
+interval endpoints. Pair selection is deliberately incomplete, so a different
+matching could prove a query this implementation leaves unknown. No new facts
+are assumed by normalization, and nonlinear expressions, invalidated identities,
+opaque calls, potentially wrapping intermediates and exhausted budgets stay
+unknown. This query does not generate additional loop invariants.
+
 Disequality does not choose an ordering. It can sharpen a known non-strict integer
 order. A join retains facts supported on every reachable incoming path. For an
 already selected disequality, a peer path can supply the same fact, a direct
@@ -136,7 +148,7 @@ or unproved candidates cannot justify an obligation.
 
 ## Remaining closure work
 
-Broader linear-combination inference, measurements of nested-loop state size
+Linear loop-candidate selection, measurements of nested-loop state size
 and qualifier discovery, correlations among multiple aggregate components, and
 consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all
