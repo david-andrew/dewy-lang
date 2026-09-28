@@ -533,6 +533,7 @@ def predicate_bounds_counter(condition: hir.AST, target_id: int) -> bool:
     if (
         isinstance(condition, hir.FunctionCall)
         and isinstance(condition.func, hir.ExpressedIdentifier)
+        and condition.func.binding_id is None
         and len(condition.pos_args) == 2
     ):
         left, right = condition.pos_args
@@ -1111,6 +1112,7 @@ class _BoundsValidator:
         if (
             isinstance(stripped, hir.FunctionCall)
             and isinstance(stripped.func, hir.ExpressedIdentifier)
+            and stripped.func.binding_id is None
             and stripped.func.name == '__unary_sub__'
             and len(stripped.pos_args) == 1
         ):
@@ -1695,7 +1697,7 @@ class _BoundsValidator:
         interval = self._eval(node, state, validate=False)
         if interval is not None and interval.upper is not None and interval.upper <= self.max_length:
             return True
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
             return all(self._is_position(argument, state) for argument in node.pos_args)
         subject = self._binding_id(node)
         if subject is None:
@@ -3272,7 +3274,7 @@ class _BoundsValidator:
         arguments = arguments[:len(node.pos_args)]
         name = node.integer_operation or (
             node.func.name
-            if isinstance(node.func, hir.ExpressedIdentifier)
+            if isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
             else None
         )
         for binding_id in self.call_writes.get(id(node), self.mutable_globals):
@@ -3413,7 +3415,7 @@ class _BoundsValidator:
             return None
         name = node.integer_operation or (
             node.func.name
-            if isinstance(node.func, hir.ExpressedIdentifier)
+            if isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
             else None
         )
         arguments = [self._constant_expr(arg, seen) for arg in node.pos_args]
@@ -3721,12 +3723,12 @@ class _BoundsValidator:
         interval = self._eval(node, state, validate=False)
         if interval is not None and interval.upper is not None and interval.upper <= minimum - gap:
             return True
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name == '__sub__' and len(node.pos_args) == 2:
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None and node.func.name == '__sub__' and len(node.pos_args) == 2:
             # `n - c`: bounded when `n` is, by `c` less
             constant = self._constant_expr(node.pos_args[1], set())
             if constant is not None and constant.lower is not None and constant.lower == constant.upper and constant.lower >= 0:
                 return self._bounded_by_length(node.pos_args[0], sequence_id, gap - constant.lower, state)
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name == '__add__' and len(node.pos_args) == 2:
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None and node.func.name == '__add__' and len(node.pos_args) == 2:
             left, right = node.pos_args
             for value, other in ((left, right), (right, left)):
                 constant = self._constant_expr(other, set())
@@ -3923,7 +3925,7 @@ class _BoundsValidator:
                 return True
         if _sequence_of(node) is not None and self._array_id(_sequence_of(node)) == sequence_id:   # type: ignore[arg-type]
             return gap <= 0
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
             left, right = node.pos_args
             for value, other in ((left, right), *(((right, left),) if node.func.name == '__add__' else ())):
                 constant = self._constant_expr(other, set())
@@ -4303,7 +4305,7 @@ class _BoundsValidator:
         op = node.op
         if op == '=':
             if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier)
-                    and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2
+                    and value.func.binding_id is None and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2
                     and self._binding_id(value.pos_args[0]) == node.target.binding_id):
                 return None
             op = '+=' if value.func.name == '__add__' else '-='
@@ -4706,6 +4708,7 @@ class _BoundsValidator:
         if not (
             isinstance(index, hir.FunctionCall)
             and isinstance(index.func, hir.ExpressedIdentifier)
+            and index.func.binding_id is None
             and index.func.name == '__sub__'
             and len(index.pos_args) == 2
         ):
@@ -5071,11 +5074,12 @@ class _BoundsValidator:
                 return None
             refined[bare.binding_id] = narrowed
             return refined
-        if isinstance(bare, hir.FunctionCall) and isinstance(bare.func, hir.ExpressedIdentifier) and bare.func.name == '__not__' and len(bare.pos_args) == 1:
+        if isinstance(bare, hir.FunctionCall) and isinstance(bare.func, hir.ExpressedIdentifier) and bare.func.binding_id is None and bare.func.name == '__not__' and len(bare.pos_args) == 1:
             return self._refine(refined, bare.pos_args[0], truth=not truth)
         if not (
             isinstance(condition, hir.FunctionCall)
             and isinstance(condition.func, hir.ExpressedIdentifier)
+            and condition.func.binding_id is None
             and len(condition.pos_args) == 2
         ):
             return refined

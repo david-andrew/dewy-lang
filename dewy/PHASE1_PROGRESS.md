@@ -6472,3 +6472,26 @@ container group passes with the surrounding hosted checks (65 total). Dynamic
 array ownership and reset/reuse already have paired execution coverage in the
 allocator storage group; no implementation restriction was restored to satisfy
 the old expectation.
+
+## Operator identity through proofs and lowering (2026-09-28)
+
+Both analyzers now require builtin identity before deriving intrinsic arithmetic,
+comparison, negation, length-offset or update facts. A user function's checked
+return contract remains available; its spelling supplies no additional theorem.
+Native arithmetic validation follows the same identity rule.
+
+Hosted operator dispatch now preserves the identity of lexical declarations,
+matching the native source-binding model, instead of emitting a binding-less
+call with a user signature. Hosted lowering also stops resolving actual intrinsic
+identifiers through a same-named lexical declaration; a user `__add__` previously
+captured imported prelude arithmetic. Logical operator rewriting now applies
+only to builtins in both checkers: an ordinary user call evaluates its arguments
+and retains its own result/effects. This preserves lexical shadowing and changes
+no µDewy short-circuit rules.
+
+Validation: 65 hosted identity/affine/type-fact/container checks, 52 further
+hosted operator/proof checks, four direct hosted/native arithmetic/length/predicate
+state comparisons, and 32 combined paired checks pass. The final expanded
+operator group passes all 12 checks, including x86-64/C execution, lexical
+operator syntax, effectful logical arguments and a written result contract.
+Five fixtures bring the manifest to 304 cases.

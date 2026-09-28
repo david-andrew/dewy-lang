@@ -66,6 +66,7 @@ offset_term = (id:addr env:values.Environment @registry:bindings.Registry):>Offs
     let function = hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier return none
     if function.name not=? '__add__' and function.name not=? '__sub__' return none
+    if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return none
     let left = node.pos_args[0]
     let right = node.pos_args[1]
     let constant = values.constant(right env)
@@ -91,6 +92,7 @@ length_offset = (id:addr sequence:addr env:values.Environment @registry:bindings
     if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return none
     let function = hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier or function.name not=? '__sub__' return none
+    if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return none
     let constant = values.constant(node.pos_args[1] env)
     if constant is? none or constant.lower is? none or constant.upper is? none or constant.lower not=? constant.upper or constant.lower <? 0 return none
     let left = node.pos_args[0]
@@ -259,6 +261,7 @@ assignment_shift = (node:hir.Assign env:values.Environment @registry:bindings.Re
         if call isnt? hir.FunctionCall or call.pos_args.length not=? 2 return none
         let function = hir.node_at(env.nodes call.func)
         if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
+        if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return none
         let left = binding_term(call.pos_args[0] env @registry)
         let target = hir.node_at(env.nodes node.target)
         $runtime_assert target is? hir.ExpressedIdentifier

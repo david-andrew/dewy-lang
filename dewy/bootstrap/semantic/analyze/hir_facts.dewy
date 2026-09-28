@@ -222,7 +222,7 @@ predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:
     if node isnt? hir.FunctionCall return false
     if node.pos_args.length not=? 2 return false
     let function = hir.node_at(nodes node.func)
-    if function isnt? hir.ExpressedIdentifier return false
+    if function isnt? hir.ExpressedIdentifier or function.binding_id isnt? none return false
     let left = node.pos_args[0]
     let right = node.pos_args[1]
     if function.name =? '__lt__' return is_target(left target nodes) and word_bound(right nodes type_nodes)

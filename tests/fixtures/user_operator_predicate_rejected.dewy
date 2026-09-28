@@ -1,0 +1,6 @@
+let __lt__=(x:uint8 y:uint8):>bool=>true
+probe=(x:uint8 y:uint8):>int64=>{
+    if __lt__(x y) {$assert y>?x}
+    return 42
+}
+main=():>int64=>probe(2 1)

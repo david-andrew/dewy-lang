@@ -734,7 +734,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         let applied=predicates.apply_call(state id none @checker.data)
         if applied isnt? none {state=applied}
         record(id @state @checker)
-        let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier function.name else ''
+        let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(checker.data.registry function.binding_id)) function.name else ''
         if validate and name in? ['__floordiv__' '__mod__'] and node.integer_operation is? none and node.pos_args.length =? 2 {
             let divisor=node.pos_args[1]
             if not obligations.nonzero(divisor checker.data.snapshot.numbers.get(divisor) state checker.data) {fail(divisor 'cannot prove the divisor is nonzero' 'establish that the divisor cannot be zero' @checker)}

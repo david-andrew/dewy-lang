@@ -64,7 +64,7 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context obse
     if interval isnt? none and interval.upper isnt? none and interval.upper <=? minimum-gap return true
     if node is? hir.FunctionCall and node.pos_args.length =? 2 {
         let function = hir.node_at(context.env.nodes node.func)
-        if function is? hir.ExpressedIdentifier {
+        if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(registry function.binding_id)) {
             if function.name =? '__sub__' {
                 let constant = values.constant(node.pos_args[1] context.env)
                 if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) and constant.lower >=? 0 {
@@ -120,7 +120,7 @@ lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context obse
     if measured isnt? none and terms.sequence_id(measured context.env @registry) =? sequence return gap <=? 0
     if node is? hir.FunctionCall and node.pos_args.length =? 2 {
         let function = hir.node_at(context.env.nodes node.func)
-        if function is? hir.ExpressedIdentifier and (function.name =? '__add__' or function.name =? '__sub__') {
+        if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(registry function.binding_id)) and (function.name =? '__add__' or function.name =? '__sub__') {
             loop side in 0..1 {
                 if side =? 1 and function.name =? '__sub__' break
                 let value = if side =? 0 node.pos_args[0] else node.pos_args[1]

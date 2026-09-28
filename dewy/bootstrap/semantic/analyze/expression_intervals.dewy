@@ -155,7 +155,7 @@ difference = (left:addr right:addr state:facts.State snapshot:Snapshot):>ranges.
 }
 call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
     let function=hir.node_at(env.nodes node.func)
-    let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier function.name else ''
+    let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(registry function.binding_id)) function.name else ''
     let result:ranges.Interval?=none
     let arithmetic=false
     if node.pos_args.length =? 1 {

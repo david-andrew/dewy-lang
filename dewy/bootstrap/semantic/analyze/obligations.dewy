@@ -137,7 +137,7 @@ nonzero = (id:addr interval:ranges.Interval? state:facts.State data:predicates.D
     let node=hir.node_at(data.env.nodes expressions.strip_casts(id data.env.nodes))
     if node is? hir.FunctionCall and node.pos_args.length =? 1 {
         let function=hir.node_at(data.env.nodes node.func)
-        if function is? hir.ExpressedIdentifier and function.name =? '__unary_sub__' {
+        if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(data.registry function.binding_id)) and function.name =? '__unary_sub__' {
             return nonzero(node.pos_args[0] data.snapshot.numbers.get(node.pos_args[0]) state data)
         }
     }
@@ -153,7 +153,7 @@ position = (id:addr state:facts.State data:predicates.Data):>bool => {
     if value.interval isnt? none and value.interval.upper isnt? none and value.interval.upper <=? data.env.cap return true
     if node is? hir.FunctionCall and node.pos_args.length =? 2 {
         let function=hir.node_at(data.env.nodes node.func)
-        if function is? hir.ExpressedIdentifier and function.name in? ['__add__' '__sub__'] {
+        if function is? hir.ExpressedIdentifier and (function.binding_id is? none or bindings.builtin_binding(data.registry function.binding_id)) and function.name in? ['__add__' '__sub__'] {
             return position(node.pos_args[0] state data) and position(node.pos_args[1] state data)
         }
     }

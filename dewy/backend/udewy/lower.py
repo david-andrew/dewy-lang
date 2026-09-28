@@ -2093,6 +2093,7 @@ class _Lowerer(
             binding = (
                 self.binding_by_semantic_id.get(node.binding_id)
                 if node.binding_id is not None
+                else None if node.name in builtins.builtin_types
                 else scope.resolve(node.name)
             )
             self.identifier_bindings[id(node)] = binding

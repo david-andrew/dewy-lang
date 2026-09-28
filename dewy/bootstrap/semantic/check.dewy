@@ -1751,13 +1751,15 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             if left is? Error return left
             let left_type = node_at(left session).value_type
             if op =? 'MultiplyJuxtapose' and ambiguous_juxtaposition(left_type @session) return juxtaposition_problem(id env session)
-            let logical = op in? ['and' '&' 'or' '|' 'nand' 'nor'] and types.is_primitive(types.node_at(session.types left_type) 'bool')
+            let operator_binding=declarations.lookup(operator env.lexical session)
+            let builtin_operator=operator_binding isnt? none and bindings.builtin_binding(session.registry operator_binding)
+            let logical = builtin_operator and op in? ['and' '&' 'or' '|' 'nand' 'nor'] and types.is_primitive(types.node_at(session.types left_type) 'bool')
             let continues = op in? ['and' '&' 'nand']
             let shortcut = if logical refined(left not continues env @session) else env
             let right_env = if logical refined(left continues env @session) else env
             let right = expression(node.right right_env @session)
             if right is? Error return right
-            let selected=target_values.logical(op left right session.hir)
+            let selected=if builtin_operator target_values.logical(op left right session.hir) else none
             if selected isnt? none return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) selected] @session)
             # Exact division has no `T/T -> T` builtin signature. Its
             # result representation depends on the numeric operands.

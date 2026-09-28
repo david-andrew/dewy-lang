@@ -158,6 +158,7 @@ constant_expr = (id:addr nodes:array<hir.AST> type_nodes:types.Table registry:bi
     if node isnt? hir.FunctionCall return none
     let function = hir.node_at(nodes node.func)
     if function isnt? hir.ExpressedIdentifier return none
+    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return none
     let operation = if node.integer_operation is? none function.name else node.integer_operation
     if node.pos_args.length =? 1 and (node.integer_operation =? 'identity' or node.integer_operation =? 'narrow') {
         let value = constant_expr(node.pos_args[0] nodes type_nodes registry @seen)

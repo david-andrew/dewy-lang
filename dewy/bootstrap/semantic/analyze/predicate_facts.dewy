@@ -157,6 +157,7 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
     if contracts.length >? 0 return apply_call(state id truth @data)
     let function=hir.node_at(context.nodes node.func)
     if function isnt? hir.ExpressedIdentifier return state
+    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(data.registry function.binding_id) return state
     if function.name =? '__not__' and node.pos_args.length =? 1 return refine_with_context(state node.pos_args[0] not truth context @data)
     let name=if node.integer_operation is? none function.name else node.integer_operation
     let op=operators.get(name)

@@ -11457,6 +11457,17 @@ def _dispatch_builtin(
     expected: ty.Type | None = None,
 ) -> hir.AST:
     """Resolve a builtin dunder call and apply any selected promotions."""
+    # A lexical operator declaration is an ordinary call, with its identity,
+    # effects and written result facts. Never send it through builtin folding
+    # or manufacture a binding-less identifier for it.
+    if ctx.binding_scopes.get(fname) is not None:
+        try:
+            call = _library_call(fname, args, loc, ctx=ctx, expected_return=expected)
+        except ty.DispatchError:
+            type_error(ctx.srcfile, f'no matching overload for operator `{source_name}`',
+                       Pointer(span=op_loc, message='the lexical operator declaration does not accept these operands'))
+        _establish_call_facts(call, ctx=ctx)
+        return call
     if expected is not None:
         expected = ty.strip_all_refinements(expected)   # the operator computes the base type; the facts are the return's to prove
     # A finite set of integer operands is not closed under arithmetic. Its
@@ -11612,7 +11623,7 @@ def _dispatch_builtin(
                 {},
             )
 
-    ftype = ctx.declarations[fname]
+    ftype = builtins.builtin_types[fname]
     assert isinstance(ftype, (ty.FunctionType, ty.OverloadType)), (
         f'INTERNAL ERROR: builtin function type expected, got {type(ftype)}'
     )
@@ -12737,7 +12748,8 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     if isinstance(binop.op, t2.MultiplyJuxtapose):
         _check_juxtaposition_type(left, binop.loc, ctx=ctx)
     right_ctx = ctx
-    if left.type == 'bool':
+    builtin_operator = ctx.binding_scopes.get(builtins.BINOP_DUNDER_MAP.get(symbol)) is None
+    if left.type == 'bool' and builtin_operator:
         if symbol in {'and', '&', 'nand'}:
             right_ctx = _refine_condition_context(ctx, left, truth=True)
         elif symbol in {'or', '|', 'nor'}:
@@ -12753,7 +12765,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
 
     left_target = _unwrap_parens(left)
     right_target = _unwrap_parens(right)
-    if isinstance(left_target, hir.TargetBool) and isinstance(right_target, hir.TargetBool):
+    if builtin_operator and isinstance(left_target, hir.TargetBool) and isinstance(right_target, hir.TargetBool):
         # Compile-time target conditions combine at compile time so gated
         # `if` arms can be selected during checking.
         a, b = left_target.value, right_target.value
@@ -12839,6 +12851,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
             and isinstance(result, hir.FunctionCall)
             and result.type == 'bool'
             and isinstance(result.func, hir.ExpressedIdentifier)
+            and result.func.binding_id is None
             and isinstance(result.func.type, ty.FunctionType)
             and len(result.func.type.pos_or_kw) == 2
             and all(param.type == 'bool' for param in result.func.type.pos_or_kw)

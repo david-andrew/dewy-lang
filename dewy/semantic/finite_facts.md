@@ -28,7 +28,11 @@ expressions in a type's bound are not a general symbolic contract language yet.
 Ordinary conditions and assertions have wider expression syntax: interval
 arithmetic and checked affine recognition can prove some of them, while an
 unrecognized expression contributes no symbolic theorem. A pure call contributes
-its checked contract, not a guessed meaning from its source name.
+its checked contract, not a guessed meaning from its source name. This also
+applies to lexical operator declarations: a user function named `__lt__` is not
+an intrinsic comparison. Builtin recognition requires its binding identity (or
+an explicitly lowered integer operation tag). Guard and storage affine transfer
+both require the mathematical result to fit its machine representation.
 
 ## Identities and stored facts
 
