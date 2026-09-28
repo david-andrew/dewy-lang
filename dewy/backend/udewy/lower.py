@@ -3796,6 +3796,14 @@ class _Lowerer(
 
         def transfer(node: hir.AST, *, handle_only: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
+            if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in cells
+                    and self._field_union_members(source.type) is None):
+                # Narrowing reads a cell's payload; it does not turn the
+                # binding into an independently owned array/record handle.
+                # Those lowerers empty a handle variable, whereas this owner
+                # still needs its cell for lexical cleanup. Whole-cell moves
+                # below are distinct from taking a selected payload.
+                return {}
             if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells):
                 return {id(source): id(source)}
             return {}

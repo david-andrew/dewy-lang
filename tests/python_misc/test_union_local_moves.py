@@ -67,6 +67,22 @@ REPEATED = HEADER + '''main=():>int64=>{
 }'''
 GENERAL = RETURN.replace('Box|none', 'Box|int64|none')
 FRAME = RETURN.replace('items:array<int64>', 'items:array<int64 length=1>')
+NARROWED_ARRAY = '''Box:type=[items:array<int64>]
+make=(flag:bool):>array<int64>|none=>if flag [42] else none
+main=():>int64=>{
+    let value=make(true)
+    if value is? none return 1
+    let box=Box[value]
+    return if box.items.length>?0 box.items[0] else 2
+}'''
+NARROWED_RETURN = '''make=(flag:bool):>array<int64>|none=>if flag [42] else none
+take=():>array<int64>=>{
+    let value=make(true)
+    if value is? none return []
+    return value
+}
+main=():>int64=>{let values=take() return if values.length>?0 values[0] else 1}
+'''
 FIXTURE = Path(__file__).resolve().parents[1] / 'fixtures/union_local_moves.dewy'
 
 
@@ -77,7 +93,7 @@ def test_owned_union_local_moves(tmp_path, source):
     execute(tmp_path, 'union-move', code)
 
 
-@pytest.mark.parametrize('source', [PRESERVE, COPY, REPEATED, FRAME, FIXTURE.read_text()])
+@pytest.mark.parametrize('source', [PRESERVE, COPY, REPEATED, FRAME, NARROWED_ARRAY, NARROWED_RETURN, FIXTURE.read_text()])
 def test_union_moves_preserve_values_and_release(tmp_path, source):
     execute(tmp_path, 'union-move-lifetime', codegen(SrcFile(None, source), debug_locations=False))
 
@@ -86,4 +102,4 @@ def test_native_union_local_moves(tmp_path):
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
     check_structural_text(build_program_driver(tmp_path), tmp_path,
                           cases=['$explicit_copies\n' + source for source in [*CASES, GENERAL]]
-                          + [PRESERVE, COPY, REPEATED, FRAME, FIXTURE.read_text()], errors=[])
+                          + [PRESERVE, COPY, REPEATED, FRAME, NARROWED_ARRAY, NARROWED_RETURN, FIXTURE.read_text()], errors=[])

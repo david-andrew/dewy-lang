@@ -74,6 +74,17 @@ hosted surrounding checks, paired execution on x86-64/C, a zero-allocation
 guarded-reader kernel, and failed-assertion messages that mutate their source
 while still observing the original snapshot.
 
+Integration follow-up (2026-09-27): `450bd71a` reached a three-generation
+native fixed point, but its freshly hosted-built driver crashed in parser
+cleanup. Whole-cell last-use evidence had also marked a narrowed array
+payload as an array-owner binding. Array transfer then treated the tag cell
+as a descriptor and cleared the cell pointer. The move analysis now keeps
+those representations distinct: taking a narrowed payload requires a
+separate proof and currently retains its ordinary copy. Thirteen hosted
+union-transfer checks and the paired native group pass, with new narrowed
+return and record-field regressions. A new hosted-driver rebuild is required
+before this integration checkpoint can be accepted.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was
