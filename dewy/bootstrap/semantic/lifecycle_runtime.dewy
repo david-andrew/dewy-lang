@@ -22,6 +22,9 @@ Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 # A component consumed on some paths only: its owner holds it while the flag
 # is true, and cleanup consults the flag instead of a static route.
 ComponentFlag:type = const [path:array<string|int64> flag:Captured]
+# A runtime-selected slot transfers only at a whole-owner last use. Save
+# its evaluated selectors for lexical cleanup, separately from static paths.
+DynamicComponent:type = const [owner:addr flag:Captured selectors:array<Captured> path:array<string|addr>]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -32,6 +35,8 @@ Frame:type = const [
 Plan:type = [
     flags:dict<addr Captured>=[]
     component_flags:dict<addr array<ComponentFlag>>=[]
+    dynamic_components:dict<addr DynamicComponent>=[]
+    dynamic_owners:dict<addr array<DynamicComponent>>=[]
     extractions:dict<addr array<Extraction>>=[]
     hooks:dict<addr Hook>=[]
     composed_moves:dict<addr addr>=[]
@@ -451,6 +456,20 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         let first:Extraction?=none
         if routes.length>?0 {first=routes.pop}
         drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=first additional=routes guards=plan.component_flags.get(declared.binding_id []))
+        loop component in plan.dynamic_owners.get(declared.binding_id []) {
+            let selected_calls:array<addr>=[]
+            let other_routes=routes
+            if first isnt? none {other_routes.push(first)}
+            drop_value(value owner loc set[] @selected_calls @plan @session
+                run_hook=fields_only is? none or owners[index] not=?fields_only
+                extraction=Extraction[declared.binding_id component.path] additional=other_routes
+                guards=plan.component_flags.get(declared.binding_id []))
+            let empty=types.primitive('void' @session.types)
+            let present=put(hir.Block[loc empty calls true] @session)
+            let absent=put(hir.Block[loc empty selected_calls true] @session)
+            let arm=put(hir.IfArm[loc empty component.flag.value present] @session)
+            calls=[put(hir.Flow[loc empty [arm] absent] @session)]
+        }
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none and owners[index] not=? fields_only {
             let empty=types.primitive('void' @session.types)
@@ -737,6 +756,24 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
             $runtime_assert frozen isnt? none
             let result=transfer(selected candidate.value_type @plan @session)
             let saved=capture_result(result candidate.loc @session)
+            let dynamic=plan.dynamic_components.get(id)
+            if dynamic isnt? none {
+                let index:addr=0
+                let empty=types.primitive('void' @session.types)
+                loop step in frozen.path {
+                    if step is? string {continue}
+                    $runtime_assert index <? dynamic.selectors.length
+                    prefix.push(put(hir.Assign[candidate.loc empty dynamic.selectors[index].value '=' step] @session))
+                    index+=1
+                }
+                prefix.push(saved.declaration)
+                if result not=?selected {drop_value(selected candidate.value_type candidate.loc set[] @prefix @plan @session run_hook=false)}
+                let absent=put(hir.Bool[candidate.loc types.primitive('bool' @session.types) false] @session)
+                prefix.push(put(hir.Assign[candidate.loc empty dynamic.flag.value '=' absent] @session))
+                prefix.push(saved.value)
+                store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type prefix false] @session)
+                return
+            }
             let held=component_flag(frozen plan session)
             if held isnt? none {
                 # Consumed on this path only: clear the owner's flag.
@@ -1482,6 +1519,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 let flag=plan.flags.get(original.binding_id)
                 if flag isnt? none {items.push(flag.declaration)}
                 loop component in plan.component_flags.get(original.binding_id []) {items.push(component.flag.declaration)}
+                loop component in plan.dynamic_owners.get(original.binding_id []) {
+                    items.push(component.flag.declaration)
+                    loop selector in component.selectors {items.push(selector.declaration)}
+                }
             }
         }
         current.items=items
@@ -1608,6 +1649,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             items.push(put(hir.Assign[node.loc types.primitive('void' @session.types) flag.value '=' present] @session))
         }
         loop restore in restore_flags(held_under(target.binding_id [] plan) node.loc @session) {items.push(restore)}
+        loop component in plan.dynamic_owners.get(target.binding_id []) {
+            let present=put(hir.Bool[node.loc types.primitive('bool' @session.types) true] @session)
+            items.push(put(hir.Assign[node.loc types.primitive('void' @session.types) component.flag.value '=' present] @session))
+        }
         store(id hir.Block[node.loc node.value_type items false] @session)
         return
     }
@@ -2213,6 +2258,34 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     }
     loop [read owner] in conditional.consumes {
         let path=conditional.paths.get(read [])
+        let selected=hir.node_at(session.hir read)
+        if path.length=?0 and selected is? hir.MemberAccess|hir.Index {
+            if read in? plan.consume_sites or not transferable_component(read session) continue
+            plan.consume_sites.push(read)
+            let reverse:array<string|addr>=[]
+            loop selected is? hir.MemberAccess|hir.Index {
+                if selected is? hir.MemberAccess {reverse.push(selected.name) selected=hir.node_at(session.hir selected.value)}
+                else {reverse.push(selected.index) selected=hir.node_at(session.hir selected.array)}
+            }
+            let saved_path:array<string|addr>=[]
+            let selectors:array<Captured>=[]
+            loop reverse.length>?0 {
+                let step=reverse.pop
+                if step is? string {saved_path.push(step)}
+                else {
+                    let zero=put(hir.Integer[function.loc types.primitive('int64' @session.types) '0d' 0] @session)
+                    let saved=capture_result(zero function.loc @session)
+                    selectors.push(saved) saved_path.push(saved.value)
+                }
+            }
+            let present=put(hir.Bool[function.loc types.primitive('bool' @session.types) true] @session)
+            let component=DynamicComponent[owner capture_result(present function.loc @session) selectors saved_path]
+            plan.dynamic_components[read]=component
+            let owner_components=plan.dynamic_owners.get(owner [])
+            owner_components.push(component)
+            plan.dynamic_owners[owner]=owner_components
+            continue
+        }
         if path.length >? 0 {
             if read in? plan.consume_sites or not transferable_component(read session) continue
             plan.consume_sites.push(read)
@@ -2264,6 +2337,10 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none {prefix.push(flag.declaration)}
         loop component in plan.component_flags.get(declared.binding_id []) {prefix.push(component.flag.declaration)}
+        loop component in plan.dynamic_owners.get(declared.binding_id []) {
+            prefix.push(component.flag.declaration)
+            loop selector in component.selectors {prefix.push(selector.declaration)}
+        }
     }
     if prefix.length >? 0 {
         let body=hir.node_at(session.hir function.body)

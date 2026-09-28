@@ -122,6 +122,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     # Components consumed on some paths only: owner -> {field path: flag}.
     # The flag is true while the owner still holds that component.
     component_flags = {}
+    # Runtime-selected routes need saved selectors as well as a presence flag.
+    # Whole-owner liveness ensures at most one is absent per owner lifetime.
+    dynamic_components = {}  # read id -> (owner, flag, selector captures, path)
+    dynamic_owners = {}
+
+    def dynamic_for(owner):
+        return dynamic_owners.get(owner, ())
+
+    def dynamic_declarations(owner):
+        return [declaration for _, flag, selectors, _ in dynamic_for(owner)
+                for declaration in [flag[0], *(item[0] for item in selectors)]]
     extractions = {}  # last-use components; the remaining owner keeps its lexical cleanup
 
     def move_remainder(shape):
@@ -378,6 +389,15 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             guards = {path: flag[1] for path, flag in component_flags.get(owner.binding_id, {}).items()}
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
                  extraction=routes[0] if routes else None, additional=routes[1:], guards=guards or None)
+            for _, presence, _, path in dynamic_for(owner.binding_id):
+                selected_calls = []
+                drop(value, owner_type, set(), owner.binding_id not in fields_only, into=selected_calls,
+                     extraction=(path, False), additional=routes, guards=guards or None)
+                # If this selection did not transfer, try the other mutually
+                # exclusive route. Otherwise omit precisely its saved slot.
+                calls = [hir.Flow(loc, ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, presence[1], hir.Block(loc, ty.VOID_TYPE, calls, True))],
+                    hir.Block(loc, ty.VOID_TYPE, selected_calls, True))]
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -1323,6 +1343,15 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         projection = returning_projection(selected, owners)
                         value, moved = transfer(selected, child.type)
                         saved, value = capture(value, child.loc)
+                        dynamic = dynamic_components.get(id(child))
+                        if dynamic is not None:
+                            _, flag, selectors, _ = dynamic
+                            indices = [step for step in projection[1] if not isinstance(step, str)]
+                            saved_indices = [hir.Assign(child.loc, ty.VOID_TYPE, captured[1], '=', index)
+                                             for captured, index in zip(selectors, indices)]
+                            remainder = cleanup((), child.loc, selected=selected, selected_moved=True) if moved else []
+                            cleared = hir.Assign(child.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(child.loc, 'bool', False))
+                            return hir.Block(child.loc, value.type, [*prefix, *saved_indices, saved, *remainder, cleared, value], False)
                         conditional_route = field_route(selected)
                         flag = (component_flags.get(conditional_route[0], {}).get(conditional_route[1])
                                 if conditional_route is not None else None)
@@ -1377,6 +1406,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         items.append(ownership_flags[item.binding_id][0])
                     if isinstance(item, hir.Declare):
                         items.extend(flag[0] for flag in component_flags.get(item.binding_id, {}).values())
+                        items.extend(dynamic_declarations(item.binding_id))
                 local = active[start:]
                 if local and node.scoped:
                     result = None
@@ -1447,6 +1477,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 activate = [hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))] if flag is not None else []
                 activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, component[1], '=', hir.Bool(node.loc, 'bool', True))
                                 for component in component_flags.get(source.binding_id, {}).values())
+                activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))
+                                for _, flag, _, _ in dynamic_for(source.binding_id))
                 released = cleanup([source], node.loc)
                 extractions.pop(source.binding_id, None)
                 return hir.Block(node.loc, node.type, [declaration, *released,
@@ -1581,7 +1613,31 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             user_error(current_source, 'resource view conflicts with a storage mutation',
                        Pointer(span=mutation.loc, message='this operation may change storage still borrowed by the view'),
                        Pointer(span=view.loc, message='this required view is still live'))
+        original_nodes = {id(node): node for node in hir.walk(body)}
         for read, (owner, path) in conditional.items():
+            dynamic_source = original_nodes[read]
+            if not path and isinstance(dynamic_source, (hir.MemberAccess, hir.Index)) and read not in consumes:
+                consumes.add(read)
+                reverse = []
+                while isinstance(dynamic_source, (hir.MemberAccess, hir.Index)):
+                    if isinstance(dynamic_source, hir.MemberAccess):
+                        reverse.append(dynamic_source.name)
+                        dynamic_source = dynamic_source.value
+                    else:
+                        reverse.append(dynamic_source.index)
+                        dynamic_source = dynamic_source.array
+                route, selectors = [], []
+                for step in reversed(reverse):
+                    if isinstance(step, str):
+                        route.append(step)
+                    else:
+                        saved = capture(hir.Integer(literal.loc, 'int64', t0.base10, 0), literal.loc)
+                        selectors.append(saved)
+                        route.append(saved[1])
+                flag = capture(hir.Bool(literal.loc, 'bool', True), literal.loc)
+                dynamic_components[read] = entry = owner, flag, selectors, tuple(route)
+                dynamic_owners.setdefault(owner, []).append(entry)
+                continue
             if path:
                 if read not in consumes:
                     consumes.add(read)
@@ -1601,6 +1657,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         prepared_body = statement(body, list(parameter_owners), [], entry=True)
         prefix = [ownership_flags[owner.binding_id][0] for owner in parameter_owners if owner.binding_id in ownership_flags]
         prefix.extend(flag[0] for owner in parameter_owners for flag in component_flags.get(owner.binding_id, {}).values())
+        prefix.extend(declaration for owner in parameter_owners for declaration in dynamic_declarations(owner.binding_id))
         if prefix:
             prepared_body = replace(prepared_body, items=[*prefix, *prepared_body.items])
         prepared = replace(literal, body=prepared_body)

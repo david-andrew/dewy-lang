@@ -140,6 +140,14 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                     and occurrences[id(value)] == 1 and counts.get(value.binding_id) == 1):
                 candidates.add(id(value))
             route = field_route(value) if isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None else None
+            if route is None and isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None:
+                root = value
+                while isinstance(root, (hir.MemberAccess, hir.Index)):
+                    root = root.value if isinstance(root, hir.MemberAccess) else root.array
+                if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
+                    # An unknown slot may transfer only when no part of its
+                    # owner remains live. Cleanup retains the selected index.
+                    route = root.binding_id, ()
             if route is not None:
                 root = value
                 while isinstance(root, (hir.MemberAccess, hir.Index)):
@@ -209,6 +217,10 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             consume(node, route[0], route[1], live, enabled)
             live.add((route[0], route[1], 'read'))
             return visit_selectors(node, live, enabled, exits)
+        if isinstance(node, (hir.MemberAccess, hir.Index)) and id(node) in candidates:
+            root = bindings.access_path(node).root
+            if isinstance(root, hir.ExpressedIdentifier):
+                consume(node, root.binding_id, (), live, enabled)
         if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
             live.add((route[0], route[1], 'length'))
             return visit_selectors(node.array, live, enabled, exits)

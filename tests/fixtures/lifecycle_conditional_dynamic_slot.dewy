@@ -1,0 +1,27 @@
+let trace:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+consume=(value:Token):>int64=>value.id
+probe=(flag:bool index:int64):>void=>{
+    let items=[Token[1] Token[2]]
+    if flag and index>=?0 and index<?2 {consume(items[index]);}
+    trace=trace*10+3
+}
+main=():>int64=>{
+    probe(true 0)
+    if trace not=?132 return 1
+    trace=0
+    probe(true 1)
+    if trace not=?231 return 2
+    trace=0
+    probe(false 0)
+    if trace not=?321 return 3
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        trace=0
+        probe(i%2=?0 i%2)
+        if trace not=?132 and trace not=?321 return 4
+    }
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 5
+}

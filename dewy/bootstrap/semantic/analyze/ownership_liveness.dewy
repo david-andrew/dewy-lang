@@ -186,6 +186,10 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             add_entry(@live route)
             return visit_selectors(id live enabled @analysis nodes exits)
         }
+        if id in? analysis.candidates {
+            let root=hir.node_at(nodes bindings.access_path(id nodes).root)
+            if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {consume(id root.binding_id [] live enabled @analysis)}
+        }
     }
     if node is? hir.ArrayLength {
         let route=field_route(node.array nodes)
@@ -328,6 +332,11 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
                     let member=hir.node_at(nodes root)
                     $runtime_assert member is? hir.MemberAccess|hir.Index
                     root=if member is? hir.MemberAccess member.value else member.array
+                }
+                let owner=hir.node_at(nodes root)
+                if route is? none and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+                    # Unknown selectors require the entire owner to be dead.
+                    route=Entry[owner.binding_id]
                 }
                 if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 {
                     # A selector may read siblings before this transfer.

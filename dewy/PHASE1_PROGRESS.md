@@ -5714,3 +5714,28 @@ replacements now receive lasting independent storage before the old value is
 released, just like runtime-length replacements. The paired fixed-array
 regression retains zero bytes across 100 calls; 60 hosted allocation/frame
 checks pass. Dynamic resource selection is a separate in-progress change.
+
+
+## Conditional runtime-selected resource transfers (2026-09-27)
+
+Both ownership passes now admit a conditional transfer from a runtime-selected
+array route when the complete owner has no later use on that path. The same
+backward liveness proof rejects retained views, later reads and unreplenished
+loop backedges. Captured selectors and a presence flag record the executed
+route; cleanup omits that component and drops the remaining elements in their
+normal reverse order at the original lexical boundary. Whole-owner replacement
+cleans its remaining components and resets those flags. Custom move hooks clean
+the selected old component on the consuming edge, as for constant slots.
+Runtime route metadata is indexed by owner rather than scanning every function's
+transfers at each cleanup site.
+
+Validation: 12 focused hosted checks, three paired dynamic/constant/conditional
+slot groups on x86-64/C, and 54 surrounding hosted ownership checks pass.
+Coverage includes mutually exclusive selectors, selector evaluation once,
+selector-variable reassignment, owning parameters, replenished loops, nested
+routes, custom moves, and zero retained bytes over 100 conditional calls.
+This does not prove arbitrary runtime indices disjoint or permit later reads
+of another slot without evidence. A nested array with unknown inner extent
+still needs a bounds proof the current indexed-length facts cannot always
+express; the nested cleanup regression uses a declared fixed inner extent to
+test ownership independently of that remaining proof-engine gap.
