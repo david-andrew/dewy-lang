@@ -6210,3 +6210,17 @@ Three fixtures bring the manifest to 269 cases. Whole-program native driver
 construction also passes with `container_methods`' directive; adoption remains
 26 physical modules. The preceding `f899b2b5` snapshot completed all 265 parity
 cases; the current proof changes still need their fresh-build integration.
+
+## Corrected copy-budget baseline (2026-09-28)
+
+David delegated the rebaseline decision. The complete inventory gate now allows
+4,500 sites and 85/KLOC, about 5% above the corrected inventory; no filtering or
+strict-policy/allocation-rule change accompanies it. At `9ef254b8`, the native
+report measures 4,303 sites / 53,278 lines / 80.765 per KLOC and passes both
+limits. The earlier failed 3,000/60 result remains valid historical evidence of
+incomplete baseline accounting. Details are in `bootstrap/PHASE0_MEASUREMENTS.md`.
+
+That snapshot also reached an identical three-generation native fixed point
+(generation 3: 55 seconds under concurrent checking). Its independently rebuilt
+hosted driver passed the two record-field/element-exclusion groups in 334.49
+seconds including build. The full 269-case manifest is still running.

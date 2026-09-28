@@ -4672,3 +4672,20 @@ The CI command gate is reduced from 4,500 sites / 100 sites per KLOC to
 protecting the current gains. This is a source-site budget, not a runtime
 allocation count or timing claim. Source coverage has grown since the older
 measurements above; compare counts with their recorded source checkpoint.
+
+### Complete inline-field inventory (2026-09-28)
+
+Retained inline record-field snapshots were missing from earlier reports. The
+corrected `f899b2b5` inventory has 4,301 static sites over 53,255 physical lines
+(80.762/KLOC); 1,336 of its 2,015 field stores are two-word Span values. At
+`9ef254b8`, the same complete inventory has 4,303 sites over 53,278 lines
+(80.765/KLOC): 3,136 records, 638 cells and 529 arrays. Both include bounded
+operations as well as runtime-sized snapshots. These numbers cannot be compared
+as a performance regression against the preceding incomplete report.
+
+The CI inventory gate is rebased from 3,000/60 to **4,500 sites / 85 per KLOC**,
+leaving about 5% headroom. David delegated this accounting decision; no entries
+are filtered out to meet it. Allocation-counter tests, strict-copy acceptance
+and reporting-completeness checks are unchanged. Counts measure static sites,
+not bytes or frequency; further performance work must still use measured kernels.
+The native tool run against the `9ef254b8` frozen source passes both new limits.

@@ -600,10 +600,13 @@ silently.
    contribute one site. Treat
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. The native command test now
-   gates the bootstrap inventory at 3,000 static sites and 60 sites/KLOC;
-   the 2026-09-27 integration checkpoint measures 2,381 sites and 45.038/KLOC
-   across 52,867 source lines. These bounds replace the old 4,500/100 gate,
-   retaining roughly 25% headroom while further foundations are implemented. Concise reporting
+   gates the bootstrap inventory at 4,500 static sites and 85 sites/KLOC.
+   The 2026-09-28 corrected inventory at `f899b2b5` measures 4,301 sites and
+   80.762/KLOC across 53,255 source lines, leaving about 5% headroom.
+   Earlier 3,000/60 gates were based on incomplete reporting: retained inline
+   record-field snapshots were omitted, including 1,336 two-word Span stores.
+   Rebaselining retains all entries, including bounded copies; it changes no
+   allocation-counter gate or strict-copy acceptance rule. Concise reporting
    retains every entry while avoiding repeated source rendering. Regressions
    surface in a pull request, not at 25 GB in a self-build.
 2. **Mechanisms in order of where the bytes went.** First: read-only
