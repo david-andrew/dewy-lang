@@ -838,6 +838,13 @@ from runtime emission, and both routes reuse their lowering proof and report.
 Focused paired checks cover conflicts, derived aliases and writes after last
 use. Full integration evidence is tracked in `PHASE1_PROGRESS.md`.
 
+Ownership follow-up (2026-09-28): runtime-selected transfers now preserve
+unrelated sibling fields, and disjoint containing arrays can transfer on the
+same path. Cleanup propagates independent presence conditions and saved selectors
+through nested arrays. Possibly overlapping dynamic routes and partial-array
+renewal remain conservative; these are remaining lifetime-proof cases, not
+implicit permission to copy a resource.
+
 ### 1.2 The proof engine
 
 Today the refinement system is an interval analysis plus a growing set of

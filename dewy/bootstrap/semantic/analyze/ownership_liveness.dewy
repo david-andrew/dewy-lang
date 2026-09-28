@@ -195,9 +195,9 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             # whole-owner rebinding has that protocol so far.
             if enclosing isnt? none {
                 consume(id enclosing.binding enclosing.path live enabled @analysis whole_region=true)
-                # Dynamic cleanup selects one transferred route per owner
-                # on a path; do not admit two simultaneous dynamic donations.
-                add_entry(@live Entry[enclosing.binding])
+                # Disjoint containing arrays may transfer independently;
+                # possibly overlapping routes retain this complete prefix.
+                add_entry(@live Entry[enclosing.binding enclosing.path])
                 return visit_selectors(id live enabled @analysis nodes exits)
             }
         }

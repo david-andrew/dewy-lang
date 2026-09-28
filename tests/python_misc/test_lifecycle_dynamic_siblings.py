@@ -37,14 +37,7 @@ ERRORS = [HEADER + BODY.replace('return owner.sibling.id', statement + '\nreturn
               'owner.items=[Token[4]]',
               'owner.items.push(Token[4])',
           ]]
-ERRORS.append(HEADER + '''Both:type=[left:array<Token> right:array<Token>]
-probe=(index:int64):>void=>{
-let owner=Both[[Token[1] Token[2]] [Token[3] Token[4]]]
-if index>=?0 and index<?owner.left.length and index<?owner.right.length {
-    consume(owner.left[index])
-    consume(owner.right[index])
-}
-}''')
+
 
 
 @pytest.mark.parametrize('source', CASES)

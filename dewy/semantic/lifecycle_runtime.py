@@ -123,7 +123,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     # The flag is true while the owner still holds that component.
     component_flags = {}
     # Runtime-selected routes need saved selectors as well as a presence flag.
-    # Whole-owner liveness ensures at most one is absent per owner lifetime.
+    # Liveness keeps potentially overlapping containing arrays mutually exclusive.
     dynamic_components = {}  # read id -> (owner, flag, selector captures, path)
     dynamic_owners = {}
 
@@ -154,14 +154,29 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None, selected_moved=False):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False, guards=None):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False, guards=None, dynamic=()):
+            # Each dynamic route carries a presence condition. At an array
+            # element this also includes every ancestor selector mismatch.
+            # Combining these at the leaf handles simultaneous disjoint moves
+            # without duplicating the entire owner's cleanup for every route.
+            empty = [present for path, present in dynamic if not path]
+            if empty:
+                calls = []
+                drop(value, type_, ancestors, run_hook, into=calls, tail=tail,
+                     extraction=extraction, additional=additional, inline_array=inline_array,
+                     guards=guards, dynamic=[entry for entry in dynamic if entry[0]])
+                for present in empty:
+                    calls = [hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, present,
+                        hir.Block(loc, ty.VOID_TYPE, calls, True))], None)]
+                into.extend(calls)
+                return
             if guards and () in guards:
                 # Drop a conditionally consumed component only while its
                 # owner still holds it.
                 calls = []
                 drop(value, type_, ancestors, run_hook, into=calls, tail=tail, extraction=extraction,
                      additional=additional, inline_array=inline_array,
-                     guards={path: flag for path, flag in guards.items() if path})
+                     guards={path: flag for path, flag in guards.items() if path}, dynamic=dynamic)
                 if calls:
                     into.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, guards[()],
                                                                         hir.Block(loc, ty.VOID_TYPE, calls, True))], None))
@@ -176,7 +191,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if resource(type_) is None:
                 return
             shape = ty.structural_base(type_)
-            if id(shape) in ancestors and not routes and not guards:
+            if id(shape) in ancestors and not routes and not guards and not dynamic:
                 # A recursive value has finite runtime storage but an infinite
                 # structural expansion. Close that expansion with a borrowed
                 # helper call, publishing its identity before checking its body.
@@ -204,7 +219,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc),
                                              [hir.Place(loc, shape, value)], {}))
                 return
-            if isinstance(shape, ty.ArrayType) and extraction is not None and not inline_array and not isinstance(value, hir.ExpressedIdentifier):
+            if isinstance(shape, ty.ArrayType) and (extraction is not None or guards or dynamic) and not inline_array and not isinstance(value, hir.ExpressedIdentifier):
                 # Give each array traversal a stable borrowed root. In a
                 # nested selection the caller's outer cursor changes; its
                 # indexed expression cannot serve as an invariant identity.
@@ -214,24 +229,25 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 parameter.type = shape
                 params = [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)]
                 arguments = [hir.Place(loc, shape, value)]
-                translated = []
-                for route, moved in routes:
-                    path = []
-                    for selector in route:
-                        if isinstance(selector, (str, hir.Integer)):
-                            path.append(selector)
-                            continue
-                        param = registry.allocate(object(), f'__index_{len(params)}', 'param', loc)
-                        param.type = 'int64'
-                        params.append(hir.Param(param.name, 'int64', binding_id=param.id))
-                        arguments.append(selector)
-                        path.append(hir.ExpressedIdentifier(loc, 'int64', param.name, binding_id=param.id))
-                    translated.append((tuple(path), moved))
+                def argument(value):
+                    param = registry.allocate(object(), f'__selected_{len(params)}', 'param', loc)
+                    param.type = value.type
+                    params.append(hir.Param(param.name, param.type, binding_id=param.id))
+                    arguments.append(value)
+                    return hir.ExpressedIdentifier(loc, param.type, param.name, binding_id=param.id)
+
+                def path_argument(path):
+                    return tuple(step if isinstance(step, (str, hir.Integer)) else argument(step) for step in path)
+
+                translated = [(path_argument(path), moved) for path, moved in routes]
+                held = {path: argument(present) for path, present in (guards or {}).items()}
+                selected = [(path_argument(path), argument(present)) for path, present in dynamic]
                 signature = ty.FunctionType([ty.PosOrKwArg(p.name, p.type, place=p.place) for p in params], [], None, ty.VOID_TYPE)
                 binding.type = signature
                 receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
                 body = []
-                drop(receiver, shape, set(), into=body, extraction=translated[0], additional=translated[1:], inline_array=True)
+                drop(receiver, shape, set(), into=body, extraction=translated[0] if translated else None, additional=translated[1:],
+                     inline_array=True, guards=held or None, dynamic=selected)
                 literal = hir.FunctionLiteral(loc, signature, params, [], None, ty.VOID_TYPE,
                     hir.Block(loc, ty.VOID_TYPE, body, True), source=current_source)
                 declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
@@ -241,7 +257,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 function = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, arguments, {}))
                 return
-            if isinstance(shape, ty.ArrayType) and (extraction is not None or guards):
+            if isinstance(shape, ty.ArrayType) and (extraction is not None or guards or dynamic):
                 # The selected element transfers; the other elements retain
                 # reverse-order cleanup. Saved selectors name the same slot
                 # for both the return value and this cleanup traversal.
@@ -253,6 +269,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     function = hir.ExpressedIdentifier(loc, signature, name)
                     return hir.FunctionCall(loc, 'bool', function, [cursor, right], {})
                 element = hir.Index(loc, shape.element, value, cursor, None)
+                selected_dynamic = []
+                boolean = ty.FunctionType([ty.PosOrKwArg(None, 'bool'), ty.PosOrKwArg(None, 'bool')], [], None, 'bool')
+                either = hir.ExpressedIdentifier(loc, boolean, '__or__')
+                for path, present in dynamic:
+                    mismatch = comparison('__ne__', path[0])
+                    held = hir.FunctionCall(loc, 'bool', either, [present, mismatch], {})
+                    selected_dynamic.append((path[1:], held))
                 # Group paths sharing an element before descending into its
                 # fields. Every transferred component must be omitted once.
                 groups = {}
@@ -272,12 +295,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                             if isinstance(selector, hir.Integer) and path[0] == selector.value}
                     drop(element, shape.element, ancestors | {id(shape)}, into=selected_calls,
                          extraction=selected_routes[0] if selected_routes else None,
-                         additional=selected_routes[1:], guards=held or None)
+                         additional=selected_routes[1:], guards=held or None, dynamic=selected_dynamic)
                     selected_arms.append(hir.IfArm(loc, ty.VOID_TYPE, comparison('__eq__', selector),
                                                   hir.Block(loc, ty.VOID_TYPE, selected_calls, True)))
-                drop(element, shape.element, ancestors | {id(shape)}, into=other_calls)
-                body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one),
-                    hir.Flow(loc, ty.VOID_TYPE, selected_arms, hir.Block(loc, ty.VOID_TYPE, other_calls, True))], True)
+                drop(element, shape.element, ancestors | {id(shape)}, into=other_calls, dynamic=selected_dynamic)
+                cleanup = ([hir.Flow(loc, ty.VOID_TYPE, selected_arms, hir.Block(loc, ty.VOID_TYPE, other_calls, True))]
+                           if selected_arms else other_calls)
+                body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one), *cleanup], True)
                 loop = hir.LoopArm(loc, ty.VOID_TYPE, comparison('__gt__', zero), body)
                 into.extend([declaration, hir.Flow(loc, ty.VOID_TYPE, [loop])])
                 return
@@ -349,7 +373,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         # resources now belong to the destination too.
                         continue
                     calls = []
-                    drop(replace(value, type=member), member, ancestors | {id(shape)}, run_hook, into=calls, extraction=extraction, additional=additional)
+                    drop(replace(value, type=member), member, ancestors | {id(shape)}, run_hook, into=calls, extraction=extraction, additional=additional, guards=guards, dynamic=dynamic)
                     condition = hir.TypeTest(loc, 'bool', value, member, False)
                     arms.append(hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, calls, True)))
                 if arms:
@@ -378,7 +402,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     nested = {path[1:]: flag for path, flag in (guards or {}).items() if path and path[0] == field.name}
                     drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into,
                          extraction=selected_routes[0] if selected_routes else None, additional=selected_routes[1:],
-                         guards=nested or None)
+                         guards=nested or None, dynamic=[(path[1:], present) for path, present in dynamic if path[0] == field.name])
         for owner in reversed(owners):
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
@@ -388,16 +412,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 routes.append(extracted[1:])
             guards = {path: flag[1] for path, flag in component_flags.get(owner.binding_id, {}).items()}
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
-                 extraction=routes[0] if routes else None, additional=routes[1:], guards=guards or None)
-            for _, presence, _, path in dynamic_for(owner.binding_id):
-                selected_calls = []
-                drop(value, owner_type, set(), owner.binding_id not in fields_only, into=selected_calls,
-                     extraction=(path, False), additional=routes, guards=guards or None)
-                # If this selection did not transfer, try the other mutually
-                # exclusive route. Otherwise omit precisely its saved slot.
-                calls = [hir.Flow(loc, ty.VOID_TYPE,
-                    [hir.IfArm(loc, ty.VOID_TYPE, presence[1], hir.Block(loc, ty.VOID_TYPE, calls, True))],
-                    hir.Block(loc, ty.VOID_TYPE, selected_calls, True))]
+                 extraction=routes[0] if routes else None, additional=routes[1:], guards=guards or None,
+                 dynamic=[(path, presence[1]) for _, presence, _, path in dynamic_for(owner.binding_id)])
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)

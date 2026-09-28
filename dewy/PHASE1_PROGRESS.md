@@ -5873,3 +5873,28 @@ helpers legitimately use earlier suffixes. The test now checks the ordered calls
 and exact reuse of their captured operands without depending on global temporary
 numbering; all 32 control-flow checks pass with that correction. No compiler
 semantics changed to accommodate the assertion.
+
+
+## Independent cleanup for disjoint dynamic transfers (2026-09-28)
+
+The next ownership step removes the previous one-dynamic-transfer-per-owner
+restriction for proved disjoint containing arrays. Each saved route now carries
+its own presence predicate down the cleanup tree. Array traversal adds selector
+mismatches to that predicate, so a transferred element is skipped only at its
+actual saved path. Independent fields can therefore transfer simultaneously;
+possibly overlapping selections within the same array remain conservative.
+
+Nested cleanup helpers capture both selectors and presence conditions as checked
+scalar arguments. This also preserves static partial-transfer flags through
+nested array helpers. Cleanup walks each structural portion with its relevant
+conditions instead of selecting among whole-owner cleanup copies. Partial
+replacement of a dynamically consumed array still needs flag renewal and remains
+unsupported; whole-owner rebinding keeps its existing protocol.
+
+Validation: 62 hosted surrounding ownership checks, three paired dynamic groups,
+and an additional mixed static/dynamic nested-array check pass on x86-64/C.
+Cases cover all four combinations of independent branches, nested arrays,
+constant outer elements, sibling transfers, changed selectors and overlapping
+route rejection. The new nested repeated-call fixture retains zero bytes and is
+included in the 248-case manifest. The preceding full 246-case checkpoint remains
+the integration baseline until this extension completes its fresh build gates.

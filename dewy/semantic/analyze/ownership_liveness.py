@@ -220,11 +220,9 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                 # Partial replacement still needs its own dynamic-flag
                 # renewal protocol; only whole-owner rebinding resets it.
                 consume(node, route[0], route[1], live, enabled, whole_region=True)
-                # Dynamic cleanup currently selects one transferred route
-                # per owner on a path. A later dynamic donation therefore
-                # keeps the whole owner live to earlier transfers, even
-                # when their enclosing fields would be disjoint.
-                live.add((route[0], (), 'read'))
+                # Another transfer may use a disjoint containing array;
+                # possible overlap still keeps this entire prefix live.
+                live.add((route[0], route[1], 'read'))
                 return visit_selectors(node, live, enabled, exits)
         if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
             live.add((route[0], route[1], 'length'))

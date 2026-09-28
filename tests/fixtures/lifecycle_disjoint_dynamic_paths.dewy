@@ -1,0 +1,31 @@
+# Each disjoint runtime selection retains its own cleanup presence condition.
+let trace:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Both:type=[left:array<array<Token>> right:array<array<Token>> sibling:Token]
+consume=(value:Token):>void=>{}
+probe=(first:bool second:bool i:int64 j:int64):>void=>{
+    let owner=Both[[[Token[1] Token[2]]] [[Token[3] Token[4]]] Token[5]]
+    if first and i>=?0 and owner.left.length>?0 and i<?owner.left[0].length {consume(owner.left[0][i])}
+    if second and j>=?0 and owner.right.length>?0 and j<?owner.right[0].length {consume(owner.right[0][j])}
+    trace=trace*10+6
+}
+exercise=():>int64=>{
+    trace=0
+    probe(true true 0 1)
+    if trace not=?146532 return 1
+    trace=0
+    probe(true false 0 1)
+    if trace not=?165432 return 2
+    trace=0
+    probe(false true 0 1)
+    if trace not=?465321 return 3
+    trace=0
+    probe(false false 0 1)
+    return if trace=?654321 42 else 4
+}
+main=():>int64=>{
+    if exercise() not=?42 return 5
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 6}
+    return if _arena_live_bytes=?before 42 else 7
+}
