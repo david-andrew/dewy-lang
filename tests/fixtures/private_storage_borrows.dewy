@@ -1,0 +1,15 @@
+$explicit_copies
+let counter:int64=0
+tick=():>void=>{counter+=1}
+work=(flag:bool):>int64=>{
+ let owner:array<int64>=[42]
+ const selected=if flag owner else [42]
+ tick()
+ return if selected.length>?0 selected[0] else 1
+}
+main=():>int64=>{
+ if work(true) not=?42 or work(false) not=?42 return 1
+ let before:int64=_arena_allocated_bytes
+ loop i in [0..1000) {if work(true) not=?42 return 2}
+ return if _arena_allocated_bytes=?before and counter=?1002 42 else 3
+}

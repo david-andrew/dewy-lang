@@ -265,6 +265,26 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 let root=hir.node_at(nodes path.root)
                 if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.push(root.binding_id)}
             }
+            # Private locals cannot alias ambient state, provided their
+            # storage never crosses a raw/unmodelled boundary here. Ordinary
+            # resolved value calls supply their own independent argument.
+            let exposed:array<addr>=[]
+            if node is? hir.Transmute|hir.RepresentationCast {
+                if union_loan_source(item nodes table) is? none {exposed.push(node.expr)}
+            } else if node is? hir.FunctionCall and effects.direct_targets(node analysis nodes) is? none {
+                let func=hir.node_at(nodes effects.unwrap(node.func nodes))
+                let modeled=primitive(func registry) or (func is? hir.ArrayMethod and not (func.name=?'sort' and 'key' in? node.kw_args))
+                if not modeled {
+                    loop arg in node.pos_args {exposed.push(arg)}
+                    loop arg in node.kw_args.values {exposed.push(arg)}
+                    if func is? hir.ArrayMethod {exposed.push(func.array)}
+                }
+            }
+            loop value in exposed {
+                let path=bindings.access_path(value nodes facts=true)
+                let root=hir.node_at(nodes path.root)
+                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.push(root.binding_id)}
+            }
             if node is? hir.Declare and node.binding_id isnt? none and not node.view {
                 let value=hir.node_at(nodes node.expr)
                 # Ordinary calls return independent values; the call graph
@@ -333,14 +353,17 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         unprojected_reads[id]=rejected
     }
     loop id in analysis.literals {
-        if id in? blocked or id not in? bodies or id not in? stable_locals or id not in? writes continue
+        if id not in? bodies or id not in? stable_locals or id not in? writes continue
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters:dict<addr addr>=[]
-        const local_owners=@stable_locals[id]
-        loop param in effects.literal_params(literal) {
+        let local_owners:dict<addr addr>=[]
+        loop [binding type] in stable_locals[id] {if binding not in? captured {local_owners[binding]=type}}
+        # Keep the whole-call-graph alias guard for incoming storage. Private
+        # fresh owners cannot be reached through another caller/global name.
+        if id not in? blocked {loop param in effects.literal_params(literal) {
             if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
-        }
+        }}
         const body=@bodies[id]
         # Whole-function local views share the allocation-contract proof.
         # Restrict this boundary to identical stored representations; scoped
@@ -365,7 +388,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 # Keep the direct-forwarding rule when naming a projection:
                 # sibling writes preserve its bytes, overlapping writes do not.
                 if not ordinary(owner table @eligible) or not stable_projection(incoming path nodes) continue
-            } else if source.binding_id not in? local_views {
+            } else if source.binding_id not in? local_views and (source.binding_id not in? local_owners or not ordinary(local_owners[source.binding_id] table @eligible)) {
                 # One dependency per candidate. Only a proved owner wakes its
                 # readers; cycles or unknown owners cannot establish a loan.
                 if source.binding_id in? waiting_views {let readers=@waiting_views[source.binding_id] readers.push(item)}

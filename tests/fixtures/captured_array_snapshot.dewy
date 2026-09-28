@@ -1,0 +1,10 @@
+make=():>array<int64>=>[42]
+work=(flag:bool):>int64=>{
+ let owner=make()
+ read=():>int64=>if owner.length>?0 owner[0] else 0
+ const selected:array<int64>=if flag owner else []
+ let observed=read()
+ if observed not=?42 return 2
+ return if selected.length>?0 selected[0] else 1
+}
+main=():>int64=>work(true)

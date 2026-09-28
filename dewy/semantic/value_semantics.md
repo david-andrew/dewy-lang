@@ -27,6 +27,15 @@ Mutations, escaping uses and statement-bearing arms retain the ordinary
 ownership rules; returning the selected array still requires an independent
 value or a proved transfer. Allocation contracts consume the same evidence.
 
+The stability proof distinguishes incoming storage from a private fresh owner.
+An unrelated helper's global effects may invalidate an incoming alias, but
+cannot reach a local value whose address never escapes and which no closure
+captures. Such local owners and their projections can remain borrowed across
+those calls. Direct writes, exposed places, representation casts, raw or
+unresolved argument exposure, and captured owners retain their conservative
+ownership checks. A later lifted closure call also keeps its captured owner
+alive even when the hidden argument is absent from the source syntax.
+
 Set and dictionary algebra borrow their inputs while constructing an
 independent result. If evaluating the right operand might change the left
 value, the left retains a reported snapshot first. For example,

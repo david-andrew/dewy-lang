@@ -36,6 +36,32 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): shared storage proofs distinguish private fresh
+owners from incoming aliases. An unwritten local created by a literal or
+ordinary value call may lend its storage across unrelated ambient effects,
+provided no capture, direct place/raw exposure or representation escape can
+reach it. Parameters retain the whole-call-graph alias guard. Named
+projections and array selections use this same proof in allocation checking
+and both lowerers. Three additional compiler modules (`method_syntax`,
+`module_directives`, `path_values`) now enable `$explicit_copies` without
+adding explicit copies, and pass both compiler routes.
+
+The captured-owner regression also exposed a hosted last-use bug: after
+lifting, hidden capture arguments were absent from the syntactic use scan,
+allowing an array to move before a later closure read. The scan now honors
+the original capture inventory. Unknown capture lifetimes keep their
+snapshot obligation; no new closure semantics were introduced.
+
+Nine focused hosted checks and the paired private-owner group pass, including
+zero-allocation repetition, union fields, mutation, address exposure and
+captured reads. The broader capture/ownership suite passes all 125 checks
+(335.28 seconds). The complete native compiler passes hosted checking and
+builds through the updated native driver. The execution driver now normalizes
+entry/library/cache paths like the real CLI; a mixed relative/absolute path
+regression also verifies warm-cache identity. Three new fixtures bring the
+full manifest to 351. Full compiler-wide strict adoption and the final Phase 1
+integration/scaling/audit milestones remain open.
+
 Checkpoint (2026-09-28): allocation contracts and both lowerers share a
 read-only array-selection proof. Complete conditional leaves may borrow
 stable arrays or use bounded scalar frame literals, with lazy arm evaluation

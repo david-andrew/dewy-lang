@@ -224,6 +224,26 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             target = node.target if isinstance(node, hir.IteratorExpression) else predicate_effects.write_target(node)
             if target is not None:
                 written.add(bindings.access_path(target, unwrap=bindings._unwrap_fact_route).binding_id)
+        # Private fresh owners cannot alias ambient state. Keep only owners
+        # whose storage never crosses an unmodelled/raw boundary in this body;
+        # ordinary resolved value calls manage their own independent argument.
+        for node in body:
+            exposed = []
+            if isinstance(node, (hir.Transmute, hir.RepresentationCast)):
+                if union_loan_source(node) is None:
+                    exposed.append(node.expr)
+            elif isinstance(node, hir.FunctionCall) and analysis._direct_targets(node) is None:
+                func = _unwrap(node.func)
+                modeled = (isinstance(func, hir.ExpressedIdentifier) and func.binding_id is None and func.name in OPERATORS
+                           or isinstance(func, hir.ArrayMethod) and not (func.name == 'sort' and 'key' in node.kw_args))
+                if not modeled:
+                    exposed.extend([*node.pos_args, *node.kw_args.values()])
+                    if isinstance(func, hir.ArrayMethod):
+                        exposed.append(func.array)
+            for value in exposed:
+                path = bindings.access_path(value, unwrap=bindings._unwrap_fact_route)
+                if isinstance(path.root, hir.ExpressedIdentifier):
+                    written.add(path.root.binding_id)
         writes[key] = written
         captured.update(node.binding_id for node in body if isinstance(node, hir.ExpressedIdentifier)
                         and node.binding_id is not None and node.binding_id not in local)
@@ -268,12 +288,19 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             if isinstance(child, hir.ExpressedIdentifier)
             and not (isinstance(node, hir.MemberAccess) and child is node.value)
         }
+    # A nested function may capture an owner even if that function is not
+    # called directly here. It cannot enter the private-owner proof.
+    stable_locals = {key: {binding: type_ for binding, type_ in owners.items() if binding not in captured}
+                     for key, owners in stable_locals.items()}
     result, local_views, literal_arguments = {}, set(), {}
     flow_views, flow_literals, flow_sources = set(), set(), set()
     for literal in analysis.literals:
-        if id(literal) in blocked:
-            continue
-        parameters = {p.binding_id: p for p in _literal_params(literal) if not p.place}
+        # Incoming storage may alias a global written by a nested call.
+        # Private fresh owners have no such alias: their direct writes,
+        # exposure and captures were excluded above. Keep the graph-wide
+        # restriction for parameters, without applying it to private locals.
+        parameters = {} if id(literal) in blocked else {
+            p.binding_id: p for p in _literal_params(literal) if not p.place}
         # An unwritten projection can lend its parameter's existing storage.
         # No retagging, lifecycle operation, capture, or escaping address is
         # admitted by this shared proof. More precise scoped views remain a
@@ -293,7 +320,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             incoming = summaries.for_param_binding(own.binding_id) if own else None
             if not isinstance(source, hir.ExpressedIdentifier) or source.binding_id is None:
                 continue
-            if own is None and source.binding_id not in local_views:
+            private = stable_locals[id(literal)].get(source.binding_id)
+            if own is None and source.binding_id not in local_views and not (private is not None and ordinary(private)):
                 # Each candidate depends on one named owner. Wake it only
                 # when that owner is proved; cycles and unknown owners never
                 # seed a proof. No repeated scan of the complete body.

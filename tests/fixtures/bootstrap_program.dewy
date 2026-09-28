@@ -1,4 +1,6 @@
 from reporting import Error
+import p"../../dewy/bootstrap/paths.dewy" as paths
+import p"../../dewy/bootstrap/invocation/platform.dewy" as platform
 import p"../../dewy/bootstrap/semantic/modules.dewy" as modules
 import p"../../dewy/bootstrap/semantic/prelude.dewy" as prelude
 import p"../../dewy/bootstrap/semantic/prelude_cache.dewy" as cache
@@ -10,11 +12,16 @@ import p"../../dewy/bootstrap/backend/udewy/program.dewy" as program
 # for every case. Entry modules and all emitted programs remain independent.
 main=(argv:array<string>):>int64=>{
     $runtime_assert argv.length >=? 4
-    let files=prelude.files(argv[2] 'x86_64')
-    loop index in 4.. and index <? argv.length {files.push(argv[index])}
-    let engine=modules.Engine[library_roots=[argv[2]] prelude_files=files]
-    engine.prelude_cache=cache.Config[argv[0] argv[3] 'x86_64' [argv[2]] files]
-    let entry=modules.load(argv[1] @engine)
+    # Match the real CLI's absolute module identities. Mixing a relative
+    # entry import with an absolute prelude would check one file twice.
+    let cwd=platform.kernel_path(false)
+    if cwd is? Error {cwd.fail}
+    let library=paths.absolute(argv[2] cwd)
+    let files=prelude.files(library 'x86_64')
+    loop index in 4.. and index <? argv.length {files.push(paths.absolute(argv[index] cwd))}
+    let engine=modules.Engine[library_roots=[library] prelude_files=files]
+    engine.prelude_cache=cache.Config[paths.absolute(argv[0] cwd) paths.absolute(argv[3] cwd) 'x86_64' [library] files]
+    let entry=modules.load(paths.absolute(argv[1] cwd) @engine)
     if entry is? Error {entry.fail}
     let expected=environment('DEWY_TEST_PRELUDE_CACHE')
     if expected isnt? none and (expected =? 'hit') not=? engine.prelude_cache_restored return 3

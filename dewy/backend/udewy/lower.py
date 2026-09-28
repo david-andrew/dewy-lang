@@ -4093,8 +4093,10 @@ class _Lowerer(
         moves: set[int] = set()
         for binding_id, (_declared_at, declared_depth) in owned.items():
             references = uses.get(binding_id, [])
-            if binding_id in self.borrow_plan.exposed_bindings:
-                continue  # raw/unknown aliases cannot be justified by named uses
+            if binding_id in self.borrow_plan.exposed_bindings or binding_id in self.borrow_plan.captured_bindings:
+                # Lifted calls acquire hidden capture arguments after this
+                # scan. A syntactic last read cannot consume their owner.
+                continue
             if not references or any(nested for _seq, _depth, nested, _transfer in references):
                 continue
             if binding_id in strings and len(references) != 1:
