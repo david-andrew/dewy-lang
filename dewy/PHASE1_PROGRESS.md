@@ -6174,3 +6174,14 @@ remaining transfer opportunities; do not silently erase entries or claim a
 passing budget from the former incomplete inventory. The full report is at
 `/tmp/dewy-record-field-copy-budget.json` in this session. The 265-case paired
 manifest remains running at this snapshot.
+
+## Adoption validation correction (2026-09-28)
+
+Whole-program checking found that the standalone adoption probe above was not
+sufficient: unused exports were not lowered. `namespaces.field` still snapshots
+a runtime-sized ModuleField on return, and the standalone result did not certify
+that path. The premature directives on `namespaces` and `type_names` are removed;
+they need reachable-function tests before adoption. `container_methods` retains
+its directive pending the full-graph check, making the current physical count
+26. Do not interpret standalone module acceptance as complete copy-policy
+coverage or insert explicit copies merely to preserve an adoption count.
