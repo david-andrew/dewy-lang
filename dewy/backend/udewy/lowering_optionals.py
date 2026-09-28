@@ -479,7 +479,7 @@ class _OptionalLowering:
             return statements, dest
         if isinstance(unfolded, ty.ObjectType):
             prelude, source = self._extract_object_pointer(value)
-            if self._frame_record_call(value):
+            if self._frame_record_temporary(value):
                 # The union owns its cloned payload. The call's frame-rooted
                 # result still owns fields until the enclosing statement ends.
                 prelude, source = self._object_statement_temporary(prelude, source, unfolded, loc)

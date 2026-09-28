@@ -1,11 +1,13 @@
 count=(keys:set<string>):>int64=>keys.length
 snapshot=(table:dict<string int64>):>set<string>=>table.keys
+optional=(table:dict<string int64>):>(set<string>)? =>table.keys
 exercise=():>int64=>{
     let table:dict<string int64>=['answer'->42]
     table.keys;
     table.keys.copy();
     if count(table.keys) not=?1 return 1
     snapshot(table);
+    optional(table);
     if snapshot(table).length not=?1 return 2
     return 42
 }
