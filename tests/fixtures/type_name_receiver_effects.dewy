@@ -1,0 +1,7 @@
+Item=type of [value:int64]
+let calls:int64=0
+make=():>Item=>{calls+=1 Item[42]}
+main=():>int64=>{
+    let name=make().typename
+    return if name=?'Item' and calls=?1 42 else 1
+}

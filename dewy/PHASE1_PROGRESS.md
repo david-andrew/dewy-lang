@@ -6288,3 +6288,18 @@ Validation: six insertion checks pass including native x86-64/C execution and
 rejections; 24 surrounding hosted allocator checks pass. Explicit `.copy()`
 remains accepted, and resetting the arena leaves the inserted snapshot valid.
 Two fixtures bring the manifest to 278 cases.
+
+## Receiver evaluation and public effects (2026-09-28)
+
+A statically known `.typename` now preserves evaluation of a computed receiver
+in both compilers. Knowing its name does not erase a call, its effects, or its
+cleanup. Hosted brand dispatch also now captures computed receivers inside the
+expression, instead of hoisting them before an enclosing conditional or reading
+an effectful member receiver separately in multiple arms. The same helper serves
+brand-directed string conversions. Plain names/type values retain their cheap
+constant path.
+
+Validation: seven checks pass including native x86-64/C execution and an empty
+effect-row rejection; 20 surrounding brand/conversion/interpolation checks pass.
+Three fixtures bring the manifest to 281 cases. This closes the explicit TODO
+in native `type_names.instance` without introducing a new evaluation rule.

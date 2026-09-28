@@ -56,9 +56,12 @@ instance = (value:addr loc:Span @session:contexts.Session):>addr => {
     let node=hir.node_at(session.hir value)
     let choices=alternatives(node.value_type session)
     let fallback=literal(node.value_type loc @session)
-    # Match the hosted constant-name path. TODO: audit whether an effectful
-    # receiver should still run when its name needs no runtime brand dispatch.
-    if choices.length =? 0 return fallback
+    if choices.length =? 0 {
+        if node is? hir.ExpressedIdentifier|hir.TypeValue return fallback
+        # A known name still evaluates a computed receiver once at this point.
+        let discarded=hir.append_node(@session.hir hir.Suppress[loc types.primitive('void' @session.types) value])
+        return hir.append_node(@session.hir hir.Block[loc hir.node_at(session.hir fallback).value_type [discarded fallback] true])
+    }
     let id=bindings.allocate(@session.registry none "__dewy_typename_{session.registry.next_id}" 'value' loc)
     let binding=bindings.binding_at(session.registry id)
     binding.value_type=node.value_type binding.store_type=node.value_type

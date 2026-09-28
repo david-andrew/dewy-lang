@@ -1053,26 +1053,6 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 }
 
 
-def _readable_object(value: hir.AST, *, ctx: Context) -> hir.AST | None:
-    """The value as something read once per arm without effects: itself when it
-    is a name or a field, else a hidden local hoisted before the statement
-    (None where nothing can be hoisted)."""
-    if isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
-        return value
-    if ctx.hoisted is None:
-        return None
-    loc = value.loc
-    name = f'__dewy_field_{ctx.binding_registry.next_id}'
-    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
-    binding.type = value.type
-    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
-    binding.declaration = declaration
-    ctx.declarations[name] = value.type
-    ctx.binding_scopes[name] = binding
-    ctx.hoisted.append(declaration)
-    return hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id)
-
-
 def _brand_dispatch(value: hir.AST, loc: Span, per_brand: 'Callable[[hir.AST, ty.ObjectType], hir.AST]', otherwise: 'Callable[[hir.AST], hir.AST]', *, ctx: Context) -> hir.AST | None:
     """A string-valued flow over the brands a value may carry at runtime (a
     mint's descendants; the mints minted from a plain structure): one `is?`
@@ -1089,14 +1069,24 @@ def _brand_dispatch(value: hir.AST, loc: Span, per_brand: 'Callable[[hir.AST, ty
         return None
     if not alternatives:
         return None
-    readable = _readable_object(value, ctx=ctx)
-    if readable is None:
-        return None
+    # Dispatch evaluates its receiver once, inside this expression. Hoisting
+    # it before an enclosing condition changes whether/when its effects run;
+    # treating an arbitrary MemberAccess as repeatable duplicates its receiver.
+    declaration = None
+    readable = value
+    if not isinstance(value, hir.ExpressedIdentifier):
+        name = f'__dewy_brand_{ctx.binding_registry.next_id}'
+        binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
+        binding.type = binding.store_type = value.type
+        declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+        binding.declaration = declaration
+        readable = hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id)
     arms = [
         hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', readable, ty.USER_BRAND_TYPES[brand], False), per_brand(replace(readable, type=narrowed_type(brand)), ty.USER_BRAND_TYPES[brand]))
         for brand in alternatives
     ]
-    return hir.Flow(loc, ty.StringType(), arms, otherwise(readable))
+    result = hir.Flow(loc, ty.StringType(), arms, otherwise(readable))
+    return result if declaration is None else hir.Block(loc, result.type, [declaration, result], True)
 
 
 def _typename(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
@@ -1109,7 +1099,13 @@ def _typename(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
         text = plain.brand if isinstance(plain, ty.ObjectType) and ty.user_branded(plain) and plain.brand is not None else type_to_dewy(plain)
         return hir.String(loc, ty.StringLiteralType(text), text)
     dispatched = _brand_dispatch(value, loc, lambda narrowed, _child: own(narrowed), own, ctx=ctx)
-    return dispatched if dispatched is not None else own(value)
+    if dispatched is not None:
+        return dispatched
+    result = own(value)
+    if isinstance(value, (hir.ExpressedIdentifier, hir.TypeValue)):
+        return result
+    # A statically known name does not erase evaluation of a computed receiver.
+    return hir.Block(loc, result.type, [hir.Suppress(value.loc, ty.VOID_TYPE, value), result], True)
 
 
 def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:

@@ -1,0 +1,11 @@
+Root=$abstract type of [value:int64]
+let Child=type of Root
+Grandchild=type of Child
+let calls:int64=0
+make=():>Root=>{calls+=1 Grandchild[42]}
+main=():>int64=>{
+    let name=if false make().typename else 'skip'
+    if calls not=?0 or name not=?'skip' return 1
+    name=make().typename
+    return if name=?'Grandchild' and calls=?1 42 else 2
+}
