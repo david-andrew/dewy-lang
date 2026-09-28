@@ -6538,3 +6538,20 @@ ordinary temporary cleanup. The full temporary fixture is included alongside
 the narrowed-record regressions; both paired groups pass (82 seconds), retaining
 the zero-allocation read-only kernel. This failure was caught before claiming
 a new native fixed point.
+
+## Reuse completed lifecycle resource queries (2026-09-28)
+
+The native lifecycle rewrite now keeps a type-id cache in its pass-local Plan,
+matching the hosted pass's cache lifetime. Both resource-bearing and negative
+answers are retained. Recursive walks still finish with their own visited set
+before publishing an answer, so a partially explored cycle cannot create a
+false negative. Newly synthesized types have new ids; a new rewrite pass starts
+with an empty cache. This removes repeated scratch arrays/sets for the same
+checked type without changing hook selection or ownership rules.
+
+Validation: the direct kernel passes with native compilation and with a fresh
+hosted-built executable on x86-64/C. It covers cycles with and without a nested
+hook and 2,000 warmed negative queries with zero allocated bytes. Twenty-seven
+recursive copy/drop, resource-replacement and union checks pass, including
+paired execution. The kernel brings the parity manifest to 308 cases. Full
+self-build volume and timing are still to be measured for this batch.

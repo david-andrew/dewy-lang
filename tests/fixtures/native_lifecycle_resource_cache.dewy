@@ -1,0 +1,31 @@
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/lifecycle_runtime.dewy" as lifetime
+
+# Completed queries, including negative ones, belong to this type arena and
+# pass. Cycles must not cache a negative answer before visiting every edge.
+main=():>int64=>{
+    let table=types.Table[]
+    let word=types.primitive('int64' @table)
+    let leaf=types.object_type([types.ObjectField['word' word]] none false [] [] @table)
+    let owned=types.object_type([] 'Resource' false [types.MethodSpec['drop' 0 lifecycle='drop']] [] @table)
+    let reference=types.named_type('Cycle' 1 @table)
+    let cycle=types.object_type([types.ObjectField['resource' owned] types.ObjectField['next' reference]] none false [] [] @table)
+    types.resolve_alias(reference cycle @table)
+    let plain_reference=types.named_type('PlainCycle' 2 @table)
+    let plain_cycle=types.object_type([types.ObjectField['next' plain_reference] types.ObjectField['leaf' leaf]] none false [] [] @table)
+    types.resolve_alias(plain_reference plain_cycle @table)
+    let known:dict<addr addr?>=[]
+    if lifetime.resource(cycle table @known) not=? owned return 1
+    if lifetime.resource(reference table @known) not=? owned return 2
+    if lifetime.resource(plain_cycle table @known) isnt? none return 3
+    if lifetime.resource(leaf table @known) isnt? none return 4
+    let count=known.length
+    let before=_arena_allocated_bytes
+    loop i in 0..999 {
+        if lifetime.resource(plain_cycle table @known) isnt? none return 5
+        if lifetime.resource(leaf table @known) isnt? none return 6
+    }
+    if known.length not=?count return 7
+    if _arena_allocated_bytes not=?before return 8
+    return 42
+}
