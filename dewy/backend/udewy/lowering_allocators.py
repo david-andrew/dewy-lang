@@ -24,6 +24,25 @@ def _body_nodes(root):
             pending.extend(hir.children(node))
 
 
+def _leaves_scope(root):
+    """A local loop exit does not leave its enclosing allocator context."""
+    pending, seen = [(root, 0)], set()
+    while pending:
+        node, depth = pending.pop()
+        key = id(node), depth
+        if key in seen:
+            continue
+        seen.add(key)
+        if isinstance(node, hir.Return):
+            return True
+        if isinstance(node, (hir.Break, hir.Continue)) and node.loop_levels >= depth:
+            return True
+        if not isinstance(node, (hir.FunctionLiteral, hir.GenericFunction)):
+            nested = depth + isinstance(node, hir.LoopArm)
+            pending.extend((child, nested) for child in hir.children(node))
+    return False
+
+
 class _AllocatorLowering:
     @staticmethod
     def _allocator_owned(type_):
@@ -92,7 +111,7 @@ class _AllocatorLowering:
         if self._allocator_owned(block.type):
             return 'hosted aggregate copy-out still uses the enclosing allocator'
         nodes = [node for item in block.items for node in _body_nodes(item)]
-        if any(isinstance(node, (hir.Return, hir.Break, hir.Continue)) for node in nodes):
+        if _leaves_scope(block):
             return 'hosted allocator scope with control-flow exits uses the enclosing allocator'
         declared = {node.binding_id for node in nodes if isinstance(node, hir.Declare)}
         declared.update(node.target.binding_id for node in nodes if isinstance(node, hir.IteratorExpression))

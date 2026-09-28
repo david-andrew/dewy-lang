@@ -5898,3 +5898,11 @@ constant outer elements, sibling transfers, changed selectors and overlapping
 route rejection. The new nested repeated-call fixture retains zero bytes and is
 included in the 248-case manifest. The preceding full 246-case checkpoint remains
 the integration baseline until this extension completes its fresh build gates.
+
+
+Hosted placement follow-up (2026-09-28): local `break`/`continue` edges whose
+target loops remain inside an allocator block no longer force heap fallback.
+Scope analysis checks actual loop depth; returns and edges leaving the allocator
+scope still retain the documented conservative fallback. Two hosted cases and
+the paired placement case pass, including context restoration and continued
+fallback for a nonlocal exit. This fixture brings the manifest to 249 cases.

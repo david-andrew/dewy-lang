@@ -1,0 +1,23 @@
+# Loop exits inside this scope do not leave its allocator context.
+build=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) {xs.push(i)}
+    return xs
+}
+main=():>int64=>{
+    let arena=Arena[]
+    let size=$allocator(@arena) {
+        let xs:array<int64>=[]
+        loop i in [0..10) {
+            if i=?1 continue
+            xs.push(build(i).length)
+            if i=?4 break
+        }
+        xs.length
+    }
+    if size not=?4 or arena.handle=?0 return 1
+    let check=_arena_alloc(8)
+    let owner=_allocator_of(check)
+    _arena_release(check 8)
+    return if owner=?0 42 else 2
+}
