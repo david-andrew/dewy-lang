@@ -823,6 +823,13 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ArrayMethod and callee.name =? 'join' {
+            let source=route(callee.array nodes)
+            if source isnt? none and source.binding in? places {source=none}
+            loop argument in arguments(node) {
+                if expression_conflicts(argument source nodes plan dirty) {array_snapshots.push(id) break}
+            }
+        }
         if callee is? hir.ExpressedIdentifier and callee.name in? ['__eq__' '__ne__'] and (callee.binding_id is? none or callee.binding_id not in? plan.source_bindings) and node.pos_args.length =? 2 {
             let source=route(peel_argument(node.pos_args[0] nodes type_nodes) nodes)
             if source is? none or not stable_owner(source stable stable_parameters) {

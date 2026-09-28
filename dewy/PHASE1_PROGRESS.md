@@ -5403,3 +5403,24 @@ owner donation with a live view, escaping returns, empty alternatives, effectful
 prefixes and a failing runtime guard. The preceding nine focused checks also
 passed. This is a native storage optimization, not a new source-level borrowing
 contract or a claim of complete hosted placement parity.
+
+
+## Borrow join inputs and preserve separator evaluation order (2026-09-27)
+
+Native string-array joins no longer acquire an independent input unconditionally.
+They borrow for the duration of the read, retaining and releasing a fresh
+receiver when necessary. Both borrow analyzers now use their existing later-
+operand conflict proof for separators, including globals reached through place
+parameters. A conflicting separator gets a snapshot before evaluation. This
+also fixes a hosted value-semantics bug: clearing/repopulating the receiver in
+the separator previously changed `['a' 'b'].join(...)` into `new-b`.
+
+The snapshot is reported with its reason and obeys `$explicit_copies` for
+runtime-length inputs. Fixed arrays of shared immutable strings retain the
+approved exemption. Thirty-five join/string/lifetime checks passed, including
+paired native execution, positional/keyword separators, ambient writes and
+repeated temporary/snapshot cleanup. The parity manifest now has 224 cases.
+`paths.dewy` and `invocation/cache.dewy` passed standalone lowering with the
+policy in both compilers and now enable it without added `.copy()` calls.
+The ordinary join test itself enables the directive, gating the eliminated
+runtime-array input copy independently of result-string placement.

@@ -720,7 +720,7 @@ expression = (id:addr @state:State):>addr => {
         }
         let args:array<addr>=[]
         let callee=hir.node_at(state.input.nodes node.func)
-        if callee is? hir.ArrayMethod return array_method_call(node callee @state)
+        if callee is? hir.ArrayMethod return array_method_call(node callee @state receiver_snapshot=(id in? state.array_snapshots))
         let function:addr=0
         if node.kw_args.length =? 0 and callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? state.symbols) and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics) {
             if callee.name in? ['__eq__' '__ne__'] and node.pos_args.length =? 2 {
@@ -3472,9 +3472,17 @@ interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
     prefix.push(segmented_string(buffer total node false @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
-string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
+string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State receiver_snapshot:bool=false):>addr => {
     let prefix:array<addr>=[]
-    let array=snapshot(owned_value(method.array @state) @prefix @state)
+    # The input is a read for the duration of this expression. Only a
+    # separator that can change the receiver requires independent storage.
+    let receiver=read_operand(method.array @prefix @state)
+    if receiver_snapshot and receiver.owner_type is? none {
+        let type=hir.node_at(state.input.nodes method.array).value_type
+        note_copy('array' type 'snapshotted before joining' 'the separator expression may write the array being read' call @state)
+        receiver=ReadOperand[copy_value(receiver.value type call @state) type]
+    }
+    let array=snapshot(receiver.value @prefix @state)
     let argument=call.kw_args.get('sep')
     if call.pos_args.length >? 0 {argument=call.pos_args[0]}
     let separator=if argument is? none string_literal(hir.String[call.loc types.string_literal('' @state.type_nodes) ''] @state) else owned_value(argument @state)
@@ -3503,7 +3511,7 @@ string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr 
     let advance=put(hir.Assign[call.loc empty offset '=' word_op('__add__' offset length call @state)] @state)
     let fill=put(hir.LoopArm[call.loc empty running sequence([conditional(separated sequence([separator_copy advance_gap] call @state) call @state) copy advance increment] call @state)] @state)
     prefix.push(put(hir.Flow[call.loc empty [fill] none] @state))
-    prefix.push(release_value(array hir.node_at(state.input.nodes method.array).value_type call @state))
+    if receiver.owner_type isnt? none {prefix.push(release_value(array receiver.owner_type call @state))}
     prefix.push(string_runtime('_native_string_release' [separator] call @state result_void=true))
     prefix.push(segmented_string(buffer total call false @state))
     return put(hir.Block[call.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
@@ -3715,8 +3723,8 @@ push_helper = (element:addr stride:addr call:hir.AST @state:State):>string => {
     state.generated.push(program.Function[generated literal])
     return generated
 }
-array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
-    if method.name =? 'join' return string_join(call method @state)
+array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State receiver_snapshot:bool=false):>addr => {
+    if method.name =? 'join' return string_join(call method @state receiver_snapshot=receiver_snapshot)
     if method.name =? 'sort' return array_sort(call method @state)
     if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'lend_write' 'set_length' 'insert'] return reject(call "array {method.name} lowering" @state)
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)

@@ -3191,6 +3191,8 @@ class _Lowerer(
             self._keyed_nodes_keepalive.append(transformed)
             if id(node) in self.borrow_plan.comparison_snapshots:
                 self.borrow_plan.comparison_snapshots.add(id(transformed))
+            if id(node) in self.borrow_plan.array_snapshots:
+                self.borrow_plan.array_snapshots.add(id(transformed))
             if id(node) in self.source_intrinsic_calls:
                 self.source_intrinsic_calls.add(id(transformed))
             borrowed = self.forwarded_values.get(id(node), ())

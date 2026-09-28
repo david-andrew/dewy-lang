@@ -2330,10 +2330,17 @@ class _StringLowering:
         def add(left: hir.AST, right: hir.AST) -> hir.AST:
             return self._int64_binary('__add__', left, right, loc)
 
-        prelude, array = self._extract_expression(method.array)
+        copied_receiver = id(node) in self.borrow_plan.array_snapshots and not self._array_expression_owns_fresh_storage(method.array)
+        if copied_receiver:
+            self._note_copy('array', array_type, 'snapshotted before joining',
+                            'the separator expression may write the array being read', node.loc)
+            prelude, array = self._clone_array_value(method.array, array_type)
+            prelude, array = self._array_result_temporary(method.array, array, prelude)
+        else:
+            prelude, array = self._extract_expression(method.array)
         statements.extend(prelude)
         array_word = replace(array, type='int64') if isinstance(array, hir.ExpressedIdentifier) else array
-        if isinstance(self._unwrap_transparent(method.array), hir.ArrayLiteral) and isinstance(array_word, hir.ExpressedIdentifier) and self._has_arena():
+        if not copied_receiver and isinstance(self._unwrap_transparent(method.array), hir.ArrayLiteral) and isinstance(array_word, hir.ExpressedIdentifier) and self._has_arena():
             # `[a b].join sep`: the literal is a temporary whose element copies die with the join
             alias = hir.ExpressedIdentifier(loc, 'int64', self._new_string_temp(loc, 'int64', 'join_literal').name)
             statements.append(hir.Assign(loc, ty.VOID_TYPE, alias, '=', array_word))

@@ -63,7 +63,7 @@ class Plan:
     place_bindings: set[int] = field(default_factory=set)
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
-    array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
+    array_snapshots: set[int] = field(default_factory=set)             # array reads whose later operands may write the receiver
     comparison_snapshots: set[int] = field(default_factory=set)        # comparison identities whose right operand may write the left
     interpolation_snapshots: dict[int, set[int]] = field(default_factory=dict)  # parts invalidated before materialization
     ambient_writes: dict[int, set[int]] = field(default_factory=dict)  # call identity -> nonlocal owners written
@@ -393,7 +393,10 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     plan = Plan(known_value_calls=known_value_calls)
     comparisons: dict[int, tuple[hir.AST, hir.AST]] = {}
     interpolations: dict[int, list[hir.AST]] = {}
+    joins: dict[int, hir.FunctionCall] = {}
     def comparison(node):
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name == 'join':
+            joins[id(node)] = node
         if isinstance(node, hir.InterpolatedString):
             interpolations[id(node)] = node.parts
         elif isinstance(node, hir.StringConcat):
@@ -482,6 +485,16 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
         if (not isinstance(unwrap(left), hir.String)
                 and expression_conflicts(right, source, plan, source_bindings)):
             plan.comparison_snapshots.add(identity)
+    # A join reads its receiver before evaluating the separator, just like
+    # an indexed read evaluates its receiver before the index. Reuse the
+    # same conflict proof; an aliasing place is not a distinct owner.
+    for identity, call in joins.items():
+        source = route(call.func.array)
+        if source is not None and source.binding in places:
+            source = None
+        if any(expression_conflicts(arg, source, plan, source_bindings)
+               for arg in [*call.pos_args, *call.kw_args.values()]):
+            plan.array_snapshots.add(identity)
     # Materialization evaluates every field before it copies the bytes. Keep
     # a snapshot only where a later field may invalidate an earlier read.
     # Record indices now, before callable rewriting changes call identities.

@@ -1,0 +1,18 @@
+# Receiver evaluation precedes separator evaluation. This read needs a
+# snapshot, even though ordinary joins can borrow their input array.
+separator=(@items:array<string>):>string=>{
+    items.clear
+    items.push('new')
+    return '-'
+}
+exercise=():>int64=>{
+    let items:array<string>=['a' 'b']
+    let result=items.join(separator(@items))
+    return if result=?'a-b' and items.length=?1 and items[0]=?'new' 42 else 1
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}
