@@ -123,11 +123,9 @@ checks pass (seven checks total).
 Integration at `cabf68ec`: three native generations reached an identical
 fixed point. A separately hosted-built driver passed all 35 focused union,
 reporting-borrow, startup-exposure, const-owner and widening checks. The
-broader hosted suite and 232-case paired manifest are still running; this
-checkpoint does not claim those results yet. Generation 2/3 builds took
+broader hosted selection passed 4,249 checks with 13 skips; all 232 paired
+manifest cases passed. Generation 2/3 builds took
 62/87 seconds under concurrent test load, not isolated timing measurements.
-
-## Strict-copy cleanup
 
 Checkpoint (2026-09-27): hosted lowering now uses last-use evidence when a
 local record enters an array literal, push/insert, or indexed replacement.
@@ -141,6 +139,22 @@ surrounding hosted checks pass. Tests include retained views, repeated-loop
 uses, COW snapshots, fixed-layout fallback and zero retained bytes over 200
 branch calls. `binary_literals.dewy` now moves its diagnostic Pointer locals;
 its remaining narrowed-array payload copy still prevents strict adoption.
+
+Checkpoint (2026-09-27): narrowed runtime-array payloads now have a distinct
+last-use transfer marker in hosted lowering. The transfer takes the array
+descriptor and clears only the owning cell's payload, never interpreting
+the cell itself as an array or clearing its address. Returns, bindings,
+record/array stores and reinjection into a union share that operation.
+Repeated-loop uses and live views retain snapshots. Nested array stores
+also now report their fallback copies, closing a strict-policy reporting
+hole. `semantic/binary_literals.dewy` passes `$explicit_copies` standalone
+in both compilers, bringing adoption to 24 physical modules. Validation:
+ten focused hosted checks, paired x86-64/C acceptance and execution, and
+50 surrounding hosted checks pass. A paired counter kernel proves zero
+allocation for a narrowed payload binding and zero retained bytes over
+repeated calls. These changes postdate the full `cabf68ec` integration above.
+
+## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was
 removed on 2026-09-20, with its patch and tests archived under

@@ -2419,6 +2419,19 @@ class _ArrayLowering(_ArraySharing):
         local is marked released so its scope exit leaves the data alone.
         """
         loc = node.loc
+        if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
+            members = self._stored_union_members(source)
+            if members is not None and any(ty.structural_base(member) == array_type for member in members):
+                # A narrowed identifier still stores a cell pointer, never a
+                # descriptor. The runtime-array alternative owns an arena
+                # descriptor. Take it once and retain the emptied cell for
+                # normal cleanup (including non-consuming branch paths).
+                cell = replace(source, type='int64', binding_id=None)
+                taken = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('taken_payload'))
+                self.move_notes.append(MoveNote(self.srcfile, source.loc,
+                    f'`{source.name}` array payload is moved when {site}: its last use transfers the descriptor and empties the owning cell', True))
+                return [hir.Declare(loc, ty.VOID_TYPE, 'let', taken.name, 'int64', self._load_i64_field(cell, 8, loc)),
+                        self._store_i64_field(cell, 8, self._int64_literal(loc, 0), loc)], taken
         if isinstance(source, hir.ExpressedIdentifier) and (adopt or id(source) in self.moved_uses):
             if not adopt:
                 self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is moved when {site}: this is its last use, so its storage is adopted rather than copied', True))
@@ -2917,10 +2930,15 @@ class _ArrayLowering(_ArraySharing):
         source_type = ty.strip_refinement(node.type)
         if isinstance(source_type, ty.ArrayType):
             array_type = source_type
+        source = self._copy_source_expression(node)
+        if id(source) in self.moved_payload_uses and array_type.length is None:
+            return self._transfer_array_value(node, source, array_type, site='stored in an element')
         # A literal/call row has no surviving source owner. Transfer its
         # element handles into the stored row; cloning them would abandon
         # the original owned strings, cells, and nested objects.
         fresh = self._array_expression_owns_fresh_storage(node)
+        if not fresh:
+            self._note_copy('array', array_type, 'stored in an element', self._copy_reason(node), node.loc)
         return self._clone_array_value(node, array_type, arena=True, move=fresh)
 
     def _array_storage_value(

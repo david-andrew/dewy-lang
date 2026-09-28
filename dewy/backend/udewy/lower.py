@@ -469,6 +469,7 @@ class _Lowerer(
         self.borrowed_default_inputs: set[str] = set()
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
+        self.moved_payload_uses: set[int] = set()  # last-use narrowed arrays still stored in owned union cells
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
         self.loop_regions: list[LoopRegion] = []   # the enclosing loops being lowered, innermost last (`_lower_loop_body`)
@@ -3691,7 +3692,7 @@ class _Lowerer(
         """Whether an array value stored into a field is the field's own storage (moved in, fresh, or cloned from a local) rather than a borrow of a parameter's or another object's."""
         source = self._copy_source_expression(value)
         if isinstance(source, hir.ExpressedIdentifier):
-            if id(source) in self.moved_uses:
+            if id(source) in self.moved_uses or id(source) in self.moved_payload_uses:
                 return True
             literal = self.current_literal
             params = [*literal.pos_or_kw_args, *literal.kw_only_args] if literal is not None else []
@@ -3795,6 +3796,7 @@ class _Lowerer(
                  if self._owned_cell_declaration(node)}
         records = {node.binding_id for node in hir.walk(literal.body)
                    if self._owned_object_declaration(node)}
+        payload_candidates: set[int] = set()
 
         def transfer(node: hir.AST, *, handle_only: bool = False, record_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
@@ -3802,9 +3804,14 @@ class _Lowerer(
                     and self._field_union_members(source.type) is None):
                 # Narrowing reads a cell's payload; it does not turn the
                 # binding into an independently owned array/record handle.
-                # Those lowerers empty a handle variable, whereas this owner
-                # still needs its cell for lexical cleanup. Whole-cell moves
-                # below are distinct from taking a selected payload.
+                # Ordinary moves empty a handle variable; this owner still
+                # needs its cell for lexical cleanup. Track a runtime-array
+                # payload separately so its transfer empties only the payload
+                # word. Other narrowed representations keep their copy.
+                narrowed = ty.structural_base(source.type)
+                if isinstance(narrowed, ty.ArrayType) and narrowed.length is None:
+                    payload_candidates.add(id(source))
+                    return {id(source): id(source)}
                 return {}
             if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells or record_element and source.binding_id in records):
                 return {id(source): id(source)}
@@ -3986,7 +3993,8 @@ class _Lowerer(
             if borrow_live_after(binding_id, _sequence):
                 continue
             moves.add(transfer)
-        return moves
+        self.moved_payload_uses = moves & payload_candidates
+        return moves - payload_candidates
 
     def _insert_releases(self, body: hir.AST, exit_statements: list[hir.AST] = ()) -> hir.AST:
         """Drop-at-scope-exit for owned array locals, over a lowered function body.
@@ -4541,7 +4549,7 @@ class _Lowerer(
                     else declared_type
                 )
                 source = self._copy_source_expression(node.expr)
-                if declared_type.length is None and isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_uses:
+                if declared_type.length is None and isinstance(source, hir.ExpressedIdentifier) and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
                     copy_prelude, copied = self._transfer_array_value(node.expr, source, declared_type, site=f'bound to `{node.name}`')
                 else:
                     self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)

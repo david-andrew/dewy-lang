@@ -486,6 +486,9 @@ class _OptionalLowering:
             clone_prelude, handle = self._union_handle_clone(source, member, loc)
             return [*prelude, *clone_prelude], handle
         assert isinstance(unfolded, ty.ArrayType)
+        source = self._copy_source_expression(value)
+        if unfolded.length is None and id(source) in self.moved_payload_uses:
+            return self._transfer_array_value(value, source, unfolded, site='stored in a union')
         return self._clone_dynamic_array_value(value, unfolded, arena=True)
 
     def _named_copy_call(self, named: ty.NamedType, source: hir.AST, loc: Span) -> hir.FunctionCall:

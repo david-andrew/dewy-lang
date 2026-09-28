@@ -1,0 +1,39 @@
+$explicit_copies
+# A narrowed array is still inside its owning cell. Taking the descriptor
+# empties that cell's payload, while the cell itself keeps its frame lifetime.
+make=(yes:bool):>array<int64>|none=>if yes [42] else none
+take=(yes:bool):>array<int64>=>{
+    let result=make(yes)
+    if result is? none return []
+    return result
+}
+exercise=(yes:bool):>int64=>{
+    let result=make(yes)
+    if result is? none return 0
+    let rows:array<array<int64>>=[]
+    rows.push(result)
+    return if rows.length>?0 and rows[0].length>?0 rows[0][0] else 1
+}
+measure=():>int64=>{
+    let result=make(true)
+    if result is? none return -1
+    let before:int64=_arena_allocated_bytes
+    let taken:array<int64>=result
+    let allocated:int64=_arena_allocated_bytes-before
+    return if taken.length=?1 and taken[0]=?42 allocated else -2
+}
+main=():>int64=>{
+    if measure() not=?0 return 5
+    exercise(true); exercise(false); take(true); take(false);
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        if exercise(true) not=?42 or exercise(false) not=?0 return 1
+        let result=take(true)
+        if result.length not=?1 or result[0] not=?42 return 2
+        let empty=take(false)
+        if empty.length not=?0 return 3
+    }
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 4
+}
