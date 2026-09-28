@@ -4454,31 +4454,37 @@ class _BoundsValidator:
 
     def _copy_relational_facts(self, state: State, source: int, target: int) -> None:
         """`let x = y`: the order, remainder, index and nonzero facts of `y` hold of `x`."""
-        for key, interval in list(state.items()):
+        if source == target:
+            return
+        # Collect only derived facts. Snapshotting the entire state allocates
+        # one tuple per unrelated fact on every value/field transfer.
+        updates: State = {}
+        for key, interval in state.items():
             if isinstance(key, DistinctFact):
                 if source in (key.left, key.right):
-                    state[_distinct_key(*(target if term == source else term for term in (key.left, key.right)))] = interval
+                    updates[_distinct_key(*(target if term == source else term for term in (key.left, key.right)))] = interval
                 continue
             remainder = _decode_remainder_fact(key)
             if remainder is not None:
                 if source in remainder:
-                    state[_remainder_key(*(target if term == source else term for term in remainder))] = interval
+                    updates[_remainder_key(*(target if term == source else term for term in remainder))] = interval
                 continue
             order = _decode_order_fact(key)
             if order is not None:
                 if source in order:
-                    state[_order_key(*(target if term == source else term for term in order))] = interval
+                    updates[_order_key(*(target if term == source else term for term in order))] = interval
                 continue
             index_fact = _decode_index_fact(key)
             if index_fact is not None and index_fact[0] == source:
-                state[_index_fact_key(target, index_fact[1])] = interval
+                updates[_index_fact_key(target, index_fact[1])] = interval
             elif index_fact is not None and source < 0 and _length_key(index_fact[1]) == source:
                 if target < 0:
-                    state[_index_fact_key(index_fact[0], -target - 1)] = interval
+                    updates[_index_fact_key(index_fact[0], -target - 1)] = interval
                 else:
                     # A length saved in a scalar is an order bound, not an
                     # array identity to which an IndexFact can refer.
-                    state[_order_key(index_fact[0], target)] = Interval(1, None)
+                    updates[_order_key(index_fact[0], target)] = Interval(1, None)
+        state.update(updates)
 
     # ---- element facts: what holds of every element of an array ----
     #

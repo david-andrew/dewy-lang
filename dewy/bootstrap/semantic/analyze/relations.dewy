@@ -151,38 +151,41 @@ ordered_direct = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.St
 
 replace_term = (term:facts.Term source:facts.Term target:facts.Term):>facts.Term => if facts.same_term(term source) target else term
 copy_relational = (@state:facts.State source:facts.Term target:facts.Term):>void => {
-    # Snapshot first: facts derived for the copy must not recursively feed
-    # this same copy operation or mutate the dictionary being traversed.
-    let entries = state.values
-    loop entry in entries {
+    if facts.same_term(source target) return
+    # Derive from the unchanged input, then publish together. A whole-state
+    # snapshot copied unrelated facts whenever publishing detached its array.
+    # The pending entries also prevent new evidence feeding this same transfer.
+    let entries:array<facts.Entry>=[]
+    loop entry in state.values {
         let fact = entry.fact
         if not facts.mentions(fact source) continue
         if fact is? facts.Order {
-            facts.put(@state facts.order(replace_term(fact.smaller source target) replace_term(fact.larger source target)) entry.interval)
+            entries.push(facts.Entry[facts.order(replace_term(fact.smaller source target) replace_term(fact.larger source target)) entry.interval])
         }
         else if fact is? facts.Distinct {
-            facts.put(@state facts.distinct(replace_term(fact.left source target) replace_term(fact.right source target)) entry.interval)
+            entries.push(facts.Entry[facts.distinct(replace_term(fact.left source target) replace_term(fact.right source target)) entry.interval])
         }
         else if fact is? facts.Remainder {
             let offset = fact.offset
             if source.projection =? 'value' and target.projection =? 'value' and offset =? source.binding_id { offset = target.binding_id }
-            facts.put(@state facts.remainder(replace_term(fact.subject source target) replace_term(fact.upper source target) offset) entry.interval)
+            entries.push(facts.Entry[facts.remainder(replace_term(fact.subject source target) replace_term(fact.upper source target) offset) entry.interval])
         }
-        else if fact is? facts.Nonzero and target.projection =? 'value' { facts.put(@state facts.nonzero(target.binding_id) entry.interval) }
+        else if fact is? facts.Nonzero and target.projection =? 'value' { entries.push(facts.Entry[facts.nonzero(target.binding_id) entry.interval]) }
         else if fact is? facts.Index {
             if source.projection =? 'value' and target.projection =? 'value' {
-                facts.put(@state facts.index(target.binding_id fact.sequence) entry.interval)
+                entries.push(facts.Entry[facts.index(target.binding_id fact.sequence) entry.interval])
             }
             else if source.projection =? 'length' and target.projection =? 'length' {
-                facts.put(@state facts.index(fact.index target.binding_id) entry.interval)
+                entries.push(facts.Entry[facts.index(fact.index target.binding_id) entry.interval])
             }
             else if source.projection =? 'length' and target.projection =? 'value' {
                 # `let n = xs.length`: an index bound against xs becomes an
                 # order bound against n, not an imaginary sequence with n's id.
-                facts.put(@state facts.order(facts.Term[fact.index] target) ranges.Interval[1 none])
+                entries.push(facts.Entry[facts.order(facts.Term[fact.index] target) ranges.Interval[1 none]])
             }
         }
     }
+    loop entry in entries {facts.put(@state entry.fact entry.interval)}
 }
 
 subject_of = (fact:facts.Fact):>facts.Term? => {

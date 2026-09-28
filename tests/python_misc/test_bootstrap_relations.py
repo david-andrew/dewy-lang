@@ -122,3 +122,9 @@ main = ():>int64 => {{
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=90, check=False)
     assert result.returncode == 0, result.stderr
     assert sorted(result.stdout.splitlines()) == sorted(expected)
+
+
+def test_sparse_relation_transfer_avoids_whole_state_allocation(tmp_path):
+    from test_scalar_projection import execute
+    source = SrcFile.from_path(ROOT / 'tests/fixtures/native_fact_transfer_scaling.dewy')
+    execute(tmp_path, 'fact-transfer-scaling', codegen(source, debug_locations=False))

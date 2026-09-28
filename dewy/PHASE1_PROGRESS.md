@@ -6630,3 +6630,27 @@ summaries unchanged. The expanded hosted-built comparison passes (314 seconds);
 the original comparison also passes under native compilation. Both modules
 enable `$explicit_copies`, bringing adoption to 35 modules without broadening
 the exemptions. The manifest adds the adjacency kernel (311 cases).
+
+The `11fa4515` frozen end-to-end run completed: **310/310 parity cases passed**,
+including the earlier length-counter failure and both borrowed-union regressions.
+
+## Publish relational transfers after deriving only their updates (2026-09-28)
+
+A large direct predicate test exposed states exceeding 100,000 facts. Relational
+copying took a complete environment snapshot for every stored value or field,
+even when only a few facts mentioned that source. Both implementations now
+collect derived entries while reading the unchanged input, then publish them.
+The native pass avoids detaching/copying the unrelated entry array; the hosted
+pass avoids allocating an item tuple for every unrelated fact. The operation
+still observes the original evidence throughout and never feeds a derived fact
+back into the same transfer. Copying a term to itself does no work.
+
+The native kernel with 1,000 unrelated facts and 100 distinct transfers falls
+from 4,419,328 allocated bytes to 113,152 (about 39x). Its allocation gate and
+explicit result/provenance checks also pass through hosted compilation on
+x86-64/C. The complete direct relational/fact-state comparisons pass, and 113
+hosted affine, scalar-snapshot, disequality and element-sequence regressions
+pass. The manifest includes the kernel (312 cases). These are scoped allocation
+improvements, not a reduction of the fact vocabulary or a claim that its dense
+relation growth is solved. The large predicate comparison still identifies that
+growth as further proof-engine scaling work.

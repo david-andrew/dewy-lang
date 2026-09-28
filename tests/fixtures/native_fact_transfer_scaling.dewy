@@ -1,0 +1,20 @@
+# Copying one value's relations should allocate for its derived facts,
+# not snapshot every unrelated fact in the current environment.
+import p"../../dewy/bootstrap/semantic/analyze/fact_state.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
+import p"../../dewy/bootstrap/semantic/analyze/relations.dewy" as relations
+main=():>int64=>{
+    let state=facts.State[]
+    state.values.reserve(1200)
+    state.next.reserve(1200)
+    loop i in 100..1099 {facts.put(@state facts.value(facts.Term[i]) ranges.Interval[0 10])}
+    facts.put(@state facts.order(facts.Term[1] facts.Term[2]) ranges.Interval[1 none true])
+    let before=_arena_allocated_bytes
+    loop repeat in 0..99 {relations.copy_relational(@state facts.Term[1] facts.Term[repeat+3])}
+    let allocated=_arena_allocated_bytes-before
+    let copied=facts.lookup(state facts.order(facts.Term[102] facts.Term[2]))
+    if copied is? none or copied.lower is? none or copied.lower not=?1 or not copied.capped return 1
+    if state.values.length not=?1101 return 2
+    if allocated >?256000 return 3
+    return 42
+}
