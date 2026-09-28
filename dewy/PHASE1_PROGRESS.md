@@ -5496,3 +5496,15 @@ kernel retains zero bytes across 200 conditional invocations and observes the
 expected 101 selector calls. It is included in the 227-case manifest. This
 extends the existing constant-slot rule; general runtime index identities and
 conditional dynamic-slot ownership remain separate work.
+
+
+## Copy-policy adoption in signatures and debug formatting (2026-09-27)
+
+`semantic/array_methods.dewy` and `backend/udewy/debug.dewy` now enable
+`$explicit_copies` after standalone hosted and native-built lowering passed
+with the directive. No implementation changes or `.copy()` annotations were
+needed. Four other probed modules still failed hosted proofs and remain
+unmarked: update invocation, container values, binary literals and syntax.
+In particular, a zero count in the reachable compiler inventory does not
+certify standalone/otherwise-unused function bodies. Compiler-source adoption
+now covers 20 physical modules and remains incomplete.
