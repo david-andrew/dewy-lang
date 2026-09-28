@@ -34,7 +34,6 @@ CASES.append((Path(__file__).parents[1] / 'fixtures/lifecycle_dynamic_siblings.d
 ERRORS = [HEADER + BODY.replace('return owner.sibling.id', statement + '\nreturn owner.sibling.id')
           for statement in [
               'if owner.items.length>?0 {let again=owner.items[0]}',
-              'owner.items=[Token[4]]',
               'owner.items.push(Token[4])',
           ]]
 

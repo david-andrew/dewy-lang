@@ -88,14 +88,13 @@ read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
     return result
 }
 # Whether a live entry needs the value a consumption of `path` takes.
-needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr> whole_region:bool=false):>bool=>{
+needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr>):>bool=>{
     loop entry in live.values {
         if binding not in? roots(entry.binding aliases) continue
         if entry.binding not=? binding return true
         if entry.measure {
             if under(entry.path path) return true
         } else if entry.store {
-            if whole_region and (under(path entry.path) or under(entry.path path)) return true
             # Storing into a component needs its ancestors, not the component.
             if path.length <? entry.path.length and under(entry.path path) return true
         } else if under(path entry.path) or under(entry.path path) return true
@@ -103,8 +102,8 @@ needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr> 
     return false
 }
 LoopExit:type=const [after:Live repeated:Live]
-consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis whole_region:bool=false):>void=>{
-    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases whole_region) {
+consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
+    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases) {
         analysis.consumes[id]=binding
         if path.length >? 0 {analysis.paths[id]=path}
     } else {
@@ -191,10 +190,10 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         }
         if id in? analysis.candidates {
             let enclosing=field_route(id nodes allow_prefix=true)
-            # Replacing a partial owner needs dynamic-flag renewal. Only
-            # whole-owner rebinding has that protocol so far.
+            # Replacing the complete containing region starts a new lifetime.
+            # Descendant stores still require the possibly partial old region.
             if enclosing isnt? none {
-                consume(id enclosing.binding enclosing.path live enabled @analysis whole_region=true)
+                consume(id enclosing.binding enclosing.path live enabled @analysis)
                 # Disjoint containing arrays may transfer independently;
                 # possibly overlapping routes retain this complete prefix.
                 add_entry(@live Entry[enclosing.binding enclosing.path])

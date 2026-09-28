@@ -885,9 +885,11 @@ use. Full integration evidence is tracked in `PHASE1_PROGRESS.md`.
 Ownership follow-up (2026-09-28): runtime-selected transfers now preserve
 unrelated sibling fields, and disjoint containing arrays can transfer on the
 same path. Cleanup propagates independent presence conditions and saved selectors
-through nested arrays. Possibly overlapping dynamic routes and partial-array
-renewal remain conservative; these are remaining lifetime-proof cases, not
-implicit permission to copy a resource.
+through nested arrays. Replacing a statically selected containing array or ancestor after a dynamic
+element transfer now cleans only the old remainder and restores the new value
+across backedges. Possibly overlapping dynamic routes remain conservative;
+this is a remaining lifetime-proof case, not implicit permission to copy a
+resource.
 
 ### 1.2 The proof engine
 

@@ -24,7 +24,7 @@ Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 ComponentFlag:type = const [path:array<string|int64> flag:Captured]
 # Save runtime selectors for lexical cleanup separately from static paths.
 # Liveness keeps possibly overlapping containing arrays mutually exclusive.
-DynamicComponent:type = const [owner:addr flag:Captured selectors:array<Captured> path:array<string|addr>]
+DynamicComponent:type = const [owner:addr flag:Captured selectors:array<Captured> path:array<string|addr> region:array<string|int64>]
 # Presence includes ancestor selector mismatches when descending into arrays.
 SelectedPresence:type = const [path:array<string|addr> present:addr]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
@@ -610,6 +610,18 @@ held_under=(binding:addr path:array<string|int64> plan:Plan):>array<ComponentFla
         let i:addr=path.length
         loop i <? component.path.length {rest.push(component.path[i]) i+=1}
         result.push(ComponentFlag[rest component.flag])
+    }
+    return result
+}
+# A statically selected ancestor replacement retires a complete dynamic
+# region. Runtime selectors below it stay saved for the old value's cleanup.
+dynamic_under=(binding:addr path:array<string|int64> plan:Plan):>array<DynamicComponent>=>{
+    let result:array<DynamicComponent>=[]
+    loop component in plan.dynamic_owners.get(binding []) {
+        if component.region.length<?path.length continue
+        let inside=true
+        loop i in [0..path.length) {if component.region[i] not=?path[i] {inside=false break}}
+        if inside {result.push(component)}
     }
     return result
 }
@@ -1858,12 +1870,21 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let logical_route=ownership_liveness.field_route(selected session.hir)
         let removed:array<Extraction>=[]
         let held:array<ComponentFlag>=[]
+        let dynamic:array<SelectedPresence>=[]
         let restored:array<addr>=[]
         if logical_route isnt? none {
             let path=logical_route.path
             # The new value restores every component under this route.
             held=held_under(logical_route.binding path plan)
             restored=restore_flags(held node.loc @session)
+            loop component in dynamic_under(logical_route.binding path plan) {
+                let rest:array<string|addr>=[]
+                let i:addr=path.length
+                loop i<?component.path.length {rest.push(component.path[i]) i+=1}
+                dynamic.push(SelectedPresence[rest component.flag.value])
+                let present=put(hir.Bool[node.loc types.primitive('bool' @session.types) true] @session)
+                restored.push(put(hir.Assign[node.loc types.primitive('void' @session.types) component.flag.value '=' present] @session))
+            }
             let retained:array<Extraction>=[]
             loop route in plan.extractions.get(logical_route.binding []) {
                 let inside=path.length<=?route.path.length
@@ -1889,7 +1910,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         }
         let first:Extraction?=none
         if removed.length>?0 {first=removed.pop}
-        drop_value(selected target.value_type node.loc set[] @prefix @plan @session extraction=first additional=removed guards=held)
+        drop_value(selected target.value_type node.loc set[] @prefix @plan @session extraction=first additional=removed guards=held dynamic=dynamic)
         let stored=if node is? hir.MemberAssign hir.MemberAssign[node.loc node.value_type selected replacement.value] else hir.IndexAssign[node.loc node.value_type selected replacement.value]
         prefix.push(put(stored @session))
         loop restore in restored {prefix.push(restore)}
@@ -2345,7 +2366,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
                 }
             }
             let present=put(hir.Bool[function.loc types.primitive('bool' @session.types) true] @session)
-            let component=DynamicComponent[owner capture_result(present function.loc @session) selectors saved_path]
+            let component=DynamicComponent[owner capture_result(present function.loc @session) selectors saved_path path]
             plan.dynamic_components[read]=component
             let owner_components=plan.dynamic_owners.get(owner [])
             owner_components.push(component)

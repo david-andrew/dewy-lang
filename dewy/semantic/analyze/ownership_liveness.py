@@ -160,14 +160,14 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                     candidates.add(id(value))
 
     consumes = {}
-    def needed(binding, path, live, whole_region=False):
+    def needed(binding, path, live):
         for entry, entry_path, kind in live:
-            if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, 'read' if whole_region and kind == 'store' else kind)):
+            if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, kind)):
                 return True
         return False
 
-    def consume(node, binding, path, live, enabled, *, whole_region=False):
-        if binding in enabled and id(node) in candidates and not needed(binding, path, live, whole_region):
+    def consume(node, binding, path, live, enabled):
+        if binding in enabled and id(node) in candidates and not needed(binding, path, live):
             consumes[id(node)] = (binding, path)
         else:
             consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
@@ -217,9 +217,10 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
         if isinstance(node, (hir.MemberAccess, hir.Index)) and id(node) in candidates:
             route = field_route(node, allow_prefix=True)
             if route is not None:
-                # Partial replacement still needs its own dynamic-flag
-                # renewal protocol; only whole-owner rebinding resets it.
-                consume(node, route[0], route[1], live, enabled, whole_region=True)
+                # A replacement of this whole containing region starts a new
+                # lifetime. Writes into its possibly absent elements still need
+                # the old region and prevent transfer, just like other reads.
+                consume(node, route[0], route[1], live, enabled)
                 # Another transfer may use a disjoint containing array;
                 # possible overlap still keeps this entire prefix live.
                 live.add((route[0], route[1], 'read'))

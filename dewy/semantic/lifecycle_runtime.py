@@ -124,14 +124,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     component_flags = {}
     # Runtime-selected routes need saved selectors as well as a presence flag.
     # Liveness keeps potentially overlapping containing arrays mutually exclusive.
-    dynamic_components = {}  # read id -> (owner, flag, selector captures, path)
+    dynamic_components = {}  # read id -> (owner, flag, selector captures, path, static region)
     dynamic_owners = {}
 
     def dynamic_for(owner):
         return dynamic_owners.get(owner, ())
 
+    def dynamic_under(owner, path):
+        # A static ancestor replacement can retire an entire dynamic region.
+        # Selectors below that ancestor remain runtime values, saved at move.
+        return [entry for entry in dynamic_for(owner) if entry[4][:len(path)] == path]
+
     def dynamic_declarations(owner):
-        return [declaration for _, flag, selectors, _ in dynamic_for(owner)
+        return [declaration for _, flag, selectors, _, _ in dynamic_for(owner)
                 for declaration in [flag[0], *(item[0] for item in selectors)]]
     extractions = {}  # last-use components; the remaining owner keeps its lexical cleanup
 
@@ -413,7 +418,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             guards = {path: flag[1] for path, flag in component_flags.get(owner.binding_id, {}).items()}
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
                  extraction=routes[0] if routes else None, additional=routes[1:], guards=guards or None,
-                 dynamic=[(path, presence[1]) for _, presence, _, path in dynamic_for(owner.binding_id)])
+                 dynamic=[(path, presence[1]) for _, presence, _, path, _ in dynamic_for(owner.binding_id)])
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -435,6 +440,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     break
             routes = []
             guards = {}
+            dynamic = []
             if isinstance(part, hir.ExpressedIdentifier):
                 path = tuple(reversed(path))
                 existing = extractions.get(part.binding_id, ())
@@ -444,8 +450,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     if tuple(step.value if isinstance(step, hir.Integer) else step for step in route[:len(path)]) != path]
                 guards = {route[len(path):]: flag[1] for route, flag in component_flags.get(part.binding_id, {}).items()
                           if route[:len(path)] == path}
+                dynamic = [(route[len(path):], flag[1]) for _, flag, _, route, _ in dynamic_under(part.binding_id, path)]
             drop(selected, selected.type, set(), run_hook=not selected_moved, extraction=routes[0] if routes else None, additional=routes[1:],
-                 guards=guards or None)
+                 guards=guards or None, dynamic=dynamic)
         if suffix is not None:
             value, first, before = suffix
             drop(value, value.type, set(), tail=(first, before))
@@ -1361,7 +1368,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         saved, value = capture(value, child.loc)
                         dynamic = dynamic_components.get(id(child))
                         if dynamic is not None:
-                            _, flag, selectors, _ = dynamic
+                            _, flag, selectors, _, _ = dynamic
                             indices = [step for step in projection[1] if not isinstance(step, str)]
                             saved_indices = [hir.Assign(child.loc, ty.VOID_TYPE, captured[1], '=', index)
                                              for captured, index in zip(selectors, indices)]
@@ -1494,7 +1501,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, component[1], '=', hir.Bool(node.loc, 'bool', True))
                                 for component in component_flags.get(source.binding_id, {}).values())
                 activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))
-                                for _, flag, _, _ in dynamic_for(source.binding_id))
+                                for _, flag, _, _, _ in dynamic_for(source.binding_id))
                 released = cleanup([source], node.loc)
                 extractions.pop(source.binding_id, None)
                 return hir.Block(node.loc, node.type, [declaration, *released,
@@ -1584,6 +1591,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 activate = [] if route is None else [
                     hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))
                     for path, flag in component_flags.get(route[0], {}).items() if path[:len(route[1])] == route[1]]
+                if route is not None:
+                    activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))
+                                    for _, flag, _, _, _ in dynamic_under(*route))
                 return hir.Block(node.loc, node.type, [*prefix, declaration,
                     *cleanup((), node.loc, selected=selected), replace(node, target=selected, value=value), *activate], False)
             if isinstance(node, hir.MemberAssign):
@@ -1652,7 +1662,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         selectors.append(saved)
                         route.append(saved[1])
                 flag = capture(hir.Bool(literal.loc, 'bool', True), literal.loc)
-                dynamic_components[read] = entry = owner, flag, selectors, tuple(route)
+                dynamic_components[read] = entry = owner, flag, selectors, tuple(route), path
                 dynamic_owners.setdefault(owner, []).append(entry)
                 continue
             if path:

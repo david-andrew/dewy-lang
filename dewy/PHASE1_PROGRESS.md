@@ -6697,3 +6697,28 @@ completed record's field intervals. The direct regressions pass on x86-64/C
 hosted constructor/default, scalar snapshot and array-fact checks pass, as do
 the three paired groups on both backends (71.50 s). The native parity manifest
 now contains 314 cases. Full integration follows this focused checkpoint.
+
+## Renew containing arrays after conditional element transfers (2026-09-28)
+
+Hosted and native ownership now permit replacing the statically selected
+containing array (or an ancestor record) after a runtime-selected element
+transfers out. Cleanup uses the saved selectors and presence flags to drop only
+the old value's still-owned components. The replacement resets flags under its
+route; sibling regions retain their independent flags. This works across loop
+backedges and when replacement evaluation changes the original selector.
+
+The liveness rule is shared with ordinary component renewal: a store needs its
+ancestors, not the old value it wholly replaces. Reading an old element, storing
+inside a possibly partial array, or renewing only on an unrelated conditional
+path still cannot justify a transfer. No dynamic disjointness assumption or
+resource copy was added. Potentially overlapping dynamic routes remain a
+separate lifetime-proof task.
+
+Validation: 49 adjacent hosted checks passed, followed by all nine tests in the
+expanded renewal group. All five paired ownership groups passed on hosted/native
+x86-64/C (114.02 s), including multiple simultaneous regions and zero retained
+storage over repeated renewal. The new loop fixture joins the parity manifest
+(315 cases). The preceding `ad4c959c` constructor-lifetime snapshot reached a
+three-generation direct native fixed point; generations 2/3 took 51/59 seconds
+under concurrent checking. Its standalone native analyzer scaling kernel also
+returned 42. Full parity and broad hosted checks for that snapshot are ongoing.
