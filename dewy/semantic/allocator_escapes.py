@@ -122,8 +122,9 @@ def block_escapes(block: hir.AllocatorBlock) -> list[Escape]:
             found.append(_escape(node.value, f'stored into {_name(node.keys)}', arena))
         elif (isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod)
               and node.func.name in ('push', 'insert') and outer(node.func.array)):
-            value = node.pos_args[0] if node.func.name == 'push' and node.pos_args else (
-                node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args.get('value'))
+            # Both methods take the value first; insert's second argument
+            # selects its position and does not carry the stored allocation.
+            value = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
             if value is not None:
                 found.append(_escape(value, f'stored into {_name(node.func.array)}', arena))
         elif isinstance(node, hir.Return) and node.item is not None:

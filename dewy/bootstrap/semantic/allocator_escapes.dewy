@@ -112,8 +112,8 @@ block_escapes = (block:hir.AllocatorBlock nodes:array<hir.AST> type_nodes:types.
             let callee=hir.node_at(nodes node.func)
             if callee is? hir.ArrayMethod and (callee.name =? 'push' or callee.name =? 'insert') and outer(callee.array declared nodes) {
                 let value:addr?=none
-                if callee.name =? 'push' and node.pos_args.length >? 0 {value=node.pos_args[0]}
-                else if node.pos_args.length >? 1 {value=node.pos_args[1]}
+                # push(value), insert(value idx): the index is not the escape.
+                if node.pos_args.length >? 0 {value=node.pos_args[0]}
                 else {value=node.kw_args.get('value')}
                 if value isnt? none {found.push(escape(value "stored into {name(callee.array nodes)}" arena nodes))}
             }

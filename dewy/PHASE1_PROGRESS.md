@@ -6274,3 +6274,17 @@ new interval, reverse-order and exclusion states. The combined element groups
 pass 52 checks including native execution on x86-64/C. Branches containing a
 foreign value and clear/reinsert paths still reject unsupported claims. Two
 fixtures bring the full manifest to 276 cases.
+
+## Insertion allocator boundary (2026-09-28)
+
+Both allocator escape scanners now select argument zero of `insert(value idx)`,
+matching `push(value)`, rather than accidentally reporting the scalar index.
+Named arguments retain the same rule. This closes a missing copy note and a
+strict-policy acceptance hole when a runtime-sized value enters an outer array
+from an allocator block. The ordinary placement fallback still protects storage;
+this change makes its source-level boundary visible and enforced.
+
+Validation: six insertion checks pass including native x86-64/C execution and
+rejections; 24 surrounding hosted allocator checks pass. Explicit `.copy()`
+remains accepted, and resetting the arena leaves the inserted snapshot valid.
+Two fixtures bring the manifest to 278 cases.

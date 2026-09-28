@@ -1,0 +1,9 @@
+$explicit_copies
+label=(n:int64):>string=>"item {n}"
+main=():>int64=>{
+    let arena=Arena[]
+    let values:array<string>=[]
+    $allocator(@arena) {values.insert(label(42) 0)}
+    arena.reset()
+    return if values.length=?1 and values[0]=?"item 42" 42 else 1
+}
