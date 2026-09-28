@@ -456,7 +456,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     plan.exposed_bindings = exposed
     # A single place parameter can be stable too, provided no call can
     # change it through an ambient alias. Unknown calls write the sentinel.
-    ambient = analyze_global_writes(root, plan.globals | captured | {-1})
+    ambient = analyze_global_writes(root, plan.globals | captured | {-1}, source_reports=True)
     for function in plan.functions.values():
         place_stable = (len(function.places) == 1
                         and not function.writes & (plan.globals | captured)

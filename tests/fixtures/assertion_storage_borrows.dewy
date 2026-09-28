@@ -1,0 +1,25 @@
+$explicit_copies
+# Diagnostic support code cannot reach these source arrays. The checked
+# message, if any, would still contribute its own effects.
+read=(values:array<int64>):>int64=>{
+    $runtime_assert values.length>?0
+    return values[0]
+}
+forward=(@values:array<int64>):>int64=>read(values)
+Box:type=[values:array<int64> count:int64]
+read_and_count=(values:array<int64> @count:int64):>int64=>{
+    count+=1
+    $runtime_assert values.length>?0
+    return values[0]
+}
+forward_record=(@box:Box):>int64=>read_and_count(box.values @box.count)
+main=():>int64=>{
+    let values:array<int64>=[42]
+    let box=Box[[42] 0]
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..20) {
+        if forward(@values) not=?42 or forward_record(@box) not=?42 return 1
+    }
+    if box.count not=?20 return 2
+    return if _arena_allocated_bytes=?before 42 else 3
+}

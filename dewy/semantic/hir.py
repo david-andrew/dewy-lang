@@ -845,6 +845,11 @@ class FunctionCall(AST):
     implicit_copy: bool = field(default=False, kw_only=True)
     # Granted only by scoped-storage checking for a nonescaping raw read.
     scoped_read: bool = field(default=False, kw_only=True)
+    # Installed runtime diagnostic support, not an ordinary source call to
+    # the same helper. Storage borrowing excludes its implementation writes;
+    # argument evaluation (messages and diagnostic operands) remains source
+    # behavior, and ordinary public effect analysis still sees the report.
+    compiler_report: bool = field(default=False, kw_only=True)
     #TODO: spread args
 
 @dataclass(slots=True, weakref_slot=True)

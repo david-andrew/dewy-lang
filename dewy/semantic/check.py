@@ -5812,7 +5812,9 @@ def _assert_failure_report(
         return hir.Integer(loc, ty.IntegerLiteralType(value), '0d', value)
 
     def call(name: str, *arguments: hir.AST) -> hir.FunctionCall:
-        return _checked_call(_compiler_helper(name, loc=loc, ctx=ctx), list(arguments), loc=loc, ctx=ctx)
+        result = _checked_call(_compiler_helper(name, loc=loc, ctx=ctx), list(arguments), loc=loc, ctx=ctx)
+        result.compiler_report = True
+        return result
 
     body = ctx.srcfile.body
     line_start = body.rfind('\n', 0, condition_ast.loc.start) + 1

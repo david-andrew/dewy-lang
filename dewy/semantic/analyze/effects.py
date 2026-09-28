@@ -826,13 +826,18 @@ def read_only_places(root: hir.AST, context: hir.AST | None = None) -> set[int]:
     return safe - unsafe
 
 
-def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int]]:
+def analyze_global_writes(root: hir.AST, globals: set[int], *, source_reports: bool = False) -> dict[int, set[int]]:
     """May-write roots for each call, including transitive/default effects.
 
     Reuse direct-call resolution from parameter effects. Scan each body once,
     then propagate finite sets through the call graph. Unknown calls may write
     every tracked global; creating a nested function does not execute its body.
     Borrowed endpoints are tracked separately by read_only_places.
+
+    Storage borrowing can exclude installed diagnostic support, matching
+    native RuntimeFailure handling. Messages and diagnostic operands remain
+    ordinary evaluated children. Other consumers retain implementation
+    writes, including allocator/I/O state; this is not a purity guarantee.
     """
     if not globals:
         return {}
@@ -842,7 +847,9 @@ def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int
     calls = {id(node): node for node in hir.walk(root) if isinstance(node, hir.FunctionCall)}
     targets = {}
     for key, call in calls.items():
-        if isinstance(call.func, hir.ArrayMethod):
+        if source_reports and call.compiler_report:
+            targets[key] = []
+        elif isinstance(call.func, hir.ArrayMethod):
             resolved = []
             if call.func.name == 'sort':
                 for callback in (call.kw_args.get('key'), call.func.key_copy):

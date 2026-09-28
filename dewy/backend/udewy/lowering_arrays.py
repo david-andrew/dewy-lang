@@ -459,6 +459,20 @@ class _ArrayLowering(_ArraySharing):
         source = None if root in self.borrow_plan.place_bindings else borrowing.Route(root, fields)
         after = False
         for key, argument in [*enumerate(call.pos_args), *call.kw_args.items()]:
+            if after and isinstance(argument, hir.Place):
+                # A pure field selection from this very owner cannot mutate
+                # a disjoint sibling while computing its address. Preserve
+                # that evidence even when the owner is itself a place. Index
+                # evaluation and differently named owners keep the ambient
+                # alias check below.
+                target = argument.target
+                while isinstance(target, hir.MemberAccess):
+                    target = target.value
+                place = self._storage_field_route(argument.target)
+                if (isinstance(target, hir.ExpressedIdentifier)
+                        and target.binding_id == root and place is not None
+                        and not self._storage_routes_overlap(storage_route, place)):
+                    continue
             if after and borrowing.expression_conflicts(
                     argument, source, self.borrow_plan, self.binding_by_semantic_id):
                 return False

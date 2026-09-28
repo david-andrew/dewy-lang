@@ -58,6 +58,22 @@ and 3 during concurrent checking; these are correctness evidence, not
 isolated throughput measurements. The union-transfer changes above postdate
 that checkpoint and have their own focused paired checks.
 
+Checkpoint (2026-09-27): hosted storage borrowing now distinguishes installed
+assertion-reporting calls from source evaluation, matching native
+`RuntimeFailure` handling. The compiler's diagnostic allocator/I/O support
+does not force snapshots of unrelated source arrays. Messages and diagnostic
+operands still contribute their ordinary effects; explicit source calls to
+reporters remain ordinary calls. This exclusion is specific to borrowing:
+public effect inference and other global-write consumers still see report
+implementation effects. A pure place selection from the same record can
+also preserve the existing proof that two sibling fields are disjoint;
+effectful selectors and other possible ambient aliases remain conservative.
+`semantic/container_values.dewy` now passes `$explicit_copies` standalone in
+both compilers, bringing adoption to 22 physical modules. Validation: 156
+hosted surrounding checks, paired execution on x86-64/C, a zero-allocation
+guarded-reader kernel, and failed-assertion messages that mutate their source
+while still observing the original snapshot.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was
