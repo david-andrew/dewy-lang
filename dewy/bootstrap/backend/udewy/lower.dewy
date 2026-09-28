@@ -95,6 +95,7 @@ State:type = [
     receiver_type:addr?=none
     receiver_fields:dict<addr string>=[]
     borrowed_arguments:dict<addr set<addr>>=[]
+    literal_arguments:dict<addr set<addr>>=[]
     # Value-boundary ownership transfers (see borrowing.Consumed): arguments
     # the caller donates without releasing, and the parameter reads that
     # adopt them instead of copying.
@@ -4578,18 +4579,32 @@ initialize_frame=(id:addr destination:addr @state:State):>addr=>{
     else {state.frame_records[id]=previous}
     return value
 }
-object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
+object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>addr => {
     let layout=object_layout(node.value_type node @state)
     let record=object_type(node.value_type @state)
     $runtime_assert record isnt? none
     let prefix:array<addr>=[]
     let temporary:array<OwnedLocal>=[]
     let frame=state.frame_records.get(id)
+    $runtime_assert not loan or frame isnt? none
     let destination=if frame is? none snapshot(record_allocation(layout node @state) @prefix @state) else frame
     loop item in node.fields {
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
         $runtime_assert field isnt? none and offset isnt? none
+        if loan {
+            # Shared proof: scalar words and stable array handles only. This
+            # call root never owns a field and must not retain or release it.
+            let value=expression(item.value @state)
+            if item.binding_id isnt? none {
+                let name=symbol(item.name item.binding_id @state)
+                let type=runtime_type(field.value_type node @state)
+                prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name type value item.binding_id] @state))
+                value=put(hir.ExpressedIdentifier[item.loc type name item.binding_id] @state)
+            }
+            prefix.push(field_write(address(destination offset node @state) value field.value_type node @state))
+            continue
+        }
         # A record field is inline storage: the write copies the source's
         # fields (retaining what they own) straight into the literal's block.
         # A source that is a view of existing storage (a field, an element,
@@ -4801,6 +4816,7 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     else {function=code_reference(direct callee @state)}
     if projection isnt? none {function=put(hir.ExpressedIdentifier[node.loc code_type(projection.function node @state result=projection.result) projection.symbol] @state)}
     let borrowed=state.borrowed_arguments.get(id set[])
+    let literal_loans=state.literal_arguments.get(id set[])
     let disposable=state.disposable_arguments.get(id set[])-borrowed
     let reclaimable=state.reclaimable_arguments.get(id set[])
     let temporary:array<OwnedLocal>=[]
@@ -4808,12 +4824,12 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     let views_allowed=string_free_type(signature.ret @state)
     let consumed=state.consumed_arguments.get(id set[])
     loop argument in node.pos_args {
-        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable)
+        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable literal_loans=literal_loans)
         positional.push(value)
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable)
+        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable literal_loans=literal_loans)
     }
     let args:array<addr>=[]
     if receiver isnt? none {args.push(receiver)}
@@ -4937,7 +4953,12 @@ string_free_type = (id:addr @state:State depth:addr=0):>bool => {
     if plain is? types.FunctionType return false
     return true
 }
-call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State reclaimable:set<addr>=set[]):>addr => {
+call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State reclaimable:set<addr>=set[] literal_loans:set<addr>=set[]):>addr => {
+    if argument in? literal_loans {
+        let source=hir.node_at(state.input.nodes argument)
+        $runtime_assert source is? hir.ObjectLiteral and argument not in? consumed
+        return snapshot(object_literal(argument source @state loan=true) @prefix @state)
+    }
     # A donated argument is an owned value the callee takes over: a fresh
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
@@ -5052,6 +5073,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     # borrowed inline field pointer may do in place.
     let written:set<addr>=set[]
     let local_declarations:array<addr>=[]
+    let loan_literals:set<addr>=set[]
     let pending:array<addr>=[node.body]
     loop parameter in parameters(node) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
     let visited:set<addr>=set[]
@@ -5061,6 +5083,9 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         visited.push(child)
         let current=hir.node_at(state.input.nodes child)
         if current is? hir.FunctionLiteral continue
+        if current is? hir.FunctionCall {
+            loop argument in state.literal_arguments.get(child set[]) {loan_literals.push(argument)}
+        }
         if current is? hir.Declare {local_declarations.push(child)}
         if current is? hir.Assign {
             let target=hir.node_at(state.input.nodes current.target)
@@ -5123,6 +5148,17 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
+    # One bounded root per proven call expression, reused across iterations.
+    # Its fields borrow storage and have no lexical cleanup registration.
+    loop initializer in loan_literals {
+        let literal=hir.node_at(state.input.nodes initializer)
+        let layout=object_layout(literal.value_type literal @state)
+        let name=fresh('call_record_frame' @state)
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let allocated=intrinsic_call('__alloca__' [word(layout.size literal @state)] word_type literal @state)
+        prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
+        state.frame_records[initializer]=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
+    }
     let frame_array_bindings:set<addr>=set[]
     loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
@@ -5383,6 +5419,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     timing.finish('lowering.borrowing' borrowing_started)
     state.timings=timings
     state.borrowed_arguments=borrowed.arguments
+    state.literal_arguments=borrowed.literal_arguments
     state.nonescaping_places=borrowed.nonescaping_places
     state.fixed_places=borrowed.fixed_places
     state.indirect_calls=borrowed.indirect

@@ -3237,6 +3237,13 @@ class _Lowerer(
                     if position is not None and id(node.pos_args[position] if isinstance(position, int)
                                                   else node.kw_args[position]) in borrowed
                 }
+            literal_loans = self.storage_borrow_proofs.literal_arguments.get(id(node), ())
+            if literal_loans:
+                self.storage_borrow_proofs.literal_arguments[id(transformed)] = {
+                    id(argument) for argument, position in zip(transformed.pos_args, source_positions)
+                    if position is not None and id(node.pos_args[position] if isinstance(position, int)
+                                                  else node.kw_args[position]) in literal_loans
+                }
             for index, (argument, source_position) in enumerate(zip(
                 transformed.pos_args,
                 source_positions,

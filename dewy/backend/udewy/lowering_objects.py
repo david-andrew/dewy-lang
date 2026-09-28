@@ -370,6 +370,28 @@ class _ObjectLowering:
         the argument first. Distinct fields of a record do not overlap.
         """
         object_type = ty.structural_base(arg.type)
+        if id(arg) in self.storage_borrow_proofs.literal_arguments.get(id(call), ()):
+            assert isinstance(arg, hir.ObjectLiteral) and isinstance(object_type, ty.ObjectType)
+            assert position not in self.owned_record_arguments.get(id(call), ())
+            # A fixed frame root lends stable handles for this call only.
+            # It owns no fields, so there is no retain or temporary cleanup.
+            # Constant loop allocations are hoisted by the shared frame pass.
+            size, offsets = self._object_layout(object_type, arg)
+            dest = self._new_object_temp(arg.loc)
+            statements = [hir.Declare(arg.loc, ty.VOID_TYPE, 'let', dest.name, 'int64',
+                                      self._object_allocation(arg.loc, size))]
+            statements.extend(self._brand_word_store(dest, object_type, arg.loc))
+            names = {field.binding_id: field.name for field in arg.fields if field.binding_id is not None}
+            self.object_literal_contexts.append((dest, object_type, names))
+            try:
+                for field in arg.fields:
+                    prelude, value = self._extract_expression(field.value)
+                    statements.extend(prelude)
+                    statements.extend(self._value_store(value, self._field_address(dest, offsets[field.name], field.loc),
+                                                        object_type.field(field.name).type, field.loc))
+            finally:
+                self.object_literal_contexts.pop()
+            return statements, dest
         if not isinstance(object_type, ty.ObjectType) and expected_type is not None:
             # A parent parameter may receive a narrowed union of descendants.
             # The union view still reads that parent's dynamic record layout

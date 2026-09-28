@@ -288,6 +288,12 @@ def inventory(root, registry, allocator_scopes=None):
                             elif projected_storage(path) and any(item.writes for item in parameter_summaries):
                                 storage()
                     else:
+                        if id(argument) in storage_proofs.literal_arguments.get(id(node), ()):
+                            # The fixed call root owns no storage. Evaluating
+                            # every source field still contributes effects.
+                            for child in hir.children(argument):
+                                visit(child)
+                            continue
                         loan = (storage_borrows.union_loan_source(argument)
                                 if id(argument) in borrowed_arguments.get(id(node), ()) else None)
                         visit(argument if loan is None else loan)

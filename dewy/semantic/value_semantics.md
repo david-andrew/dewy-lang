@@ -6,12 +6,24 @@ Both compilers preserve independent values across ordinary bindings,
 assignments, arguments and returns. The implementation combines proven
 borrows and moves with a provisional copy-on-write fallback. Fixed local
 storage may live in the frame when lifetime analysis proves it cannot escape.
+
+A fixed temporary record passed to a known read-only function can also lend
+stable fields for the duration of the call. The current shared proof covers
+scalar words and dynamic-array handles when the callee only projects fields
+from the root. The root owns no storage, and field evaluation still has its
+ordinary effects. Returned field values keep their normal independent value
+semantics. Conflicting writes, exposed storage, lifecycle hooks, layout
+conversions and unsupported shapes retain the copy/allocation obligation.
+The implementation bounds these temporary roots to 4 KiB per function and
+reuses them across loop iterations; exceeding that proof budget never grants
+a `no allocates` promise.
+
 Runtime arrays, nested records, dictionaries and tagged unions retain their
 value semantics regardless of placement. This is not a promise that every
 source assignment performs a physical copy.
 
 Implementation coverage and remaining ownership restrictions are tracked in
-[the Phase 1 checklist](../PHASE1_PROGRESS.md#current-completion-checklist-2026-09-27).
+[the Phase 1 checklist](../PHASE1_PROGRESS.md#current-completion-checklist-2026-09-28).
 First-class escaping places and capturing function values remain unsupported.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.

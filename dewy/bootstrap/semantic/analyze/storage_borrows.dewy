@@ -82,7 +82,65 @@ union_loan_source=(id:addr nodes:array<hir.AST> table:types.Table):>addr?=>{
     if node isnt? hir.ValueCast|hir.RepresentationCast return none
     return if views.preserves_union_payload(hir.node_at(nodes node.expr).value_type node.value_type table) node.expr else none
 }
-Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr>]
+# A bounded call root owns no fields: only words and dynamic-array handles.
+# Other layouts need separate cleanup/representation evidence.
+record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table):>array<addr>|none=>{
+    if node isnt? hir.ObjectLiteral or not borrowable(node.value_type table) return none
+    let shape=types.node_at(table views.structural_base(node.value_type table))
+    if shape isnt? types.ObjectType or shape.fields.length not=?node.fields.length return none
+    let arrays:array<addr>=[]
+    loop field in node.fields {
+        let expected=types.object_field(shape field.name)
+        if expected is? none return none
+        let stored_id=views.structural_base(expected.value_type table)
+        let actual_id=views.structural_base(hir.node_at(nodes field.value).value_type table)
+        let stored=types.node_at(table stored_id)
+        let actual=types.node_at(table actual_id)
+        if stored is? types.ArrayType and stored.length is? none {
+            if not types.same_type(actual_id stored_id table) return none
+            arrays.push(field.value)
+        } else if types.is_primitive(stored 'bool') and actual is? types.Primitive and actual.name in? ['bool' 'true' 'false'] {
+            continue
+        } else {
+            let bounds=views.fixed_integer_bounds(stored_id table)
+            if bounds is? none return none
+            if not types.same_type(actual_id stored_id table) {
+                if actual isnt? types.IntegerLiteralType or actual.value<?bounds.minimum or actual.value>?bounds.maximum return none
+            }
+        }
+    }
+    return arrays
+}
+stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool>):>bool=>{
+    let path=bindings.access_path(value nodes)
+    let source=hir.node_at(nodes path.root)
+    if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
+    let own=parameters.get(source.binding_id)
+    let local=local_owners.get(source.binding_id)
+    let stable=source.binding_id in? local_views or (local isnt? none and ordinary(local table @eligible))
+    if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
+        const incoming=@summaries.by_param_binding[source.binding_id]
+        stable=stable_projection(incoming path nodes)
+    }
+    if not stable return false
+    loop id in path.steps {
+        let step=hir.node_at(nodes id)
+        let stored:addr?=none
+        if step is? hir.Index {
+            let parent=types.node_at(table views.structural_base(hir.node_at(nodes step.array).value_type table))
+            if parent is? types.ArrayType {stored=parent.element}
+        } else if step is? hir.MemberAccess {
+            let parent=types.node_at(table views.structural_base(hir.node_at(nodes step.value).value_type table))
+            if parent is? types.ObjectType {
+                let field=types.object_field(parent step.name)
+                if field isnt? none {stored=field.value_type}
+            }
+        }
+        if stored is? none or not types.same_type(views.structural_base(stored table) views.structural_base(step.value_type table) table) return false
+    }
+    return true
+}
+Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[]]
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>prove(analysis summaries nodes table registry).arguments
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let eligible:dict<addr bool>=[]
@@ -176,6 +234,22 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     }
     let result:dict<addr set<addr>>=[]
     let local_views:set<addr>=set[]
+    let literal_arguments:dict<addr set<addr>>=[]
+    let unprojected_reads:dict<addr set<addr>>=[]
+    loop id in analysis.literals {
+        if id not in? bodies continue
+        let rejected:set<addr>=set[]
+        let parents:array<addr>=[id]
+        loop item in bodies[id] {parents.push(item)}
+        loop item in parents {
+            let parent=hir.node_at(nodes item)
+            loop child in hir.children(parent) {
+                let value=hir.node_at(nodes child)
+                if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and not (parent is? hir.MemberAccess and child=?parent.value) {rejected.push(value.binding_id)}
+            }
+        }
+        unprojected_reads[id]=rejected
+    }
     loop id in analysis.literals {
         if id in? blocked or id not in? bodies or id not in? stable_locals or id not in? writes continue
         let literal=hir.node_at(nodes id)
@@ -236,6 +310,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 loop reader in readers {pending_views.push(reader)}
             }
         }
+        let literal_bytes:addr=0
         loop item in body {
             let node=hir.node_at(nodes item)
             if node isnt? hir.FunctionCall continue
@@ -245,6 +320,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             loop arg in node.pos_args {allowed.push(arg)}
             loop arg in node.kw_args.values {allowed.push(arg)}
             loop target in targets {
+                if target not in? unprojected_reads {allowed.clear break}
                 let callee=hir.node_at(nodes target)
                 $runtime_assert callee is? hir.FunctionLiteral
                 let pairs=effects.pair_arguments(node callee)
@@ -282,6 +358,14 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                                 safe=effects.read_only(outgoing)
                             }
                         }
+                        if expected isnt? none and pair.parameter isnt? none and pair.parameter not in? unprojected_reads[target] and pair.parameter in? summaries.by_param_binding and types.same_type(arg.value_type expected table) {
+                            let fields=record_loan_fields(arg nodes table)
+                            if fields isnt? none {
+                                const outgoing=@summaries.by_param_binding[pair.parameter]
+                                safe=effects.read_only(outgoing)
+                                loop field in fields {if not stable_value(field parameters local_owners local_views summaries nodes table @eligible) {safe=false}}
+                            }
+                        }
                         if safe {current.push(pair.argument)} else {rejected.push(pair.argument)}
                     }
                 }
@@ -293,8 +377,26 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 }
                 allowed=retained
             }
-            if allowed.length >? 0 {result[item]=allowed}
+            let loans:set<addr>=set[]
+            let accepted:set<addr>=set[]
+            # Match source argument order and the hosted frame-root budget.
+            let arguments:array<addr>=[]
+            loop argument in node.pos_args {arguments.push(argument)}
+            loop argument in node.kw_args.values {arguments.push(argument)}
+            loop argument in arguments {
+                if argument not in? allowed continue
+                let value=hir.node_at(nodes argument)
+                if value is? hir.ObjectLiteral {
+                    if value.fields.length>?511 continue
+                    let size:addr=8*(value.fields.length+1)
+                    if size>?4096-literal_bytes continue
+                    literal_bytes+=size loans.push(argument)
+                }
+                accepted.push(argument)
+            }
+            if loans.length>?0 {literal_arguments[item]=loans}
+            if accepted.length>?0 {result[item]=accepted}
         }
     }
-    return Proofs[result local_views]
+    return Proofs[result local_views literal_arguments]
 }

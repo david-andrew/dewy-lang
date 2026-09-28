@@ -77,6 +77,40 @@ def union_loan_source(node, expected_type=None):
 class Proofs:
     arguments: dict[int, set[int]]
     local_views: set[int]
+    literal_arguments: dict[int, set[int]]
+
+
+def record_loan_fields(node):
+    """Fixed root containing words and borrowed dynamic-array handles.
+
+    Inline records, cells, fixed arrays and lifecycle values need their own
+    representation/cleanup evidence. This initial shape has no owned fields
+    at all; it may only exist for the duration of a proven read-only call.
+    """
+    if not isinstance(node, hir.ObjectLiteral) or not borrowable(node.type):
+        return None
+    shape = ty.structural_base(node.type)
+    if not isinstance(shape, ty.ObjectType) or len(shape.fields) != len(node.fields):
+        return None
+    arrays = []
+    for field in node.fields:
+        expected = shape.field(field.name)
+        if expected is None:
+            return None
+        stored = ty.structural_base(expected.type)
+        actual = ty.structural_base(field.value.type)
+        if isinstance(stored, ty.ArrayType) and stored.length is None:
+            if actual != stored:
+                return None
+            arrays.append(field.value)
+        elif stored == 'bool' and actual in ('bool', 'true', 'false'):
+            pass
+        elif ty.fixed_integer_layout(stored) is not None and (actual == stored or
+                isinstance(actual, ty.IntegerLiteralType) and ty.integer_literal_fits(actual.value, stored)):
+            pass
+        else:
+            return None
+    return arrays
 
 
 def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
@@ -88,6 +122,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     stable_locals = {}
     writes, captured = {}, set()
     eligible = {}
+    unprojected_reads = {}
 
     def ordinary(type_):
         key = id(type_)
@@ -157,7 +192,16 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             if caller not in blocked:
                 blocked.add(caller)
                 pending.append(caller)
-    result, local_views = {}, set()
+    for literal in analysis.literals:
+        # A frame root must never enter an owning-parameter protocol. Its
+        # handle is used only to project fields; the callee handles any
+        # subsequent field value boundaries in the ordinary way.
+        unprojected_reads[id(literal)] = {
+            child.binding_id for node in [literal, *bodies[id(literal)]] for child in hir.children(node)
+            if isinstance(child, hir.ExpressedIdentifier)
+            and not (isinstance(node, hir.MemberAccess) and child is node.value)
+        }
+    result, local_views, literal_arguments = {}, set(), {}
     for literal in analysis.literals:
         if id(literal) in blocked:
             continue
@@ -206,6 +250,31 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 continue
             local_views.add(node.binding_id)
             pending_views.extend(waiting_views.pop(node.binding_id, ()))
+        def stable_value(value):
+            path = bindings.access_path(value, unwrap=_unwrap)
+            source = path.root
+            if not isinstance(source, hir.ExpressedIdentifier):
+                return False
+            own = parameters.get(source.binding_id)
+            incoming = summaries.for_param_binding(own.binding_id) if own else None
+            local = stable_locals[id(literal)].get(source.binding_id)
+            stable = source.binding_id in local_views or (local is not None and ordinary(local)) or (
+                own is not None and ordinary(own.type) and incoming is not None
+                and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else step.name
+                                                for step in path.steps)))
+            # A narrowed field/element may still live in a tagged cell or a
+            # different layout. Do not reinterpret that storage as a handle.
+            for step in path.steps:
+                parent = ty.structural_base(step.array.type if isinstance(step, hir.Index) else step.value.type)
+                field = parent.field(step.name) if isinstance(step, hir.MemberAccess) and isinstance(parent, ty.ObjectType) else None
+                stored = parent.element if isinstance(step, hir.Index) and isinstance(parent, ty.ArrayType) else field.type if field else None
+                if stored is None or ty.structural_base(stored) != ty.structural_base(step.type):
+                    return False
+            return stable
+
+        # Separate from ordinary local placement: at most 4 KiB of fixed
+        # call roots per function, reused across loop iterations.
+        literal_bytes = 0
         for node in bodies[id(literal)]:
             if not isinstance(node, hir.FunctionCall):
                 continue
@@ -235,6 +304,11 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)
                     same_storage |= loan is not None
+                    fields = record_loan_fields(argument)
+                    if (fields is not None and argument.type == expected
+                            and parameter is not None and parameter.binding_id not in unprojected_reads[id(target)]
+                            and all(stable_value(field) for field in fields)):
+                        stable = True
                     if (stable and parameter is not None and ordinary(argument.type)
                             and same_storage and not parameter.place
                             and outgoing is not None and outgoing.read_only):
@@ -244,5 +318,16 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 current -= rejected
                 allowed = current if allowed is None else allowed & current
             if allowed:
+                loans = set()
+                for argument in [*node.pos_args, *node.kw_args.values()]:
+                    if id(argument) in allowed and isinstance(argument, hir.ObjectLiteral):
+                        size = 8 * (len(argument.fields) + 1)
+                        if literal_bytes + size <= 4096:
+                            literal_bytes += size
+                            loans.add(id(argument))
+                        else:
+                            allowed.discard(id(argument))
+                if loans:
+                    literal_arguments[id(node)] = loans
                 result[id(node)] = allowed
-    return Proofs(result, local_views)
+    return Proofs(result, local_views, literal_arguments)

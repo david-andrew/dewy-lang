@@ -36,6 +36,18 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): fixed temporary record arguments can lend stable
+array handles and scalar fields to a known read-only callee that only projects
+the root. The shared call-specific proof controls public allocation effects
+and both lowerers; the root owns no fields and is reused across loop iterations.
+Scalar field evaluation and defaults retain their effects. Fresh aggregate
+fields, different layouts, lifecycle values, unknown callbacks, conflicting
+writes, whole-root forwarding and more than 4 KiB of call roots per function
+retain ordinary storage obligations. This adds no source syntax or ownership
+exception. Twenty focused checks, including paired x86-64/C execution, and
+125 surrounding hosted checks pass. Kernels check zero allocation, returned
+array independence, a 200,000-iteration loop and both sides of the root budget.
+
 Checkpoint (2026-09-28): constructor-private field bindings now participate
 in lexical storage/effect inventories, including parameter default expressions.
 A later field default reading an earlier field is private to its construction;
@@ -47,7 +59,7 @@ paired execution also checks zero allocation across repeated calls.
 Integration at `b934932d`: three native generations reached an identical
 fixed point, with generations 2/3 taking 47/51 seconds under concurrent load.
 The complete native inventory reports 4,112 copy sites (2,901 records, 562
-arrays, 649 cells), within the 4,500-site gate. Full paired parity is running;
+arrays, 649 cells), within the 4,500-site gate. All 329 paired cases passed;
 this checkpoint does not close Phase 1.
 
 Checkpoint (2026-09-28): a separate finite weighted-sum domain now carries
