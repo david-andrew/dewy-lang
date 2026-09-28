@@ -6564,3 +6564,12 @@ not establish a counter bound. The direct HIR comparison includes a shadowed
 operator, and the full length-term fixture joins the focused operator group:
 15 checks pass, including paired x86-64/C execution. A new frozen integration
 will cover this correction together with the borrow and lifecycle-query work.
+
+## Reserve surviving fact joins (2026-09-28)
+
+The native fact-state join uses the largest input as a capacity hint for its
+value/chain arrays. Reservation happens only when the first fact survives;
+empty joins retain empty buffers, and zero/single-input fast paths are unchanged.
+The hint is not a bound: implied evidence can retain more than any one input.
+The complete hosted/native fact-state comparison passes (5.87 seconds).
+A full self-build allocation delta has not yet been measured.

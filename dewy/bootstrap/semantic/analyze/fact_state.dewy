@@ -271,6 +271,15 @@ evidence = (state:State fact:Fact context:Context):>Evidence => {
     return implied(state fact context)
 }
 
+# Reserve only when a first fact actually survives. An empty join should not
+# allocate buffers sized for candidates it discarded. The largest input is a
+# capacity hint, not a bound: implied/vacuous evidence can retain more facts.
+reserve_join = (@state:State capacity:addr):>void => {
+    if state.values.length not=? 0 return
+    state.values.reserve(capacity)
+    state.next.reserve(capacity)
+}
+
 join = (states:array<State> context:Context):>State => {
     # A single reachable path already carries exactly the joined evidence.
     # Returning its value preserves snapshot independence on later mutation.
@@ -280,6 +289,8 @@ join = (states:array<State> context:Context):>State => {
     # an earlier state holds was already considered: a lookup, where
     # collecting candidates into a state of their own allocated per fact.
     let result=State[]
+    let capacity:addr=0
+    loop state in states {if state.values.length >? capacity {capacity=state.values.length}}
     loop index in 0.. and index <? states.length {
         loop candidate in states[index].values {
             let earlier=false
@@ -308,6 +319,7 @@ join = (states:array<State> context:Context):>State => {
             }
             if not present continue
             if combined isnt? none {
+                reserve_join(@result capacity)
                 put(@result candidate.fact combined)
                 continue
             }
@@ -323,6 +335,7 @@ join = (states:array<State> context:Context):>State => {
             $runtime_assert supplier <? states.length
             let values=states[supplier].values
             $runtime_assert supplied >=? 0 and supplied <? values.length
+            reserve_join(@result capacity)
             put(@result candidate.fact values[supplied].interval)
         }
     }
