@@ -5079,7 +5079,7 @@ class _BoundsValidator:
         if not (
             isinstance(condition, hir.FunctionCall)
             and isinstance(condition.func, hir.ExpressedIdentifier)
-            and condition.func.binding_id is None
+            and (condition.func.binding_id is None or condition.integer_operation is not None)
             and len(condition.pos_args) == 2
         ):
             return refined

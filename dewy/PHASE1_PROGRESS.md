@@ -6495,3 +6495,12 @@ state comparisons, and 32 combined paired checks pass. The final expanded
 operator group passes all 12 checks, including x86-64/C execution, lexical
 operator syntax, effectful logical arguments and a written result contract.
 Five fixtures bring the manifest to 304 cases.
+
+The `0c203273` native snapshot reached identical three-generation output
+(generation 3: 58 seconds under concurrent work). Its fresh hosted-built driver
+exposed a tag-handling omission: BigInt comparison helpers have real function
+bindings and an explicit checked `integer_operation` tag. Hosted guard refinement
+now retains that tag path, as native refinement already did. The focused
+operator/narrowing group passes 12 hosted checks, and the previously failing
+binary-literal compiler module checks successfully. Fresh hosted integration
+is being rerun with this correction; the earlier driver failure is not a pass.

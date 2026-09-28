@@ -45,6 +45,14 @@ main=():>int64=>{
     return 42
 }""")
 
+# Lowered BigInt helpers carry an explicit integer_operation tag even though
+# their function binding is ordinary. Keep that checked identity available.
+CASES.append("""narrow=(value:bigint):>int64=>{
+    if value <? 0 or value >? 42 return 1
+    return value as int64
+}
+main=():>int64=>narrow(42)""")
+
 @pytest.mark.parametrize('source', ERRORS)
 def test_user_operator_cannot_supply_builtin_evidence(source):
     with pytest.raises(ReportException, match='assertion'):
