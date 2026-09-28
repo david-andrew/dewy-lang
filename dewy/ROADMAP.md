@@ -773,9 +773,11 @@ in both lowerings and the parity tool is the gate.
   Conditional field transfers now include custom moves, arrays and resource
   unions. A custom move cleans its leftover nested resources on the consuming
   edge before marking the field absent; replacements restore that field.
-  Literal array-element routes now participate in the same branch liveness
+  Proven constant array-element routes now participate in the same branch liveness
   and cleanup flags, including nested arrays, field projections, replacement
-  and custom moves. Length reads keep the container alive without demanding
+  and custom moves. Named constants and checked constant-result selectors use
+  the same slot identity as literals; selector effects and dependencies still
+  run once on the selected path. Length reads keep the container alive without demanding
   its consumed elements. Dynamic index routes, components behind hooked
   wrappers, and remaining resource-container mutations still require
   further lifetime analysis. Same-block owning input

@@ -15,17 +15,26 @@ from .. import hir, bindings
 from . import predicate_effects
 
 
+def fixed_index(node):
+    """The checked slot identity, independent of the selector's spelling."""
+    index = node.constant_index
+    if index is None and isinstance(node.index, hir.Integer):
+        index = node.index.value
+    return index if index is not None and index >= 0 else None
+
+
 def field_route(node):
-    """A stable route from a name: fields and nonnegative literal indices."""
+    """A stable route from a name: fields and proven constant indices."""
     path = []
     while isinstance(node, (hir.MemberAccess, hir.Index)):
         if isinstance(node, hir.MemberAccess):
             path.append(node.name)
             node = node.value
         else:
-            if not isinstance(node.index, hir.Integer) or node.index.value < 0:
+            index = fixed_index(node)
+            if index is None:
                 return None
-            path.append(node.index.value)
+            path.append(index)
             node = node.array
     if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
         return node.binding_id, tuple(reversed(path))
@@ -135,9 +144,14 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                 root = value
                 while isinstance(root, (hir.MemberAccess, hir.Index)):
                     root = root.value if isinstance(root, hir.MemberAccess) else root.array
+                # Selector reads happen before this component transfers.
+                # Other operands still prevent a same-expression donation;
+                # the backward walk checks the selector's own dependencies.
+                own_reads = sum(route[0] in roots(child.binding_id) for child in hir.walk(value)
+                                if isinstance(child, hir.ExpressedIdentifier))
                 if (route[0] in owners and route[0] not in captured and occurrences[id(root)] == 1
                         and resource(value.type) is not None and component(value)
-                        and counts.get(route[0]) == 1):
+                        and counts.get(route[0]) == own_reads):
                     candidates.add(id(value))
 
     consumes = {}
@@ -152,6 +166,17 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             consumes[id(node)] = (binding, path)
         else:
             consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
+
+    def visit_selectors(node, live, enabled, exits):
+        # A known result does not erase evaluation. Work backwards through
+        # selectors without turning the selected storage into a whole read.
+        while isinstance(node, (hir.MemberAccess, hir.Index)):
+            if isinstance(node, hir.Index):
+                live = visit(node.index, live, enabled, exits)
+                node = node.array
+            else:
+                node = node.value
+        return live
 
     def visit(node, after, enabled, exits=()):
         live = set(after)
@@ -183,10 +208,10 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
         if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node)) is not None:
             consume(node, route[0], route[1], live, enabled)
             live.add((route[0], route[1], 'read'))
-            return live
+            return visit_selectors(node, live, enabled, exits)
         if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
             live.add((route[0], route[1], 'length'))
-            return live
+            return visit_selectors(node.array, live, enabled, exits)
         if isinstance(node, hir.FunctionLiteral):
             return live | reads(node)
         if isinstance(node, (hir.Break, hir.Continue)) and node.loop_levels < len(exits):
@@ -224,7 +249,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             binding, path = route
             live = {entry for entry in live if entry[0] != binding or entry[1][:len(path)] != path}
             live.add((binding, path, 'store'))
-            return visit(node.value, live, enabled, exits)
+            return visit_selectors(node.target, visit(node.value, live, enabled, exits), enabled, exits)
         if isinstance(node, hir.Declare):
             live = {entry for entry in live if entry[0] != node.binding_id}
         for child in reversed(tuple(hir.children(node))):

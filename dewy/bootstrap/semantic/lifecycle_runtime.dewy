@@ -1075,6 +1075,12 @@ freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @sess
         let array=freeze_route(node.array loc root @prefix @plan @session)
         check_selection(node.index root @plan session)
         let index=freeze_value(node.index loc @prefix @session)
+        let constant=ownership_liveness.fixed_index(node session.hir)
+        if constant isnt? none {
+            # Preserve evaluation above, then give transfer and cleanup the
+            # same checked slot identity even for a nonliteral selector.
+            index=put(hir.Integer[node.loc types.primitive('int64' @session.types) '0d' constant] @session)
+        }
         return put(hir.Index[node.loc node.value_type array index node.constant_index] @session)
     }
     if node is? hir.DictLookup and node.proven {
@@ -1838,9 +1844,9 @@ alias_alive=(binding:addr read:addr dependent:dict<addr set<addr>> born:dict<add
 # Before cleanup adds artificial reads, identify last uses transferring
 # between declarations in one lexical block. Outer-owner conditional moves
 # need lifetime joins and are deliberately excluded by the same-block rule.
-# A maximal member/constant-index route observes only that component.
+# A maximal member/proven-constant-index route observes only that component.
 # Dynamic indexing and calls/whole values still observe the containing root.
-# Numeric steps here are literal indices, not HIR ids as in Extraction.
+# Numeric steps here are slot identities, not HIR ids as in Extraction.
 ReadRoute:type=const [id:addr path:array<string|int64>]
 ReadRoutes:type=[paths:dict<addr array<string|int64>>=[] by_binding:dict<addr array<addr>>=[]]
 route_overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
@@ -1850,11 +1856,6 @@ route_overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
         i+=1
     }
     return true
-}
-literal_index=(id:addr nodes:array<hir.AST>):>int64?=>{
-    let node=hir.node_at(nodes id)
-    if node is? hir.Integer and node.value>=?-9223372036854775808 and node.value<=?9223372036854775807 return node.value as int64
-    return none
 }
 read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
     let result=ReadRoutes[]
@@ -1867,12 +1868,13 @@ read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
             let path:array<string|int64>=[node.name]
             loop name in selected.path {path.push(name)}
             pending.push(ReadRoute[node.value path])
-        } else if node is? hir.Index and literal_index(node.index nodes) isnt? none {
-            let index=literal_index(node.index nodes)
+        } else if node is? hir.Index and ownership_liveness.fixed_index(node nodes) isnt? none {
+            let index=ownership_liveness.fixed_index(node nodes)
             $runtime_assert index isnt? none
             let path:array<string|int64>=[index]
             loop step in selected.path {path.push(step)}
             pending.push(ReadRoute[node.array path])
+            pending.push(ReadRoute[node.index []])
         } else {
             if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
                 if selected.id not in? result.paths {
@@ -1929,7 +1931,7 @@ last_component=(value:addr root:addr renewals:dict<addr array<Renewal>> last:dic
     if part is? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
     loop part is? hir.MemberAccess|hir.Index {
         if part is? hir.Index {
-            if literal_index(part.index nodes) is? none break
+            if ownership_liveness.fixed_index(part nodes) is? none break
             part=hir.node_at(nodes part.array)
         } else {part=hir.node_at(nodes part.value)}
     }

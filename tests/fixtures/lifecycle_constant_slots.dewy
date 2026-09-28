@@ -1,0 +1,22 @@
+let trace:int64=0
+let selections:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+consume=(value:Token):>int64=>value.id
+# The returned slot is known, but the selector still runs once on its path.
+choose=(value:int64):>0=>{selections+=1 return 0}
+work=(flag:bool):>int64=>{
+    let items=[Token[1] Token[2]]
+    if flag {consume(items[choose(items[1].id)]);}
+    return items[1].id
+}
+main=():>int64=>{
+    if work(true) not=?2 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        trace=0
+        if work(true) not=?2 or trace not=?12 return 2
+        trace=0
+        if work(false) not=?2 or trace not=?21 return 3
+    }
+    return if _arena_live_bytes=?before and selections=?101 42 else 4
+}

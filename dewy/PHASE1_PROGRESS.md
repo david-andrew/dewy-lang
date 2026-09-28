@@ -5474,3 +5474,25 @@ compiler-source copy inventory is 2,379 static sites: 1,501 record, 552 array,
 2,583 sites and 49.065 sites/KLOC. These are static counts, not runtime bytes
 or an isolated performance measurement. The newer guard and wrapper changes
 have the focused validation above pending their next full integration.
+
+
+## Constant-slot ownership follows checked facts (2026-09-27)
+
+Both resource-liveness passes now use an index's checked constant identity,
+not just literal syntax. Named/aliased/arithmetic constants and a call with a
+checked constant result can select the same partially owned slot. Canonical
+cleanup selectors retain the original evaluation once, and backward liveness
+visits selector reads and writes separately. Reads within the selector happen
+before the selected component transfers; other call operands retain the
+existing conservative donation rule. Dynamic unknown indices still need a
+whole-owner last use or an independent copy.
+
+Seventy-two hosted ownership checks and all six native paired groups passed
+on x86-64/C, including nested slots, conditional consumption/renewal and
+custom component moves. Regressions preserve side-effecting selectors, reject
+reads of consumed slots (including inside later read/store selectors), and
+reject selectors that invalidate the receiver. An additional paired lifetime
+kernel retains zero bytes across 200 conditional invocations and observes the
+expected 101 selector calls. It is included in the 227-case manifest. This
+extends the existing constant-slot rule; general runtime index identities and
+conditional dynamic-slot ownership remain separate work.

@@ -17,7 +17,7 @@ from ..parser import t0
 from .errors import not_implemented, user_error
 from ..reporting import Pointer
 from .analyze import public_effects, effects, predicate_effects
-from .analyze.ownership_liveness import conditional_consumptions, field_route
+from .analyze.ownership_liveness import conditional_consumptions, field_route, fixed_index
 
 
 def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True,
@@ -392,8 +392,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 if isinstance(part, hir.MemberAccess):
                     path.append(part.name)
                     part = part.value
-                elif isinstance(part.index, hir.Integer):
-                    path.append(part.index.value)
+                elif fixed_index(part) is not None:
+                    path.append(fixed_index(part))
                     part = part.array
                 else:
                     break
@@ -768,7 +768,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if isinstance(value, hir.Index):
             array = freeze_route(value.array, loc, root_id, prefix)
             check_selection(value.index, root_id)
-            return replace(value, array=array, index=freeze_value(value.index, loc, prefix))
+            index = freeze_value(value.index, loc, prefix)
+            constant = fixed_index(value)
+            if constant is not None:
+                # Keep the original evaluation above, but use the checked
+                # slot identity for all subsequent transfers and cleanup.
+                index = hir.Integer(value.index.loc, 'int64', t0.base10, constant)
+            return replace(value, array=array, index=index)
         if isinstance(value, hir.DictLookup) and value.proven:
             # Cleanup and the eventual mutation share one captured key and
             # receiver. Their physical positions may change during cleanup.
@@ -1086,8 +1092,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 continue
             if isinstance(node, hir.MemberAccess):
                 pending.append((node.value, (node.name, *route)))
-            elif isinstance(node, hir.Index) and isinstance(node.index, hir.Integer):
-                pending.append((node.array, (node.index.value, *route)))
+            elif isinstance(node, hir.Index) and fixed_index(node) is not None:
+                pending.append((node.array, (fixed_index(node), *route)))
+                pending.append((node.index, ()))
             else:
                 if isinstance(node, hir.ExpressedIdentifier):
                     reads_by_binding.setdefault(node.binding_id, []).append(node)
@@ -1147,7 +1154,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             part = value
             while isinstance(part, (hir.MemberAccess, hir.Index)):
                 if isinstance(part, hir.Index):
-                    if not isinstance(part.index, hir.Integer):
+                    if fixed_index(part) is None:
                         break
                     part = part.array
                 else:

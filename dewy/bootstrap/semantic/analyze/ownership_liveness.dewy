@@ -39,16 +39,23 @@ under=(path:array<string|int64> prefix:array<string|int64>):>bool=>{
     loop i in [0..prefix.length) {if path[i] not=? prefix[i] return false}
     return true
 }
-# The binding and field path of a route of field reads from a name.
+# The checked slot identity, independent of the selector's spelling.
+fixed_index=(node:hir.Index nodes:array<hir.AST>):>int64?=>{
+    if node.constant_index isnt? none and node.constant_index<=?9223372036854775807 return node.constant_index as int64
+    let index=hir.node_at(nodes node.index)
+    if index is? hir.Integer and index.value>=?0 and index.value<=?9223372036854775807 return index.value as int64
+    return none
+}
+# The binding and field path of a route with proven constant slots.
 field_route=(id:addr nodes:array<hir.AST>):>Entry?=>{
     let reverse:array<string|int64>=[]
     let node=hir.node_at(nodes id)
     loop node is? hir.MemberAccess|hir.Index {
         if node is? hir.MemberAccess {reverse.push(node.name) node=hir.node_at(nodes node.value)}
         else {
-            let index=hir.node_at(nodes node.index)
-            if index isnt? hir.Integer or index.value <? 0 or index.value >? 9223372036854775807 return none
-            reverse.push(index.value as int64)
+            let index=fixed_index(node nodes)
+            if index is? none return none
+            reverse.push(index)
             node=hir.node_at(nodes node.array)
         }
     }
@@ -148,6 +155,19 @@ check_view_writes=(id:addr live:Live @analysis:Analysis nodes:array<hir.AST>):>v
         }
     }
 }
+# A known index does not erase its evaluation. Visit selectors backwards
+# without treating a component read as a read of the whole owner.
+visit_selectors=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>):>Live=>{
+    let node=hir.node_at(nodes id)
+    let live=after
+    loop node is? hir.MemberAccess|hir.Index {
+        if node is? hir.Index {
+            live=visit(node.index live enabled @analysis nodes exits)
+            node=hir.node_at(nodes node.array)
+        } else {node=hir.node_at(nodes node.value)}
+    }
+    return live
+}
 visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>=[]):>Live=>{
     let node=hir.node_at(nodes id)
     let live=after
@@ -164,12 +184,12 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         if route isnt? none {
             consume(id route.binding route.path live enabled @analysis)
             add_entry(@live route)
-            return live
+            return visit_selectors(id live enabled @analysis nodes exits)
         }
     }
     if node is? hir.ArrayLength {
         let route=field_route(node.array nodes)
-        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true]) return live}
+        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true]) return visit_selectors(node.array live enabled @analysis nodes exits)}
     }
     if node is? hir.FunctionLiteral {
         loop binding in read_roots(id analysis.aliases nodes) {add_entry(@live Entry[binding])}
@@ -228,7 +248,8 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             let kept:Live=[]
             loop [key entry] in live {if entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
             add_entry(@kept Entry[route.binding route.path true])
-            return visit(node.value kept enabled @analysis nodes exits)
+            let before=visit(node.value kept enabled @analysis nodes exits)
+            return visit_selectors(node.target before enabled @analysis nodes exits)
         }
     }
     if node is? hir.Declare and node.binding_id isnt? none {
@@ -308,7 +329,18 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
                     $runtime_assert member is? hir.MemberAccess|hir.Index
                     root=if member is? hir.MemberAccess member.value else member.array
                 }
-                if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 and counts.get(route.binding 0) =? 1 {analysis.candidates.push(selected)}
+                if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 {
+                    # A selector may read siblings before this transfer.
+                    # Other operands still prevent a same-expression donation.
+                    let own_reads:addr=0
+                    let pending_reads:array<addr>=[selected]
+                    loop pending_reads.length>?0 {
+                        let read=hir.node_at(nodes pending_reads.pop)
+                        if read is? hir.ExpressedIdentifier and read.binding_id isnt? none and route.binding in? roots(read.binding_id analysis.aliases) {own_reads+=1}
+                        hir.push_children(read @pending_reads)
+                    }
+                    if counts.get(route.binding 0) =? own_reads {analysis.candidates.push(selected)}
+                }
             }
         }
     }
