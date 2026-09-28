@@ -1,0 +1,19 @@
+$explicit_copies
+exercise=():>int64=>{
+    let table:dict<string int64>=['a'->20 'b'->22]
+    let keys=table.keys.copy()
+    let values=table.values.copy()
+    let set_values=keys.values.copy()
+    table.clear
+    if keys.length not=?2 or values.length not=?2 or set_values.length not=?2 return 1
+    keys.clear
+    return values[0]+values[1]
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 2}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

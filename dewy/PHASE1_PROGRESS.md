@@ -5655,3 +5655,22 @@ unmarked: update invocation, container values, binary literals and syntax.
 In particular, a zero count in the reachable compiler inventory does not
 certify standalone/otherwise-unused function bodies. Compiler-source adoption
 now covers 20 physical modules and remains incomplete.
+
+
+## Entry snapshots: reporting, explicit copies and temporary cleanup (2026-09-27)
+
+Both lowerers now report `.keys` / `.values` materialization as one
+source-level copy. Applying `.copy()` explicitly authorizes that snapshot
+without materializing a second one. Ordinary property snapshots retain their
+independence, while stable iteration continues to use the shared borrowing
+proof. This closes a reporting hole in values snapshots and the native keys
+path; hosted keys previously reported their synthetic bookkeeping stores
+instead of the source operation.
+
+Hosted keys snapshots now build their owned storage directly and participate
+in frame-record temporary cleanup. Discarded snapshots, direct call arguments,
+and direct returns previously retained their entry arrays; the new counter
+fixture retains zero bytes across 100 calls. Validation: 13 focused hosted
+checks, the paired snapshot and iteration groups on x86-64/C, and 48 surrounding
+hosted dictionary/lifecycle/copy-policy checks pass. Full compiler integration
+remains a separate checkpoint.

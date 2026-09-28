@@ -4922,9 +4922,9 @@ class _Lowerer(
         conventions; strings and dynamic arrays already track temporaries.
         """
         fresh_decode = isinstance(source, hir.RepresentationCast) and self._fresh_cell_expression(source)
-        if not self._has_arena() or not (isinstance(source, (hir.FunctionCall, hir.CopyValue)) or fresh_decode):
+        if not self._has_arena() or not (isinstance(source, (hir.FunctionCall, hir.CopyValue, hir.DictView)) or fresh_decode):
             return None
-        if isinstance(source.type, ty.ObjectType) and self._frame_record_call(source):
+        if isinstance(source.type, ty.ObjectType) and self._frame_record_temporary(source):
             return self._release_object_members(value, source.type, source.loc)
         if not fresh_decode and not isinstance(source, hir.CopyValue) and (not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
             return None
@@ -5231,6 +5231,14 @@ class _Lowerer(
 
     def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         if isinstance(node, hir.CopyValue):
+            if isinstance(node.value, hir.DictView):
+                # The property already materializes one independent value.
+                # An explicit copy authorizes that snapshot, not another one.
+                if isinstance(node.type, ty.ArrayType):
+                    self._consume_array_value(node.value)
+                    prelude, value = self._extract_dict_view(node.value, explicit=True)
+                    return self._array_result_temporary(node, value, prelude)
+                return self._extract_dict_view(node.value, explicit=True)
             plain = ty.structural_base(node.type)
             if self._is_string_valued(plain):
                 prelude, value = self._escaping_string_value(node.value, explicit=True)

@@ -395,6 +395,8 @@ expression = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     if node is? hir.CopyValue {
+        let receiver=hir.node_at(state.input.nodes node.value)
+        if receiver is? hir.DictView return dict_view(receiver @state explicit=true)
         let array_frame=state.frame_arrays.get(id)
         if array_frame isnt? none {
             let type=array_type(node.value_type state)
@@ -6784,7 +6786,9 @@ dict_entries = (node:hir.DictEntries @state:State):>addr => {
     prefix.push(conditional(dead dict_rebuild(parts 0 node @state) node @state))
     return finish_dictionary(dict_field(parts node.name node @state) parts node @prefix @state copy_result=true)
 }
-dict_view = (node:hir.DictView @state:State):>addr => {
+dict_view = (node:hir.DictView @state:State explicit:bool=false):>addr => {
+    note_copy((if node.name =? 'keys' 'record' else 'array') node.value_type "materialized from `.{node.name}`"
+        (if explicit 'requested with `.copy()`' else 'entry snapshots keep independent mutable storage') node @state explicit=explicit)
     let prefix:array<addr>=[]
     let parts=dict_parts(node.dictionary @prefix @state)
     prefix.push(dict_ensure(parts node @state compact=true))

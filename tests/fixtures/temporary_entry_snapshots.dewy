@@ -1,0 +1,19 @@
+count=(keys:set<string>):>int64=>keys.length
+snapshot=(table:dict<string int64>):>set<string>=>table.keys
+exercise=():>int64=>{
+    let table:dict<string int64>=['answer'->42]
+    table.keys;
+    table.keys.copy();
+    if count(table.keys) not=?1 return 1
+    snapshot(table);
+    if snapshot(table).length not=?1 return 2
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 2}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

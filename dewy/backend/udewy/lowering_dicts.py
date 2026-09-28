@@ -833,9 +833,13 @@ class _DictLowering:
             statements.append(self._arena_release_call(snapshot, self._int64_literal(loc, size), loc))
         return statements, result_name
 
-    def _extract_dict_view(self, node: hir.DictView) -> tuple[list[hir.AST], hir.AST]:
+    def _extract_dict_view(self, node: hir.DictView, *, explicit: bool = False) -> tuple[list[hir.AST], hir.AST]:
         """`d.keys` (a set), `d.values` / `s.values` (an array): fresh copies of the live entries."""
         loc = node.loc
+        self._note_copy('record' if node.name == 'keys' else 'array', node.type,
+                        f'materialized from `.{node.name}`',
+                        'requested with `.copy()`' if explicit else 'entry snapshots keep independent mutable storage',
+                        loc, explicit=explicit)
         entry_types = ty.container_entry_types(node.dictionary.type)
         assert entry_types is not None
         key_type, value_type = entry_types
@@ -853,13 +857,25 @@ class _DictLowering:
                 arena=True,
             )
             return self._array_result_temporary(node, copied, [*prelude, compact, *copy_prelude])
-        # keys: a set over copies of the entries and their hashes (table rebuilt lazily)
+        # One source-level snapshot owns the copied keys and bookkeeping.
+        # Build it directly, without reporting synthetic object-field stores
+        # as additional implicit copies or constructing a second snapshot.
         assert isinstance(node.type, ty.ObjectType)
-        fresh = hir.ObjectLiteral(loc, node.type, [
-            hir.ObjectField(loc, 'keys', hir.MemberAccess(loc, ty.ArrayType(key_type, None), source, 'keys')),
-            hir.ObjectField(loc, 'hashes', hir.MemberAccess(loc, ty.ArrayType('int64', None), source, 'hashes')),
-            hir.ObjectField(loc, 'indices', hir.ArrayLiteral(loc, ty.ArrayType('int64', 0), [])),
-            hir.ObjectField(loc, 'live', hir.MemberAccess(loc, 'int64', source, 'live')),
+        size, offsets = self._object_layout(node.type, node)
+        pointer = self._new_object_temp(loc)
+        statements = [*prelude, compact,
+                      self._declare(pointer, self._object_allocation(loc, size), loc),
+                      *self._brand_word_store(pointer, node.type, loc)]
+        for field, element in (('keys', key_type), ('hashes', 'int64')):
+            array_type = ty.ArrayType(element, None)
+            copied_prelude, copied = self._clone_dynamic_array_value(
+                hir.MemberAccess(loc, array_type, source, field), array_type, arena=self._has_arena())
+            statements.extend(copied_prelude)
+            statements.append(self._store_i64_field(pointer, offsets[field], replace(copied, type='int64'), loc))
+        empty_prelude, empty = self._allocate_array_value(ty.ArrayType('int64', 0), loc, arena=self._has_arena())
+        statements.extend(empty_prelude)
+        statements.extend([
+            self._store_i64_field(pointer, offsets['indices'], replace(empty, type='int64'), loc),
+            self._store_i64_field(pointer, offsets['live'], self._dict_live(parts, loc), loc),
         ])
-        set_prelude, pointer = self._extract_object_pointer(fresh)
-        return [*prelude, compact, *set_prelude], pointer
+        return statements, pointer

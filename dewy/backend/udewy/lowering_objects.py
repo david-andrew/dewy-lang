@@ -339,11 +339,11 @@ class _ObjectLowering:
             self.lowering_module_startup = startup
         return result
 
-    def _frame_record_call(self, node: hir.AST) -> bool:
-        """Calls whose record result follows the caller-frame storage ABI."""
+    def _frame_record_temporary(self, node: hir.AST) -> bool:
+        """Fresh record results with a frame root and separately owned fields."""
         node = self._copy_source_expression(node)
-        if isinstance(node, hir.CopyValue):
-            return True  # its record root uses the same frame-owned layout
+        if isinstance(node, (hir.CopyValue, hir.DictView)):
+            return True  # snapshots use the same frame-owned root layout
         return isinstance(node, hir.FunctionCall) and (
             isinstance(node.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
             or isinstance(node.func, hir.ArrayMethod) and node.func.name == 'pop'
@@ -389,7 +389,7 @@ class _ObjectLowering:
         prelude, value = self._extract_object_pointer(arg)
         if isinstance(object_type, ty.ObjectType) and (
             isinstance(arg, hir.ObjectLiteral)
-            or self._frame_record_call(arg)
+            or self._frame_record_temporary(arg)
         ):
             return self._object_statement_temporary(prelude, value, object_type, arg.loc)
         return prelude, value
@@ -1253,7 +1253,7 @@ class _ObjectLowering:
         if not isinstance(object_type, ty.ObjectType):
             self._target_error(node, 'member access requires an object')
         if (self._has_arena() and not self.lowering_module_startup
-                and self._frame_record_call(node.value)):
+                and self._frame_record_temporary(node.value)):
             # A field view keeps its returned receiver alive for the whole
             # statement. Retained fields are copied by their ordinary value
             # boundary before this receiver's owned members are released.
@@ -1890,7 +1890,7 @@ class _ObjectLowering:
         elif not self._object_expression_owns_fresh_storage(item):
             self._note_copy('record', object_type, 'returned', self._copy_reason(item), item.loc)
         prelude, source = self._extract_object_pointer(item)
-        if self._frame_record_call(item) and isinstance(item.type, ty.ObjectType):
+        if self._frame_record_temporary(item) and isinstance(item.type, ty.ObjectType):
             # A child-returning call cannot write directly into the parent's
             # prepared result tree. The copy below keeps the complete dynamic
             # value; release the temporary child's fields after that copy, just
