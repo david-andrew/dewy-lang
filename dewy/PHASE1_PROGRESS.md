@@ -5813,3 +5813,26 @@ failure remains an integration gate until a fresh build with this fix passes.
 Validation for the projection fix: 46 surrounding hosted checks and the paired
 field/index/dictionary group pass on x86-64/C, including both stale-fact
 rejections. The native program driver was rebuilt with the native index change.
+
+
+## Hosted scalar/void allocator scope placement (2026-09-28)
+
+The hosted lowerer now enters the requested allocator for proved scalar/void
+blocks and restores it after their normal fallthrough. Placement checks direct
+and transitive publication of owned storage, outer destinations, callbacks and
+captured storage. Unknown lifetimes keep the enclosing allocator with a specific
+fallback reason. Normal nested scopes and scalar writes to outer arrays use the
+region-aware storage primitives above. Source escape diagnostics and strict-copy
+acceptance remain independent of this placement decision.
+
+This is a bounded placement step: aggregate block results and scopes containing
+control-flow exits still use the enclosing allocator. Their copy-out and lexical
+cleanup must be coordinated before broadening placement. No new allocator
+syntax or failure policy is introduced.
+
+Validation: 27 surrounding hosted allocator/storage/frame checks, two lifetime
+fallback cases, and the paired scalar-placement fixture pass on x86-64/C. The
+fixture checks actual region handles, nested restoration, owned global-store
+fallback and outer-array growth/detachment surviving reset. It is in the
+246-case manifest. The blanket hosted-fallback expectation now correctly reports
+only the unsupported block in the original allocator fixture.

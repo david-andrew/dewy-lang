@@ -130,8 +130,8 @@ def test_hosted_allocator_fallback_report(capsys):
     from dewy.__main__ import analyze
     assert analyze(['--brief', str(FIXTURE)]) == 0
     lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith('allocator: ')]
-    assert len(lines) == 3
-    assert all('hosted lowering' in line and str(FIXTURE) in line for line in lines)
+    assert len(lines) == 1
+    assert 'aggregate copy-out' in lines[0] and str(FIXTURE) in lines[0]
 
 
 def test_allocator_result_before_trailing_statements_is_reported():
@@ -212,3 +212,36 @@ def test_native_allocator_no_allocation_warning(tmp_path):
         compiled = compile_native(tmp_path, 'allocator-no-allocation', NO_ALLOCATION.read_text())
         assert compiled.returncode == 0, compiled.stderr
         assert compiled.stderr.count('allocator scope does not allocate') == 1, compiled.stderr
+
+
+SCALAR_PLACEMENT = Path(__file__).resolve().parents[1] / 'fixtures/scalar_allocator_placement.dewy'
+
+
+def test_hosted_scalar_allocator_placement(tmp_path):
+    execute(tmp_path, 'scalar-allocator-placement', codegen(SrcFile.from_path(SCALAR_PLACEMENT), debug_locations=False))
+
+
+def test_native_scalar_allocator_placement(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[SCALAR_PLACEMENT.read_text()], errors=[])
+
+
+PLACEMENT_FALLBACKS = [
+    '''build=():>int64=>{let xs:array<int64>=[] xs.push(42) return xs.length}
+work=(callback:():>int64 @arena:Arena):>int64=>$allocator(@arena) {callback()}
+main=():>int64=>{let arena=Arena[] let n=work(@build @arena) return if arena.handle=?0 and n=?1 42 else 1}''',
+    '''main=():>int64=>{
+let captured:array<int64>=[42]
+let arena=Arena[]
+read=():>int64=>captured.length
+let n=$allocator(@arena) {read()}
+return if arena.handle=?0 and n=?1 42 else 1
+}''',
+]
+
+
+@pytest.mark.parametrize('source', PLACEMENT_FALLBACKS)
+def test_hosted_allocator_unknown_lifetime_falls_back(tmp_path, source):
+    code=codegen(SrcFile(None, source), debug_locations=False)
+    assert lower.last_placement_notes
+    execute(tmp_path, 'allocator-fallback', code)

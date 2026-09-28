@@ -53,6 +53,7 @@ from .lowering_iterators import _IteratorLowering
 from .lowering_objects import _ObjectLowering
 from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
+from .lowering_allocators import _AllocatorLowering
 from . import borrowing
 from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
@@ -259,6 +260,7 @@ def _uniquify_module_locals(root: hir.Block) -> hir.Block:
     return rebuilt
 
 class _Lowerer(
+    _AllocatorLowering,
     _DictLowering,
     _StringLowering,
     _ArrayLowering,
@@ -500,6 +502,8 @@ class _Lowerer(
         # the source function the entry wrapper calls: `main`, or the generated test runner
         self.entry_name = entry_name
         analysis = _EffectAnalyzer(root)
+        self.allocator_analysis = analysis
+        self.allocator_hazards = None
         self.program_effects: ProgramEffects = analysis.solve()
         # Selected overloads and immutable callable aliases are ordinary
         # value boundaries too; their names alone do not imply raw exposure.
@@ -2854,6 +2858,8 @@ class _Lowerer(
         their concrete units are emitted from ``LoweredProgram.functions``
         instead of at their original lexical position.
         """
+        if isinstance(node, hir.AllocatorBlock):
+            return self._transform_allocator(node)
         if isinstance(node, hir.Suppress):
             return replace(
                 node,
@@ -3744,8 +3750,6 @@ class _Lowerer(
         """Report values leaving `$allocator` blocks as copies (see allocator_escapes)."""
         from ...semantic import allocator_escapes
         for block in allocator_escapes.blocks(body):
-            self.placement_notes.append(PlacementNote(self.srcfile, block.loc,
-                'hosted lowering uses the enclosing allocator; arena placement is not implemented'))
             for escape in allocator_escapes.block_escapes(block):
                 kind = _allocator_copy_kind(escape.value_type)
                 if kind is not None:

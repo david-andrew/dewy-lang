@@ -1,0 +1,35 @@
+# Scalar/void results need no region value to cross the scope boundary.
+build=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) {xs.push(i)}
+    return xs
+}
+let kept:array<array<int64>>=[]
+publish=():>void=>{kept.push(build(3))}
+main=():>int64=>{
+    let scalar=Arena[]
+    let length=$allocator(@scalar) {build(40).length}
+    if scalar.handle=?0 or length not=?40 return 1
+    let outer=Arena[]
+    let inner=Arena[]
+    let nested=$allocator(@outer) {$allocator(@inner) {build(2).length} + build(3).length}
+    if outer.handle=?0 or inner.handle=?0 or nested not=?5 return 2
+    let discarded=Arena[]
+    $allocator(@discarded) {let xs=build(2) xs.push(3)}
+    if discarded.handle=?0 return 3
+    let external=Arena[]
+    $allocator(@external) {publish()}
+    if external.handle not=?0 or kept.length not=?1 return 4
+    let counts:array<int64>=[1]
+    let snapshot=counts.copy()
+    let growing=Arena[]
+    $allocator(@growing) {counts.push(build(5).length)}
+    if growing.handle=?0 return 5
+    growing.reset()
+    if counts.length not=?2 or snapshot.length not=?1 or counts[1] not=?5 return 6
+    # Normal scope exits restored the heap context after all nesting.
+    let check=_arena_alloc(8)
+    let context=_allocator_of(check)
+    _arena_release(check 8)
+    return if context=?0 42 else 7
+}
