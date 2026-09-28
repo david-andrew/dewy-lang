@@ -358,6 +358,7 @@ class _ObjectLowering:
         call: hir.FunctionCall,
         arg: hir.AST,
         position: int | str,
+        expected_type: ty.Type | None = None,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Lower one object-typed value argument of ``call``.
 
@@ -369,6 +370,11 @@ class _ObjectLowering:
         the argument first. Distinct fields of a record do not overlap.
         """
         object_type = ty.structural_base(arg.type)
+        if not isinstance(object_type, ty.ObjectType) and expected_type is not None:
+            # A parent parameter may receive a narrowed union of descendants.
+            # The union view still reads that parent's dynamic record layout
+            # and owes the same snapshot at a conflicting argument boundary.
+            object_type = ty.structural_base(expected_type)
         if isinstance(object_type, ty.ObjectType) and position in self.owned_record_arguments.get(id(call), ()):
             # The caller materializes one independent value; the callee
             # releases its fields. The frame root lives across this call.

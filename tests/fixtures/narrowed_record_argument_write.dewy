@@ -1,0 +1,17 @@
+Node=$abstract type of [items:array<int64>]
+Leaf=type of Node & [value:int64]
+Branch=type of Node & [child:int64]
+Other=type of Node & [other:int64]
+read=(node:Node ignored:int64):>int64=>{
+    if node.items.length=?0 return 1
+    return node.items[0]
+}
+alter=(@node:Node):>int64=>{
+    if node.items.length>?0 {node.items[0]=9}
+    return 0
+}
+visit=(node:Node):>int64=>{
+    if node is? Leaf|Branch return read(node alter(@node))
+    return 1
+}
+main=():>int64=>visit(Leaf[[42] 1])

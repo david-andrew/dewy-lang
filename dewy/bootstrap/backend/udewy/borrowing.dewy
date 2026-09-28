@@ -49,9 +49,13 @@ peel_argument = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr => {
             let outer_plain=types.unfold(types.strip_refinement(node.value_type type_nodes) type_nodes)
             let inner_plain=types.unfold(types.strip_refinement(inner.value_type type_nodes) type_nodes)
             if views.string_valued(outer_plain type_nodes) and views.string_valued(inner_plain type_nodes) {current=node.expr continue}
-            # A record read as a relative (a child passed where its parent
-            # is expected) is the same block under another static type.
-            if node is? hir.ValueCast and record_value(current nodes type_nodes) and record_value(node.expr nodes type_nodes) {current=node.expr continue}
+            # Find the source owner through record/union conversions too.
+            # This proves only the route's stability during the call. The
+            # lowerer separately checks that the selected layouts share a
+            # handle; a real cell conversion retains its copy and cleanup.
+            let outer=types.node_at(type_nodes views.structural_base(outer_plain type_nodes))
+            let source=types.node_at(type_nodes views.structural_base(inner_plain type_nodes))
+            if outer is? types.ObjectType|types.TypeOr and source is? types.ObjectType|types.TypeOr {current=node.expr continue}
         }
         return current
     }

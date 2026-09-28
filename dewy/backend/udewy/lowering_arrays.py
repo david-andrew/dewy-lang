@@ -327,6 +327,14 @@ class _ArrayLowering(_ArraySharing):
         while True:
             if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
                 node = node.items[0]
+            elif isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+                # A narrowed record may be upcast through a temporary union
+                # view. Its owner still conflicts with a later place write.
+                node = node.expr
+            elif isinstance(node, hir.Obligation):
+                node = node.value
+            elif isinstance(node, hir.Suppress):
+                node = node.item
             elif isinstance(node, hir.MemberAccess):
                 fields.append(node.name)
                 node = node.value

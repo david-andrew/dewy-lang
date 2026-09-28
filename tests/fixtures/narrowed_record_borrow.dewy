@@ -1,0 +1,20 @@
+# Read-only family upcasts must not copy the record or its array handle.
+Node=$abstract type of [items:array<int64>]
+Leaf=type of Node & [value:int64]
+Branch=type of Node & [child:int64]
+Other=type of Node & [other:int64]
+read=(node:Node @pending:array<int64>):>void=>{pending.push(node.items.length)}
+visit=(node:Node @pending:array<int64>):>void=>{
+    if node is? Leaf|Branch {read(node @pending)}
+}
+repeat=(node:Node):>int64=>{
+    let pending:array<int64>=[]
+    pending.reserve(1000)
+    let before=_arena_allocated_bytes
+    loop i in 0..999 {visit(node @pending)}
+    let allocated=_arena_allocated_bytes-before
+    if allocated not=?0 return 2
+    if pending.length not=?1000 return 1
+    return 42
+}
+main=():>int64=>repeat(Leaf[[1 2 3] 1])

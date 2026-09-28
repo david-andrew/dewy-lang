@@ -6504,3 +6504,28 @@ now retains that tag path, as native refinement already did. The focused
 operator/narrowing group passes 12 hosted checks, and the previously failing
 binary-literal compiler module checks successfully. Fresh hosted integration
 is being rerun with this correction; the earlier driver failure is not a pass.
+
+## Read-only calls through narrowed record unions (2026-09-28)
+
+Native argument borrowing now recovers the stable source route through
+record/union casts. The existing lowering check still decides whether the
+representations share a handle; a real cell conversion retains its copy and
+cleanup. Previously route discovery stopped at a representation cast even when
+lowering already supported borrowing that same record handle.
+
+A family-narrowing kernel with 1,000 read-only calls now allocates zero bytes,
+down from 32,000, matching the hosted compiler. This is the AST-reader pattern
+identified by the allocation profile; it is not yet a measured reduction of
+the complete self-build's 32 GB total.
+
+The paired alias tests also found and fixed a hosted snapshot bug. Conflict
+routes now see through value/representation/proof wrappers, and a narrowed union
+passed to a parent parameter uses that parameter's record layout when an
+independent snapshot is required. Later argument writes and same-call place
+aliases preserve the earlier value. Keyword and explicit-cast variants pass.
+
+Validation: 13 hosted record/field-call checks, five final hosted cases, three
+paired borrowing groups, and the final five-case paired kernel pass on x86-64/C.
+Three fixtures bring the manifest to 307 cases. The preceding arithmetic/tag
+snapshot also passed both fresh hosted-built driver groups (319 seconds including
+build); its full 304-case parity run is separate and still in progress.

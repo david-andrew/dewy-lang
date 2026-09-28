@@ -5850,7 +5850,7 @@ class _Lowerer(
                         arg_members, temporary=True,
                     )
                 elif isinstance(ty.structural_base(arg.type), ty.ObjectType) or isinstance(ty.structural_base(expected_type), ty.ObjectType):
-                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg, index)
+                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg, index, expected_type)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 append_argument_prelude(arg_prelude)
@@ -5889,7 +5889,7 @@ class _Lowerer(
                         ty.runtime_union_members(arg.type), temporary=True,
                     )
                 elif isinstance(ty.structural_base(arg.type), ty.ObjectType):
-                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg, name)
+                    arg_prelude, lowered_arg = self._lower_object_argument(node, arg, name, expected_type)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 append_argument_prelude(arg_prelude)

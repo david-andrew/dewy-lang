@@ -782,3 +782,17 @@ initial 8 slots, and a growth step copies the old buffer. The 5.72 GB are
   expected; the context allocator is the lever for these, not the stack.
 
 The scheduling of each group is recorded in `ROADMAP.md` under 1.1.
+
+### Narrowed record call follow-up (2026-09-28)
+
+The native argument-route walker stopped at representation casts for a narrowed
+record union passed back to its parent type. Lowering already knew that these
+family layouts shared a handle, but did not receive the stable-route borrow
+proof. Route discovery now follows those casts; final representation checks,
+alias conflicts and ordinary conversion cleanup remain in lowering.
+
+`tests/fixtures/narrowed_record_borrow.dewy` performs 1,000 such calls after
+reserving its result buffer. Allocated bytes fall from 32,000 to zero, matching
+the hosted path. Companion tests require snapshots when a later argument or
+another place argument mutates the source. Full self-build allocation and time
+measurements must be refreshed before attributing a total-volume improvement.
