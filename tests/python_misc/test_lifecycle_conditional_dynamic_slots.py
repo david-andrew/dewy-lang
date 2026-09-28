@@ -76,7 +76,7 @@ trace=trace*10+3
 main=():>int64=>{probe(true 0) if trace not=?194392 return 1
 trace=0 probe(false 0) return if trace=?39291 42 else 2}""",
     HEADER + """probe=(flag:bool row:int64 column:int64):>void=>{
-let items:array<array<Token length=2>>=[[Token[1] Token[2]] [Token[3] Token[4]]]
+let items:array<array<Token>>=[[Token[1] Token[2]] [Token[3] Token[4]]]
 if flag and row>=?0 and row<?items.length and column>=?0 and column<?items[row].length {consume(items[row][column]);}
 trace=trace*10+5
 }

@@ -276,7 +276,7 @@ extend_route = (id:addr fields:array<string> type_nodes:types.Table @registry:Re
     return route_id(@registry root path type binding.loc)
 }
 
-array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
+array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry mutable_selectors:bool=false):>addr? => {
     let path = access_path(id nodes facts=true dictionaries=true)
     let root = hir.node_at(nodes path.root)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
@@ -314,9 +314,12 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
             if step.constant_index isnt? none {fields.push("[{step.constant_index}]") continue}
             if selected isnt? hir.ExpressedIdentifier or selected.binding_id is? none return none
             let binding=find_binding(registry selected.binding_id)
-            if binding is? none or binding.declaration is? none return none
-            let declaration=hir.node_at(nodes binding.declaration)
-            if declaration isnt? hir.Declare or declaration.decltype not=? 'const' return none
+            if binding is? none return none
+            if not mutable_selectors {
+                if binding.declaration is? none return none
+                let declaration=hir.node_at(nodes binding.declaration)
+                if declaration isnt? hir.Declare or declaration.decltype not=? 'const' return none
+            }
             fields.push("[@{binding.id}]") indices.push(binding.id)
         } else return none
     }

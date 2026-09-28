@@ -1,0 +1,18 @@
+# Runtime selectors name the current element until a write changes them.
+read=(rows:array<array<int64>> row:int64 column:int64):>int64=>{
+    if row>=?0 and row<?rows.length and column>=?0 and column<?rows[row].length {
+        return rows[row][column]
+    }
+    return 0
+}
+sum=(rows:array<array<int64>>):>int64=>{
+    let result:int64=0
+    loop row in [0..rows.length) {
+        loop column in [0..rows[row].length) {result+=rows[row][column]}
+    }
+    return result
+}
+main=():>int64=>{
+    let rows:array<array<int64>>=[[20] [] [22]]
+    return if sum(rows)=?42 and read(rows 2 0)=?22 and read(rows 1 0)=?0 42 else 1
+}

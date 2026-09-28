@@ -85,7 +85,7 @@ named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:types.Ta
         let writes=predicate_effects.mutated_bindings(id nodes)
         loop root in reads {if root in? writes return none}
     }
-    let root=bindings.array_route_id(argument nodes @registry)
+    let root=bindings.array_route_id(argument nodes @registry mutable_selectors=true)
     return if root is? none none else bindings.extend_route(root route.fields type_nodes @registry)
 }
 object_of = (id:addr nodes:types.Table):>types.ObjectType? => {

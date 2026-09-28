@@ -185,7 +185,7 @@ forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
             }
         }
     }
-    let endpoint=bindings.array_route_id(id checker.data.env.nodes @checker.data.registry)
+    let endpoint=bindings.array_route_id(id checker.data.env.nodes @checker.data.registry mutable_selectors=true)
     if endpoint isnt? none {
         let route=bindings.route_at(checker.data.registry endpoint)
         let root=node_at(access.root checker)
@@ -525,6 +525,7 @@ assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker
     let interval=checker.data.snapshot.numbers.get(value)
     let rebound=hir.Assign[node.loc node.value_type node.target node.op value]
     let shift=terms.assignment_shift(rebound checker.data.env @checker.data.registry)
+    stores.forget_selected(@current subject @checker.data)
     let shifted:facts.State=facts.State[]
     if shift isnt? none {
         # Preserve affine facts only if the update cannot roll over, including
@@ -805,7 +806,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         let nonzero=obligations.nonzero(node.value number state checker.data)
         let stable=intervals.stable(node.target checker.data.snapshot checker.data.env.nodes)
         forget_value(target.array @state @checker)
-        let route=if stable bindings.array_route_id(node.target checker.data.env.nodes @checker.data.registry) else none
+        let route=if stable bindings.array_route_id(node.target checker.data.env.nodes @checker.data.registry mutable_selectors=true) else none
         if route isnt? none {
             if number isnt? none {facts.set_value(@state facts.Term[route] number)}
             if nonzero {facts.put(@state facts.nonzero(route) ranges.exact(1))}
@@ -822,7 +823,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             # These are compiler-owned fields of an opaque dictionary,
             # so the public field-route resolver deliberately excludes them.
             # Derive the sibling route from the already checked keys route.
-            let key_id=bindings.array_route_id(node.keys checker.data.env.nodes @checker.data.registry)
+            let key_id=bindings.array_route_id(node.keys checker.data.env.nodes @checker.data.registry mutable_selectors=true)
             let owner_type=types.node_at(checker.data.env.types views.structural_base(node_at(keys.value checker).value_type checker.data.env.types))
             if key_id isnt? none and owner_type is? types.ObjectType {
                 let route=bindings.route_at(checker.data.registry key_id)
@@ -970,6 +971,7 @@ enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker word
         let target=node_at(node.target checker)
         $runtime_assert target is? hir.ExpressedIdentifier
         if target.binding_id is? none continue
+        stores.forget_selected(@current target.binding_id @checker.data)
         facts.set_value(@current facts.Term[target.binding_id] values.loop_counter_interval(node checker.element_intervals checker.data.env word_candidates))
         let sequence=terms.sequence_id(node.iterable checker.data.env @checker.data.registry)
         if sequence isnt? none {elements.read(@current sequence target.binding_id checker.word_type node.loc @checker.data.registry) note_element_routes(sequence @checker)}

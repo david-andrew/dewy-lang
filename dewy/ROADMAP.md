@@ -892,6 +892,11 @@ Candidate discovery now includes the loop guard as well as its body, under
 one deduplicated pair budget. Guard-selected facts still require entry and
 backedge evidence; zero-trip, condition-write and candidate-budget cases
 are covered in both compilers.
+Numeric route facts now also follow named mutable selectors, including
+parameters and nested range iterators. A guard on `rows[row].length` can
+justify `rows[row][column]`; assignments, place writes and loop advancement
+invalidate facts that depend on the changed selector. This is numeric
+evidence for the current selection, not persistent source-level type narrowing.
 
 ### 1.3 Effects as a real vocabulary
 

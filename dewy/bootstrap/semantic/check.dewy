@@ -1434,6 +1434,24 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         if node.inner.length =? 1 and node.delims in? ['[]' '[)' '(]' '()'] {
             let content = contexts.node_at(node.inner[0] env.lexical session)
             if content is? parser.Flat and source_views.is_operator(content.op 'RangeJuxtapose' env.lexical session) return range_value(id content env @session bounds=node.delims)
+            if content is? parser.Ambiguous {
+                # An indexed/call endpoint can leave the whole range ambiguous.
+                # Resolve its ordinary readings before attaching the bounds;
+                # do not choose an endpoint interpretation from syntax alone.
+                let ranges=content.candidates.length >? 0
+                loop candidate in content.candidates {
+                    let reading=contexts.node_at(candidate env.lexical session)
+                    if reading isnt? parser.Flat or not source_views.is_operator(reading.op 'RangeJuxtapose' env.lexical session) {ranges=false break}
+                }
+                if ranges {
+                    let checked=expression(node.inner[0] env @session)
+                    if checked is? Error return checked
+                    let range=node_at(checked session)
+                    $runtime_assert range is? hir.Range
+                    $runtime_assert node.delims is? '[]'|'[)'|'(]'|'()'
+                    return put(hir.Range[node.loc range.value_type node.delims range.step_pair range.left range.right] @session)
+                }
+            }
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         # `(a += 1 i += 2)`: a parenthesized statement group is an unscoped
@@ -3177,7 +3195,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
     let index = expression(item inner @session)
     if index is? Error return index
     let checked = node_at(index session)
-    let route = bindings.array_route_id(sequence session.hir @session.registry)
+    let route = bindings.array_route_id(sequence session.hir @session.registry mutable_selectors=true)
     if checked is? hir.Range {
         let range:hir.Range=checked
         let range_index:addr=index

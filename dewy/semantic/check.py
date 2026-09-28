@@ -4570,6 +4570,18 @@ def _runtime_range_parts(iterable: p0.AST) -> tuple[p0.AST, p0.AST, str] | None:
     if isinstance(flat, p0.Block) and flat.kind in ('[)', '[]') and len(flat.inner) == 1:
         bounds = flat.kind
         flat = flat.inner[0]
+    if isinstance(flat, p0.Ambiguous) and flat.candidates:
+        # Juxtaposition in the endpoint can keep the complete range
+        # ambiguous (`0..rows[row].length`). Factor only its common prefix;
+        # ordinary type-directed checking still chooses the endpoint.
+        first = flat.candidates[0]
+        if not (isinstance(first, p0.Flat) and isinstance(first.op, t2.RangeJuxtapose)
+                and len(first.items) == 3 and all(isinstance(item, p0.Flat)
+                    and isinstance(item.op, t2.RangeJuxtapose) and len(item.items) == 3
+                    and item.items[:2] == first.items[:2] for item in flat.candidates)):
+            return None
+        endpoint = p0.Ambiguous(flat.loc, [item.items[2] for item in flat.candidates])
+        flat = replace(first, items=[*first.items[:2], endpoint])
     if not (isinstance(flat, p0.Flat) and isinstance(flat.op, t2.RangeJuxtapose) and len(flat.items) == 3):
         return None
     start, dots, end = flat.items
@@ -12242,7 +12254,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -
     constant_index = _constant_integer(index, ctx=index_ctx)
     if length is None and not (
         (isinstance(array.type, ty.ArrayType) or _is_string_type(array.type))
-        and sb.array_route_id(array, ctx.binding_registry) is not None
+        and sb.array_route_id(array, ctx.binding_registry, mutable_selectors=True) is not None
     ):
         user_error(
             ctx.srcfile,

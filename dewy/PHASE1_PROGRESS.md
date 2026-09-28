@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Dynamic conditional element routes, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers at whole-owner last use. | General dynamic-route disjointness, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -5739,3 +5739,31 @@ of another slot without evidence. A nested array with unknown inner extent
 still needs a bounds proof the current indexed-length facts cannot always
 express; the nested cleanup regression uses a declared fixed inner extent to
 test ownership independently of that remaining proof-engine gap.
+
+
+## Numeric facts for mutable index selectors (2026-09-27)
+
+Both numeric analyzers now identify array routes selected by a named runtime
+parameter or local. Guards on nested lengths and scalar element values carry
+through subsequent reads of the same selection. Selector assignment, compound
+updates, mutating place calls, local mutable aliases and loop advancement
+invalidate dependent route facts before carrying forward affine relationships.
+Ordinary source-level type narrowing retains its const-selector rule; creating
+an identity for numeric analysis does not promise a persistent narrowed type.
+
+Nested range endpoints exposed a separate ambiguity-handling gap. Hosted
+runtime-range normalization now factors only a common range prefix and leaves
+the endpoint to ordinary type-directed checking. Native bracketed ranges
+likewise resolve ambiguous range readings before attaching their bounds.
+`loop column in [0..rows[row].length)` now checks directly. The conditional
+resource regression also uses an unknown inner extent rather than a fixed-size
+workaround.
+
+The preceding `a702b875` integration reached a three-generation native fixed
+point, passed all 241 paired manifest cases, and passed 24 checks with a freshly
+hosted-built native driver (320.40 seconds including its build). The selector
+change has its own focused checks: 90 surrounding hosted checks and three
+paired selector/const-route/scalar groups passed on x86-64/C. New paired cases
+include nested loops, element nonzero facts, writes through aliases, changed
+selectors after container snapshots, and conditional resource cleanup. The
+manifest now has 243 cases; its full run remains a separate integration gate.

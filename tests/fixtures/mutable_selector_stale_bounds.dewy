@@ -1,0 +1,9 @@
+# An old selection's length cannot justify a newly selected element.
+read=(rows:array<array<int64>> row:int64 column:int64 next:int64):>int64=>{
+    if row>=?0 and row<?rows.length and column>=?0 and column<?rows[row].length {
+        row=next
+        if row>=?0 and row<?rows.length {return rows[row][column]}
+    }
+    return 0
+}
+main=():>int64=>read([[42] []] 0 0 1)

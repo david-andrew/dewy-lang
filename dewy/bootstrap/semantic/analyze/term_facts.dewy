@@ -32,7 +32,7 @@ sequence_id = (id:addr env:values.Environment @registry:bindings.Registry):>addr
     # field through its dynamic store type.
     let sequence = type is? types.ArrayType | types.StringType | types.StringLiteralType or types.is_primitive(type 'string') or types.is_primitive(type 'grapheme') or types.is_primitive(type 'char')
     if not sequence return none
-    return bindings.array_route_id(current env.nodes @registry)
+    return bindings.array_route_id(current env.nodes @registry mutable_selectors=true)
 }
 binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>facts.Term? => {
     let current = expressions.strip_casts(id env.nodes)
@@ -50,7 +50,7 @@ binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>fac
         return if node.binding_id is? none none else facts.Term[node.binding_id]
     }
     if node is? hir.MemberAccess | hir.Index | hir.DictLookup {
-        let route = bindings.array_route_id(current env.nodes @registry)
+        let route = bindings.array_route_id(current env.nodes @registry mutable_selectors=true)
         return if route is? none none else facts.Term[route]
     }
     return none

@@ -583,7 +583,7 @@ def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None)
         return node.binding_id
     if registry is None:
         return None
-    return sb.array_route_id(node, registry)
+    return sb.array_route_id(node, registry, mutable_selectors=True)
 
 
 def _drop_index_facts(
@@ -1010,6 +1010,7 @@ class _BoundsValidator:
                 )
             elif node.op != '=':
                 value = None
+            self._forget_index_routes(binding_id, current)
             shift = self._assignment_shift(node)
             shifted = self._shifted_facts(current, binding_id, shift) if shift is not None and self._shift_is_exact(node, current, shift) else {}
             self._set_interval(current, binding_id, value)
@@ -2052,6 +2053,7 @@ class _BoundsValidator:
         def enter(head: State, word_candidates: bool = True) -> State:
             body_state = dict(head)
             if iterator.target.binding_id is not None:
+                self._forget_index_routes(iterator.target.binding_id, body_state)
                 body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator, word_candidates=word_candidates)
                 if iterated is not None:
                     self._read_element(body_state, iterated, iterator.target.binding_id, iterator.loc)
@@ -2189,6 +2191,7 @@ class _BoundsValidator:
             body_state = dict(head)
             for iterator in condition.iterators:
                 if iterator.count != 0 and iterator.target.binding_id is not None:
+                    self._forget_index_routes(iterator.target.binding_id, body_state)
                     body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator, word_candidates=word_candidates)
             return body_state
 
@@ -2629,7 +2632,7 @@ class _BoundsValidator:
 
     def _eval_member_access(self, node: hir.MemberAccess, state: State, *, validate: bool) -> Interval | None:
         self._eval(node.value, state, validate=validate)
-        route_id = sb.array_route_id(node, self.registry)
+        route_id = sb.array_route_id(node, self.registry, mutable_selectors=True)
         self._seed_sibling_relations(node, state)
         interval = state.get(route_id) if route_id is not None else None
         declared = self._bounds_of(self._member_invariant(node))
@@ -2656,7 +2659,7 @@ class _BoundsValidator:
                 array = self._array_id(step.array)
                 if array is not None:
                     self._drop_route_facts(state, array)
-        endpoint = sb.array_route_id(target, self.registry)
+        endpoint = sb.array_route_id(target, self.registry, mutable_selectors=True)
         if endpoint is not None:
             if path.binding_id is not None and path.binding_id != endpoint:
                 # Field identities are flattened under their original root,
@@ -2772,7 +2775,7 @@ class _BoundsValidator:
             return
         self._forget_container_value(keys.value, state)
         member = hir.MemberAccess(keys.loc, ty.addr_type(), keys.value, 'live')
-        route = sb.array_route_id(member, self.registry)
+        route = sb.array_route_id(member, self.registry, mutable_selectors=True)
         if route is not None:
             self._forget_global(route, state)
             if empty:
@@ -3014,7 +3017,7 @@ class _BoundsValidator:
         if assigned is not None:
             root_id, path = assigned
             self._drop_route_facts(state, root_id, path)
-            route_id = sb.array_route_id(node.target, self.registry)
+            route_id = sb.array_route_id(node.target, self.registry, mutable_selectors=True)
             if route_id is not None:
                 self._set_interval(state, route_id, value)  # the field now holds the assigned value
         return None
@@ -3445,6 +3448,7 @@ class _BoundsValidator:
 
     def _forget_index_routes(self, binding_id: int, state: State) -> None:
         for route in self.registry.index_routes.get(binding_id, ()):
+            self.member_facts.pop(route, None)
             state.pop(route, None)
             self._invalidate_length(route, state)
             self._drop_route_facts(state, route)
@@ -3453,6 +3457,7 @@ class _BoundsValidator:
                 self._drop_route_facts(state, parent, self.registry.route_paths[route])
 
     def _forget_global(self, binding_id: int, state: State) -> None:
+        self._forget_index_routes(binding_id, state)
         state.pop(binding_id, None)
         self._invalidate_length(binding_id, state)
         _drop_index_facts(state, index_id=binding_id)
@@ -5053,7 +5058,7 @@ class _BoundsValidator:
         if isinstance(node, (hir.MemberAccess, hir.Index, hir.DictLookup)):
             # Fields and stable element selections name storage routes.
             # Root/selector writes invalidate their facts through the registry.
-            return sb.array_route_id(node, self.registry)
+            return sb.array_route_id(node, self.registry, mutable_selectors=True)
         return None
 
     @staticmethod

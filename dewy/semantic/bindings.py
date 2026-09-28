@@ -250,12 +250,14 @@ def field_route(node: hir.AST, fields: tuple[str, ...]) -> hir.AST | None:
     return node
 
 
-def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True) -> int | None:
+def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True, mutable_selectors: bool = False) -> int | None:
     """The fact id of a named sequence and stable field/index route.
 
     Use ``create=False`` for reads that only consume an existing route fact.
     A const selector identifies one evaluated index until its declaration is
-    executed again. Bracketed components cannot collide with field names.
+    executed again. Numeric analysis may opt into mutable selectors when it
+    invalidates dependent routes on every write/rebinding. Source type checking
+    retains const-only selectors. Bracketed components cannot collide with field names.
     """
     path = access_path(node, unwrap=_unwrap_fact_route, dictionaries=True)
     root_id = path.binding_id
@@ -286,7 +288,7 @@ def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = T
                 names.append(f'[{step.constant_index}]')
             else:
                 binding = registry.by_id.get(selected.binding_id) if isinstance(selected, hir.ExpressedIdentifier) else None
-                if binding is None or binding.declaration is None or binding.declaration.decltype != 'const':
+                if binding is None or (not mutable_selectors and (binding.declaration is None or binding.declaration.decltype != 'const')):
                     return None
                 names.append(f'[@{binding.id}]')
                 indices.append(binding.id)

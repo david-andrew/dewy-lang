@@ -206,7 +206,7 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
     }
     if node is? hir.FunctionCall return call(id node state snapshot env @registry)
     if node is? hir.MemberAccess {
-        let route=bindings.array_route_id(id env.nodes @registry)
+        let route=bindings.array_route_id(id env.nodes @registry mutable_selectors=true)
         let interval=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
         interval=meet(interval values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
         # The read's declared type still carries facts such as `addr`, even
@@ -221,7 +221,7 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
         return interval
     }
     if node is? hir.Index|hir.DictLookup {
-        let route=bindings.array_route_id(id env.nodes @registry)
+        let route=bindings.array_route_id(id env.nodes @registry mutable_selectors=true)
         let known=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
         return meet(known own_bounds(node.value_type env))
     }

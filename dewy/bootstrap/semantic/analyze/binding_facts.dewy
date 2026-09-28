@@ -33,13 +33,19 @@ A copied array or record owns its evidence too. Later replacement of the
 source loses source relationships without erasing the copy's own promises.
 """
 
+# Selection identity follows a mutable index only until that index changes.
+# Keep this separate from the selector's own relational induction facts.
+forget_selected = (@state:facts.State subject:addr @data:predicates.Data):>void => {
+    loop dependent in data.registry.index_routes.get(subject set[]) {
+        forget(@state dependent @data)
+        let route=bindings.route_at(data.registry dependent)
+        if route isnt? none {forget(@state route.root @data prefix=route.path)}
+    }
+}
+
 forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string>=[] keep_length:addr?=none):>void => {
     if prefix.length =? 0 {
-        loop dependent in data.registry.index_routes.get(subject set[]) {
-            forget(@state dependent @data)
-            let route=bindings.route_at(data.registry dependent)
-            if route isnt? none {forget(@state route.root @data prefix=route.path)}
-        }
+        forget_selected(@state subject @data)
         facts.forget(@state facts.Term[subject])
         if subject not=? keep_length {facts.forget(@state facts.Term[subject 'length'])}
         intervals.forget(@data.snapshot subject)
