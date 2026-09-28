@@ -936,6 +936,17 @@ let _allocator_exit = (previous:int64):>void => {
     return void
 }
 
+# Rebuilding an existing value must put all recursively copied storage in
+# that owner's allocator. Paired with `_allocator_exit` by lowering; this
+# changes no source-level allocator or ownership contract.
+let _allocator_enter_for = (anchor:int64):>int64 => {
+    let previous:int64=_allocator_context
+    if previous =? 0 and (anchor <? _region_low or anchor >=? _region_high) return previous
+    let owner=_allocator_of(anchor)
+    _allocator_context=if owner <? 0 0 else owner
+    return previous
+}
+
 # A scratch allocator for `$allocator(@arena) { ... }` blocks: allocations
 # bump through its chunks, releases are free, and `reset` (or dropping the
 # arena) returns every chunk at once. Nothing allocated in it can outlive it:

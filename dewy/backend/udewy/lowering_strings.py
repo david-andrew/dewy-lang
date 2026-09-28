@@ -3222,7 +3222,7 @@ class _StringLowering:
         one = self._int64_literal(loc, 1)
         share = [
             self._if(self._typed_equality(owner, one, 'int64', loc), [
-                self._assign(owner, self._arena_allocation(self._int64_literal(loc, 8), loc), loc),
+                self._assign(owner, self._owner_allocation(self._string_data_start(source, loc), self._int64_literal(loc, 8), loc), loc),
                 self._store_i64_field(owner, 0, one, loc),
                 self._store_i64_field(source, STRING_OWNER_OFFSET, owner, loc),
             ], loc),
@@ -3235,9 +3235,10 @@ class _StringLowering:
         ]
         return [
             self._declare(owner, self._load_i64_field(source, STRING_OWNER_OFFSET, loc), loc),
-            self._if(hir.ShortCircuit(loc, 'bool', 'or',
+            self._if(hir.ShortCircuit(loc, 'bool', 'and', hir.ShortCircuit(loc, 'bool', 'or',
                 self._typed_equality(owner, one, 'int64', loc),
-                self._int64_comparison('__gt__', owner, self._int64_literal(loc, 2), loc)), share, loc),
+                self._int64_comparison('__gt__', owner, self._int64_literal(loc, 2), loc)),
+                self._shareable_storage(self._string_data_start(source, loc), loc)), share, loc),
         ]
 
     def _synthesize_string_clone(self) -> list:

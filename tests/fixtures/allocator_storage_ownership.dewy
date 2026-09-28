@@ -1,0 +1,31 @@
+# Storage remains in its owner allocator when changed from another context.
+build=(n:int64):>array<int64>=>{let xs:array<int64>=[] xs.push(n) return xs}
+label=(n:int64):>string=>"item {n}"
+reuse=(@arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    let junk=build(99)
+    let text=label(99)
+    _allocator_exit(previous)
+}
+change=(@xs:array<array<int64>> @arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    if xs.length>?0 and xs[0].length>?0 {xs[0][0]=42}
+    _allocator_exit(previous)
+}
+exercise=():>int64=>{
+    let arena=Arena[]
+    let xs:array<array<int64>>=[build(1)]
+    let before=xs.copy()
+    change(@xs @arena)
+    arena.reset()
+    reuse(@arena)
+    if xs.length not=?1 or xs[0].length not=?1 return 1
+    if before.length not=?1 or before[0].length not=?1 or before[0][0] not=?1 return 2
+    return xs[0][0]
+}
+main=():>int64=>{
+    if exercise() not=?42 return 3
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 4}
+    return if _arena_live_bytes=?before 42 else 5
+}

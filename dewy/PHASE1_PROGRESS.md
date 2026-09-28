@@ -5767,3 +5767,27 @@ paired selector/const-route/scalar groups passed on x86-64/C. New paired cases
 include nested loops, element nonzero facts, writes through aliases, changed
 selectors after container snapshots, and conditional resource cleanup. The
 manifest now has 243 cases; its full run remains a separate integration gate.
+
+
+## Hosted region-aware storage ownership (2026-09-27)
+
+Before enabling hosted scoped placement, three prerequisite regressions were
+reproduced using the allocator runtime directly: copying region-backed arrays
+could retain their data after reset; growth could put a heap array's new buffer
+in the caller's region; and detaching a nested shared array could publish region
+storage through its heap owner. All three now preserve the owning lifetime.
+
+Hosted array/string sharing checks backing-storage eligibility and allocates
+reference counts beside the retained buffers. Growth uses the existing
+owner-directed allocator. Recursive COW detachment temporarily selects the
+owner's context, including private child descriptors, then restores the calling
+context. The internal `_allocator_enter_for` helper extends runtime machinery,
+not language syntax or allocation contracts. Required helpers survive hosted
+prelude pruning. Native lowering already preserves these tested lifetimes.
+
+Five hosted ownership checks and the paired initial four cases pass on x86-64/C;
+a repeated nested mutation/reset kernel retains zero bytes over 100 calls.
+Twenty-five surrounding hosted allocator/replacement/snapshot checks also pass.
+The kernel is in the 244-case manifest. Actual hosted `$allocator` block
+placement remains separate work; this fixes its storage prerequisites without
+claiming the existing placement fallback is gone.

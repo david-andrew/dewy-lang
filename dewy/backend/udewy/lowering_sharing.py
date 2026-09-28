@@ -171,7 +171,7 @@ class _ArraySharing:
         shared = [
             self._declare(owner, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc),
             self._if(self._int64_comparison('__eq__', owner, one, loc), [
-                self._assign(owner, self._arena_allocation(size, loc), loc),
+                self._assign(owner, self._owner_allocation(self._load_i64_field(source, ARRAY_DATA_OFFSET, loc), size, loc), loc),
                 self._store_i64_field(owner, 0, one, loc),
                 self._store_i64_field(source, ARRAY_OWNER_OFFSET, owner, loc),
                 self._store_i64_field(source, ARRAY_FLAGS_OFFSET, self._int64_binary('__or__', self._load_i64_field(source, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_SHARED), loc), loc),
@@ -182,8 +182,13 @@ class _ArraySharing:
               for offset in (ARRAY_DATA_OFFSET, ARRAY_LENGTH_OFFSET, ARRAY_CAPACITY_OFFSET, ARRAY_STRIDE_OFFSET, ARRAY_OWNER_OFFSET)],
             self._store_i64_field(target, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR | ARRAY_SHARED), loc),
         ]
+        owned = hir.ShortCircuit(loc, 'bool', 'or', self._int64_comparison('__eq__', self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), one, loc), self._array_is_shared(source, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc))
+        # Descriptors are independent in this lowering. It is the backing
+        # data (and the count allocated beside it) whose lifetime is retained.
+        can_share = hir.ShortCircuit(loc, 'bool', 'and', owned,
+            self._shareable_storage(self._load_i64_field(source, ARRAY_DATA_OFFSET, loc), loc))
         return [*before, self._declare(target, self._int64_literal(loc, 0), loc),
-                self._if(hir.ShortCircuit(loc, 'bool', 'or', self._int64_comparison('__eq__', self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), one, loc), self._array_is_shared(source, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc)),
+                self._if(can_share,
                          shared, loc, [*cloned, self._assign(target, result, loc)])], target
 
     def _ensure_unique_array(self, descriptor, element, loc):
@@ -220,6 +225,13 @@ class _ArraySharing:
         # The outer buffer becomes independent; element copies may themselves
         # share their backing arrays. Nested places detach each ancestor.
         copied, fresh = self._clone_dynamic_array_storage(replace(source, type=ty.ArrayType(element, None)), ty.ArrayType(element, None), arena=True)
+        # Nested element copies create private descriptors too. Route the
+        # complete clone through the owner's context, not only its outer
+        # buffer, so no child points into the caller's shorter-lived region.
+        if self._runtime_helper('_allocator_enter_for') is not None:
+            previous = self._name('detach_allocator', loc)
+            copied = [self._declare(previous, self._region_call('_allocator_enter_for', [source], loc, 'int64'), loc),
+                      *copied, self._region_call('_allocator_exit', [previous], loc, ty.VOID_TYPE)]
         detach = [*copied,
             self._store_i64_field(owner, 0, self._int64_binary('__sub__', self._load_i64_field(owner, 0, loc), one, loc), loc),
             *[self._store_i64_field(source, offset, self._load_i64_field(fresh, offset, loc), loc)

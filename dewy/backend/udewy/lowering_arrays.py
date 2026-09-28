@@ -1636,6 +1636,18 @@ class _ArrayLowering(_ArraySharing):
             {},
         )
 
+    def _owner_allocation(self, anchor: hir.AST, size: hir.AST, loc) -> hir.AST:
+        """Growing existing storage preserves its allocator, not the caller's."""
+        if self._runtime_helper('_arena_alloc_for') is None:
+            return self._arena_allocation(size, loc)
+        return self._region_call('_arena_alloc_for', [anchor, size], loc, 'int64')
+
+    def _shareable_storage(self, anchor: hir.AST, loc) -> hir.AST:
+        """A snapshot may retain heap storage or its current region only."""
+        if self._runtime_helper('_shareable') is None:
+            return hir.Bool(loc, 'bool', True)
+        return self._region_call('_shareable', [anchor], loc, 'bool')
+
     def _is_growable_element(self, element: ty.Type) -> bool:
         """Elements a growable (arena-backed) array may hold: words, string handles, objects, arrays, and optional cells (as handles)."""
         element = ty.structural_base(element)   # unfold recursive handles and storage refinements
@@ -1785,7 +1797,8 @@ class _ArrayLowering(_ArraySharing):
                 declare(length, self._load_i64_field(descriptor, ARRAY_LENGTH_OFFSET, loc)),
                 declare(
                     new_data,
-                    self._arena_allocation(
+                    self._owner_allocation(
+                        descriptor,
                         self._int64_binary('__mul__', new_capacity, self._int64_literal(loc, element_bytes), loc),
                         loc,
                     ),
