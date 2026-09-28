@@ -1,0 +1,23 @@
+# Dynamic selection retains unrelated sibling lifetimes and lexical cleanup.
+let trace:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Bundle:type=[items:array<Token> sibling:Token]
+consume=(value:Token):>void=>{}
+probe=(flag:bool index:int64):>int64=>{
+    let owner=Bundle[[Token[1] Token[2]] Token[3]]
+    if flag and index>=?0 and index<?owner.items.length {consume(owner.items[index])}
+    trace=trace*10+5
+    return owner.sibling.id
+}
+exercise=():>int64=>{
+    trace=0
+    if probe(true 0) not=?3 or trace not=?1532 return 1
+    trace=0
+    return if probe(false 0)=?3 and trace=?5321 42 else 2
+}
+main=():>int64=>{
+    if exercise() not=?42 return 3
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 4}
+    return if _arena_live_bytes=?before 42 else 5
+}

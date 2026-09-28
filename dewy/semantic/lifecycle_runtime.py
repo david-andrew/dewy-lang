@@ -1616,7 +1616,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         original_nodes = {id(node): node for node in hir.walk(body)}
         for read, (owner, path) in conditional.items():
             dynamic_source = original_nodes[read]
-            if not path and isinstance(dynamic_source, (hir.MemberAccess, hir.Index)) and read not in consumes:
+            if (isinstance(dynamic_source, (hir.MemberAccess, hir.Index))
+                    and field_route(dynamic_source) is None and read not in consumes):
                 consumes.add(read)
                 reverse = []
                 while isinstance(dynamic_source, (hir.MemberAccess, hir.Index)):

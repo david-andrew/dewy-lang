@@ -46,16 +46,18 @@ fixed_index=(node:hir.Index nodes:array<hir.AST>):>int64?=>{
     if index is? hir.Integer and index.value>=?0 and index.value<=?9223372036854775807 return index.value as int64
     return none
 }
-# The binding and field path of a route with proven constant slots.
-field_route=(id:addr nodes:array<hir.AST>):>Entry?=>{
+# A stable route, or conservatively its prefix before an unknown slot.
+field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false):>Entry?=>{
     let reverse:array<string|int64>=[]
     let node=hir.node_at(nodes id)
     loop node is? hir.MemberAccess|hir.Index {
         if node is? hir.MemberAccess {reverse.push(node.name) node=hir.node_at(nodes node.value)}
         else {
             let index=fixed_index(node nodes)
-            if index is? none return none
-            reverse.push(index)
+            if index is? none {
+                if not allow_prefix return none
+                reverse.clear
+            } else {reverse.push(index)}
             node=hir.node_at(nodes node.array)
         }
     }
@@ -86,13 +88,14 @@ read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
     return result
 }
 # Whether a live entry needs the value a consumption of `path` takes.
-needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr>):>bool=>{
+needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr> whole_region:bool=false):>bool=>{
     loop entry in live.values {
         if binding not in? roots(entry.binding aliases) continue
         if entry.binding not=? binding return true
         if entry.measure {
             if under(entry.path path) return true
         } else if entry.store {
+            if whole_region and (under(path entry.path) or under(entry.path path)) return true
             # Storing into a component needs its ancestors, not the component.
             if path.length <? entry.path.length and under(entry.path path) return true
         } else if under(path entry.path) or under(entry.path path) return true
@@ -100,8 +103,8 @@ needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr>)
     return false
 }
 LoopExit:type=const [after:Live repeated:Live]
-consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
-    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases) {
+consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis whole_region:bool=false):>void=>{
+    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases whole_region) {
         analysis.consumes[id]=binding
         if path.length >? 0 {analysis.paths[id]=path}
     } else {
@@ -187,8 +190,16 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             return visit_selectors(id live enabled @analysis nodes exits)
         }
         if id in? analysis.candidates {
-            let root=hir.node_at(nodes bindings.access_path(id nodes).root)
-            if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {consume(id root.binding_id [] live enabled @analysis)}
+            let enclosing=field_route(id nodes allow_prefix=true)
+            # Replacing a partial owner needs dynamic-flag renewal. Only
+            # whole-owner rebinding has that protocol so far.
+            if enclosing isnt? none {
+                consume(id enclosing.binding enclosing.path live enabled @analysis whole_region=true)
+                # Dynamic cleanup selects one transferred route per owner
+                # on a path; do not admit two simultaneous dynamic donations.
+                add_entry(@live Entry[enclosing.binding])
+                return visit_selectors(id live enabled @analysis nodes exits)
+            }
         }
     }
     if node is? hir.ArrayLength {
@@ -326,17 +337,12 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
             if value is? hir.MemberAccess|hir.Index {
                 # A field route of an owner; the caller decides which
                 # component types may leave it.
-                let route=field_route(selected nodes)
+                let route=field_route(selected nodes allow_prefix=true)
                 let root=selected
                 loop hir.node_at(nodes root) is? hir.MemberAccess|hir.Index {
                     let member=hir.node_at(nodes root)
                     $runtime_assert member is? hir.MemberAccess|hir.Index
                     root=if member is? hir.MemberAccess member.value else member.array
-                }
-                let owner=hir.node_at(nodes root)
-                if route is? none and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
-                    # Unknown selectors require the entire owner to be dead.
-                    route=Entry[owner.binding_id]
                 }
                 if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 {
                     # A selector may read siblings before this transfer.

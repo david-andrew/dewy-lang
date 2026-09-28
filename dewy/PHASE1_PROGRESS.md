@@ -6,7 +6,7 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
-## Current completion checklist (2026-09-27)
+## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
 work list; historical checkpoints below still describe their own dates.
@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers at whole-owner last use. | General dynamic-route disjointness, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with conservative containing-array liveness. | General dynamic-route disjointness, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -5836,3 +5836,30 @@ fixture checks actual region handles, nested restoration, owned global-store
 fallback and outer-array growth/detachment surviving reset. It is in the
 246-case manifest. The blanket hosted-fallback expectation now correctly reports
 only the unsupported block in the original allocator fixture.
+
+
+## Dynamic transfers preserve unrelated siblings (2026-09-28)
+
+Both ownership analyses now preserve the stable prefix before an unknown array
+selector. Transferring `owner.items[index]` requires the containing array to be
+dead, while unrelated fields such as `owner.sibling` remain readable and
+replaceable. Saved runtime selectors still identify precisely the element to
+omit from cleanup; the prefix is liveness evidence, not the cleanup route.
+
+Cleanup currently admits at most one dynamic transfer per owner on an executed
+path. Mutually exclusive alternatives work; simultaneous transfers and partial
+replacement of the containing array remain rejected until their cleanup and
+flag-renewal protocols are generalized. Whole-owner rebinding retains its
+existing renewal protocol. These restrictions prevent double cleanup rather
+than silently accepting an unsupported ownership shape.
+
+Validation: 20 hosted dynamic-transfer checks, 36 surrounding partial-hook,
+conditional, disjoint-field and replacement checks, and both paired dynamic
+groups pass. Cases include nested constant outer selections, sibling replacement,
+container mutation rejection and simultaneous-transfer rejection. A repeated
+kernel retains zero bytes on both backends; it is in the 247-case manifest.
+
+The preceding `734a479f` checkpoint's fresh hosted-built native driver passed
+all 32 focused selector, allocator-storage and projected-string checks (299.04 s
+including its build). `ef2fa9d0` reached a three-generation native fixed point;
+its broad hosted and 246-case parity runs are still in progress.

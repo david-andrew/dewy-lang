@@ -23,8 +23,8 @@ def fixed_index(node):
     return index if index is not None and index >= 0 else None
 
 
-def field_route(node):
-    """A stable route from a name: fields and proven constant indices."""
+def field_route(node, *, allow_prefix=False):
+    """A stable route, or conservatively its prefix before an unknown slot."""
     path = []
     while isinstance(node, (hir.MemberAccess, hir.Index)):
         if isinstance(node, hir.MemberAccess):
@@ -33,8 +33,13 @@ def field_route(node):
         else:
             index = fixed_index(node)
             if index is None:
-                return None
-            path.append(index)
+                if not allow_prefix:
+                    return None
+                # Walking toward the root: discard everything below this
+                # unknown selection, but preserve its enclosing field route.
+                path.clear()
+            else:
+                path.append(index)
             node = node.array
     if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
         return node.binding_id, tuple(reversed(path))
@@ -139,15 +144,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                     and resource(value.type) is not None and value.binding_id not in captured
                     and occurrences[id(value)] == 1 and counts.get(value.binding_id) == 1):
                 candidates.add(id(value))
-            route = field_route(value) if isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None else None
-            if route is None and isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None:
-                root = value
-                while isinstance(root, (hir.MemberAccess, hir.Index)):
-                    root = root.value if isinstance(root, hir.MemberAccess) else root.array
-                if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
-                    # An unknown slot may transfer only when no part of its
-                    # owner remains live. Cleanup retains the selected index.
-                    route = root.binding_id, ()
+            route = field_route(value, allow_prefix=True) if isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None else None
             if route is not None:
                 root = value
                 while isinstance(root, (hir.MemberAccess, hir.Index)):
@@ -163,14 +160,14 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                     candidates.add(id(value))
 
     consumes = {}
-    def needed(binding, path, live):
+    def needed(binding, path, live, whole_region=False):
         for entry, entry_path, kind in live:
-            if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, kind)):
+            if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, 'read' if whole_region and kind == 'store' else kind)):
                 return True
         return False
 
-    def consume(node, binding, path, live, enabled):
-        if binding in enabled and id(node) in candidates and not needed(binding, path, live):
+    def consume(node, binding, path, live, enabled, *, whole_region=False):
+        if binding in enabled and id(node) in candidates and not needed(binding, path, live, whole_region):
             consumes[id(node)] = (binding, path)
         else:
             consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
@@ -218,9 +215,17 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             live.add((route[0], route[1], 'read'))
             return visit_selectors(node, live, enabled, exits)
         if isinstance(node, (hir.MemberAccess, hir.Index)) and id(node) in candidates:
-            root = bindings.access_path(node).root
-            if isinstance(root, hir.ExpressedIdentifier):
-                consume(node, root.binding_id, (), live, enabled)
+            route = field_route(node, allow_prefix=True)
+            if route is not None:
+                # Partial replacement still needs its own dynamic-flag
+                # renewal protocol; only whole-owner rebinding resets it.
+                consume(node, route[0], route[1], live, enabled, whole_region=True)
+                # Dynamic cleanup currently selects one transferred route
+                # per owner on a path. A later dynamic donation therefore
+                # keeps the whole owner live to earlier transfers, even
+                # when their enclosing fields would be disjoint.
+                live.add((route[0], (), 'read'))
+                return visit_selectors(node, live, enabled, exits)
         if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
             live.add((route[0], route[1], 'length'))
             return visit_selectors(node.array, live, enabled, exits)

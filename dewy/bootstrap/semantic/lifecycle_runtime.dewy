@@ -2259,7 +2259,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     loop [read owner] in conditional.consumes {
         let path=conditional.paths.get(read [])
         let selected=hir.node_at(session.hir read)
-        if path.length=?0 and selected is? hir.MemberAccess|hir.Index {
+        if selected is? hir.MemberAccess|hir.Index and ownership_liveness.field_route(read session.hir) is? none {
             if read in? plan.consume_sites or not transferable_component(read session) continue
             plan.consume_sites.push(read)
             let reverse:array<string|addr>=[]
