@@ -1,0 +1,22 @@
+$explicit_copies
+make=():>array<int64>=>[42]
+exercise=():>int64=>{
+    let value=make()
+    let snapshot=value.copy()
+    let rows:array<array<int64>>=[]
+    rows.reserve(1)
+    let before:int64=_arena_allocated_bytes
+    rows.push(value)
+    let allocated:int64=_arena_allocated_bytes-before
+    if rows.length>?0 {rows[0].clear}
+    if snapshot.length not=?1 or snapshot[0] not=?42 return -1
+    return allocated
+}
+main=():>int64=>{
+    if exercise() not=?0 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?0 return 2}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

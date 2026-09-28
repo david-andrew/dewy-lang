@@ -3792,13 +3792,23 @@ class _Lowerer(
             and self.local_initializers.get(binding)
             and all(self._is_owned_string_result(value) for value in self.local_initializers[binding])
         }
-        cells = {node.binding_id for node in hir.walk(literal.body)
-                 if self._owned_cell_declaration(node)}
-        records = {node.binding_id for node in hir.walk(literal.body)
-                   if self._owned_object_declaration(node)}
+        cells: set[int] = set()
+        element_owners: set[int] = set()
+        for node in hir.walk(literal.body):
+            if not isinstance(node, hir.Declare) or node.binding_id is None:
+                continue
+            if self._owned_cell_declaration(node):
+                cells.add(node.binding_id)
+            if self._owned_object_declaration(node) or (
+                self._owned_array_declaration(node) is not None
+                and not node.view
+                and node.binding_id not in self.storage_borrow_proofs.local_views
+                and not self._borrowed_route_local(node, node.annotation or node.expr.type)
+            ):
+                element_owners.add(node.binding_id)
         payload_candidates: set[int] = set()
 
-        def transfer(node: hir.AST, *, handle_only: bool = False, record_element: bool = False) -> dict[int, int]:
+        def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
             if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in cells
                     and self._field_union_members(source.type) is None):
@@ -3813,7 +3823,10 @@ class _Lowerer(
                     payload_candidates.add(id(source))
                     return {id(source): id(source)}
                 return {}
-            if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells or record_element and source.binding_id in records):
+            if isinstance(source, hir.ExpressedIdentifier) and (
+                not handle_only or source.binding_id in strings or source.binding_id in cells
+                or aggregate_element and source.binding_id in element_owners
+            ):
                 return {id(source): id(source)}
             return {}
 
@@ -3897,19 +3910,19 @@ class _Lowerer(
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
                 field_type = node.target.type
-                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), record_element=isinstance(node, hir.IndexAssign))
+                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign))
                 walk(node.value, depth, nested, site)
                 return
             if isinstance(node, hir.ArrayLiteral):
                 for item in node.items:
-                    walk(item, depth, nested, transfer(item, handle_only=True, record_element=True))
+                    walk(item, depth, nested, transfer(item, handle_only=True, aggregate_element=True))
                 return
             if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name in ('push', 'insert'):
                 walk(node.func, depth, nested, {})
                 for index, argument in enumerate(node.pos_args):
-                    walk(argument, depth, nested, transfer(argument, handle_only=True, record_element=True) if index == 0 else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if index == 0 else {})
                 for name, argument in node.kw_args.items():
-                    walk(argument, depth, nested, transfer(argument, handle_only=True, record_element=True) if name == 'value' and not node.pos_args else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if name == 'value' and not node.pos_args else {})
                 return
             if isinstance(node, hir.Flow):
                 for arm in node.arms:

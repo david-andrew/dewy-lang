@@ -154,6 +154,16 @@ ten focused hosted checks, paired x86-64/C acceptance and execution, and
 allocation for a narrowed payload binding and zero retained bytes over
 repeated calls. These changes postdate the full `cabf68ec` integration above.
 
+Checkpoint (2026-09-27): the same element-transfer sites now consume ordinary
+owned runtime arrays at last use, matching native lowering. Borrowed locals
+remain ineligible; retained views and repeated loop uses still require the
+newly reported snapshot. The owned-storage classification uses one HIR
+walk for records, cells and arrays. Validation: paired acceptance/execution
+on x86-64/C, 20 record/payload/counter checks and 26 surrounding hosted checks
+pass. A reserved row container takes a COW-backed array descriptor with
+zero allocation at insertion, preserves its explicit snapshot and retains
+zero bytes over 100 calls.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was

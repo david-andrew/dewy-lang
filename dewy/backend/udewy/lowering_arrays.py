@@ -2931,7 +2931,7 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(source_type, ty.ArrayType):
             array_type = source_type
         source = self._copy_source_expression(node)
-        if id(source) in self.moved_payload_uses and array_type.length is None:
+        if array_type.length is None and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
             return self._transfer_array_value(node, source, array_type, site='stored in an element')
         # A literal/call row has no surviving source owner. Transfer its
         # element handles into the stored row; cloning them would abandon
