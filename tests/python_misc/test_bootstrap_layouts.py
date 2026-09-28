@@ -30,6 +30,7 @@ def test_native_aggregate_layouts(tmp_path, monkeypatch):
     records = [
         record(), record(field('flag', 'bool')),
         pair, record(field('wide', 'uint64'), field('small', 'uint8')),
+        record(field('left', pair), field('right', pair)),
         record(field('head', 'bool'), field('pair', pair), field('tail', 'uint8')),
         record(field('items', ty.ArrayType('int64')), field('text', 'string')),
         record(field('call', function), field('maybe', optional), field('choice', union)),

@@ -6400,3 +6400,23 @@ prevents the move. Three fixtures bring the manifest to 295 cases.
 The preceding `a4c05062` ownership snapshot completed all 288 parity cases in
 addition to its identical three-generation fixed point. Later fact-transfer and
 replacement work awaits the next frozen integration snapshot.
+
+## Shared traversal scratch for copy and layout queries (2026-09-28)
+
+Native copy classification and layout traversal now keep one mutable recursion
+path per query, pushing before inspecting children and popping on every normal
+result, including Pending. Sibling components reuse that scratch instead of
+copying a set at each recursive edge. Cached copy classifications return before
+allocating scratch. This follows the hosted traversal protocol; cycle handling,
+brand descendants and separate string-sharing memo modes are unchanged.
+
+Both modules now enable `$explicit_copies`, bringing adoption to 33 modules. The
+complete native entry-point analysis passes, and the hosted layout/copy fixtures
+exercise the same strict modules. No copies were hidden: the native report has no
+remaining sites in these two modules. The hosted assignment repair above was
+required for layout adoption.
+
+Validation: 23 copy-bound checks and two layout/dictionary-layout checks pass on
+x86-64/C, including repeated sibling types and shared-string classification. The
+copy-bound fixture is now included in the full 296-case parity manifest. A fresh
+integration will cover these modules as part of the complete compiler.

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
 import p"../../semantic/brands.dewy" as brands
@@ -7,29 +9,39 @@ import p"../../semantic/subtyping.dewy" as subtyping
 # counts do not bound string bytes, and a COW handle does not bound the
 # logical copy it defers. Immutable string sharing is bounded. Memoization belongs to one closed
 # compilation and one sharing mode.
-runtime_sized = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> active:set<addr>=set[] share_strings:bool=false):>bool => {
+runtime_sized = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> share_strings:bool=false):>bool => {
+    let known=memo.get(views.structural_base(id nodes))
+    if known isnt? none return known
+    let active:set<addr>=set[]
+    return visit(id nodes registry @memo @active share_strings)
+}
+# The path is scratch state for this traversal, not a value snapshot at each
+# edge. Pop before returning so repeated sibling shapes are not cycles. The
+# hosted checker uses the same enter/inspect/leave protocol.
+visit = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> @active:set<addr> share_strings:bool):>bool => {
     let plain=views.structural_base(id nodes)
     let known=memo.get(plain)
     if known isnt? none return known
     if plain in? active return true
     active.push(plain)
-    let result=inspect(plain nodes registry @memo active share_strings)
+    let result=inspect(plain nodes registry @memo @active share_strings)
+    active.pop(plain default=plain);
     memo[plain]=result
     return result
 }
-inspect = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> active:set<addr> share_strings:bool):>bool => {
+inspect = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> @active:set<addr> share_strings:bool):>bool => {
     let type=types.node_at(nodes id)
     if type is? types.Primitive return not share_strings and type.name in? ['string' 'char' 'grapheme']
     if type is? types.StringType return not share_strings and type.length not=? 0
     if type is? types.ArrayType {
         if type.length is? none return true
-        return type.length not=? 0 and runtime_sized(type.element nodes registry @memo active=active share_strings=share_strings)
+        return type.length not=? 0 and visit(type.element nodes registry @memo @active share_strings)
     }
     if type is? types.TypeOr|types.TypeAnd {
-        loop member in type.items {if runtime_sized(member nodes registry @memo active=active share_strings=share_strings) return true}
+        loop member in type.items {if visit(member nodes registry @memo @active share_strings) return true}
     }
     if type is? types.ObjectType {
-        loop field in type.fields {if runtime_sized(field.value_type nodes registry @memo active=active share_strings=share_strings) return true}
+        loop field in type.fields {if visit(field.value_type nodes registry @memo @active share_strings) return true}
         # Copy dispatch preserves fields only present in a concrete child,
         # including those carried by a structural parent.
         loop entry in registry.entries {
@@ -39,7 +51,7 @@ inspect = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bo
                 if not subtyping.object_subtype(child type nodes) continue
             } else if type.brand isnt? none or not subtyping.brand_carries(child type nodes) {continue}
             loop field in child.fields {
-                if types.object_field(type field.name) is? none and runtime_sized(field.value_type nodes registry @memo active=active share_strings=share_strings) return true
+                if types.object_field(type field.name) is? none and visit(field.value_type nodes registry @memo @active share_strings) return true
             }
         }
     }

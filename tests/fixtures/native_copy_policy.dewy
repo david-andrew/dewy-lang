@@ -36,5 +36,14 @@ main=():>int64=>{
     $runtime_assert not policy.runtime_sized(parent nodes registry @shared share_strings=true)
     $runtime_assert not policy.runtime_sized(child nodes registry @shared share_strings=true)
     $runtime_assert policy.runtime_sized(dynamic nodes registry @shared share_strings=true)
+    # The same finite component reached through siblings is not recursion.
+    let leaf=types.object_type([types.ObjectField['value' word]] none false [] [] @nodes)
+    let pair=types.object_type([types.ObjectField['left' leaf] types.ObjectField['right' leaf]] none false [] [] @nodes)
+    $runtime_assert not policy.runtime_sized(pair nodes registry @memo)
+    # An early unbounded result must unwind the scratch path before a later
+    # independent query; memo modes remain separate as above.
+    let mixed=types.object_type([types.ObjectField['first' dynamic] types.ObjectField['later' pair]] none false [] [] @nodes)
+    $runtime_assert policy.runtime_sized(mixed nodes registry @memo)
+    $runtime_assert not policy.runtime_sized(pair nodes registry @memo)
     return 42
 }
