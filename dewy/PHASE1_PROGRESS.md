@@ -36,6 +36,27 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): hosted direct single-use union parameters now share
+native's consuming-input protocol. A caller supplies an independent frame cell;
+the callee transfers or releases its active payload. Fresh arguments and
+last-use locals transfer, while a retained source still requires its ordinary
+snapshot. Keyword normalization and forwarding use the same dependency worklist
+as record inputs. Conditional/repeated uses, captures, function values and
+prepared recursive payload trees retain their previous conservative protocols.
+
+Thirteen hosted checks and the 78-test surrounding ownership suite pass,
+including paired x86-64/C execution. Additional paired cases cover direct member
+injection, runtime-array payloads and absent alternatives. Repeated-call live
+storage counters remain stable. Three fixtures bring the manifest to 354;
+this hosted parity change does not alter the language's source calling rules.
+
+Frozen revision `41a4a3e2` also reaches an identical three-generation native
+fixed point (60/58/58 seconds under concurrent validation). Its complete native
+inventory reports 3,986 sites across 54,652 lines, or 72.934/KLOC, below the
+unchanged 4,500/85 gates. The frozen hosted inventory reports 2,106 nonexplicit
+runtime-sized obligations in 90 bootstrap modules; compiler-wide strict adoption
+remains open. The full 351-case integration run for that revision is pending.
+
 Checkpoint (2026-09-28): shared storage proofs distinguish private fresh
 owners from incoming aliases. An unwritten local created by a literal or
 ordinary value call may lend its storage across unrelated ambient effects,

@@ -1,0 +1,21 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+Node:type=Box|none
+append=(@output:array<Node> node:Node):>void=>{output.push(node)}
+make=():>Node=>Box[[42]]
+work=():>int64=>{
+ let output:array<Node>=[]
+ let local=make()
+ append(@output local)
+ if local is? Box {local.items.clear()}
+ $runtime_assert output.length=?1
+ let found=output[0]
+ if found is? Box and found.items.length>?0 return found.items[0]
+ return 1
+}
+main=():>int64=>{
+ loop i in [0..1000) {if work() not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..1000) {if work() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

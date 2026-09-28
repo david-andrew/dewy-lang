@@ -1297,6 +1297,22 @@ class _OptionalLowering:
             node, lower_body=lower_body, lower_loop=lower_loop, result_type=ty.VOID_TYPE,
         )
 
+    def _materialize_owned_cell(self, value: hir.AST, expected: ty.Type) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """A direct consuming parameter owns this frame cell's active payload.
+
+        Each call gets a distinct cell, so taking a last-use source payload
+        leaves its lexical cleanup valid. The callee releases or transfers
+        the payload; the caller must not register a second temporary owner.
+        Existing union writes retain copy notes, explicit intent and member
+        representation checks at this ordinary value boundary.
+        """
+        members = self._field_union_members(expected)
+        assert members is not None and not self._union_tree_slots(members)
+        target = hir.ExpressedIdentifier(value.loc, 'int64', self._new_optional_name('owned_argument'))
+        return [hir.Declare(value.loc, ty.VOID_TYPE, 'let', target.name, 'int64',
+                            self._union_cell_allocation(members, value.loc)),
+                *self._union_write(target, value, members, fresh=True)], target
+
     def _materialize_union(
         self,
         value: hir.AST,

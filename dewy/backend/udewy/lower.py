@@ -560,10 +560,12 @@ class _Lowerer(
                     if binding is not None and binding.kind in {'function', 'overload'}:
                         self.value_function_ids.update(id(function.literal) for function in self._resolve_callable(child))
         self.owned_record_parameters = set()
+        self.owned_cell_parameters = set()
         self.owned_record_arguments = {}
+        self.owned_cell_arguments = {}
         if self._has_arena():
-            from .consuming_inputs import record_parameters
-            consumed = record_parameters(self.allocator_analysis, self.value_function_ids | {
+            from .consuming_inputs import parameters as consuming_parameters
+            consumed = consuming_parameters(self.allocator_analysis, self.value_function_ids | {
                 id(function.literal) for function in self.functions if self.lifted.get(id(function))})
             for function in self.functions:
                 literal = function.literal
@@ -573,12 +575,17 @@ class _Lowerer(
                     binding = parameter.binding_id
                     if (binding is None or parameter.place or isinstance(parameter, hir.BoundParam)
                             or binding in self.borrow_plan.captured_bindings or binding in self.borrow_plan.exposed_bindings
-                            or not isinstance(ty.structural_base(parameter.type), ty.ObjectType)
                             or not storage_borrows.borrowable(parameter.type)):
                         continue
-                    summary = self.program_effects.for_param_binding(binding)
-                    if binding in consumed or summary is not None and not summary.read_only and not summary.escapes:
-                        self.owned_record_parameters.add(binding)
+                    shape = ty.structural_base(parameter.type)
+                    if isinstance(shape, ty.ObjectType):
+                        summary = self.program_effects.for_param_binding(binding)
+                        if binding in consumed or summary is not None and not summary.read_only and not summary.escapes:
+                            self.owned_record_parameters.add(binding)
+                    elif binding in consumed:
+                        members = self._field_union_members(shape)
+                        if members is not None and not self._union_tree_slots(members):
+                            self.owned_cell_parameters.add(binding)
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
             and item.name == self.entry_name
@@ -977,11 +984,13 @@ class _Lowerer(
                     if param.binding_id is not None
                     else None
                 )
-                if summary is not None and summary.read_only:
-                    # As for objects: a body that never writes to or retains
-                    # the value borrows the caller's cell (`0 | [...]` values
-                    # are otherwise deep-copied — tree and limb arrays — on
-                    # every call).
+                owned = param.binding_id in self.owned_cell_parameters
+                if owned or summary is not None and summary.read_only:
+                    if owned:
+                        parameter_cells[param.name] = (members, True)
+                    # Consuming calls supply an independent payload for the
+                    # callee to transfer or release. Other read-only bodies
+                    # borrow the caller's cell without adopting its cleanup.
                     parameter_prologue.append(hir.Declare(
                         literal.loc,
                         ty.VOID_TYPE,
@@ -1040,10 +1049,13 @@ class _Lowerer(
             )
             summary = (self.program_effects.for_param_binding(param.binding_id)
                        if param.binding_id is not None else None)
-            if summary is not None and summary.read_only:
-                # Optional payloads obey the same read-only ABI as general
-                # unions. Borrow the existing tag/payload cell; neither the
-                # cell nor its payload belongs to this callee's cleanup.
+            owned = param.binding_id in self.owned_cell_parameters
+            if owned or summary is not None and summary.read_only:
+                if owned:
+                    parameter_cells[param.name] = (('none', payload), False)
+                # Optional inputs share the union ownership protocol: an
+                # owning call supplies a payload; other read-only calls lend
+                # the cell without registering a second cleanup owner.
                 parameter_prologue.append(hir.Declare(
                     literal.loc, ty.VOID_TYPE, 'let', param.name, 'int64',
                     replace(incoming, type='int64'), binding_id=param.binding_id))
@@ -3232,6 +3244,14 @@ class _Lowerer(
                         if position is not None and id(node.pos_args[position] if isinstance(position, int)
                                                        else node.kw_args[position]) in donated
                     }
+                donated_cells = {id(argument) for argument, parameter in pairs or []
+                                 if parameter is not None and parameter.binding_id in self.owned_cell_parameters}
+                if donated_cells:
+                    self.owned_cell_arguments[id(transformed)] = {
+                        index for index, position in enumerate(source_positions)
+                        if position is not None and id(node.pos_args[position] if isinstance(position, int)
+                                                       else node.kw_args[position]) in donated_cells
+                    }
             if id(node) in self.borrow_plan.comparison_snapshots:
                 self.borrow_plan.comparison_snapshots.add(id(transformed))
             if id(node) in self.borrow_plan.array_snapshots:
@@ -3827,12 +3847,12 @@ class _Lowerer(
         Owned tagged locals use the same sites; their payload may transfer
         when the source and destination layouts both contain owned handles.
         """
-        # Owning record parameters follow the same last-use rule as locals;
+        # Owning aggregate parameters follow the same last-use rule as locals;
         # their prologue installs the matching lexical cleanup owner.
         owned: dict[int, tuple[int, int]] = {
             parameter.binding_id: (0, 0)
             for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
-            if parameter.binding_id in self.owned_record_parameters
+            if parameter.binding_id in self.owned_record_parameters or parameter.binding_id in self.owned_cell_parameters
         }  # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
         transfers: list[tuple[int, int, int, int]] = []   # (binding id, transfer node id, sequence, loop depth) in order
@@ -4027,9 +4047,9 @@ class _Lowerer(
                 for name, argument in node.kw_args.items():
                     walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if name == 'value' and not node.pos_args else {})
                 return
-            if isinstance(node, hir.FunctionCall) and id(node) in self.owned_record_arguments:
+            if isinstance(node, hir.FunctionCall) and (id(node) in self.owned_record_arguments or id(node) in self.owned_cell_arguments):
                 walk(node.func, depth, nested, {})
-                donated = self.owned_record_arguments[id(node)]
+                donated = self.owned_record_arguments.get(id(node), set()) | self.owned_cell_arguments.get(id(node), set())
                 for index, argument in enumerate(node.pos_args):
                     walk(argument, depth, nested, transfer(argument) if index in donated else {})
                 for name, argument in node.kw_args.items():
@@ -5885,6 +5905,8 @@ class _Lowerer(
                         self._materialize_place_argument(arg)
                     )
                     place_postlude.extend(arg_postlude)
+                elif index in self.owned_cell_arguments.get(id(node), ()):
+                    arg_prelude, lowered_arg = self._materialize_owned_cell(arg, expected_type)
                 elif (id(arg) in self.forwarded_values.get(id(node), ())
                         and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
                     arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)

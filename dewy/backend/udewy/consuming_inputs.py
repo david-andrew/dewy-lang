@@ -12,8 +12,8 @@ from ...semantic.analyze.effects import _literal_params
 from ...semantic.analyze.storage_borrows import borrowable
 
 
-def record_parameters(analysis, excluded_literals):
-    """Find record inputs donated into push/insert or another proved input.
+def parameters(analysis, excluded_literals):
+    """Find ordinary record/union inputs donated into push/insert or another proved input.
 
     A worklist propagates only from actual consuming operations. A forwarding
     cycle without a consuming endpoint supplies no evidence. Functions used
@@ -26,7 +26,7 @@ def record_parameters(analysis, excluded_literals):
         wanted = {p.binding_id for p in _literal_params(literal)
                   if p.binding_id is not None and not p.place
                   and not isinstance(p, hir.BoundParam)
-                  and isinstance(ty.structural_base(p.type), ty.ObjectType)
+                  and isinstance(ty.structural_base(p.type), (ty.ObjectType, ty.TypeOr))
                   and borrowable(p.type)}
         if not wanted:
             continue
