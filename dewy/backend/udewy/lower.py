@@ -504,6 +504,9 @@ class _Lowerer(
         analysis = _EffectAnalyzer(root)
         self.allocator_analysis = analysis
         self.allocator_hazards = None
+        # Entering an allocator scope registers a lexical cleanup action.
+        # Its generated name is unique across functions, like other owners.
+        self.allocator_restorations: dict[str, hir.AST] = {}
         self.program_effects: ProgramEffects = analysis.solve()
         # Selected overloads and immutable callable aliases are ordinary
         # value boundaries too; their names alone do not imply raw exposure.
@@ -4071,9 +4074,9 @@ class _Lowerer(
         ends every scope inside the loop it leaves. Names are unique within
         a function, so the lowered tree's blocks are the scopes.
         """
-        if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not self.owned_raw_arrays and not self.owned_cells and not self.owned_aggregate_cells and not exit_statements) or not isinstance(body, hir.Block):
+        if (not self.owned_array_names and not self.owned_objects and not self.owned_strings and not self.owned_raw_arrays and not self.owned_cells and not self.owned_aggregate_cells and not self.allocator_restorations and not exit_statements) or not isinstance(body, hir.Block):
             return body
-        owned_names = self.owned_array_names | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells) | set(self.owned_aggregate_cells)
+        owned_names = self.owned_array_names | self.owned_strings | set(self.owned_raw_arrays) | set(self.owned_cells) | set(self.owned_aggregate_cells) | self.allocator_restorations.keys()
         exit_statements = list(exit_statements)   # run at every function exit, after the scopes' releases
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]], moved: str | None = None) -> list[hir.AST]:
@@ -4084,7 +4087,9 @@ class _Lowerer(
                 for local in reversed(scope):
                     if local.name == moved:
                         continue   # `return s`: the caller takes the string over
-                    if local.name in self.owned_strings:
+                    if local.name in self.allocator_restorations:
+                        released.append(self.allocator_restorations[local.name])
+                    elif local.name in self.owned_strings:
                         released.append(self._release_string_by_owner(local, local.loc))
                     elif local.name in self.owned_aggregate_cells:
                         members, prepared = self.owned_aggregate_cells[local.name]

@@ -6303,3 +6303,25 @@ Validation: seven checks pass including native x86-64/C execution and an empty
 effect-row rejection; 20 surrounding brand/conversion/interpolation checks pass.
 Three fixtures bring the manifest to 281 cases. This closes the explicit TODO
 in native `type_names.instance` without introducing a new evaluation rule.
+
+## Hosted allocator exit cleanup (2026-09-28)
+
+Hosted lowering now registers allocator restoration as an ordinary lexical
+cleanup action. Normal exits, scalar/void returns and outward loop exits unwind
+it after inner owned values and hooks, matching native cleanup order. Nested
+arenas restore in reverse order; return operands evaluate before cleanup. This
+replaces the separate fallthrough-only exit insertion and removes the generic
+control-flow fallback. Aggregate block/return copy-out and outer owned stores
+retain their explicit fallbacks.
+
+Validation: 20 allocator exit/insertion/storage checks pass including paired
+x86-64/C execution, and 17 further hosted allocator checks pass. Tests observe
+allocator identity after return/break/continue, nested scopes and labeled exits;
+a drop hook confirms that cleanup precedes restoration. Three fixtures bring
+the manifest to 284 cases. Module-level Arena ownership is still unsupported by
+lifecycle lowering; this does not claim coverage of that separate boundary.
+
+The preceding `9dc8ae48` snapshot reached a three-generation native fixed point
+(generation 3: 60 seconds under concurrent tests), and its fresh hosted-built
+driver passed all four new groups in 364.57 seconds including build. Its full
+281-case parity and broad hosted runs remain in progress.

@@ -1,0 +1,20 @@
+build=(n:int64):>array<int64>=>{let xs:array<int64>=[] xs.push(n) return xs}
+heap_owner=():>int64=>{
+    let pointer=_arena_alloc(8)
+    let owner=_allocator_of(pointer)
+    _arena_release(pointer 8)
+    return owner
+}
+main=():>int64=>{
+    let arena=Arena[]
+    let total:int64=0
+    $outer
+    loop i in [0..5) {
+        $allocator(@arena) {
+            let xs=build(i)
+            loop true {total+=xs.length break $outer}
+        }
+    }
+    return if total=?1 and arena.handle not=?0 and heap_owner()=?0 42 else 1
+}
+

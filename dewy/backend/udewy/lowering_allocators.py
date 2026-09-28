@@ -24,25 +24,6 @@ def _body_nodes(root):
             pending.extend(hir.children(node))
 
 
-def _leaves_scope(root):
-    """A local loop exit does not leave its enclosing allocator context."""
-    pending, seen = [(root, 0)], set()
-    while pending:
-        node, depth = pending.pop()
-        key = id(node), depth
-        if key in seen:
-            continue
-        seen.add(key)
-        if isinstance(node, hir.Return):
-            return True
-        if isinstance(node, (hir.Break, hir.Continue)) and node.loop_levels >= depth:
-            return True
-        if not isinstance(node, (hir.FunctionLiteral, hir.GenericFunction)):
-            nested = depth + isinstance(node, hir.LoopArm)
-            pending.extend((child, nested) for child in hir.children(node))
-    return False
-
-
 class _AllocatorLowering:
     @staticmethod
     def _allocator_owned(type_):
@@ -105,14 +86,14 @@ class _AllocatorLowering:
         for name in ('_allocator_enter', '_allocator_exit', '_shareable', '_arena_alloc_for', '_allocator_enter_for'):
             if self._runtime_helper(name) is None:
                 return f'missing allocator runtime helper `{name}`'
-        # Initial hosted scope support restores at normal fallthrough. Keep
-        # aggregate copy-out and nonlocal exits on the enclosing allocator
-        # until their result/cleanup boundaries also carry restoration.
+        # Scalar exits unwind through the ordinary lexical cleanup pass.
+        # Aggregate results still need a separate copy-out after restoration.
         if self._allocator_owned(block.type):
             return 'hosted aggregate copy-out still uses the enclosing allocator'
         nodes = [node for item in block.items for node in _body_nodes(item)]
-        if _leaves_scope(block):
-            return 'hosted allocator scope with control-flow exits uses the enclosing allocator'
+        if any(isinstance(node, hir.Return) and node.item is not None
+               and self._allocator_owned(node.item.type) for node in nodes):
+            return 'hosted aggregate return copy-out still uses the enclosing allocator'
         declared = {node.binding_id for node in nodes if isinstance(node, hir.Declare)}
         declared.update(node.target.binding_id for node in nodes if isinstance(node, hir.IteratorExpression))
         arenas = {id(node.arena) for node in nodes if isinstance(node, hir.AllocatorBlock)}
@@ -151,7 +132,8 @@ class _AllocatorLowering:
         arena = self._require_node(self._transform_node(node.arena))
         entry = self._region_call('_allocator_enter', [arena], node.loc, 'int64')
         exit_ = self._region_call('_allocator_exit', [previous], node.loc, ty.VOID_TYPE)
+        self.allocator_restorations[previous.name] = exit_
         return replace(node, arena=arena, items=[
             hir.Declare(node.loc, ty.VOID_TYPE, 'let', previous.name, 'int64', entry),
-            *items, exit_,
+            *items,
         ])
