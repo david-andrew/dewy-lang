@@ -1,0 +1,10 @@
+# The guard selects the lower/upper pair for inference. Its initial bounds
+# and matching updates establish the invariant even if the loop never runs.
+work=(start:int64<v=>0<=?v<=?100>):>int64=>{
+    let lower:int64=0 let upper:int64=start
+    loop lower<?upper and lower<?10 and upper<?int64.max {lower+=1 upper+=1}
+    $assert lower<=?upper
+    $assert upper-lower<=?100
+    return 42
+}
+main=():>int64=>if work(0)=?42 and work(100)=?42 42 else 1

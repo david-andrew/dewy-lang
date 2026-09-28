@@ -899,7 +899,10 @@ counters therefore need not hide a useful candidate. Neither an assertion nor
 its requested offset is assumed. Entry intervals supply both directional
 bounds, and every normal/continue backedge must preserve them. Stronger
 existing evidence survives candidate insertion. Source-pair discovery is
-cached per loop body, with binding/route identities retained. Paired cases
+cached per loop guard/body, with binding/route identities retained. Guards
+and bodies share a deduplicated 64-pair budget, with guard pairs first. A
+guard selects a candidate without being assumed true at entry: zero-trip
+execution must preserve the entry proof too. Paired cases
 check interval bounds, branch/continue paths and rejection of unequal updates,
 invalid entry conditions and invalidating calls. This extends the difference
 vocabulary; arbitrary linear combinations and exact unsafe-proof provenance

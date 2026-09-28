@@ -5424,3 +5424,27 @@ repeated temporary/snapshot cleanup. The parity manifest now has 224 cases.
 policy in both compilers and now enable it without added `.copy()` calls.
 The ordinary join test itself enables the directive, gating the eliminated
 runtime-array input copy independently of result-string placement.
+
+
+## Guard-selected finite qualifiers (2026-09-27)
+
+The candidate audit found that while-loop guards did not select difference
+pairs, although body predicates did. Both analyzers now merge guard/body
+vocabularies under the same deduplicated 64-pair budget, considering the guard
+first. Entry intervals still justify each proposed bound, and every advancing
+edge must preserve it. No guard fact is assumed for a zero-trip loop.
+
+Forty-seven hosted surrounding checks passed; the subsequent 43-check batch
+includes paired native execution and a case with 70 unrelated changing
+bindings that exceed the exact-value seed budget. Invalid entry states,
+unequal updates, omitted updates on a continue edge and mutation in the guard
+remain rejected. The new case is in the 225-case manifest. The source-selected
+vocabulary remains intentionally finite; this adds no arbitrary nonlinear or
+quantified propositions to the proof language.
+
+The preceding getter/join checkpoint (`00bb38cd`) closed a three-generation
+native fixed point with execution/scaling checks at
+`../dewy-build-artifacts/phase1-getter-join-integration`. Its independent broad
+hosted suite and 224-case parity manifest are still running against that
+checkpoint; their eventual results must not be attributed to the newer guard
+change without the separate focused evidence above.

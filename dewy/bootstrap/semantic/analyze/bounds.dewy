@@ -1072,7 +1072,7 @@ iterator_steps_fit = (iterators:array<addr> transfer:Transfer checker:Checker):>
     return true
 }
 
-# Cache a bounded vocabulary from each loop body. A relation mentioned in
+# Cache a bounded vocabulary from each loop guard or body. A relation mentioned in
 # source only identifies a pair; entry intervals and backedges prove it.
 mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
     let cached=checker.loop_qualifier_pairs.get(body)
@@ -1136,7 +1136,17 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
         let root=if route is? none fact.term.binding_id else route.root
         if root in? checker.assigned {changing.push(fact.term.binding_id)}
     }
-    let mentioned=mentioned_loop_pairs(arm.body @checker)
+    # A guard selects candidates without assuming the condition at entry:
+    # zero trips and every backedge still have to establish each relation.
+    let mentioned=mentioned_loop_pairs(arm.condition @checker)
+    loop pair in mentioned_loop_pairs(arm.body @checker) {
+        if mentioned.length>=?64 break
+        let found=false
+        loop known in mentioned {
+            if facts.same_term(pair.left known.left) and facts.same_term(pair.right known.right) or facts.same_term(pair.left known.right) and facts.same_term(pair.right known.left) {found=true break}
+        }
+        if not found {mentioned.push(pair)}
+    }
     incoming=facts.seed_loop_relations(incoming changing mentioned)
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval

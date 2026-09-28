@@ -883,6 +883,10 @@ audit found and fixed an unsound eight-transfer cutoff: budget exhaustion now
 discards unstable facts rather than treating them as inductive. Both compilers
 include condition writes in each while-loop transfer. Delayed-dependency
 regressions cover while loops and single/multiple iterators.
+Candidate discovery now includes the loop guard as well as its body, under
+one deduplicated pair budget. Guard-selected facts still require entry and
+backedge evidence; zero-trip, condition-write and candidate-budget cases
+are covered in both compilers.
 
 ### 1.3 Effects as a real vocabulary
 

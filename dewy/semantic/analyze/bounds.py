@@ -1964,7 +1964,16 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> State:
-        state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
+        # The guard selects vocabulary too, but contributes no entry proof:
+        # the loop may execute zero times. Keep one finite, deduplicated budget
+        # across guard and body, with the guard's pairs considered first.
+        mentioned = list(self._mentioned_loop_pairs(condition))
+        for pair in self._mentioned_loop_pairs(body):
+            if len(mentioned) >= 64:
+                break
+            if pair not in mentioned and pair[::-1] not in mentioned:
+                mentioned.append(pair)
+        state = _seed_loop_relations(state, self.assigned, self.registry, mentioned)
         head = dict(state)
         # Each transfer includes evaluating the condition. Its writes are
         # loop-carried too; applying them only for final body validation
