@@ -196,7 +196,7 @@ def _length_propositions_interval(propositions: tuple[ty.Proposition, ...] | lis
 
 
 def _excludes_zero(propositions: tuple[ty.Proposition, ...] | list[ty.Proposition]) -> bool:
-    return any(p.subject == 'self' and p.op == 'not=?' and p.value == 0 for p in propositions)
+    return any(p.subject == 'self' and p.term is None and p.op == 'not=?' and p.value == 0 for p in propositions)
 
 
 def _call_function_type(node: hir.AST) -> ty.FunctionType | None:
@@ -1347,6 +1347,36 @@ class _BoundsValidator:
 
     def _proposition_verdict(self, proposition: ty.Proposition, value: hir.AST, interval: Interval | None, state: State) -> bool | None:
         """True when the facts prove the proposition, False when they refute it, None otherwise."""
+        # Disequality is a finite relation of its own, not a choice of order.
+        # Keep the same actual-value/length identities as the ordered rules.
+        if proposition.op == 'not=?' and proposition.term is not None:
+            if proposition.term_id is None or proposition.term_id < 0:
+                return None
+            bound = _length_key(proposition.term_id) if proposition.term_of == 'length' else proposition.term_id
+            if proposition.param is not None:
+                if proposition.subject_id is None:
+                    return None
+                subject = _length_key(proposition.subject_id) if proposition.of == 'length' else proposition.subject_id
+                actual = _known_interval(state, subject, self.max_length) if subject < 0 else self._binding_interval(state, subject)
+            else:
+                node, actual = self._subject_interval(proposition, value, interval, state)
+                if proposition.subject == 'length' or proposition.of == 'length':
+                    sequence = self._array_id(_strip_casts(node))
+                    subject = _length_key(sequence) if sequence is not None else None
+                else:
+                    subject = self._binding_id(_strip_casts(node))
+                    if subject is None:
+                        subject = self._element_route_of(node)
+            known = _known_interval(state, bound, self.max_length) if bound < 0 else self._binding_interval(state, bound)
+            verdict = self._decide_comparison('__ne__', actual, known)
+            if verdict is not None:
+                return verdict
+            if subject is not None:
+                if _distinct_key(subject, bound) in state or self._ordered(subject, bound, 1, state) or self._ordered(bound, subject, 1, state):
+                    return True
+                if self._ordered(subject, bound, 0, state) and self._ordered(bound, subject, 0, state):
+                    return False
+            return None
         directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}
         if proposition.axiom == 'addr':
             subject_node, _interval = self._subject_interval(proposition, value, interval, state)
@@ -1557,15 +1587,19 @@ class _BoundsValidator:
             if field.name != node.name and not any(p.term == node.name for p in field.refinement):
                 continue   # the field read, and the fields that relate to it
             for proposition in field.refinement:
-                if proposition.term is None or proposition.field is not None or proposition.op not in directions:
+                if proposition.term is None or proposition.field is not None or (proposition.op not in directions and proposition.op != 'not=?'):
                     continue
                 sibling = object_type.field(proposition.term)
                 if sibling is None:
                     continue
                 subject = self.registry.route_id(root_id, (*path[:-1], field.name), field.type, node.loc)
                 term_route = self.registry.route_id(root_id, (*path[:-1], sibling.name), sibling.type, node.loc)
+                if proposition.subject == 'length' or proposition.of == 'length':
+                    subject = _length_key(subject)
                 term = _length_key(term_route) if proposition.term_of == 'length' else term_route
-                for direction, gap in directions[proposition.op]:
+                if proposition.op == 'not=?':
+                    state[_distinct_key(subject, term)] = Interval.exact(1)
+                for direction, gap in directions.get(proposition.op, []):
                     smaller, larger = (subject, term) if direction == 'upper' else (term, subject)
                     key = _order_key(smaller, larger)
                     state[key] = state.get(key, Interval(None, None)).intersect(Interval(gap, None))
@@ -1610,6 +1644,8 @@ class _BoundsValidator:
             return
         subject = binding_id if proposition.subject == 'self' else _length_key(binding_id)
         bound = _length_key(proposition.term_id) if proposition.term_of == 'length' else proposition.term_id
+        if proposition.op == 'not=?':
+            state[_distinct_key(subject, bound)] = Interval.exact(1)
         for direction, gap in {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}.get(proposition.op, []):
             smaller, larger = (subject, bound) if direction == 'upper' else (bound, subject)
             state[_order_key(smaller, larger)] = Interval(gap, None)
@@ -3976,6 +4012,19 @@ class _BoundsValidator:
         """`let length = eat(src[i..])`: the call's promise as facts on the binding."""
         for refined in _call_result_refinements(value):
             for proposition in refined.propositions:
+                if proposition.op == 'not=?' and proposition.term is not None and proposition.subject in {'self', 'length'}:
+                    argument = _call_argument(value, proposition.term, self.predicate_bindings)
+                    if argument is not None:
+                        argument = _strip_casts(argument)
+                        if proposition.term_of == 'length':
+                            sequence = self._array_id(argument)
+                            bound_term = _length_key(sequence) if sequence is not None else None
+                        else:
+                            offset = self._offset_term(argument)
+                            bound_term = offset[0] if offset is not None and offset[1] == 0 else None
+                        if bound_term is not None:
+                            result_term = subject if proposition.subject == 'self' else _length_key(subject)
+                            state[_distinct_key(result_term, bound_term)] = Interval.exact(1)
                 if (proposition.term is None or proposition.subject != 'self'
                         or proposition.term_of != 'length'):
                     continue
@@ -4049,6 +4098,7 @@ class _BoundsValidator:
             # `let n = src.length`: `n` is the length, in both directions
             sequence_id = self._array_id(measured)
             if sequence_id is not None:
+                self._copy_relational_facts(state, _length_key(sequence_id), subject)
                 state[_order_key(subject, _length_key(sequence_id))] = Interval(0, None)
                 state[_order_key(_length_key(sequence_id), subject)] = Interval(0, None)
             return
@@ -4153,6 +4203,8 @@ class _BoundsValidator:
                     if bound_term is not None and bound_term < 0:
                         bound_term = None
                     bound_interval = self._eval(bound_argument, state, validate=False)
+                if proposition.op == 'not=?' and subject_term is not None and bound_term is not None:
+                    state[_distinct_key(subject_term, bound_term)] = Interval.exact(1)
                 directions = {'<?': [('upper', 1)], '<=?': [('upper', 0)], '>?': [('lower', 1)], '>=?': [('lower', 0)], '=?': [('upper', 0), ('lower', 0)]}.get(proposition.op, [])
                 for direction, gap in directions:
                     smaller, larger = (subject_term, bound_term) if direction == 'upper' else (bound_term, subject_term)
@@ -4331,6 +4383,10 @@ class _BoundsValidator:
     def _copy_relational_facts(self, state: State, source: int, target: int) -> None:
         """`let x = y`: the order, remainder, index and nonzero facts of `y` hold of `x`."""
         for key, interval in list(state.items()):
+            if isinstance(key, DistinctFact):
+                if source in (key.left, key.right):
+                    state[_distinct_key(*(target if term == source else term for term in (key.left, key.right)))] = interval
+                continue
             remainder = _decode_remainder_fact(key)
             if remainder is not None:
                 if source in remainder:
@@ -4345,7 +4401,12 @@ class _BoundsValidator:
             if index_fact is not None and index_fact[0] == source:
                 state[_index_fact_key(target, index_fact[1])] = interval
             elif index_fact is not None and source < 0 and _length_key(index_fact[1]) == source:
-                state[_index_fact_key(index_fact[0], -target - 1)] = interval
+                if target < 0:
+                    state[_index_fact_key(index_fact[0], -target - 1)] = interval
+                else:
+                    # A length saved in a scalar is an order bound, not an
+                    # array identity to which an IndexFact can refer.
+                    state[_order_key(index_fact[0], target)] = Interval(1, None)
 
     # ---- element facts: what holds of every element of an array ----
     #

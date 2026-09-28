@@ -1,0 +1,11 @@
+pick=(a:int64 @b:int64):>int64<v=>v not=?a>=>{
+    if a=?0 {b=1 return 1}
+    b=0
+    return 0
+}
+probe=(a:int64):>int64=>{
+    let value=pick(a @a)
+    $assert value not=?a
+    return 42
+}
+main=():>int64=>probe(12)

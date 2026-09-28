@@ -238,7 +238,6 @@ comparison = (left:addr right:addr op:facts.Operator name:string subject:string 
         bound_projection = 'length'
     }
     if term isnt? none and term not=? name and term not=? 'length' {
-        if operator =? 'not=?' return contexts.unsupported(bound 'a dependent term in an inequality (`not=?`)' context session)
         return facts.Proposition[target.name operator projection=target.projection term=term term_projection=bound_projection]
     }
     return contexts.unsupported(bound 'refinement conditions beyond integer literals, fixed-width min/max, and named value/length terms' context session)

@@ -77,6 +77,22 @@ call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data)
         }
     }
     if not intervals.stable(value data.snapshot data.env.nodes places=true) return
+    # A disequality has no chosen direction. Only substitute arguments whose
+    # identity survived evaluation, just as for ordinary ordered promises.
+    loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+        loop p in result.propositions {
+            if p.op not=? 'not=?' or p.term is? none or (p.subject not=? 'self' and p.subject not=? 'length') continue
+            let supplied=expressions.call_argument(value p.term data.env.nodes data.env.types)
+            if supplied is? none continue
+            let argument=expressions.strip_casts(supplied data.env.nodes)
+            let bound:facts.Term?=none
+            if p.term_projection =? 'length' {
+                let sequence=terms.sequence_id(argument data.env @data.registry)
+                if sequence isnt? none {bound=facts.Term[sequence 'length']}
+            } else {bound=terms.binding_term(argument data.env @data.registry)}
+            if bound isnt? none {facts.put(@state facts.distinct(facts.Term[subject (if p.subject =? 'length' 'length' else 'value')] bound) ranges.exact(1))}
+        }
+    }
     terms.seed(@state facts.Term[subject] terms.value_facts(value state data.relations data.env @data.registry) data.relations)
     terms.seed(@state facts.Term[subject 'length'] terms.call_facts(value 'length' data.env @data.registry) data.relations)
 }
@@ -121,6 +137,7 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
     }
     let saved=data.snapshot.terms.get(value)
     if expressions.sequence_of(id data.env.nodes) isnt? none and saved isnt? none {
+        if saved.shift =? 0 {relations.copy_relational(@state saved.term target)}
         facts.put(@state facts.order(target saved.term) ranges.Interval[-saved.shift none])
         facts.put(@state facts.order(saved.term target) ranges.Interval[saved.shift none])
         return

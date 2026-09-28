@@ -64,6 +64,7 @@ seed_term = (@state:facts.State subject:addr p:propositions.Proposition context:
     if p.term_id is? none or (p.subject not=? 'self' and p.subject not=? 'length') return
     let source = facts.Term[subject (if p.subject =? 'length' 'length' else 'value')]
     let target = facts.Term[p.term_id p.term_projection]
+    if p.op =? 'not=?' {facts.put(@state facts.distinct(source target) ranges.exact(1))}
     loop bound in terms.directions(p.op) {
         let key = if bound.direction =? 'upper' facts.order(source target) else facts.order(target source)
         facts.put(@state key ranges.Interval[bound.gap none])
@@ -129,14 +130,16 @@ seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment
         loop p in field.refinement {
             if p.term is? none or propositions.field(p) isnt? none continue
             let directions = terms.directions(p.op)
-            if directions.length =? 0 continue
+            if directions.length =? 0 and p.op not=? 'not=?' continue
             let sibling = types.object_field(member.object p.term)
             if sibling is? none continue
             let subject = bindings.route_id(@registry member.root sibling_path(member.path field.name) field.value_type node.loc)
             let bound = bindings.route_id(@registry member.root sibling_path(member.path sibling.name) sibling.value_type node.loc)
+            let source = facts.Term[subject (if p.subject =? 'length' or p.projection =? 'length' 'length' else 'value')]
             let target = facts.Term[bound p.term_projection]
+            if p.op =? 'not=?' {facts.put(@state facts.distinct(source target) ranges.exact(1))}
             loop direction in directions {
-                let key = if direction.direction =? 'upper' facts.order(facts.Term[subject] target) else facts.order(target facts.Term[subject])
+                let key = if direction.direction =? 'upper' facts.order(source target) else facts.order(target source)
                 let previous = facts.lookup(state key)
                 facts.put(@state key ranges.intersect((if previous is? none ranges.UNKNOWN else previous) ranges.Interval[direction.gap none]))
             }

@@ -14,6 +14,7 @@ import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
 import p"intervals.dewy" as ranges
 import p"relations.dewy" as relations
+import p"comparison_facts.dewy" as comparisons
 import p"length_proofs.dewy" as lengths
 
 doc"""
@@ -217,10 +218,15 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
     }
     if p.term isnt? none {
         if p.term_id is? none return none
-        let directions=terms.directions(p.op)
-        if directions.length =? 0 return none
         let term=facts.Term[p.term_id p.term_projection]
         let bound=relations.interval_of(term state data.relations)
+        if p.op =? 'not=?' {
+            let verdict=ranges.decide(p.op target.interval bound)
+            if verdict isnt? none return verdict
+            return comparisons.decide_order(p.op comparisons.Operand[interval=target.interval term=target.term] comparisons.Operand[interval=bound term=term] state data.relations)
+        }
+        let directions=terms.directions(p.op)
+        if directions.length =? 0 return none
         loop direction in directions {
             let upper=direction.direction =? 'upper'
             let held=false

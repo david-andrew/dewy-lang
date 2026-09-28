@@ -160,6 +160,9 @@ copy_relational = (@state:facts.State source:facts.Term target:facts.Term):>void
         if fact is? facts.Order {
             facts.put(@state facts.order(replace_term(fact.smaller source target) replace_term(fact.larger source target)) entry.interval)
         }
+        else if fact is? facts.Distinct {
+            facts.put(@state facts.distinct(replace_term(fact.left source target) replace_term(fact.right source target)) entry.interval)
+        }
         else if fact is? facts.Remainder {
             let offset = fact.offset
             if source.projection =? 'value' and target.projection =? 'value' and offset =? source.binding_id { offset = target.binding_id }

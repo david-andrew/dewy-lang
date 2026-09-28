@@ -5961,3 +5961,31 @@ Constructor checkpoint `e6d355a1` reached another three-generation fixed point
 (generations 2/3: 51/55 s under concurrent checks). Its fresh hosted-built driver
 passed 10 constructor and scoped-placement checks in 266.80 s including build.
 The full 250-case parity run is in progress.
+
+
+## Dependent disequality contracts (2026-09-28)
+
+The existing named-bound contract syntax now accepts `not=?` in both checkers.
+Its obligations and transfers use the same symmetric finite fact as guards,
+without choosing an order or synthesizing unrelated term pairs. Coverage includes
+scalar/length parameters, result promises, boolean predicate arms, direct checked
+proof calls and immutable sibling-field contracts. Saving a scalar or length
+carries the observed disequalities into the new binding; changing the source
+invalidates only facts that still mention that source. A length copied into a
+scalar supplies ordinary order bounds, never an invented array identity.
+
+A dependent exclusion is not a literal zero exclusion: `b not=? a` does not
+justify `b not=? 0`. Postconditions likewise cannot refer back to a by-value
+argument's current source if the invocation changed that source. Both have
+negative regressions. Unsupported expressions still leave obligations unknown.
+
+Validation: 136 surrounding hosted contract/proof tests passed, followed by 55
+focused contract/index/key checks and 22 final contract cases. The paired
+contract and guard groups passed on x86-64/C; the final length-snapshot and
+sibling-length cases also passed against the rebuilt native driver. Positive
+result-contract and stale-argument fixtures bring the manifest to 254 cases.
+This is focused evidence; the new checkpoint still needs fresh-build integration.
+
+The preceding constructor checkpoint `e6d355a1` completed all 250 manifest
+cases. Its copy inventory is 2,417 sites across 53,081 lines (45.534/KLOC), below
+both unchanged gates of 3,000 sites and 60/KLOC. Phase 1 remains incomplete.

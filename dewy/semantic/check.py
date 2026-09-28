@@ -14058,13 +14058,9 @@ def _comparison_proposition(ast: p0.AST, subject_name: str, subject: str, *, ctx
             return ty.Proposition(subject_placeholder, op, value, of=of)
         term = _refinement_term_ast(node)
         if term is not None and term != subject_name:
-            if op == 'not=?':
-                not_implemented(ctx.srcfile, node.loc, 'a length term in an inequality (`not=? src.length`)')
             return ty.Proposition(subject_placeholder, op, 0, of=of, term=term)
         if (name := identifier(node)) is not None and name != subject_name and name != 'length':
             # `a <=? b` between two names: a value term (bound as a parameter afterwards)
-            if op == 'not=?':
-                not_implemented(ctx.srcfile, node.loc, 'a value term in an inequality (`not=? b`)')
             return ty.Proposition(subject_placeholder, op, 0, of=of, term=name, term_of='value')
         not_implemented(ctx.srcfile, node.loc, 'refinement conditions beyond integer literals, fixed-width `min`/`max`, and a binding\'s `.length`')
 

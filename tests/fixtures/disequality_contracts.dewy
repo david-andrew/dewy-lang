@@ -1,0 +1,8 @@
+pick=(a:int64 b:int64<v=>v not=?a>):>int64<v=>v not=?a>=>b
+probe=(a:int64 b:int64):>int64=>{
+    if a=?b return 0
+    let value=pick(a b)
+    $assert value not=?a
+    return 42
+}
+main=():>int64=>probe(12 4)
