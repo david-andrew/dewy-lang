@@ -1,0 +1,28 @@
+Left=type of [value:int64 data:array<int64>]
+Right=type of [value:int64 words:array<string>]
+Node:type=Left|Right|none
+read=(nodes:array<Node> id:addr):>Node=>{
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+forward=(nodes:array<Node> id:addr):>Node=>read(nodes id)
+measure=(nodes:array<Node>):>int64=>{
+    let total:int64=0
+    loop i in [0..100) {
+        const node=forward(nodes i%2)
+        if node is? Left {total+=node.value}
+        else if node is? Right {total+=node.value}
+    }
+    return total
+}
+main=():>int64=>{
+    let nodes:array<Node>=[Left[21 [1 2]] Right[21 ['a' 'b']]]
+    if measure(nodes) not=?2100 return 3
+    let before:int64=_arena_allocated_bytes
+    let live:int64=_arena_live_bytes
+    let answer=measure(nodes)
+    let allocated:int64=_arena_allocated_bytes-before
+    if _arena_live_bytes not=?live return 1
+    printl(allocated)
+    return if answer=?2100 42 else 2
+}

@@ -5370,8 +5370,7 @@ The preceding view-contract checkpoint (`7fe7854d`) closed a three-generation
 native fixed point with execution checks at
 `../dewy-build-artifacts/phase1-view-contract-integration`. Its fresh hosted-built
 native-driver suite passed all 60 selected view/resource/effect/argument checks.
-The 223-case parity manifest is running against that isolated snapshot; this
-is not yet a completed parity result. The newest global/overload corrections
+All 223 parity cases passed against that isolated snapshot. The newest global/overload corrections
 remain covered by the focused batch pending the next integration checkpoint.
 
 
@@ -5384,3 +5383,23 @@ entry graph. No `.copy()` calls were added to satisfy the directive. This checks
 each marked physical module; the entry directive does not silently opt all of
 its imports into the policy. Adoption across the remaining compiler modules
 is still required.
+
+
+## Borrow tagged getter results from stable owners (2026-09-27)
+
+The native getter projection now lends tagged cells as well as records. It
+requires an existing stored representation, a known capture-free getter with
+one terminal parameter route, and a stable caller owner. Forwarding getters
+retain that route; dependent locals extend the backing owner's lifetime.
+Retagging that needs a new cell stays on the owning path. Full getter prefixes,
+including guards and side effects, still execute. Ordinary escaping boundaries
+still acquire independent values.
+
+The tagged-read kernel allocates zero bytes across 100 native reads. Hosted
+lowering retains its safe copying path (9,600 bytes for the same kernel); both
+retain zero bytes after the warmed measurement. Seventy surrounding checks
+passed, including paired native execution on x86-64/C, mutation/snapshot cases,
+owner donation with a live view, escaping returns, empty alternatives, effectful
+prefixes and a failing runtime guard. The preceding nine focused checks also
+passed. This is a native storage optimization, not a new source-level borrowing
+contract or a claim of complete hosted placement parity.

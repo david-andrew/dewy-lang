@@ -4305,7 +4305,7 @@ mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {
 getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     let node=hir.node_at(state.input.nodes read)
     if node isnt? hir.FunctionCall return borrowing.route(read state.input.nodes)
-    if depth >? 4 or not object_valued(node.value_type @state) return none
+    if depth >? 4 or (not object_valued(node.value_type @state) and cell_members(node.value_type @state) is? none) return none
     let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
     if direct is? none return none
     let literal=hir.node_at(state.input.nodes direct)
@@ -4331,10 +4331,10 @@ getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     return borrowing.route(source state.input.nodes)
 }
 # The callee/argument half of a getter borrow: a direct, capture-free getter
-# returning a record route of one read-only parameter, called with a route
-# argument whose owner stays stable for the whole calling function.
+# returning a record or tagged-cell route of one read-only parameter, with a
+# route argument whose owner stays stable for the whole calling function.
 getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarProjection? => {
-    if not object_valued(call.value_type @state) return none
+    if not object_valued(call.value_type @state) and cell_members(call.value_type @state) is? none return none
     let direct=captures.resolve(call.func call.selected_method_index state.capture_plan state.input.nodes)
     if direct is? none return none
     let literal=hir.node_at(state.input.nodes direct)
@@ -4344,6 +4344,10 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none or read in? state.array_snapshots return none
+    # A borrowed result must already have the declared representation. In
+    # particular, narrowing/widening a tagged cell cannot return a temporary
+    # retagged cell from this callee's frame.
+    if not borrow_projection_matches(stored_type(read @state) literal.rettype state.type_nodes) return none
     let route=getter_route(read 0 @state)
     if route is? none or route.binding not in? state.stable_bindings return none
     let parameter:hir.Param?=none
@@ -4367,7 +4371,7 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     state.pending_projections.push(projection)
     return projection
 }
-# Keep a getter's returned record as a local view only when both the view
+# Keep a getter's returned record/cell as a view only when both the view
 # binding and its owner remain read-only for their whole lexical function.
 # Ordinary calls/returns still establish value boundaries and copy as needed.
 borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
