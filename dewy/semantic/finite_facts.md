@@ -88,6 +88,9 @@ Candidate selection is bounded separately from proof:
 - entry intervals must establish each offered difference;
 - the loop condition's effects and every advancing edge participate in transfer,
   including `continue` paths;
+- a loop nest shares 4,096 speculative widening/narrowing steps. Exhaustion
+  drops an unstable head to unknown; final condition/body validation still runs.
+  A separate top-level loop receives a fresh budget;
 - widening has eight passes. Exhaustion discards the unstable head and starts
   from unknown; it is not a convergence certificate;
 - while loops may perform three sound narrowing passes from that overapproximation;
@@ -103,8 +106,8 @@ or unproved candidates cannot justify an obligation.
 
 ## Remaining closure work
 
-Broader linear-combination inference, scaling of nested loops that do have
-advancing edges, complete transfer of every fact kind through aggregate element
+Broader linear-combination inference, measurements of nested-loop state size
+and qualifier discovery, complete transfer of every fact kind through aggregate element
 summaries, and consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all
 of Phase 1 merely because the current finite domain reaches a fixed point.

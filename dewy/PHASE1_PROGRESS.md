@@ -6063,3 +6063,25 @@ single-pass/labeled-exit groups pass. Three fixtures bring the parity manifest t
 The preceding owning-record snapshot completed all 255 parity cases and its
 fresh hosted driver passed 35 checks (379.67 seconds including build); its broader
 hosted suite remains running separately.
+
+## Bounded search across loop nests (2026-09-28)
+
+The existing per-loop pass cap could still multiply through nested advancing
+loops. Both analyzers now share 4,096 speculative search steps across a loop
+nest. Exhaustion discards an unstable head, while ordinary condition/body
+validation still runs. A separate top-level loop receives a fresh budget;
+proof precision in unrelated loops does not depend on earlier search effort.
+This is an implementation search limit, not a language loop-depth restriction.
+
+Hosted transfer counts are 15,811 at eight levels and 16,327 at eighteen levels
+for the advancing-loop probe. This bounds the repeated transfers, not all work
+in a transfer: fact-set size and qualifier scans still need measurements.
+Validation: 59 surrounding hosted checks and the paired nested/convergence
+budget groups pass on x86-64/C. Tests include runtime behavior, false assertions
+inside/after the exhausted nest, iterator nests and an independent later loop.
+Two fixtures bring the manifest to 262 cases.
+
+The preceding loop-exit checkpoint `3cc21750` reached a three-generation native
+fixed point (generation 3: 59 seconds under concurrent checks). A fresh
+hosted-built driver passed both loop-exit and mixed-disequality groups in
+337.06 seconds including build. Its 260-case manifest run remains in progress.

@@ -61,6 +61,8 @@ Checker:type = [
     # ordinary widening path remains sound, though less precise.
     finite_loop_budget:bigint=64
     loop_controls:loop_control.Cache=[]
+    loop_depth:bigint=0
+    loop_search_budget:addr=0
     loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
     container_receivers:set<addr>=set[]
 ]
@@ -1106,6 +1108,15 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
     return pairs
 }
 loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool=true):>Transfer => {
+    # Share speculative work across nested loops. Final validation still
+    # visits every reachable body even after the search budget is spent.
+    if checker.loop_depth =? 0 {checker.loop_search_budget=4096}
+    checker.loop_depth+=1
+    let result=search_loop_body(arm state @checker validate word_candidates)
+    checker.loop_depth-=1
+    return result
+}
+search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool):>Transfer => {
     let iterators=iterators_of(arm.condition checker)
     let incoming=state
     loop id in iterators {
@@ -1159,6 +1170,11 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
     let stabilized=false
     let single_pass=iterators.length =? 0 and loop_control.single_pass(arm.body checker.data.env.nodes @checker.loop_controls)
     loop pass <? 11 and not single_pass {
+        if checker.loop_search_budget =? 0 {
+            if not stabilized {head=facts.State[]}
+            break
+        }
+        checker.loop_search_budget-=1
         if pass =? 8 and not stabilized {
             # The budget is not evidence of induction. Delayed dependencies
             # may still invalidate facts after eight transfers. Top is safe;

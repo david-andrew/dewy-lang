@@ -1,0 +1,82 @@
+# Nested advancing loops share a bounded proof search; execution still visits
+# each body once here. An independent following loop keeps its ordinary proof.
+main=():>int64=>{
+    let value:int64=0
+    let step0:int64=0
+    loop step0<?1 {
+        let step1:int64=0
+        loop step1<?1 {
+            let step2:int64=0
+            loop step2<?1 {
+                let step3:int64=0
+                loop step3<?1 {
+                    let step4:int64=0
+                    loop step4<?1 {
+                        let step5:int64=0
+                        loop step5<?1 {
+                            let step6:int64=0
+                            loop step6<?1 {
+                                let step7:int64=0
+                                loop step7<?1 {
+                                    let step8:int64=0
+                                    loop step8<?1 {
+                                        let step9:int64=0
+                                        loop step9<?1 {
+                                            let step10:int64=0
+                                            loop step10<?1 {
+                                                let step11:int64=0
+                                                loop step11<?1 {
+                                                    let step12:int64=0
+                                                    loop step12<?1 {
+                                                        let step13:int64=0
+                                                        loop step13<?1 {
+                                                            let step14:int64=0
+                                                            loop step14<?1 {
+                                                                let step15:int64=0
+                                                                loop step15<?1 {
+                                                                    let step16:int64=0
+                                                                    loop step16<?1 {
+                                                                        let step17:int64=0
+                                                                        loop step17<?1 {
+                                                                            value=42
+                                                                            step17+=1
+                                                                        }
+                                                                        step16+=1
+                                                                    }
+                                                                    step15+=1
+                                                                }
+                                                                step14+=1
+                                                            }
+                                                            step13+=1
+                                                        }
+                                                        step12+=1
+                                                    }
+                                                    step11+=1
+                                                }
+                                                step10+=1
+                                            }
+                                            step9+=1
+                                        }
+                                        step8+=1
+                                    }
+                                    step7+=1
+                                }
+                                step6+=1
+                            }
+                            step5+=1
+                        }
+                        step4+=1
+                    }
+                    step3+=1
+                }
+                step2+=1
+            }
+            step1+=1
+        }
+        step0+=1
+    }
+    let fresh:int64=0
+    loop fresh<?42 {fresh+=1}
+    $assert fresh=?42
+    return if value=?42 fresh else 0
+}

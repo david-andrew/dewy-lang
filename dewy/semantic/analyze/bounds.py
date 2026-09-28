@@ -889,6 +889,8 @@ class _BoundsValidator:
         # budget falls back to widening, never to an assumed proof.
         self.finite_loop_budget = 64
         self.loop_controls = {}
+        self.loop_depth = 0
+        self.loop_search_budget = 0
         self.loop_qualifier_pairs = {}
         self.constant_indices: dict[int, int | None] = {}
         self.call_writes: dict[int, set[int]] = {}
@@ -1976,11 +1978,26 @@ class _BoundsValidator:
 
     def _loop_flow_transfer(self, arm: hir.LoopArm, state: State, *, validate: bool) -> _LoopTransfer:
         """Preserve exits targeting an enclosing loop across this loop boundary."""
-        if isinstance(arm.condition, hir.IteratorExpression):
-            return self._analyze_iterator_loop(arm.condition, arm.body, state, validate=validate)
-        if isinstance(arm.condition, hir.MultiIteratorExpression):
-            return self._analyze_multi_iterator_loop(arm.condition, arm.body, state, validate=validate)
-        return self._analyze_while_loop(arm.condition, arm.body, state, validate=validate)
+        if self.loop_depth == 0:
+            self.loop_search_budget = 4096
+        self.loop_depth += 1
+        try:
+            if isinstance(arm.condition, hir.IteratorExpression):
+                return self._analyze_iterator_loop(arm.condition, arm.body, state, validate=validate)
+            if isinstance(arm.condition, hir.MultiIteratorExpression):
+                return self._analyze_multi_iterator_loop(arm.condition, arm.body, state, validate=validate)
+            return self._analyze_while_loop(arm.condition, arm.body, state, validate=validate)
+        finally:
+            self.loop_depth -= 1
+
+    def _spend_loop_search(self) -> bool:
+        # A per-loop pass limit still multiplies through nesting. Share a
+        # search budget across this entire loop nest; final validation is
+        # never skipped, and an unstable head falls back to unknown.
+        if self.loop_search_budget == 0:
+            return False
+        self.loop_search_budget -= 1
+        return True
 
     def _finish_loop(self, exits: list[State], transfer: _LoopTransfer, target_ids=()) -> _LoopTransfer:
         breaks = {level - 1: parts for level, parts in transfer.breaks.items() if level > 0}
@@ -2037,6 +2054,9 @@ class _BoundsValidator:
         # loop-carried too; applying them only for final body validation
         # misses facts they invalidate indirectly on subsequent iterations.
         for _ in range(0 if single_pass else 8):
+            if not self._spend_loop_search():
+                head = {}
+                break
             current = dict(head)
             self._eval(condition, current, validate=False)
             true_state = self._refine(current, condition, truth=True)
@@ -2064,6 +2084,8 @@ class _BoundsValidator:
         # keep what comes back — under `loop i <? xs.length` that is [0, cap].
         # A decreasing iteration from a post-fixpoint stays sound.
         for _ in range(0 if single_pass else 3):
+            if not self._spend_loop_search():
+                break
             current = dict(head)
             self._eval(condition, current, validate=False)
             true_state = self._refine(current, condition, truth=True)
@@ -2188,6 +2210,9 @@ class _BoundsValidator:
         state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
         head = dict(state)
         for _ in range(8):
+            if not self._spend_loop_search():
+                head = {}
+                break
             transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)
             backedges = [
                 *([transfer.normal] if transfer.normal is not None else []),
