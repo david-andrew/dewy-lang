@@ -89,7 +89,9 @@ forget_many = (@state:facts.State subjects:set<addr> @data:predicates.Data keep_
 # Bind a checked call result's concrete and symbolic promises. A mutated
 # argument can still supply its saved interval, but never a current identity.
 call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data):>void => {
-    loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+    loop result_id in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+        let result=types.node_at(data.env.types result_id)
+        $runtime_assert result is? types.RefinedType
         loop p in result.propositions {
             if p.term is? none or p.subject not=? 'self' or p.term_projection not=? 'length' continue
             let argument=expressions.call_argument(value p.term data.env.nodes data.env.types)
@@ -105,7 +107,9 @@ call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data)
     if not intervals.stable(value data.snapshot data.env.nodes places=true) return
     # A disequality has no chosen direction. Only substitute arguments whose
     # identity survived evaluation, just as for ordinary ordered promises.
-    loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+    loop result_id in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+        let result=types.node_at(data.env.types result_id)
+        $runtime_assert result is? types.RefinedType
         loop p in result.propositions {
             if p.op not=? 'not=?' or p.term is? none or (p.subject not=? 'self' and p.subject not=? 'length') continue
             let supplied=expressions.call_argument(value p.term data.env.nodes data.env.types)
@@ -224,7 +228,11 @@ fields = (@state:facts.State root:addr declared:types.ObjectType value:addr path
         let route=path
         route.push(actual.name)
         let nested=expressions.object_of(field.value_type data.env.types)
-        if nested isnt? none {fields(@state root nested actual.value route @data) continue}
+        if nested isnt? none {
+            let shape=types.node_at(data.env.types nested)
+            $runtime_assert shape is? types.ObjectType
+            fields(@state root shape actual.value route @data) continue
+        }
         let scalar=data.snapshot.numbers.get(actual.value)
         let length=data.snapshot.lengths.get(actual.value)
         if scalar is? none and length is? none continue
@@ -248,8 +256,12 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? word_type
         }
     }
     let object=expressions.object_of(if annotation is? none hir.node_at(data.env.nodes value).value_type else annotation data.env.types)
-    if object isnt? none {fields(@state subject object value [] @data)}
+    if object isnt? none {
+        let shape=types.node_at(data.env.types object)
+        $runtime_assert shape is? types.ObjectType
+        fields(@state subject shape value [] @data)
+    }
     seed(@state subject value word_type loc @data)
-    let called=expressions.call_function_type(value data.env.nodes data.env.types)
-    if called isnt? none and types.node_at(data.env.types called.ret) is? types.TypeOr {data.member_calls[subject]=expressions.strip_casts(value data.env.nodes)}
+    let called=expressions.call_result_type(value data.env.nodes data.env.types)
+    if called isnt? none and types.node_at(data.env.types called) is? types.TypeOr {data.member_calls[subject]=expressions.strip_casts(value data.env.nodes)}
 }

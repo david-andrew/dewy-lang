@@ -98,7 +98,7 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
         checks.append(f'    let argument{i} = analysis.call_argument({names[id(called)]} "n" nodes type_nodes)')
         checks.append(f'    printl("arg{i}|{{argument{i} =? {names[id(x)]}}}")')
         expected.append(f'arg{i}|true')
-        checks.append(f'    loop refinement in analysis.call_result_refinements({names[id(called)]} nodes type_nodes) {{ emit_props("call{i}" refinement.propositions) }}')
+        checks.append(f'    loop refinement_id in analysis.call_result_refinements({names[id(called)]} nodes type_nodes) {{ let refinement=types.node_at(type_nodes refinement_id) $runtime_assert refinement is? types.RefinedType emit_props("call{i}" refinement.propositions) }}')
         for refined in bounds._call_result_refinements(called):
             expected.extend(f'call{i}|{p.subject},{p.op},{p.value}' for p in refined.propositions)
     expected.extend(f'assigned|{binding}' for binding in bounds._assigned_binding_ids(root))
@@ -128,3 +128,9 @@ main = ():>int64 => {{
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=60, check=False)
     assert result.returncode == 0, result.stderr
     assert sorted(result.stdout.splitlines()) == sorted(expected)
+
+
+def test_hir_queries_bound_allocation_independently_of_contract_size(tmp_path):
+    from test_scalar_projection import execute
+    source = SrcFile.from_path(ROOT / 'tests/fixtures/hir_query_identities.dewy')
+    execute(tmp_path, 'query-identities', codegen(source, debug_locations=False))

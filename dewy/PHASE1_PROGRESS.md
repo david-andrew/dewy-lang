@@ -29,6 +29,34 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Query type identities instead of copied contracts (2026-09-29)
+
+Call signatures, result refinements and record-shape queries now return ids in
+the immutable type table. Their consumers borrow the selected entries rather
+than retaining copied parameter, field and proposition arrays. An explicitly
+selected contract from a private subtype table is visited directly; its ids
+are not reinterpreted in the main table. Member invariant results still own
+the promises they assemble, with those retained copies explicit.
+
+The HIR fact module passes strict checking on both routes (76 physical modules).
+All five hosted-built fact comparisons pass, as does the allocation kernel on
+x86-64/C: 712,000 hosted-built and 152,000 native-built bytes over 1,000 queries
+with a 64-proposition contract. The gate is 768,000 bytes and preserves the
+actual identity/result checks. It does not claim zero allocation or identical
+placement. The fixture brings the manifest to 637.
+
+Two native-built fact comparisons pass. Three others expose a pre-existing
+optional-bigint equality mismatch, also reproduced with the preceding driver;
+repair and their native certification are next. The final scoped scanner
+place-update tests pass through the fresh native driver. Logs use
+`dewy-query-identity-*`, `dewy-call-query-comparisons.log` and
+`dewy-query-allocation-*`.
+
+The preceding `f8fc209d` snapshot reached a byte-identical three-generation
+fixed point, including native x86-64/C execution/scaling checks. Generations
+2/3 took 63/67 seconds under concurrent checks. Its complete 636-case parity
+and inventory runs are in progress.
+
 ## Stable string handles and scoped scanner loans (2026-09-29)
 
 Bounded temporary records can lend stable string handles alongside arrays and

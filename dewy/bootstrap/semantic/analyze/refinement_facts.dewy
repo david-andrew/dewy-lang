@@ -43,7 +43,11 @@ seed_field = (@state:facts.State root:addr p:propositions.Proposition base:addr 
     loop name in path {
         let object = expressions.object_of(current context.env.types)
         let declared:types.ObjectField? = none
-        if object isnt? none { declared = types.object_field(object name) }
+        if object isnt? none {
+            let shape=types.node_at(context.env.types object)
+            $runtime_assert shape is? types.ObjectType
+            declared = types.object_field(shape name)
+        }
         current = if declared is? none context.word_type else declared.value_type
     }
     let subject = bindings.route_id(@registry root path current loc)
@@ -101,7 +105,7 @@ seed_parameters = (@state:facts.State @declared:Declared function:hir.FunctionLi
     }
 }
 
-Member:type = const [object:types.ObjectType root:addr path:array<string>]
+Member:type = const [object:addr root:addr path:array<string>]
 locate = (node:hir.MemberAccess env:values.Environment):>Member? => {
     let object = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
     if object is? none return none
@@ -122,8 +126,11 @@ sibling_path = (path:array<string> name:string):>array<string> => {
 }
 seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment @registry:bindings.Registry):>void => {
     let member = locate(node env)
-    if member is? none or not member.object.immutable return
-    loop field in member.object.fields {
+    if member is? none return
+    let object=types.node_at(env.types member.object)
+    $runtime_assert object is? types.ObjectType
+    if not object.immutable return
+    loop field in object.fields {
         let related = field.name =? node.name
         loop p in field.refinement { if p.term =? node.name { related = true } }
         if not related continue
@@ -131,7 +138,7 @@ seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment
             if p.term is? none or propositions.field(p) isnt? none continue
             let directions = terms.directions(p.op)
             if directions.length =? 0 and p.op not=? 'not=?' continue
-            let sibling = types.object_field(member.object p.term)
+            let sibling = types.object_field(object p.term)
             if sibling is? none continue
             let subject = bindings.route_id(@registry member.root sibling_path(member.path field.name) field.value_type node.loc)
             let bound = bindings.route_id(@registry member.root sibling_path(member.path sibling.name) sibling.value_type node.loc)
@@ -148,8 +155,10 @@ seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment
 }
 
 field_interval = (node:hir.MemberAccess state:facts.State env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
-    let object = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
-    if object is? none return values.declared_field_interval(hir.node_at(env.nodes node.value).value_type node.name env)
+    let object_id = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
+    if object_id is? none return values.declared_field_interval(hir.node_at(env.nodes node.value).value_type node.name env)
+    let object=types.node_at(env.types object_id)
+    $runtime_assert object is? types.ObjectType
     let field = types.object_field(object node.name)
     if field is? none return none
     let interval = values.declared_interval(field.value_type env)

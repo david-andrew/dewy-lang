@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../type_queries.dewy" as views
@@ -33,27 +34,37 @@ value_leaf = (id:addr nodes:array<hir.AST>):>addr => {
         return current
     }
 }
-call_function_type = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>types.FunctionType? => {
+# Query results name the immutable type arena. Returning a whole signature
+# or refinement here would snapshot its parameter/proposition arrays for
+# every call the bounds analysis visits.
+call_function_type = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr? => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     if node isnt? hir.FunctionCall return none
-    let callable = types.node_at(type_nodes hir.node_at(nodes node.func).value_type)
+    let signature = hir.node_at(nodes node.func).value_type
+    let callable = types.node_at(type_nodes signature)
     let selected = node.selected_method_index
     if callable is? types.OverloadType and selected isnt? none {
         $runtime_assert selected <? callable.methods.length
-        callable = types.node_at(type_nodes callable.methods[selected])
+        signature = callable.methods[selected]
     }
-    return if callable is? types.FunctionType callable else none
+    return if types.node_at(type_nodes signature) is? types.FunctionType signature else none
 }
-call_result_refinements = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<types.RefinedType> => {
+call_result_type = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr? => {
     let signature = call_function_type(id nodes type_nodes)
-    if signature is? none return []
-    let result = types.node_at(type_nodes signature.ret)
-    if result is? types.RefinedType return [result]
-    let output:array<types.RefinedType> = []
+    if signature is? none return none
+    let function = types.node_at(type_nodes signature)
+    $runtime_assert function is? types.FunctionType
+    return function.ret
+}
+call_result_refinements = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<addr> => {
+    let returned = call_result_type(id nodes type_nodes)
+    if returned is? none return []
+    let result = types.node_at(type_nodes returned)
+    if result is? types.RefinedType return [returned]
+    let output:array<addr> = []
     if result is? types.TypeOr {
         loop member in result.items {
-            let node = types.node_at(type_nodes member)
-            if node is? types.RefinedType { output.push(node) }
+            if types.node_at(type_nodes member) is? types.RefinedType { output.push(member) }
         }
     }
     return output
@@ -63,9 +74,11 @@ argument_value = (id:addr nodes:array<hir.AST>):>addr => {
     return if node is? hir.Place node.target else id
 }
 call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:types.Table unwrap:bool=true):>addr? => {
-    let signature = call_function_type(id nodes type_nodes)
+    let signature_id = call_function_type(id nodes type_nodes)
     let call = hir.node_at(nodes strip_casts(id nodes))
-    if signature is? none or call isnt? hir.FunctionCall return none
+    if signature_id is? none or call isnt? hir.FunctionCall return none
+    let signature = types.node_at(type_nodes signature_id)
+    $runtime_assert signature is? types.FunctionType
     if name in? call.kw_args return if unwrap argument_value(call.kw_args[name] nodes) else call.kw_args[name]
     loop i in 0.. and i <? signature.pos_or_kw.length {
         if signature.pos_or_kw[i].name =? name {
@@ -88,18 +101,19 @@ named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:types.Ta
     let root=bindings.array_route_id(argument nodes @registry mutable_selectors=true)
     return if root is? none none else bindings.extend_route(root route.fields type_nodes @registry)
 }
-object_of = (id:addr nodes:types.Table):>types.ObjectType? => {
+object_of = (id:addr nodes:types.Table):>addr? => {
     # Excluding a descendant preserves the positive record's field contracts,
     # just as the source checker preserves its available member structure.
-    let node = types.node_at(nodes views.structural_base(id nodes))
-    if node is? types.ObjectType return node
+    let base = views.structural_base(id nodes)
+    let node = types.node_at(nodes base)
+    if node is? types.ObjectType return base
     if node isnt? types.TypeOr return none
-    let object:types.ObjectType? = none
+    let object:addr? = none
     loop member in node.items {
         let item = types.node_at(nodes member)
         if item is? types.ObjectType {
             if object isnt? none return none
-            object = item
+            object = member
         }
     }
     return object
@@ -115,11 +129,14 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
         name = node.field receiver = node.value
     } else return []
     let receiver_type = hir.node_at(nodes receiver).value_type
-    let object = object_of(receiver_type type_nodes)
+    let object_id = object_of(receiver_type type_nodes)
+    # This result owns promises assembled from several distinct type entries.
     let output:array<facts.Proposition> = []
-    if object isnt? none {
+    if object_id isnt? none {
+        let object = types.node_at(type_nodes object_id)
+        $runtime_assert object is? types.ObjectType
         let field = types.object_field(object name)
-        if field isnt? none { output = field.refinement }
+        if field isnt? none { output = field.refinement.copy() }
     } else {
         # A forwarded common field may carry only the invariants every
         # alternative declares. A missing field contributes no guarantees.
@@ -127,15 +144,17 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
         if union is? types.TypeOr {
             let first = true
             loop member in union.items {
-                let alternative = object_of(types.unfold(member type_nodes) type_nodes)
-                if alternative is? none { output.clear break }
+                let alternative_id = object_of(types.unfold(member type_nodes) type_nodes)
+                if alternative_id is? none { output.clear break }
+                let alternative = types.node_at(type_nodes alternative_id)
+                $runtime_assert alternative is? types.ObjectType
                 let field = types.object_field(alternative name)
                 if field is? none { output.clear break }
-                if first { output = field.refinement first = false }
+                if first { output = field.refinement.copy() first = false }
                 else {
                     let shared:array<facts.Proposition> = []
                     loop proposition in output {
-                        if views.has_proposition(field.refinement proposition) { shared.push(proposition) }
+                        if views.has_proposition(field.refinement proposition) { shared.push(proposition.copy()) }
                     }
                     output = shared
                 }
@@ -145,7 +164,7 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
     let narrowed = types.node_at(type_nodes types.unfold(node.value_type type_nodes))
     if narrowed is? types.RefinedType {
         loop proposition in narrowed.propositions {
-            if proposition.term is? none and facts.field(proposition) is? none { output.push(proposition) }
+            if proposition.term is? none and facts.field(proposition) is? none { output.push(proposition.copy()) }
         }
     }
     # Enclosing field contracts also constrain descendants, e.g.
@@ -153,8 +172,10 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
     let suffix = name
     let parent = hir.node_at(nodes strip_casts(receiver nodes))
     loop parent is? hir.MemberAccess {
-        let owner = object_of(hir.node_at(nodes parent.value).value_type type_nodes)
-        if owner isnt? none {
+        let owner_id = object_of(hir.node_at(nodes parent.value).value_type type_nodes)
+        if owner_id isnt? none {
+            let owner = types.node_at(type_nodes owner_id)
+            $runtime_assert owner is? types.ObjectType
             let field = types.object_field(owner parent.name)
             if field isnt? none {
                 loop p in field.refinement {
@@ -164,7 +185,7 @@ member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<
                         # provenance and conditionality intact.
                         output.push(facts.Proposition[
                             subject=(if p.projection =? 'length' 'length' else 'self')
-                            op=p.op value=p.value term=p.term term_id=p.term_id
+                            op=p.op value=p.value.copy() term=p.term term_id=p.term_id
                             term_projection=p.term_projection tested_type=p.tested_type
                             when=p.when subject_id=p.subject_id axiom=p.axiom
                         ])

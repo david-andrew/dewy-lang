@@ -186,8 +186,8 @@ call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:va
         result=values.binary(name snapshot.numbers.get(node.pos_args[0]) snapshot.numbers.get(node.pos_args[1]) node.value_type env.types bound floor=node.integer_operation isnt? none)
     }
     if not arithmetic and node.integer_operation is? none {result=meet(result values.fixed_bounds(node.value_type env.types))}
-    let signature=expressions.call_function_type(id env.nodes env.types)
-    if signature isnt? none {result=meet(result own_bounds(signature.ret env))}
+    let signature=expressions.call_result_type(id env.nodes env.types)
+    if signature isnt? none {result=meet(result own_bounds(signature env))}
     return result
 }
 

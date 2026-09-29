@@ -2851,7 +2851,9 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     if node is? hir.FunctionCall {
         # Promises name the callee's parameters; source reads must refine the
         # corresponding caller binding, including named arguments and places.
-        loop returned in hir_facts.call_result_refinements(condition session.hir session.types) {
+        loop returned_id in hir_facts.call_result_refinements(condition session.hir session.types) {
+            let returned=types.node_at(session.types returned_id)
+            $runtime_assert returned is? types.RefinedType
             loop promise in returned.propositions {
                 if promise.when isnt? none and promise.when not=? truth continue
                 if promise.tested_type is? none or promise.op not in? ['is?' 'isnt?'] continue

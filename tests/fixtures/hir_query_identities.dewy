@@ -1,0 +1,34 @@
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/propositions.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/hir_facts.dewy" as queries
+
+# Repeated signature/record queries must not retain their nested arrays.
+# A large contract distinguishes a handle query from a record snapshot.
+scan=(nodes:array<hir.AST> table:types.Table call:addr record:addr expected:addr):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {
+        if queries.call_result_type(call nodes table) not=? expected return 1
+        if queries.object_of(record table) not=? record return 2
+        let contracts=queries.call_result_refinements(call nodes table)
+        if contracts.length not=? 1 or contracts[0] not=? expected return 3
+    }
+    let allocated:int64=_arena_allocated_bytes-before
+    return if allocated<=?768000 42 else 4
+}
+main=():>int64=>{
+    let table=types.Table[]
+    let integer=types.primitive('int64' @table)
+    let props:array<facts.Proposition>=[]
+    loop i in 0.. and i<?64 {props.push(facts.Proposition['self' '>=?' i as bigint])}
+    let refined=types.refined_type(integer props @table)
+    let signature=types.function_type([types.PosOrKwArg['value' integer]] [] none refined [] @table)
+    let record=types.object_type([types.ObjectField['value' integer refinement=props]] none true [] [] @table)
+    let span=Span[0 0]
+    let nodes:array<hir.AST>=[]
+    let function=hir.append_node(@nodes hir.ExpressedIdentifier[span signature 'known'])
+    let value=hir.append_node(@nodes hir.Integer[span integer '0d' 42])
+    let call=hir.append_node(@nodes hir.FunctionCall[span integer function [value] []])
+    return scan(nodes table call record refined)
+}

@@ -152,7 +152,9 @@ directions = (op:propositions.Operator):>array<Bound> => {
 CallFact:type = const [upper:facts.Term offset:addr? gap:bigint direction:Direction capped:bool=false]
 call_facts = (id:addr subject:string env:values.Environment @registry:bindings.Registry):>array<CallFact> => {
     let output:array<CallFact> = []
-    loop refined in expressions.call_result_refinements(id env.nodes env.types) {
+    loop refined_id in expressions.call_result_refinements(id env.nodes env.types) {
+        let refined=types.node_at(env.types refined_id)
+        $runtime_assert refined is? types.RefinedType
         loop p in refined.propositions {
             if p.term is? none or p.subject not=? subject or propositions.field(p) isnt? none continue
             let named=propositions.named_route(p.term)

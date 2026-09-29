@@ -72,9 +72,9 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     if id not in? data.snapshot.terms return state
     let remembered=data.member_calls.get(tested.binding_id)
     if remembered is? none return state
-    let signature=expressions.call_function_type(remembered data.env.nodes data.env.types)
+    let signature=expressions.call_result_type(remembered data.env.nodes data.env.types)
     if signature is? none return state
-    let result=types.node_at(data.env.types signature.ret)
+    let result=types.node_at(data.env.types signature)
     if result isnt? types.TypeOr return state
     # Only a refined result alternative can add conditional call evidence.
     # Ordinary optional/union results need no private subtype-analysis arena.

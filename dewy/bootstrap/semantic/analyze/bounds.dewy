@@ -857,7 +857,12 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             evaluate(field.value @state @checker validate)
             if field.binding_id isnt? none {
                 install(@state field.binding_id field.value none field.loc @checker)
-                let declaration=if object is? none none else types.object_field(object field.name)
+                let declaration:types.ObjectField?=none
+                if object isnt? none {
+                    let shape=types.node_at(checker.data.env.types object)
+                    $runtime_assert shape is? types.ObjectType
+                    declaration=types.object_field(shape field.name)
+                }
                 if declaration isnt? none and declaration.refinement.length >? 0 {
                     let refined=types.RefinedType[key="field-contract:{field.binding_id}" base=declaration.value_type propositions=declaration.refinement]
                     refinements.seed_binding(@state @checker.declared field.binding_id refined checker.refinement_context field.loc @checker.data.registry)

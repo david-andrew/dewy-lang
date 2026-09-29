@@ -93,8 +93,10 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
         let refined=types.node_at(data.env.types types.unfold(type data.env.types))
         if refined is? types.RefinedType {loop p in refined.propositions {inherited.push(p)}}
         inherited=project(inherited name)
-        let object=expressions.object_of(type data.env.types)
-        if object is? none return Subject[none none none]
+        let object_id=expressions.object_of(type data.env.types)
+        if object_id is? none return Subject[none none none]
+        let object=types.node_at(data.env.types object_id)
+        $runtime_assert object is? types.ObjectType
         let field=types.object_field(object name)
         if field is? none return Subject[none none none]
         type=field.value_type
@@ -129,9 +131,9 @@ nonzero = (id:addr interval:ranges.Interval? state:facts.State data:predicates.D
     let saved=data.snapshot.terms.get(id)
     if saved isnt? none and saved.shift =? 0 and saved.term.projection =? 'value' and facts.contains(state facts.nonzero(saved.term.binding_id)) return true
     if excludes_zero(expressions.member_invariant(id data.env.nodes data.env.types)) return true
-    let signature=expressions.call_function_type(id data.env.nodes data.env.types)
+    let signature=expressions.call_result_type(id data.env.nodes data.env.types)
     if signature isnt? none {
-        let result=types.node_at(data.env.types signature.ret)
+        let result=types.node_at(data.env.types signature)
         if result is? types.RefinedType and excludes_zero(result.propositions) return true
     }
     let node=hir.node_at(data.env.nodes expressions.strip_casts(id data.env.nodes))
@@ -146,7 +148,9 @@ nonzero = (id:addr interval:ranges.Interval? state:facts.State data:predicates.D
 position = (id:addr state:facts.State data:predicates.Data):>bool => {
     let node=hir.node_at(data.env.nodes expressions.strip_casts(id data.env.nodes))
     if views.is_addr(node.value_type data.env.types) or expressions.sequence_of(id data.env.nodes) isnt? none return true
-    loop promised in expressions.call_result_refinements(id data.env.nodes data.env.types) {
+    loop promised_id in expressions.call_result_refinements(id data.env.nodes data.env.types) {
+        let promised=types.node_at(data.env.types promised_id)
+        $runtime_assert promised is? types.RefinedType
         loop p in promised.propositions {if p.axiom =? 'addr' return true}
     }
     let value=predicates.operand(id state data)
@@ -280,7 +284,9 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
         return true
     }
     if parameter is? none {
-        loop result in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+        loop result_id in expressions.call_result_refinements(value data.env.nodes data.env.types) {
+            let result=types.node_at(data.env.types result_id)
+            $runtime_assert result is? types.RefinedType
             if views.has_proposition(result.propositions p) return true
         }
         let node=hir.node_at(data.env.nodes expressions.strip_casts(value data.env.nodes))
