@@ -1,0 +1,10 @@
+$explicit_copies
+make=():>array<int64>=>[20 22]
+replace=(@target:array<int64> source:array<int64>):>void=>{target=source.copy();}
+main=():>int64=>{
+    let source=make()
+    let snapshot:array<int64>=[]
+    replace(@snapshot source)
+    source.clear()
+    return if snapshot.length=?2 snapshot[0]+snapshot[1] else 1
+}

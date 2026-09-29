@@ -1,0 +1,9 @@
+$explicit_copies
+make=():>array<int64>=>[20 22]
+main=():>int64=>{
+    let source=make()
+    let snapshot:array<int64>=[]
+    snapshot=source.copy()
+    source.clear()
+    return if snapshot.length=?2 snapshot[0]+snapshot[1] else 1
+}

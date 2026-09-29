@@ -1022,6 +1022,13 @@ class _ArrayLowering(_ArraySharing):
             if node.target.binding_id is not None
             else None
         )
+        # As in CopyValue expression lowering, copying an already fresh
+        # result is elided. Retain its source shape so literals still use
+        # lifetime promotion and calls still transfer their arena result.
+        source = self._copy_source_expression(node.value)
+        while isinstance(source, hir.CopyValue) and self._array_expression_owns_fresh_storage(source.value):
+            node = replace(node, value=source.value)
+            source = self._copy_source_expression(node.value)
         fresh = self._array_expression_owns_fresh_storage(node.value)
         # Literal buffers belong to this expression, and their element handles
         # have no other owner. Moving those handles into the lasting buffer
@@ -1029,24 +1036,31 @@ class _ArrayLowering(_ArraySharing):
         # keep their separate temporary-owner protocol.
         move_literal = isinstance(self._copy_source_expression(node.value), hir.ArrayLiteral)
         representation = self._array_use_representation(node.target)
-        adopt_call = array_type.length is None and representation != 'stack_data' and self._is_named_array_call(node.value)
         source = self._copy_source_expression(node.value)
+        # Explicit snapshots of existing storage already produce an owned
+        # arena descriptor. Take it just like a function result. A `.copy()`
+        # of a fresh expression may elide to a frame literal, so that case
+        # keeps its lifetime promotion instead of assuming an arena owner.
+        owned_copy = (isinstance(source, hir.CopyValue) and self._has_arena()
+                      and not self._array_expression_owns_fresh_storage(source.value))
+        adopt_result = (array_type.length is None and representation != 'stack_data'
+                        and (self._is_named_array_call(node.value) or owned_copy))
         adopt_local = (array_type.length is None and representation != 'stack_data'
                        and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses))
 
         def replacement():
-            if adopt_call:
+            if adopt_result:
                 return self._independent_array_value(node.value, array_type)
             if adopt_local:
                 return self._transfer_array_value(node.value, source, array_type, site=f'assigned to `{node.target.name}`')
             return self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
 
-        if adopt_call:
+        if adopt_result:
             # Ordinary dynamic-array calls return independently owned arena
             # descriptors. Rebinding takes that owner directly, just as a
             # declaration does; cloning it would create a needless snapshot.
             self.move_notes.append(MoveNote(self.srcfile, node.loc,
-                f'array call result is moved when assigned to `{node.target.name}`', True))
+                f'owned array result is moved when assigned to `{node.target.name}`', True))
         elif move_literal and array_type.length is None and representation != 'stack_data':
             # The lifetime promotion below transfers the literal's owned
             # elements. It is placement plus a move, not an independent
@@ -1084,7 +1098,7 @@ class _ArrayLowering(_ArraySharing):
                 node.value,
                 array_type,
             )
-        if adopt_call or adopt_local:
+        if adopt_result or adopt_local:
             prelude, copied = replacement()
         elif self._array_use_representation(node.target) == 'stack_data':
             prelude, copied = self._clone_array_to_raw(node.value, array_type)

@@ -24,6 +24,22 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Explicit array assignment takes its result owner (2026-09-29)
+
+Hosted assignment now takes the arena descriptor produced by an explicit copy
+of existing storage, as it already does for a named function result. Previously
+it copied the snapshot again and rejected that second operation under strict
+policy. Copying a fresh literal still elides the redundant snapshot and promotes
+the literal's storage across its scope; it never lends the dead frame buffer.
+Native lowering already supports these transfers.
+
+Five focused hosted cases and their paired native group pass, covering startup
+globals, local and place replacement, self-copy and nested literal lifetimes.
+Twelve surrounding explicit-copy tests also pass. Five manifest cases bring the
+corpus to 552. Artifacts use `dewy-explicit-array-assignment-*`. The complete
+inventory at the preceding repaired native checkpoint is 4,278 sites / 55,629
+lines = 76.902/KLOC, within the unchanged 4,500/85 gates.
+
 ## Modeled array operations preserve unrelated storage loans (2026-09-29)
 
 The shared storage proof now recognizes ordinary builtin array operations in
