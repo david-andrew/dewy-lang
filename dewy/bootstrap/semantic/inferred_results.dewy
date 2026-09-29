@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"context.dewy" as contexts
 import p"hir.dewy" as hir
 import p"ty.dewy" as types
@@ -83,5 +85,8 @@ predicate = (body:addr parameters:array<hir.Param> @session:contexts.Session):>a
         }
     }
     if fact is? none return none
-    return types.refined_type(types.primitive('bool' @session.types) [fact facts.negated(fact)] @session.types)
+    # Build the opposite while the original is still available to read,
+    # then transfer both independent propositions into the result type.
+    let opposite=facts.negated(fact)
+    return types.refined_type(types.primitive('bool' @session.types) [fact opposite] @session.types)
 }

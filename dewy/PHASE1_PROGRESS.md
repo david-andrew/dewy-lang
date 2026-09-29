@@ -25,6 +25,22 @@ address those failures. The last hosted full strict-copy inventory still has
 1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
 latest ownership slices. Phase 1 remains open.
 
+## Predicate result ownership and numeric constants (2026-09-29)
+
+`inferred_results.dewy` now passes `$explicit_copies` on both compiler routes:
+compute a proposition's negation while the original remains readable, then
+transfer both independent results into the refined type. This removes an
+unnecessary early snapshot without changing evaluation effects. The complete
+inferred-result acceptance/type comparison group passes. Strict adoption is
+now 63 physical bootstrap modules.
+
+Bigint's limb base, mask and unit magnitude are immutable startup values,
+matching their existing constant role. Fourteen hosted bigint checks and
+paired x86-64/C arithmetic execution pass. The numeric type-product helper
+still has a separate storage-proof gap across representation conversions;
+its strict directive is not enabled. Logs use `dewy-inferred-results-*`,
+`dewy-immutable-bigint-*` and `dewy-constant-bigint-*`.
+
 ## Shared storage proof across runtime reports (2026-09-29)
 
 The shared argument/literal storage proof now uses the same installed-report
