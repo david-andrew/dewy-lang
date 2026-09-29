@@ -1,0 +1,28 @@
+from reporting import SrcFile, Error
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
+import p"../../dewy/bootstrap/semantic/effect_syntax.dewy" as effects
+import p"../../dewy/bootstrap/semantic/effect_rows.dewy" as rows
+import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
+main=():>int64=>{
+ let source=SrcFile['row' 'E']
+ let parsed=parser.parse(source)
+ if parsed is? Error return 1
+ let session=contexts.Session[]
+ let context=contexts.begin(source parsed.nodes @session)
+ let root=contexts.node_at(parsed.root context session)
+ if root isnt? parser.Block or root.inner.length not=?1 return 2
+ let binding=bindings.allocate(@session.registry none 'E' 'effect' root.loc)
+ let entry=bindings.binding_at(session.registry binding)
+ entry.effect_value=rows.Contract[allowed=rows.Row[atoms=[rows.Atom['allocates']]]]
+ bindings.store_binding(@session.registry binding entry)
+ bindings.bind(@session.scopes context.scope 'E' binding)
+ let held=effects.row_binding(root.inner[0] context session)
+ entry.effect_value=rows.Contract[allowed=rows.Row[]]
+ bindings.store_binding(@session.registry binding entry)
+ let current=effects.row_binding(root.inner[0] context session)
+ if held is? none or current is? none return 3
+ if held.allowed is? none or current.allowed is? none return 4
+ if held.allowed.atoms.length not=?1 or current.allowed.atoms.length not=?0 return 5
+ return if held.allowed.atoms[0].family=?'allocates' 42 else 6
+}

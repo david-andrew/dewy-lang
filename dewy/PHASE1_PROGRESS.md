@@ -23,6 +23,24 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Effect syntax owns its retained snapshots (2026-09-29)
+
+`effect_syntax.dewy` now enables `$explicit_copies`. Its application parameter
+list and returned effect contract explicitly own independent snapshots. Rebuilding
+an immutable `Source` copies the node list it modifies and retains only the source
+metadata needed for replacement, instead of first snapshotting the whole source
+record. These are intentional value boundaries, not a claimed speedup or copy
+budget reduction; every copy stays in the inventory.
+
+Both compiler/backend pairs pass source-replacement and registry-replacement
+fixtures, and the hosted inventory contains only explicit runtime-sized copies
+for this module. The initial three checks took 544.53 seconds, dominated by
+compiler-sized C builds. Their inventory assertion now runs inside the existing
+paired harness to avoid duplicating the hosted compilation and execution.
+Two manifest entries bring the corpus to 533. Artifacts use
+`dewy-effect-syntax-*` and `dewy-strict-effect-syntax-*`. The frozen full suite is
+still completing with reported failures; this does not close Phase 1.
+
 ## Nominal child payloads at parent results (2026-09-29)
 
 Hosted lowering now adopts the owned fields of a last-use nominal child into

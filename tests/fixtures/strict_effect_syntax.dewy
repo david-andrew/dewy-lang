@@ -1,0 +1,22 @@
+from reporting import SrcFile, Error
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
+import p"../../dewy/bootstrap/semantic/effect_syntax.dewy" as effects
+main=():>int64=>{
+ let source=SrcFile['effect split' '(int64 & reads<Disk>) & (int64 & no mutates<Disk>)']
+ let parsed=parser.parse(source)
+ if parsed is? Error return 1
+ let session=contexts.Session[]
+ let context=contexts.begin(source parsed.nodes @session)
+ let root=contexts.node_at(parsed.root context session)
+ if root isnt? parser.Block or root.inner.length not=?1 return 2
+ $runtime_assert context.source <? session.sources.length
+ let original=session.sources[context.source].nodes.copy()
+ let result=effects.split(root.inner[0] context @session)
+ if result.value is? none or result.terms.length not=?2 return 3
+ $runtime_assert context.source <? session.sources.length
+ if session.sources[context.source].nodes.length <=? original.length return 4
+ if original.length not=?parsed.nodes.length return 5
+ let rebuilt=contexts.node_at(result.value context session)
+ return if rebuilt is? parser.BinOp 42 else 6
+}

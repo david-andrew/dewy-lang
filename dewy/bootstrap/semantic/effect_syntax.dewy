@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error
 import p"effect_rows.dewy" as rows
 import p"source_views.dewy" as views
@@ -13,7 +14,9 @@ application = (id:addr context:contexts.Context session:contexts.Session):>Appli
     let node=contexts.node_at(id context session)
     if node is? parser.BinOp and views.is_operator(node.op 'TypeParamJuxtapose' context session) {
         let block=contexts.node_at(node.right context session)
-        if block is? parser.Block and block.delims =? '<>' return Application[views.identifier(node.left context session) block.inner]
+        # The application owns its parameter list independently of later
+        # source-arena replacement, just as row_binding owns its contract.
+        if block is? parser.Block and block.delims =? '<>' return Application[views.identifier(node.left context session) block.inner.copy()]
     }
     return Application[views.identifier(id context session)]
 }
@@ -23,7 +26,9 @@ row_binding = (id:addr context:contexts.Context session:contexts.Session):>rows.
     let found=bindings.lookup(session.scopes context.scope name)
     if found is? none return none
     let binding=bindings.binding_at(session.registry found)
-    return if binding.kind =? 'effect' binding.effect_value else none
+    # The returned contract can outlive a later registry replacement. Its
+    # arrays belong to that returned value, independently of the binding.
+    return if binding.kind =? 'effect' binding.effect_value.copy() else none
 }
 is_effect = (id:addr context:contexts.Context session:contexts.Session):>bool => {
     let node=contexts.node_at(views.unparen(id context session) context session)
@@ -45,11 +50,13 @@ split = (id:addr context:contexts.Context @session:contexts.Session):>Split => {
         # Preserve ordinary type/fact intersection checking. Only mixed rows
         # need a synthetic node; original source spans remain diagnostic sites.
         $runtime_assert context.source <? session.sources.length
-        let source=session.sources[context.source]
-        let nodes=source.nodes
+        let srcfile=session.sources[context.source].srcfile
+        # Source is immutable. Build its replacement from an independent
+        # node list; retained syntax views still describe the old source.
+        let nodes=session.sources[context.source].nodes.copy()
         let value=nodes.length
         nodes.push(parser.BinOp[loc=node.loc op=node.op left=left.value right=right.value])
-        session.sources[context.source]=contexts.Source[source.srcfile nodes]
+        session.sources[context.source]=contexts.Source[srcfile nodes]
         return Split[value terms]
     }
     return if is_effect(id context session) Split[none [id]] else Split[id]
