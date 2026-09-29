@@ -1,0 +1,7 @@
+import p"state.dewy" as state
+main=():>int64=>{
+    state.set()
+    let observed=state.value
+    let flag=state.enabled
+    return if "{observed}:{flag}"=?'42:true' 42 else 0
+}

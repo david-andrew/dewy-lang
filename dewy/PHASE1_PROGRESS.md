@@ -31,6 +31,29 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Imported scalar interfaces retain their declared types (2026-09-29)
+
+The audit reproduced a hosted metadata bug: an imported mutable `int64` or
+Boolean could retain its initializer's singleton type. Runtime reads observed
+the updated value, but interpolation could replace it with the old constant.
+This made hosted-built `timing.finish` print zero live/peak arena bytes despite
+a held allocation. Completed bindings now publish their lexical type interface
+rather than the initializer's value fact; implicit declarations retain their
+existing expression-type fallback. Local flow refinements stay separate.
+
+Thirty-two focused checks pass (73.65 seconds), including selective, namespace
+and splat imports on x86-64/C, the paired native group, existing semantic/imported
+borrow tests, and a strengthened timing assertion requiring a nonzero peak.
+The three fixtures bring the manifest to 698. Full independent integration of
+this hosted repair remains pending. Logs use `dewy-audit-scalar-contract-final2`.
+
+The preceding `a202b734` source received a fresh independent hosted seed and a
+successful direct-native cold self-build during the audit. It took 97.33 seconds
+with 4.39 GiB peak process RSS; the seed's incorrect live/peak gauges must not be
+used as memory evidence. This self-build is not a new fixed-point/parity
+certification. Disjoint phase measurements and roadmap proposals are recorded
+in `AUDIT_2026_09_29.md`.
+
 ## Effect equations own one summary per parameter (2026-09-29)
 
 Native effect analysis no longer retains a second, unused by-function summary

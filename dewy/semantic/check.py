@@ -1403,7 +1403,11 @@ def _complete_binding(
         type_ = replace(declaration.expr.type, effects=effect_rows.Contract(effect_rows.Row(variables=(name,))), inferred_effect=None)
         declaration = replace(declaration, expr=hir.ValueCast(declaration.expr.loc, type_, declaration.expr, effect_target=type_))
         ctx.declarations[declaration.name] = type_
-    binding.type = declaration.expr.type
+    # Exports and imported reads use this interface, not the initializer's
+    # current value fact. In particular, `let count:int64=0` must not export
+    # the singleton zero after a helper can assign it. The lexical interface
+    # already separates the declared storage from local flow refinements.
+    binding.type = ctx.declarations.get(declaration.name, declaration.expr.type)
     if isinstance(declaration.expr, hir.TypeValue):
         binding.type_value = declaration.expr.value
     declaration = replace(declaration, binding_id=binding.id)

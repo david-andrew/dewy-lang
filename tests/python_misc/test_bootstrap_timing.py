@@ -46,4 +46,5 @@ main=():>int64=>{{
         counters = {key: int(value) for key, value in counters.items()}
         assert counters['allocated'] >= 1024
         assert counters['copied'] >= 257
+        assert counters['peak'] >= 1024
         assert 0 <= counters['live'] <= counters['peak']
