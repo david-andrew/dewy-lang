@@ -1096,6 +1096,20 @@ note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<
     }
     note_copy(kind argument.value_type "copied on entry as `{argument.name}`" reason node @state)
 }
+# Both fields and elements own a descriptor slot. The caller detaches its
+# containing route first. Arena descriptors hand over directly; frame-backed
+# storage promotes and leaves its old descriptor for ordinary cleanup.
+take_array_slot=(slot:addr array:types.ArrayType node:hir.AST origin:string @state:State):>addr=>{
+    let prefix:array<addr>=[]
+    let taken=snapshot(read_word(slot 0 node @state) @prefix @state)
+    let allocated=compare('__ne__' word_op('__and__' read_word(taken layouts.array_descriptor.flags node @state) word(layouts.array_flags.arena_descriptor node @state) node @state) word(0 node @state) node @state)
+    let transfer=put(hir.Block[node.loc runtime_type(node.value_type node @state) [store_word(word(0 node @state) slot 0 node @state) taken] false] @state)
+    prefix.push(put(hir.Flow[node.loc runtime_type(node.value_type node @state) [put(hir.IfArm[node.loc runtime_type(node.value_type node @state) allocated transfer] @state)] array_copy(taken array node @state)] @state))
+    state.copy_notes.push(CopyNote['array' copy_name(node.value_type @state) "promoted from a {origin}"
+        'the frame-backed branch promotes storage before the owner dies; an arena descriptor transfers directly'
+        node.loc state.source_index false true true])
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+}
 owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Index and id in? state.moved_uses and id not in? state.array_snapshots {
@@ -1112,6 +1126,20 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                 let result=snapshot(read_word(slot 0 node @state) @prefix @state)
                 prefix.push(store_word(word(0 node @state) slot 0 node @state))
                 prefix.push(result)
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
+    }
+    if node is? hir.Index and id in? state.moved_uses and id not in? state.array_snapshots {
+        let owner=hir.node_at(state.input.nodes node.array)
+        let array=array_type(node.value_type state)
+        let stored=array_type(stored_type(id @state) state)
+        if array isnt? none and stored isnt? none and stored.length is? none and types.same_type(array.element stored.element state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+            let binding=owner.binding_id
+            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and storage_borrows.borrowable(owner.value_type state.type_nodes) {
+                let prefix:array<addr>=[]
+                let slot=snapshot(array_index(node @state writable=true) @prefix @state)
+                prefix.push(take_array_slot(slot array node 'array element' @state))
                 return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
             }
         }
@@ -1165,18 +1193,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                 # shared COW root first, just as an ordinary field write
                 # would, so a retained value never sees an emptied slot.
                 let slot=snapshot(field_pointer(node @state writable=true) @prefix @state)
-                let taken=snapshot(read_word(slot 0 node @state) @prefix @state)
-                let allocated=compare('__ne__' word_op('__and__' read_word(taken layouts.array_descriptor.flags node @state) word(layouts.array_flags.arena_descriptor node @state) node @state) word(0 node @state) node @state)
-                let transfer=put(hir.Block[node.loc runtime_type(node.value_type node @state) [store_word(word(0 node @state) slot 0 node @state) taken] false] @state)
-                # Frame placement is independent of source ownership. Its
-                # descriptor/data cannot escape; the ordinary layout copy
-                # acquires lasting storage and root cleanup keeps the old one.
-                prefix.push(put(hir.Flow[node.loc runtime_type(node.value_type node @state) [put(hir.IfArm[node.loc runtime_type(node.value_type node @state) allocated transfer] @state)] array_copy(taken array node @state)] @state))
-                # Placement promotion remains visible in the inventory,
-                # independently of source-level copy permission.
-                state.copy_notes.push(CopyNote['array' copy_name(node.value_type @state) 'promoted from a record field'
-                    'the frame-backed branch promotes storage before the record dies; an arena descriptor transfers directly'
-                    node.loc state.source_index false true true])
+                prefix.push(take_array_slot(slot array node 'record field' @state))
                 return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
             }
         }

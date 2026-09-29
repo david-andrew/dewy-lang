@@ -389,7 +389,11 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
                 let root=hir.node_at(nodes field.array)
                 let array=types.node_at(table views.structural_base(root.value_type table))
                 let value=types.node_at(table views.structural_base(field.value_type table))
-                if root is? hir.ExpressedIdentifier and array is? types.ArrayType and value is? types.ObjectType and types.same_type(array.element field.value_type table) and storage_borrows.ordinary(root.value_type table @eligible) {
+                if array isnt? types.ArrayType continue
+                let stored=types.node_at(table views.structural_base(array.element table))
+                let transferable=if value is? types.ArrayType and stored is? types.ArrayType stored.length is? none and types.same_type(stored.element value.element table)
+                    else value is? types.ObjectType and types.same_type(array.element field.value_type table)
+                if root is? hir.ExpressedIdentifier and transferable and storage_borrows.ordinary(root.value_type table @eligible) {
                     field_candidates.push(use.id) field_owners.push(binding)
                 }
                 continue

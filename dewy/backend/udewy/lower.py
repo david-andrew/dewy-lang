@@ -3806,14 +3806,14 @@ class _Lowerer(
         source = self._copy_source_expression(node.expr)
         if isinstance(source, hir.MemberAccess) and self._borrowed_route_local(node, declared):
             return None
-        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.ExpressedIdentifier, hir.Flow, hir.Block, hir.MemberAccess)):
+        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.ExpressedIdentifier, hir.Flow, hir.Block, hir.MemberAccess, hir.Index)):
             return None
         return node if self._array_representation(node) == 'descriptor' else None
 
     def _array_value_is_owned(self, value: hir.AST) -> bool:
         """Whether an array value stored into a field is the field's own storage (moved in, fresh, or cloned from a local) rather than a borrow of a parameter's or another object's."""
         source = self._copy_source_expression(value)
-        if isinstance(source, hir.MemberAccess) and id(source) in self.moved_uses:
+        if isinstance(source, (hir.MemberAccess, hir.Index)) and id(source) in self.moved_uses:
             return True
         if isinstance(source, hir.ExpressedIdentifier):
             if source.binding_id in self.storage_borrow_proofs.flow_views:
@@ -3930,8 +3930,12 @@ class _Lowerer(
                 continue
             if self._owned_cell_declaration(node):
                 cells.add(node.binding_id)
+            # A fixed frame buffer still owns any element handles. Taking
+            # one transfers that element, never the buffer's frame address.
+            raw_elements = (isinstance(ty.structural_base(node.annotation or node.expr.type), ty.ArrayType)
+                            and self._array_representation(node) == 'stack_data')
             if self._owned_object_declaration(node) or (
-                self._owned_array_declaration(node) is not None
+                (self._owned_array_declaration(node) is not None or raw_elements)
                 and not node.view
                 and node.binding_id not in self.storage_borrow_proofs.local_views
                 and not self._borrowed_route_local(node, node.annotation or node.expr.type)
@@ -3971,11 +3975,13 @@ class _Lowerer(
                 # Taking a record empties its owned fields, not the array's
                 # shape. Exact element layout and ordinary ownership are
                 # required; selected union alternatives keep their cell.
+                transferable = (isinstance(value, ty.ObjectType) and value == stored
+                                and self._record_fields_transferable(value))
+                transferable |= (isinstance(value, ty.ArrayType) and isinstance(stored, ty.ArrayType)
+                                 and stored.length is None and value.element == stored.element)
                 if (isinstance(root, hir.ExpressedIdentifier)
-                        and root.binding_id in element_owners
-                        and isinstance(value, ty.ObjectType) and value == stored
+                        and root.binding_id in element_owners and transferable
                         and storage_borrows.borrowable(root.type)
-                        and self._record_fields_transferable(value)
                         and id(source) not in self.borrow_plan.array_snapshots):
                     field_candidates[id(source)] = root.binding_id
                     return {id(root): id(source)}
@@ -4879,7 +4885,7 @@ class _Lowerer(
                     else declared_type
                 )
                 source = self._copy_source_expression(node.expr)
-                if declared_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess)) and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
+                if declared_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
                     copy_prelude, copied = self._transfer_array_value(node.expr, source, declared_type, site=f'bound to `{node.name}`')
                 else:
                     self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)

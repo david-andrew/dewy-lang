@@ -1130,7 +1130,7 @@ class _ArrayLowering(_ArraySharing):
         """Produce an independently mutable array value from one expression."""
 
         source = self._copy_source_expression(node)
-        if (array_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess))
+        if (array_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index))
                 and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses)):
             return self._transfer_array_value(node, source, array_type, site=site or 'transferred')
         if self._array_expression_owns_fresh_storage(node):
@@ -2461,6 +2461,35 @@ class _ArrayLowering(_ArraySharing):
         prelude, copied = self._transfer_array_value(item, source, array_type, site='returned')
         return [*prelude, hir.Return(item.loc, ty.BOTTOM_TYPE, replace(copied, type='int64'))]
 
+    def _transfer_array_slot(self, slot: hir.AST, node: hir.AST, array_type: ty.ArrayType,
+                             *, site: str, origin: str) -> tuple[list[hir.AST], hir.AST]:
+        """Take a private descriptor slot, promoting frame storage if needed.
+
+        The caller evaluates and detaches the containing writable route first.
+        Leave a zero slot after handoff, or the old frame descriptor after
+        promotion, so ordinary container cleanup remains valid.
+        """
+        loc = node.loc
+        address = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('taken_slot'))
+        taken = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('taken_value'))
+        result = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('slot_result'))
+        promoted, value = self._transfer_array_value(taken, taken, array_type, site=site, adopt=True)
+        allocated = self._int64_comparison('__ne__', self._int64_binary('__and__',
+            self._load_i64_field(taken, ARRAY_FLAGS_OFFSET, loc),
+            self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc), self._int64_literal(loc, 0), loc)
+        before = [self._declare(address, slot, loc),
+                  self._declare(taken, self._load_i64_field(address, 0, loc), loc),
+                  self._declare(result, taken, loc), self._if(allocated,
+                    [self._store_i64_field(address, 0, self._int64_literal(loc, 0), loc)], loc,
+                    [*promoted, self._assign(result, value, loc)])]
+        self.copy_notes.append(CopyNote(self.srcfile, loc,
+            'the frame-backed branch promotes storage before the owner dies; an arena descriptor transfers directly',
+            kind='array', type_name=type_to_dewy(array_type),
+            site=f'promoted from a {origin}', policy_exempt=True))
+        self.move_notes.append(MoveNote(self.srcfile, loc,
+            f'array {origin} is moved when {site}: its last use transfers the descriptor and empties the slot', True))
+        return before, result
+
     def _transfer_array_value(self, node: hir.AST, source: hir.AST, array_type: ty.ArrayType, *, site: str, frame_copy: bool = False, adopt: bool = False) -> tuple[list[hir.AST], hir.AST]:
         """An arena-backed value for an array leaving this frame: moved from an owned local at its last use, else cloned.
 
@@ -2470,6 +2499,18 @@ class _ArrayLowering(_ArraySharing):
         local is marked released so its scope exit leaves the data alone.
         """
         loc = node.loc
+        if isinstance(source, hir.Index) and id(source) in self.moved_uses:
+            root = source.array
+            stored = ty.structural_base(self._index_storage_type(source))
+            from ...semantic.analyze.storage_borrows import borrowable
+            if (isinstance(root, hir.ExpressedIdentifier)
+                    and (root.name in self.owned_array_names or root.name in self.owned_raw_arrays)
+                    and isinstance(stored, ty.ArrayType) and stored.length is None
+                    and stored.element == array_type.element and borrowable(root.type)
+                    and id(source) not in self.borrow_plan.array_snapshots):
+                before, slot = self._extract_projected_place_storage(source)
+                transferred, result = self._transfer_array_slot(slot, source, array_type, site=site, origin='array element')
+                return [*before, *transferred], result
         if isinstance(source, hir.MemberAccess) and id(source) in self.moved_uses:
             root = source
             while isinstance(root, hir.MemberAccess):
@@ -2486,28 +2527,9 @@ class _ArrayLowering(_ArraySharing):
                     and field is not None and ty.structural_base(field.type) == array_type):
                 before, receiver = self._extract_object_pointer(source.value)
                 _, offsets = self._object_layout(owner, source)
-                taken = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('taken_field'))
-                before.append(self._declare(taken, self._load_i64_field(receiver, offsets[source.name], loc), loc))
-                # A record can contain a frame descriptor, including a
-                # literal array of frame-rooted records. Only a lasting
-                # descriptor can leave by handle. Reuse record-return
-                # promotion for the other layout and leave its original
-                # field available to clean up any untransferred elements.
-                result = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('field_result'))
-                promoted, value = self._transfer_array_value(taken, taken, array_type, site=site, adopt=True)
-                allocated = self._int64_comparison('__ne__', self._int64_binary('__and__',
-                    self._load_i64_field(taken, ARRAY_FLAGS_OFFSET, loc),
-                    self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc), self._int64_literal(loc, 0), loc)
-                before.extend([self._declare(result, taken, loc), self._if(allocated,
-                    [self._store_i64_field(receiver, offsets[source.name], self._int64_literal(loc, 0), loc)], loc,
-                    [*promoted, self._assign(result, value, loc)])])
-                self.copy_notes.append(CopyNote(self.srcfile, source.loc,
-                    'the frame-backed branch promotes storage before the record dies; an arena descriptor transfers directly',
-                    kind='array', type_name=type_to_dewy(array_type),
-                    site='promoted from a record field', policy_exempt=True))
-                self.move_notes.append(MoveNote(self.srcfile, source.loc,
-                    f'array field `{source.name}` is moved when {site}: this field has no remaining reads and its slot is emptied', True))
-                return before, result
+                slot = self._field_address(receiver, offsets[source.name], loc)
+                transferred, result = self._transfer_array_slot(slot, source, array_type, site=site, origin='record field')
+                return [*before, *transferred], result
         if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
             members = self._stored_union_members(source)
             if members is not None and any(ty.structural_base(member) == array_type for member in members):

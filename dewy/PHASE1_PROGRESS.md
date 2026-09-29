@@ -6,17 +6,41 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
-## Latest full certification: `db95f751` (2026-09-29)
+## Latest native/parity integration: `5d6a1baa` (2026-09-29)
 
-**468/468** paired acceptance/execution cases pass. An independent hosted seed
+**507/507** paired acceptance/execution cases pass. An independent hosted seed
 rebuilds the native pair to a byte-identical three-generation fixed point,
-including its x86-64/C execution checks. The complete copy inventory reports
-**4,276 sites / 55,386 lines = 77.204/KLOC**, within the unchanged 4,500/85 gates.
-The hosted build of this source prepared/emitted in 244.01/249.18 seconds under
-concurrent validation; its implicit runtime-sized bootstrap inventory is
-1,805 sites in 73 modules. The later sibling-field and dispatch changes have
-focused paired evidence and are entering independent hosted-build validation.
-Phase 1 remains open. Earlier checkpoints below retain their historical scope.
+including its x86-64/C execution and scaling checks. The complete copy inventory
+reports **4,279 sites / 55,557 lines = 77.020/KLOC**, within the unchanged
+4,500/85 gates. Generations 2/3 took 89/103 seconds under concurrent validation;
+these are not isolated performance measurements. Artifacts use
+`phase1-ownership-closure-*` outside the checkout.
+
+The broader non-slow pytest run is still in progress and has reported failures;
+this is not a green full-suite checkpoint. The independent hosted seed before
+the last return-boundary adjustment prepared/emitted in 237.78/242.79 seconds,
+with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
+record/array-element changes have focused paired evidence and postdate this
+integration. Phase 1 remains open.
+
+## Nested array descriptor transfers (2026-09-29)
+
+Last-use nested arrays now transfer their descriptor from the selected slot.
+Fields and elements share one descriptor-handoff helper in each lowerer. The
+containing COW array detaches before its slot changes; arena descriptors move,
+while frame descriptors promote with the operation retained in the copy report.
+The hosted liveness inventory now also recognizes owned element handles in a
+fixed frame buffer. Only the element transfers, never its enclosing frame data.
+
+Validation: seven focused hosted checks, 16 surrounding hosted checks, the
+existing paired record-field group, and the complete nine-check descriptor
+module pass. A separate slot-replacement case passes on both compilers/backends.
+The kernels check retained snapshots, const roots, returned elements, successive
+owning transfers, slot renewal, bounded allocation and steady-state cleanup.
+Disabling element moves fails the allocation control. Read-only borrowed-alias
+promotion remains separate; these handoffs require an owning source or an owned
+container slot. Eight manifest cases bring the corpus to 526. Artifacts use
+`dewy-nested-array-*`; no strict-copy or allocation gate was weakened.
 
 ## Last-use record elements (2026-09-29)
 
