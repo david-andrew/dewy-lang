@@ -364,7 +364,7 @@ class _ObjectLowering:
             dest = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dest')
             src = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src')
             if prepared:
-                statements = self._copy_object_into_result_storage(dest, src, object_type, loc, move=move, borrowed=borrowed, inline=True)
+                statements = self._copy_object_into_result_storage(dest, src, object_type, loc, move=move, borrowed=borrowed, inline=True, exact=exact)
             else:
                 assert isinstance(move, bool)
                 statements = self._object_copy(dest, src, object_type, loc, arena=True, move=move, inline=True, exact=exact)
@@ -2292,11 +2292,23 @@ class _ObjectLowering:
         move: bool | str = False,
         borrowed: set[str] = frozenset(),
         inline: bool = False,
+        exact: bool = False,
     ) -> list[hir.AST]:
         """Recursively copy an object into already-prepared mutable storage (``move='adopt'``: take the arrays of fields not in ``borrowed``)."""
 
         if not inline:
-            return [self._object_copy_call(dest, src, object_type, loc, prepared=True, move=move, borrowed=borrowed)]
+            return [self._object_copy_call(dest, src, object_type, loc, prepared=True, move=move, borrowed=borrowed, exact=exact)]
+        if not exact and not borrowed and not self._object_copy_uses_frame_storage(object_type):
+            # Adoption used to duplicate every descendant's field transfers
+            # under every parent view. Share one exact helper per concrete
+            # layout, just as ordinary copies do. Fixed-array fields need the
+            # original prepared/unprepared distinction, including fields only
+            # present on descendants, so that family keeps the existing path.
+            dispatched = self._record_dispatch(src, object_type, loc,
+                lambda concrete: self._object_copy_call(dest, src, concrete, loc,
+                    prepared=True, move=move, exact=True))
+            if dispatched is not None:
+                return dispatched
         _size, offsets = self._object_layout(
             object_type,
             hir.Void(loc, ty.VOID_TYPE),
@@ -2404,5 +2416,6 @@ class _ObjectLowering:
                 copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc), prepared=False))
             return copied
 
-        statements.extend(self._by_brand(src, object_type, loc, child_fields))
+        if not exact:
+            statements.extend(self._by_brand(src, object_type, loc, child_fields))
         return statements
