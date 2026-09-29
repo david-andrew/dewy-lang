@@ -17,13 +17,16 @@ and scaling checks. The complete inventory reports **4,278 sites / 55,629 lines
 Artifacts use `phase1-full-suite-repair-*` and `phase1-post-repair-*` outside
 the checkout. Subsequent ownership changes have focused evidence below.
 
-The fresh non-slow pytest run remains in progress against the preceding frozen
-repair source. It has found the contextual-literal follow-up already fixed in
-`2850bc9a`; do not treat this as a green full-suite checkpoint. The previous
-`5d6a1baa` run had 6,039 passes, 20 failures and 13 skips; the repairs below
-address those failures. The last hosted full strict-copy inventory still has
-1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
-latest ownership slices. Phase 1 remains open.
+The non-slow pytest run against the preceding frozen repair source finished
+with **6,092 passes, 4 failures and 13 skips** (95m49s). One failure is the
+contextual-literal follow-up fixed in `2850bc9a`; three measurement tests require
+Git metadata absent from the archive used for that run. All four pass focused
+rechecks in the current Git checkout (`dewy-full-suite-final-rechecks.log`).
+This accounts for every observed failure, but is not a claim that later source
+changes have received a fresh green full-suite run. The previous `5d6a1baa`
+run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
+inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
+before the latest conversion/iterator work. Phase 1 remains open.
 
 ## Typed conversions preserve unrelated loans (2026-09-29)
 
