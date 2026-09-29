@@ -506,23 +506,7 @@ class _ObjectLowering:
                 or self.borrowed_fields.get(local_binding_key(source))):
             return None
 
-        def transferable(record: ty.ObjectType) -> bool:
-            # Parent layouts may dispatch to unprepared descendant fields.
-            # Their transfer needs a separate complete-layout proof.
-            if any(ty.USER_BRAND_TYPES.get(brand, record) != record for brand in ty.brand_alternatives(record)):
-                return False
-            for field in record.fields:
-                plain = ty.structural_base(field.type)
-                if isinstance(plain, ty.ArrayType) and plain.length is not None:
-                    return False
-                if isinstance(plain, ty.ObjectType) and not transferable(plain):
-                    return False
-                members = self._field_union_members(field.type)
-                if members is not None and any(isinstance(ty.structural_base(member), (ty.ArrayType, ty.ObjectType)) for member in members):
-                    return False
-            return True
-
-        if not transferable(object_type):
+        if not self._record_fields_transferable(object_type):
             return None
         prelude, pointer = self._extract_object_pointer(node)
         allocated, dest = (self._allocate_object_result_value(object_type, node.loc, arena=arena)
@@ -531,6 +515,38 @@ class _ObjectLowering:
             f'`{source.name}` is moved when {site}: this is its last use, so its owned fields change owner', True))
         return [*prelude, *allocated,
                 *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest
+
+    def _record_fields_transferable(self, object_type: ty.ObjectType) -> bool:
+        """Every active field can change owner without retaining frame storage.
+
+        Include descendant-only fields: a parent handle owns the complete
+        dynamic value. Inline union cells own heap payloads, but payload
+        records can themselves contain prepared fixed-array frame storage.
+        Recursive payload handles terminate at the already visited layout.
+        """
+        cached = self.object_field_transfers.get(id(object_type))
+        if cached is not None:
+            return cached[1]
+        seen: set[int] = set()
+
+        def transferable(type_: ty.Type) -> bool:
+            plain = ty.structural_base(type_)
+            if id(plain) in seen:
+                return True
+            seen.add(id(plain))
+            if isinstance(plain, ty.ArrayType):
+                return plain.length is None
+            if isinstance(plain, ty.ObjectType):
+                candidates = [plain, *(ty.USER_BRAND_TYPES[brand]
+                    for brand in ty.brand_alternatives(plain) if brand in ty.USER_BRAND_TYPES)]
+                return all(transferable(field.type)
+                           for candidate in candidates for field in candidate.fields)
+            members = self._field_union_members(plain)
+            return members is None or all(transferable(member) for member in members)
+
+        result = transferable(object_type)
+        self.object_field_transfers[id(object_type)] = (object_type, result)
+        return result
 
     def _allocate_object_result_value(
         self,
@@ -2119,6 +2135,12 @@ class _ObjectLowering:
             statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
+                if (move == 'adopt' and field.name not in borrowed
+                        and self._record_fields_transferable(ty.ObjectType((field,)))):
+                    # Inline fields have no prepared trees. Their independently
+                    # owned heap payload moves, while the emptied source cell
+                    # remains valid for ordinary scope cleanup.
+                    return self._take_cell_payload(dest_address, source_address, loc)
                 statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False, move=move if move == 'adopt' else bool(move)))
                 if move == 'adopt' and any(self._is_string_valued(member) for member in members):
                     # a string payload moved by handle: empty the local's payload word
@@ -2160,6 +2182,10 @@ class _ObjectLowering:
                         source_is_pointer=True,
                     )
                 )
+            elif (isinstance(field.type, ty.ObjectType) and move == 'adopt'
+                    and self._record_fields_transferable(field.type)):
+                statements.extend(self._copy_object_into_result_storage(
+                    dest_address, source_address, field.type, loc, move='adopt'))
             elif isinstance(field.type, ty.ObjectType) and not prepared:
                 # `adopt` still releases the source local after returning.
                 # The unprepared copy helper cannot clear its moved fields,

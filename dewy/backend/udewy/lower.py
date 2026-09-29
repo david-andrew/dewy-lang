@@ -368,6 +368,7 @@ class _Lowerer(
         self.object_release_names = {}
         self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
         self.object_frame_copies: dict[int, tuple[ty.ObjectType, bool]] = {}
+        self.object_field_transfers: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.object_prepared_storage: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.member_tags_by_identity: dict[int, tuple[ty.TypeExpr, int]] = {}
         self.pending_object_copies: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []

@@ -1,0 +1,21 @@
+$explicit_copies
+Node=type of any & [tag:int64]
+Leaf=type of Node & [items:array<int64>]
+append=(value:Node @rows:array<Node>):>void=>{rows.push(value)}
+make=():>Node=>Leaf[0 [42]]
+work=():>int64=>{
+ let rows:array<Node>=[]
+ let value=make()
+ append(value @rows)
+ if rows.length>?0 {
+  const item=@rows[0]
+  if item is? Leaf and item.items.length>?0 return item.items[0]
+ }
+ return 1
+}
+main=():>int64=>{
+ loop i in [0..100) {if work() not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..100) {if work() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

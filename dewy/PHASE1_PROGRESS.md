@@ -36,6 +36,20 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): hosted record donation now checks complete dynamic
+families instead of rejecting every ancestor layout. Last-use owned values
+transfer descendant-only array fields, nested records and inline union payloads;
+source cells are emptied for normal cleanup. The layout proof follows recursive
+payloads finitely and retains the fallback for prepared fixed-array storage.
+Native already transfers these complete owned layouts; no source rule changes.
+
+Eight hosted checks and paired x86-64/C cases pass, including active record,
+array, string and absent union alternatives, independent retained snapshots and
+stable live-storage counters. The surrounding hosted suite passes 94 checks.
+Two fixtures bring the manifest to 367. Full integration remains a separate
+frozen checkpoint; the independent hosted build at `99f2592e` prepared in
+236.43 seconds and emitted in 241.65 seconds under concurrent validation.
+
 Checkpoint (2026-09-28): direct single-use aggregate inputs now transfer
 through constructors and explicit or implicit returns. Both compilers trace
 transparent checked wrappers, including payload-preserving union injections.
