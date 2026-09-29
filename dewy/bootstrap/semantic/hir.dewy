@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import Span, SrcFile
 import p"../parser/t0.dewy" as lex
 import p"ty.dewy" as types
@@ -737,7 +739,9 @@ RangeMembership = type of AST & [
 
 node_at = (nodes:array<AST> id:addr):>AST => {
     $runtime_assert id <? nodes.length
-    return nodes[id]
+    # Owning callers get an independent node; stable readers use the
+    # proved getter loan and elide this fallback snapshot.
+    return nodes[id].copy()
 }
 
 append_node = (@nodes:array<AST> node:AST):>addr<i => i <? nodes.length> => {

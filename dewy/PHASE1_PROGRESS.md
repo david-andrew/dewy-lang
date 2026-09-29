@@ -36,6 +36,31 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): hosted lowering now synthesizes stable getter
+variants for direct terminal record/cell reads. The complete guard/effect
+prefix remains, while the variant lends its caller's storage. Source and
+reader stability, argument borrowing, exact stored representation and absence
+of captures/donating parameters are prerequisites. Borrow dependencies prevent
+later owner moves, and a returned borrowed record still creates its own owner.
+Native retains its additional getter-forwarding support; hosted forwarding
+wrappers remain on their ordinary result protocol in this slice.
+
+Both routes can elide an explicit default-copy getter fallback for a proved
+reader without lifecycle operations. HIR's `node_at` now states its owning
+snapshot with `.copy()`, and the module enables `$explicit_copies` on both
+routes. Strict adoption reaches 45 physical bootstrap modules. Token lookups
+state the same fallback, but token-module adoption still awaits mutually
+exclusive branch last-use handling; no unnecessary snapshot was added there.
+
+Twenty hosted getter checks pass, with 34 surrounding checks in the earlier
+slice. Paired record/union cases pass on x86-64/C, including zero allocations
+for repeated reads, allocating disabled-optimization controls, guards, side
+effects, retained snapshots and escaping results. Two fixtures bring the
+manifest to 369. The frozen `99f2592e` pair reaches identical three-generation
+native output (last generations 56/58 seconds); its full 365-case manifest is
+running separately. Its hosted runtime inventory is 2,126 obligations in 88
+modules, before the family-transfer/getter changes.
+
 Checkpoint (2026-09-28): hosted record donation now checks complete dynamic
 families instead of rejecting every ancestor layout. Last-use owned values
 transfer descendant-only array fields, nested records and inline union payloads;

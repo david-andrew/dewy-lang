@@ -61,6 +61,11 @@ class _ObjectLowering:
             body = body.items[-1]
         if isinstance(body, hir.Return):
             body = body.item
+        if isinstance(body, hir.CopyValue):
+            from ...semantic.analyze.storage_borrows import borrowable
+            if not borrowable(body.type):
+                return False
+            body = body.value
         return isinstance(body, (hir.Index, hir.MemberAccess, hir.ExpressedIdentifier)) and not cls._projection_has_return(body)
 
     def _scalar_getter_projection(self, node: hir.MemberAccess) -> tuple[ProjectionPath, ty.Type, str] | None:
@@ -108,6 +113,83 @@ class _ObjectLowering:
             self.pending_scalar_projections.append(variant)
         return variant[1:]
 
+    def _borrowed_getter_projection(self, declaration: hir.Declare):
+        """A private getter ABI lending a stable caller-owned record/cell.
+
+        Preserve the entire getter prefix. Only its terminal route changes
+        representation: it returns an address instead of materializing an
+        independent result. Both the source and the local reader must remain
+        stable; ordinary/escaping returns retain their value boundary.
+        """
+        from ...semantic.analyze.storage_borrows import borrowable
+        if (not self._has_arena() or self.lowering_module_startup
+                or declaration.binding_id not in self.borrow_plan.stable_bindings
+                or declaration.view):
+            return None
+        call = declaration.expr
+        if not isinstance(call, hir.FunctionCall):
+            return None
+        result = ty.structural_base(call.type)
+        if not isinstance(result, (ty.ObjectType, ty.TypeOr)) or not borrowable(result):
+            return None
+        if declaration.annotation is not None and declaration.annotation != call.type:
+            return None
+        function = self._direct_call_function(call)
+        if (function is None or function.literal.object_receiver
+                or self.lifted.get(id(function)) or function.literal.rettype != call.type
+                or not self._scalar_getter_body(function.literal.body)):
+            return None
+        read = function.literal.body
+        if isinstance(read, hir.Block):
+            read = read.items[-1]
+        if isinstance(read, hir.Return):
+            read = read.item
+        if isinstance(read, hir.CopyValue):
+            read = read.value
+        if id(read) in self.borrow_plan.array_snapshots or read.type != call.type:
+            return None
+        route = borrowing.route(read)
+        if route is None or not borrowing.stable_owner(route, self.borrow_plan):
+            return None
+        pairs = self.allocator_analysis._pair_arguments(call, function.literal)
+        pair = next(((arg, param) for arg, param in pairs or ()
+                     if param is not None and param.binding_id == route.binding), None)
+        if pair is None:
+            return None
+        argument, parameter = pair
+        if (parameter.place or isinstance(parameter, hir.BoundParam)
+                or parameter.binding_id in self.owned_record_parameters | self.owned_cell_parameters | self.owned_array_parameters
+                or not isinstance(argument, (hir.ExpressedIdentifier, hir.MemberAccess))
+                or argument.type != parameter.type):
+            return None
+        borrowed = id(argument) in self.forwarded_values.get(id(call), ())
+        if isinstance(parameter.type, ty.ArrayType):
+            position = next((index for index, item in enumerate(call.pos_args) if item is argument), None)
+            if position is None:
+                position = next((name for name, item in call.kw_args.items() if item is argument), None)
+            boundary = self.array_call_boundary_analyses.get((id(call), position))
+            borrowed |= boundary is not None and boundary.safe
+        if not borrowed:
+            return None
+        # Narrowing a union read may load a payload rather than its cell;
+        # do not return a temporary retagged representation from this frame.
+        stored = (read.array.type.element if isinstance(read, hir.Index)
+                  else read.value.type.field(read.name).type if isinstance(read, hir.MemberAccess)
+                  and isinstance(read.value.type, ty.ObjectType) else parameter.type)
+        if stored != call.type:
+            return None
+        owner = borrowing.route(argument)
+        if owner is None or not borrowing.stable_owner(owner, self.borrow_plan):
+            return None
+        key = (id(function), ())
+        variant = self.scalar_projections.get(key)
+        if variant is None:
+            symbol = self._internal_symbol(f'__dewy_borrow_getter_{len(self.scalar_projections)}')
+            variant = (function, (), 'int64', symbol)
+            self.scalar_projections[key] = variant
+            self.pending_scalar_projections.append(variant)
+        return variant[1:], owner
+
     @classmethod
     def _project_getter_result(cls, body: hir.AST, path: ProjectionPath, type_: ty.Type) -> hir.AST:
         if isinstance(body, hir.Block):
@@ -116,6 +198,12 @@ class _ObjectLowering:
         if isinstance(body, hir.Return):
             assert body.item is not None
             return replace(body, item=cls._project_getter_result(body.item, path, type_))
+        if isinstance(body, hir.CopyValue):
+            body = body.value  # eligibility excluded observable lifecycle operations
+        if not path:
+            # Internal address ABI, not a source representation cast: this
+            # must not pin or expose the caller's storage as a raw pointer.
+            return hir.ValueCast(body.loc, 'int64', body)
         for field, field_type in path:
             body = hir.MemberAccess(body.loc, field_type, body, field)
         return body
@@ -1624,6 +1712,8 @@ class _ObjectLowering:
         matches the read. The local then aliases the container's storage and
         owns nothing, so no copy and no release.
         """
+        if node.binding_id in self.borrowed_getter_locals:
+            return True
         value_type = ty.unfold(ty.strip_refinement(value_type))
         if (not self._has_arena() and not node.view) or self.lowering_module_startup or node.binding_id is None:
             return False

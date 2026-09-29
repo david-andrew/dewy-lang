@@ -100,7 +100,9 @@ append_node = (@nodes:array<Token> token:Token):>addr<i => i <? nodes.length> =>
 }
 node_at = (nodes:array<Token> id:addr):>Token => {
     $runtime_assert id <? nodes.length
-    return nodes[id]
+    # Owning callers get an independent node; stable readers use the
+    # proved getter loan and elide this fallback snapshot.
+    return nodes[id].copy()
 }
 
 lexical_error = (srcfile:SrcFile loc:Span title:string):>TokenError => TokenError[

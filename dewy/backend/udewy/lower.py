@@ -416,6 +416,7 @@ class _Lowerer(
         # A direct getter followed by a scalar field read can return that word
         # before copying its record. Variants retain the original input ABI and
         # discovery identities; only their output and terminal read differ.
+        self.borrowed_getter_locals: dict[int, borrowing.Route] = {}
         self.scalar_projection_bodies: dict[int, bool] = {}
         self.scalar_projections: dict[tuple[int, tuple[str, ...]], tuple[_FunctionDef, ProjectionPath, ty.Type, str]] = {}
         self.pending_scalar_projections: list[tuple[_FunctionDef, ProjectionPath, ty.Type, str]] = []
@@ -3354,6 +3355,12 @@ class _Lowerer(
             if self._is_compile_time_rational(node.annotation or node.expr.type):
                 # Exact rational constants (unit scales) fold during checking.
                 return None
+            getter = self._borrowed_getter_projection(node)
+            if getter is not None:
+                projection, owner = getter
+                self.borrowed_getter_locals[node.binding_id] = owner
+                return replace(node, annotation=node.annotation or node.expr.type,
+                    expr=self._require_node(self._transform_node(node.expr, scalar_projection=projection)))
             annotation = node.annotation
             if isinstance(node.annotation or node.expr.type, ty.QuantityType):
                 # Dimensions are erased: the binding holds the number's word.
@@ -3812,10 +3819,10 @@ class _Lowerer(
         declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
         if not isinstance(declared, ty.ObjectType):
             return False
-        if self._fresh_object_declaration(node):
-            return True
         if not hasattr(self, 'borrow_plan') or self._borrowed_route_local(node, declared):
             return False
+        if self._fresh_object_declaration(node):
+            return True
         return isinstance(self._copy_source_expression(node.expr), (hir.ExpressedIdentifier, hir.Index, hir.MemberAccess, hir.DictLookup))
 
     def _required_view_error(self, node: hir.Declare) -> NoReturn:
@@ -3988,7 +3995,7 @@ class _Lowerer(
                                 borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                     declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
                     if (node.view or node.binding_id in self.storage_borrow_proofs.local_views or isinstance(declared, (ty.ArrayType, ty.ObjectType, ty.TypeOr))) and self._borrowed_route_local(node, declared):
-                        source = borrowing.route(node.expr)
+                        source = self.borrowed_getter_locals.get(node.binding_id) or borrowing.route(node.expr)
                         if source is not None:
                             borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                 movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings or node.binding_id in cells
@@ -4614,6 +4621,9 @@ class _Lowerer(
                 statements.extend(self._loop_signal_checkpoint(node.loc))
             return statements
         if isinstance(node, hir.Declare):
+            if node.binding_id in self.borrowed_getter_locals:
+                prelude, value = self._extract_expression(node.expr)
+                return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
             declared_type = ty.structural_base(node.annotation or node.expr.type)
             if node.view and not self._borrowed_route_local(node, declared_type):
                 self._required_view_error(node)

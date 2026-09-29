@@ -1096,17 +1096,20 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # source is an explicitly supplied, borrowed, unrebound parameter;
         # caller and callee proofs keep it alive beyond this return cleanup.
         if projection.borrowed {
-            if node is? hir.FunctionCall {
-                let inner=getter_borrow_projection(id node @state)
-                if inner isnt? none return ordinary_call(id node runtime_type(node.value_type node @state) @state projection=inner)
+            let selected=if node is? hir.CopyValue node.value else id
+            let source=hir.node_at(state.input.nodes selected)
+            if source is? hir.FunctionCall {
+                let inner=getter_borrow_projection(selected source @state)
+                if inner isnt? none return ordinary_call(selected source runtime_type(source.value_type source @state) @state projection=inner)
             }
-            return expression(id @state)
+            return expression(selected @state)
         }
         # Keep the selected field while the route and all enclosing locals
         # are alive. Scalars pass through; aggregate handles acquire their
         # own lifetime before ordinary return cleanup releases the source.
         let prefix:array<addr>=[]
-        let receiver=read_operand(id @prefix @state)
+        let selected_read=if node is? hir.CopyValue node.value else id
+        let receiver=read_operand(selected_read @prefix @state)
         let value=receiver.value
         loop field in projection.fields {
             let layout=object_layout(field.owner node @state)
@@ -4113,7 +4116,7 @@ field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>add
 # Return-by-value remains the fallback. The initial projection rule accepts
 # one terminal route read, preserving every preceding guard and side effect.
 # It does not select a field out of a constructor or change an indirect call.
-getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
+getter_read = (body:addr nodes:array<hir.AST> type_nodes:types.Table):>addr? => {
     let terminal=body
     let node=hir.node_at(nodes terminal)
     let prefix_nodes:set<addr>=set[]
@@ -4140,6 +4143,13 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
         if node.item is? none return none
         terminal=node.item
         node=hir.node_at(nodes terminal)
+    }
+    # An explicit default copy states the owning fallback. Stable readers
+    # may still elide it, provided no resource hook is skipped. Retain the
+    # wrapper id so the override affects this result boundary only.
+    if node is? hir.CopyValue {
+        if not storage_borrows.borrowable(node.value_type type_nodes) return none
+        node=hir.node_at(nodes node.value)
     }
     # A wrapper returning another getter's call is itself a getter when the
     # inner call's route argument is a route of this function's parameter;
@@ -4207,7 +4217,7 @@ scalar_getter_projection = (node:hir.MemberAccess call_id:addr @state:State):>Sc
     let array=array_type(node.value_type state)
     let owned_handle=state.allocator isnt? none and (owned_string(node.value_type state) or array isnt? none and array.length is? none)
     if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'bool') and views.fixed_integer_layout(node.value_type state.type_nodes) is? none and not owned_handle return none
-    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes state.type_nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none return none
     let existing=state.scalar_projections.get(key)
@@ -4369,6 +4379,7 @@ mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {
 # borrows it. Depth is bounded so recursive wrappers stay finite.
 getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     let node=hir.node_at(state.input.nodes read)
+    if node is? hir.CopyValue return getter_route(node.value depth @state)
     if node isnt? hir.FunctionCall return borrowing.route(read state.input.nodes)
     if depth >? 4 or (not object_valued(node.value_type @state) and cell_members(node.value_type @state) is? none) return none
     let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
@@ -4377,7 +4388,7 @@ getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     if literal isnt? hir.FunctionLiteral or literal.object_receiver or literal.rettype not=? node.value_type return none
     let capture=state.capture_plan.functions.get(direct)
     if capture is? none or capture.captures.length >? 0 return none
-    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes state.type_nodes)}
     let inner=state.getter_reads.get(direct default=none)
     if inner is? none or inner in? state.array_snapshots return none
     let inner_route=getter_route(inner depth+1 @state)
@@ -4406,13 +4417,15 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     if literal isnt? hir.FunctionLiteral or literal.object_receiver or literal.rettype not=? call.value_type return none
     let capture=state.capture_plan.functions.get(direct)
     if capture is? none or capture.captures.length >? 0 return none
-    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes state.type_nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none or read in? state.array_snapshots return none
     # A borrowed result must already have the declared representation. In
     # particular, narrowing/widening a tagged cell cannot return a temporary
     # retagged cell from this callee's frame.
-    if not borrow_projection_matches(stored_type(read @state) literal.rettype state.type_nodes) return none
+    let result_node=hir.node_at(state.input.nodes read)
+    let storage_read=if result_node is? hir.CopyValue result_node.value else read
+    if not borrow_projection_matches(stored_type(storage_read @state) literal.rettype state.type_nodes) return none
     let route=getter_route(read 0 @state)
     if route is? none or route.binding not in? state.stable_bindings return none
     let parameter:hir.Param?=none
