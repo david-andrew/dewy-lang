@@ -156,7 +156,7 @@ def array_selection(node):
             actual = ty.structural_base(item.type)
             if not isinstance(actual, ty.ArrayType) or actual.element != shape.element:
                 return None
-            if not isinstance(item, (hir.ArrayLiteral, hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+            if not isinstance(item, (hir.ArrayLiteral, hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) and not common_array_field(item):
                 return None
             if isinstance(item, hir.ArrayLiteral) and (actual.length != len(item.items) or len(item.items) > 64 or any(isinstance(value, hir.Spread) for value in item.items)
                     or item.items and actual.element != 'bool' and ty.fixed_integer_layout(actual.element) is None):
@@ -393,7 +393,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             local_views.add(node.binding_id)
             pending_views.extend(waiting_views.pop(node.binding_id, ()))
         def stable_value(value, selections=()):
-            path = bindings.access_path(value, unwrap=_unwrap)
+            path = bindings.access_path(value, unwrap=_unwrap, forwarding=common_array_field(value))
             source = path.root
             if not isinstance(source, hir.ExpressedIdentifier):
                 return False
@@ -402,11 +402,14 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             local = stable_locals[id(literal)].get(source.binding_id)
             stable = source.binding_id in local_views or source.binding_id in selections or (local is not None and ordinary(local)) or (
                 own is not None and ordinary(own.type) and incoming is not None
-                and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else step.name
+                and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else
+                                                step.field if isinstance(step, hir.ForwardingAccess) else step.name
                                                 for step in path.steps)))
             # A narrowed field/element may still live in a tagged cell or a
             # different layout. Do not reinterpret that storage as a handle.
             for step in path.steps:
+                if common_array_field(step):
+                    continue  # every alternative was checked against this descriptor layout
                 parent = ty.structural_base(step.array.type if isinstance(step, hir.Index) else step.value.type)
                 field = parent.field(step.name) if isinstance(step, hir.MemberAccess) and isinstance(parent, ty.ObjectType) else None
                 stored = parent.element if isinstance(step, hir.Index) and isinstance(parent, ty.ArrayType) else field.type if field else None
@@ -453,7 +456,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if not stable_value(leaf, candidates):
                     invalid.add(binding)
                     continue
-                source = bindings.access_path(leaf, unwrap=_unwrap).root
+                source = bindings.access_path(leaf, unwrap=_unwrap, forwarding=common_array_field(leaf)).root
                 if isinstance(source, hir.ExpressedIdentifier) and source.binding_id in candidates:
                     needed.add(source.binding_id)
                     readers.setdefault(source.binding_id, set()).add(binding)

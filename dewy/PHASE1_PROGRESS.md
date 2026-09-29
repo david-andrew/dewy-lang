@@ -36,6 +36,31 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): conditional array selections now compose with
+common-field loans across record unions. The shared proof checks each leaf's
+layout and owner stability; lowering dispatches only the selected arm. Public
+effect inference consumes the same proof. Derived selected views are registered
+against their underlying owners before last-use moves, so moving a record cannot
+invalidate a still-live selected array, including through another selection.
+Mutable readers and escaping uses retain the ordinary owning fallback.
+
+Thirty-five hosted selection checks pass. Both native paired groups pass on
+x86-64/C (33.92 seconds), including zero-allocation reads, independent mutation
+snapshots and strict rejection of an owner move with live derived readers.
+Propositions, effect-boundary construction and type rebinding pass standalone
+strict checking on both routes, with comments on their intentional retained
+constants/contracts. Strict adoption reaches **53 physical bootstrap modules**;
+four selection fixtures bring the manifest to 385. The staged native seed was
+built with these three new module directives disabled only in its isolated
+build checkout, then checked the actual directive-enabled sources successfully.
+
+The frozen `25236513` checkpoint has now passed **373/373** paired acceptance
+and execution cases, alongside its recorded three-generation fixed point and
+complete copy-inventory gate. This closes that integration checkpoint, including
+the two regressions found at `99f2592e`; later source changes still need a fresh
+whole-program integration checkpoint. Phase 1 remains open for the work in the
+completion checklist above.
+
 Checkpoint (2026-09-28): stable common array fields across record unions
 now lend their descriptors to read-only calls and iterator arms in both
 lowerers. Alternatives may use different field offsets. Call loans share the

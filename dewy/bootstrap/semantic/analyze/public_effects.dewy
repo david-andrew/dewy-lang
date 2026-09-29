@@ -165,6 +165,7 @@ visit_selection=(id:addr input:Input @scan:Scan):>void=>{
             pending.push(item.default)
         } else if item is? hir.Block and item.items.length=?1 {pending.push(item.items[0])}
         else if item is? hir.ValueCast|hir.RepresentationCast {pending.push(item.expr)}
+        else if item is? hir.ForwardingAccess and storage_borrows.common_array_field(item input.nodes input.types) {record_access(item.value 'reads' input @scan)}
         else {visit(id input @scan)}
     }
 }

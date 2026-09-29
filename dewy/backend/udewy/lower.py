@@ -4021,7 +4021,7 @@ class _Lowerer(
                 if not nested and node.binding_id is not None:
                     if node.binding_id in self.storage_borrow_proofs.flow_views:
                         for leaf in storage_borrows.array_selection(node.expr) or ():
-                            source = borrowing.route(leaf)
+                            source = borrowing.route(leaf.value if storage_borrows.common_array_field(leaf) else leaf)
                             if source is not None:
                                 borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                     declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))

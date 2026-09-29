@@ -382,3 +382,9 @@ alias, incompatible representation or unproved callee retains the ordinary
 snapshot. Such snapshots appear in the copy inventory and require `.copy()`
 under `$explicit_copies`; explicit copies are already independent owners when
 stored into another container.
+
+Conditional array selections compose with common union-field reads under the
+same storage proof. Every possible source stays live through the selected view's
+readers, including other selected views. Last-use moves account for these
+indirect uses before transferring an owner. A selected value that escapes or is
+mutated keeps the ordinary independent-value boundary.

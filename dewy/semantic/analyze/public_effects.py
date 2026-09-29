@@ -200,6 +200,8 @@ def inventory(root, registry, allocator_scopes=None):
                     pending.append(item.items[0])
                 elif isinstance(item, (hir.ValueCast, hir.RepresentationCast)):
                     pending.append(item.expr)
+                elif storage_borrows.common_array_field(item):
+                    access(item.value, 'reads')
                 else:
                     visit(item)
 

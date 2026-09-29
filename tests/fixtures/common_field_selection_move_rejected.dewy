@@ -1,0 +1,14 @@
+$explicit_copies
+Left=type of [items:array<int64>]
+Right=type of [padding:int64 items:array<int64>]
+Node:type=Left|Right
+make=():>Node=>Left[[42]]
+work=(flag:bool):>int64=>{
+ let owner=make()
+ const first:array<int64>=if flag owner.items else []
+ const selected:array<int64>=if flag first else []
+ let changed=owner
+ if changed is? Left {changed.items.clear()}
+ return if selected.length>?0 selected[0] else 1
+}
+main=():>int64=>work(true)

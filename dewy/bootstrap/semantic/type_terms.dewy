@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"ty.dewy" as types
 import p"propositions.dewy" as facts
 
@@ -10,7 +12,8 @@ propositions=(items:array<facts.Proposition> @mapping:Rebinding @table:types.Tab
     let result:array<facts.Proposition>=[]
     loop p in items {
         let tested=if p.tested_type is? none none else rebind(p.tested_type @mapping @table)
-        result.push(facts.Proposition[p.subject p.op p.value p.projection p.term identity(p.term_id mapping) p.term_projection tested p.when identity(p.subject_id mapping) p.axiom])
+        # Rebound facts retain their own arbitrary-precision constants.
+        result.push(facts.Proposition[p.subject p.op p.value.copy() p.projection p.term identity(p.term_id mapping) p.term_projection tested p.when identity(p.subject_id mapping) p.axiom])
     }
     return result
 }

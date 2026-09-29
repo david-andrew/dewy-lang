@@ -1,0 +1,22 @@
+$explicit_copies
+Left=type of [items:array<int64>]
+Right=type of [padding:int64 items:array<int64>]
+Node:type=Left|Right
+size=(items:array<int64>):>int64 & no_effects=>items.length+40
+forward=(owner:Node flag:bool):>int64 & no_effects=>{
+ const first:array<int64>=if flag owner.items else [20 22]
+ const selected:array<int64>=if flag first else [20 22]
+ selected.clear()
+ return size(selected)
+}
+work=(owner:Node):>int64=>{
+ let before:int64=_arena_allocated_bytes
+ loop i in [0..1000) {if forward(owner true) not=?42 or forward(owner false) not=?42 return 1}
+ return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>{
+ let left:Node=Left[[20 22]]
+ let right:Node=Right[7 [20 22]]
+ if work(left) not=?42 return 3
+ return work(right)
+}

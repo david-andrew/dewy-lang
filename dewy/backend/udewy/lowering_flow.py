@@ -12,6 +12,7 @@ from typing import Literal
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
+from ...semantic.analyze import storage_borrows
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
     FIXED_INTEGER_WIDTHS,
@@ -953,6 +954,8 @@ class _FlowLowering:
             if local_binding_key(target) in self.borrowed_array_flow_targets:
                 # Every selected owner is stable for the local view. Bounded
                 # scalar literals use their ordinary fixed frame allocation.
+                if storage_borrows.common_array_field(source):
+                    return self._extract_forwarding_access(source, borrowed=True)
                 representation = self._array_use_representation(source)
                 if representation is not None:
                     source_type = ty.ArrayType(target_type.element, self._raw_array_length(source))

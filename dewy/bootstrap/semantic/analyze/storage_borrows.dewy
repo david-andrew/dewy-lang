@@ -154,7 +154,7 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table):>array<
     return arrays
 }
 stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
-    let path=bindings.access_path(value nodes)
+    let path=bindings.access_path(value nodes forwarding=common_array_field(hir.node_at(nodes value) nodes table))
     let source=hir.node_at(nodes path.root)
     if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
     let own=parameters.get(source.binding_id)
@@ -167,6 +167,7 @@ stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr>
     if not stable return false
     loop id in path.steps {
         let step=hir.node_at(nodes id)
+        if common_array_field(step nodes table) continue
         let stored:addr?=none
         if step is? hir.Index {
             let parent=types.node_at(table views.structural_base(hir.node_at(nodes step.array).value_type table))
@@ -208,7 +209,7 @@ array_selection=(id:addr nodes:array<hir.AST> table:types.Table):>array<addr> | 
         else {
             let actual=types.node_at(table views.structural_base(item.value_type table))
             if actual isnt? types.ArrayType or not types.same_type(actual.element shape.element table) return none
-            if item isnt? hir.ArrayLiteral|hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return none
+            if item isnt? hir.ArrayLiteral|hir.ExpressedIdentifier|hir.MemberAccess|hir.Index and not common_array_field(item nodes table) return none
             if item is? hir.ArrayLiteral {
                 if actual.length is? none or actual.length not=?item.items.length or item.items.length>?64 return none
                 if item.items.length>?0 and not types.is_primitive(types.node_at(table actual.element) 'bool') and views.fixed_integer_layout(actual.element table) is? none return none
@@ -504,7 +505,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             loop leaf in leaves {
                 if hir.node_at(nodes leaf) is? hir.ArrayLiteral continue
                 if not stable_value(leaf parameters local_owners local_views summaries nodes table @eligible selections=selections) {invalid.push(binding) continue}
-                let source=hir.node_at(nodes bindings.access_path(leaf nodes).root)
+                let source=hir.node_at(nodes bindings.access_path(leaf nodes forwarding=common_array_field(hir.node_at(nodes leaf) nodes table)).root)
                 if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? selections {
                     needed.push(source.binding_id)
                     if source.binding_id in? readers {let waiting=@readers[source.binding_id] waiting.push(binding)}

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"ty.dewy" as types
 import p"effect_inference.dewy" as inference
 
@@ -19,7 +21,8 @@ constraints=(actual:addr required:addr table:types.Table):>array<inference.Const
         let left=types.node_at(table a)
         let right=types.node_at(table b)
         if left is? types.FunctionType and right is? types.FunctionType {
-            result.push(inference.Constraint[left.effects right.effects])
+            # The returned constraints keep snapshots after these table reads end.
+            result.push(inference.Constraint[left.effects.copy() right.effects.copy()])
             loop i in 0.. and i <? left.pos_or_kw.length and i <? right.pos_or_kw.length {
                 pending.push(Pair[right.pos_or_kw[i].value_type left.pos_or_kw[i].value_type])
             }

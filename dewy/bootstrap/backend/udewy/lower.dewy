@@ -5280,7 +5280,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                 let leaves=storage_borrows.array_selection(declaration.expr state.input.nodes state.type_nodes)
                 $runtime_assert leaves isnt? none
                 loop leaf in leaves {
-                    let source=borrowing.route(leaf state.input.nodes)
+                    let value=hir.node_at(state.input.nodes leaf)
+                    let source=borrowing.route(if value is? hir.ForwardingAccess value.value else leaf state.input.nodes)
                     if source isnt? none {
                         let dependents=borrow_dependents.get(source.binding set[])
                         dependents.push(declaration.binding_id)
@@ -5974,6 +5975,7 @@ borrowed_selection=(id:addr @state:State):>addr=>{
     if node is? hir.Flow return lower_flow(node 0 @state borrowed=true)
     if node is? hir.Block and node.items.length=?1 return borrowed_selection(node.items[0] @state)
     if node is? hir.ValueCast|hir.RepresentationCast return borrowed_selection(node.expr @state)
+    if node is? hir.ForwardingAccess and storage_borrows.common_array_field(node state.input.nodes state.type_nodes) return forwarding_field(node @state loan=true)
     return expression(id @state)
 }
 flow_value = (id:addr expected:addr @state:State borrowed:bool=false):>addr => {

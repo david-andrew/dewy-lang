@@ -1,3 +1,5 @@
+$explicit_copies
+
 doc"""
 Liquid refinement conditions, corresponding to semantic/ty.py's Proposition.
 
@@ -65,7 +67,8 @@ negated = (p:Proposition):>Proposition => {
         '<?' -> '>=?' '>=?' -> '<?' '<=?' -> '>?' '>?' -> '<=?'
     ]
     let when = if p.when is? none none else not p.when
-    return Proposition[p.subject opposite[p.op] p.value p.projection p.term p.term_id p.term_projection p.tested_type when p.subject_id p.axiom]
+    # The new proposition owns its arbitrary-precision constant.
+    return Proposition[p.subject opposite[p.op] p.value.copy() p.projection p.term p.term_id p.term_projection p.tested_type when p.subject_id p.axiom]
 }
 
 # These helpers only decide constant scalar bounds. Term and type predicates
@@ -84,13 +87,13 @@ holds = (p:Proposition value:bigint):>bool => {
 lower_bound = (p:Proposition):>bigint | none => {
     if p.term isnt? none or p.tested_type isnt? none or parameter(p) isnt? none or p.axiom isnt? none return none
     if p.op =? '>?' return p.value + 1
-    if p.op =? '>=?' or p.op =? '=?' return p.value
+    if p.op =? '>=?' or p.op =? '=?' return p.value.copy()
     return none
 }
 upper_bound = (p:Proposition):>bigint | none => {
     if p.term isnt? none or p.tested_type isnt? none or parameter(p) isnt? none or p.axiom isnt? none return none
     if p.op =? '<?' return p.value - 1
-    if p.op =? '<=?' or p.op =? '=?' return p.value
+    if p.op =? '<=?' or p.op =? '=?' return p.value.copy()
     return none
 }
 
