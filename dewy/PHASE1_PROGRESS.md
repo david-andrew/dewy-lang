@@ -288,6 +288,16 @@ future declarations, rewritten selectors and loop-repeated declarations are
 rejected. Eight fixtures bring the manifest to 506. Full certification remains
 `db95f751`; the remaining checklist is unchanged in scope.
 
+## Return an inline field through destination storage (2026-09-29)
+
+Hosted record returns now consult the same adoption helper as declarations,
+assignments and owning calls. A last-use inline field can therefore transfer
+its owned buffers directly into the caller's result storage, retaining normal
+cleanup of the source record. Native returns already use the general owned-value
+path. Thirteen hosted field checks and the paired x86-64/C return regression
+pass, including repeated live-byte recovery. The manifest now contains 507
+cases; a fresh full integration checkpoint is next.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

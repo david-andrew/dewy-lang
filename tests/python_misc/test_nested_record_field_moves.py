@@ -38,6 +38,9 @@ CASES.append(SOURCE.replace('Inner:type=', 'Inner = type of '))
 CASES.append(SOURCE.replace('Inner:type=[values:array<int64>]', 'Inner:type=[values:array<int64> payload:array<int64>|bool=[7]]'))
 CASES.append('$explicit_copies\nInner:type=[values:array<int64>]\nBox:type=[inner:Inner answer:int64=42]\nwork=():>int64=>{let box=Box[Inner[[20]]] let inner=box.inner inner.values.push(22) return if box.answer=?42 and inner.values.length=?2 inner.values[0]+inner.values[1] else 1}\nmain=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 2} return if _arena_live_bytes=?before 42 else 3}\n')
 
+RETURNED = SOURCE.replace('work=():>int64=>{', 'take_inner=():>Inner=>{let box=make(1024) return box.inner}\nwork=():>int64=>{')
+RETURNED = RETURNED.replace('    let box=make(1024)\n    let before:int64=_arena_allocated_bytes\n    let inner=box.inner', '    let inner=take_inner()\n    let before:int64=_arena_allocated_bytes').replace('    if box.answer not=?42 return 1\n', '')
+CASES.append(RETURNED)
 ERRORS = [SOURCE.replace('inner.values.push(42)', 'inner.values.push(42)\n    if box.inner.values.length=?0 return 6'),
     SOURCE.replace('let inner=box.inner', 'const alias=@box.inner\n    let inner=box.inner').replace('if box.answer', 'if alias.values.length=?0 return 6\n    if box.answer')]
 
