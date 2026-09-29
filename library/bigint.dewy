@@ -9,9 +9,11 @@
 # `+ - * // % ^` and comparisons here and promotes integer operands.
 let BigInt:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
 
-let _LIMB_BASE:uint64 = 4294967296
-let _LIMB_MASK:uint64 = 4294967295
-let _BIGINT_ONE:BigInt<sign =? 1> = [sign = 1 limbs = [1]]
+# Representation constants are immutable startup values, including the
+# shared magnitude for one. Working arithmetic values keep their own owners.
+const _LIMB_BASE:uint64 = 4294967296
+const _LIMB_MASK:uint64 = 4294967295
+const _BIGINT_ONE:BigInt<sign =? 1> = [sign = 1 limbs = [1]]
 
 let _bigint_trim = (@limbs:array<uint64>):>void => {
     loop limbs.length >? 0 and limbs[limbs.length - 1] =? 0 {
