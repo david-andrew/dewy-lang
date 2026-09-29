@@ -1,0 +1,29 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+Holder:type=[item:Box|none]
+make=(present:bool):>Box|none=>if present Box[[42]] else none
+choose=(which:int64 present:bool):>Holder=>{
+    let value=make(present)
+    let result=Holder[none]
+    if which=?0 {result=Holder[value]}
+    else if value is? Box and which=?1 {result=Holder[value]}
+    else if value is? Box and value.items.length>?0 {result=Holder[value]}
+    else {result=Holder[value]}
+    if value is? Box and value.items.length=?0 return Holder[none]
+    return result
+}
+work=(which:int64 present:bool):>int64=>{
+    let result=choose(which present)
+    if result.item is? none return if present 1 else 42
+    return if result.item.items.length>?0 result.item.items[0] else 2
+}
+main=():>int64=>{
+    if work(0 true) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        loop which in [0..3) {
+            if work(which true) not=?42 or work(which false) not=?42 return 2
+        }
+    }
+    return if _arena_live_bytes=?before 42 else 3
+}

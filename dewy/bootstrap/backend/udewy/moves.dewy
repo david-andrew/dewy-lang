@@ -27,8 +27,9 @@ lowering.
 
 Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool returned:bool path:addr]
 # Persistent lexical paths keep one word per use, rather than copying the
-# complete branch stack. Distinct arms of one conditional cannot both run.
-Branch:type = const [parent:addr depth:addr conditional:addr]
+# complete branch stack. An arm names one outcome; its ordered guard can
+# run for that or any later outcome. Ranges keep long elseif chains shallow.
+Branch:type = const [parent:addr depth:addr conditional:addr first:addr last:addr]
 # A transfer use in statement order, and one followed by a `return` of an
 # enclosing block: it moves if nothing in `(sequence, until]` intervenes.
 Transfer:type = const [binding:addr id:addr sequence:addr depth:addr]
@@ -36,7 +37,7 @@ Candidate:type = const [id:addr sequence:addr until:addr]
 Analysis:type = [
     uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0
     transfers:array<Transfer>=[] exits:array<addr>=[] candidates:dict<addr array<Candidate>>=[]
-    paths:array<Branch>=[Branch[0 0 0]] path:addr=0 next_conditional:addr=0
+    paths:array<Branch>=[Branch[0 0 0 0 0]] path:addr=0 next_conditional:addr=0
 ]
 
 compatible = (left:addr right:addr paths:array<Branch>):>bool => {
@@ -45,15 +46,15 @@ compatible = (left:addr right:addr paths:array<Branch>):>bool => {
         let a=paths[left] let b=paths[right]
         if a.depth >? b.depth {left=a.parent}
         else if b.depth >? a.depth {right=b.parent}
-        else if a.conditional =? b.conditional {return false}
+        else if a.conditional =? b.conditional and (a.last<?b.first or b.last<?a.first) {return false}
         else {left=a.parent right=b.parent}
     }
     return true
 }
-walk_branch = (id:addr conditional:addr depth:addr nested:bool transfer:bool returned:bool nodes:array<hir.AST> donations:dict<addr set<addr>> @analysis:Analysis):>void => {
+walk_branch = (id:addr conditional:addr first:addr last:addr depth:addr nested:bool transfer:bool returned:bool nodes:array<hir.AST> donations:dict<addr set<addr>> @analysis:Analysis):>void => {
     let parent=analysis.path
     $runtime_assert parent <? analysis.paths.length
-    let branch=Branch[parent analysis.paths[parent].depth+1 conditional]
+    let branch=Branch[parent analysis.paths[parent].depth+1 conditional first last]
     analysis.path=analysis.paths.length
     analysis.paths.push(branch)
     if transfer {walk_transfer(id depth nested returned nodes donations @analysis)}
@@ -151,13 +152,15 @@ walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AS
         if conditional {
             analysis.next_conditional+=1
             let choice=analysis.next_conditional
+            let index:addr=0
             loop arm_id in node.arms {
                 let arm=hir.node_at(nodes arm_id)
                 $runtime_assert arm is? hir.IfArm
-                walk(arm.condition depth nested nodes donations @analysis)
-                walk_branch(arm.body choice depth nested true returned nodes donations @analysis)
+                walk_branch(arm.condition choice index node.arms.length depth nested false false nodes donations @analysis)
+                walk_branch(arm.body choice index index depth nested true returned nodes donations @analysis)
+                index+=1
             }
-            if node.default isnt? none {walk_branch(node.default choice depth nested true returned nodes donations @analysis)}
+            if node.default isnt? none {walk_branch(node.default choice index index depth nested true returned nodes donations @analysis)}
             return
         }
     }
@@ -276,18 +279,24 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> donations:dict<addr 
         loop arm_id in node.arms {if hir.node_at(nodes arm_id) isnt? hir.IfArm {conditional=false}}
         analysis.next_conditional+=1
         let choice=analysis.next_conditional
+        let index:addr=0
         loop arm_id in node.arms {
             let arm=hir.node_at(nodes arm_id)
             let arm_depth:addr=depth
             if arm is? hir.LoopArm {arm_depth=depth+1}
             if arm is? hir.IfArm|hir.LoopArm {
-                walk(arm.condition arm_depth nested nodes donations @analysis)
-                if conditional {walk_branch(arm.body choice arm_depth nested false false nodes donations @analysis)}
-                else {walk(arm.body arm_depth nested nodes donations @analysis)}
+                if conditional {
+                    walk_branch(arm.condition choice index node.arms.length arm_depth nested false false nodes donations @analysis)
+                    walk_branch(arm.body choice index index arm_depth nested false false nodes donations @analysis)
+                } else {
+                    walk(arm.condition arm_depth nested nodes donations @analysis)
+                    walk(arm.body arm_depth nested nodes donations @analysis)
+                }
             }
+            index+=1
         }
         if node.default isnt? none {
-            if conditional {walk_branch(node.default choice depth nested false false nodes donations @analysis)}
+            if conditional {walk_branch(node.default choice index index depth nested false false nodes donations @analysis)}
             else {walk(node.default depth nested nodes donations @analysis)}
         }
         return

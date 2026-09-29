@@ -3943,10 +3943,11 @@ class _Lowerer(
                 element_owners.add(node.binding_id)
         payload_candidates: set[int] = set()
         field_candidates: dict[int, int] = {}
-        # Persistent lexical paths: one entry per arm, one word per read.
-        # Conditions retain the enclosing path and therefore conservatively
-        # remain compatible with every arm.
-        paths = [(0, 0, 0)]  # parent, depth, identity of the conditional
+        # Persistent lexical paths: one word per read. A body's choice is a
+        # singleton; an ordered guard can run for its arm or any later arm,
+        # including the no-arm/default outcome. Ranges avoid making a long
+        # elseif chain a deeply nested path just to express those exclusions.
+        paths = [(0, 0, 0, 0, 0)]  # parent, depth, conditional, first, last
         use_paths: dict[int, int] = {}
         path = 0
         next_conditional = 0
@@ -3954,14 +3955,14 @@ class _Lowerer(
         def compatible(left: int, right: int) -> bool:
             a, b = use_paths.get(left, 0), use_paths.get(right, 0)
             while a != b:
-                ap, ad, af = paths[a]
-                bp, bd, bf = paths[b]
+                ap, ad, af, alo, ahi = paths[a]
+                bp, bd, bf, blo, bhi = paths[b]
                 if ad > bd:
                     a = ap
                 elif bd > ad:
                     b = bp
-                elif af == bf:
-                    return False  # distinct arms of the same conditional
+                elif af == bf and (ahi < blo or bhi < alo):
+                    return False  # these choices of one conditional cannot coincide
                 else:
                     a, b = ap, bp
             return True
@@ -4123,15 +4124,17 @@ class _Lowerer(
                 parent = path
                 next_conditional += 1
                 conditional = next_conditional
-                for arm in node.arms:
-                    path = parent
+                limit = len(node.arms)
+                for index, arm in enumerate(node.arms):
+                    path = len(paths)
+                    paths.append((parent, paths[parent][1] + 1, conditional, index, limit))
                     walk(arm.condition, depth, nested, {})
                     path = len(paths)
-                    paths.append((parent, paths[parent][1] + 1, conditional))
+                    paths.append((parent, paths[parent][1] + 1, conditional, index, index))
                     walk(arm.body, depth, nested, transfer_of)
                 if node.default is not None:
                     path = len(paths)
-                    paths.append((parent, paths[parent][1] + 1, conditional))
+                    paths.append((parent, paths[parent][1] + 1, conditional, limit, limit))
                     walk(node.default, depth, nested, transfer_of)
                 path = parent
                 return

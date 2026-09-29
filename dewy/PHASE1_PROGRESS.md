@@ -25,6 +25,22 @@ address those failures. The last hosted full strict-copy inventory still has
 1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
 latest ownership slices. Phase 1 remains open.
 
+## Ordered guards preserve last-use transfers (2026-09-29)
+
+Both move analyses now model an `else if` guard as running only for its own
+arm or a later outcome. An earlier taken body and a later guard are disjoint;
+reads after the conditional remain live on every incoming path. Persistent
+paths store choice ranges, keeping long conditional chains shallow rather
+than introducing one nested path per guard. Loop and capture restrictions
+remain in force.
+
+Three focused hosted cases, 38 surrounding move checks and the paired native
+x86-64/C group pass, including nested arms, post-join rejection and repeated
+cleanup. Three fixtures bring the corpus to 576. Logs use
+`dewy-ordered-guard-*`. The compiler's predicate-result constructor now moves
+its selected constant through the ordered conditional; retaining both a fact
+and its negation is the next separate storage obligation.
+
 ## Isolated later arguments beside place projections (2026-09-29)
 
 Hosted call-boundary borrowing no longer treats every known later call as a
