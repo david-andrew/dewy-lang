@@ -8,16 +8,17 @@ extensions may proceed provisionally and are recorded here for David.
 
 ## Latest native/parity repair integration (2026-09-29)
 
-**636/636** paired acceptance/execution cases pass against frozen source
-`f8fc209d`. An independent hosted seed rebuilt that native source to a
+**668/668** paired acceptance/execution cases pass against frozen source
+`9df1d08f`. An independent hosted seed rebuilt that native source to a
 byte-identical three-generation fixed point, including x86-64/C execution
-and scaling checks. The complete inventory reports **4,216 sites / 55,882 lines
-= 75.445/KLOC**, within the unchanged 4,500/85 gates. Generations 2/3 took
-63/67 seconds under concurrent validation, not isolated performance timings.
-Artifacts use `phase1-string-loan-*` outside the checkout. The preceding
-613-case `748129bb` checkpoint measured 4,250 sites / 55,823 lines. Subsequent
-numeric/query/strict traversal changes have focused evidence below; this
-certification does not cover those newer batches.
+and scaling checks. The complete inventory reports **4,220 sites / 56,063 lines
+= 75.272/KLOC**, within the unchanged 4,500/85 gates. Generations 2/3 took
+62/67 seconds under concurrent validation, not isolated performance timings.
+Artifacts use `phase1-dictionary-place-*` outside the checkout, and the full
+parity log is `dewy-dictionary-place-parity.log`. The preceding `f8fc209d`
+checkpoint passed 636 cases with 4,216 sites / 55,882 lines. Subsequent ambient-
+effect, route-update and local-place changes have focused evidence below;
+this certification does not cover those newer batches.
 
 The non-slow pytest run against the preceding frozen repair source finished
 with **6,092 passes, 4 failures and 13 skips** (95m49s). One failure is the
@@ -43,10 +44,10 @@ local owners remain accepted.
 
 All 83 focused hosted place checks pass (129.23 seconds), and four corresponding
 native groups pass on x86-64/C (227.90 seconds). Seven new fixtures bring the
-manifest to 685. Logs use `dewy-local-place-alias-*`. The wider borrowing checks
-are being rerun after encountering a temporary source error in the separate
-in-progress effect-translation optimization; those failures are not included
-in this checkpoint's passing evidence.
+manifest to 685. Logs use `dewy-local-place-alias-*`. The wider borrowing run passed seven checks; its three remaining cases
+encountered a temporary source error in the separate effect-translation work.
+All three pass after that correction (152.90 seconds), accounting for every
+failure in that run.
 
 ## Resolve imported bodies for local-place lifetimes (2026-09-29)
 
@@ -85,7 +86,7 @@ The preceding frozen `9df1d08f` snapshot reached an independently seeded,
 byte-identical three-generation fixed point, with x86-64/C execution/scaling
 checks. Generations 2/3 took 62/67 seconds under concurrent checks. Its inventory
 is 4,220 sites / 56,063 lines = 75.272/KLOC, within unchanged gates. Full
-668-case parity is running; the two subsequent effect batches are later work.
+668-case parity passed; the subsequent effect/place batches are later work.
 
 ## Ambient writes stop at the owning activation (2026-09-29)
 
