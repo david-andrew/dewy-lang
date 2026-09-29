@@ -2506,7 +2506,7 @@ class _ArrayLowering(_ArraySharing):
                     kind='array', type_name=type_to_dewy(array_type),
                     site='promoted from a record field', policy_exempt=True))
                 self.move_notes.append(MoveNote(self.srcfile, source.loc,
-                    f'array field `{source.name}` is moved when {site}: its receiver is at its last use and the field is emptied', True))
+                    f'array field `{source.name}` is moved when {site}: this field has no remaining reads and its slot is emptied', True))
                 return before, result
         if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
             members = self._stored_union_members(source)

@@ -163,6 +163,26 @@ runtime-sized bootstrap copies from 1,823 to 1,804 sites across 73 modules.
 Full integration remains certified at `da4a1aca`; the new batch follows below
 when its integration completes.
 
+## Preserve siblings after an ordinary field transfer (2026-09-29)
+
+Ordinary dynamic-array fields now reuse logical ownership's field-sensitive
+backward liveness when a containing local remains live only for sibling fields.
+Both lowerers retain their physical ownership/layout checks and empty only the
+transferred slot. Existing borrowed dependents, captured or exposed roots and
+later overlapping reads keep the conservative copy path. This extends the
+ordinary-array proof using the existing branch/loop lifetime rules rather than
+introducing a second field-path analysis.
+
+Nine hosted checks pass, including a positive control that disables field moves
+and observes the otherwise avoided allocation; 42 surrounding hosted checks and
+two paired native groups also pass. Repeated kernels preserve optional, mixed
+union and plain record siblings, sibling writes and owned sibling arrays with
+zero allocation during transfer and no retained live bytes. Overlapping field
+reads and explicit/inferred aliases remain rejected under strict copy policy.
+Eight fixtures bring the manifest to 476. The preceding `db95f751` source has
+reached a native fixed point and passed its 4,276-site / 77.204-per-KLOC copy
+gate; its complete 468-case parity run is still in progress.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

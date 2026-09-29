@@ -3932,6 +3932,7 @@ class _Lowerer(
             ):
                 element_owners.add(node.binding_id)
         payload_candidates: set[int] = set()
+        field_candidates: dict[int, int] = {}
         # Persistent lexical paths: one entry per arm, one word per read.
         # Conditions retain the enclosing path and therefore conservatively
         # remain compatible with every arm.
@@ -3959,10 +3960,10 @@ class _Lowerer(
             source = self._copy_source_expression(node)
             if isinstance(source, hir.MemberAccess):
                 # A runtime array field owns a descriptor independently of
-                # the containing record's frame. Transfer only at the whole
-                # receiver's last use; live sibling/derived reads therefore
-                # keep the usual snapshot. Lowering checks the stored layout
-                # and empties the field, preserving the root's cleanup.
+                # the containing record's frame. Collect the whole-owner
+                # last-use candidate first; field-sensitive liveness below
+                # also permits remaining sibling reads. Lowering checks the
+                # stored layout and empties only this field for cleanup.
                 array = ty.structural_base(source.type)
                 receiver = ty.structural_base(source.value.type)
                 field = receiver.field(source.name) if isinstance(receiver, ty.ObjectType) else None
@@ -3975,6 +3976,7 @@ class _Lowerer(
                         and isinstance(root, hir.ExpressedIdentifier)
                         and (root.binding_id in element_owners or root.binding_id in cells)
                         and isinstance(ty.structural_base(root.type), ty.ObjectType)):
+                    field_candidates[id(source)] = root.binding_id
                     return {id(root): id(source)}
                 return {}
             if isinstance(source, hir.RepresentationCast) and storage_borrows.union_loan_source(source) is not None:
@@ -4256,6 +4258,23 @@ class _Lowerer(
                     if not live and not borrow_live_after(binding_id, sequence):
                         moves.add(transfer)
                 future.append(sequence)
+        # Reuse logical ownership's field-sensitive backward analysis for
+        # descriptors whose sibling fields remain live. Physical lowering
+        # still checks the exact stored layout and empties only that slot.
+        # Existing views/exposed places stay on the conservative root proof.
+        pending_fields = {site for site, owner in field_candidates.items() if site not in moves
+                  and owner not in borrow_dependents
+                  and owner not in self.borrow_plan.exposed_bindings
+                  and owner not in self.borrow_plan.captured_bindings}
+        if pending_fields:
+            from ...semantic.analyze import ownership_liveness
+            consumed, _, _, _ = ownership_liveness.conditional_consumptions(
+                literal.body,
+                [p for p in [*literal.pos_or_kw_args, *literal.kw_only_args]
+                 if p.binding_id in owned],
+                lambda type_: True if storage_borrows.borrowable(type_) else None,
+                component=lambda value: id(value) in pending_fields)
+            moves.update(pending_fields & consumed.keys())
         self.moved_payload_uses = moves & payload_candidates
         return moves - payload_candidates
 

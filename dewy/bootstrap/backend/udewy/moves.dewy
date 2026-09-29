@@ -1,5 +1,9 @@
 $explicit_copies
 import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/type_queries.dewy" as views
+import p"../../semantic/analyze/storage_borrows.dewy" as storage_borrows
+import p"../../semantic/analyze/ownership_liveness.dewy" as ownership_liveness
 
 doc"""
 Last-use moves.
@@ -308,7 +312,7 @@ borrow_live_after = (binding:addr sequence:addr path:addr borrows:dict<addr set<
     }
     return false
 }
-compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] donations:dict<addr set<addr>>=[] parameters:set<addr>=set[]):>set<addr> => {
+compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr set<addr>>=[] donations:dict<addr set<addr>>=[] parameters:set<addr>=set[]):>set<addr> => {
     let function=hir.node_at(nodes literal)
     let moves:set<addr>=set[]
     if function isnt? hir.FunctionLiteral return moves
@@ -359,6 +363,34 @@ compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] don
             }
             if not live and not borrow_live_after(binding use.sequence use.path borrows analysis) {moves.push(use.id)}
         }
+    }
+    # The logical ownership pass already joins field paths across branches
+    # and loop backedges. Reuse it when only siblings remain live; a root
+    # with a dependent view keeps the conservative whole-owner proof.
+    let field_candidates:set<addr>=set[]
+    let field_owners:set<addr>=set[]
+    loop [binding uses] in analysis.uses {
+        if binding not in? analysis.declared or binding in? borrows continue
+        loop use in uses {
+            if not use.transfer or use.id in? moves continue
+            let field=hir.node_at(nodes use.id)
+            if field isnt? hir.MemberAccess continue
+            let array=types.node_at(table views.structural_base(field.value_type table))
+            let receiver=types.node_at(table views.structural_base(hir.node_at(nodes field.value).value_type table))
+            if array isnt? types.ArrayType or receiver isnt? types.ObjectType continue
+            let slot=types.object_field(receiver field.name)
+            if slot is? none continue
+            let stored=types.node_at(table views.structural_base(slot.value_type table))
+            if stored isnt? types.ArrayType or stored.length isnt? none or not types.same_type(stored.element array.element table) continue
+            let root=hir.node_at(nodes field.value)
+            loop root is? hir.MemberAccess {root=hir.node_at(nodes root.value)}
+            if root isnt? hir.ExpressedIdentifier or not storage_borrows.borrowable(root.value_type table) continue
+            field_candidates.push(use.id) field_owners.push(binding)
+        }
+    }
+    if field_candidates.length>?0 {
+        let logical=ownership_liveness.consumptions(function.body field_owners nodes table)
+        loop site in field_candidates {if site in? logical.consumes {moves.push(site)}}
     }
     return moves
 }
