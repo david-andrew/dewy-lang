@@ -72,6 +72,8 @@ class Plan:
     scoped_views: set[int] = field(default_factory=set)                # view binding -> interval/lexical proof
     view_scopes: dict[int, hir.Block] = field(default_factory=dict)
     view_regions: dict[int, list[hir.AST]] = field(default_factory=dict)
+    isolated_functions: set[int] = field(default_factory=set)
+    """Known calls whose writes stay within ordinary by-value/local storage."""
 
 
 def unwrap(node: hir.AST) -> hir.AST:
@@ -257,8 +259,10 @@ def expression_conflicts(root: hir.AST, source: Route | None, plan: Plan, source
                 return True
             callee = node.func
             if isinstance(callee, hir.ExpressedIdentifier) and callee.binding_id in plan.named:
-                writes = plan.functions[id(plan.named[callee.binding_id])].writes
-                if source is None or source.binding in writes:
+                identity = id(plan.named[callee.binding_id])
+                writes = plan.functions[identity].writes
+                if ((source is None and identity not in plan.isolated_functions)
+                        or source is not None and source.binding in writes):
                     return True
                 # Place arguments are examined below while walking the call's
                 # children; ambient writes were checked through the call graph.
@@ -274,6 +278,44 @@ def expression_conflicts(root: hir.AST, source: Route | None, plan: Plan, source
             if source is None or exposed is None or overlap(source, exposed):
                 return True
     return False
+
+
+def isolated_functions(plan: Plan, source_bindings: set[int]) -> set[int]:
+    """Finite call-graph proof for evaluating a later argument beside a place.
+
+    An unknown source route can alias any outside owner. Known value-only
+    calls may still calculate an index: their locals and independent argument
+    values cannot replace that outside storage. Captures, raw access, place
+    formals and unresolved calls retain the conservative boundary. Generated
+    failure reporting is the existing source-level diagnostic boundary; its
+    evaluated arguments and user-written messages are still walked.
+    """
+    from collections import deque
+    blocked, callers = set(), {}
+    for identity, function in plan.functions.items():
+        if function.places or function.writes - function.locals:
+            blocked.add(identity)
+        for node in _walk_function(function.literal):
+            if isinstance(node, hir.Transmute) and not (_word_value(node.type) and _word_value(node.expr.type)):
+                blocked.add(identity)
+            if not isinstance(node, hir.FunctionCall) or node.compiler_report:
+                continue
+            callee = node.func
+            if isinstance(callee, hir.ExpressedIdentifier) and callee.binding_id in plan.named:
+                callers.setdefault(id(plan.named[callee.binding_id]), set()).add(identity)
+            elif (not isinstance(callee, hir.ArrayMethod)
+                  and not (isinstance(callee, hir.ExpressedIdentifier)
+                           and callee.binding_id not in source_bindings and callee.name in PURE_OPERATORS)):
+                blocked.add(identity)
+            elif is_raw_call(node, plan, source_bindings):
+                blocked.add(identity)
+    pending = deque(blocked)
+    while pending:
+        for caller in callers.get(pending.popleft(), ()):
+            if caller not in blocked:
+                blocked.add(caller)
+                pending.append(caller)
+    return plan.functions.keys() - blocked
 
 
 def _walk_function_subtree(root: hir.AST):
@@ -484,6 +526,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             if summary is not None:
                 plan.stable_parameters[binding] = summary
     plan.ambient_writes = ambient
+    plan.isolated_functions = isolated_functions(plan, source_bindings)
     # The existing discovery inventories cover module initializers as well as
     # function bodies/defaults. Preserve evidence before callable rewriting
     # replaces the call nodes keyed by the ambient-write analysis.

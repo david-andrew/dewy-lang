@@ -25,6 +25,23 @@ address those failures. The last hosted full strict-copy inventory still has
 1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
 latest ownership slices. Phase 1 remains open.
 
+## Isolated later arguments beside place projections (2026-09-29)
+
+Hosted call-boundary borrowing no longer treats every known later call as a
+possible write through an unknown place alias. A finite reverse call graph
+proves functions whose writes remain in their local/by-value storage. External
+writes, place parameters, raw access, unresolved calls and captures remain
+conservative. Diagnostic support uses the existing compiler-report boundary;
+user message expressions still contribute effects. This matches the already
+supported native calculation of an index beside a place projection.
+
+Twenty-three focused/surrounding hosted checks and the paired native group
+pass. They include zero allocation over 1,000 calls, a disabled-proof control,
+transitive helpers, place writes, ambient writes and raw exposure. Five fixtures
+bring the corpus to 573. Logs use `dewy-nested-place-loan-*`. The bootstrap
+`inferred_results.dewy` nested getter now borrows; its next remaining copy is
+a last-use value in an ordered conditional whose later guards also mention it.
+
 ## Last-use tagged record fields (2026-09-29)
 
 Both lowerers now transfer the active payload of an ordinary record's last-use
