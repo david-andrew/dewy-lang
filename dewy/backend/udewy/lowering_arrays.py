@@ -1704,7 +1704,7 @@ class _ArrayLowering(_ArraySharing):
             if adopted is not None:
                 return adopted
             # a fresh value (a call's result, a literal) dies here: its members move
-            fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))
+            fresh = self._object_expression_owns_fresh_storage(node)
             if not fresh:
                 self._note_copy('record', element_type, 'stored in an element', self._copy_reason(node), node.loc)
             return self._clone_object_value(node, element_type, arena=True, move=fresh)
@@ -3021,7 +3021,7 @@ class _ArrayLowering(_ArraySharing):
             # an element object is an arena block (the array's release gives
             # it back as one), whether a dying temporary whose members move or
             # a copy of a borrowed value (`[p.span]`, `xs[i] = seg`)
-            if isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral)):
+            if self._object_expression_owns_fresh_storage(node):
                 return self._clone_object_value(node, element_type, arena=True, move=True)
             self._note_copy('record', element_type, 'stored in an element', self._copy_reason(node), node.loc)
             if self._has_arena():
@@ -3726,7 +3726,9 @@ class _ArrayLowering(_ArraySharing):
             assert members is not None
             self.union_cells[iterator.target.binding_id] = members   # the target holds the cell pointer
         raw_representation = self._array_use_representation(iterator.iterable)
-        if self._iteration_snapshot_needed(iterator.iterable, arm.body):
+        if self._iterable_common_field(iterator.iterable):
+            prelude, array = self._extract_forwarding_access(iterator.iterable, borrowed=True)
+        elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
             # The value the source had on entry, as in multi-iterator loops.
             prelude, array = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)
             prelude, array = self._array_result_temporary(iterator.iterable, array, prelude)

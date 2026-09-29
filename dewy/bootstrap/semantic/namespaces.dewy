@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../parser/p0.dewy" as parser
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
@@ -12,7 +14,8 @@ value so both source type lookup and expression lookup use the same identity.
 """
 
 field = (module:types.ModuleType name:string):>types.ModuleField? => {
-    loop member in module.fields { if member.name =? name return member }
+    # Lookup returns an independent field value, outside the module loan.
+    loop member in module.fields { if member.name =? name return member.copy() }
     return none
 }
 source_field = (id:addr context:contexts.Context session:contexts.Session):>types.ModuleField? => {

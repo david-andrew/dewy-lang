@@ -9,6 +9,7 @@ from ...utils import dataclass_replace as replace
 
 from ...reporting import Error, Pointer
 from ...semantic import hir, ty
+from ...semantic.analyze import storage_borrows
 from . import borrowing
 from ...semantic.errors import NotImplementedYet
 from .lowering_shared import (
@@ -20,6 +21,12 @@ from .lowering_shared import (
 
 
 class _IteratorLowering:
+    def _iterable_common_field(self, iterable: hir.AST) -> bool:
+        if not storage_borrows.common_array_field(iterable):
+            return False
+        source = borrowing.route(iterable.value)
+        return source is not None and borrowing.stable_owner(source, self.borrow_plan)
+
     def _iterable_entry_view(self, iterable: hir.AST) -> hir.AST:
         """Read stable container entries without first building a snapshot.
 
@@ -226,6 +233,8 @@ class _IteratorLowering:
                 )
                 if isinstance(iterator.iterable, hir.DictEntries):
                     array_prelude, array_value = self._extract_dict_entries(iterator.iterable, dictionary_sources)
+                elif self._iterable_common_field(iterator.iterable):
+                    array_prelude, array_value = self._extract_forwarding_access(iterator.iterable, borrowed=True)
                 elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
                     # The loop iterates the value its source had on entry. A
                     # write to the source's owner (in the body or through a

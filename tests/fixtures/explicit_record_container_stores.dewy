@@ -1,0 +1,16 @@
+$explicit_copies
+Row:type=const [values:array<int64>]
+Box:type=const [row:Row?]
+work=(box:Box):>int64=>{
+let boxes:dict<string Box>=[]
+ boxes['key']=box.copy()
+ let saved=boxes['key'].copy()
+ if saved.row is? none or saved.row.values.length<?1 return 1
+ return saved.row.values[0]
+}
+main=():>int64=>{
+ loop i in [0..100) {if work(Box[Row[[42]]]) not=?42 return 2}
+ let before:int64=_arena_live_bytes
+ loop i in [0..100) {if work(Box[Row[[42]]]) not=?42 return 3}
+ return if _arena_live_bytes=?before 42 else 4
+}

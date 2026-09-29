@@ -55,6 +55,7 @@ stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nod
     loop step_id in path.steps {
         let step=hir.node_at(nodes step_id)
         if step is? hir.MemberAccess {steps.push(step.name)}
+        else if step is? hir.ForwardingAccess {steps.push(step.field)}
         else {steps.push('[]')}
     }
     return effects.read_only_at(summary effects.Route[steps])
@@ -102,6 +103,26 @@ union_loan_source=(id:addr nodes:array<hir.AST> table:types.Table):>addr?=>{
     let node=hir.node_at(nodes id)
     if node isnt? hir.ValueCast|hir.RepresentationCast return none
     return if views.preserves_union_payload(hir.node_at(nodes node.expr).value_type node.value_type table) node.expr else none
+}
+# A common field can lend its existing dynamic-array descriptor, even when
+# the record alternatives store it at different offsets. This is only a
+# layout classification: prove still checks both owners and every callee.
+common_array_field=(node:hir.AST nodes:array<hir.AST> table:types.Table):>bool=>{
+    if node isnt? hir.ForwardingAccess or not types.is_primitive(types.node_at(table node.exception_type) 'never') return false
+    let shape=views.structural_base(node.value_type table)
+    let array=types.node_at(table shape)
+    if array isnt? types.ArrayType or array.length isnt? none return false
+    let path=bindings.access_path(node.value nodes)
+    if hir.node_at(nodes path.root) isnt? hir.ExpressedIdentifier return false
+    let receiver=types.node_at(table views.structural_base(hir.node_at(nodes node.value).value_type table))
+    if receiver isnt? types.TypeOr or receiver.items.length=?0 return false
+    loop member in receiver.items {
+        let record=types.node_at(table views.structural_base(member table))
+        if record isnt? types.ObjectType return false
+        let field=types.object_field(record node.field)
+        if field is? none or not types.same_type(views.structural_base(field.value_type table) shape table) return false
+    }
+    return true
 }
 # A bounded call root owns no fields: only words and dynamic-array handles.
 # Other layouts need separate cleanup/representation evidence.
@@ -557,7 +578,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                         let arg=hir.node_at(nodes pair.argument)
                         let expected=if pair.parameter is? none none else wanted.get(pair.parameter)
                         let loan=union_loan_source(pair.argument nodes table)
-                        let path=bindings.access_path(if loan is? none pair.argument else loan nodes)
+                        let path=bindings.access_path(if loan is? none pair.argument else loan nodes forwarding=common_array_field(arg nodes table))
                         let source=hir.node_at(nodes path.root)
                         let safe=false
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {

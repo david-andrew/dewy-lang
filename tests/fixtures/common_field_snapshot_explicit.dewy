@@ -1,0 +1,10 @@
+$explicit_copies
+Left=type of [items:array<int64>]
+Right=type of [padding:int64 items:array<int64>]
+Node:type=Left|Right
+size=(items:array<int64> ignored:int64):>int64=>items.length+40
+mutate=(@owner:Node):>int64=>{owner=Right[0 []] return 0}
+main=():>int64=>{
+ let owner:Node=Left[[20 22]]
+ return size(owner.items.copy() mutate(@owner))
+}

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"syntax.dewy" as syntax
@@ -61,7 +63,8 @@ sink = (id:addr @nodes:array<tokens.Token>):>addr => {
     return id
 }
 prepare = (original:array<tokens.Token>):>array<tokens.Token> => {
-    let nodes = original
+    # Rewriting owns a separate arena; parser/debug readers keep the input.
+    let nodes = original.copy()
     let count = nodes.length
     loop i in 0.. and i <? count and i <? nodes.length {
         let id = sink(i @nodes)

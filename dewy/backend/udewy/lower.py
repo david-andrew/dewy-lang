@@ -1504,12 +1504,13 @@ class _Lowerer(
         result_prelude, value = self._extract_expression(result)
         return [*prelude, holder, *test_prelude, flow, *result_prelude], value
 
-    def _hold_union_value(self, value: hir.AST, name: str, binding_id: int, loc: Span) -> tuple[list[hir.AST], tuple[ty.TypeExpr, ...]]:
+    def _hold_union_value(self, value: hir.AST, name: str, binding_id: int, loc: Span, *, borrowed=False) -> tuple[list[hir.AST], tuple[ty.TypeExpr, ...]]:
         """Materialize a union/optional value's cell under a hidden binding and
         register its storage members; returns the statements and the members."""
         members = ty.runtime_union_members(value.type)
         if members is not None:
-            prelude, cell = self._materialize_union(value, members, temporary=True)
+            prelude, cell = (self._extract_expression(value) if borrowed else
+                             self._materialize_union(value, members, temporary=True))
             self.union_cells[binding_id] = members
         else:
             payload = ty.optional_payload(value.type)
@@ -1526,11 +1527,17 @@ class _Lowerer(
             self.owned_cells[name] = members
         return [*prelude, holder], members
 
-    def _extract_forwarding_access(self, node: hir.ForwardingAccess) -> tuple[list[hir.AST], hir.AST]:
+    def _extract_forwarding_access(self, node: hir.ForwardingAccess, *, borrowed=False) -> tuple[list[hir.AST], hir.AST]:
         """Safe navigation: read the member from an ordinary alternative, else
         retag the exception alternative into the result union."""
         loc = node.loc
-        statements, members = self._hold_union_value(node.value, node.name, node.binding_id, loc)
+        # A proved stable read or immediate explicit snapshot may lend its
+        # receiver. The selected descriptor keeps the existing owner's lifetime.
+        assert not borrowed or storage_borrows.common_array_field(node)
+        if not borrowed and storage_borrows.common_array_field(node):
+            self._note_copy('array', node.type, 'read through a union field',
+                            'the selected field needs independent storage', node.loc)
+        statements, members = self._hold_union_value(node.value, node.name, node.binding_id, loc, borrowed=borrowed)
         system = self.runtime_type_system
         result_members = ty.runtime_union_members(node.type)
         result = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('forwarded'))
@@ -5472,6 +5479,14 @@ class _Lowerer(
                     return self._array_result_temporary(node, value, prelude)
                 return self._extract_dict_view(node.value, explicit=True)
             plain = ty.structural_base(node.type)
+            if isinstance(plain, ty.ArrayType) and storage_borrows.common_array_field(node.value):
+                # Snapshot the chosen descriptor directly while the receiver
+                # is still live. The explicit result, rather than a copy of
+                # the whole dispatch receiver, supplies independent storage.
+                self._note_copy('array', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
+                prelude, field = self._extract_forwarding_access(node.value, borrowed=True)
+                copied, value = self._clone_array_value(replace(field, type=plain), plain)
+                return self._array_result_temporary(node, value, [*prelude, *copied])
             if self._is_string_valued(plain):
                 prelude, value = self._escaping_string_value(node.value, explicit=True)
                 return self._string_result_temporary(node, value, prelude)
@@ -5994,6 +6009,9 @@ class _Lowerer(
                     # it, so there is no second caller temporary cleanup owner.
                     arg_prelude, lowered_arg = self._independent_array_value(arg, expected_type, site='donated to a call')
                 elif (id(arg) in self.forwarded_values.get(id(node), ())
+                        and storage_borrows.common_array_field(arg)):
+                    arg_prelude, lowered_arg = self._extract_forwarding_access(arg, borrowed=True)
+                elif (id(arg) in self.forwarded_values.get(id(node), ())
                         and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
                     arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)
                 elif boundary is not None and boundary.safe:
@@ -6043,6 +6061,9 @@ class _Lowerer(
                         self._materialize_place_argument(arg)
                     )
                     place_postlude.extend(arg_postlude)
+                elif (id(arg) in self.forwarded_values.get(id(node), ())
+                        and storage_borrows.common_array_field(arg)):
+                    arg_prelude, lowered_arg = self._extract_forwarding_access(arg, borrowed=True)
                 elif (id(arg) in self.forwarded_values.get(id(node), ())
                         and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
                     arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)

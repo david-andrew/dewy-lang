@@ -316,6 +316,10 @@ def inventory(root, registry, allocator_scopes=None):
                             for child in hir.children(argument):
                                 visit(child)
                             continue
+                        if (id(argument) in borrowed_arguments.get(id(node), ())
+                                and storage_borrows.common_array_field(argument)):
+                            access(argument.value, 'reads')
+                            continue
                         loan = (storage_borrows.union_loan_source(argument)
                                 if id(argument) in borrowed_arguments.get(id(node), ()) else None)
                         visit(argument if loan is None else loan)

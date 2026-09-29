@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import SrcFile, Span, Error, Pointer
 import p"ty.dewy" as types
 import p"subtyping.dewy" as subtyping
@@ -34,7 +36,8 @@ instantiate = (alias:types.GenericTypeAlias arguments:array<Argument> links:subt
         let argument = arguments[i]
         if param.kind=?'effect' {
             if argument isnt? rows.Contract return Error[srcfile=srcfile title='generic argument needs an effect row' pointers=[Pointer[loc "`{param.name}` has kind Effect"]]]
-            effects[param.identity]=argument
+            # Substitution owns each row independently of the supplied arguments.
+            effects[param.identity]=argument.copy()
             continue
         }
         if argument isnt? addr return Error[srcfile=srcfile title='an effect row is not a value type' pointers=[Pointer[loc "`{param.name}` needs a type argument"]]]

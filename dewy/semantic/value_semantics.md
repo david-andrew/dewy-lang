@@ -371,3 +371,14 @@ array elements (`const item=@items[i]`). Their original owner performs cleanup;
 the view cannot supply a second owner. Live derived aliases also prevent
 consuming or invalidating that owner. Array detachment still makes sibling
 slot writes conservative when the element's physical lifetime is unproved.
+
+
+A common dynamic-array field across record alternatives can lend its existing
+descriptor to a proved read-only call. Each alternative keeps its own field
+offset; dispatch evaluates the receiver once. Allocation contracts consume the
+same storage proof. A loop can also read this field in place when its complete
+owner stays stable throughout the function. An owner mutation, escaped/raw
+alias, incompatible representation or unproved callee retains the ordinary
+snapshot. Such snapshots appear in the copy inventory and require `.copy()`
+under `$explicit_copies`; explicit copies are already independent owners when
+stored into another container.

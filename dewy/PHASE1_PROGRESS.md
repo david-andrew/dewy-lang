@@ -36,6 +36,38 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): stable common array fields across record unions
+now lend their descriptors to read-only calls and iterator arms in both
+lowerers. Alternatives may use different field offsets. Call loans share the
+storage proof with public effects; iterator loans use the existing whole-owner
+stability proof, without expanding the public iterator effect contract.
+Exceptions, representation conversions, owner mutation and unproved lifetime
+boundaries keep their snapshots. Explicit snapshots read the selected field
+before any later argument can mutate its owner.
+
+The new strict rejection checks exposed unreported ordinary union-field
+snapshots on both routes. They are now counted, including iteration snapshots;
+`.copy()` authorizes the independent result. Hosted container stores now
+recognize all already-owned record results, including explicit copies, instead
+of demanding a second implicit copy after the requested one. Both routes pass
+array push/literal/replacement and dictionary-store cases with live-byte checks.
+
+Sixteen hosted checks and both native paired groups pass on x86-64/C
+(41.55 seconds for the paired groups). Five additional modules pass standalone
+strict checking on both routes: tokens, syntax normalization, namespace lookup,
+type tests and generic type-alias instantiation. Intentional owning snapshots
+have comments; strict adoption reaches **50 physical bootstrap modules**.
+Eight fixtures bring the acceptance/execution manifest to 381.
+
+The independent frozen `25236513` checkpoint prepared/emitted the hosted seed
+in 211.62/216.67 seconds and reached a byte-identical three-generation native
+fixed point (last generations 61/62 seconds under concurrent validation).
+Its complete native inventory contains 4,108 sites across 54,871 lines,
+74.867/KLOC, passing the unchanged 4,500/85 gates. Its full 373-case parity run
+is still running; this checkpoint does not claim that result or certify the
+subsequent common-field changes. The hosted inventory at that revision retains
+2,072 implicit runtime-sized obligations in 86 modules before this adoption.
+
 Checkpoint (2026-09-28): last-use proofs now distinguish mutually exclusive
 conditional arms in both lowerers. Persistent branch paths take one word per
 read and one entry per arm. Later compatible reads and borrowed readers still

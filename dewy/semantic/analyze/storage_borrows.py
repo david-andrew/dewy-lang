@@ -93,6 +93,31 @@ def union_loan_source(node, expected_type=None):
     return source if ty.preserves_union_payload(source.type, expected_type) else None
 
 
+def common_array_field(node):
+    """A nonexceptional union field with one existing descriptor layout.
+
+    Different alternatives may store the field at different offsets; dispatch
+    still evaluates the receiver once. Retagging, exception forwarding and
+    nested computed receivers keep their ordinary value boundary.
+    """
+    if (not isinstance(node, hir.ForwardingAccess) or node.exception_type != ty.BOTTOM_TYPE
+            or not isinstance(shape := ty.structural_base(node.type), ty.ArrayType)
+            or shape.length is not None
+            or not isinstance(bindings.access_path(node.value, unwrap=_unwrap).root, hir.ExpressedIdentifier)):
+        return False
+    members = ty.runtime_union_members(node.value.type)
+    if not members:
+        return False
+    for member in members:
+        record = ty.structural_base(member)
+        if not isinstance(record, ty.ObjectType):
+            return False
+        field = record.field(node.field)
+        if field is None or ty.structural_base(field.type) != shape:
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class Proofs:
     arguments: dict[int, set[int]]
@@ -475,7 +500,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 for argument, parameter in pairs or ():
                     expected = parameter.type if parameter is not None else None
                     loan = union_loan_source(argument, expected) if expected is not None else None
-                    path = bindings.access_path(argument if loan is None else loan, unwrap=_unwrap)
+                    path = bindings.access_path(argument if loan is None else loan, unwrap=_unwrap,
+                                                forwarding=common_array_field(argument))
                     source = path.root
                     own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     incoming = summaries.for_param_binding(own.binding_id) if own else None
@@ -486,7 +512,9 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                               and source.binding_id in local_views) or (local is not None and ordinary(local)) or (
                         own is not None and ordinary(own.type) and incoming is not None
                         and (incoming.read_only or incoming.read_only_at(tuple(
-                            INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps))))
+                            INDEX_STEP if isinstance(step, hir.Index) else
+                            step.field if isinstance(step, hir.ForwardingAccess) else step.name
+                            for step in path.steps))))
                     same_storage = argument.type == expected or (
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)

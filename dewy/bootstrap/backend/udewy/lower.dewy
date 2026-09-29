@@ -401,6 +401,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.CopyValue {
         let receiver=hir.node_at(state.input.nodes node.value)
         if receiver is? hir.DictView return dict_view(receiver @state explicit=true)
+        if receiver is? hir.ForwardingAccess return forwarding_field(receiver @state explicit=true)
         let array_frame=state.frame_arrays.get(id)
         if array_frame isnt? none {
             let type=array_type(node.value_type state)
@@ -4992,6 +4993,10 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     # released here.
     if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
     if argument in? borrowed {
+        let source=hir.node_at(state.input.nodes argument)
+        if source is? hir.ForwardingAccess and storage_borrows.common_array_field(source state.input.nodes state.type_nodes) {
+            return snapshot(forwarding_field(source @state loan=true) @prefix @state)
+        }
         let loan=storage_borrows.union_loan_source(argument state.input.nodes state.type_nodes)
         # A route may name an unproven lookup whose fallback/result owns
         # storage. Borrow its view below when supported; otherwise keep the
@@ -5785,6 +5790,13 @@ iterable_entry_view = (source:hir.AST @state:State):>hir.AST => {
     let field=if view.name =? 'values' and entries.value isnt? none 'values' else 'keys'
     return hir.DictEntries[source.loc source.value_type view.dictionary field]
 }
+# Iteration only lends the selected array. Reuse the same whole-owner proof
+# as container entry views; unstable owners keep the ordinary field snapshot.
+iterable_common_field = (source:hir.AST state:State):>bool => {
+    if source isnt? hir.ForwardingAccess or not storage_borrows.common_array_field(source state.input.nodes state.type_nodes) return false
+    let route=borrowing.route(source.value state.input.nodes)
+    return route isnt? none and borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
+}
 iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State plain:bool=false):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
@@ -5860,6 +5872,9 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
                 }
             }
             sequence=dict_field(parts source.name node @state)
+        } else if iterable_common_field(source state) {
+            $runtime_assert source is? hir.ForwardingAccess
+            sequence=snapshot(forwarding_field(source @state loan=true) @prefix @state)
         } else if iteration_snapshot(node.iterable @state) {
             # The loop iterates the value its source had on entry. A write
             # to the source's owner can replace or free it: hold a shared
@@ -5877,7 +5892,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
             $runtime_assert source.default isnt? none
             keep_fallback(hir.node_at(state.input.nodes source.default).value_type @state)
         } else {sequence=snapshot(expression(node.iterable @state) @prefix @state)}
-        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) and not iterated_view(node.iterable @state) and not iteration_snapshot(node.iterable @state) {
+        if source isnt? hir.DictEntries and not iterable_common_field(source state) and temporary_owner(node.iterable @state) and not iterated_view(node.iterable @state) and not iteration_snapshot(node.iterable @state) {
             # lower_flow gives iterator setup its own cleanup frame. Body
             # continues keep this owner; leaving the arm or returning from
             # the function releases it after the last borrowed element use.
@@ -6299,7 +6314,7 @@ string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
 # handle: the narrowed union would be a tagged cell around a copy of the
 # record. When every member keeps the field at one offset and type, read it
 # from the handle instead: no record copy, no cell, and no release.
-forwarded_in_place = (node:hir.ForwardingAccess members:array<addr> @state:State):>addr? => {
+forwarded_in_place = (node:hir.ForwardingAccess members:array<addr> @state:State loan:bool=false):>addr? => {
     let offset:addr?=none
     let field_type:addr?=none
     loop member in members {
@@ -6320,6 +6335,7 @@ forwarded_in_place = (node:hir.ForwardingAccess members:array<addr> @state:State
     if record is? none return none
     let actual=field_type
     let value=field_read(address(record.handle offset node @state) actual node @state)
+    if loan return read_value(value actual node.value_type node @state)
     if enum_members(node.value_type state) isnt? none return enum_pack(value actual node.value_type node @state)
     if enum_members(actual state) isnt? none return enum_read(value actual node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none {
@@ -6328,13 +6344,17 @@ forwarded_in_place = (node:hir.ForwardingAccess members:array<addr> @state:State
     }
     return copy_value(read_value(value actual node.value_type node @state) node.value_type node @state)
 }
-forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
+forwarding_field = (node:hir.ForwardingAccess @state:State loan:bool=false explicit:bool=false):>addr => {
+    if not loan {
+        let kind=copy_kind(node.value_type @state)
+        if kind isnt? none {note_copy(kind node.value_type 'read through a union field' 'the selected field needs independent storage' node @state explicit=explicit)}
+    }
     let source_type=hir.node_at(state.input.nodes node.value).value_type
     let handle=record_union(source_type @state) isnt? none
     let members=if handle record_members(source_type @state) else cell_members(source_type @state)
     if members is? none return reject(node 'forwarded fields require a tagged record union' @state)
     if not handle {
-        let in_place=forwarded_in_place(node members @state)
+        let in_place=forwarded_in_place(node members @state loan=loan)
         if in_place isnt? none return in_place
     }
     let prefix:array<addr>=[]
@@ -6345,7 +6365,7 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
         let shared=shared_field(node members @state)
         if shared isnt? none {
             let read=field_read(address(receiver shared.offset node @state) shared.type node @state)
-            return finish_forwarding(receiver source_type forwarded_result(read shared.type node @state) node @prefix @state)
+            return finish_forwarding(receiver source_type forwarded_result(read shared.type node @state loan=loan) node @prefix @state)
         }
     }
     let tag=if handle receiver else snapshot(read_word(receiver 0 node @state) @prefix @state)
@@ -6367,7 +6387,7 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
             value=field_read(address(value offset node @state) field.value_type node @state)
             actual=field.value_type
         }
-        value=forwarded_result(value actual node @state)
+        value=forwarded_result(value actual node @state loan=loan)
         let boolean=types.primitive('bool' @state.type_nodes)
         let condition:addr=0
         if not handle {condition=intrinsic_call('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)}
@@ -6384,7 +6404,8 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
     return finish_forwarding(receiver source_type put(hir.Flow[node.loc output arms last.body] @state) node @prefix @state)
 }
 # The forwarded value as the access's result: an independent owner.
-forwarded_result = (value:addr actual:addr node:hir.ForwardingAccess @state:State):>addr => {
+forwarded_result = (value:addr actual:addr node:hir.ForwardingAccess @state:State loan:bool=false):>addr => {
+    if loan return read_value(value actual node.value_type node @state)
     if enum_members(node.value_type state) isnt? none return enum_pack(value actual node.value_type node @state)
     if enum_members(actual state) isnt? none return enum_read(value actual node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none {
