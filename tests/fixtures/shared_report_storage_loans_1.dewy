@@ -1,0 +1,17 @@
+$explicit_copies
+Box:type=[items:array<int64> counter:int64]
+Pair:type=[items:array<int64> offset:int64]
+length=(items:array<int64>):>int64=>{ $runtime_assert items.length>?0
+ return items.length }
+read=(pair:Pair):>int64=>{ $runtime_assert pair.items.length>?0
+ return length(pair.items)+pair.offset }
+forward=(@box:Box):>int64=>{
+    box.counter+=1
+    return read(Pair[box.items 40])
+}
+work=(@box:Box):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {if forward(@box) not=?42 return 1}
+    return if box.counter=?1000 and _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>{let box=Box[[20 22] 0] return work(@box)}

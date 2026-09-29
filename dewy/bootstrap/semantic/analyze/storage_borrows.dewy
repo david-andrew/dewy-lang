@@ -387,6 +387,14 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             let node=hir.node_at(nodes item)
             if item in? seen or node is? hir.FunctionLiteral continue
             seen.push(item) body.push(item)
+            # Installed report helpers cannot alias source owners. Traverse
+            # the user message, including its calls/writes, rather than the
+            # generated reporting body. This matches source-level borrowing;
+            # the ordinary effects solver still checks reporting effects.
+            if node is? hir.RuntimeFailure {
+                if node.message isnt? none {pending.push(node.message)}
+                continue
+            }
             if node is? hir.Declare and node.binding_id isnt? none {locals.push(node.binding_id) constants.pop(node.binding_id default=0);}
             # Constructor field names are private locals, including names
             # used by a later default. They do not expose ambient storage.

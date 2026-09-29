@@ -390,6 +390,12 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                         and analysis._flatten_callable(node, frozenset()) is None):
                     ambient_reads.setdefault(key, set()).add(node.binding_id)
             elif isinstance(node, hir.FunctionCall):
+                if node.compiler_report:
+                    # Installed reporting cannot alias source storage. Its
+                    # operands/messages remain in `body` and keep their own
+                    # edges. Match native RuntimeFailure and the lowerer's
+                    # source-report boundary; this is not effect purity.
+                    continue
                 targets = analysis._direct_targets(node)
                 if targets is None:
                     if not modeled_call(node):

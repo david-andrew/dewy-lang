@@ -25,6 +25,23 @@ address those failures. The last hosted full strict-copy inventory still has
 1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
 latest ownership slices. Phase 1 remains open.
 
+## Shared storage proof across runtime reports (2026-09-29)
+
+The shared argument/literal storage proof now uses the same installed-report
+boundary as direct lowering. Hosted traversal omits compiler-marked report
+call edges; native traversal follows a RuntimeFailure's source message instead
+of its expanded reporting body. User conditions/messages retain their own
+calls and writes. Public effect contracts retain reporting effects: storage
+isolation is not a purity guarantee.
+
+Twenty-nine hosted storage/effect checks, the additional source-message
+rejection, and both paired native report groups pass. Coverage includes
+transitive checked helpers, borrowed record temporaries, zero-allocation happy
+paths, side-effecting failure messages, user functions with helper-like names,
+and rejection of `no_effects` on reporting code. Three fixtures bring the
+manifest to 579. Logs use `dewy-report-loan-*`; the fresh native test driver is
+in `phase1-shared-report-source` outside the checkout.
+
 ## Ordered guards preserve last-use transfers (2026-09-29)
 
 Both move analyses now model an `else if` guard as running only for its own
