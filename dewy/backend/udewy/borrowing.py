@@ -280,6 +280,40 @@ def expression_conflicts(root: hir.AST, source: Route | None, plan: Plan, source
     return False
 
 
+def iterator_body_stable(root: hir.AST, source: Route, private: set[int], plan: Plan) -> bool:
+    """An interval loan beside writes to independent local owners.
+
+    Earlier writes do not change the loop's entry value. Within the loop,
+    permit only disjoint fields of that owner or private value constructions.
+    Other places may alias it. Unknown/named calls and lifecycle operations
+    need a broader call-interval proof and retain the snapshot for now.
+    """
+    for node in _walk_function_subtree(root):
+        if isinstance(node, hir.Transmute) and not (_word_value(node.type) and _word_value(node.expr.type)):
+            return False
+        if isinstance(node, hir.FunctionCall):
+            callee = node.func
+            pure = (isinstance(callee, hir.ExpressedIdentifier) and callee.binding_id is None
+                    and callee.name in PURE_OPERATORS)
+            method = (isinstance(callee, hir.ArrayMethod) and callee.name in storage_borrows.ARRAY_METHODS
+                      and storage_borrows.borrowable(callee.array.type))
+            if not pure and not method:
+                return False
+        targets = [] if isinstance(node, hir.IteratorExpression) else write_targets(node)
+        if isinstance(node, hir.DictMethod):
+            targets.append(node.dictionary)
+        for target in targets:
+            written = route(target)
+            if written is None:
+                return False
+            if written.binding == source.binding:
+                if overlap(written, source):
+                    return False
+            elif written.binding not in private:
+                return False
+    return True
+
+
 def isolated_functions(plan: Plan, source_bindings: set[int]) -> set[int]:
     """Finite call-graph proof for evaluating a later argument beside a place.
 

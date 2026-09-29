@@ -3814,6 +3814,7 @@ class _ArrayLowering(_ArraySharing):
             prelude, array = self._extract_forwarding_access(iterator.iterable, borrowed=True)
         elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
             # The value the source had on entry, as in multi-iterator loops.
+            self._note_copy('array', array_type, 'iterated', self._copy_reason(iterator.iterable), iterator.iterable.loc)
             prelude, array = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)
             prelude, array = self._array_result_temporary(iterator.iterable, array, prelude)
             raw_representation = None

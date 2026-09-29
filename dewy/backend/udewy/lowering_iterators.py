@@ -58,7 +58,7 @@ class _IteratorLowering:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, 'int64', name)
 
-    def _iteration_snapshot_needed(self, iterable: hir.AST, body: hir.AST | None = None) -> bool:
+    def _iteration_snapshot_needed(self, iterable: hir.AST, body: hir.AST | None = None, setup: hir.AST | None = None) -> bool:
         """Whether a loop over this array or string route must iterate a snapshot.
 
         A route whose owner nothing in the function writes stays in place for
@@ -72,6 +72,26 @@ class _IteratorLowering:
         source = borrowing.route(iterable)
         if source is None or borrowing.stable_owner(source, self.borrow_plan):
             return False
+        if body is not None and self.current_literal is not None:
+            # Compute local origins once per function, only when an interval
+            # proof is needed. A mutable place/view is not a private value.
+            cache = getattr(self, '_iterator_private_cache', None)
+            if cache is None:
+                cache = self._iterator_private_cache = {}
+            key = id(self.current_literal)
+            if key not in cache:
+                cache[key] = {node.binding_id for node in borrowing._walk_function(self.current_literal)
+                    if isinstance(node, hir.Declare) and node.binding_id is not None and not node.view
+                    and node.binding_id not in self.borrow_plan.captured_bindings
+                    and node.binding_id not in self.borrow_plan.exposed_bindings
+                    and (storage_borrows.private_origin(node.expr)
+                         or storage_borrows.independent_materialization(node.expr))}
+            # Multi-iterator sources are evaluated left to right. A later
+            # source can change an earlier one before the first body runs.
+            if setup is not None and not borrowing.iterator_body_stable(setup, source, cache[key], self.borrow_plan):
+                return True
+            if borrowing.iterator_body_stable(body, source, cache[key], self.borrow_plan):
+                return False
         if body is None or source.binding in self.borrow_plan.globals:
             return True
         # Only a write during the loop can change what it iterates. An owner
@@ -235,13 +255,14 @@ class _IteratorLowering:
                     array_prelude, array_value = self._extract_dict_entries(iterator.iterable, dictionary_sources)
                 elif self._iterable_common_field(iterator.iterable):
                     array_prelude, array_value = self._extract_forwarding_access(iterator.iterable, borrowed=True)
-                elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
+                elif self._iteration_snapshot_needed(iterator.iterable, arm.body, condition):
                     # The loop iterates the value its source had on entry. A
                     # write to the source's owner (in the body or through a
                     # call) must not change or free it: iterate a shared
                     # copy-on-write snapshot (an arena descriptor, also for a
                     # raw fixed source), released after the loop.
                     array_type = ty.unfold(ty.strip_refinement(iterator.iterable.type))
+                    self._note_copy('array', array_type, 'iterated', self._copy_reason(iterator.iterable), iterator.iterable.loc)
                     array_prelude, array_value = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)
                     array_prelude, array_value = self._array_result_temporary(replace(iterator.iterable, type=array_type), array_value, array_prelude)
                     array_representation = None

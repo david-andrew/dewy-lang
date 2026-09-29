@@ -112,6 +112,38 @@ expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captur
     }
     return false
 }
+# Earlier writes do not invalidate a loop's entry value. During the loan,
+# only disjoint fields or independent local constructions may be written.
+# Other places, named/unknown calls and lifecycle operations keep a snapshot
+# until the interval proof can account for their complete alias effects.
+iterator_body_stable = (root:addr source:Route private:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>bool => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length>?0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral|hir.GenericFunction continue
+        if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) return false
+        if node is? hir.FunctionCall {
+            let callee=hir.node_at(nodes node.func)
+            let pure=callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? plan.source_bindings) and (callee.name in? emit.binary or callee.name in? emit.prefix)
+            let method=callee is? hir.ArrayMethod and callee.name in? storage_borrows.ARRAY_METHODS and storage_borrows.borrowable(hir.node_at(nodes callee.array).value_type type_nodes)
+            if not pure and not method return false
+        }
+        let targets:array<addr>=if node is? hir.IteratorExpression [] else captures.write_targets(node nodes)
+        if node is? hir.DictMethod {targets.push(node.dictionary)}
+        loop target in targets {
+            let written=route(target nodes)
+            if written is? none return false
+            if written.binding=?source.binding {if overlap(written source) return false}
+            else if written.binding not in? private return false
+        }
+        hir.push_children(node @pending)
+    }
+    return true
+}
 conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AST> plan:captures.Plan ambient:set<addr>):>bool => {
     let args=arguments(call)
     loop i in 0.. and i <? args.length {

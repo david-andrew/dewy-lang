@@ -1,0 +1,15 @@
+$explicit_copies
+Box:type=[items:array<int64> count:int64]
+collect=(@box:Box):>array<int64>=>{
+    box.items.push(22)
+    let output:array<int64>=[]
+    loop item in box.items {let address=box.items transmute int64 output.push(item)}
+    return output
+}
+main=():>int64=>{
+    let box=Box[[20] 0]
+    let values=collect(@box)
+    if values.length not=?2 return 1
+    values[0]=0
+    return if box.items.length=?2 and box.items[0]=?20 and box.items[1]=?22 and values[1]=?22 42 else 2
+}

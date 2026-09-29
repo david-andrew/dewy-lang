@@ -118,6 +118,8 @@ State:type = [
     move_time:timing.Total=timing.Total[]
     # The body of the loop arm whose iterators are being lowered.
     iterated_body:addr?=none
+    iterated_condition:addr?=none
+    iterator_private:set<addr>=set[]
     view_scopes:dict<addr addr>=[]
     view_regions:dict<addr array<addr>>=[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
@@ -5456,6 +5458,13 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         state.frame_boxes[binding]=put(hir.ExpressedIdentifier[node.loc word_type name] @state)
     }
     state.view_writes=[]
+    state.iterator_private=set[]
+    loop declaration_id in local_declarations {
+        let declaration=hir.node_at(state.input.nodes declaration_id)
+        $runtime_assert declaration is? hir.Declare
+        if declaration.binding_id is? none or declaration.view or declaration.binding_id in? excluded continue
+        if storage_borrows.private_origin(declaration.expr state.input.nodes) or storage_borrows.independent_materialization(declaration.expr state.input.nodes) {state.iterator_private.push(declaration.binding_id)}
+    }
     if local_declarations.length >? 0 {
         let has_view=false
         loop declaration_id in local_declarations {
@@ -5955,6 +5964,10 @@ iteration_snapshot = (id:addr @state:State):>bool => {
     if route is? none or borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return false
     let body=state.iterated_body
     if body is? none return true
+    # A later multi-iterator source is evaluated after this route, before
+    # the first body. Its writes must not invalidate the earlier value.
+    if state.iterated_condition isnt? none and not borrowing.iterator_body_stable(state.iterated_condition route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return true
+    if borrowing.iterator_body_stable(body route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return false
     # An owner other code can reach may change through any call in the body.
     if route.binding in? state.boxed or route.binding in? state.place_parameters or route.binding in? state.capture_plan.globals return true
     return writes_binding(body route.binding state)
@@ -6282,9 +6295,12 @@ lower_flow = (node:hir.Flow position:addr @state:State borrowed:bool=false):>add
     let entry:array<addr>=[]
     if iterator {
         let outer_body=state.iterated_body
+        let outer_condition=state.iterated_condition
         state.iterated_body=arm.body
+        state.iterated_condition=if test is? hir.MultiIteratorExpression arm.condition else none
         let step=iterator_condition(test @state)
         state.iterated_body=outer_body
+        state.iterated_condition=outer_condition
         prefix=step.prefix condition=step.condition entry=step.entry
     } else {condition=expression(arm.condition @state)}
     let previous_depth=state.loop_depth
