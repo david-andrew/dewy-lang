@@ -24,6 +24,29 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Modeled array operations preserve unrelated storage loans (2026-09-29)
+
+The shared storage proof now recognizes ordinary builtin array operations in
+its ambient call graph, using the same classification for exposure and caller
+stability. Their receiver/argument routes already belong to the effect summary;
+an operation on one record field does not add an unknown ambient write to all
+siblings. Lifecycle-bearing arrays and sort callbacks retain the conservative
+call-graph boundary. No allocation permission changes: the builtin can still
+need storage even when a sibling loan is proved.
+
+Seven hosted checks and two paired native groups pass, including a disabled-
+proof control, overlapping later-argument rejection, and zero allocated bytes
+over 1,000 unique-owner calls. Thirteen surrounding hosted loan checks also
+pass. Six fixtures bring the corpus to 547. Artifacts use
+`dewy-sibling-array-method-*`. The compiler's `type_products.dewy` still has
+unproved storage boundaries, so it has not been marked strict.
+
+The preceding frozen repairs reached a byte-identical three-generation native
+fixed point with both backend execution/scaling checks. Generations 2/3 took
+92/83 seconds under concurrent tests, not isolated performance measurements.
+The 541-case parity run and broader pytest run remain in progress; the latter
+has found the contextual-literal follow-up described below.
+
 ## Full-suite repair: superseded expectations (2026-09-29)
 
 The remaining expectation updates distinguish supported consuming returns from

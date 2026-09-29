@@ -20,6 +20,8 @@ OPERATORS = frozenset({
     '__gt__', '__ge__', '__and__', '__or__', '__xor__', '__nand__', '__nor__',
     '__xnor__', '__lshift__', '__rshift__',
 })
+ARRAY_METHODS = frozenset({'push', 'pop', 'clear', 'reserve', 'insert',
+                           'truncate', 'set_length', 'join'})
 
 
 def borrowable(type_):
@@ -306,6 +308,16 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             eligible[key] = borrowable(type_)
         return eligible[key]
 
+    def modeled_call(node):
+        func = _unwrap(node.func)
+        if isinstance(func, hir.ExpressedIdentifier):
+            return func.binding_id is None and func.name in OPERATORS
+        # The effect analyzer already tracks these builtins' receiver and
+        # argument routes. They cannot perform an additional ambient write.
+        # Hooks and sort callbacks need their ordinary call-graph evidence.
+        return (isinstance(func, hir.ArrayMethod) and func.name in ARRAY_METHODS
+                and ordinary(func.array.type))
+
     for literal in analysis.literals:
         key = id(literal)
         local = {p.binding_id for p in _literal_params(literal)}
@@ -347,9 +359,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     exposed.append(node.expr)
             elif isinstance(node, hir.FunctionCall) and analysis._direct_targets(node) is None:
                 func = _unwrap(node.func)
-                modeled = (isinstance(func, hir.ExpressedIdentifier) and func.binding_id is None and func.name in OPERATORS
-                           or isinstance(func, hir.ArrayMethod) and not (func.name == 'sort' and 'key' in node.kw_args))
-                if not modeled:
+                if not modeled_call(node):
                     exposed.extend([*node.pos_args, *node.kw_args.values()])
                     if isinstance(func, hir.ArrayMethod):
                         exposed.append(func.array)
@@ -379,9 +389,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             elif isinstance(node, hir.FunctionCall):
                 targets = analysis._direct_targets(node)
                 if targets is None:
-                    func = _unwrap(node.func)
-                    if not (isinstance(func, hir.ExpressedIdentifier)
-                            and func.binding_id is None and func.name in OPERATORS):
+                    if not modeled_call(node):
                         blocked.add(key)
                 else:
                     for target in targets:

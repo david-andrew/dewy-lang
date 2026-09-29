@@ -15,6 +15,7 @@ import p"../subtyping.dewy" as subtyping
 # proof permits outer array-length widening and exact union-member boxing.
 # More precise lowerer proofs may still borrow other expressions.
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
+const ARRAY_METHODS:set<string>=set['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'set_length' 'join']
 # Native builtins carry stable identities. A source function with the same
 # spelling must still contribute its ordinary call-graph effects.
 primitive=(node:hir.AST registry:bindings.Registry):>bool=>{
@@ -49,6 +50,14 @@ ordinary=(type:addr table:types.Table @known:dict<addr bool>):>bool=>{
     let result=borrowable(type table)
     known[type]=result
     return result
+}
+modeled_call=(node:hir.FunctionCall registry:bindings.Registry nodes:array<hir.AST> table:types.Table @known:dict<addr bool>):>bool=>{
+    let func=hir.node_at(nodes effects.unwrap(node.func nodes))
+    if primitive(func registry) return true
+    # Builtin receiver/argument routes already belong to the effect summary;
+    # they do not add an ambient write. Hooks and sort callbacks still need
+    # the ordinary call-graph proof.
+    return func is? hir.ArrayMethod and func.name in? ARRAY_METHODS and ordinary(hir.node_at(nodes func.array).value_type table @known)
 }
 stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nodes:array<hir.AST>):>bool=>{
     if effects.read_only(summary) return true
@@ -408,8 +417,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 if union_loan_source(item nodes table) is? none {exposed.push(node.expr)}
             } else if node is? hir.FunctionCall and effects.direct_targets(node analysis nodes) is? none {
                 let func=hir.node_at(nodes effects.unwrap(node.func nodes))
-                let modeled=primitive(func registry) or (func is? hir.ArrayMethod and not (func.name=?'sort' and 'key' in? node.kw_args))
-                if not modeled {
+                if not modeled_call(node registry nodes table @eligible) {
                     loop arg in node.pos_args {exposed.push(arg)}
                     loop arg in node.kw_args.values {exposed.push(arg)}
                     if func is? hir.ArrayMethod {exposed.push(func.array)}
@@ -445,8 +453,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             } else if node is? hir.FunctionCall {
                 let targets=effects.direct_targets(node analysis nodes)
                 if targets is? none {
-                    let func=hir.node_at(nodes effects.unwrap(node.func nodes))
-                    if not primitive(func registry) {blocked.push(id)}
+                    if not modeled_call(node registry nodes table @eligible) {blocked.push(id)}
                 } else {
                     loop target in targets {
                         # Extend the live adjacency set, rather than copying
