@@ -276,7 +276,9 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             }
             else {
                 if arg in? input.literal_arguments.get(id set[]) {
-                    loop child in hir.children(value) {visit(child input @scan)}
+                    loop child in hir.children(value) {
+                        visit(storage_borrows.scalar_cell_input(child input.nodes input.types) input @scan)
+                    }
                     continue
                 }
                 if arg in? input.borrowed_arguments.get(id set[]) and storage_borrows.common_array_field(value input.nodes input.types) {

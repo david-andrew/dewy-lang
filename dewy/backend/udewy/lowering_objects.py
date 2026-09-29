@@ -476,6 +476,14 @@ class _ObjectLowering:
                     field_type = object_type.field(field.name).type
                     field_shape = ty.structural_base(field_type)
                     inline = isinstance(field_shape, ty.ObjectType)
+                    members = self._field_union_members(field_type)
+                    if members is not None:
+                        # Keep the source's member type until tagging. In
+                        # particular, extracting `none` first erases it to
+                        # the integer zero and would store the wrong tag.
+                        address = self._field_address(dest, offsets[field.name], field.loc)
+                        statements.extend(self._union_write(address, field.value, members, prepared=False))
+                        continue
                     prelude, value = (self._extract_object_pointer(field.value) if inline
                                       else self._extract_expression(field.value))
                     statements.extend(prelude)

@@ -129,6 +129,28 @@ common_array_field=(node:hir.AST nodes:array<hir.AST> table:types.Table):>bool=>
 # repeatedly; cycles/oversized families exhaust the finite budget. Summing
 # alternatives is conservative and independent of backend padding choices.
 LoanSizeItem:type=const [type:addr family:bool=true]
+scalar_loan_cell=(type:addr table:types.Table):>bool=>{
+    let shape=types.node_at(table views.structural_base(type table))
+    if shape isnt? types.TypeOr or shape.items.length=?0 return false
+    loop item in shape.items {
+        let plain=views.structural_base(item table)
+        let member=types.node_at(table plain)
+        if member is? types.Primitive and member.name in? ['none' 'bool' 'true' 'false'] continue
+        if views.fixed_integer_layout(plain table) is? none return false
+    }
+    return true
+}
+# Remove only scalar-to-cell packing. The call root is the cell's final
+# storage, so both effects and lowering evaluate its operand directly.
+scalar_cell_input=(id:addr nodes:array<hir.AST> table:types.Table):>addr=>{
+    let node=hir.node_at(nodes id)
+    if node is? hir.ValueCast|hir.RepresentationCast and scalar_loan_cell(node.value_type table) {
+        let actual=views.structural_base(hir.node_at(nodes node.expr).value_type table)
+        let shape=types.node_at(table actual)
+        if shape is? types.IntegerLiteralType or views.fixed_integer_layout(actual table) isnt? none or (shape is? types.Primitive and shape.name in? ['none' 'bool' 'true' 'false']) return node.expr
+    }
+    return id
+}
 record_loan_size=(type:addr table:types.Table families:array<addr> @memo:dict<addr addr?>):>addr?=>{
     if type in? memo return memo[type]
     let pending:array<LoanSizeItem>=[LoanSizeItem[type]]
@@ -150,6 +172,9 @@ record_loan_size=(type:addr table:types.Table families:array<addr> @memo:dict<ad
                     }
                 }
             }
+        } else if scalar_loan_cell(selected table) {
+            if size>?4080 {memo[type]=none return none}
+            size+=8
         } else if not (shape is? types.ArrayType and shape.length is? none) and not types.is_primitive(shape 'bool') and views.fixed_integer_layout(selected table) is? none {
             memo[type]=none return none
         }
@@ -178,6 +203,8 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
             arrays.push(field.value)
         } else if stored is? types.ObjectType and types.same_type(actual_id stored_id table) {
             arrays.push(field.value)
+        } else if scalar_loan_cell(stored_id table) and (types.same_type(actual_id stored_id table) or (actual is? types.Primitive and actual.name in? ['none' 'bool' 'true' 'false']) or views.fixed_integer_layout(actual_id table) isnt? none or actual is? types.IntegerLiteralType) {
+            continue
         } else if types.is_primitive(stored 'bool') and actual is? types.Primitive and actual.name in? ['bool' 'true' 'false'] {
             continue
         } else {
@@ -454,8 +481,13 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         loop [binding type] in stable_locals[id] {if binding not in? captured {local_owners[binding]=type}}
         # Keep the whole-call-graph alias guard for incoming storage. Private
         # fresh owners cannot be reached through another caller/global name.
-        if id not in? blocked {loop param in effects.literal_params(literal) {
-            if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
+        # A single place has no second place formal that could alias it.
+        # Route effects still reject overlapping writes or exposed storage.
+        let params=effects.literal_params(literal)
+        let place_count:addr=0
+        loop param in params {if param.place {place_count+=1}}
+        if id not in? blocked {loop param in params {
+            if (not param.place or place_count=?1) and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
         }}
         const body=@bodies[id]
         # Whole-function local views share the allocation-contract proof.

@@ -217,6 +217,8 @@ def record_loan_size(type_, memo):
             if family:
                 pending.extend((ty.USER_BRAND_TYPES[name], False)
                                for name in ty.brand_alternatives(shape))
+        elif scalar_loan_cell(shape):
+            size += 8  # scalar union: tag plus one scalar payload word
         elif not (isinstance(shape, ty.ArrayType) and shape.length is None
                   or shape == 'bool' or ty.fixed_integer_layout(shape) is not None):
             size = None
@@ -229,11 +231,20 @@ def record_loan_size(type_, memo):
     return size
 
 
+def scalar_loan_cell(type_):
+    """A two-word tag cell with no descriptor, owner or cleanup inside it."""
+    shape = ty.structural_base(type_)
+    return isinstance(shape, ty.TypeOr) and bool(shape.items) and all(
+        (plain := ty.structural_base(member)) in ('none', 'bool', 'true', 'false')
+        or ty.fixed_integer_layout(plain) is not None for member in shape.items)
+
+
 def record_loan_fields(node, sizes):
     """A call-scoped root lends stable fields without acquiring owners.
 
     Inline records containing words and array handles use the same lifetime
-    proof as array fields. Cells and fixed arrays retain their ordinary path.
+    proof as array fields. Scalar tag cells own no payload; other cells and
+    fixed arrays retain their ordinary path.
     """
     if not isinstance(node, hir.ObjectLiteral) or not borrowable(node.type):
         return None
@@ -255,6 +266,11 @@ def record_loan_fields(node, sizes):
             borrowed.append(field.value)
         elif isinstance(stored, ty.ObjectType) and actual == stored:
             borrowed.append(field.value)
+        elif scalar_loan_cell(stored) and (
+                actual == stored or actual in ('none', 'bool', 'true', 'false')
+                or ty.fixed_integer_layout(actual) is not None
+                or isinstance(actual, ty.IntegerLiteralType)):
+            pass
         elif stored == 'bool' and actual in ('bool', 'true', 'false'):
             pass
         elif ty.fixed_integer_layout(stored) is not None and (actual == stored or
@@ -384,8 +400,14 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # Private fresh owners have no such alias: their direct writes,
         # exposure and captures were excluded above. Keep the graph-wide
         # restriction for parameters, without applying it to private locals.
+        params = _literal_params(literal)
+        # One incoming place cannot alias another place formal. Its unwritten
+        # projections may lend storage under the same route effect proof.
+        # Multiple places may alias at the call, so keep those unknown until
+        # their cross-parameter alias relationships are proved as well.
+        single_place = sum(bool(p.place) for p in params) == 1
         parameters = {} if id(literal) in blocked else {
-            p.binding_id: p for p in _literal_params(literal) if not p.place}
+            p.binding_id: p for p in params if not p.place or single_place}
         # An unwritten projection can lend its parameter's existing storage.
         # No retagging, lifecycle operation, capture, or escaping address is
         # admitted by this shared proof. More precise scoped views remain a

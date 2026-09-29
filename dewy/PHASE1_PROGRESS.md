@@ -104,6 +104,26 @@ optional and mixed unions, nested records, returned fields, shared snapshots,
 repeated live-byte checks and rejected retained-reader cases. Seven fixtures
 bring the manifest to 448. Full integration remains certified at `da4a1aca`.
 
+## Scalar cell and place projection loans (2026-09-29)
+
+Bounded call roots now admit scalar tag cells, including concrete member
+initializers and existing optional scalar values. Hosted lowering preserves
+`none` until tagging; native lowering packs members directly into the final
+inline cell rather than allocating a temporary. Allocation effects use that
+same construction proof. Cells with owned aggregate payloads retain their
+ordinary storage obligation.
+
+The shared proof also admits unwritten projections of a sole place parameter.
+Sibling field writes are allowed; overlapping writes, escapes and unknown/raw
+calls still prevent borrowing. Multiple place formals remain conservative
+until cross-parameter alias relationships are proved.
+
+Ten hosted checks and two paired native groups pass, including zero allocation
+across 1,000 calls, optional defaults, existing scalar cells, sibling mutation,
+later-argument mutation and owned-cell rejection. Ten new manifest cases bring
+the total to 458. Full integration remains certified at `da4a1aca`; Phase 1 is
+still open.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

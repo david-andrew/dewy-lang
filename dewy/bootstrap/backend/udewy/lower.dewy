@@ -2360,7 +2360,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
         return put(hir.Block[node.loc output prefix false] @state)
     }
     let shared_none=state.none_cell
-    if shared_none isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(selected state.type_nodes)) 'none') {
+    if borrowed_cell is? none and shared_none isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(selected state.type_nodes)) 'none') {
         return put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
     }
     let prefix:array<addr>=[]
@@ -4679,6 +4679,19 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
         if loan {
             # Shared proof: bounded representations with stable borrowed
             # handles. This root never retains or releases a field owner.
+            let scalar_source=storage_borrows.scalar_cell_input(item.value state.input.nodes state.type_nodes)
+            let target=address(destination offset node @state)
+            if scalar_source not=?item.value {
+                # Pack into the final inline cell, with no temporary owner.
+                let actual=hir.node_at(state.input.nodes scalar_source).value_type
+                let value=cell_pack(expression(scalar_source @state) actual field.value_type node @state borrowed_cell=target)
+                prefix.push(value)
+                if item.binding_id isnt? none {
+                    let name=symbol(item.name item.binding_id @state)
+                    prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name types.primitive('int64' @state.type_nodes) target item.binding_id] @state))
+                }
+                continue
+            }
             let value=expression(item.value @state)
             if item.binding_id isnt? none {
                 let name=symbol(item.name item.binding_id @state)
@@ -4686,7 +4699,6 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
                 prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name type value item.binding_id] @state))
                 value=put(hir.ExpressedIdentifier[item.loc type name item.binding_id] @state)
             }
-            let target=address(destination offset node @state)
             if object_valued(field.value_type @state) {
                 let stored=object_layout(field.value_type node @state)
                 prefix.push(counted_bytes(value target word(0 node @state) word(stored.size node @state) node @state))
