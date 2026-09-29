@@ -28,6 +28,19 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Parent-place validation adopts strict checking (2026-09-29)
+
+Parent-place validation borrows a membership-guarded parameter summary instead
+of constructing an owning optional result. Its consumed traversal worklist and
+separate mutable effect-solver state explicitly request independence from the
+roots/discovery data retained for subsequent queries.
+
+The module passes strict checking on both routes, reaching 69 physical modules.
+All eleven existing hosted cases and a new paired native group pass, covering
+field updates through a parent and rejection of whole-child replacement through
+direct, forwarded and nested helpers. Logs use `dewy-place-contracts-*` and
+`dewy-global-owner-native-tests.log`; the corpus remains 605 cases.
+
 ## Element writes preserve containing array extents (2026-09-29)
 
 Both fact engines retain known lengths of every array containing an element

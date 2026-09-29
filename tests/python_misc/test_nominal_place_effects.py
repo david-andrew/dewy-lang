@@ -50,3 +50,15 @@ def test_imported_parent_helper_is_analyzed_in_its_defining_graph(tmp_path):
     source = tmp_path / 'main.dewy'
     source.write_text('from p"parent.dewy" import Base, update\nDerived=type of Base & [extra:int64]\nf=():>void=>{let d=Derived[0 1] update(@d)}')
     check.typecheck_and_resolve(SrcFile.from_path(source))
+
+
+def test_native_nominal_place_effects(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    entry = '\nmain=():>int64=>{let d=Derived[0 2] update(@d) return d.token+d.extra}'
+    cases = [TYPES + 'update=(@p:Base):>void=>{p.token=40}' + entry,
+             TYPES + 'set=(@p:Base):>void=>{p.token=40}\nupdate=(@p:Base):>void=>set(@p)' + entry]
+    errors = [TYPES + body + '\nmain=():>int64=>{let d=Derived[42 1] replace(@d) return 42}'
+              for body in ['replace=(@p:Base):>void=>{p=Base[0]}',
+                           'set=(@p:Base):>void=>{p=Base[0]}\nreplace=(@p:Base):>void=>set(@p)',
+                           'replace=(@p:Base):>void=>{let inner=():>void=>{p=Base[0]} inner()}']]
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=cases, errors=errors)

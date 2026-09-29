@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import SrcFile, Error, Pointer
 import p"../context.dewy" as contexts
 import p"../hir.dewy" as hir
@@ -53,7 +55,8 @@ signature_arguments = (call:hir.FunctionCall signature:types.FunctionType nodes:
 }
 validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Session):>Error? => {
     let candidates:array<Candidate>=[]
-    let pending=roots
+    # Traversal consumes its worklist; retain the roots for effect collection.
+    let pending=roots.copy()
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let item=pending.pop
@@ -72,7 +75,9 @@ validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Sessi
     let ids:array<addr>=[]
     loop root in roots {ids.push(root.id)}
     let analysis=access.collect_roots(ids session.hir)
-    let effects=access.analyze_collected(analysis session.hir session.types)
+    # Solving updates summaries and worklists. Preserve the discovery graph
+    # below for direct target resolution while the solver owns its state.
+    let effects=access.analyze_collected(analysis.copy() session.hir session.types)
     loop candidate in candidates {
         let call=hir.node_at(session.hir candidate.id)
         $runtime_assert call is? hir.FunctionCall
@@ -86,8 +91,8 @@ validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Sessi
                     let pairs=access.pair_arguments(call literal)
                     let parameter:addr?=none
                     if pairs isnt? none {loop pair in pairs {if pair.argument =? argument {parameter=pair.parameter}}}
-                    let summary=if parameter is? none none else effects.by_param_binding.get(parameter)
-                    if summary is? none {safe=false break}
+                    if parameter is? none or parameter not in? effects.by_param_binding {safe=false break}
+                    let summary=effects.by_param_binding[parameter]
                     loop path in summary.rebinds {if path.steps.length =? 0 {safe=false}}
                     loop path in summary.escapes {if path.steps.length =? 0 {safe=false}}
                 }
