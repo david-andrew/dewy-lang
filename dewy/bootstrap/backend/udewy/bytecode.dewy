@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import Error
 
 doc"""
@@ -329,7 +331,9 @@ let blob_at = (toks:Tokens idx:addr):>array<uint8> => {
     let index:int64=value_at(toks idx)
     if index <? 0 or index >=? (toks.blobs.length as int64) return []
     $runtime_assert (index as addr) <? toks.blobs.length
-    return toks.blobs[index as addr]
+    # This public value result can outlive or be changed independently of
+    # the retained token buffer. It owns its bytes.
+    return toks.blobs[index as addr].copy()
 }
 let expect = (toks:Tokens idx:addr kind:uint8 @p:Parser):>addr => {
     if kind_at(toks idx) not=? kind {fail("expected token {kind}, got {kind_at(toks idx)}" @p) return toks.kinds.length}
@@ -1040,7 +1044,8 @@ let finish = (@p:Parser target:string):>array<uint8>|Error => {
         if not entry.defined and undefined is? none {undefined=name}
     }
     if undefined isnt? none {fail("Undefined function: {undefined}" @p)}
-    if p.problem isnt? none return p.problem
+    # The caller retains its parser, including the original diagnostic.
+    if p.problem isnt? none return p.problem.copy()
     # Reachability from `main`, the initializers and top-level references.
     let reachable:array<bool>=[]
     reachable.reserve(p.function_count as addr)
@@ -1059,8 +1064,9 @@ let finish = (@p:Parser target:string):>array<uint8>|Error => {
         $runtime_assert slot <? reachable.length
         if reachable[slot] continue
         reachable[slot]=true
-        let callees=p.references.get(id)
-        if callees isnt? none {loop callee in callees {work.push(callee)}}
+        # Traverse the retained adjacency list in place; no optional owning
+        # lookup result is needed for a read-only reachability walk.
+        if id in? p.references {loop callee in p.references[id] {work.push(callee)}}
     }
     let count:int64=0
     loop flag in reachable {if flag {count+=1}}

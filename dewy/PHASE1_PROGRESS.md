@@ -28,6 +28,29 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Loop interval loans and bytecode source adoption (2026-09-29)
+
+Array loops can borrow a place field after earlier writes have completed.
+Both backends prove the interval separately: only disjoint fields and private
+local owners may be written; unknown calls, exposed aliases and lifecycle
+operations retain the snapshot. Multi-iterator source evaluation participates
+in the proof, so a later source cannot invalidate an earlier iteration value.
+Hosted array snapshots now produce the copy notes previously missing from
+single/multiple iterator paths; strict checking sees those operations.
+
+Ninety focused/surrounding hosted checks and two native groups pass. Seven
+fixtures bring the paired manifest to 591. All sixteen bytecode execution and
+text/stream equivalence tests pass with the new native drivers.
+
+The bytecode module now passes strict checking on both routes (65 physical
+modules). Its retained blob and diagnostic results explicitly request
+independence; adjacency traversal reads a guarded dictionary slot directly.
+The full hosted bootstrap prepared/emitted in 240.30/245.35 seconds with the
+corrected reporting. Its inventory has 1615 implicit runtime-sized bootstrap
+sites across 67 modules. This is focused evidence, not a new full
+integration certification. Logs use `dewy-place-iterator-*`,
+`dewy-bytecode-*` and `dewy-iterator-inventory.*` outside the checkout.
+
 ## Typed conversions preserve unrelated loans (2026-09-29)
 
 Both shared storage proofs now keep a representation conversion's escape
