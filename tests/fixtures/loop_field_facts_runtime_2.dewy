@@ -1,0 +1,11 @@
+Box:type=[items:array<int64>=[]]
+Outer:type=[inner:Box]
+main=():>int64=>{
+    let box=Outer[Box[]]
+    loop i in [0..3) {box.inner.items.push(14)}
+    let original=box.inner.items
+    box.inner.items=[]
+    let total:int64=0
+    loop item in original {total+=item}
+    return total
+}

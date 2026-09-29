@@ -6,6 +6,21 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
+## Integration repair (2026-09-29): nested loop writes
+
+The independent hosted seed at `a2919429` exposed a missing hosted loop
+invalidation case: the syntax pre-scan found `items.push` but missed
+`box.items.push` and deeper stores. Exact initializer lengths could therefore
+survive mutation; the compiler's local-place inventory copied an empty array
+instead of the collected node IDs. The pre-scan now shares the complete storage
+route traversal used by iterator exclusion checks. No borrowing rule changed.
+
+Validation: 27 focused hosted checks pass, plus paired native execution and
+rejection cases for nested fields, indexed receivers, while/iterator loops,
+and stale bounds. Seven new manifest cases retain this regression. The frozen
+425-case integration run is still in progress; its failures are being reduced.
+Phase 1 remains open pending corrected-seed integration and the checklist below.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

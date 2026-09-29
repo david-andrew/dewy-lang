@@ -8961,6 +8961,28 @@ def _runtime_syntax_children(node: p0.AST):
     yield from p0.children(node)
 
 
+def _syntax_storage_route(node: p0.AST) -> tuple[str, tuple[str, ...], bool] | None:
+    if isinstance(node, p0.Block) and node.kind == '()' and len(node.inner) == 1:
+        return _syntax_storage_route(node.inner[0])
+    if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
+        return node.item.name, (), False
+    if isinstance(node, p0.BinOp):
+        indexed = isinstance(node.op, t2.IndexJuxtapose)
+        if isinstance(node.op, t2.QJuxtapose):
+            indexed = any(isinstance(option, t2.IndexJuxtapose) for option in node.op.options)
+        member = isinstance(node.op, t1.Operator) and node.op.symbol == '.'
+        if indexed or member:
+            base = _syntax_storage_route(node.left)
+            if base is None:
+                return None
+            name, path, stopped = base
+            if indexed or stopped:
+                return name, path, True
+            if isinstance(node.right, p0.Atom) and isinstance(node.right.item, t1.Identifier):
+                return name, (*path, node.right.item.name), False
+    return None
+
+
 def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
     """Separate sibling writes without assuming different indices are disjoint.
 
@@ -8969,27 +8991,6 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
     boundary and do not mutate storage merely by being declared here.
     """
     routes: set[tuple[str, tuple[str, ...]]] = set()
-
-    def route(node: p0.AST) -> tuple[str, tuple[str, ...], bool] | None:
-        if isinstance(node, p0.Block) and node.kind == '()' and len(node.inner) == 1:
-            return route(node.inner[0])
-        if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
-            return node.item.name, (), False
-        if isinstance(node, p0.BinOp):
-            indexed = isinstance(node.op, t2.IndexJuxtapose)
-            if isinstance(node.op, t2.QJuxtapose):
-                indexed = any(isinstance(option, t2.IndexJuxtapose) for option in node.op.options)
-            member = isinstance(node.op, t1.Operator) and node.op.symbol == '.'
-            if indexed or member:
-                base = route(node.left)
-                if base is None:
-                    return None
-                name, path, stopped = base
-                if indexed or stopped:
-                    return name, path, True
-                if isinstance(node.right, p0.Atom) and isinstance(node.right.item, t1.Identifier):
-                    return name, (*path, node.right.item.name), False
-        return None
 
     def walk(node: p0.AST) -> None:
         target: p0.AST | None = None
@@ -9005,7 +9006,7 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
                 and node.right.item.name in _MUTATING_METHOD_NAMES):
                 target = node.left
         if target is not None:
-            found = route(target)
+            found = _syntax_storage_route(target)
             if found is not None:
                 routes.add(found[:2])
         for child in _runtime_syntax_children(node):
@@ -9029,42 +9030,28 @@ def _binding_write_names(ast: p0.AST) -> tuple[set[str], set[str]]:
     replacements: set[str] = set()
 
     def walk(node: p0.AST) -> None:
+        target: p0.AST | None = None
+        replaces = False
         if isinstance(node, p0.Prefix) and isinstance(node.op, t1.Operator) and node.op.symbol == '@':
             target = node.item
-            while isinstance(target, p0.BinOp) and isinstance(target.op, (t1.Operator, t2.IndexJuxtapose)):
-                target = target.left
-            if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
-                replacements.add(target.item.name)
+            replaces = True
         if isinstance(node, p0.BinOp):
-            left_name = (
-                node.left.item.name
-                if isinstance(node.left, p0.Atom) and isinstance(node.left.item, t1.Identifier)
-                else None
-            )
-            if left_name is not None and (
-                (isinstance(node.op, t1.Operator) and node.op.symbol in {'=', ':=', '::'})
-                or isinstance(node.op, t2.CombinedAssignmentOp)
-            ):
-                replacements.add(left_name)
-            if (
-                left_name is None
-                and isinstance(node.op, t1.Operator)
-                and node.op.symbol == '='
-                and isinstance(node.left, p0.BinOp)
-                and isinstance(node.left.left, p0.Atom)
-                and isinstance(node.left.left.item, t1.Identifier)
-            ):
-                # `d[k] = v` mutates the indexed binding (a dictionary or array).
-                names.add(node.left.left.item.name)
-            if (
-                left_name is not None
-                and isinstance(node.op, t1.Operator)
-                and node.op.symbol == '.'
-                and isinstance(node.right, p0.Atom)
-                and isinstance(node.right.item, t1.Identifier)
-                and node.right.item.name in _MUTATING_METHOD_NAMES
-            ):
-                names.add(left_name)
+            if ((isinstance(node.op, t1.Operator) and node.op.symbol in {'=', ':=', '::'})
+                    or isinstance(node.op, t2.CombinedAssignmentOp)):
+                target = node.left
+                replaces = isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier)
+            if (isinstance(node.op, t1.Operator) and node.op.symbol == '.'
+                    and isinstance(node.right, p0.Atom) and isinstance(node.right.item, t1.Identifier)
+                    and node.right.item.name in _MUTATING_METHOD_NAMES):
+                target = node.left
+        if target is not None:
+            # Walk the complete receiver route: `box.items.push` and
+            # `rows[i].items[j] = value` mutate their roots just as direct
+            # container writes do. Otherwise initializer length facts can
+            # survive a loop that changes a nested field.
+            found = _syntax_storage_route(target)
+            if found is not None:
+                (replacements if replaces else names).add(found[0])
         for child in _runtime_syntax_children(node):
             walk(child)
 

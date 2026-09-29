@@ -1,0 +1,3 @@
+Box:type=[items:array<int64>]
+Outer:type=[inner:Box]
+main=():>int64=>{let box=Outer[Box[[42]]] loop i in [0..1) {box.inner.items=[]} return box.inner.items[0]}
