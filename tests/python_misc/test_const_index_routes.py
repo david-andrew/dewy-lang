@@ -68,6 +68,15 @@ i+=1
 return 42
 }''',
 ]
+ERRORS += [
+    # A literal and a named selection can also denote the same storage.
+    ERRORS[0].replace('const other=j', 'const other=0'),
+    ERRORS[0].replace('xs[other].clear', 'xs[j].clear'),
+    ERRORS[0].replace('array<array<int64>>=[[] []]',
+                      'array<[items:array<int64>]>=[[items=[]] [items=[]]]')
+             .replace('xs[chosen]', 'xs[chosen].items')
+             .replace('xs[other]', 'xs[other].items'),
+]
 
 @pytest.mark.parametrize('source', CASES)
 def test_const_index_route(tmp_path, source):

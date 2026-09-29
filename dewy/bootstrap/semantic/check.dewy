@@ -3983,12 +3983,18 @@ array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Envir
 # storage refinements; losing an exact length is not permission to skip it.
 array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session):>Error? => {
     if method.name in? ['join' 'reserve'] return none
-    container_state.replaced(method.array env.state @session descendants=true)
-    if method.name =? 'sort' return none
+    if method.name =? 'sort' {
+        container_state.replaced(method.array env.state @session descendants=true)
+        return none
+    }
     let limit = targets.max_length(session.target)
     let route = bindings.array_route_id(method.array session.hir @session.registry)
+    let current = if route is? none none else read_type(route env session fallback=node_at(method.array session).value_type)
+    # Two selector bindings can name the same array. Save this receiver's
+    # prior length, invalidate all possibly overlapping routes, then install
+    # only the selected receiver's postcondition.
+    container_state.replaced(method.array env.state @session)
     if route is? none return none
-    let current = read_type(route env session fallback=node_at(method.array session).value_type)
     let array = types.node_at(session.types node_at(method.array session).value_type)
     $runtime_assert array is? types.ArrayType
     let length:addr? = none

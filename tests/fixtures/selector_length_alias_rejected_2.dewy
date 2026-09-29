@@ -1,0 +1,8 @@
+check=(i:int64 j:int64):>int64=>{
+let xs:array<array<int64>>=[[] []]
+if i<?0 or i>=?xs.length or j<?0 or j>=?xs.length return 0
+const chosen=i const other=j
+xs[chosen].clear xs[chosen].push(42)
+xs[j].clear
+return xs[chosen][0]
+}

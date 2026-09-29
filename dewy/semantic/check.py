@@ -8793,18 +8793,23 @@ def _apply_array_method_transition(
     the bounds analysis.
     """
     receiver = method.array
+    binding_id = sb.array_route_id(receiver, ctx.binding_registry)
+    current = ctx.refinements.get(binding_id)
+    exact = current.length if isinstance(current, ty.ArrayType) else None
+    minimum = ctx.length_bounds.get(binding_id, 0) if exact is None else exact
     if method.name not in {'join', 'reserve'}:
         assigned = sb.mutation_path(receiver)
         if assigned is not None:
-            _invalidate_routes(assigned[0], ctx=ctx, prefix=(*assigned[1], '[]'))
-    binding_id = sb.array_route_id(receiver, ctx.binding_registry)
+            # Distinct selector bindings may select the same array. Capture
+            # this receiver's old length first, then invalidate its possible
+            # aliases before installing the method's new length. Sorting
+            # changes only descendants, so it preserves the receiver length.
+            prefix = (*assigned[1], '[]') if method.name == 'sort' else assigned[1]
+            _invalidate_routes(assigned[0], ctx=ctx, prefix=prefix)
     if binding_id is None:
         return
     assert isinstance(receiver.type, ty.ArrayType)
     element = receiver.type.element
-    current = ctx.refinements.get(binding_id)
-    exact = current.length if isinstance(current, ty.ArrayType) else None
-    minimum = ctx.length_bounds.get(binding_id, 0) if exact is None else exact
     index_value = _constant_integer(_unwrap_parens(index), ctx=ctx) if index is not None else None
     if method.name == 'pop':
         if index is None:

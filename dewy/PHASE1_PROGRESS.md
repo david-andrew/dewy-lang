@@ -16,12 +16,30 @@ reports **4,279 sites / 55,557 lines = 77.020/KLOC**, within the unchanged
 these are not isolated performance measurements. Artifacts use
 `phase1-ownership-closure-*` outside the checkout.
 
-The broader non-slow pytest run is still in progress and has reported failures;
-this is not a green full-suite checkpoint. The independent hosted seed before
+The broader non-slow pytest run finished with **6,039 passed, 20 failed and
+13 skipped** in 5,150.58 seconds; this is not a green full-suite checkpoint.
+The independent hosted seed before
 the last return-boundary adjustment prepared/emitted in 237.78/242.79 seconds,
 with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
+
+## Full-suite repair: aliased selector lengths (2026-09-29)
+
+Array length transitions invalidated descendants but missed peer routes that
+could denote the receiver itself: clearing `xs[j]` could leave the old length
+of `xs[i]` in the source checker's type facts. Both checkers now capture the
+receiver's old length, invalidate all overlapping routes, then install its
+postcondition. Sorting retains its length and invalidates only descendants.
+This repairs an unsound acceptance; no new proof is assumed about selectors.
+
+The complete selector module passes all 12 checks, including both compilers
+and x86-64/C execution. Thirty-three surrounding hosted array/route checks
+passed; one stronger out-of-bounds diagnostic required a separate expectation
+update. Four rejected manifest cases cover const, mutable and literal peers,
+including nested record fields, bringing the corpus to 537. The native driver
+was built from frozen `phase1-regression-repair-source`; artifacts use
+`dewy-selector-*`. Other full-suite failures are still being repaired.
 
 ## Full-suite repair: conditional frame-array expectation (2026-09-29)
 
