@@ -36,6 +36,21 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-29): the independent-seed failure was a hosted value
+cast lowering bug, exposed by the traversal cursor added in `50deaaca`.
+Erasing a record value cast to `int64` before selecting an inferred local's
+storage skipped its ownership boundary. Reassigning the cursor then overwrote
+the borrowed input node, corrupting a checked block into its final flow node.
+A hardware watchpoint identified that write in `borrowing.scan_reads`.
+
+Hosted lowering now retains the logical record type until storage selection,
+then erases its representation during expression extraction. No move/copy
+permission is weakened. Cursor traversal, field mutation, dynamic fields and
+strict-copy rejection have focused regressions; 38 hosted ownership/brand/
+projection checks and the paired x86-64/C group pass (28.08 seconds). Four
+fixtures bring the manifest to 425. A fresh independent hosted seed is building;
+full integration certification remains pending.
+
 Checkpoint (2026-09-29): current array-field length facts now refine hosted
 reads without narrowing the declared mutation/growth contract. Both routes
 reseed stable member routes after replacement; mutation and deferred captures

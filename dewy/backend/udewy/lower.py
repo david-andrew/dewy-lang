@@ -3430,9 +3430,13 @@ class _Lowerer(
             )
             if (
                 isinstance(node, (hir.ValueCast, hir.Transmute))
-                and isinstance(node.type, (ty.QuantityType, ty.ObjectType))
+                and (isinstance(node.type, ty.QuantityType)
+                     or isinstance(node, hir.Transmute) and isinstance(node.type, ty.ObjectType))
             ):
-                # Objects are one-word handles; quantities are their numbers.
+                # Quantities are their numbers and raw transmutes expose the
+                # handle. A value cast must retain the record type until its
+                # storage boundary: erasing it here makes an inferred local
+                # alias the input handle without acquiring its own storage.
                 return replace(
                     transformed,
                     type=self._lower_runtime_value_type(node.type),
@@ -6256,7 +6260,8 @@ class _Lowerer(
                 if pins:
                     prelude.extend([self._declare(raw, replace(expr, type='int64'), node.loc), *pins])
                     expr = raw
-            return prelude, replace(node, expr=expr)
+            physical = self._lower_runtime_value_type(node.type) if isinstance(node.type, ty.ObjectType) else node.type
+            return prelude, replace(node, type=physical, expr=expr)
         if isinstance(node, hir.Block) and node.scoped:
             # A value block is one always-selected branch. Reuse the flow
             # result boundary (including aggregate/optional storage), since

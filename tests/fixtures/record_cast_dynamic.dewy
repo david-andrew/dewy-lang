@@ -1,0 +1,17 @@
+Node=$abstract type of [value:int64 items:array<int64>]
+Leaf=type of Node
+Group=type of Node & [child:addr]
+Other=type of Node & [text:string]
+get=(nodes:array<Node> id:addr):>Node=>{ $runtime_assert id <? nodes.length return nodes[id] }
+scan=(nodes:array<Node> id:addr):>int64=>{
+ let node=get(nodes id)
+ if node is? Leaf return 1
+ let terminal=node
+ loop terminal is? Group {terminal=get(nodes terminal.child)}
+ return if node is? Group and node.value=?42 node.value else 2
+}
+main=():>int64=>{
+ let nodes:array<Node>=[Group[42 [1 2] 1] Other[3 [4] 'x']]
+ let result=scan(nodes 0)
+ return if nodes[0] is? Group and nodes[0].value=?42 result else 4
+}
