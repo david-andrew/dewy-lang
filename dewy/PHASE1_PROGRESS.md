@@ -25,6 +25,30 @@ address those failures. The last hosted full strict-copy inventory still has
 1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
 latest ownership slices. Phase 1 remains open.
 
+## Typed conversions preserve unrelated loans (2026-09-29)
+
+Both shared storage proofs now keep a representation conversion's escape
+restriction on its own source route rather than blocking the complete caller.
+Typed value conversion does not expose an arbitrary outside owner. Source
+escape summaries, raw boundaries, later argument writes and public allocation
+permissions remain conservative. UTF-8/Unicode-scalar conversion and mutation
+of a converted byte array retain value independence and reclaim temporary
+storage after warming the runtime's reusable region.
+
+Thirty-six focused/surrounding hosted checks and the paired x86-64/C group
+pass. Five fixtures bring the corpus to 584. The numeric type-product module
+now passes strict checking on both routes, reaching 64 physical modules.
+The fresh driver was built with the preceding corrected native driver, since
+the older full-checkpoint seed cannot check the new strict predicate module.
+Logs use `dewy-conversion-loan-*` and `dewy-type-products-*`.
+
+A refreshed hosted inventory after the preceding ownership/report fixes has
+1,587 implicit runtime-sized bootstrap sites in 69 modules (down from 1,694
+in 72); it predates this conversion change. Complete source adoption and the
+other closure work below remain open. The frozen inventory source is
+`phase1-storage-inventory-source`, with `dewy-storage-inventory.*` logs outside
+the checkout.
+
 ## Predicate result ownership and numeric constants (2026-09-29)
 
 `inferred_results.dewy` now passes `$explicit_copies` on both compiler routes:

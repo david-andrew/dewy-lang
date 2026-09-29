@@ -450,8 +450,10 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         writes[id]=written
         loop item in body {
             let node=hir.node_at(nodes item)
-            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) and union_loan_source(item nodes table) is? none {blocked.push(id)}
-            else if node is? hir.ExpressedIdentifier {
+            # Typed conversion may retain its own source (excluded by the
+            # route/escape proof), but cannot expose unrelated ambient owners.
+            # Its children still contribute their ordinary calls/raw effects.
+            if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
                 let operation=primitive(node registry)

@@ -4,7 +4,7 @@ A read-only aggregate parameter, a stable fresh local owner, or one of their
 projections can be forwarded without a snapshot when the caller and callee
 operate on their own bindings through known calls. The whole-caller proof
 excludes writes through later arguments too. Nonlocal
-storage, raw operations, casts of existing storage and unresolved callbacks keep
+storage, raw operations, converted source routes and unresolved callbacks keep
 this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
 from collections import deque
@@ -381,10 +381,11 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                              # effects and writes/captures of these locals.
                              and private_origin(node.expr)}
         for node in body:
-            if (isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr)
-                    and union_loan_source(node) is None):
-                blocked.add(key)
-            elif isinstance(node, hir.ExpressedIdentifier):
+            # A typed conversion may retain its source (excluded above and
+            # by parameter escape summaries), but it cannot expose unrelated
+            # owners to ambient mutation. Its children retain their ordinary
+            # call/raw restrictions; no allocation permission is removed.
+            if isinstance(node, hir.ExpressedIdentifier):
                 if (node.binding_id not in local
                         and not (node.binding_id is None and node.name in OPERATORS)
                         and analysis._flatten_callable(node, frozenset()) is None):
