@@ -124,6 +124,22 @@ later-argument mutation and owned-cell rejection. Ten new manifest cases bring
 the total to 458. Full integration remains certified at `da4a1aca`; Phase 1 is
 still open.
 
+## Projection-only forwarding of call roots (2026-09-29)
+
+The bounded call-root proof now follows whole-record arguments through known
+read-only helpers. Every use must ultimately project a field or forward to
+another such parameter. A complete-record ownership use rejects its parameter
+and all upstream forwarders through a finite worklist; recursive forwarding
+without an owning endpoint remains safe. This does not equate read-only effects
+with a nonowning parameter ABI.
+
+Twenty-four hosted checks and two paired native groups pass, covering multiple
+helpers, keyword arguments, recursion, returned roots, owning locals and the
+existing frame budget/stability cases. Five fixtures bring the manifest to 463.
+Native reporting also retains the bounded two-word copies of existing scalar
+cells in call roots. An independent hosted build of the forwarding proof is in
+progress; full integration remains certified at `da4a1aca`.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

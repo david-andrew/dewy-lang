@@ -58,11 +58,12 @@ ERRORS = [
     SOURCE.split('work=')[0].replace('forward=(items:array<int64>)',
                                   'forward=(items:array<int64> callback:():>int64 & no_effects)')
           .replace('Pair[items 40]', 'Pair[items callback()]'),
-    # An entire record forwarded or consumed by a second callee keeps the
-    # ordinary ownership protocol; this proof only lends projected roots.
-    SOURCE.replace('read=(pair:Pair):>int64 & no_effects=>pair.items.length+pair.offset',
-                   'size=(pair:Pair):>int64 & no_effects=>pair.items.length+pair.offset\nread=(pair:Pair):>int64 & no_effects=>size(pair)'),
+
 ]
+
+# A known projection-only helper can forward the same call root.
+CASES.append(SOURCE.replace('read=(pair:Pair):>int64 & no_effects=>pair.items.length+pair.offset',
+                   'size=(pair:Pair):>int64 & no_effects=>pair.items.length+pair.offset\nread=(pair:Pair):>int64 & no_effects=>size(pair)'))
 
 # The finite frame budget is a proof limit, not a reason to allocate silently.
 def roots(count):

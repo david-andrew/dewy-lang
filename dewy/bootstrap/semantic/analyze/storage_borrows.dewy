@@ -457,20 +457,65 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let flow_literals:set<addr>=set[]
     let flow_sources:set<addr>=set[]
     let literal_arguments:dict<addr set<addr>>=[]
-    let unprojected_reads:dict<addr set<addr>>=[]
+    # Propagate ownership requirements back through known read-only
+    # forwarding calls. Projection-only cycles introduce no owning use.
+    let unprojected_reads:set<addr>=set[]
+    let forwarders:dict<addr set<addr>>=[]
     loop id in analysis.literals {
         if id not in? bodies continue
-        let rejected:set<addr>=set[]
         let parents:array<addr>=[id]
         loop item in bodies[id] {parents.push(item)}
         loop item in parents {
             let parent=hir.node_at(nodes item)
+            let forwarded:dict<addr set<addr>>=[]
+            let common:set<addr>=set[]
+            if parent is? hir.FunctionCall {
+                let targets=effects.direct_targets(parent analysis nodes)
+                let first=true
+                if targets isnt? none {loop target in targets {
+                    let callee=hir.node_at(nodes target)
+                    $runtime_assert callee is? hir.FunctionLiteral
+                    let readonly:set<addr>=set[]
+                    loop param in effects.literal_params(callee) {
+                        if not param.place and param.binding_id isnt? none and param.binding_id in? summaries.by_param_binding {
+                            const summary=@summaries.by_param_binding[param.binding_id]
+                            if effects.read_only(summary) {readonly.push(param.binding_id)}
+                        }
+                    }
+                    let current:set<addr>=set[]
+                    let pairs=effects.pair_arguments(parent callee)
+                    if pairs isnt? none {loop pair in pairs {
+                        if pair.parameter isnt? none and pair.parameter in? readonly {
+                            current.push(pair.argument)
+                            if pair.argument in? forwarded {let parameters=@forwarded[pair.argument] parameters.push(pair.parameter)}
+                            else {forwarded[pair.argument]=set[pair.parameter]}
+                        }
+                    }}
+                    if first {common=current} else {common=common & current}
+                    first=false
+                }}
+            }
             loop child in hir.children(parent) {
                 let value=hir.node_at(nodes child)
-                if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and not (parent is? hir.MemberAccess and child=?parent.value) {rejected.push(value.binding_id)}
+                if value isnt? hir.ExpressedIdentifier or value.binding_id is? none continue
+                if parent is? hir.MemberAccess and child=?parent.value continue
+                if child in? common and child in? forwarded {
+                    loop parameter in forwarded[child] {
+                        if parameter in? forwarders {let callers=@forwarders[parameter] callers.push(value.binding_id)}
+                        else {forwarders[parameter]=set[value.binding_id]}
+                    }
+                } else {unprojected_reads.push(value.binding_id)}
             }
         }
-        unprojected_reads[id]=rejected
+    }
+    let rejected:array<addr>=[]
+    loop binding in unprojected_reads {rejected.push(binding)}
+    loop rejected.length>?0 {
+        let target=rejected.pop
+        if target not in? forwarders continue
+        loop caller in forwarders[target] {
+            if caller not in? unprojected_reads {unprojected_reads.push(caller) rejected.push(caller)}
+        }
     }
     loop id in analysis.literals {
         if id not in? bodies or id not in? stable_locals or id not in? writes continue
@@ -642,7 +687,6 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             loop arg in node.pos_args {allowed.push(arg)}
             loop arg in node.kw_args.values {allowed.push(arg)}
             loop target in targets {
-                if target not in? unprojected_reads {allowed.clear break}
                 let callee=hir.node_at(nodes target)
                 $runtime_assert callee is? hir.FunctionLiteral
                 let pairs=effects.pair_arguments(node callee)
@@ -680,7 +724,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                                 safe=effects.read_only(outgoing)
                             }
                         }
-                        if expected isnt? none and pair.parameter isnt? none and pair.parameter not in? unprojected_reads[target] and pair.parameter in? summaries.by_param_binding and types.same_type(arg.value_type expected table) {
+                        if expected isnt? none and pair.parameter isnt? none and pair.parameter not in? unprojected_reads and pair.parameter in? summaries.by_param_binding and types.same_type(arg.value_type expected table) {
                             let fields=record_loan_fields(arg nodes table families @loan_sizes)
                             if fields isnt? none {
                                 const outgoing=@summaries.by_param_binding[pair.parameter]

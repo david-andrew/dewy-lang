@@ -286,7 +286,6 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     stable_locals = {}
     writes, captured = {}, set()
     eligible = {}
-    unprojected_reads = {}
     loan_sizes = {}
 
     def ordinary(type_):
@@ -380,15 +379,45 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             if caller not in blocked:
                 blocked.add(caller)
                 pending.append(caller)
+    # Call roots may pass through known read-only helpers, provided every
+    # path ends in projections. An owning use rejects its parameter and all
+    # forwarders; forwarding cycles with no owning endpoint remain loans.
+    # This is separate from effect purity: a read-only callee can still copy
+    # its complete input into a local and require the owning-input protocol.
+    unprojected_reads = set()
+    forwarders = {}
     for literal in analysis.literals:
-        # A frame root must never enter an owning-parameter protocol. Its
-        # handle is used only to project fields; the callee handles any
-        # subsequent field value boundaries in the ordinary way.
-        unprojected_reads[id(literal)] = {
-            child.binding_id for node in [literal, *bodies[id(literal)]] for child in hir.children(node)
-            if isinstance(child, hir.ExpressedIdentifier)
-            and not (isinstance(node, hir.MemberAccess) and child is node.value)
-        }
+        for node in [literal, *bodies[id(literal)]]:
+            forwarded = {}
+            if isinstance(node, hir.FunctionCall):
+                targets = analysis._direct_targets(node)
+                common = None
+                for target in targets or ():
+                    current = {}
+                    for value, param in analysis._pair_arguments(node, target) or ():
+                        summary = summaries.for_param_binding(param.binding_id) if param is not None else None
+                        if param is not None and not param.place and summary is not None and summary.read_only:
+                            current.setdefault(id(value), set()).add(param.binding_id)
+                    common = set(current) if common is None else common & current.keys()
+                    for value, parameters in current.items():
+                        forwarded.setdefault(value, set()).update(parameters)
+                forwarded = {value: parameters for value, parameters in forwarded.items() if value in (common or ())}
+            for child in hir.children(node):
+                if not isinstance(child, hir.ExpressedIdentifier) or child.binding_id is None:
+                    continue
+                if isinstance(node, hir.MemberAccess) and child is node.value:
+                    continue
+                if id(child) in forwarded:
+                    for parameter in forwarded[id(child)]:
+                        forwarders.setdefault(parameter, set()).add(child.binding_id)
+                else:
+                    unprojected_reads.add(child.binding_id)
+    pending = deque(unprojected_reads)
+    while pending:
+        for caller in forwarders.get(pending.popleft(), ()):
+            if caller not in unprojected_reads:
+                unprojected_reads.add(caller)
+                pending.append(caller)
     # A nested function may capture an owner even if that function is not
     # called directly here. It cannot enter the private-owner proof.
     stable_locals = {key: {binding: type_ for binding, type_ in owners.items() if binding not in captured}
@@ -585,7 +614,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     same_storage |= loan is not None
                     fields = record_loan_fields(argument, loan_sizes)
                     if (fields is not None and argument.type == expected
-                            and parameter is not None and parameter.binding_id not in unprojected_reads[id(target)]
+                            and parameter is not None and parameter.binding_id not in unprojected_reads
                             and all(stable_value(field) for field in fields)):
                         stable = True
                     if (stable and parameter is not None and ordinary(argument.type)

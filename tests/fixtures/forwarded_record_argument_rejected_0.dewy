@@ -1,0 +1,15 @@
+$explicit_copies
+
+# Assemble a fixed call root from stable handles. The callee projects its
+# fields; the root and the fields do not become separate storage owners.
+Pair:type=[items:array<int64> offset:int64]
+size=(pair:Pair):>int64=>{let saved=pair saved.items.clear return saved.offset}
+middle=(pair:Pair):>int64 & no_effects=>size(pair)
+read=(pair:Pair):>int64 & no_effects=>middle(pair)
+forward=(items:array<int64>):>int64 & no_effects=>read(Pair[items 40])
+work=(items:array<int64>):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {if forward(items) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>work([20 22])

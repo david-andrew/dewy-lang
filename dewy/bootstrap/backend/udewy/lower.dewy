@@ -4703,7 +4703,15 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
                 let stored=object_layout(field.value_type node @state)
                 prefix.push(counted_bytes(value target word(0 node @state) word(stored.size node @state) node @state))
                 state.copy_notes.push(CopyNote['record' copy_name(field.value_type @state) 'borrowed into a call root' 'bounded representation of a proven call-scoped loan' item.loc state.source_index runtime_sized=false policy_exempt=true])
-            } else {prefix.push(field_write(target value field.value_type node @state))}
+            } else {
+                if cell_members(field.value_type @state) isnt? none {
+                    # Existing scalar cells still copy two words. Keep that
+                    # operation in the inventory even though it cannot own
+                    # a runtime-sized payload or allocate storage.
+                    state.copy_notes.push(CopyNote['cell' copy_name(field.value_type @state) 'stored in a union' 'bounded scalar cell stored in a call root' item.loc state.source_index runtime_sized=false])
+                }
+                prefix.push(field_write(target value field.value_type node @state))
+            }
             continue
         }
         # A record field is inline storage: the write copies the source's
