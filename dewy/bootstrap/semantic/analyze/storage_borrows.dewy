@@ -87,7 +87,7 @@ private_origin=(id:addr nodes:array<hir.AST>):>bool=>{
     let pending:array<addr>=[id]
     loop pending.length>?0 {
         let item=hir.node_at(nodes pending.pop)
-        if item is? hir.ObjectLiteral|hir.ArrayLiteral|hir.FunctionCall|hir.NoneValue continue
+        if item is? hir.ObjectLiteral|hir.ArrayLiteral|hir.FunctionCall|hir.CopyValue|hir.NoneValue continue
         if item is? hir.Flow {
             if item.default is? none return false
             pending.push(item.default)
@@ -363,11 +363,13 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let blocked:set<addr>=set[]
     let constants:dict<addr addr>=[]
     let ambient_reads:dict<addr set<addr>>=[]
-    # Closed immutable startup values cannot change through ordinary writes.
+    # Immutable startup owners include ordinary factory results and explicit
+    # copies: their value boundary separates them from initializer inputs.
+    # Later raw/unknown calls still block the ambient-storage loan proof.
     # Remove function-local declarations before resolving ambient readers.
     loop [binding id] in analysis.declares {
         let node=hir.node_at(nodes id)
-        if node is? hir.Declare and node.decltype=?'const' and not node.view and independent_materialization(node.expr nodes) {
+        if node is? hir.Declare and node.decltype=?'const' and not node.view and (independent_materialization(node.expr nodes) or private_origin(node.expr nodes)) {
             constants[binding]=if node.annotation is? none hir.node_at(nodes node.expr).value_type else node.annotation
         }
     }

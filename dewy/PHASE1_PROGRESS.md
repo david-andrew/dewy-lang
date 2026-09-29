@@ -24,6 +24,23 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Computed immutable startup owners (2026-09-29)
+
+The shared storage proof recognizes ordinary factory results and explicit
+copies as independent startup owners, alongside literal construction. Only
+immutable, owning module declarations qualify; local declarations are removed
+before resolving ambient readers. Unknown/raw operations and mutable globals
+keep their existing stability restrictions. Explicit copies also qualify as
+fresh local origins under the same exposure and capture checks.
+
+All eleven hosted checks and the paired native group pass, including a proof-
+disabled control, mutation of the original after a startup snapshot, record
+factory results, mutable globals and captured local storage. Six new fixtures
+bring the corpus to 558. Logs use `dewy-computed-constant-*`. The compiler's
+`type_products.dewy` remains non-strict: its call graph reaches reporting and
+raw I/O, so the shared incoming-storage proof still cannot justify its call
+root. No ambient mutation or allocation permission was relaxed to admit it.
+
 ## Explicit array assignment takes its result owner (2026-09-29)
 
 Hosted assignment now takes the arena descriptor produced by an explicit copy

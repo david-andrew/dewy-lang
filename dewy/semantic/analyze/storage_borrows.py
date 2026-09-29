@@ -63,7 +63,7 @@ def private_origin(node):
     pending = [node]
     while pending:
         item = pending.pop()
-        if isinstance(item, (hir.ObjectLiteral, hir.ArrayLiteral, hir.FunctionCall, hir.NoneValue)):
+        if isinstance(item, (hir.ObjectLiteral, hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.NoneValue)):
             continue
         if isinstance(item, hir.Flow):
             if item.default is None or any(not isinstance(arm, hir.IfArm) for arm in item.arms):
@@ -295,11 +295,14 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     writes, captured = {}, set()
     eligible = {}
     loan_sizes = {}
-    # Only closed immutable startup values enter the ambient-storage proof.
+    # Immutable startup owners may be constructed by a factory or an explicit
+    # copy as well as a literal. Those value boundaries establish independence
+    # from the initializer's inputs; later raw/unknown calls still block loans.
     # Remove declarations found inside functions below; local const views
     # and captured/reexecuted declarations keep their existing lifetime rules.
     constants = {binding: node.annotation or node.expr.type for binding, node in analysis.declares.items()
-                 if node.decltype == 'const' and not node.view and independent_materialization(node.expr)}
+                 if node.decltype == 'const' and not node.view
+                 and (independent_materialization(node.expr) or private_origin(node.expr))}
     ambient_reads = {}
 
     def ordinary(type_):

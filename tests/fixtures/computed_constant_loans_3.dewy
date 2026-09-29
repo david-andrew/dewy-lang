@@ -1,0 +1,16 @@
+$explicit_copies
+
+# Assemble a fixed call root from stable handles. The callee projects its
+# fields; the root and the fields do not become separate storage owners.
+Pair:type=[items:array<int64> offset:int64]
+read=(pair:Pair):>int64 & no_effects=>pair.items.length+pair.offset
+Box:type=[items:array<int64>]
+make=():>Box=>Box[[20 22]]
+const fixed=make()
+forward=(items:array<int64>):>int64 & no allocates=>read(Pair[fixed.items 40])
+work=(items:array<int64>):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {if forward(items) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>work([20 22])
