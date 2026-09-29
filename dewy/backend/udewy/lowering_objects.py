@@ -473,10 +473,25 @@ class _ObjectLowering:
             self.object_literal_contexts.append((dest, object_type, names))
             try:
                 for field in arg.fields:
-                    prelude, value = self._extract_expression(field.value)
+                    field_type = object_type.field(field.name).type
+                    field_shape = ty.structural_base(field_type)
+                    inline = isinstance(field_shape, ty.ObjectType)
+                    prelude, value = (self._extract_object_pointer(field.value) if inline
+                                      else self._extract_expression(field.value))
                     statements.extend(prelude)
-                    statements.extend(self._value_store(value, self._field_address(dest, offsets[field.name], field.loc),
-                                                        object_type.field(field.name).type, field.loc))
+                    address = self._field_address(dest, offsets[field.name], field.loc)
+                    if inline:
+                        # Copy only the bounded representation. Its nested
+                        # descriptors still belong to the stable source; this
+                        # call root neither retains nor releases their owners.
+                        field_size, _ = self._object_layout(field_shape, field.value)
+                        statements.extend(self._byte_copy_loop(address, value, self._int64_literal(field.loc, field_size), field.loc))
+                        self.copy_notes.append(CopyNote(
+                            self.srcfile, field.loc, 'bounded representation of a proven call-scoped loan',
+                            kind='record', type_name=type_to_dewy(field_type), site='borrowed into a call root',
+                            runtime_sized=False, policy_exempt=True))
+                    else:
+                        statements.extend(self._value_store(value, address, field_type, field.loc))
             finally:
                 self.object_literal_contexts.pop()
             return statements, dest

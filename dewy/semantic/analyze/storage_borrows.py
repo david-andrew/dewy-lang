@@ -194,19 +194,55 @@ def owning_array_reads(body, analysis, summaries, selection_reads=()):
     return owning
 
 
-def record_loan_fields(node):
-    """Fixed root containing words and borrowed dynamic-array handles.
+def record_loan_size(type_, memo):
+    """Bounded inline bytes, including possible descendant record layouts.
 
-    Inline records, cells, fixed arrays and lifecycle values need their own
-    representation/cleanup evidence. This initial shape has no owned fields
-    at all; it may only exist for the duration of a proven read-only call.
+    Array descriptors are borrowed handles, never inline element storage.
+    Sum the family alternatives conservatively rather than depending on the
+    backend's padding choices. Repeated fields count repeatedly; cycles and
+    oversized families exhaust the same finite frame budget.
+    """
+    key = id(type_)
+    if key in memo:
+        return memo[key]
+    pending, size = [(type_, True)], 0
+    while pending:
+        selected, family = pending.pop()
+        shape = ty.structural_base(selected)
+        if isinstance(shape, ty.ObjectType):
+            if any(method.lifecycle is not None for method in shape.methods):
+                size = None
+                break
+            pending.extend((field.type, True) for field in shape.fields)
+            if family:
+                pending.extend((ty.USER_BRAND_TYPES[name], False)
+                               for name in ty.brand_alternatives(shape))
+        elif not (isinstance(shape, ty.ArrayType) and shape.length is None
+                  or shape == 'bool' or ty.fixed_integer_layout(shape) is not None):
+            size = None
+            break
+        size += 8  # word, array handle, or record tag/alignment allowance
+        if size > 4096:
+            size = None
+            break
+    memo[key] = size
+    return size
+
+
+def record_loan_fields(node, sizes):
+    """A call-scoped root lends stable fields without acquiring owners.
+
+    Inline records containing words and array handles use the same lifetime
+    proof as array fields. Cells and fixed arrays retain their ordinary path.
     """
     if not isinstance(node, hir.ObjectLiteral) or not borrowable(node.type):
+        return None
+    if record_loan_size(node.type, sizes) is None:
         return None
     shape = ty.structural_base(node.type)
     if not isinstance(shape, ty.ObjectType) or len(shape.fields) != len(node.fields):
         return None
-    arrays = []
+    borrowed = []
     for field in node.fields:
         expected = shape.field(field.name)
         if expected is None:
@@ -216,7 +252,9 @@ def record_loan_fields(node):
         if isinstance(stored, ty.ArrayType) and stored.length is None:
             if actual != stored:
                 return None
-            arrays.append(field.value)
+            borrowed.append(field.value)
+        elif isinstance(stored, ty.ObjectType) and actual == stored:
+            borrowed.append(field.value)
         elif stored == 'bool' and actual in ('bool', 'true', 'false'):
             pass
         elif ty.fixed_integer_layout(stored) is not None and (actual == stored or
@@ -224,7 +262,7 @@ def record_loan_fields(node):
             pass
         else:
             return None
-    return arrays
+    return borrowed
 
 
 def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
@@ -233,6 +271,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     writes, captured = {}, set()
     eligible = {}
     unprojected_reads = {}
+    loan_sizes = {}
 
     def ordinary(type_):
         key = id(type_)
@@ -522,7 +561,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)
                     same_storage |= loan is not None
-                    fields = record_loan_fields(argument)
+                    fields = record_loan_fields(argument, loan_sizes)
                     if (fields is not None and argument.type == expected
                             and parameter is not None and parameter.binding_id not in unprojected_reads[id(target)]
                             and all(stable_value(field) for field in fields)):
@@ -539,8 +578,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 loans = set()
                 for argument in [*node.pos_args, *node.kw_args.values()]:
                     if id(argument) in allowed and isinstance(argument, hir.ObjectLiteral):
-                        size = 8 * (len(argument.fields) + 1)
-                        if literal_bytes + size <= 4096:
+                        size = record_loan_size(argument.type, loan_sizes)
+                        if size is not None and literal_bytes + size <= 4096:
                             literal_bytes += size
                             loans.add(id(argument))
                         else:

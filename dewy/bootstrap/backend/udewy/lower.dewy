@@ -4670,8 +4670,8 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
         let offset=layout.offsets.get(item.name)
         $runtime_assert field isnt? none and offset isnt? none
         if loan {
-            # Shared proof: scalar words and stable array handles only. This
-            # call root never owns a field and must not retain or release it.
+            # Shared proof: bounded representations with stable borrowed
+            # handles. This root never retains or releases a field owner.
             let value=expression(item.value @state)
             if item.binding_id isnt? none {
                 let name=symbol(item.name item.binding_id @state)
@@ -4679,7 +4679,12 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
                 prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name type value item.binding_id] @state))
                 value=put(hir.ExpressedIdentifier[item.loc type name item.binding_id] @state)
             }
-            prefix.push(field_write(address(destination offset node @state) value field.value_type node @state))
+            let target=address(destination offset node @state)
+            if object_valued(field.value_type @state) {
+                let stored=object_layout(field.value_type node @state)
+                prefix.push(counted_bytes(value target word(0 node @state) word(stored.size node @state) node @state))
+                state.copy_notes.push(CopyNote['record' copy_name(field.value_type @state) 'borrowed into a call root' 'bounded representation of a proven call-scoped loan' item.loc state.source_index runtime_sized=false policy_exempt=true])
+            } else {prefix.push(field_write(target value field.value_type node @state))}
             continue
         }
         # A record field is inline storage: the write copies the source's

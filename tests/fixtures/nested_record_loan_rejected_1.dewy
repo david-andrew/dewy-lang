@@ -1,0 +1,16 @@
+$explicit_copies
+
+# The temporary call root lends its inline record's descriptors. Its source
+# stays owned by the caller and every callee access is read-only.
+Inner:type=[items:array<int64> offset:int64]
+Pair:type=[inner:Inner offset:int64]
+read=(pair:Pair unused:int64):>int64 & no_effects=>pair.inner.items.length+pair.inner.offset+pair.offset
+change=(@inner:Inner):>int64=>{inner.items.clear return 0}
+forward=(inner:Inner):>int64 & no_effects=>read(Pair[inner 20] change(@inner))
+work=(inner:Inner):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {if forward(inner) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+main=():>int64=>work(Inner[[20 22] 20])
+

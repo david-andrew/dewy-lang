@@ -46,6 +46,32 @@ the nonresource paths as well. The independent seed with the preceding loop and
 conversion repairs built successfully (233.57 seconds prepare, 238.88 emitted);
 full source bootstrap validation follows with this write-target repair included.
 
+## Nested record argument loans (2026-09-29)
+
+The shared storage proof now permits stable inline record fields in a
+call-scoped record root, including nested dictionaries. Both lowerers copy only
+the bounded inline representation: its descriptors remain borrowed from the
+source, with no retain, allocation or cleanup in the temporary root. Callee
+read-only effects and caller-wide storage stability are still required; later
+argument writes prevent the loan. The copy report includes each bounded
+representation copy rather than hiding it under the source type's runtime size.
+
+The frame bound includes possible nominal descendants and structural carriers,
+counting repeated fields and conservatively summing family alternatives. Cycles,
+unsupported layouts and the 4096-byte per-function budget retain the ordinary
+ownership obligation. No new syntax or ownership policy is introduced.
+
+Validation: 27 hosted checks and two paired native groups pass; an additional
+nominal-descendant execution case passes on both backends for both compilers.
+The kernels require zero allocated bytes across 1,000 calls. They cover nested
+structural records, minted records, dictionaries, mutation conflicts and an
+oversized descendant family. Eight fixtures bring the manifest to 441.
+
+Independent integration of the preceding `da4a1aca` source reached a
+byte-identical three-generation native fixed point, including x86-64/C execution
+checks. Generations 2/3 took 61/65 seconds under concurrent checking, not isolated
+performance measurements. Its full 433-case parity run remains in progress.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
