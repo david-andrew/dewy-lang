@@ -72,6 +72,22 @@ byte-identical three-generation native fixed point, including x86-64/C execution
 checks. Generations 2/3 took 61/65 seconds under concurrent checking, not isolated
 performance measurements. Its full 433-case parity run remains in progress.
 
+## Certified integration checkpoint: `da4a1aca` (2026-09-29)
+
+All **433/433** paired acceptance/execution cases pass, including every failure
+from the earlier 425-case run. The native pair reaches a byte-identical
+three-generation fixed point and passes its x86-64/C execution checks. The
+complete native inventory reports **4,270 sites / 55,206 lines = 77.347/KLOC**,
+passing the unchanged 4,500/85 gates. This is the latest complete certification;
+the nested-record-loan work above has focused evidence and a fresh independent
+hosted seed, but postdates this full checkpoint.
+
+The nested-loan hosted build prepared/emitted in 233.13/238.44 seconds. Its
+remaining implicit runtime-sized inventory is 1,823 sites in 73 bootstrap
+modules, unchanged from the preceding hosted inventory: the new proof enables
+nested loans but does not yet cover the compiler's full context constructors.
+Phase 1 remains open; these measurements are not a completion claim.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
