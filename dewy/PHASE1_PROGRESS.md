@@ -29,6 +29,28 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Optional numeric equality shares call applicability (2026-09-29)
+
+Native union equality now uses ordinary call acceptance when selecting its
+payload comparison, including the prelude's numeric materializations. It no
+longer rejects `optional_bigint =? 3` merely because the literal does not
+structurally subtype the nonzero record. Both routes select optional tags
+before an oversized literal triggers numeric dispatch; absence is never
+converted to a non-optional integer. Native capture keeps pure literal operands
+contextual until the selected payload call supplies their representation,
+including `uint64.max` beside an effectful/field operand.
+
+Eight focused hosted checks and 26 surrounding equality checks pass, along
+with paired x86-64/C execution. Cases retain source evaluation order, negative
+and reversed equality, absent/zero payloads, large constants and ambiguous or
+nonnumeric rejection. Eight fixtures bring the manifest to 645. With these
+repairs, all five native-built fact comparisons from the preceding query batch
+pass. Logs use `dewy-optional-numeric-*` and
+`dewy-query-identity-native-comparisons-final.log`.
+
+The preceding frozen string-loan inventory is 4,216 sites / 55,882 lines =
+75.445/KLOC, within unchanged gates. Its 636-case full parity run is ongoing.
+
 ## Query type identities instead of copied contracts (2026-09-29)
 
 Call signatures, result refinements and record-shape queries now return ids in

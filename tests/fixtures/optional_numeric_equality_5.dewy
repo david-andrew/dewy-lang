@@ -1,0 +1,9 @@
+let calls:int64=0
+left=(value:bigint?):>bigint?=>{calls=calls*10+1 return value}
+right=():>int64=>{calls=calls*10+2 return 3}
+main=():>int64=>{
+    if left(none)=?right() or calls not=?12 return 1
+    calls=0
+    if left(3) not=?right() or calls not=?12 return 2
+    return 42
+}

@@ -1,0 +1,9 @@
+
+equal=(value:bigint?):>bool=>value=?3
+unequal=(value:bigint?):>bool=>value not=?3
+main=():>int64=>{
+    if equal(none) or equal(0) or equal(4) return 1
+    if not equal(3) or unequal(3) return 2
+    if not unequal(none) or not unequal(0) or not unequal(4) return 3
+    return 42
+}

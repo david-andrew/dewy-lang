@@ -986,6 +986,16 @@ snapshot_read = (value:addr member:addr @session:contexts.Session):>addr => {
     $runtime_assert node is? hir.ExpressedIdentifier
     return put(hir.ExpressedIdentifier[node.loc member node.name node.binding_id] @session)
 }
+# Literal operands have no evaluation effects or mutable storage to capture.
+# Keeping them contextual avoids allocating an arbitrary-width literal before
+# the selected numeric payload call has supplied its representation.
+equality_snapshot = (value:addr @session:contexts.Session):>SnapshotValue => {
+    let node=node_at(value session)
+    if node is? hir.Integer|hir.Bool|hir.String|hir.NoneValue {
+        return SnapshotValue[put(hir.Void[node.loc types.primitive('void' @session.types)] @session) value]
+    }
+    return snapshot_value(value @session)
+}
 union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     $runtime_assert arguments.length =? 2
     let loc=contexts.node_at(id env.lexical session).loc
@@ -1034,9 +1044,13 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
             $runtime_assert combined isnt? none
             return put(hir.Block[loc boolean [left.declaration right.declaration combined] false] @session)
         }
+        # Equality selects a payload call, so it shares ordinary call
+        # applicability, including prelude numeric materialization. Structural
+        # subtyping alone cannot place a literal in BigInt's nonzero record.
+        let system=dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
         let members:array<addr>=[]
         loop member in union.items {
-            if not types.is_primitive(types.node_at(session.types member) 'none') and subtyping.is_subtype(other_type member session.links @session.types) {members.push(member)}
+            if not types.is_primitive(types.node_at(session.types member) 'none') and dispatch.accepts(other_type member system @session.types) {members.push(member)}
         }
         if members.length =? 0 continue
         if members.length >? 1 return problem(id 'ambiguous equality against a union' 'narrow the union with `is?` first' env session)
@@ -1046,8 +1060,8 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
         let simple=node_at(value session) is? hir.ExpressedIdentifier
         loop argument in arguments {if node_at(argument session) isnt? hir.ExpressedIdentifier|hir.Integer|hir.Bool|hir.String|hir.NoneValue {simple=false}}
         if not simple {
-            let left=snapshot_value(arguments[0] @session)
-            let right=snapshot_value(arguments[1] @session)
+            let left=equality_snapshot(arguments[0] @session)
+            let right=equality_snapshot(arguments[1] @session)
             prefix=[left.declaration right.declaration]
             tested=if index =? 0 left.read else right.read
             other=if index =? 0 right.read else left.read
@@ -1124,6 +1138,22 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
         if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+            if func.name in? ['__eq__' '__ne__'] and positional.length =? 2 {
+                let absent=false
+                loop argument in positional {
+                    let type=types.node_at(session.types types.unfold(types.strip_refinement(node_at(argument session).value_type session.types) session.types))
+                    if type is? types.TypeOr {
+                        loop member in type.items {if types.is_primitive(types.node_at(session.types member) 'none') {absent=true}}
+                    }
+                }
+                # A large literal does not remove an optional operand's tag.
+                # Guard its payload comparison before numeric materialization.
+                if absent {
+                    let equality=union_equality(function positional func.name =? '__ne__' id env @session)
+                    if equality is? Error return equality
+                    if equality isnt? none return if expected is? none equality else against(equality expected id env @session)
+                }
+            }
             if func.name =? '__pow__' {
                 let powered=pow_operation(positional id env @session)
                 if powered is? Error return powered

@@ -11536,6 +11536,16 @@ def _dispatch_builtin(
             words = [hir.Transmute(arg.loc, 'int64', check_against(arg, root, ctx=ctx)) for arg in args]
             comparison = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, ty.FunctionType([ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int64')], [], None, 'bool', []), fname), words, {})
             return comparison
+    if fname in ('__eq__', '__ne__') and len(args) == 2 and any(
+        isinstance(shape := ty.unfold(ty.strip_refinement(arg.type)), ty.TypeOr)
+        and 'none' in shape.items for arg in args
+    ):
+        # Absence is a tag alternative, even beside an oversized constant.
+        # Select the guarded payload call before numeric dispatch tries to
+        # widen the whole optional value into a non-optional integer.
+        cell_test = _union_member_equality(args, negated=fname == '__ne__', loc=loc, source_name=source_name, ctx=ctx)
+        if cell_test is not None:
+            return cell_test
     big = _dispatch_bigint(fname, args, loc=loc, source_name=source_name, ctx=ctx, expected=expected)
     if big is not None:
         return big

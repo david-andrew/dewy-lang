@@ -1,0 +1,6 @@
+Box:type=[lower:bigint? upper:bigint?]
+equal=(value:Box?):>bool=>value isnt?none and value.lower=?3 and value.upper=?8
+main=():>int64=>{
+    if equal(none) or equal(Box[none 8]) or equal(Box[3 none]) return 1
+    return if equal(Box[3 8]) 42 else 2
+}
