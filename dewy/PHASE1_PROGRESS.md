@@ -6,6 +6,18 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
+## Latest full certification: `db95f751` (2026-09-29)
+
+**468/468** paired acceptance/execution cases pass. An independent hosted seed
+rebuilds the native pair to a byte-identical three-generation fixed point,
+including its x86-64/C execution checks. The complete copy inventory reports
+**4,276 sites / 55,386 lines = 77.204/KLOC**, within the unchanged 4,500/85 gates.
+The hosted build of this source prepared/emitted in 244.01/249.18 seconds under
+concurrent validation; its implicit runtime-sized bootstrap inventory is
+1,805 sites in 73 modules. The later sibling-field and dispatch changes have
+focused paired evidence and are entering independent hosted-build validation.
+Phase 1 remains open. Earlier checkpoints below retain their historical scope.
+
 ## Integration repair (2026-09-29): nested loop writes
 
 The independent hosted seed at `a2919429` exposed a missing hosted loop

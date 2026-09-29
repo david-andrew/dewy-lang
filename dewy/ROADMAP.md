@@ -605,8 +605,10 @@ silently.
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. The native command test now
    gates the bootstrap inventory at 4,500 static sites and 85 sites/KLOC.
-   The 2026-09-28 corrected inventory at `f899b2b5` measures 4,301 sites and
-   80.762/KLOC across 53,255 source lines, leaving about 5% headroom.
+   The corrected inventory at `f899b2b5` measured 4,301 sites and
+   80.762/KLOC across 53,255 source lines. The fully certified 2026-09-29
+   `db95f751` checkpoint measures 4,276 sites and 77.204/KLOC across 55,386
+   lines, retaining about 5% headroom under the total-site gate.
    Earlier 3,000/60 gates were based on incomplete reporting: retained inline
    record-field snapshots were omitted, including 1,336 two-word Span stores.
    Rebaselining retains all entries, including bounded copies; it changes no
