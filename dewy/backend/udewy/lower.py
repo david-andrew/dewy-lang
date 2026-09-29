@@ -470,7 +470,7 @@ class _Lowerer(
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
         self.rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
-        self.borrowed_default_inputs: set[str] = set()
+        self.direct_default_inputs: set[str] = set()
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.moved_payload_uses: set[int] = set()  # last-use narrowed aggregates still stored in owned union cells
@@ -580,11 +580,12 @@ class _Lowerer(
                     continue
                 for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]:
                     binding = parameter.binding_id
-                    if (binding is None or parameter.place or isinstance(parameter, hir.BoundParam)
+                    shape = ty.structural_base(parameter.type)
+                    if (binding is None or parameter.place
+                            or isinstance(parameter, hir.BoundParam) and not isinstance(shape, ty.ObjectType)
                             or binding in self.borrow_plan.captured_bindings or binding in self.borrow_plan.exposed_bindings
                             or not storage_borrows.borrowable(parameter.type)):
                         continue
-                    shape = ty.structural_base(parameter.type)
                     if isinstance(shape, ty.ObjectType):
                         summary = self.program_effects.for_param_binding(binding)
                         if binding in consumed or summary is not None and not summary.read_only and not summary.escapes:
@@ -827,7 +828,7 @@ class _Lowerer(
         default_prologue: list[hir.AST] = []
         parameter_prologue: list[hir.AST] = []
         parameter_objects: dict[LocalBindingKey, ty.ObjectType] = {}
-        borrowed_default_inputs: set[str] = set()
+        direct_default_inputs: set[str] = set()
         default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         parameter_arrays: dict[str, ty.TypeExpr] = {}
@@ -1198,12 +1199,17 @@ class _Lowerer(
                 continue
             if isinstance(param.type, (ty.ArrayType, ty.ObjectType)) or members is not None:
                 summary = self.program_effects.for_param_binding(param.binding_id) if param.binding_id is not None else None
-                if (isinstance(param.type, ty.ObjectType) and summary is not None and summary.read_only
+                if param.binding_id in self.owned_record_parameters:
+                    # The supplied root already belongs to this callee. The
+                    # lazy default constructs another owned root on omission;
+                    # both paths use the ordinary unconditional local cleanup.
+                    direct_default_inputs.add(incoming_name)
+                elif (isinstance(param.type, ty.ObjectType) and summary is not None and summary.read_only
                         and storage_borrows.borrowable(param.type)):
                     # Like an ordinary read-only parameter, an explicitly
                     # supplied record borrows the caller's storage. Only the
                     # omitted default belongs to this function's cleanup.
-                    borrowed_default_inputs.add(incoming_name)
+                    direct_default_inputs.add(incoming_name)
                     default_owner_conditions[local_binding_key(target)] = self._bool_not(
                         hir.ExpressedIdentifier(literal.loc, 'bool', present_name))
                 # Select before dereferencing: an omitted aggregate argument
@@ -1379,7 +1385,7 @@ class _Lowerer(
             transformed_body, literal.rettype, parameter_prologue,
             parameter_objects=parameter_objects, parameter_cells=parameter_cells,
             parameter_arrays=parameter_arrays,
-            borrowed_default_inputs=borrowed_default_inputs,
+            direct_default_inputs=direct_default_inputs,
             default_owner_conditions=default_owner_conditions,
         )
         self.rebound_array_owners = previous_array_owners
@@ -3508,14 +3514,14 @@ class _Lowerer(
         *, parameter_objects: dict[LocalBindingKey, ty.ObjectType] | None = None,
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] | None = None,
         parameter_arrays: dict[str, ty.TypeExpr] | None = None,
-        borrowed_default_inputs: set[str] | None = None,
+        direct_default_inputs: set[str] | None = None,
         default_owner_conditions: dict[LocalBindingKey, hir.AST] | None = None,
     ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set(parameter_arrays or {})
         self.owned_array_elements = dict(parameter_arrays or {})
         self.owned_objects = dict(parameter_objects or {})
-        self.borrowed_default_inputs = borrowed_default_inputs or set()
+        self.direct_default_inputs = direct_default_inputs or set()
         self.default_owner_conditions = default_owner_conditions or {}
         self.moved_record_bindings = set()
         # Already-lowered parameter copies belong to this scope just like
@@ -3959,8 +3965,8 @@ class _Lowerer(
         def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
             if isinstance(source, hir.MemberAccess):
-                # A runtime array field owns a descriptor independently of
-                # the containing record's frame. Collect the whole-owner
+                # Descriptor and inline-record fields can transfer their
+                # owned storage independently of siblings. Collect the whole-owner
                 # last-use candidate first; field-sensitive liveness below
                 # also permits remaining sibling reads. Lowering checks the
                 # stored layout and empties only this field for cleanup.

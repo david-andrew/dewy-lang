@@ -1,0 +1,5 @@
+Box:type=[values:array<int64>]
+default_box=():>Box=>Box[[20]]
+take=(box:Box=default_box()):>int64=>{box.values.push(22) return if box.values.length=?2 box.values[0]+box.values[1] else 1}
+work=():>int64=>{let box=default_box() const callback=@take if callback(box) not=?42 return 2 return if box.values.length=?1 take() else 3}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 4} return if _arena_live_bytes=?before 42 else 5}

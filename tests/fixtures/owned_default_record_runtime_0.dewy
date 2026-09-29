@@ -1,0 +1,29 @@
+$explicit_copies
+
+Inner:type=[values:array<int64>]
+Box:type=[inner:Inner answer:int64=42]
+make_inner=(size:int64):>Inner=>{
+    let values:array<int64>=[]
+    values.reserve(size+1)
+    loop i in 0.. and i <? size {values.push(i)}
+    return Inner[values]
+}
+make=(size:int64):>Box=>Box[make_inner(size)]
+let defaults:int64=0
+default_inner=():>Inner=>{defaults+=1 return make_inner(1024)}
+take=(inner:Inner=default_inner() answer:int64=42):>int64=>{
+ inner.values.push(42)
+ return if answer=?42 and inner.values.length=?1025 inner.values[1024] else 1
+}
+work=():>int64=>{
+ let box=make(1024)
+ let before:int64=_arena_allocated_bytes
+ let result=take(box.inner box.answer)
+ if _arena_allocated_bytes-before>?1024 return 2
+ if defaults not=?0 return 5
+ if take() not=?42 or defaults not=?1 return 6
+ if take(answer=42) not=?42 or defaults not=?2 return 7
+ defaults=0
+ return result
+}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 3} return if _arena_live_bytes=?before 42 else 4}

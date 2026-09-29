@@ -5481,7 +5481,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let present_value=put(hir.ExpressedIdentifier[node.loc boolean present] @state)
             if not private {condition=intrinsic_call('__not__' [present_value] boolean node @state)}
             let supplied=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
-            if private {
+            if private and not owned {
                 note_parameter_copy(argument boxed rebound mutated written node @state)
                 supplied=copy_value(supplied argument.value_type node @state shared=whole)
             }

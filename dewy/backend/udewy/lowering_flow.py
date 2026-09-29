@@ -961,7 +961,7 @@ class _FlowLowering:
                     source_type = ty.ArrayType(target_type.element, self._raw_array_length(source))
                     return self._raw_array_descriptor(source, source_type, representation)
                 return self._extract_array_operand(item, target_type)
-            if isinstance(source, hir.ExpressedIdentifier) and source.name in self.borrowed_default_inputs:
+            if isinstance(source, hir.ExpressedIdentifier) and source.name in self.direct_default_inputs:
                 # ABI-provided defaults borrow their supplied argument; the
                 # parameter's presence bit supplies its separate cleanup rule.
                 return self._extract_array_operand(item, target_type)
@@ -976,10 +976,10 @@ class _FlowLowering:
             # lives on (a binding, a field), as `let t = x` copies
             if isinstance(item_type, ty.ObjectType) and isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
                 return self._extract_object_pointer(item)
-            if isinstance(item, hir.ExpressedIdentifier) and item.name in self.borrowed_default_inputs:
-                # This is the generated supplied-argument arm of a read-only
-                # defaulted parameter. Its cleanup is guarded by the ABI's
-                # presence bit; no independent record is needed on this path.
+            if isinstance(item, hir.ExpressedIdentifier) and item.name in self.direct_default_inputs:
+                # The supplied-argument arm either borrows read-only storage
+                # or receives a donated owner. The parameter's ABI selects
+                # conditional or unconditional cleanup for those cases.
                 return self._extract_object_pointer(item)
             # An inferred join can widen a child union into its parent record.
             # Extract its payload and copy into the joined layout; the cell's

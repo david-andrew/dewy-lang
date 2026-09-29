@@ -11,12 +11,12 @@ SOURCE = ROOT / 'tests/fixtures/dispatch_candidate_ownership.dewy'
 
 def test_ordered_dispatch_candidate_ownership(tmp_path):
     generated = codegen(SrcFile.from_path(SOURCE), debug_locations=False)
-    # The remaining mapping argument is a separate ownership obligation;
-    # selecting candidates must not reintroduce array/union snapshots.
+    # Selection transfers its winner, and generic instantiation transfers
+    # disjoint inference fields to the owning substitution parameters.
     notes = [note for note in lower.last_copy_notes
              if note.srcfile.path and note.srcfile.path.name == 'dispatch.dewy'
              and note.runtime_sized and not note.explicit and not note.policy_exempt]
-    assert all(note.site == 'passed to a call' for note in notes)
+    assert not notes
     execute(tmp_path, 'dispatch-candidates', generated)
 
 

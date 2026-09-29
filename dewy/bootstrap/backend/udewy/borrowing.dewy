@@ -833,8 +833,9 @@ owned_mutable_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:cap
         if literal.object_receiver or function.captures.length >? 0 continue
         loop parameter in effects.literal_params(literal) {
             let binding=parameter.binding_id
-            if binding is? none or parameter.place or parameter is? hir.BoundParam or binding in? captured or binding in? consumed continue
+            if binding is? none or parameter.place or binding in? captured or binding in? consumed continue
             let type=types.node_at(type_nodes types.unfold(types.strip_refinement(parameter.value_type type_nodes) type_nodes))
+            if parameter is? hir.BoundParam and type isnt? types.ObjectType continue
             if type isnt? types.ArrayType and (type isnt? types.ObjectType or not storage_borrows.borrowable(parameter.value_type type_nodes)) continue
             let summary=summaries.by_param_binding.get(binding)
             if summary isnt? none and summary.escapes.length =? 0 and effects.writes(summary) {result.push(binding)}

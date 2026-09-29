@@ -248,6 +248,29 @@ manifest to 493. Enabling strict policy for the dispatch module additionally
 exposed native snapshots for defaulted record parameters; that protocol is being
 extended before adoption is committed. Full certification remains `db95f751`.
 
+## Owning defaulted records and dispatch policy (2026-09-29)
+
+Direct mutable record parameters now use the same owning protocol with or
+without a default. Supplied arguments donate fresh/moved/explicitly copied
+storage; omission constructs the default lazily. Both branches own their
+cleanup. Read-only defaults and first-class callable values retain their
+existing borrowed ABI. Hosted default joins distinguish direct storage from
+copying without confusing that distinction with the cleanup presence bit.
+
+Five focused hosted cases, twenty-seven surrounding cases and three paired
+native groups pass. Allocation kernels cover supplied/named/omitted arguments,
+lazy side effects, retained caller values and repeated live-byte recovery.
+The dispatch module now enables `$explicit_copies`: overload selection takes
+its winner, and generic instantiation transfers disjoint inference fields.
+Its signature getter explicitly requests independence for escaping returns;
+synchronous getter loans remain available. Five fixtures bring the manifest
+to 498; full certification remains `db95f751`.
+
+An independent hosted build of this snapshot prepared/emitted in
+237.78/242.79 seconds. Its implicit runtime-sized bootstrap inventory is
+**1,694 sites in 72 modules**, down from 1,805/73 at the certified checkpoint.
+The resulting native seed built its driver and passed the groups above.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
