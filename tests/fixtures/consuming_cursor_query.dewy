@@ -1,0 +1,8 @@
+# This module permits its local traversal snapshot. A caller's strict policy
+# must not gain a donated-argument copy just from this read-only cursor.
+Item:type=[size:addr values:array<int64>]
+inspect=(item:Item):>int64=>{
+    let cursor=item
+    loop cursor.size >? 0 {cursor=Item[0 []]}
+    return 42
+}

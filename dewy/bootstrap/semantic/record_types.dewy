@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error
 import p"context.dewy" as contexts
 import p"ty.dewy" as types
@@ -17,16 +18,19 @@ merge = (@fields:array<types.ObjectField> additions:array<types.ObjectField> def
     loop field in additions {
         let position:addr? = none
         loop i in 0.. and i <? fields.length { if fields[i].name =? field.name { position = i break } }
-        if position is? none { fields.push(field) continue }
+        # The merged description outlives this borrowed source field.
+        if position is? none { fields.push(field.copy()) continue }
         $runtime_assert position <? fields.length
-        let previous = fields[position]
-        if not subtyping.is_subtype(field.value_type previous.value_type session.links @session.types) {
+        # Only the scalar contract is needed across checking. Read the
+        # replacement's remaining fields before the destination is written.
+        let previous_type = fields[position].value_type
+        if not subtyping.is_subtype(field.value_type previous_type session.links @session.types) {
             let title = if owner is? none 'intersection weakens a field' else "minted type `{owner}` weakens field `{field.name}`"
-            return contexts.problem(id title "`{display.type_to_dewy(field.value_type session.types)}` does not fit the earlier `{display.type_to_dewy(previous.value_type session.types)}`" context session)
+            return contexts.problem(id title "`{display.type_to_dewy(field.value_type session.types)}` does not fit the earlier `{display.type_to_dewy(previous_type session.types)}`" context session)
         }
         if field.name in? default_only and field.default isnt? none {
-            fields[position] = types.ObjectField[previous.name previous.value_type previous.mutable field.default previous.refinement]
-        } else { fields[position] = field }
+            fields[position] = types.ObjectField[fields[position].name previous_type fields[position].mutable field.default fields[position].refinement.copy()]
+        } else { fields[position] = field.copy() }
     }
     return none
 }
@@ -47,7 +51,11 @@ merge_methods = (@methods:array<types.MethodSpec> additions:array<types.MethodSp
                 if last isnt? none and last =? i {output.push(method) inserted=true}
             }
         } else {
-            loop previous in methods {
+            # Rebuild into a separate output; the input changes only after
+            # this pass. Index reads avoid an owning iterator snapshot of the
+            # mutable place parameter (each MethodSpec has bounded storage).
+            loop i in 0.. and i <? methods.length {
+                let previous=methods[i]
                 if previous.name =? method.name {
                     if not inserted {output.push(method) inserted=true}
                 } else {output.push(previous)}

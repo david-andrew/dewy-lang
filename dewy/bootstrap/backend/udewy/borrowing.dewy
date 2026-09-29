@@ -608,9 +608,85 @@ consuming_value_source=(id:addr nodes:array<hir.AST> type_nodes:types.Table):>ad
         else {return current}
     }
 }
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table @scan:ReadScan exposed:bool=false):>void => {
+# A plain alias used only for traversal does not justify an owning call
+# protocol. Seed demand at actual mutation/whole-value transfer boundaries;
+# local alias chains can propagate demand but cannot invent it.
+need_local = (id:addr nodes:array<hir.AST> type_nodes:types.Table @needed:set<addr> through_route:bool=false):>void => {
+    let value=consuming_value_source(id nodes type_nodes)
+    let node=hir.node_at(nodes value)
+    if not through_route and node isnt? hir.ExpressedIdentifier return
+    let binding=captures.root_binding(value nodes)
+    if binding isnt? none {needed.push(binding)}
+}
+owning_locals = (body:addr nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
+    let needed:set<addr>=set[]
+    let aliases:dict<addr set<addr>>=[]
+    let pending:array<addr>=[body]
+    loop pending.length>?0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral|hir.GenericFunction continue
+        if node is? hir.Declare and not node.view {
+            let source=hir.node_at(nodes consuming_value_source(node.expr nodes type_nodes))
+            if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and node.binding_id isnt? none {
+                if node.binding_id in? aliases {let inputs=@aliases[node.binding_id] inputs.push(source.binding_id)}
+                else {aliases[node.binding_id]=set[source.binding_id]}
+            }
+        } else if node is? hir.Return and node.item isnt? none {need_local(node.item nodes type_nodes @needed)}
+        else if node is? hir.ObjectLiteral|hir.ArrayLiteral {
+            loop child in hir.children(node) {need_local(child nodes type_nodes @needed)}
+        } else if node is? hir.Assign {
+            # Compound updates arrive as `x = operation(x)`. Plain cursor
+            # replacement (`x = other`) supplies no such ownership demand.
+            let binding=captures.root_binding(node.target nodes)
+            if binding isnt? none {
+                if node.op not=?'=' {needed.push(binding)}
+                else {
+                    loop child in view_nodes(node.value nodes) {
+                        let read=hir.node_at(nodes child)
+                        if read is? hir.ExpressedIdentifier and read.binding_id=?binding {needed.push(binding)}
+                    }
+                }
+            }
+        } else if node is? hir.FunctionCall {
+            let callee=hir.node_at(nodes node.func)
+            if callee is? hir.ArrayMethod and callee.name in? ['push' 'insert'] and node.pos_args.length>?0 {need_local(node.pos_args[0] nodes type_nodes @needed)}
+        }
+        if node isnt? hir.IteratorExpression and not (node is? hir.Assign and node.op=?'=') {
+            loop target in captures.write_targets(node nodes) {need_local(target nodes type_nodes @needed through_route=true)}
+        }
+        hir.push_children(node @pending)
+    }
+    loop binding in needed {pending.push(binding)}
+    loop pending.length>?0 {
+        let binding=pending.pop
+        if binding not in? aliases continue
+        const inputs=@aliases[binding]
+        loop source in inputs {if source not in? needed {needed.push(source) pending.push(source)}}
+    }
+    return needed
+}
+# A known scalar query can be an observation too. Use the already solved
+# parameter summary: a query that writes or retains the input is not a loan.
+observes_argument = (call:hir.FunctionCall read:addr plan:captures.Plan summaries:effects.ProgramEffects nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+    let shape=types.node_at(type_nodes views.structural_base(call.value_type type_nodes))
+    if not (shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) and views.fixed_integer_layout(call.value_type type_nodes) is? none return false
+    let direct=captures.resolve(call.func call.selected_method_index plan nodes)
+    if direct is? none return false
+    let target=hir.node_at(nodes direct)
+    if target isnt? hir.FunctionLiteral return false
+    let pairs=effects.pair_arguments(call target)
+    if pairs is? none return false
+    loop pair in pairs {
+        if pair.parameter is? none or consuming_value_source(pair.argument nodes type_nodes) not=?read continue
+        let summary=summaries.by_param_binding.get(pair.parameter)
+        if summary isnt? none and effects.read_only(summary) return true
+    }
+    return false
+}
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false):>void => {
     let source=consuming_value_source(id nodes type_nodes)
-    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes @scan exposed=exposed) return}
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
@@ -621,20 +697,31 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
                 let shape=types.node_at(type_nodes views.structural_base(owner.value_type type_nodes))
                 observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
             }
+            if not exposed and owner is? hir.FunctionCall {observed=observes_argument(owner id plan summaries nodes type_nodes)}
             sites.push(ReadSite[id parent guarded scan.exited observed])
             scan.reads[node.binding_id]=sites
         }
+        return void
+    }
+    let terminal=node
+    if guarded {
+        loop terminal is? hir.Block and terminal.items.length >? 0 {terminal=hir.node_at(nodes terminal.items[terminal.items.length-1])}
+    }
+    if terminal is? hir.RuntimeFailure or (terminal is? hir.FunctionCall and types.is_primitive(types.node_at(type_nodes terminal.value_type) 'never')) {
+        # No reader in the diverging branch survives on the transfer path.
+        # Keep an ordinary owned parameter for any earlier-exit path.
+        scan.exited=true
         return void
     }
     # A read inside a nested literal, a flow arm, a loop or a short-circuit
     # operand may run never, once or many times: never a single consumption.
     let nested=guarded or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit
     let escapes=exposed or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Place|hir.Transmute|hir.Assign|hir.MemberAssign|hir.IndexAssign
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes @scan exposed=escapes)}
+    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes)}
     if node is? hir.Return {scan.exited=true}
     return void
 }
-consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr> borrowed_literals:set<addr> owned_protocol:bool=false retaining:set<addr>=set[] excluded:set<addr>=set[]):>Consumed => {
+consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr> borrowed_literals:set<addr> summaries:effects.ProgramEffects borrowed_bindings:set<addr>=set[] owned_protocol:bool=false retaining:set<addr>=set[] excluded:set<addr>=set[]):>Consumed => {
     let result=Consumed[]
     let candidates:dict<addr ReadSite>=[]
     let owned:set<addr>=set[]
@@ -651,20 +738,23 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
             wanted.push(binding)
         }
         if wanted.length=?0 continue
+        let needed_locals=owning_locals(literal.body nodes type_nodes)
         let scan=ReadScan[]
         # A lazy default may also read a donating argument. Its conditional
         # execution cannot be ignored when establishing a single use.
         loop parameter in effects.literal_params(literal) {
-            if parameter is? hir.BoundParam {scan_reads(parameter.value id true wanted nodes type_nodes @scan)}
+            if parameter is? hir.BoundParam {scan_reads(parameter.value id true wanted nodes type_nodes plan summaries @scan)}
         }
-        scan_reads(literal.body id false wanted nodes type_nodes @scan)
+        scan_reads(literal.body id false wanted nodes type_nodes plan summaries @scan)
         loop binding in wanted {
             if binding not in? scan.reads continue
             const sites=@scan.reads[binding]
             if sites.length=?0 continue
             let site=sites[sites.length-1]
             if site.guarded continue
-            if sites.length=?1 and not site.after_exit {candidates[binding]=site continue}
+            let parent=hir.node_at(nodes site.parent)
+            if parent is? hir.Declare and (parent.binding_id is? none or parent.binding_id not in? needed_locals) continue
+            if sites.length=?1 and not site.after_exit and hir.node_at(nodes site.parent) isnt? hir.Declare {candidates[binding]=site continue}
             if not owned_protocol or id in? retaining or binding in? excluded or not storage_borrows.borrowable(hir.node_at(nodes site.id).value_type type_nodes) continue
             # Earlier scalar inspections create no alias. An early exit owns
             # cleanup; ordinary last-use analysis chooses the final transfer.
@@ -686,7 +776,8 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
         # A temporary call root lends stable field handles; constructing it
         # does not consume the source parameter or make it an owning input.
         if parent is? hir.ObjectLiteral and site.parent in? borrowed_literals continue
-        if parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
+        if parent is? hir.Declare and (parent.view or (parent.binding_id isnt? none and parent.binding_id in? borrowed_bindings)) continue
+        if parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral|hir.Declare or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
             # Prepared fixed-array call storage retains its existing protocol.
             let shape=types.node_at(type_nodes types.unfold(types.strip_refinement(hir.node_at(nodes site.id).value_type type_nodes) type_nodes))
             if shape isnt? types.ArrayType or shape.length is? none {pending.push(binding)}
@@ -840,7 +931,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop [call arguments] in storage_proofs.literal_arguments {
         loop argument in arguments {borrowed_literals.push(argument)}
     }
-    let consumed=consumed_parameters(nodes type_nodes plan valued borrowed_literals owned_protocol=owned_parameter_protocol retaining=retaining excluded=(captured | exposed))
+    let consumed=consumed_parameters(nodes type_nodes plan valued borrowed_literals summaries borrowed_bindings=storage_proofs.local_views owned_protocol=owned_parameter_protocol retaining=retaining excluded=(captured | exposed))
     let owned:set<addr>=if owned_parameter_protocol owned_mutable_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
     loop binding in consumed.owned {owned.push(binding)}
     let consumed_arguments:dict<addr set<addr>>=[]

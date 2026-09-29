@@ -32,6 +32,15 @@ the parameter normally; the final use obeys ordinary liveness and borrowed
 reader constraints. First-class calls and exposed/captured storage retain the
 ordinary fallback. This is an inferred calling convention, not new syntax.
 
+Earlier calls may also observe an input when their solved parameter effects
+prove they cannot mutate or retain it and their result is a fixed-size scalar.
+The final transfer may initialize a working local whose storage is mutated or
+whose complete value is later transferred. Read-only traversal cursors do not
+need that owning convention merely because their binding is reassigned.
+Alias chains propagate ownership demand from an actual endpoint, never from
+a cycle alone. A diagnostic branch proved not to return has no reader on the
+successful continuation; ordinary cleanup and liveness still apply there.
+
 A stable direct getter can lend a caller-owned record or tagged cell while
 preserving its guards and other effects. Its ordinary result still denotes
 an independent value when it escapes or is modified. An explicit `.copy()`

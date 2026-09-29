@@ -1,3 +1,4 @@
+$explicit_copies
 import p"context.dewy" as contexts
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
@@ -43,11 +44,12 @@ result_dimension = (name:string arguments:array<addr> @session:contexts.Session)
 value = (id:addr session:contexts.Session):>literals.Fraction? => {
     let node=hir.node_at(session.hir id)
     let type=types.node_at(session.types number_type(id session))
-    if type is? types.IntegerLiteralType return literals.Fraction[type.value 1]
-    if type is? types.RationalLiteralType return literals.Fraction[type.numerator type.denominator]
+    # Folded results own their numbers independently of the type arena.
+    if type is? types.IntegerLiteralType return literals.Fraction[type.value.copy() 1]
+    if type is? types.RationalLiteralType return literals.Fraction[type.numerator.copy() type.denominator.copy()]
     let integer=integers.constant_in(id session.hir session.types session.registry)
     if integer is? none or integer.lower is? none or integer.upper is? none or integer.lower not=? integer.upper return none
-    return literals.Fraction[integer.lower 1]
+    return literals.Fraction[integer.lower.copy() 1]
 }
 fold = (name:string arguments:array<addr> session:contexts.Session):>literals.Fraction|bool|string|none => {
     if arguments.length =? 0 return none
@@ -58,7 +60,9 @@ fold = (name:string arguments:array<addr> session:contexts.Session):>literals.Fr
     if not rational and name not=? '__truediv__' return none
     let a=value(arguments[0] session)
     if a is? none return none
-    if arguments.length =? 1 and name =? '__unary_sub__' return fraction(-a.numerator a.denominator)
+    # The new fraction owns the retained denominator; partial field transfer
+    # from the temporary fraction is not yet proved at this call boundary.
+    if arguments.length =? 1 and name =? '__unary_sub__' return fraction(-a.numerator a.denominator.copy())
     if arguments.length not=? 2 return none
     let b=value(arguments[1] session)
     if b is? none return none

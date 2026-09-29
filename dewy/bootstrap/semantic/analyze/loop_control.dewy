@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../hir.dewy" as hir
 
 # Structural control only: a body without fallthrough or a continue to its
@@ -6,8 +7,9 @@ import p"../hir.dewy" as hir
 Summary:type=const [normal:bool continues:set<addr>=set[]]
 Cache:type=dict<addr Summary>
 summarize=(id:addr nodes:array<hir.AST> @cache:Cache):>Summary=>{
-    let cached=cache.get(id)
-    if cached isnt? none return cached
+    # Callers compose their own continuation sets; cached summaries stay
+    # independent of those updates. Copy once at this owning boundary.
+    if id in? cache return cache[id].copy()
     let node=hir.node_at(nodes id)
     let normal=true
     let continues:set<addr>=set[]
@@ -45,7 +47,7 @@ summarize=(id:addr nodes:array<hir.AST> @cache:Cache):>Summary=>{
         normal=node isnt? hir.Return
     }
     let result=Summary[normal continues]
-    cache[id]=result
+    cache[id]=result.copy()
     return result
 }
 single_pass=(body:addr nodes:array<hir.AST> @cache:Cache):>bool=>{

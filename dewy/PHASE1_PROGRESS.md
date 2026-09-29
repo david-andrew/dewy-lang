@@ -36,6 +36,47 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): the frozen `73fd8f9c` integration passes
+**391/391** paired acceptance/execution cases and a byte-identical
+three-generation native fixed point. The last generations took 59/65 seconds
+under concurrent validation; hosted preparation/emission took 223.40/228.41
+seconds. Its complete native inventory is **4,171 sites / 54,993 lines =
+75.846/KLOC**, passing the unchanged 4,500/85 gates. The hosted inventory
+contains 1,906 implicit runtime-sized obligations in 78 bootstrap modules.
+This is the latest complete integration certification.
+
+The next ownership slice lets direct aggregate inputs become working local
+owners after checked scalar query calls. Solved parameter effects must prove
+those calls read-only and non-retaining. Local ownership demand propagates
+backward through aliases from actual mutations or whole-value transfers;
+read-only traversal cursors and alias cycles do not create demand. Compound
+updates and their checked `x = operation(x)` form agree on both routes.
+Proved nonreturning diagnostic branches do not keep readers alive on the
+successful continuation. The ordinary owned-parameter cleanup protocol still
+handles earlier returns and live borrowed readers.
+
+Numeric literal/constant helpers, loop control and record intersections now
+pass strict checking, bringing adoption to **58 physical bootstrap modules**.
+Intentional copies retain independent arena constants, cached control-flow
+results, and source fields in merged records. Record merging reads the old
+field's scalar metadata before replacement instead of snapshotting the whole
+field descriptor. Nine fixtures bring the manifest to **400 cases**.
+
+Focused hosted ownership/protocol and numeric checks pass. The fresh native
+alias group passes on x86-64/C, including a large-integer working local, a
+read-only cursor, terminal diagnostics and rejected retained aliases. Five
+numeric cases, two record execution cases and a record-intersection rejection
+also pass on both routes. The fresh native driver emits the complete compiler
+with all 58 strict directives enabled (24,197,087 bytes), and that output
+compiles with native uDewy. These changes have not yet received their own
+independent hosted seed/full-manifest/fixed-point certification.
+
+The failing-guard case exits 101 on both native backends. Its native diagnostic
+preserves the condition and source, but still lacks the hosted saved operand
+value notes: the existing runtime-report placeholder remains explicit. The
+parity fixture tests the shared diagnostic, while the hosted test also checks
+its operand note; no guard expression is reevaluated for reporting.
+
 Checkpoint (2026-09-28): direct aggregate inputs may transfer after scalar
 observations, with normal owner cleanup on earlier exits. The final read must
 remain unguarded and every earlier read must be a non-retaining observation;

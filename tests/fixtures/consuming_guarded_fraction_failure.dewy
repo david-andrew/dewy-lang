@@ -1,0 +1,7 @@
+$explicit_copies
+Fraction:type=const [numerator:bigint denominator:bigint & ~0]
+fraction=(numerator:bigint denominator:bigint):>Fraction=>{
+ $runtime_assert denominator isnt? 0
+ return Fraction[numerator denominator]
+}
+main=():>int64=>{let x=fraction(42 0) return if x.numerator=?42 and x.denominator=?1 42 else 0}

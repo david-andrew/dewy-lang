@@ -1,0 +1,9 @@
+$explicit_copies
+halve=(value:bigint):>bigint=>{
+    $runtime_assert value >=? 0
+    let remaining=value
+    loop remaining >? 1 {remaining //= 2}
+    return remaining
+}
+main=():>int64=>if halve(123456789012345678901234567890)=?1 42 else 0
+

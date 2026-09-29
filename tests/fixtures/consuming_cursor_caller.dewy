@@ -1,0 +1,8 @@
+$explicit_copies
+import p"consuming_cursor_query.dewy" as query
+main=():>int64=>{
+    let source=query.Item[2 [20 22]]
+    let result=query.inspect(source)
+    source.values.clear
+    return result
+}

@@ -1,0 +1,17 @@
+$explicit_copies
+Item:type=[size:addr values:array<int64>]
+keep=(value:Item):>Item=>{
+ if value.size=?0 {printl(value)}
+ return value
+}
+work=():>int64=>{
+ let value=keep(Item[2 [20 22]])
+ let empty=Item[0 []]
+ return if empty.values.length=?0 and value.values.length=?2 value.size+40 else 1
+}
+main=():>int64=>{
+ loop i in [0..100) {if work() not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..100) {if work() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

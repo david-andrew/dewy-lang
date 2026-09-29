@@ -1825,6 +1825,12 @@ class _ObjectLowering:
             annotation='int64',
             expr=self._object_allocation(node.loc, size),
         )
+        if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
+            adopted = self._adopt_object_fields(node.expr, object_type, arena=False,
+                site=f'bound to `{node.name}`', destination=cell)
+            if adopted is not None:
+                self.borrowed_fields[local_binding_key(node)] = set()
+                return [declaration, *adopted[0]]
         prelude, src = self._extract_object_pointer(node.expr)
         self._note_copy('record', object_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
         return [declaration, *prelude, *self._object_copy(cell, src, object_type, node.loc)]

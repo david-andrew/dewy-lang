@@ -572,7 +572,8 @@ class _Lowerer(
             consumed = consuming_parameters(self.allocator_analysis, self.value_function_ids | {
                 id(function.literal) for function in self.functions if self.lifted.get(id(function))},
                 {argument for arguments in self.storage_borrow_proofs.literal_arguments.values()
-                 for argument in arguments})
+                 for argument in arguments}, summaries=self.program_effects,
+                borrowed_bindings=self.storage_borrow_proofs.local_views | self.borrow_plan.scoped_views)
             for function in self.functions:
                 literal = function.literal
                 if literal.object_receiver or id(literal) in self.value_function_ids or self.lifted.get(id(function)):
