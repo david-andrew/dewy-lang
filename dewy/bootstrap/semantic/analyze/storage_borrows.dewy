@@ -71,12 +71,13 @@ stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nod
     return effects.read_only_at(summary effects.Route[steps])
 }
 # Contextual boxing of a closed literal/default cannot expose existing
-# caller storage. Casts of names and calls retain the conservative boundary.
+# caller storage. Discharged obligations leave literal-only blocks; inspect
+# all their children too. Names and calls retain the conservative boundary.
 independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
     let pending:array<addr>=[id]
     loop pending.length>?0 {
         let node=hir.node_at(nodes pending.pop)
-        if node isnt? hir.NoneValue|hir.Void|hir.Bool|hir.Integer|hir.String|hir.ArrayLiteral|hir.ObjectLiteral|hir.ValueCast|hir.RepresentationCast|hir.Obligation return false
+        if node isnt? hir.NoneValue|hir.Void|hir.Bool|hir.Integer|hir.String|hir.ArrayLiteral|hir.ObjectLiteral|hir.ValueCast|hir.RepresentationCast|hir.Obligation|hir.Block return false
         hir.push_children(node @pending)
     }
     return true
@@ -96,8 +97,14 @@ private_origin=(id:addr nodes:array<hir.AST>):>bool=>{
                 if arm isnt? hir.IfArm return false
                 pending.push(arm.body)
             }
-        } else if item is? hir.Block and item.items.length=?1 {pending.push(item.items[0])}
+        } else if item is? hir.Block and item.items.length>?0 {
+            # Erased obligation witnesses do not change the final value's
+            # owner. Other prefixes retain the conservative boundary.
+            loop i in 0.. and i<?item.items.length-1 {if hir.node_at(nodes item.items[i]) isnt? hir.Void return false}
+            pending.push(item.items[item.items.length-1])
+        }
         else if item is? hir.ValueCast {pending.push(item.expr)}
+        else if item is? hir.Obligation {pending.push(item.value)}
         else {return false}
     }
     return true
@@ -184,7 +191,7 @@ record_loan_size=(type:addr table:types.Table families:array<addr> @memo:dict<ad
         } else if scalar_loan_cell(selected table) {
             if size>?4080 {memo[type]=none return none}
             size+=8
-        } else if not (shape is? types.ArrayType and shape.length is? none) and not types.is_primitive(shape 'bool') and views.fixed_integer_layout(selected table) is? none {
+        } else if not (shape is? types.ArrayType and shape.length is? none) and not views.string_valued(selected table) and not types.is_primitive(shape 'bool') and views.fixed_integer_layout(selected table) is? none {
             memo[type]=none return none
         }
         size+=8
@@ -192,7 +199,7 @@ record_loan_size=(type:addr table:types.Table families:array<addr> @memo:dict<ad
     memo[type]=size
     return size
 }
-# A bounded call root owns no fields: words, borrowed array handles, and
+# A bounded call root owns no fields: words, borrowed array/string handles, and
 # inline records with those representations share the same lifetime proof.
 record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families:array<addr> constants:dict<addr addr> @sizes:dict<addr addr?>):>array<addr>|none=>{
     if node isnt? hir.ObjectLiteral or not borrowable(node.value_type table) return none
@@ -216,6 +223,10 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
             arrays.push(field.value)
         } else if stored is? types.ObjectType and types.same_type(actual_id stored_id table) {
             arrays.push(field.value)
+        } else if views.string_valued(stored_id table) and views.string_valued(actual_id table) {
+            # Descriptor handles borrow the same stable source lifetime as
+            # array fields; this call root never acquires their ownership.
+            arrays.push(field.value)
         } else if scalar_loan_cell(stored_id table) and (types.same_type(actual_id stored_id table) or (actual is? types.Primitive and actual.name in? ['none' 'bool' 'true' 'false']) or views.fixed_integer_layout(actual_id table) isnt? none or actual is? types.IntegerLiteralType) {
             continue
         } else if types.is_primitive(stored 'bool') and actual is? types.Primitive and actual.name in? ['bool' 'true' 'false'] {
@@ -231,6 +242,14 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
     return arrays
 }
 stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> constants:dict<addr addr> allow_constants:bool summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
+    # A finite-string widening changes the logical type, not its descriptor.
+    # Do not strip conversions involving an optional or a non-string value.
+    loop true {
+        let node=hir.node_at(nodes value)
+        if node isnt? hir.ValueCast|hir.RepresentationCast break
+        if not views.string_valued(node.value_type table) or not views.string_valued(hir.node_at(nodes node.expr).value_type table) break
+        value=node.expr
+    }
     let path=bindings.access_path(value nodes forwarding=common_array_field(hir.node_at(nodes value) nodes table))
     let source=hir.node_at(nodes path.root)
     if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
@@ -257,7 +276,10 @@ stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr>
                 if field isnt? none {stored=field.value_type}
             }
         }
-        if stored is? none or not types.same_type(views.structural_base(stored table) views.structural_base(step.value_type table) table) return false
+        if stored is? none return false
+        # A finite string union and its widened string read use the same
+        # descriptor handle. Optional/tagged alternatives remain excluded.
+        if not types.same_type(views.structural_base(stored table) views.structural_base(step.value_type table) table) and not (views.string_valued(stored table) and views.string_valued(step.value_type table)) return false
     }
     return true
 }

@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Pointer, SrcFile
 import p"hir.dewy" as hir
 import p"ty.dewy" as types
@@ -69,9 +70,11 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
         if method is? hir.ArrayMethod and method.name =? 'set_length' {
             let owner=hir.node_at(input.nodes method.array)
             if not input.writable or owner isnt? hir.ExpressedIdentifier or owner.binding_id not=? input.root {reject(id 'only the writable loan owner can commit its length' input @scan) return}
-            let arguments=node.pos_args
-            loop argument in node.kw_args.values {arguments.push(argument)}
-            loop argument in arguments {
+            loop argument in node.pos_args {
+                if derived(argument input scan.addresses) {reject(argument 'an address cannot be committed as a length' input @scan) return}
+                visit(argument input @scan)
+            }
+            loop argument in node.kw_args.values {
                 if derived(argument input scan.addresses) {reject(argument 'an address cannot be committed as a length' input @scan) return}
                 visit(argument input @scan)
             }
@@ -132,13 +135,13 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
     }
     reject(id 'this operation is outside the initial raw-scope subset' input @scan)
 }
-validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session writable:bool=false):>Error?=>{
-    let owner_node=hir.node_at(session.hir owner_id)
-    let shape=types.node_at(session.types views.structural_base(owner_node.value_type session.types))
-    let valid=false
-    if shape is? types.ArrayType {valid=types.is_primitive(types.node_at(session.types types.strip_refinement(shape.element session.types)) 'uint8')}
-    if owner_node isnt? hir.ExpressedIdentifier or owner_node.binding_id is? none or not valid return Error[srcfile=source title='cannot prove scoped storage access' pointers=[Pointer[span=owner_node.loc message='this read-only loan currently requires a named byte array']]]
-    let input=Input[owner=owner_id root=(owner_node.binding_id) nodes=session.hir types=session.types registry=session.registry source=source target=session.target writable=writable]
+# Complete discovery before committing any HIR permissions. The session is
+# read-only throughout this query, so Input can borrow its tables instead of
+# snapshotting the complete program just to inspect one raw-storage scope.
+scan_scope=(owner:addr root:addr body:addr source:SrcFile session:contexts.Session writable:bool):>Scan=>{
+    return scan_input(Input[owner=owner root=root nodes=session.hir types=session.types registry=session.registry source=source target=session.target writable=writable] body)
+}
+scan_input=(input:Input body:addr):>Scan=>{
     let scan=Scan[]
     let nodes:array<addr>=[]
     let pending:array<addr>=[body]
@@ -171,13 +174,25 @@ validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session 
         }
     }
     visit(body input @scan result=true)
-    if scan.problem isnt? none return scan.problem
+    return scan
+}
+mark_read=(@node:hir.AST):>void=>{
+    $runtime_assert node is? hir.FunctionCall
+    node.scoped_read=true
+}
+validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session writable:bool=false):>Error?=>{
+    let owner_node=hir.node_at(session.hir owner_id)
+    let shape=types.node_at(session.types views.structural_base(owner_node.value_type session.types))
+    let valid=false
+    if shape is? types.ArrayType {valid=types.is_primitive(types.node_at(session.types types.strip_refinement(shape.element session.types)) 'uint8')}
+    if owner_node isnt? hir.ExpressedIdentifier or owner_node.binding_id is? none or not valid return Error[srcfile=source title='cannot prove scoped storage access' pointers=[Pointer[span=owner_node.loc message='this read-only loan currently requires a named byte array']]]
+    let scan=scan_scope(owner_id owner_node.binding_id body source session writable)
+    # The diagnostic outlives this scan; retain its pointers on the error path.
+    if scan.problem isnt? none return scan.problem.copy()
     # No partially checked permission can reach lowering.
     loop id in scan.checked_reads {
-        let node=hir.node_at(session.hir id)
-        $runtime_assert node is? hir.FunctionCall and id <? session.hir.length
-        node.scoped_read=true
-        session.hir[id]=node
+        $runtime_assert id <? session.hir.length
+        mark_read(@session.hir[id])
     }
     return none
 }

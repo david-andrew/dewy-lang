@@ -1,0 +1,15 @@
+Pair:type=[text:string]
+read=(pair:Pair):>string=>pair.text
+forward=(text:string):>string=>read(Pair[text])
+work=(value:int64):>int64=>{
+    let text="{value}"
+    let kept=forward(text)
+    text="changed{value}"
+    return if kept=?"{value}" 42 else 1
+}
+main=():>int64=>{
+    if work(42) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i<?1000 {if work(i) not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

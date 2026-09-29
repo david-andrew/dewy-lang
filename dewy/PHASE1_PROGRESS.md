@@ -29,6 +29,29 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Stable string handles and scoped scanner loans (2026-09-29)
+
+Bounded temporary records can lend stable string handles alongside arrays and
+inline records. Finite-string widening preserves the same handle; unrelated
+representation conversions retain their existing checks. Both storage proofs
+preserve closed-constant provenance through discharged witness blocks and
+pending obligations, without treating names, arbitrary calls or preceding
+statements as independent literals. Obligations still require validation.
+
+Scoped storage checking lends its input tables for the read-only traversal,
+then marks validated calls directly through their HIR places. It no longer
+snapshots the tables or replaces copied call records. Only the retained error
+result explicitly copies its diagnostic. The module passes strict checking on
+both routes, reaching 75 physical bootstrap modules.
+
+Thirteen focused hosted checks and four native groups pass, including string
+widening, constant expressions, rejected later-argument writes, retained string
+results and scoped I/O. These supplement the earlier 54 surrounding checks.
+Eleven fixtures bring the manifest to 636. Logs use
+`dewy-scoped-closure-cast-view-*` and `dewy-scoped-closure-final-*`.
+Fresh complete integration is pending; the 613-case checkpoint above predates
+this batch and the numeric/comparison changes.
+
 ## Comparison worklists and explicit snapshot ownership (2026-09-29)
 
 Comparison transfer records only matching sequence ids before inserting index

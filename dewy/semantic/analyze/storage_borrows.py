@@ -51,11 +51,13 @@ def independent_materialization(node):
 
     Keep casts of names/calls conservative, including byte views of strings.
     A closed literal/default has no such source, regardless of how many
-    representation wrappers contextual typing inserts around it.
+    representation wrappers contextual typing inserts around it. Discharged
+    obligations can leave a block containing a void witness and the literal;
+    inspect every child rather than losing provenance at that wrapper.
     """
     return all(isinstance(item, (hir.NoneValue, hir.Void, hir.Bool, hir.Integer,
         hir.String, hir.ArrayLiteral, hir.ObjectLiteral, hir.ValueCast,
-        hir.RepresentationCast, hir.Obligation)) for item in hir.walk(node))
+        hir.RepresentationCast, hir.Obligation, hir.Block)) for item in hir.walk(node))
 
 
 def private_origin(node):
@@ -69,10 +71,17 @@ def private_origin(node):
             if item.default is None or any(not isinstance(arm, hir.IfArm) for arm in item.arms):
                 return False
             pending.extend([item.default, *(arm.body for arm in item.arms)])
-        elif isinstance(item, hir.Block) and len(item.items) == 1:
-            pending.append(item.items[0])
+        elif (isinstance(item, hir.Block) and item.items
+              and all(isinstance(prefix, hir.Void) for prefix in item.items[:-1])):
+            # Checked obligation witnesses erase to void, including around
+            # ordinary constructors/calls that produce a fresh owned value.
+            pending.append(item.items[-1])
         elif isinstance(item, hir.ValueCast):
             pending.append(item.expr)
+        elif isinstance(item, hir.Obligation):
+            # The checking pass still has to discharge this witness. It does
+            # not change the storage owner of the value being checked.
+            pending.append(item.value)
         else:
             return False
     return True
@@ -200,7 +209,7 @@ def owning_array_reads(body, analysis, summaries, selection_reads=()):
 def record_loan_size(type_, memo):
     """Bounded inline bytes, including possible descendant record layouts.
 
-    Array descriptors are borrowed handles, never inline element storage.
+    Array and string descriptors are borrowed handles, never inline payloads.
     Sum the family alternatives conservatively rather than depending on the
     backend's padding choices. Repeated fields count repeatedly; cycles and
     oversized families exhaust the same finite frame budget.
@@ -223,6 +232,7 @@ def record_loan_size(type_, memo):
         elif scalar_loan_cell(shape):
             size += 8  # scalar union: tag plus one scalar payload word
         elif not (isinstance(shape, ty.ArrayType) and shape.length is None
+                  or ty.string_valued(shape)
                   or shape == 'bool' or ty.fixed_integer_layout(shape) is not None):
             size = None
             break
@@ -245,7 +255,7 @@ def scalar_loan_cell(type_):
 def record_loan_fields(node, sizes, constants):
     """A call-scoped root lends stable fields without acquiring owners.
 
-    Inline records containing words and array handles use the same lifetime
+    Inline records containing words, strings and arrays use the same lifetime
     proof as array fields. Scalar tag cells own no payload; other cells and
     fixed arrays retain their ordinary path.
     """
@@ -273,6 +283,10 @@ def record_loan_fields(node, sizes, constants):
                     return None
             borrowed.append(field.value)
         elif isinstance(stored, ty.ObjectType) and actual == stored:
+            borrowed.append(field.value)
+        elif ty.string_valued(stored) and ty.string_valued(actual):
+            # A string field is one borrowed descriptor handle. Its owner
+            # must be stable for the call just like an array's owner.
             borrowed.append(field.value)
         elif scalar_loan_cell(stored) and (
                 actual == stored or actual in ('none', 'bool', 'true', 'false')
@@ -516,6 +530,11 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             local_views.add(node.binding_id)
             pending_views.extend(waiting_views.pop(node.binding_id, ()))
         def stable_value(value, selections=()):
+            # Widening a finite string union keeps its descriptor handle.
+            # Other representation conversions still need their own storage.
+            while (isinstance(value, (hir.ValueCast, hir.RepresentationCast))
+                   and ty.string_valued(value.type) and ty.string_valued(value.expr.type)):
+                value = value.expr
             path = bindings.access_path(value, unwrap=_unwrap, forwarding=common_array_field(value))
             source = path.root
             if not isinstance(source, hir.ExpressedIdentifier):
@@ -536,7 +555,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 parent = ty.structural_base(step.array.type if isinstance(step, hir.Index) else step.value.type)
                 field = parent.field(step.name) if isinstance(step, hir.MemberAccess) and isinstance(parent, ty.ObjectType) else None
                 stored = parent.element if isinstance(step, hir.Index) and isinstance(parent, ty.ArrayType) else field.type if field else None
-                if stored is None or ty.structural_base(stored) != ty.structural_base(step.type):
+                if stored is None:
+                    return False
+                if (ty.structural_base(stored) != ty.structural_base(step.type)
+                        and not (ty.string_valued(stored) and ty.string_valued(step.type))):
                     return False
             return stable
 

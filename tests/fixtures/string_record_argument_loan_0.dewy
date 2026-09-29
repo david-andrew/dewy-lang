@@ -1,0 +1,12 @@
+$explicit_copies
+Inner:type=[items:array<int64> text:string]
+Pair:type=[inner:Inner text:string]
+read=(pair:Pair):>int64 & no_effects=>pair.inner.items.length+pair.inner.text.length+pair.text.length
+forward=(inner:Inner text:string):>int64 & no_effects=>read(Pair[inner text])
+work=(inner:Inner text:string):>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {if forward(inner text) not=?40 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}
+text=(value:int64):>string=>"{value}"
+main=():>int64=>work(Inner[[1 2] text(1234567890123456789)] text(1234567890123456789))
