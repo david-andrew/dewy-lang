@@ -1,0 +1,42 @@
+import p"../../dewy/bootstrap/semantic/analyze/effects.dewy" as effects
+
+exercise=(max_allocated:int64):>int64=>{
+    let params:dict<addr effects.ParameterEffects>=[1->effects.ParameterEffects[]]
+    let path=effects.Route[['a' 'x']]
+    if not effects.record(1 'read' path @params) return 1
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..1000) {
+        if effects.record(1 'read' path @params) return 2
+    }
+    let allocated:int64=_arena_allocated_bytes-before
+    if allocated >? max_allocated return 3
+
+    effects.record(1 'read' effects.Route[['b']] @params);
+    effects.record(1 'read' effects.Route[['a' 'y']] @params);
+    effects.record(1 'read' effects.Route[['c']] @params);
+    if not effects.record(1 'read' effects.Route[['a']] @params) return 4
+    $runtime_assert 1 in? params
+    const summary=params[1]
+    if summary.reads.length not=?3 return 5
+    if not effects.disjoint_routes(summary.reads effects.Route[['d']]) return 6
+    if effects.disjoint_routes(summary.reads effects.Route[['a' 'child']]) return 7
+    if effects.record(1 'read' effects.Route[['a' 'child']] @params) return 8
+    if not effects.record(1 'read' effects.Route[[]] @params) return 9
+    $runtime_assert 1 in? params
+    const root=params[1]
+    if root.reads.length not=?1 or root.reads[0].steps.length not=?0 return 10
+
+    effects.record(1 'mutate' effects.Route[['0' '1' '2' '3' '4' '5' '6' '7' '8' '9']] @params);
+    $runtime_assert 1 in? params
+    const bounded=params[1]
+    if bounded.mutates.length not=?1 return 11
+    return if bounded.mutates[0].steps.length=?8 42 else 12
+}
+
+main=(args:array<string>):>int64=>{
+    let limit:int64=if 'zero-allocation' in? args 0 else 65536
+    if exercise(limit) not=?42 return 20
+    let before:int64=_arena_live_bytes
+    loop i in [0..8) {if exercise(limit) not=?42 return 21}
+    return if _arena_live_bytes=?before 42 else 22
+}

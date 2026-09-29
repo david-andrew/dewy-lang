@@ -80,28 +80,38 @@ raw_callee = (call:hir.FunctionCall nodes:array<hir.AST>):>bool => {
 }
 
 add_route = (@routes:array<Route> route:Route):>bool => {
-    let steps = route.steps
-    if steps.length >? MAX_ROUTE_DEPTH { steps.truncate(MAX_ROUTE_DEPTH) }
-    loop stored in routes { if bindings.path_starts_with(steps stored.steps) return false }
-    let remaining:array<Route> = []
-    loop stored in routes {
-        if not bindings.path_starts_with(stored.steps steps) { remaining.push(stored) }
+    if route.steps.length >? MAX_ROUTE_DEPTH {
+        let steps=route.steps.copy()
+        steps.truncate(MAX_ROUTE_DEPTH)
+        return add_route(@routes Route[steps])
     }
-    remaining.push(Route[steps])
-    routes = remaining
+    # Most fixed-point visits repeat an established route. Read it before
+    # retaining a new independent path, so that fast path does no copying.
+    loop stored in routes {if bindings.path_starts_with(route.steps stored.steps) return false}
+    # Route order is immaterial. Remove covered descendants by taking the
+    # last owned entry into the vacated slot, rather than copying survivors
+    # into a second array (or repeatedly shifting an array tail).
+    let index:addr=0
+    loop index <? routes.length {
+        if bindings.path_starts_with(routes[index].steps route.steps) {
+            let last=routes.pop
+            if index <? routes.length {routes[index]=last}
+        } else {index+=1}
+    }
+    routes.push(route.copy())
     return true
+}
+record_summary = (kind:Effect route:Route @summary:ParameterEffects):>bool => {
+    if kind =? 'read' return add_route(@summary.reads route)
+    if kind =? 'mutate' return add_route(@summary.mutates route)
+    if kind =? 'rebind' return add_route(@summary.rebinds route)
+    return add_route(@summary.escapes route)
 }
 record = (binding_id:addr kind:Effect route:Route @params:dict<addr ParameterEffects>):>bool => {
     if binding_id not in? params return false
-    let summary = params[binding_id]
-    let changed:bool = false
-    if kind =? 'read' { changed = add_route(@summary.reads route) }
-    else if kind =? 'mutate' { changed = add_route(@summary.mutates route) }
-    else if kind =? 'rebind' { changed = add_route(@summary.rebinds route) }
-    else { changed = add_route(@summary.escapes route) }
-    if changed { params[binding_id] = summary }
-    return changed
+    return record_summary(kind route @params[binding_id])
 }
+
 opaque = (binding_id:addr route:Route @params:dict<addr ParameterEffects>):>bool => {
     let changed:bool = false
     let kinds:array<Effect> = ['read' 'mutate' 'rebind' 'escape']

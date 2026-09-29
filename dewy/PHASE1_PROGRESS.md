@@ -30,6 +30,30 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Effect routes update their stored owners (2026-09-29)
+
+Native effect insertion now mutates the selected parameter summary directly.
+Repeated routes check existing coverage before retaining a path. When a broader
+route replaces descendants, the unordered route set moves its last entry into
+each removed slot, keeping linear traversal without copying survivors or
+repeatedly shifting a tail. New retained paths still explicitly own their copy;
+the finite route-depth bound is unchanged.
+
+Over 1,000 already-covered updates, measured allocations fall from 64,000 to
+zero bytes when native-built, and from 400,008 to 64,008 bytes when hosted-built,
+on both x86-64 and C. The regression gates hosted allocation at 65,536 bytes
+and native repeated-update allocation at zero. It also checks prefix coverage,
+descendant removal, depth truncation and live-byte recovery after repeated full
+exercises. Both final kernel checks pass (34.68 seconds). The full parameter-
+effect comparison passes when hosted-built and native-built (18.49/12.32 seconds).
+The fixture brings the manifest to 672. Logs use `dewy-effects-inplace-*`.
+
+The preceding frozen `9df1d08f` snapshot reached an independently seeded,
+byte-identical three-generation fixed point, with x86-64/C execution/scaling
+checks. Generations 2/3 took 62/67 seconds under concurrent checks. Its inventory
+is 4,220 sites / 56,063 lines = 75.272/KLOC, within unchanged gates. Full
+668-case parity is running; the two subsequent effect batches are later work.
+
 ## Ambient writes stop at the owning activation (2026-09-29)
 
 Both transitive ambient-effect solvers now subtract a function's own parameters,
