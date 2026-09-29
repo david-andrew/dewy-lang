@@ -1098,6 +1098,47 @@ note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<
 }
 owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    if node is? hir.MemberAccess and id in? state.moved_uses {
+        let array=array_type(node.value_type state)
+        let stored=array_type(stored_type(id @state) state)
+        let root=id
+        let valid=true
+        loop true {
+            let part=hir.node_at(state.input.nodes root)
+            if part isnt? hir.MemberAccess break
+            let owner=hir.node_at(state.input.nodes part.value)
+            if not object_valued(owner.value_type @state) or stored_type(part.value @state) not=? owner.value_type {valid=false break}
+            root=part.value
+        }
+        let owner=hir.node_at(state.input.nodes root)
+        # A current exact-length fact does not change a field's descriptor
+        # layout. Element representation must still match the stored array.
+        if valid and array isnt? none and stored isnt? none and types.same_type(array.element stored.element state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+            let binding=owner.binding_id
+            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed {
+                # Keep the record root for normal cleanup of the untouched
+                # fields. The selected descriptor now has exactly one owner.
+                let prefix:array<addr>=[]
+                # Taking a field mutates the physical record. Detach any
+                # shared COW root first, just as an ordinary field write
+                # would, so a retained value never sees an emptied slot.
+                let slot=snapshot(field_pointer(node @state writable=true) @prefix @state)
+                let taken=snapshot(read_word(slot 0 node @state) @prefix @state)
+                let allocated=compare('__ne__' word_op('__and__' read_word(taken layouts.array_descriptor.flags node @state) word(layouts.array_flags.arena_descriptor node @state) node @state) word(0 node @state) node @state)
+                let transfer=put(hir.Block[node.loc runtime_type(node.value_type node @state) [store_word(word(0 node @state) slot 0 node @state) taken] false] @state)
+                # Frame placement is independent of source ownership. Its
+                # descriptor/data cannot escape; the ordinary layout copy
+                # acquires lasting storage and root cleanup keeps the old one.
+                prefix.push(put(hir.Flow[node.loc runtime_type(node.value_type node @state) [put(hir.IfArm[node.loc runtime_type(node.value_type node @state) allocated transfer] @state)] array_copy(taken array node @state)] @state))
+                # Placement promotion remains visible in the inventory,
+                # independently of source-level copy permission.
+                state.copy_notes.push(CopyNote['array' copy_name(node.value_type @state) 'promoted from a record field'
+                    'the frame-backed branch promotes storage before the record dies; an arena descriptor transfers directly'
+                    node.loc state.source_index false true true])
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
+    }
     if state.result_projection isnt? none and state.result_projection.read =? id {
         let projection=state.result_projection
         # A proven scope borrow returns the route's existing storage. Its
@@ -5312,6 +5353,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.moved_bindings=set[]
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
+        loop moved is? hir.MemberAccess {moved=hir.node_at(state.input.nodes moved.value)}
         if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.push(moved.binding_id)}
     }
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]

@@ -25,6 +25,15 @@ aliases participate in the same check. A loop cannot consume an owner that
 its next iteration may need. Both implementations bound branch comparisons
 to 4,096 per owner; exhausting that search retains the copy.
 
+An owned record's final array-field use can also transfer the field. The
+proof accounts for readers of the whole record and its borrowed aliases;
+live siblings, later loop iterations and drop-hook reads retain the snapshot
+fallback. The field is emptied only when its descriptor can outlive the
+record. Frame-backed storage uses the ordinary promotion path, and a shared
+native record detaches before its field is emptied. The conditional placement
+copy remains visible in the inventory, with the existing placement exemption
+from source copy policy. Other fields still receive ordinary cleanup.
+
 A known direct callee may own an incoming aggregate even when it inspects
 scalar fields, tests its alternative, or reads its length before a final
 transfer. Those observations cannot retain an alias. Earlier returns release

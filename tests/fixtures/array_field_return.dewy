@@ -1,0 +1,10 @@
+$explicit_copies
+Pack:type=[values:array<int64> other:array<string>]
+make=():>Pack=>{
+ let values:array<int64>=[2]
+ values.reserve(8)
+ return Pack[values ['left behind']]
+}
+read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 0
+take=():>array<int64>=>{let owner=make() return owner.values}
+main=():>int64=>{let values=take() values.push(40) return read(values)}

@@ -1,0 +1,24 @@
+$explicit_copies
+Pack:type=[values:array<int64> other:array<string>]
+make=():>Pack=>{
+ let values:array<int64>=[2]
+ values.reserve(8)
+ return Pack[values ['left behind']]
+}
+read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 0
+exercise=():>int64=>{
+ let owner=make()
+ let snapshot=owner.copy()
+ let before:int64=_arena_allocated_bytes
+ let values=owner.values
+ values.push(40)
+ if snapshot.values.length not=?1 or snapshot.other.length not=?1 return 0
+ let allocated:int64=_arena_allocated_bytes-before
+ return if allocated>=?0 read(values) else 1
+}
+main=():>int64=>{
+ if exercise() not=?42 return 1
+ let before:int64=_arena_live_bytes
+ loop i in [0..50) {if exercise() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

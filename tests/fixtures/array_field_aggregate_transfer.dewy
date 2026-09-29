@@ -1,0 +1,10 @@
+$explicit_copies
+Item:type=[n:int64 words:array<string>]
+Pack:type=[values:array<Item> other:array<string>]
+take=():>array<Item>=>{let owner=Pack[[Item[2 ['kept']]] ['released']] return owner.values}
+exercise=():>int64=>{let values=take() values.push(Item[40 ['new']]) return if values.length=?2 values[0].n+values[1].n else 0}
+main=():>int64=>{if exercise() not=?42 return 1
+let before:int64=_arena_live_bytes
+loop i in [0..50) {if exercise() not=?42 return 2}
+return if _arena_live_bytes=?before 42 else 3}
+

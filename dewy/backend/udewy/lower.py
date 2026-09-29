@@ -3794,13 +3794,17 @@ class _Lowerer(
         if not isinstance(declared, ty.ArrayType):
             return None
         source = self._copy_source_expression(node.expr)
-        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.ExpressedIdentifier, hir.Flow, hir.Block)):
+        if isinstance(source, hir.MemberAccess) and self._borrowed_route_local(node, declared):
+            return None
+        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.ExpressedIdentifier, hir.Flow, hir.Block, hir.MemberAccess)):
             return None
         return node if self._array_representation(node) == 'descriptor' else None
 
     def _array_value_is_owned(self, value: hir.AST) -> bool:
         """Whether an array value stored into a field is the field's own storage (moved in, fresh, or cloned from a local) rather than a borrow of a parameter's or another object's."""
         source = self._copy_source_expression(value)
+        if isinstance(source, hir.MemberAccess) and id(source) in self.moved_uses:
+            return True
         if isinstance(source, hir.ExpressedIdentifier):
             if source.binding_id in self.storage_borrow_proofs.flow_views:
                 return False
@@ -3949,6 +3953,22 @@ class _Lowerer(
 
         def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
+            if isinstance(source, hir.MemberAccess):
+                # A runtime array field owns a descriptor independently of
+                # the containing record's frame. Transfer only at the whole
+                # receiver's last use; live sibling/derived reads therefore
+                # keep the usual snapshot. Lowering checks the stored layout
+                # and empties the field, preserving the root's cleanup.
+                array = ty.structural_base(source.type)
+                root = source
+                while isinstance(root, hir.MemberAccess) and isinstance(ty.structural_base(root.value.type), ty.ObjectType):
+                    root = root.value
+                if (isinstance(array, ty.ArrayType) and array.length is None
+                        and isinstance(root, hir.ExpressedIdentifier)
+                        and root.binding_id in element_owners
+                        and isinstance(ty.structural_base(root.type), ty.ObjectType)):
+                    return {id(root): id(source)}
+                return {}
             if isinstance(source, hir.RepresentationCast) and storage_borrows.union_loan_source(source) is not None:
                 # A member injection changes the tag, not its owned payload
                 # layout. The union store can adopt a last-use member just as
@@ -4073,7 +4093,7 @@ class _Lowerer(
                 return
             if isinstance(node, hir.Return) and node.item is not None:
                 result_transfers = transfer(node.item)
-                returned.update(result_transfers)
+                returned.update(result_transfers.values())
                 first = len(transfers)
                 walk(node.item, depth, nested, result_transfers)
                 if not nested:
@@ -4802,7 +4822,7 @@ class _Lowerer(
                     else declared_type
                 )
                 source = self._copy_source_expression(node.expr)
-                if declared_type.length is None and isinstance(source, hir.ExpressedIdentifier) and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
+                if declared_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess)) and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses):
                     copy_prelude, copied = self._transfer_array_value(node.expr, source, declared_type, site=f'bound to `{node.name}`')
                 else:
                     self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)

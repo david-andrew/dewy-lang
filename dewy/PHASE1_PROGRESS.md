@@ -36,6 +36,41 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): final array-field reads can transfer from owned
+record locals on both routes. The complete receiver participates in last-use
+analysis, including derived readers, branch paths and loop backedges. Taking
+a native field detaches a shared record first; a frame-backed descriptor uses
+ordinary storage promotion rather than escaping its frame. Other fields retain
+normal cleanup. Conditional promotion is reported with the existing placement
+exemption, rather than hidden or treated as a source-requested copy.
+
+Fifteen hosted field-transfer checks pass, including zero-allocation reserved
+buffer growth, a positive control with transfer disabled, aggregate elements,
+repeated live-byte checks, shared snapshots and const owners. The final paired
+native group passes on x86-64/C (53.76 seconds). The earlier record-field suite
+also passes on both routes; lifecycle/borrow regression checking passed 61 cases
+and exposed two stale expectations about synchronous read-only captures. Those
+expectations now check supported execution and rejection of writes; all eight
+focused hosted checks and the two native execution cases pass. The test update
+is separately committed as `13df1d66`.
+
+Native move analysis no longer copies the program-wide donation map into each
+function's mutable analysis state. Its candidate lists update their actual
+slots, and membership-guarded readers avoid optional owning lookup results.
+It passes strict checking on both routes: **59 physical bootstrap modules**.
+Twelve field/capture fixtures bring the manifest to **412 cases**. The corrected
+native driver also emitted the complete bootstrap (24,161,632 bytes) before
+the final exact-length/reporting adjustment; a fresh independent full integration
+checkpoint is still required. The latest completed full certification remains
+`73fd8f9c` below.
+
+One acceptance-precision gap remains recorded: native retains the exact length
+of `Pack[[2]].values` across the local constructor, so a snapshot before a drop
+hook is bounded; hosted currently keeps only the declared runtime length and
+requires an explicit copy. With a runtime-sized input both reject the implicit
+snapshot, and both preserve the hook's read. No hook is skipped or run after
+its observed field has been emptied.
+
 Checkpoint (2026-09-28): the frozen `73fd8f9c` integration passes
 **391/391** paired acceptance/execution cases and a byte-identical
 three-generation native fixed point. The last generations took 59/65 seconds

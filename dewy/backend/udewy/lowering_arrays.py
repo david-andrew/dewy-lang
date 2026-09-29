@@ -35,6 +35,8 @@ from .lowering_shared import (
     ArrayRepresentation,
     ArrayUse,
     MoveNote,
+    CopyNote,
+    local_binding_key,
     _Binding,
     _FunctionDef,
     _Scope,
@@ -1128,7 +1130,7 @@ class _ArrayLowering(_ArraySharing):
         """Produce an independently mutable array value from one expression."""
 
         source = self._copy_source_expression(node)
-        if (array_type.length is None and isinstance(source, hir.ExpressedIdentifier)
+        if (array_type.length is None and isinstance(source, (hir.ExpressedIdentifier, hir.MemberAccess))
                 and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses)):
             return self._transfer_array_value(node, source, array_type, site=site or 'transferred')
         if self._array_expression_owns_fresh_storage(node):
@@ -2468,6 +2470,40 @@ class _ArrayLowering(_ArraySharing):
         local is marked released so its scope exit leaves the data alone.
         """
         loc = node.loc
+        if isinstance(source, hir.MemberAccess) and id(source) in self.moved_uses:
+            root = source
+            while isinstance(root, hir.MemberAccess):
+                root = root.value
+            owner = ty.structural_base(source.value.type)
+            field = owner.field(source.name) if isinstance(owner, ty.ObjectType) else None
+            if (isinstance(root, hir.ExpressedIdentifier)
+                    and local_binding_key(root) in self.owned_objects
+                    and not self.borrowed_fields.get(local_binding_key(root))
+                    and field is not None and ty.structural_base(field.type) == array_type):
+                before, receiver = self._extract_object_pointer(source.value)
+                _, offsets = self._object_layout(owner, source)
+                taken = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('taken_field'))
+                before.append(self._declare(taken, self._load_i64_field(receiver, offsets[source.name], loc), loc))
+                # A record can contain a frame descriptor, including a
+                # literal array of frame-rooted records. Only a lasting
+                # descriptor can leave by handle. Reuse record-return
+                # promotion for the other layout and leave its original
+                # field available to clean up any untransferred elements.
+                result = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('field_result'))
+                promoted, value = self._transfer_array_value(taken, taken, array_type, site=site, adopt=True)
+                allocated = self._int64_comparison('__ne__', self._int64_binary('__and__',
+                    self._load_i64_field(taken, ARRAY_FLAGS_OFFSET, loc),
+                    self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc), self._int64_literal(loc, 0), loc)
+                before.extend([self._declare(result, taken, loc), self._if(allocated,
+                    [self._store_i64_field(receiver, offsets[source.name], self._int64_literal(loc, 0), loc)], loc,
+                    [*promoted, self._assign(result, value, loc)])])
+                self.copy_notes.append(CopyNote(self.srcfile, source.loc,
+                    'the frame-backed branch promotes storage before the record dies; an arena descriptor transfers directly',
+                    kind='array', type_name=type_to_dewy(array_type),
+                    site='promoted from a record field', policy_exempt=True))
+                self.move_notes.append(MoveNote(self.srcfile, source.loc,
+                    f'array field `{source.name}` is moved when {site}: its receiver is at its last use and the field is emptied', True))
+                return before, result
         if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
             members = self._stored_union_members(source)
             if members is not None and any(ty.structural_base(member) == array_type for member in members):
