@@ -38,9 +38,13 @@ bytes to remain outside the logical-copy budget, as the approved policy states.
 
 Validation: 24 diagnostic/getter checks, 22 hosted copy-policy checks and 27
 paired strict-body/widening checks pass; the standalone borrowing fixture also
-passes. The fresh full CLI test is running against frozen
-`phase1-full-suite-repair-source`. Its result is still pending; these targeted
-repairs do not yet certify a green full suite or completion of Phase 1.
+passes. The fresh full CLI test passes against frozen
+`phase1-full-suite-repair-source`, including the unchanged compiler copy gates.
+Its first attempt built the seed successfully and exposed a removed test-local
+row helper; after restoring that helper the complete command test reused the
+same independent hosted seed. A fresh non-slow suite and three-generation
+native rebuild are now running. These targeted repairs do not yet certify a
+green full suite or completion of Phase 1.
 
 ## Full-suite repair: bounded union-array copies (2026-09-29)
 

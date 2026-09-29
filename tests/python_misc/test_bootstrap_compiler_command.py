@@ -181,6 +181,9 @@ def test_native_compiler_command(tmp_path):
                 for line in get_inventory.stdout.splitlines()
                 if line.startswith('copy: ') and 'get_views.dewy:' in line and ': record ' in line}
     lines = get_fixture.read_text().splitlines()
+    def rows(*fragments):
+        return {index + 1 for index, line in enumerate(lines)
+                if any(fragment in line for fragment in fragments)}
     assert get_rows == rows('let before=d.get', "found=d.get('beta')") | {index + 1 for index, line in enumerate(lines)
                                                                         if 'let found=d.get(k)' in line and 'first' in lines[index + 1]}, get_rows
 
