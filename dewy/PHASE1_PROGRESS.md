@@ -21,6 +21,15 @@ and stale bounds. Seven new manifest cases retain this regression. The frozen
 425-case integration run is still in progress; its failures are being reduced.
 Phase 1 remains open pending corrected-seed integration and the checklist below.
 
+## Integration repair (2026-09-29): conversion facts
+
+Array-field fact seeding now crosses only subtype-widening casts in both
+checkers. A real conversion produces a different value: in particular, decoding
+bytes cannot refine an optional string back to the input's array type. The
+existing decoded-string escape regression exposed this after array root facts
+were generalized. Twenty-three hosted conversion/field-fact checks and two
+paired native groups pass, including ownership and release of decoded payloads.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

@@ -1902,6 +1902,8 @@ def _seed_field_routes(
     declared = ty.unfold(ty.strip_refinement(declared))
     literal = _unwrap_parens(expr)
     while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
+        if not ctx.type_system.is_subtype(literal.expr.type, literal.type):
+            return  # A conversion does not preserve its input's field facts.
         literal = literal.expr
     if isinstance(declared, ty.ArrayType):
         current = ty.unfold(ty.strip_refinement(literal.type))

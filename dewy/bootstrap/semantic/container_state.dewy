@@ -224,7 +224,16 @@ inherited = (state:addr session:contexts.Session):>array<keys.Fact> => {
 seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
     let node = hir.node_at(session.hir value)
     if node is? hir.Obligation { seed_fields(binding node.value state @session) return void }
-    if node is? hir.ValueCast|hir.RepresentationCast { seed_fields(binding node.expr state @session) return void }
+    if node is? hir.ValueCast|hir.RepresentationCast {
+        let source=hir.node_at(session.hir node.expr)
+        # Widening preserves the input's field facts; a real conversion has
+        # a new value. UTF-8 decoding, for example, must not seed its byte
+        # array's length/type onto the resulting optional string.
+        if subtyping.is_subtype(source.value_type node.value_type session.links @session.types) {
+            seed_fields(binding node.expr state @session)
+        }
+        return void
+    }
     let current=types.node_at(session.types types.strip_refinement(node.value_type session.types))
     if current is? types.ArrayType and current.length isnt? none {
         $runtime_assert state <? session.read_states.length
