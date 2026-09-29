@@ -1,0 +1,24 @@
+$explicit_copies
+Box:type=[items:array<int64> spare:array<int64>]
+make=(n:int64):>Box=>Box[[n 22] [3 4]]
+take=(n:int64 @kept:Box):>array<int64>=>{
+    let owner=make(n)
+    kept=owner.copy()
+    let result=owner.items
+    if owner.spare.length not=?2 return []
+    return result
+}
+work=():>int64=>{
+    let kept=Box[[] []]
+    let items=take(20 @kept)
+    if items.length not=?2 return 1
+    items[0]=items[0]+1
+    if kept.items.length not=?2 or kept.items[0] not=?20 return 4
+    return items[0]+items[1]-1
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

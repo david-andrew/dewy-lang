@@ -1,0 +1,12 @@
+$explicit_copies
+Part:type=[items:array<int64>]
+Box:type=[part:Part spare:array<int64>]
+make=():>Box=>Box[Part[[20 22]] [7]]
+take=():>Part=>{let owner=make() let result=owner.part return result}
+work=():>int64=>{let value=take() return if value.items.length=?2 value.items[0]+value.items[1] else 1}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

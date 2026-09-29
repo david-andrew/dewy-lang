@@ -28,6 +28,25 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Returned field views take their local owner's storage (2026-09-29)
+
+A stable aggregate view returned at function exit can now transfer its field
+from an owned local on both routes. Static member paths use the existing
+physical transfer rules: detach shared native roots, promote frame-backed
+fields if needed, and clean the remaining owner normally. Incoming borrowed
+roots, exposed/captured roots and lifecycle-bearing owners remain excluded.
+Saved scalar values never re-read their old source at return; the surrounding
+view tests caught and corrected that overly broad initial rule.
+
+Ninety-nine focused/surrounding hosted checks pass, along with three native
+groups and two additional paired cases. Coverage includes arrays, tagged
+payloads, inline records, nested paths, explicit views, loop exits, a retained
+caller snapshot and repeated live-byte recovery on x86-64/C. Nine new fixtures
+bring the manifest to 600; two former borrowed-union return rejections now
+expect successful execution. Logs use `dewy-returned-view-*` outside the tree.
+This is the first owner-directed return slice, not general escape/capture
+promotion; full integration remains the checkpoint above.
+
 ## Loop interval loans and bytecode source adoption (2026-09-29)
 
 Array loops can borrow a place field after earlier writes have completed.

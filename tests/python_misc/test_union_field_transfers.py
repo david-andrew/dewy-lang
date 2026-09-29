@@ -32,11 +32,8 @@ CASES = [SOURCE,
           .replace('=>Box[if present [20 22] else false]', '=>Box[Inner[if present [20 22] else false]]').replace('owner.item', 'owner.nested.item'),
 ]
 RETAINED = SOURCE.replace('return owner.item', 'let result=owner.item\n    if owner.item is? bool return false\n    return result')
-ERRORS = [RETAINED,
-    # A named borrowed alias still needs owner-directed promotion; this
-    # field transfer does not turn an escaping view into an owning local.
-    SOURCE.replace('return owner.item', 'let result=owner.item\n    return result'),
-]
+CASES += [RETAINED, SOURCE.replace('return owner.item', 'let result=owner.item\n    return result')]
+ERRORS = []
 CASES.append(SOURCE.replace('return owner.item', '''let kept=owner.copy()
     let result=owner.item
     owner.item=false
@@ -53,11 +50,6 @@ def test_union_field_transfer(tmp_path, source):
     emitted = codegen(SrcFile(None, source), debug_locations=False)
     assert any('record field is moved when stored in a union' in note.message for note in lower.last_move_notes)
     execute(tmp_path, 'union-field-transfer', emitted)
-
-
-def test_retained_union_field_still_requires_copy():
-    with pytest.raises(ReportException, match='unproven copy'):
-        codegen(SrcFile(None, RETAINED), debug_locations=False)
 
 
 def test_union_field_transfer_requires_last_use_proof(monkeypatch):

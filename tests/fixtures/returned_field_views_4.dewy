@@ -1,0 +1,22 @@
+$explicit_copies
+Inner:type=[items:array<int64> spare:array<int64>]
+Box:type=[nested:Inner]
+make=(n:int64):>Box=>Box[Inner[[n 22] [3 4]]]
+take=(n:int64):>array<int64>=>{
+    let owner=make(n)
+    let result=owner.nested.items
+    if owner.nested.spare.length not=?2 return []
+    return result
+}
+work=():>int64=>{
+    let items=take(20)
+    if items.length not=?2 return 1
+    items[0]=items[0]+1
+    return items[0]+items[1]-1
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

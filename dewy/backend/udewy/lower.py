@@ -1358,6 +1358,30 @@ class _Lowerer(
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.owning_string_bindings = self._owning_string_locals(analysis_literal, self.local_initializers)
         self.moved_uses = self._compute_moves(analysis_literal)
+        # A returned stable view can take its field from a dying local owner.
+        # Retain fresh transfer nodes for this function so their identity cannot
+        # be reused while the move set still contains it.
+        self.return_borrow_sources = {}
+        self.return_borrow_nodes = []
+        declarations = [node for node in borrowing._walk_function(analysis_literal)
+                        if isinstance(node, hir.Declare) and node.binding_id is not None]
+        owned_roots = {node.binding_id for node in declarations
+                       if self._owned_object_declaration(node) or self._owned_cell_declaration(node)}
+        for declaration in declarations:
+            source = borrowing.unwrap(declaration.expr)
+            if (isinstance(source, hir.MemberAccess)
+                    and (isinstance(ty.structural_base(source.type), (ty.ArrayType, ty.ObjectType))
+                         or self._field_union_members(source.type) is not None)
+                    and self._borrowed_route_local(declaration, declaration.annotation or source.type)):
+                root = source
+                while isinstance(root, hir.MemberAccess):
+                    root = root.value
+                if (isinstance(root, hir.ExpressedIdentifier)
+                        and root.binding_id in owned_roots
+                        and root.binding_id not in self.borrow_plan.exposed_bindings
+                        and root.binding_id not in self.borrow_plan.captured_bindings
+                        and storage_borrows.borrowable(root.type)):
+                    self.return_borrow_sources[declaration.binding_id] = source
         self._note_allocator_escapes(analysis_literal.body)
         self.owned_strings = set()
         self.owned_raw_arrays = {}
@@ -5169,6 +5193,18 @@ class _Lowerer(
         if isinstance(node, hir.Return):
             if node.item is not None and isinstance(self._unwrap_transparent(node.item), hir.Flow) and (distributed := self._distributed_return(node.item)) is not None:
                 return self._lower_statement(distributed)   # `return match …`: each arm returns its own value
+            if isinstance(node.item, hir.ExpressedIdentifier):
+                source = self.return_borrow_sources.get(node.item.binding_id)
+                if source is not None and source.type == node.item.type:
+                    # Re-read only a proven stable, static member route. The
+                    # normal field-transfer path checks that its root really
+                    # owns storage, handles COW/layout promotion and leaves
+                    # sibling cleanup intact. An incoming borrowed root still
+                    # takes the ordinary copy path.
+                    source = replace(source, loc=node.item.loc)
+                    self.return_borrow_nodes.append(source)
+                    self.moved_uses.add(id(source))
+                    node = replace(node, item=source)
             if self.current_object_result is not None:
                 if node.item is None:
                     self._target_error(node, 'object return without a value')

@@ -1,0 +1,4 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+take=(owner:Box):>array<int64>=>{let result=owner.items return result}
+main=():>int64=>{let box=Box[[20 22]] let values=take(box) return 42}

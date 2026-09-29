@@ -66,6 +66,7 @@ State:type = [
     # Identifier uses that move their local (moves.compute), and the locals
     # they empty, which must be declared `let` for the emptying store.
     moved_uses:set<addr>=set[]
+    return_borrow_sources:dict<addr addr>=[]
     moved_bindings:set<addr>=set[]
     nodes:array<hir.AST>=[]
     type_nodes:types.Table=types.Table[]
@@ -1114,6 +1115,20 @@ take_array_slot=(slot:addr array:types.ArrayType node:hir.AST origin:string @sta
 }
 owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    if site =? 'returned' and state.result_projection is? none and node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? state.return_borrow_sources {
+        let source=state.return_borrow_sources[node.binding_id]
+        let route=borrowing.route(source state.input.nodes)
+        if route isnt? none and route.binding in? state.cleanup_owned and releasable(node.value_type @state) and types.same_type(hir.node_at(state.input.nodes source).value_type node.value_type state.type_nodes) {
+            # The declaration already proved this static route stable. Only
+            # this return can consume it; ordinary field lowering verifies
+            # ownership, detaches shared roots and preserves sibling cleanup.
+            let was_moved=source in? state.moved_uses
+            state.moved_uses.push(source)
+            let result=owned_value(source @state site)
+            if not was_moved {state.moved_uses.pop(source default=source);}
+            return result
+        }
+    }
     if node is? hir.Index and id in? state.moved_uses and id not in? state.array_snapshots {
         let owner=hir.node_at(state.input.nodes node.array)
         if inline_record(node.value_type @state) and types.same_type(stored_type(id @state) node.value_type state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
@@ -5483,6 +5498,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     # Moving that owner into a mutable destination while the view lives would
     # let mutation of the destination change an ordinary value snapshot.
     let borrow_dependents:dict<addr set<addr>>=[]
+    state.return_borrow_sources=[]
     if enabled {
         loop declaration_id in local_declarations {
             let declaration=hir.node_at(state.input.nodes declaration_id)
@@ -5508,6 +5524,12 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                 let dependents=borrow_dependents.get(route.binding set[])
                 dependents.push(declaration.binding_id)
                 borrow_dependents[route.binding]=dependents
+                let source=hir.node_at(state.input.nodes declaration.expr)
+                if source is? hir.MemberAccess and borrowed_route_local(declaration @state) and route.binding not in? excluded and route.binding not in? state.boxed and route.binding not in? state.addressed {
+                    let owner:hir.AST=source
+                    loop owner is? hir.MemberAccess {owner=hir.node_at(state.input.nodes owner.value)}
+                    if owner is? hir.ExpressedIdentifier and storage_borrows.borrowable(owner.value_type state.type_nodes) {state.return_borrow_sources[declaration.binding_id]=declaration.expr}
+                }
             }
         }
     }
