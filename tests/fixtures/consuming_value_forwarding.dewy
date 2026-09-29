@@ -1,0 +1,15 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+wrap=(items:array<int64>):>Box=>Box[items]
+forward=(items:array<int64>):>Box=>wrap(items)
+make=():>array<int64>=>[42]
+work=():>int64=>{
+ let value=forward(make())
+ return if value.items.length>?0 value.items[0] else 1
+}
+main=():>int64=>{
+ loop i in [0..1000) {if work() not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..1000) {if work() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

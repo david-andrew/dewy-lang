@@ -1127,6 +1127,10 @@ class _ArrayLowering(_ArraySharing):
     ) -> tuple[list[hir.AST], hir.AST]:
         """Produce an independently mutable array value from one expression."""
 
+        source = self._copy_source_expression(node)
+        if (array_type.length is None and isinstance(source, hir.ExpressedIdentifier)
+                and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses)):
+            return self._transfer_array_value(node, source, array_type, site=site or 'transferred')
         if self._array_expression_owns_fresh_storage(node):
             self._consume_array_value(node)   # the taker owns this fresh storage
             return self._extract_expression(node)

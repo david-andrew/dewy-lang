@@ -561,8 +561,10 @@ class _Lowerer(
                         self.value_function_ids.update(id(function.literal) for function in self._resolve_callable(child))
         self.owned_record_parameters = set()
         self.owned_cell_parameters = set()
+        self.owned_array_parameters = set()
         self.owned_record_arguments = {}
         self.owned_cell_arguments = {}
+        self.owned_array_arguments = {}
         if self._has_arena():
             from .consuming_inputs import parameters as consuming_parameters
             consumed = consuming_parameters(self.allocator_analysis, self.value_function_ids | {
@@ -582,6 +584,8 @@ class _Lowerer(
                         summary = self.program_effects.for_param_binding(binding)
                         if binding in consumed or summary is not None and not summary.read_only and not summary.escapes:
                             self.owned_record_parameters.add(binding)
+                    elif isinstance(shape, ty.ArrayType) and shape.length is None and binding in consumed:
+                        self.owned_array_parameters.add(binding)
                     elif binding in consumed:
                         members = self._field_union_members(shape)
                         if members is not None and not self._union_tree_slots(members):
@@ -873,6 +877,13 @@ class _Lowerer(
                     place=False,
                 )
             if isinstance(param.type, ty.ArrayType) and param.binding_id is not None:
+                if param.binding_id in self.owned_array_parameters:
+                    incoming_name = self._new_array_name(f'arg_{param.name}')
+                    incoming = hir.ExpressedIdentifier(literal.loc, 'int64', incoming_name)
+                    parameter_prologue.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let',
+                        param.name, 'int64', incoming, binding_id=param.binding_id))
+                    parameter_arrays[param.name] = param.type.element
+                    return replace(param, name=incoming_name, type='int64', binding_id=None)
                 summary = self.program_effects.for_param_binding(param.binding_id)
                 # ABI membership belongs to the checked declaration, even when
                 # a return-layout rewrite produces a new literal node.
@@ -3252,6 +3263,14 @@ class _Lowerer(
                         if position is not None and id(node.pos_args[position] if isinstance(position, int)
                                                        else node.kw_args[position]) in donated_cells
                     }
+                donated_arrays = {id(argument) for argument, parameter in pairs or []
+                                 if parameter is not None and parameter.binding_id in self.owned_array_parameters}
+                if donated_arrays:
+                    self.owned_array_arguments[id(transformed)] = {
+                        index for index, position in enumerate(source_positions)
+                        if position is not None and id(node.pos_args[position] if isinstance(position, int)
+                                                       else node.kw_args[position]) in donated_arrays
+                    }
             if id(node) in self.borrow_plan.comparison_snapshots:
                 self.borrow_plan.comparison_snapshots.add(id(transformed))
             if id(node) in self.borrow_plan.array_snapshots:
@@ -3852,7 +3871,7 @@ class _Lowerer(
         owned: dict[int, tuple[int, int]] = {
             parameter.binding_id: (0, 0)
             for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
-            if parameter.binding_id in self.owned_record_parameters or parameter.binding_id in self.owned_cell_parameters
+            if parameter.binding_id in self.owned_record_parameters or parameter.binding_id in self.owned_cell_parameters or parameter.binding_id in self.owned_array_parameters
         }  # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
         transfers: list[tuple[int, int, int, int]] = []   # (binding id, transfer node id, sequence, loop depth) in order
@@ -4047,9 +4066,9 @@ class _Lowerer(
                 for name, argument in node.kw_args.items():
                     walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if name == 'value' and not node.pos_args else {})
                 return
-            if isinstance(node, hir.FunctionCall) and (id(node) in self.owned_record_arguments or id(node) in self.owned_cell_arguments):
+            if isinstance(node, hir.FunctionCall) and (id(node) in self.owned_record_arguments or id(node) in self.owned_cell_arguments or id(node) in self.owned_array_arguments):
                 walk(node.func, depth, nested, {})
-                donated = self.owned_record_arguments.get(id(node), set()) | self.owned_cell_arguments.get(id(node), set())
+                donated = self.owned_record_arguments.get(id(node), set()) | self.owned_cell_arguments.get(id(node), set()) | self.owned_array_arguments.get(id(node), set())
                 for index, argument in enumerate(node.pos_args):
                     walk(argument, depth, nested, transfer(argument) if index in donated else {})
                 for name, argument in node.kw_args.items():
@@ -4076,7 +4095,9 @@ class _Lowerer(
                                 if isinstance(item, hir.AST):
                                     walk(item, depth, nested, {})
 
-        walk(literal.body, 0, False, {})
+        # An implicit function result is the same ownership boundary as a
+        # written return. Statement-only bodies contribute no transfer here.
+        walk(literal.body, 0, False, transfer(literal.body))
 
         def borrow_live_between(binding: int, sequence: int, until: int) -> bool:
             pending = [binding]
@@ -5907,6 +5928,10 @@ class _Lowerer(
                     place_postlude.extend(arg_postlude)
                 elif index in self.owned_cell_arguments.get(id(node), ()):
                     arg_prelude, lowered_arg = self._materialize_owned_cell(arg, expected_type)
+                elif index in self.owned_array_arguments.get(id(node), ()):
+                    # The callee owns this descriptor; it transfers or releases
+                    # it, so there is no second caller temporary cleanup owner.
+                    arg_prelude, lowered_arg = self._independent_array_value(arg, expected_type, site='donated to a call')
                 elif (id(arg) in self.forwarded_values.get(id(node), ())
                         and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
                     arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)

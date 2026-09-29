@@ -12,8 +12,22 @@ from ...semantic.analyze.effects import _literal_params
 from ...semantic.analyze.storage_borrows import borrowable
 
 
+def value_source(node):
+    """Checked value wrappers preserve the consuming position of a read."""
+    while True:
+        if isinstance(node, hir.ValueCast) or (isinstance(node, hir.RepresentationCast)
+                and ty.preserves_union_payload(node.expr.type, node.type)):
+            node = node.expr
+        elif isinstance(node, hir.Obligation):
+            node = node.value
+        elif isinstance(node, hir.Block) and len(node.items) == 1:
+            node = node.items[0]
+        else:
+            return node
+
+
 def parameters(analysis, excluded_literals):
-    """Find ordinary record/union inputs donated into push/insert or another proved input.
+    """Find ordinary aggregate inputs donated into a value boundary or proved input.
 
     A worklist propagates only from actual consuming operations. A forwarding
     cycle without a consuming endpoint supplies no evidence. Functions used
@@ -26,7 +40,7 @@ def parameters(analysis, excluded_literals):
         wanted = {p.binding_id for p in _literal_params(literal)
                   if p.binding_id is not None and not p.place
                   and not isinstance(p, hir.BoundParam)
-                  and isinstance(ty.structural_base(p.type), (ty.ObjectType, ty.TypeOr))
+                  and isinstance(ty.structural_base(p.type), (ty.ObjectType, ty.TypeOr, ty.ArrayType))
                   and borrowable(p.type)}
         if not wanted:
             continue
@@ -35,6 +49,10 @@ def parameters(analysis, excluded_literals):
 
         def visit(node, parent=None, guarded=False):
             nonlocal exited
+            value = value_source(node)
+            if value is not node:
+                visit(value, parent, guarded)
+                return
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id in wanted:
                     reads[node.binding_id].append((node, parent, guarded or exited))
@@ -51,7 +69,7 @@ def parameters(analysis, excluded_literals):
         for param in _literal_params(literal):
             if isinstance(param, hir.BoundParam):
                 visit(param.value, guarded=True)
-        visit(literal.body)
+        visit(literal.body, literal)
         for binding, sites in reads.items():
             if len(sites) == 1 and not sites[0][2]:
                 candidates[binding] = sites[0][:2]
@@ -59,18 +77,26 @@ def parameters(analysis, excluded_literals):
     proven = set()
     dependents = defaultdict(set)
     for binding, (read, parent) in candidates.items():
+        if isinstance(parent, (hir.Return, hir.ObjectLiteral, hir.ArrayLiteral)) or (
+                isinstance(parent, hir.FunctionLiteral) and value_source(parent.body) is read):
+            shape = ty.structural_base(read.type)
+            # Fixed-array calls can use prepared/raw storage, whose ownership
+            # protocol is separate from a donated runtime descriptor.
+            if not isinstance(shape, ty.ArrayType) or shape.length is None:
+                proven.add(binding)
+            continue
         if not isinstance(parent, hir.FunctionCall):
             continue
         if isinstance(parent.func, hir.ArrayMethod):
             if (parent.func.name in {'push', 'insert'} and parent.pos_args
-                    and parent.pos_args[0] is read):
+                    and value_source(parent.pos_args[0]) is read):
                 proven.add(binding)
             continue
         targets = analysis._direct_targets(parent)
         if targets is None or len(targets) != 1:
             continue
         for argument, parameter in analysis._pair_arguments(parent, targets[0]) or ():
-            if argument is read and parameter is not None and parameter.binding_id in candidates:
+            if value_source(argument) is read and parameter is not None and parameter.binding_id in candidates:
                 dependents[parameter.binding_id].add(binding)
     pending = deque(proven)
     while pending:

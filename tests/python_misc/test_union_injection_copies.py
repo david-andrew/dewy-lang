@@ -11,9 +11,9 @@ ERRORS = [
 find=(rows:array<Box>):>Box?=>{loop row in rows {return row} return none}
 main=():>int64=>42''',
     '''Box:type=[items:array<int64>]
-wrap=(box:Box):>Box?=>box
+wrap=(box:Box):>Box?=>if box.items.length>?0 box else none
 main=():>int64=>42''',
-    '''wrap=(values:array<int64>):>array<int64> ?=>values
+    '''wrap=(values:array<int64>):>array<int64> ?=>if values.length>?0 values else none
 main=():>int64=>42''',
     '''Box:type=[items:array<int64>]
 wrap=(values:array<Box length=1>):>array<Box length=1> ?=>values

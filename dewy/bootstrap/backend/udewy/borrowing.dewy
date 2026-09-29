@@ -582,8 +582,8 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
 }
 
 # Ownership transfer at a value boundary. A parameter whose only use, on
-# every path and outside any loop, pushes it into an array or passes it on
-# to another such parameter takes ownership of its argument: the caller
+# every path and outside any loop, installs it in a returned value/container
+# or passes it to another such parameter takes ownership of its argument: the caller
 # donates a temporary (or copies a value it keeps) and never releases it,
 # and the callee adopts it at that use instead of copying. Only functions
 # that are exclusively called directly qualify, so every caller and the
@@ -594,7 +594,23 @@ ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false]
 # One pre-order walk per function records every read of its candidate
 # parameters: where it is, whether it may run never/many times, and whether
 # an earlier return could skip it.
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> @scan:ReadScan):>void => {
+consuming_value_source=(id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr=>{
+    let current=id
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.ValueCast {current=node.expr}
+        else if node is? hir.RepresentationCast {
+            if not views.preserves_union_payload(hir.node_at(nodes node.expr).value_type node.value_type type_nodes) return current
+            current=node.expr
+        }
+        else if node is? hir.Obligation {current=node.value}
+        else if node is? hir.Block and node.items.length=?1 {current=node.items[0]}
+        else {return current}
+    }
+}
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table @scan:ReadScan):>void => {
+    let source=consuming_value_source(id nodes type_nodes)
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes @scan) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
@@ -607,72 +623,82 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     # A read inside a nested literal, a flow arm, a loop or a short-circuit
     # operand may run never, once or many times: never a single consumption.
     let nested=guarded or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes @scan)}
+    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes @scan)}
     if node is? hir.Return {scan.exited=true}
     return void
 }
-consuming_use = (sites:array<ReadSite> nodes:array<hir.AST> plan:captures.Plan parameters:set<addr>):>addr? => {
-    if sites.length not=? 1 return none
-    let read:addr=0
-    let parent_id:addr=0
-    loop site in sites {
-        if site.guarded or site.after_exit return none
-        read=site.id parent_id=site.parent
-    }
-    let parent=hir.node_at(nodes parent_id)
-    if parent isnt? hir.FunctionCall return none
-    let callee=hir.node_at(nodes parent.func)
-    if callee is? hir.ArrayMethod {
-        if callee.name in? ['push' 'insert'] and parent.pos_args.length >? 0 and parent.pos_args[0] =? read return read
-        return none
-    }
-    let direct=captures.resolve(parent.func parent.selected_method_index plan nodes)
-    if direct is? none return none
-    let target=hir.node_at(nodes direct)
-    if target isnt? hir.FunctionLiteral return none
-    let pairs=effects.pair_arguments(parent target)
-    if pairs is? none return none
-    loop pair in pairs {
-        if pair.argument =? read and pair.parameter isnt? none and pair.parameter in? parameters return read
-    }
-    return none
-}
 consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr>):>Consumed => {
     let result=Consumed[]
-    # Candidate parameters and their read sites, scanned once per function.
-    let scans:dict<addr ReadScan>=[]
-    let candidates:dict<addr array<addr>>=[]
+    let candidates:dict<addr ReadSite>=[]
     loop [id function] in plan.functions {
         if id in? valued continue
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
-        if literal.object_receiver or function.captures.length >? 0 continue
-        let bindings:array<addr>=[]
+        if literal.object_receiver or function.captures.length>?0 continue
         let wanted:set<addr>=set[]
         loop parameter in effects.literal_params(literal) {
             let binding=parameter.binding_id
             if binding is? none or parameter.place or parameter is? hir.BoundParam continue
             if word_value(parameter.value_type type_nodes) continue
-            bindings.push(binding) wanted.push(binding)
+            wanted.push(binding)
         }
-        if bindings.length =? 0 continue
+        if wanted.length=?0 continue
         let scan=ReadScan[]
-        scan_reads(literal.body id false wanted nodes @scan)
-        scans[id]=scan candidates[id]=bindings
-    }
-    loop true {
-        let changed=false
-        loop [id bindings] in candidates {
-            let scan=scans.get(id)
-            if scan is? none continue
-            loop binding in bindings {
-                if binding in? result.parameters continue
-                let use=consuming_use(scan.reads.get(binding default=[]) nodes plan result.parameters)
-                if use is? none continue
-                result.parameters.push(binding) result.uses.push(use) changed=true
-            }
+        # A lazy default may also read a donating argument. Its conditional
+        # execution cannot be ignored when establishing a single use.
+        loop parameter in effects.literal_params(literal) {
+            if parameter is? hir.BoundParam {scan_reads(parameter.value id true wanted nodes type_nodes @scan)}
         }
-        if not changed break
+        scan_reads(literal.body id false wanted nodes type_nodes @scan)
+        loop binding in wanted {
+            if binding not in? scan.reads continue
+            const sites=@scan.reads[binding]
+            if sites.length not=?1 continue
+            let site=sites[0]
+            if not site.guarded and not site.after_exit {candidates[binding]=site}
+        }
+    }
+    # Seed only actual ownership boundaries, then propagate through direct
+    # forwarding. A forwarding cycle alone proves nothing. One reverse-edge
+    # worklist replaces repeated rescanning of every parameter in the graph.
+    let readers:dict<addr set<addr>>=[]
+    let pending:array<addr>=[]
+    loop [binding site] in candidates {
+        let parent=hir.node_at(nodes site.parent)
+        if parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
+            # Prepared fixed-array call storage retains its existing protocol.
+            let shape=types.node_at(type_nodes types.unfold(types.strip_refinement(hir.node_at(nodes site.id).value_type type_nodes) type_nodes))
+            if shape isnt? types.ArrayType or shape.length is? none {pending.push(binding)}
+            continue
+        }
+        if parent isnt? hir.FunctionCall continue
+        let callee=hir.node_at(nodes parent.func)
+        if callee is? hir.ArrayMethod {
+            if callee.name in? ['push' 'insert'] and parent.pos_args.length>?0 and consuming_value_source(parent.pos_args[0] nodes type_nodes)=?site.id {pending.push(binding)}
+            continue
+        }
+        let direct=captures.resolve(parent.func parent.selected_method_index plan nodes)
+        if direct is? none continue
+        let target=hir.node_at(nodes direct)
+        if target isnt? hir.FunctionLiteral continue
+        let pairs=effects.pair_arguments(parent target)
+        if pairs is? none continue
+        loop pair in pairs {
+            if consuming_value_source(pair.argument nodes type_nodes) not=?site.id or pair.parameter is? none or pair.parameter not in? candidates continue
+            if pair.parameter in? readers {let waiting=@readers[pair.parameter] waiting.push(binding)}
+            else {readers[pair.parameter]=set[binding]}
+        }
+    }
+    loop pending.length>?0 {
+        let binding=pending.pop
+        if binding in? result.parameters {continue}
+        $runtime_assert binding in? candidates
+        result.parameters.push(binding)
+        result.uses.push(candidates[binding].id)
+        if binding in? readers {
+            const waiting=@readers[binding]
+            loop reader in waiting {if reader not in? result.parameters {pending.push(reader)}}
+        }
     }
     return result
 }

@@ -36,6 +36,29 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): direct single-use aggregate inputs now transfer
+through constructors and explicit or implicit returns. Both compilers trace
+transparent checked wrappers, including payload-preserving union injections.
+The hosted route gives donated runtime arrays a distinct owning parameter;
+source cleanup sees an emptied descriptor after transfer. Native inline record
+fields honor consuming uses instead of silently copying them. Fixed-array
+prepared storage retains its existing calling protocol.
+
+The native consuming-input analysis now uses reverse dependencies and a queue
+seeded by actual ownership boundaries. A forwarding cycle cannot establish its
+own ownership proof. Defaults, conditional/repeated uses, captures and function
+values remain conservative. No source calling convention or effect syntax
+changes. Retained callers still owe independent snapshots.
+
+The surrounding hosted suite passes 93 checks, and both paired groups pass
+on x86-64 and C (70.39 seconds), including stable live-storage counters across
+2,000 calls, optional results, nested array literals and record-field transfers.
+Five fixtures bring the full manifest to 365. A preliminary frozen hosted
+inventory prepared successfully in 216.51 seconds; its emission harness then
+called a nonexistent `render` method, so that run certifies no executable. The
+next integration checkpoint must use the corrected `source` emitter and the
+final source revision. Compiler-wide strict adoption remains open.
+
 Checkpoint (2026-09-28): array-selection loans now compose through other
 selected views and nested single-expression blocks. A finite dependency
 worklist establishes each source from stable storage, rejects self-supporting
