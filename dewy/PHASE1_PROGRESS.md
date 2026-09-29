@@ -31,6 +31,27 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Effect equations own one summary per parameter (2026-09-29)
+
+Native effect analysis no longer retains a second, unused by-function summary
+forest. Local scanning transfers its completed parameter owners into the result;
+call equations and the dependency worklist use parameter binding identities.
+Changing one parameter therefore does not reschedule every other parameter in
+its function. Argument pairing retains identities rather than full parameter
+records. Recursive self-edges still receive a source snapshot, preserving value
+semantics while destination summaries grow.
+
+The 128-function/eight-parameter recursive kernel falls from 3,855,144 to
+3,373,416 allocated bytes on both x86-64 and C (12.5%). The one-parameter
+comparison falls from 2,428,712 to 2,271,592 bytes. These are kernel allocation
+measurements, not a claimed self-build speedup. The permanent kernel checks all
+1,024 parameter summaries and repeated-run live-byte recovery. Three final
+hosted/native kernel and equivalence checks pass (85.44 seconds), and the
+native-built equivalence test passes separately (9.09 seconds), including mixed
+positional/keyword forwarding. Eleven surrounding effect checks passed before
+the final argument-metadata simplification (151.53 seconds). Full independent
+integration remains pending. The manifest now contains 695 cases.
+
 ## Compare array values independently of element length facts (2026-09-29)
 
 Both builtin equality dispatchers now distinguish read-only value comparison

@@ -27,8 +27,8 @@ def effect_program():
     def number(n=0):
         return hir.Integer(LOC, 'int64', '0d', n)
 
-    def function(binding_id, params, body):
-        literal = hir.FunctionLiteral(LOC, CALLABLE, params, [], None, 'void', hir.Block(LOC, 'void', body, True))
+    def function(binding_id, params, body, *, kw_only=()):
+        literal = hir.FunctionLiteral(LOC, CALLABLE, params, list(kw_only), None, 'void', hir.Block(LOC, 'void', body, True))
         declarations.append(hir.Declare(LOC, 'void', 'let', f'f{binding_id}', CALLABLE, literal, binding_id=binding_id))
         return literal
 
@@ -123,6 +123,12 @@ def effect_program():
     for _ in range(16):
         shared = hir.Flow(LOC, CALLABLE, [hir.IfArm(LOC, CALLABLE, hir.Bool(LOC, 'bool', True), shared)], shared)
     function(130, [param(32)], [hir.FunctionCall(LOC, 'void', shared, [place(read(32))], {})])
+    # Keyword pairing removes named slots before binding remaining positional
+    # arguments. The equation retains identities, including keyword-only ones.
+    function(131, [param(33), param(34)], [store(read(33)), hir.ArrayLength(LOC, 'int64', read(34)),
+        hir.Assign(LOC, 'void', read(35), '=', hir.ArrayLiteral(LOC, ARRAY, [number()]))], kw_only=[param(35)])
+    function(132, [param(36), param(37), param(38)], [hir.FunctionCall(LOC, 'void', read(131, CALLABLE),
+        [place(read(37))], {'p33': place(read(36)), 'p35': place(read(38))})])
     return hir.Block(LOC, 'void', declarations, True)
 
 
@@ -204,6 +210,9 @@ def test_native_effect_analysis_matches_hosted(tmp_path):
     assert expected.by_param_binding[30].reads == {('[]',)}
     assert expected.by_param_binding[32].read_only
     assert expected.by_param_binding[31].read_only
+    assert expected.by_param_binding[36].mutates == {('[]',)}
+    assert expected.by_param_binding[37].read_only
+    assert expected.by_param_binding[38].rebinds == {()}
     lines, root_id = emit_hir(root)
     source = tmp_path / 'effects.dewy'
     source.write_text(f'''

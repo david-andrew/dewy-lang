@@ -25,19 +25,16 @@ ParameterEffects:type = [
     reads:array<Route>=[] mutates:array<Route>=[]
     rebinds:array<Route>=[] escapes:array<Route>=[]
 ]
-FunctionEffects:type = [literal:addr params:dict<addr ParameterEffects>]
-ProgramEffects:type = [by_literal:dict<addr FunctionEffects> by_param_binding:dict<addr ParameterEffects>]
-EffectTransfer:type = const [caller:addr caller_parameter:addr callee_parameter:addr prefix:Route]
+ProgramEffects:type = [by_param_binding:dict<addr ParameterEffects>]
+EffectTransfer:type = const [caller_parameter:addr prefix:Route]
 Analysis:type = [
     literals:array<addr>=[] declares:dict<addr addr>=[]
     # Staging for child visits (see `visit_children`).
     child_stack:array<addr>=[]
     calls:array<addr>=[]
     reassigned:set<addr>=set[] param_ids:set<addr>=set[]
-    effects:dict<addr FunctionEffects>=[]
     callback_targets:dict<addr array<addr>>=[]
     value_casts_escape:bool=true
-    current_literal:addr=0
     transfers:dict<addr array<EffectTransfer>>=[]
 ]
 ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
@@ -188,14 +185,9 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
         let node = hir.node_at(nodes id)
         if node is? hir.FunctionLiteral {
             analysis.literals.push(id)
-            let params:dict<addr ParameterEffects> = []
-            let declared = literal_params(node)
-            loop param in declared {
-                if param.binding_id is? none continue
-                analysis.param_ids.push(param.binding_id)
-                params[param.binding_id] = ParameterEffects[]
-            }
-            analysis.effects[id] = FunctionEffects[id params]
+            loop param in node.pos_or_kw_args {if param.binding_id isnt? none {analysis.param_ids.push(param.binding_id)}}
+            loop param in node.kw_only_args {if param.binding_id isnt? none {analysis.param_ids.push(param.binding_id)}}
+            if node.rest_args isnt? none and node.rest_args.binding_id isnt? none {analysis.param_ids.push(node.rest_args.binding_id)}
         }
         else if node is? hir.FunctionCall {analysis.calls.push(id)}
         else if node is? hir.Declare and node.binding_id isnt? none { analysis.declares[node.binding_id] = id }
@@ -298,25 +290,26 @@ direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):
     return value_targets(call.func call.selected_method_index analysis nodes)
 }
 pair_arguments = (call:hir.FunctionCall literal:hir.FunctionLiteral):>array<ArgumentPair> | none => {
-    let named:dict<string hir.Param> = []
-    let positional:array<hir.Param> = []
+    # Binding identity is the only parameter metadata an effect equation
+    # needs. Retaining full Param records copied names/defaults/contracts at
+    # every call edge, even though none of those fields survived pairing.
+    let named:dict<string addr?> = []
+    let positional:array<addr?> = []
     loop p in literal.pos_or_kw_args {
-        named[p.name] = p
-        if p.name not in? call.kw_args { positional.push(p) }
+        named[p.name] = p.binding_id
+        if p.name not in? call.kw_args { positional.push(p.binding_id) }
     }
-    loop p in literal.kw_only_args { named[p.name] = p }
+    loop p in literal.kw_only_args { named[p.name] = p.binding_id }
     let pairs:array<ArgumentPair> = []
     loop i in 0.. and i <? call.pos_args.length {
         let parameter:addr? = none
-        if i <? positional.length { parameter = positional[i].binding_id }
+        if i <? positional.length { parameter = positional[i] }
         else if literal.rest_args is? none return none
         pairs.push(ArgumentPair[call.pos_args[i] parameter])
     }
-    loop name in call.kw_args.keys {
+    loop [name argument] in call.kw_args {
         if name not in? named return none
-        if name not in? call.kw_args return none
-        let parameter = named[name]
-        pairs.push(ArgumentPair[call.kw_args[name] parameter.binding_id])
+        pairs.push(ArgumentPair[argument named[name]])
     }
     return pairs
 }
@@ -526,21 +519,18 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
         loop pairing in pairings {
             let parameter:addr? = none
             loop pair in pairing.pairs { if pair.argument =? argument { parameter = pair.parameter break } }
-            let summary:ParameterEffects? = none
-            if parameter isnt? none and pairing.target in? analysis.effects {
-                let callee = analysis.effects[pairing.target]
-                summary = callee.params.get(parameter)
-            }
-            if summary is? none {
+            # Pairing already names the callee's checked parameter. Its
+            # globally unique binding identity is enough; no effect record
+            # needs to be copied merely to establish that it exists.
+            if parameter is? none or parameter not in? analysis.param_ids {
                 if opaque(resolved.binding_id resolved.route @params) { changed = true }
             }
             else {
-                $runtime_assert parameter isnt? none
                 # The route and parameter pairing depend only on checked
                 # syntax. Record the equation; solve it after all local scans.
-                let transfers = analysis.transfers.get(pairing.target [])
-                transfers.push(EffectTransfer[analysis.current_literal resolved.binding_id parameter resolved.route])
-                analysis.transfers[pairing.target] = transfers
+                if parameter not in? analysis.transfers {analysis.transfers[parameter]=[]}
+                let transfers=@analysis.transfers[parameter]
+                transfers.push(EffectTransfer[resolved.binding_id resolved.route.copy()])
             }
         }
     }
@@ -553,50 +543,50 @@ analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callbac
 analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     analysis.callback_targets=callback_targets
     analysis.value_casts_escape=value_casts_escape
-    # Scan bodies/defaults once for local effects and place-call transfers.
-    # Propagating summaries later never needs to revisit syntax or resolve a
-    # callee again. Value boundaries contribute local reads, not transfers.
+    # Local scanning needs only this function's parameters. Syntax/call
+    # discovery stays separate from the single table owning solved effects.
+    let by_param:dict<addr ParameterEffects>=[]
     loop id in analysis.literals {
-        if id not in? analysis.effects continue
-        analysis.current_literal=id
-        let summary=analysis.effects[id]
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
-        visit(literal.body @summary.params @analysis nodes type_nodes);
-        loop parameter in literal_params(literal) {
-            if parameter is? hir.BoundParam {visit(parameter.value @summary.params @analysis nodes type_nodes);}
+        let params:dict<addr ParameterEffects>=[]
+        let declared=literal_params(literal)
+        loop parameter in declared {
+            if parameter.binding_id isnt? none {params[parameter.binding_id]=ParameterEffects[]}
         }
-        analysis.effects[id]=summary
+        visit(literal.body @params @analysis nodes type_nodes);
+        loop parameter in declared {
+            if parameter is? hir.BoundParam {visit(parameter.value @params @analysis nodes type_nodes);}
+        }
+        # Transfer each completed local owner. Keeping a second by-literal
+        # tree served no consumer and duplicated every route collection.
+        loop parameter in declared {
+            let binding=parameter.binding_id
+            if binding isnt? none and binding in? params {by_param[binding]=params.pop(binding)}
+        }
     }
-    # May-effects only add coverage. Prefix normalization and MAX_ROUTE_DEPTH
-    # bound recursive routes. Value semantics give self-transfers a snapshot
-    # of the source summary while the destination grows.
-    let pending=analysis.literals
+    # Equations connect parameter identities, so revisiting an unrelated
+    # parameter of the same function is unnecessary. Prefix coverage and
+    # MAX_ROUTE_DEPTH bound this finite worklist, including recursive SCCs.
+    let pending:array<addr>=[]
     let queued:set<addr>=set[]
-    loop id in pending {queued.push(id)}
+    loop binding in analysis.param_ids {pending.push(binding) queued.push(binding)}
     loop pending.length >? 0 {
-        let id=pending.pop
-        queued.pop(id default=id);
-        if id not in? analysis.effects continue
-        let callee=analysis.effects[id]
-        loop transfer in analysis.transfers.get(id []) {
-            if transfer.callee_parameter not in? callee.params or transfer.caller not in? analysis.effects continue
-            let caller=analysis.effects[transfer.caller]
-            if translated(transfer.caller_parameter callee.params[transfer.callee_parameter] transfer.prefix @caller.params) {
-                analysis.effects[transfer.caller]=caller
-                if transfer.caller in? queued continue
-                queued.push(transfer.caller)
-                pending.push(transfer.caller)
+        let binding=pending.pop
+        queued.pop(binding default=binding);
+        if binding not in? by_param or binding not in? analysis.transfers continue
+        # Self-edges can update this very parameter. Keep one source snapshot
+        # for its outgoing edges, while destinations retain their own owners.
+        let source=by_param[binding].copy()
+        loop transfer in analysis.transfers[binding] {
+            if translated(transfer.caller_parameter source transfer.prefix @by_param) {
+                if transfer.caller_parameter in? queued continue
+                queued.push(transfer.caller_parameter)
+                pending.push(transfer.caller_parameter)
             }
         }
     }
-    let by_param:dict<addr ParameterEffects> = []
-    loop summary in analysis.effects.values {
-        loop binding_id in summary.params.keys {
-            if binding_id in? summary.params { by_param[binding_id] = summary.params[binding_id] }
-        }
-    }
-    return ProgramEffects[analysis.effects by_param]
+    return ProgramEffects[by_param]
 }
 
 
