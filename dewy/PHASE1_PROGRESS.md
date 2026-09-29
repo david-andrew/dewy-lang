@@ -30,6 +30,21 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Resolve imported bodies for local-place lifetimes (2026-09-29)
+
+The hosted local-place pass now sees already loaded module roots when resolving
+calls and transitive effects. Known imported helpers retain ordinary value
+boundaries, including calls before a later place declaration. Writes during a
+place's live interval and unknown callbacks remain barriers. The transformation
+still applies only to aliases in the current module; imported roots supply
+checking context, matching subsequent effect and ownership analysis.
+
+All 76 focused hosted local-place checks pass (111.85 seconds), and the six
+new imported cases pass through the native route (33.34 seconds). Six fixtures
+bring the paired manifest to 678. Logs use `dewy-imported-local-place-*`.
+A separate borrowed-parameter/global-alias lifetime gap was found while reviewing
+these checks and is being corrected; this checkpoint does not certify that case.
+
 ## Effect routes update their stored owners (2026-09-29)
 
 Native effect insertion now mutates the selected parameter summary directly.

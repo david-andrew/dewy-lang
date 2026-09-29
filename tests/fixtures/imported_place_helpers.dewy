@@ -1,0 +1,5 @@
+# Ordinary imported calls preserve value boundaries even before a later local
+# place is declared. Their writes still invalidate a place that is live.
+fill=(@table:dict<string int64>):>void=>{table['x']=40}
+clear=(@table:dict<string int64>):>void=>table.clear
+relay=(@table:dict<string int64>):>void=>clear(@table)

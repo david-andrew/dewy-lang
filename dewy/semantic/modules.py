@@ -673,7 +673,8 @@ class ModuleCompiler:
         from .errors import NotImplementedYet
         options = dict(prelude_module=prelude_module, no_prelude=no_prelude, ctx=ctx)
         from . import local_places
-        root = local_places.prepare(root, self.registry, srcfile)
+        root = local_places.prepare(root, self.registry, srcfile,
+                                    loaded_roots=(record.root for record in self.order))
         try:
             # Both file and in-memory modules share the native ordering:
             # insert implicit operations before proving facts about effects.

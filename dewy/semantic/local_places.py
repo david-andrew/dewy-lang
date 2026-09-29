@@ -16,12 +16,12 @@ def mutable(declaration):
     return isinstance(declaration, hir.Declare) and declaration.view and declaration.decltype not in {'const', 'local_const'}
 
 
-def prepare(root, registry, srcfile):
+def prepare(root, registry, srcfile, *, loaded_roots=()):
     aliases = {node.binding_id: node for node in hir.walk(root) if mutable(node)}
     if not aliases:
         return root
     from ..backend.udewy import borrowing
-    from .analyze.effects import analyze_effects
+    from .analyze.effects import _EffectAnalyzer
     captured = set()
     scopes = {}
     def discover(node, scope=None, enclosing=frozenset()):
@@ -38,8 +38,15 @@ def prepare(root, registry, srcfile):
             scopes[node.binding_id] = scope
         for child in hir.children(node):
             discover(child, scope, enclosing)
-    discover(root)
-    plan = borrowing.analyze(root, captured, analyze_effects(root), set(registry.by_id))
+    # Imported helper bodies are already checked, but are not children of
+    # this module. Resolve their value boundaries and transitive writes in
+    # the loaded graph, just as subsequent bounds/effect checking does.
+    context = hir.Block(root.loc, root.type, [*loaded_roots, root], False)
+    discover(context)
+    analysis = _EffectAnalyzer(context)
+    plan = borrowing.analyze(context, captured, analysis.solve(), set(registry.by_id),
+                             known_value_calls=frozenset(id(call) for call in analysis.calls
+                                                         if analysis._direct_targets(call)))
     # A read-only, nonescaping capture does not relocate its owner's storage.
     # Capturing an alias extends its demand through the containing scope.
     # Calls are checked over that interval; escaping function values remain
