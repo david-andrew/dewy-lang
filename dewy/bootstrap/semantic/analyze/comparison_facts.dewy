@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../propositions.dewy" as propositions
 import p"intervals.dewy" as ranges
 import p"fact_state.dewy" as facts
@@ -36,16 +37,20 @@ ordered = (@state:facts.State smaller:Operand larger:Operand strict:bool):>void 
     # sequence identity. An offset that reverses the guaranteed order cannot
     # transfer the fact. The general order relation still records that gap.
     if gap >=? 0 and smaller.affine.projection =? 'value' and larger.affine.projection =? 'value' {
-        let entries=state.values
-        loop entry in entries {
+        # Save only sequence identities before adding derived entries. A
+        # complete snapshot would copy every unrelated fact and endpoint.
+        let sequences:array<addr>=[]
+        loop entry in state.values {
             let fact=entry.fact
             if fact is? facts.Index and fact.index =? larger.affine.binding_id {
-                facts.put(@state facts.index(smaller.affine.binding_id fact.sequence) ranges.exact(1))
+                sequences.push(fact.sequence)
             }
         }
+        loop sequence in sequences {facts.put(@state facts.index(smaller.affine.binding_id sequence) ranges.exact(1))}
     }
+    let proves_index=gap >=? 1 and smaller.affine.projection =? 'value' and larger.affine.projection =? 'length'
     facts.put(@state facts.order(smaller.affine larger.affine) ranges.Interval[gap none])
-    if gap >=? 1 and smaller.affine.projection =? 'value' and larger.affine.projection =? 'length' {
+    if proves_index {
         facts.put(@state facts.index(smaller.affine.binding_id larger.affine.binding_id) ranges.exact(1))
     }
 }
@@ -58,13 +63,10 @@ narrow = (@state:facts.State op:propositions.Operator subject:Operand other:Oper
     # a nonnegative field unequal to zero is strictly positive.
     if subject.interval isnt? none {previous=ranges.intersect(previous subject.interval)}
     let constraint=ranges.constraint(op other.interval true)
-    let narrowed:ranges.Interval?=previous
-    if constraint isnt? none {narrowed=ranges.intersect(previous constraint)}
-    else if op =? 'not=?' and other.interval.lower isnt? none and ranges.same_endpoint(other.interval.lower other.interval.upper) {
-        narrowed=ranges.exclude(previous other.interval.lower)
-        if other.interval.lower =? 0 and subject.term.projection =? 'value' {
-            facts.put(@state facts.nonzero(subject.term.binding_id) ranges.exact(1))
-        }
+    let exclude=op =? 'not=?' and other.interval.lower isnt? none and ranges.same_endpoint(other.interval.lower other.interval.upper)
+    let narrowed:ranges.Interval?=if constraint isnt? none ranges.intersect(previous constraint) else if exclude and other.interval.lower isnt? none ranges.exclude(previous other.interval.lower) else previous
+    if constraint is? none and exclude and other.interval.lower =? 0 and subject.term.projection =? 'value' {
+        facts.put(@state facts.nonzero(subject.term.binding_id) ranges.exact(1))
     }
     if narrowed is? none or ranges.is_empty(narrowed) return false
     facts.set_value(@state subject.term narrowed)
@@ -99,7 +101,9 @@ refine = (state:facts.State op:propositions.Operator left:Operand right:Operand 
     # comparison must never justify itself by the facts it is about to add.
     if decided is? none {decided=decide_order(op left right state context)}
     if decided isnt? none and decided not=? truth return none
-    let result=state
+    # Each comparison produces a branch state; its incoming state remains
+    # available to the caller and to the opposite branch.
+    let result=state.copy()
     let effective=if truth op else negate(op)
     if effective =? '<?' or effective =? '<=?' {ordered(@result left right effective =? '<?')}
     else if effective =? '>?' or effective =? '>=?' {ordered(@result right left effective =? '>?')}
@@ -115,7 +119,7 @@ refine = (state:facts.State op:propositions.Operator left:Operand right:Operand 
         let orders=[facts.order(left.term right.term) facts.order(right.term left.term)]
         loop order in orders {
             let bound=facts.lookup(result order)
-            if bound isnt? none and bound.lower =? 0 {facts.put(@result order ranges.Interval[1 bound.upper])}
+            if bound isnt? none and bound.lower =? 0 {facts.put(@result order ranges.Interval[1 bound.upper.copy()])}
         }
     }
     if not narrow(@result effective left right context) return none

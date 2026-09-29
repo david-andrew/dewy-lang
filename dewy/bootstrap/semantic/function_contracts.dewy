@@ -1,3 +1,4 @@
+$explicit_copies
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
 import p"analyze/hir_facts.dewy" as expressions
@@ -27,7 +28,8 @@ rename = (id:addr names:dict<string string> @nodes:types.Table):>addr => {
         let parameter=facts.parameter(p)
         if parameter isnt? none {subject="@{names.get(parameter parameter)}"}
         let term=if p.term is? none none else facts.rename_term(p.term names)
-        promises.push(facts.Proposition[subject p.op p.value p.projection term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+        # A rewritten promise retains its own mathematical endpoint.
+        promises.push(facts.Proposition[subject p.op p.value.copy() p.projection term p.term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
     }
     return types.refined_type(node.base promises @nodes)
 }
@@ -39,8 +41,9 @@ member = (id:addr contract:array<addr> @nodes:types.Table):>addr => {
         let expected=types.node_at(nodes candidate)
         if node isnt? types.RefinedType return candidate
         if expected isnt? types.RefinedType return id
-        let promises=expected.propositions
-        loop p in node.propositions {if not views.has_proposition(promises p) {promises.push(p)}}
+        # Extend a new contract without changing either stored signature.
+        let promises=expected.propositions.copy()
+        loop p in node.propositions {if not views.has_proposition(promises p) {promises.push(p.copy())}}
         return types.refined_type(node.base promises @nodes)
     }
     return id
@@ -62,7 +65,8 @@ adopt = (result:addr expected:types.FunctionType parameters:array<types.PosOrKwA
     let node=types.node_at(nodes result)
     if types.is_primitive(node 'untyped') return contract
     let desired=types.node_at(nodes contract)
-    let members:array<addr>=if desired is? types.TypeOr desired.items else [contract]
+    # Keep the contract's member ids while member() grows the type arena.
+    let members:array<addr>=if desired is? types.TypeOr desired.items.copy() else [contract]
     if node isnt? types.TypeOr return member(result members @nodes)
     let output:array<addr>=[]
     loop item in node.items {output.push(member(item members @nodes))}
@@ -89,7 +93,7 @@ bind_parameters = (id:addr parameters:array<hir.Param> @nodes:types.Table @regis
             }
             if facts.parameter(p) =? param.name {subject_id=param.binding_id}
         }
-        promises.push(facts.Proposition[p.subject p.op p.value p.projection p.term term_id p.term_projection p.tested_type p.when subject_id p.axiom])
+        promises.push(facts.Proposition[p.subject p.op p.value.copy() p.projection p.term term_id p.term_projection p.tested_type p.when subject_id p.axiom])
     }
     return types.refined_type(node.base promises @nodes)
 }
@@ -140,7 +144,7 @@ at_call = (id:addr arguments:dict<string addr> hir_nodes:array<hir.AST> @nodes:t
             if argument isnt? none {
                 let supplied=hir.node_at(hir_nodes expressions.strip_casts(argument hir_nodes))
                 if supplied is? hir.Integer and route.fields.length =? 0 and p.term_projection =? 'value' {
-                    promises.push(facts.Proposition[p.subject p.op supplied.value p.projection none none p.term_projection p.tested_type p.when p.subject_id p.axiom])
+                    promises.push(facts.Proposition[p.subject p.op supplied.value.copy() p.projection none none p.term_projection p.tested_type p.when p.subject_id p.axiom])
                     continue
                 }
                 let value=if supplied is? hir.Place supplied.target else argument
@@ -158,7 +162,7 @@ at_call = (id:addr arguments:dict<string addr> hir_nodes:array<hir.AST> @nodes:t
                 }
             }
         }
-        promises.push(facts.Proposition[p.subject p.op p.value p.projection p.term term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+        promises.push(facts.Proposition[p.subject p.op p.value.copy() p.projection p.term term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
     }
     return types.refined_type(node.base promises @nodes)
 }

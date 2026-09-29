@@ -28,6 +28,31 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Comparison worklists and explicit snapshot ownership (2026-09-29)
+
+Comparison transfer records only matching sequence ids before inserting index
+facts, avoiding a snapshot of every fact and bigint endpoint. It computes the
+scalar index decision before transferring the order gap and constructs only
+the selected narrowed interval. Branch states explicitly copy their incoming
+state. Rewritten function contracts explicitly retain their promises and the
+member-id worklist that survives type-arena updates.
+
+Hosted record ownership now uses the same fresh-result classification as
+record initialization. Explicit `.copy()` results, dictionary views and set
+operations were initialized as owners but omitted from move discovery; the
+shared classification removes that discrepancy. A copied owner can transfer
+its fields or enter an optional result after its last use, while a still-live
+snapshot remains independent.
+
+Seventeen comparison/transfer checks and twenty-nine return/disequality contract
+checks pass. The copied-record native group also passes on x86-64/C, including
+repeated live-byte recovery and rejection of a still-live source. Comparison
+and function-contract modules pass strict checking on both routes: 74 physical
+modules certified. Five fixtures bring the manifest to 625. Logs use
+`dewy-proof-query-*`, `dewy-comparison-*`, `dewy-function-contracts-*` and
+`dewy-scoped-query-native-tests.log`. The ongoing frozen 613-case integration
+predates these changes.
+
 ## Numeric queries and tagged replacement transfers (2026-09-29)
 
 Index checking now compares borrowed length endpoints directly instead of

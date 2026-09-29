@@ -3855,11 +3855,11 @@ class _Lowerer(
         return self._array_expression_owns_fresh_storage(value)
 
     def _fresh_object_declaration(self, node: hir.AST) -> bool:
-        """A local object built here (a literal or a call result): its runtime-length array fields may be adopted when it is returned at its last use."""
+        """A fresh owning result, using the same rule as record initialization."""
         if not isinstance(node, hir.Declare):
             return False
         declared = ty.strip_refinement(node.annotation or node.expr.type)
-        return isinstance(declared, ty.ObjectType) and isinstance(self._copy_source_expression(node.expr), (hir.ObjectLiteral, hir.FunctionCall))
+        return isinstance(declared, ty.ObjectType) and self._object_expression_owns_fresh_storage(node.expr)
 
     def _owned_object_declaration(self, node: hir.AST) -> bool:
         """A local that owns a record: built here or copied in, and not a scope borrow of container storage.
