@@ -1,0 +1,5 @@
+let table:dict<string int64>=['x'->0]
+clear=():>void=>table.clear
+relay=():>void=>clear()
+main=():>int64=>{
+if 'x' in? table {let entry=@table['x'] relay() entry=42 return entry} return 1}

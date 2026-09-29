@@ -76,7 +76,7 @@ arguments = (call:hir.FunctionCall):>array<addr> => {
 # Borrow it only while those expressions cannot replace or mutate its storage.
 # An unknown source route (including an aliasing place parameter) overlaps all
 # writes. Merely calculating an integer index does not require a snapshot.
-expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captures.Plan ambient:set<addr> deep:bool=true):>bool => {
+expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captures.Plan ambient:set<addr> deep:bool=true conflicting_calls:set<addr>=set[]):>bool => {
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
@@ -86,6 +86,7 @@ expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captur
         let node=hir.node_at(nodes id)
         if node is? hir.FunctionLiteral|hir.GenericFunction continue
         if deep and node is? hir.FunctionCall {
+            if id in? conflicting_calls return true
             let direct=captures.resolve(node.func node.selected_method_index plan nodes)
             if direct isnt? none {
                 if direct in? ambient return true
@@ -498,22 +499,22 @@ view_reads = (id:addr aliases:set<addr> nodes:array<hir.AST>):>bool => {
     }
     return false
 }
-view_liveness = (id:addr live:bool aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false):>ViewLiveness => {
+view_liveness = (id:addr live:bool aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false conflicting_calls:set<addr>=set[]):>ViewLiveness => {
     let node=hir.node_at(nodes id)
-    if node is? hir.Return return if node.item is? none ViewLiveness[false retained] else view_liveness(node.item retained aliases source nodes plan retained=retained)
+    if node is? hir.Return return if node.item is? none ViewLiveness[false retained] else view_liveness(node.item retained aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
     if node is? hir.Block {
         let conflict=false
         let index=node.items.length
         loop index >? 0 {
             index-=1
-            let prior=view_liveness(node.items[index] live aliases source nodes plan retained=retained)
+            let prior=view_liveness(node.items[index] live aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
             conflict=conflict or prior.conflict
             live=prior.live
         }
         return ViewLiveness[conflict live]
     }
     if node is? hir.Flow {
-        let previous=if node.default is? none ViewLiveness[false live] else view_liveness(node.default live aliases source nodes plan retained=retained)
+        let previous=if node.default is? none ViewLiveness[false live] else view_liveness(node.default live aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
         let conflict=previous.conflict
         let remaining=previous.live
         let index=node.arms.length
@@ -522,22 +523,22 @@ view_liveness = (id:addr live:bool aliases:set<addr> source:Route nodes:array<hi
             let arm=hir.node_at(nodes node.arms[index])
             $runtime_assert arm is? hir.IfArm|hir.LoopArm
             let after=live or (arm is? hir.LoopArm and (view_reads(arm.condition aliases nodes) or view_reads(arm.body aliases nodes)))
-            let body=view_liveness(arm.body after aliases source nodes plan retained=retained)
-            let condition=view_liveness(arm.condition body.live or remaining aliases source nodes plan retained=retained)
+            let body=view_liveness(arm.body after aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
+            let condition=view_liveness(arm.condition body.live or remaining aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
             conflict=conflict or body.conflict or condition.conflict
             remaining=condition.live
         }
         return ViewLiveness[conflict remaining]
     }
     let before=live or view_reads(id aliases nodes)
-    return ViewLiveness[before and expression_conflicts(id source nodes plan set[]) before]
+    return ViewLiveness[before and expression_conflicts(id source nodes plan set[] conflicting_calls=conflicting_calls) before]
 }
-view_conflicts = (region:array<addr> aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false):>bool => {
+view_conflicts = (region:array<addr> aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false conflicting_calls:set<addr>=set[]):>bool => {
     let live=retained
     let index=region.length
     loop index >? 0 {
         index-=1
-        let prior=view_liveness(region[index] live aliases source nodes plan retained=retained)
+        let prior=view_liveness(region[index] live aliases source nodes plan retained=retained conflicting_calls=conflicting_calls)
         if prior.conflict return true
         live=prior.live
     }

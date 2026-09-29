@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from itertools import chain
 
 from ...semantic import hir, ty
-from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects, analyze_global_writes
+from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects, analyze_global_writes, nonlocal_bindings
 from ...semantic.analyze import storage_borrows
 
 # The operator spellings µDewy emits directly (emit.py's binop/prefix tables);
@@ -255,7 +255,11 @@ def expression_conflicts(root: hir.AST, source: Route | None, plan: Plan, source
     """Whether evaluating `root` may write or alias the `source` route (conservative)."""
     for node in _walk_function_subtree(root):
         if isinstance(node, hir.FunctionCall):
-            if source is not None and source.binding in plan.ambient_writes.get(id(node), ()):
+            ambient = plan.ambient_writes.get(id(node), ())
+            # A place parameter can name a global/captured owner at its call
+            # site. Distinct lexical bindings do not prove distinct storage.
+            if source is not None and (source.binding in ambient
+                    or source.binding in plan.place_bindings and ambient):
                 return True
             callee = node.func
             if isinstance(callee, hir.ExpressedIdentifier) and callee.binding_id in plan.named:
@@ -543,7 +547,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     plan.stable_bindings.update(constants - exposed)
     # A single place parameter can be stable too, provided no call can
     # change it through an ambient alias. Unknown calls write the sentinel.
-    ambient = analyze_global_writes(root, plan.globals | captured | {-1}, source_reports=True)
+    ambient = analyze_global_writes(root, plan.globals | captured | nonlocal_bindings(root) | {-1}, source_reports=True)
     for function in plan.functions.values():
         place_stable = (len(function.places) == 1
                         and not function.writes & (plan.globals | captured)

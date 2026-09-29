@@ -5,6 +5,7 @@ import p"ty.dewy" as types
 import p"bindings.dewy" as bindings
 import p"builtins.dewy" as builtins
 import p"type_terms.dewy" as type_terms
+import p"analyze/effects.dewy" as effects
 import p"../backend/udewy/borrowing.dewy" as borrowing
 import p"../backend/udewy/captures.dewy" as captures
 
@@ -157,10 +158,20 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
     let functions=captures.analyze(joined session.hir plan.symbols)
     let captured:set<addr>=set[]
     let written_captures:set<addr>=set[]
+    let borrowed_parameters:set<addr>=set[]
     loop function in functions.functions.values {
+        let literal=hir.node_at(session.hir function.id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        loop parameter in effects.literal_params(literal) {
+            if parameter.place and parameter.binding_id isnt? none {borrowed_parameters.push(parameter.binding_id)}
+        }
         loop binding in function.captures {captured.push(binding)}
         loop binding in function.writes {if binding not in? function.locals {written_captures.push(binding)}}
     }
+    # Loaded call bodies give transitive ambient writes, with each callee's
+    # own activation removed. Borrowed roots may alias any of those owners.
+    let tracked=effects.nonlocal_bindings(joined session.hir)
+    let writes=effects.analyze_global_writes_in(roots session.hir tracked registry=session.registry)
     let exposed=borrowing.exposed_roots(joined functions session.hir session.types)
     let scopes:dict<addr borrowing.ViewScope>=[]
     loop binding in plan.order {
@@ -206,7 +217,11 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
             if dependent in? exposed or dependent in? written_captures return selection_error(alias fallback session detail='a dependent place can escape or be written by another function')
             if dependent in? captured {retained=true}
         }
-        if borrowing.view_conflicts(region live source session.hir functions retained=retained) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
+        let conflicting_calls:set<addr>=set[]
+        loop [call changed] in writes {
+            if source.binding in? changed or (source.binding in? borrowed_parameters and changed.length>?0) {conflicting_calls.push(call)}
+        }
+        if borrowing.view_conflicts(region live source session.hir functions retained=retained conflicting_calls=conflicting_calls) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
     }
     return none
 }

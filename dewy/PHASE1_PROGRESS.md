@@ -30,6 +30,24 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Check ambient aliases throughout local-place lifetimes (2026-09-29)
+
+A borrowed parameter can denote a global or captured owner at its call site;
+different binding IDs do not establish independent storage. The hosted borrowing
+pass now discovers nonlocal roots independently of module-block layout and
+checks their transitive call writes when a source is a place parameter. Native
+mutable-place validation supplies the same shared call-graph evidence to its
+backward live-interval check. Direct and transitive dictionary/array invalidation
+are rejected, while writes after last use, private callee storage and unrelated
+local owners remain accepted.
+
+All 83 focused hosted place checks pass (129.23 seconds), and four corresponding
+native groups pass on x86-64/C (227.90 seconds). Seven new fixtures bring the
+manifest to 685. Logs use `dewy-local-place-alias-*`. The wider borrowing checks
+are being rerun after encountering a temporary source error in the separate
+in-progress effect-translation optimization; those failures are not included
+in this checkpoint's passing evidence.
+
 ## Resolve imported bodies for local-place lifetimes (2026-09-29)
 
 The hosted local-place pass now sees already loaded module roots when resolving
@@ -998,7 +1016,7 @@ path. Thirteen hosted field checks and the paired x86-64/C return regression
 pass, including repeated live-byte recovery. The manifest now contains 507
 cases; a fresh full integration checkpoint is next.
 
-## Current completion checklist (2026-09-28)
+## Current completion checklist (2026-09-29)
 
 Phase 1 is **not complete**. The entries below replace the original generic
 work list; historical checkpoints below still describe their own dates.
@@ -1008,9 +1026,9 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with disjoint field footprints and drop-hook access proofs. | Broader stable-selector discovery beyond function inputs, remaining unsupported resource operations; escaping/writable captured storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with disjoint field footprints and drop-hook access proofs, dominated once-initialized local selectors. | Loop-repeated or mutable selector lifetime proofs, remaining unsupported resource operations; escaping/writable captured storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
-| 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
+| 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Actual unsafe-assumption consumer provenance beyond the current scope candidate inventory; audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
 | 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
 

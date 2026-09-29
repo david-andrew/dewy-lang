@@ -1,0 +1,7 @@
+let table:dict<string int64>=['x'->0]
+clear=():>void=>table.clear
+relay=():>void=>clear()
+forward=(@input:dict<string int64>):>int64=>{
+if 'x' in? input {let entry=@input['x'] entry=42
+let answer=entry relay() return answer} return 1}
+main=():>int64=>forward(@table)

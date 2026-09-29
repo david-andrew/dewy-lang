@@ -1,0 +1,5 @@
+let values:array<int64>=[0]
+clear=():>void=>values.clear
+forward=(@input:array<int64>):>int64=>{
+if input.length>?0 {let entry=@input[0] clear() entry=42 return entry} return 1}
+main=():>int64=>forward(@values)
