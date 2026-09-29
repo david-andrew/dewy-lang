@@ -1,0 +1,7 @@
+Box:type=[items:array<int64>]
+set=(@box:Box):>void=>{box.items.push(42)}
+work=(@table:dict<string Box> key:string):>int64=>{
+if key not in? table {table[key]=Box[[]]}
+set(@table[key]) let entry=@table[key]
+return if entry.items.length>?0 entry.items[0] else 1}
+main=():>int64=>{let table:dict<string Box>=[] return work(@table 'x')}

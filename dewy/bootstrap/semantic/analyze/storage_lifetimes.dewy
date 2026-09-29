@@ -14,6 +14,7 @@ import p"place_contracts.dewy" as places
 # owning values cannot be reached by an unrelated callback; borrowed,
 # captured and exposed storage needs a call-graph or effect-row proof.
 Visit:type=const [id:addr source:addr function:addr?=none]
+Selection:type=const [id:addr source:addr argument:addr binding:addr?]
 Candidate:type=const [id:addr source:addr function:addr? binding:addr?]
 owner=(binding:addr? session:contexts.Session):>addr?=>{
     let seen:set<addr>=set[]
@@ -47,8 +48,20 @@ interferes=(changed:set<addr> binding:addr? borrowed:bool tracked:set<addr> sess
     }
     return false
 }
+select_entry=(id:addr visit:Visit session:contexts.Session @selections:array<Selection>):>void=>{
+    let argument=hir.node_at(session.hir id)
+    if argument isnt? hir.Place return void
+    let path=bindings.access_path(argument.target session.hir facts=true dictionaries=true)
+    loop step in path.steps {
+        if hir.node_at(session.hir step) is? hir.DictLookup {
+            selections.push(Selection[visit.id visit.source id root_of(argument.target session)])
+            break
+        }
+    }
+}
 validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.Session):>Error?=>{
     let candidates:array<Candidate>=[]
+    let selections:array<Selection>=[]
     let private:dict<addr set<addr>>=[]
     let borrowed_parameters:set<addr>=set[]
     let captured:set<addr>=set[]
@@ -121,15 +134,47 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
             let method=hir.node_at(session.hir node.func)
             if method is? hir.ArrayMethod and method.name=?'sort' {candidates.push(Candidate[item.id source function root_of(method.array session)])}
         }
+        if node is? hir.FunctionCall {
+            let total=node.pos_args.length + node.kw_args.length
+            if total >? 0 {
+                loop argument in node.pos_args {select_entry(argument item session @selections)}
+                loop [name argument] in node.kw_args {select_entry(argument item session @selections)}
+            }
+        }
         loop child in hir.children(node) {pending.push(Visit[child source function])}
     }
-    if candidates.length=?0 return none
+    if candidates.length=?0 and selections.length=?0 return none
     let tracked:set<addr>=set[]
     loop binding in captured {if binding in? written {tracked.push(binding)}}
     loop candidate in candidates {if candidate.binding isnt? none {tracked.push(candidate.binding)}}
+    loop selection in selections {if selection.binding isnt? none {tracked.push(selection.binding)}}
     loop [alias target] in aliases {if target in? tracked {tracked.push(alias)}}
     let writes=effects.analyze_global_writes_in(ids session.hir tracked registry=session.registry)
     let readonly=effects.read_only_places_in(ids session.hir session.types)
+    # Place selection is not a write; nested argument calls still execute
+    # before entry use and cannot invalidate its containing dictionary.
+    loop selections.length >? 0 {
+        let selection=selections.pop
+        let call=hir.node_at(session.hir selection.id)
+        $runtime_assert call is? hir.FunctionCall
+        let arguments=call.pos_args.copy()
+        loop argument in call.kw_args.values {arguments.push(argument)}
+        $runtime_assert selection.source <? source_files.length
+        let borrowed=selection.binding isnt? none and selection.binding in? borrowed_parameters
+        let conflict=if selection.id in? writes interferes(writes[selection.id] selection.binding borrowed tracked session) else interferes(tracked selection.binding borrowed tracked session)
+        if not nonmutating(call.func session) and conflict {
+            return Error[srcfile=source_files[selection.source] title='callee may invalidate a selected dictionary entry' pointers=[Pointer[hir.node_at(session.hir selection.argument).loc 'the entry owner must remain stable throughout the call']] hint='keep owner mutations outside the borrowed entry call']
+        }
+        let after=false
+        loop id in arguments {
+            if not after {after=id =? selection.argument continue}
+            let argument=hir.node_at(session.hir id)
+            let selected=if argument is? hir.Place argument.target else id
+            if interferes(predicates.mutated_bindings(selected session.hir writes readonly) selection.binding borrowed tracked session) {
+                return Error[srcfile=source_files[selection.source] title='later argument may invalidate a selected dictionary entry' pointers=[Pointer[hir.node_at(session.hir selection.argument).loc 'this place borrows the entry storage'] Pointer[argument.loc 'this argument may change its owner before the call']] hint='evaluate the changing argument before selecting the entry']
+            }
+        }
+    }
     loop candidate in candidates {
         let call=hir.node_at(session.hir candidate.id)
         $runtime_assert call is? hir.FunctionCall

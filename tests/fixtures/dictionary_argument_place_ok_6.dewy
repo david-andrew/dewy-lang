@@ -1,0 +1,8 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+set=(@box:Box):>void=>{box.items.push(42)}
+main=():>int64=>{let table:dict<string Box>=['x'->Box[[]]]
+let saved=table.copy() set(@table['x'])
+let changed=@table['x']
+let original=@saved['x']
+return if changed.items.length=?1 and original.items.length=?0 changed.items[0] else 1}

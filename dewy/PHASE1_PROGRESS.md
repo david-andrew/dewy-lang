@@ -30,6 +30,29 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Select complete dictionary places before call barriers (2026-09-29)
+
+Both frontends now select an entire `@` argument path before invalidating the
+selected storage's facts. Proven dictionary entries are direct call places;
+parenthesized/keyword forms agree, selectors run once, declared storage types
+survive read narrowing, and ancestor membership survives an entry write.
+Const ancestry and overlapping mutable routes remain rejected.
+
+The shared storage-lifetime pass also checks selected entry addresses through
+later argument evaluation and the callee. It rejects owner mutation through
+explicit, global and transitive captured routes. This currently uses conservative
+containing-owner interference; unrelated nested writes can still need a more
+precise proof. Trying the direct form in match coverage exposed that precision
+limit, so its independent prior-coordinate snapshot remains for now.
+
+All 18 focused hosted cases and five native paired x86-64/C groups pass (148.06
+seconds): dictionary call/local places, projected facts and sort lifetime/effect
+contracts. Surrounding hosted checking passed 88 place tests and 44 entry/sort
+checks across this batch. The lifetime module retains strict-copy acceptance on
+both routes. Eighteen fixtures bring the manifest to 668. Logs use
+`dewy-selected-place-*` and `dewy-dict-place-*`. Full integration of this batch
+remains pending; the latest complete certification is the 636-case snapshot.
+
 ## Strict traversal, diagnostics and match coverage (2026-09-29)
 
 Four more physical modules enforce `$explicit_copies`, bringing adoption to

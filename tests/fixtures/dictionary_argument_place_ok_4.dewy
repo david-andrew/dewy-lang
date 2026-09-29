@@ -1,0 +1,5 @@
+let calls:int64=0
+key=():>'x'=>{calls+=1 return 'x'}
+set=(@value:int64):>void=>{value=42}
+main=():>int64=>{let table:totaldict<'x'|'y' int64>=['x'->0 'y'->0]
+set(@table[key()]) return if calls=?1 table['x'] else 1}

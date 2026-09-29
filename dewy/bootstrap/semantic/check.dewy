@@ -3168,7 +3168,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
                 loop param in signature.pos_or_kw { if param.name =? name and not param.place { wanted = param.value_type } }
                 loop param in signature.kw_only { if param.name =? name and not param.place { wanted = param.value_type } }
             }
-            let value = expression(row.right env @session expected=wanted allow_place=true)
+            let value = argument_expression(row.right env @session expected=wanted)
             if value is? Error return value
             keyword[name] = value
             order.push(name)
@@ -3184,7 +3184,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
                 let param = signature.pos_or_kw[index]
                 if not param.place { wanted = param.value_type }
             }
-            let value = expression(item env @session expected=wanted allow_place=true)
+            let value = argument_expression(item env @session expected=wanted)
             if value is? Error return value
             positional.push(value)
             order.push(none)
@@ -3192,6 +3192,22 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
         }
     }
     return call(function positional keyword id env @session expected=expected order=if interleaved order else [])
+}
+
+# Select the entire receiver path while its membership/bounds facts are live.
+# Only the completed place applies the mutation barrier for following arguments.
+argument_expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let prefix=local_view_prefix(id env session)
+    if prefix is? none return expression(id env @session expected=expected allow_place=true)
+    let probe=session.local_view_probes.length
+    session.local_view_probes.push(contexts.LocalViewProbe[prefix])
+    let checking=Environment[env.lexical env.state env.return_type env.control env.return_collector probe loan=env.loan]
+    let value=expression(id checking @session expected=expected allow_place=true)
+    $runtime_assert probe <? session.local_view_probes.length
+    let selected=session.local_view_probes[probe].used
+    session.local_view_probes.truncate(probe)
+    if value is? Error return value
+    return if selected place(value id env @session) else value
 }
 
 # The index scope binds `end` to this sequence's last position. Its binding
@@ -3864,10 +3880,10 @@ writable = (value:addr id:addr env:Environment session:contexts.Session named:bo
 
 place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let target = node_at(value session)
-    if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'a place needs mutable storage' 'use a binding, field, or indexed element' env session)
+    if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index|hir.DictLookup return problem(id 'a place needs mutable storage' 'use a binding, field, or indexed element' env session)
     let error = writable(value id env session named=true)
     if error isnt? none return error
-    let path = bindings.access_path(value session.hir)
+    let path = bindings.access_path(value session.hir dictionaries=true)
     let root = node_at(path.root session)
     $runtime_assert root is? hir.ExpressedIdentifier and root.binding_id isnt? none
     let binding = bindings.binding_at(session.registry root.binding_id)
@@ -3903,11 +3919,11 @@ call_argument = (argument:addr required:addr place_parameter:bool id:addr env:En
 remember_place = (argument:addr @places:array<addr> id:addr env:Environment session:contexts.Session):>Error? => {
     let node = node_at(argument session)
     if node isnt? hir.Place return none
-    let path = bindings.access_path(node.target session.hir)
+    let path = bindings.access_path(node.target session.hir dictionaries=true)
     let root = node_at(path.root session)
     $runtime_assert root is? hir.ExpressedIdentifier
     loop previous in places {
-        let other = bindings.access_path(previous session.hir)
+        let other = bindings.access_path(previous session.hir dictionaries=true)
         let owner = node_at(other.root session)
         $runtime_assert owner is? hir.ExpressedIdentifier
         if root.binding_id not=? owner.binding_id continue
@@ -5716,6 +5732,10 @@ store_type = (id:addr @session:contexts.Session):>addr => {
         let array=types.node_at(session.types views.structural_base(node_at(node.array session).value_type session.types))
         if array is? types.ArrayType return array.element
     }
+    if node is? hir.DictLookup {
+        let array=types.node_at(session.types views.structural_base(node_at(node.values session).value_type session.types))
+        if array is? types.ArrayType return array.element
+    }
     let route=bindings.array_route_id(id session.hir @session.registry)
     if route isnt? none {
         let binding=bindings.binding_at(session.registry route)
@@ -5737,6 +5757,7 @@ storage_place = (id:addr @session:contexts.Session):>addr => {
     if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc stored node.name node.binding_id] @session)
     if node is? hir.MemberAccess return put(hir.MemberAccess[node.loc stored node.value node.name node.mutable] @session)
     if node is? hir.Index return put(hir.Index[node.loc stored node.array node.index node.constant_index] @session)
+    if node is? hir.DictLookup return put(hir.DictLookup[node.loc stored node.keys node.values node.key node.proven node.position node.static_position node.default] @session)
     return id
 }
 

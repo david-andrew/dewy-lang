@@ -14,6 +14,7 @@ from . import effects, predicate_effects
 
 def validate(root, registry, srcfile):
     candidates = []
+    selections = []
     private_by_function = {}
     borrowed_parameters = set()
     captured = set()
@@ -81,6 +82,14 @@ def validate(root, registry, srcfile):
             exposed.add(root_of(node.expr))
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name == 'sort':
             candidates.append((node, source, function, root_of(node.func.array)))
+        if isinstance(node, hir.FunctionCall):
+            arguments = [*node.pos_args, *node.kw_args.values()]
+            for index, argument in enumerate(arguments):
+                if not isinstance(argument, hir.Place):
+                    continue
+                path = bindings.access_path(argument.target, unwrap=bindings._unwrap_fact_route, dictionaries=True)
+                if any(isinstance(step, hir.DictLookup) for step in path.steps):
+                    selections.append((node, source, index, root_of(argument.target)))
         if isinstance(node, hir.Program):
             for child, child_source in zip(node.items, node.item_sources):
                 pending_nodes.append((child, child_source, function))
@@ -90,12 +99,13 @@ def validate(root, registry, srcfile):
 
     while pending_nodes:
         scan(*pending_nodes.pop())
-    if not candidates:
+    if not candidates and not selections:
         return
     # A callback may reach a global through a wrapper. Include captures when
     # a borrowed receiver might alias them; private callback locals don't
     # become ambient writes merely because they occur inside its body.
     tracked = (captured & written) | {binding for _, _, _, binding in candidates}
+    tracked.update(binding for _, _, _, binding in selections)
     tracked.discard(None)
     tracked.update(alias for alias, target in aliases.items() if target in tracked)
     writes = effects.analyze_global_writes(root, tracked)
@@ -105,6 +115,26 @@ def validate(root, registry, srcfile):
     def nonmutating(value):
         signature = ty.unfold(ty.strip_refinement(value.type))
         return isinstance(signature, ty.FunctionType) and rows.implies(signature.effects, no_mutation)
+
+    # A selected dictionary entry lends an address into its owner. Later
+    # arguments run before the callee and must not remove/relocate that entry.
+    # Selecting another place is not itself a write; effects of calls inside
+    # its selectors still count. Whole-call overlap is checked separately.
+    for call, source, index, binding in selections:
+        arguments = [*call.pos_args, *call.kw_args.values()]
+        relevant = tracked if binding in borrowed_parameters else {binding}
+        if not nonmutating(call.func) and {owner(item) for item in writes.get(id(call), tracked)} & relevant:
+            user_error(source, 'callee may invalidate a selected dictionary entry',
+                       Pointer(span=arguments[index].loc, message='the entry owner must remain stable throughout the call'),
+                       hint='keep owner mutations outside the borrowed entry call')
+        for argument in arguments[index + 1:]:
+            selected = argument.target if isinstance(argument, hir.Place) else argument
+            changed = predicate_effects.mutated_bindings(selected, call_writes=writes, read_only_places=readonly)
+            if {owner(item) for item in changed} & relevant:
+                user_error(source, 'later argument may invalidate a selected dictionary entry',
+                           Pointer(span=arguments[index].loc, message='this place borrows the entry storage'),
+                           Pointer(span=argument.loc, message='this argument may change its owner before the call'),
+                           hint='evaluate the changing argument before selecting the entry')
 
     for call, source, function, binding in candidates:
         private = private_by_function.get(function, set())

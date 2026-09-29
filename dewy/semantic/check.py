@@ -11790,8 +11790,8 @@ def _dispatch_builtin(
 def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
     """Explicit `@` and implicit method receivers share the write barrier.
 
-    Borrowing can change the root and projected storage, so neither route
-    refinements nor cached dictionary membership can survive the call.
+    Borrowing can change the selected storage and its descendants. Facts
+    about ancestors (including the containing dictionary's keys) survive.
     """
     access = sb.access_path(target, unwrap=_unwrap_write_path, forwarding=True, dictionaries=True)
     for step in access.steps:
@@ -11801,10 +11801,7 @@ def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
                 f'cannot take the place of const object field `{step.name}`',
                 Pointer(span=loc, message='this field is const'),
             )
-    binding = _member_root_binding(target, ctx=ctx)
-    owner = ctx.binding_registry.by_id.get(access.binding_id)
-    if owner is not None and (reason := _read_only_reason(owner)) is not None:
-        user_error(ctx.srcfile, 'cannot pass a const binding as a mutable place', Pointer(span=loc, message=f'`{owner.name}` {reason}'))
+    binding = ctx.binding_registry.by_id.get(access.binding_id)
     _refuse_immutable_write(target, loc, 'pass a member', ctx=ctx)
     if binding is not None:
         if (reason := _read_only_reason(binding)) is not None:
@@ -11817,13 +11814,14 @@ def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
                 ),
                 *_declaration_pointers(binding),
             )
-        # the callee may change the value: forget what was known about it
-        # (an exact length after `= []`, a refinement) for the code after the call
-        ctx.refinements.pop(binding.id, None)
-        ctx.length_bounds.pop(binding.id, None)
-        _invalidate_routes(binding.id, ctx=ctx)
-        _drop_key_facts(ctx, dictionary_id=binding.id)
-        _drop_key_facts(ctx, key_id=binding.id)
+        # A selected entry/field cannot replace its ancestors. Expire only
+        # possibly overlapping descendants, preserving container membership.
+        projection = tuple(step.name if isinstance(step, hir.MemberAccess) else '[]' for step in access.steps)
+        if not projection:
+            ctx.refinements.pop(binding.id, None)
+            ctx.length_bounds.pop(binding.id, None)
+            _drop_key_facts(ctx, key_id=binding.id)
+        _invalidate_routes(binding.id, ctx=ctx, prefix=projection)
     return hir.Place(loc, target.type, target)
 
 
@@ -15538,6 +15536,41 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
     return pos_or_kw_args, kw_only_args, rest_args
 
 
+def _call_argument_expression(ast: p0.AST, *, ctx: Context, expected=None) -> hir.AST:
+    # @ can precede the receiver of a projected path in the parsed tree.
+    # Select the complete place before applying its write barrier: selection
+    # consumes current bounds/membership, while later arguments see the write.
+    prefix = _local_view_prefix(ast)
+    used = [False]
+    checking = replace(ctx, view_probe=(id(prefix), used)) if prefix is not None else ctx
+    value = typecheck_and_resolve_inner(ast, ctx=checking, expected=expected)
+    if not used[0]:
+        return value
+    value = _unwrap_write_path(value)
+    if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup)):
+        user_error(ctx.srcfile, 'a place needs mutable storage', Pointer(span=ast.loc, message='select a named binding, field, or indexed element'))
+    # Read facts never strengthen a writable slot's declared contract.
+    stored = value.type
+    if isinstance(value, hir.ExpressedIdentifier):
+        binding = ctx.binding_registry.by_id.get(value.binding_id)
+        if binding is not None:
+            stored = binding.store_type
+            if stored is None and binding.declaration is not None:
+                stored = binding.declaration.annotation
+            if stored is None or stored == ty.INFERRED_TYPE:
+                stored = ctx.declarations.get(value.name, value.type)
+    elif isinstance(value, hir.MemberAccess):
+        owner = ty.structural_base(value.value.type)
+        field = owner.field(value.name) if isinstance(owner, ty.ObjectType) else None
+        if field is not None:
+            stored = _field_expectation(field)
+    elif isinstance(value, hir.Index):
+        stored = ty.structural_base(value.array.type).element
+    elif isinstance(value, hir.DictLookup):
+        stored = ty.structural_base(value.values.type).element
+    return _mutable_place(replace(value, type=stored), ast.loc, ctx=ctx)
+
+
 def parse_call_arguments(
     right: p0.AST,
     *,
@@ -15564,7 +15597,7 @@ def parse_call_arguments(
                 expected_arg = param.type if param is not None else None
                 # `top` (an intrinsic's untyped address parameter) says nothing about the argument
                 literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None and expected_arg != ty.TOP_TYPE else None
-                arg = typecheck_and_resolve_inner(
+                arg = _call_argument_expression(
                     value,
                     ctx=argument_ctx,
                     expected=literal_expected,
@@ -15601,7 +15634,7 @@ def parse_call_arguments(
                 ) if method is not None else None
                 expected_arg = method.pos_or_kw[index].type if method is not None and index is not None else None
                 literal_expected = ty.strip_refinement(expected_arg) if expected_arg is not None else None
-                arg = typecheck_and_resolve_inner(
+                arg = _call_argument_expression(
                     item,
                     ctx=argument_ctx,
                     expected=literal_expected,
@@ -15729,9 +15762,9 @@ def _validate_place_call_arguments(
 
 
 def _place_route(
-    target: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index,
+    target: hir.ExpressedIdentifier | hir.MemberAccess | hir.Index | hir.DictLookup,
 ) -> tuple[int, tuple[sb.AccessComponent, ...]]:
-    path = sb.access_path(target)
+    path = sb.access_path(target, dictionaries=True)
     if path.binding_id is None:
         raise ValueError('INTERNAL ERROR: place target has no binding identity')
     return path.binding_id, path.components

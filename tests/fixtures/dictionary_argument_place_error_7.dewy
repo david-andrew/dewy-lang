@@ -1,0 +1,4 @@
+let table:dict<string int64>=['x'->0]
+clear=():>int64=>{table.clear return 1}
+set=(@value:int64 ignored:int64):>void=>{value=42}
+main=():>int64=>{if 'x' in? table {set(@table['x'] clear())} return 42}

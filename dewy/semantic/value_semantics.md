@@ -181,6 +181,16 @@ parent field in the child prevents lending it through a wider writable type.
 
 Field and index selection form one place route. `@` occurs only at the beginning, and `@pair.left` selects the place occupied by `left` at the end of the complete route. The parser groups it as `(@pair).left`, but `@pair` is not an independently observable intermediate reference value. The same rule composes through `@matrix[row][column]` and mixed routes such as `@box.items[i]`. Parenthesized `@(pair.left)` selects the same final place. Every selector expression is evaluated once before the call.
 
+A proven dictionary lookup also selects an entry place: `update(@table[key])`.
+The key must be known present before selection. Selection consumes that proof
+before the call's mutation barrier; updating an entry does not remove its key.
+The entry keeps its declared storage contract even if its current value is
+narrower. Later arguments and the callee must keep the containing dictionary
+stable: clearing/removing/replacing it through an ambient alias invalidates the
+borrow and is rejected. Evaluate such work before selecting the entry instead.
+The current lifetime check conservatively tracks the containing owner; it can
+reject independent writes beneath the same owner when disjointness is unproved.
+
 Mark a place on both sides for ordinary values:
 
 ```dewy
