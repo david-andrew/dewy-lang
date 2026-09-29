@@ -46,6 +46,14 @@ same independent hosted seed. A fresh non-slow suite and three-generation
 native rebuild are now running. These targeted repairs do not yet certify a
 green full suite or completion of Phase 1.
 
+The fresh suite's live failure log caught a follow-up in contextual dictionary
+literal unpacking: requiring array subtyping also compared the literal's
+unconverted element type. The new check now applies only to union destinations;
+ordinary array fields retain the established length-transfer rule after their
+initializer has been checked. The unpacking fixture and all eleven hosted
+array-field regressions pass. The frozen full run still uses the preceding
+source, so this repair needs the later integration checkpoint.
+
 ## Full-suite repair: bounded union-array copies (2026-09-29)
 
 Hosted source checking now retains a known array initializer's length through

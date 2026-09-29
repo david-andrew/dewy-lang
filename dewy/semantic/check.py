@@ -1910,7 +1910,8 @@ def _seed_field_routes(
         # A union annotation admits other values on later stores, but does
         # not erase the initializer's known array alternative or its length.
         # Representation casts were checked for value preservation above.
-        if current.length is not None and ctx.type_system.is_subtype(current, declared):
+        if current.length is not None and (isinstance(declared, ty.ArrayType)
+                                         or ctx.type_system.is_subtype(current, declared)):
             route_id = ctx.binding_registry.route_id(root_id, path, declared, literal.loc) if path else root_id
             element = declared.element if isinstance(declared, ty.ArrayType) else current.element
             ctx.refinements[route_id] = ty.ArrayType(element, current.length)
