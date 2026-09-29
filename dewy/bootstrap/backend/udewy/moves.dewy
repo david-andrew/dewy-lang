@@ -369,6 +369,7 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
     # with a dependent view keeps the conservative whole-owner proof.
     let field_candidates:set<addr>=set[]
     let field_owners:set<addr>=set[]
+    let eligible:dict<addr bool>=[]
     loop [binding uses] in analysis.uses {
         if binding not in? analysis.declared or binding in? borrows continue
         loop use in uses {
@@ -384,7 +385,7 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
             if stored isnt? types.ArrayType or stored.length isnt? none or not types.same_type(stored.element array.element table) continue
             let root=hir.node_at(nodes field.value)
             loop root is? hir.MemberAccess {root=hir.node_at(nodes root.value)}
-            if root isnt? hir.ExpressedIdentifier or not storage_borrows.borrowable(root.value_type table) continue
+            if root isnt? hir.ExpressedIdentifier or not storage_borrows.ordinary(root.value_type table @eligible) continue
             field_candidates.push(use.id) field_owners.push(binding)
         }
     }

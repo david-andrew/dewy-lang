@@ -4268,12 +4268,17 @@ class _Lowerer(
                   and owner not in self.borrow_plan.captured_bindings}
         if pending_fields:
             from ...semantic.analyze import ownership_liveness
+            ownership_types = {}
+            def ordinary_ownership(type_):
+                key = id(type_)
+                if key not in ownership_types:
+                    ownership_types[key] = (type_, True if storage_borrows.borrowable(type_) else None)
+                return ownership_types[key][1]
             consumed, _, _, _ = ownership_liveness.conditional_consumptions(
                 literal.body,
                 [p for p in [*literal.pos_or_kw_args, *literal.kw_only_args]
                  if p.binding_id in owned],
-                lambda type_: True if storage_borrows.borrowable(type_) else None,
-                component=lambda value: id(value) in pending_fields)
+                ordinary_ownership, component=lambda value: id(value) in pending_fields)
             moves.update(pending_fields & consumed.keys())
         self.moved_payload_uses = moves & payload_candidates
         return moves - payload_candidates
