@@ -1,0 +1,31 @@
+$explicit_copies
+TransferBase=type of [values:array<int64>]
+TransferChild=type of TransferBase & [extra:string='child' more:array<int64>=[42]]
+TransferWide=type of TransferBase & [one:string two:string three:array<int64> four:int64?]
+TransferOther:type=[other:array<int64>]
+make=(yes:bool):>TransferChild=>{
+ let values:array<int64>=[]
+ values.reserve(1025)
+ loop i in [0..1024) {values.push(i)}
+ return TransferChild[values]
+}
+forward=(yes:bool):>TransferBase|bool=>{
+ let parsed=make(yes)
+ if parsed is? TransferBase return parsed
+ return false
+}
+work=():>int64=>{
+ let value=forward(true)
+ if value is? TransferChild {
+  value.values.push(42)
+  value.more.push(7)
+  return if value.values.length=?1025 and value.values[1024]=?42 and value.extra=?'child' and value.more.length=?2 and value.more[0]=?42 42 else 1
+ }
+ return 2
+}
+main=():>int64=>{
+ if work() not=?42 return 3
+ let before:int64=_arena_live_bytes
+ loop i in [0..20) {if work() not=?42 return 4}
+ return if _arena_live_bytes=?before 42 else 5
+}

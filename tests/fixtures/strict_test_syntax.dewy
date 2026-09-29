@@ -1,0 +1,10 @@
+from reporting import SrcFile, Error
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/semantic/test_syntax.dewy" as tests
+main=():>int64=>{
+ let source=SrcFile['probe' 'main=():>int64=>42']
+ let parsed=parser.parse(source)
+ if parsed is? Error return 1
+ let prepared=tests.prepare(source parsed true)
+ return if prepared is? Error 2 else 42
+}

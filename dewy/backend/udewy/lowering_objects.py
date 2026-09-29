@@ -610,9 +610,21 @@ class _ObjectLowering:
         retain their layout copy.
         """
         source = self._copy_source_expression(node)
+        source_type = ty.structural_base(source.type)
+        # An owning child may become a parent result without copying its
+        # payloads. Allocate the parent's complete family layout and keep
+        # the dynamic brand: copying the old union tag/root directly would
+        # give the new cell the wrong tag or allocation size for cleanup.
+        # Only canonical nominal prefixes qualify here; strengthened field
+        # contracts and representation-changing projections remain separate.
+        nominal_upcast = (isinstance(source, hir.ExpressedIdentifier)
+                          and ty.user_brand_descends(source_type, object_type)
+                          and ty.USER_BRAND_TYPES.get(source_type.brand) == source_type
+                          and ty.USER_BRAND_TYPES.get(object_type.brand) == object_type
+                          and all(a.type == b.type for a, b in zip(source_type.fields, object_type.fields)))
         payload = (isinstance(source, hir.ExpressedIdentifier)
                    and id(source) in self.moved_payload_uses
-                   and any(ty.structural_base(member) == object_type
+                   and any(ty.structural_base(member) == source_type
                            for member in self._stored_union_members(source) or ()))
         root = source
         while isinstance(root, hir.MemberAccess):
@@ -638,7 +650,7 @@ class _ObjectLowering:
                      and id(source) not in self.borrow_plan.array_snapshots)
         if (not self._has_arena() or not isinstance(root, hir.ExpressedIdentifier)
                 or not (payload or id(source) in self.moved_uses)
-                or ty.structural_base(source.type) != object_type
+                or source_type != object_type and not nominal_upcast
                 or not (payload or owned)
                 or self.borrowed_fields.get(local_binding_key(root))):
             return None
@@ -654,11 +666,12 @@ class _ObjectLowering:
                            if destination is None else ([], destination))
         self.move_notes.append(MoveNote(self.srcfile, source.loc,
             f'`{root.name}` component is moved when {site}: its owned fields change owner after their last reads', True))
-        if isinstance(source, (hir.MemberAccess, hir.Index)):
+        if isinstance(source, (hir.MemberAccess, hir.Index)) or nominal_upcast:
             self.copy_notes.append(CopyNote(self.srcfile, source.loc,
                 'a bounded record root adopts owned handles; frame-backed array fields promote before the owner dies',
                 kind='record', type_name=type_to_dewy(object_type),
-                site='transferred from an array element' if isinstance(source, hir.Index) else 'transferred from an inline field',
+                site=('promoted to a parent record' if nominal_upcast else
+                      'transferred from an array element' if isinstance(source, hir.Index) else 'transferred from an inline field'),
                 runtime_sized=True, policy_exempt=True))
         return [*prelude, *allocated,
                 *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest

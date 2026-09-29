@@ -23,6 +23,26 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Nominal child payloads at parent results (2026-09-29)
+
+Hosted lowering now adopts the owned fields of a last-use nominal child into
+the parent's complete family root. It preserves the dynamic brand and child-only
+fields, and gives the destination the correct allocation size for its cleanup.
+Copying the source cell's tag or handing over its differently sized root would
+not suffice. The proof is limited to canonical nominal prefixes with unchanged
+inherited field types; retained readers and representation changes keep their
+ordinary obligations. Native lowering already supports this transfer.
+
+This closes the `TokenError` to `Error` return in bootstrap `test_syntax.dewy`,
+which now enables `$explicit_copies`. Four focused hosted checks and their
+paired native group pass, including wider sibling layouts, child-only owned
+fields, union/ordinary owners and repeated cleanup. The complete test-syntax
+runner compiles under strict policy and executes on both backends through both
+routes; its hosted inventory has no implicit runtime-sized copies. Five added
+manifest cases bring the corpus to 531. Logs use `dewy-nominal-payload-*` and
+`dewy-test-syntax-*`. The broader frozen pytest run remains in progress with
+failures to resolve; Phase 1 is still open.
+
 ## Nested array descriptor transfers (2026-09-29)
 
 Last-use nested arrays now transfer their descriptor from the selected slot.
