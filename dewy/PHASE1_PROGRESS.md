@@ -36,6 +36,19 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-29): current array-field length facts now refine hosted
+reads without narrowing the declared mutation/growth contract. Both routes
+reseed stable member routes after replacement; mutation and deferred captures
+invalidate old evidence. Forty-four focused hosted checks and the paired
+x86-64/C group pass (15.76 seconds). Nine fixtures bring the manifest to 421.
+This closes the constructor-length precision gap recorded below.
+
+Independent integration of `3823554c` exposed a return-move regression in a
+hosted-built native seed. A minimal conditional optional-record return fails
+when its guard compares strings; the corresponding native-built driver
+accepts it. Disabling hosted array-field transfers does not remove the failure.
+Investigation is ongoing; `73fd8f9c` remains the latest full certification.
+
 Checkpoint (2026-09-28): final array-field reads can transfer from owned
 record locals on both routes. The complete receiver participates in last-use
 analysis, including derived readers, branch paths and loop backedges. Taking

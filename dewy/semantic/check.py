@@ -1858,6 +1858,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         if assigned is not None:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
+            _seed_field_routes(root_id, target.type, value, path, ctx=ctx)
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, value)
     if _is_range_type(target.type):
         # Range bindings resolve to their initializer at compile time, so a
@@ -1902,6 +1903,13 @@ def _seed_field_routes(
     literal = _unwrap_parens(expr)
     while isinstance(literal, (hir.RepresentationCast, hir.ValueCast)):
         literal = literal.expr
+    if isinstance(declared, ty.ArrayType):
+        current = ty.unfold(ty.strip_refinement(literal.type))
+        if declared.length is None and isinstance(current, ty.ArrayType) and current.length is not None:
+            route_id = ctx.binding_registry.route_id(root_id, path, declared, literal.loc) if path else root_id
+            ctx.refinements[route_id] = ty.ArrayType(declared.element, current.length)
+            ctx.length_bounds[route_id] = current.length
+        return
     if not (isinstance(declared, ty.ObjectType) and isinstance(literal, hir.ObjectLiteral)):
         return
     if ty.container_entry_types(declared) is not None:
@@ -1920,17 +1928,7 @@ def _seed_field_routes(
         if field is None:
             continue
         field_path = (*path, field_value.name)
-        if (
-            isinstance(field.type, ty.ArrayType)
-            and field.type.length is None
-            and isinstance(field_value.value.type, ty.ArrayType)
-            and field_value.value.type.length is not None
-        ):
-            route_id = ctx.binding_registry.route_id(root_id, field_path, field.type, field_value.loc)
-            ctx.refinements[route_id] = ty.ArrayType(field.type.element, field_value.value.type.length)
-            ctx.length_bounds[route_id] = field_value.value.type.length
-        elif isinstance(ty.unfold(ty.strip_refinement(field.type)), ty.ObjectType):
-            _seed_field_routes(root_id, field.type, field_value.value, field_path, ctx=ctx)
+        _seed_field_routes(root_id, field.type, field_value.value, field_path, ctx=ctx)
 
 
 def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = ()) -> None:
@@ -9107,14 +9105,27 @@ def _tcr_array_method(
                 Pointer(span=value.loc, message=f'`{root.name}` {reason}'),
             )
         _refuse_immutable_write(value, value.loc, 'mutate a member', ctx=ctx)
-        if value.type.length is not None:
+        # The read may carry an exact current length. Growth is governed by
+        # the selected slot's declared contract, just as for a named array.
+        if isinstance(value, hir.MemberAccess):
+            owner = ty.structural_base(value.value.type)
+            member = owner.field(value.name) if isinstance(owner, ty.ObjectType) else None
+            declared = ty.strip_refinement(member.type) if member is not None else value.type
+        else:
+            array = ty.structural_base(value.array.type)
+            declared = ty.strip_refinement(array.element) if isinstance(array, ty.ArrayType) else value.type
+        if isinstance(declared, ty.TypeOr):
+            declared = next((member for item in declared.items
+                             if isinstance(member := ty.strip_refinement(item), ty.ArrayType)
+                             and member.length is None
+                             and ctx.type_system.is_subtype(value.type, member)), declared)
+        if not isinstance(declared, ty.ArrayType) or declared.length is not None:
             user_error(
                 ctx.srcfile,
                 'exact-length arrays cannot change length',
                 Pointer(span=value.loc, message=f'this field has type `{type_to_dewy(value.type)}`'),
                 hint='declare the field as `array<T>` to allow growth',
             )
-        declared = value.type
         return _bind_array_method(value, declared, name, loc, ctx=ctx)
     if not isinstance(value, hir.ExpressedIdentifier) or value.binding_id is None:
         not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
@@ -12077,11 +12088,10 @@ def _known_string_length(type_: ty.Type) -> int | None:
 def _refined_route_read(node: hir.AST, *, ctx: Context) -> hir.AST:
     """Consume an existing stable projection fact without changing storage.
 
-    Array lengths have a separate growth contract. Record/union alternatives
-    and string membership facts refine the read; writes keep their declared
-    type. A string field may be narrowed to a literal union just like a name.
+    Current array lengths, record/union alternatives and string membership
+    facts refine reads. Writes and growth keep their declared storage type.
     """
-    if (isinstance(ty.unfold(ty.strip_refinement(node.type)), (ty.ObjectType, ty.TypeOr))
+    if (isinstance(ty.unfold(ty.strip_refinement(node.type)), (ty.ObjectType, ty.TypeOr, ty.ArrayType))
             or ty.string_valued(node.type)):
         route = sb.array_route_id(node, ctx.binding_registry, create=False)
         refined = ctx.refinements.get(route) if route is not None else None

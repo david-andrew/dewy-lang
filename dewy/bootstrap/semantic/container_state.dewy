@@ -225,6 +225,12 @@ seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>vo
     let node = hir.node_at(session.hir value)
     if node is? hir.Obligation { seed_fields(binding node.value state @session) return void }
     if node is? hir.ValueCast|hir.RepresentationCast { seed_fields(binding node.expr state @session) return void }
+    let current=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    if current is? types.ArrayType and current.length isnt? none {
+        $runtime_assert state <? session.read_states.length
+        store_type(@session.read_states[state] binding node.value_type)
+        return void
+    }
     if node isnt? hir.ObjectLiteral return void
     let owner = binding
     let path:array<string> = []

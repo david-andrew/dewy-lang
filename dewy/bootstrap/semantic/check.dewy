@@ -2141,6 +2141,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         let marked=receiver_method(value store_type(place @session) id env @session)
         if marked is? Error return marked
         value=marked
+        seed_replaced_route(place value env @session)
         return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
     }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
@@ -2181,6 +2182,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
             let value=expression(node.right env @session expected=store_type(prior.replacement @session))
             if value is? Error return value
             container_state.replaced(prior.replacement env.state @session)
+            seed_replaced_route(prior.replacement value env @session)
             return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) prior.replacement value] @session)
         }
         if prior.read_only_reason isnt? none return problem(id 'cannot assign to a constant' name env session)
@@ -2420,6 +2422,16 @@ read_type = (id:addr env:Environment session:contexts.Session fallback:addr?=non
 # Update the state in place: copying it out and back would detach (copy)
 # every array of its dictionary for one insertion.
 store_read_type = (@state:contexts.ReadState id:addr type:addr):>void => { state.types[id] = type }
+# Replacement invalidates the old subtree first, then establishes facts
+# about its new value. Only a stable route may retain that evidence; runtime
+# selectors can alias and cannot acquire a persistent identity here.
+seed_replaced_route = (place:addr value:addr env:Environment @session:contexts.Session):>void => {
+    let binding=container_state.route(place @session)
+    if binding is? none return void
+    set_read_type(binding stored_read_type(value @session) env @session)
+    container_state.seed(binding value env.state @session)
+    container_state.seed_fields(binding value env.state @session)
+}
 set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>void => {
     $runtime_assert env.state <? session.read_states.length
     store_read_type(@session.read_states[env.state] id type)

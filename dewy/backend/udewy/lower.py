@@ -3960,10 +3960,14 @@ class _Lowerer(
                 # keep the usual snapshot. Lowering checks the stored layout
                 # and empties the field, preserving the root's cleanup.
                 array = ty.structural_base(source.type)
+                receiver = ty.structural_base(source.value.type)
+                field = receiver.field(source.name) if isinstance(receiver, ty.ObjectType) else None
+                stored = ty.structural_base(field.type) if field is not None else None
                 root = source
                 while isinstance(root, hir.MemberAccess) and isinstance(ty.structural_base(root.value.type), ty.ObjectType):
                     root = root.value
-                if (isinstance(array, ty.ArrayType) and array.length is None
+                if (isinstance(array, ty.ArrayType) and isinstance(stored, ty.ArrayType)
+                        and stored.length is None and stored.element == array.element
                         and isinstance(root, hir.ExpressedIdentifier)
                         and root.binding_id in element_owners
                         and isinstance(ty.structural_base(root.type), ty.ObjectType)):

@@ -1,0 +1,6 @@
+$explicit_copies
+let dropped:int64=0
+Pack=type of [values:array<int64>
+$__drop__ release=():>void=>{dropped+=values.length as int64}]
+take=():>array<int64>=>{let owner=Pack[[2]] return owner.values}
+main=():>int64=>{let values=take() values.push(40) return if dropped=?1 and values.length=?2 values[0]+values[1] else 0}

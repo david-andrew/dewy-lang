@@ -1,0 +1,4 @@
+Box:type=[values:array<int64>]
+main=():>int64=>{let box=Box[[42]] let before:array<int64 length=1>=box.values
+ box.values.clear box.values.push(99)
+ return if before.length=?1 and box.values.length=?1 before[0] else 0}
