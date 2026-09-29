@@ -1905,11 +1905,15 @@ def _seed_field_routes(
         if not ctx.type_system.is_subtype(literal.expr.type, literal.type):
             return  # A conversion does not preserve its input's field facts.
         literal = literal.expr
-    if isinstance(declared, ty.ArrayType):
-        current = ty.unfold(ty.strip_refinement(literal.type))
-        if declared.length is None and isinstance(current, ty.ArrayType) and current.length is not None:
+    current = ty.unfold(ty.strip_refinement(literal.type))
+    if isinstance(declared, (ty.ArrayType, ty.TypeOr)) and isinstance(current, ty.ArrayType):
+        # A union annotation admits other values on later stores, but does
+        # not erase the initializer's known array alternative or its length.
+        # Representation casts were checked for value preservation above.
+        if current.length is not None and ctx.type_system.is_subtype(current, declared):
             route_id = ctx.binding_registry.route_id(root_id, path, declared, literal.loc) if path else root_id
-            ctx.refinements[route_id] = ty.ArrayType(declared.element, current.length)
+            element = declared.element if isinstance(declared, ty.ArrayType) else current.element
+            ctx.refinements[route_id] = ty.ArrayType(element, current.length)
             ctx.length_bounds[route_id] = current.length
         return
     if not (isinstance(declared, ty.ObjectType) and isinstance(literal, hir.ObjectLiteral)):

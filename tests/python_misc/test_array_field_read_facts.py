@@ -7,6 +7,17 @@ from test_scalar_projection import execute
 
 HEADER='Box:type=[values:array<int64>]\n'
 CASES=[
+ '''Box:type=[values:array<int64>|bool]
+main=():>int64=>{let box=Box[[20 22]]
+ let kept:array<int64 length=2>=box.values
+ box.values=false
+ return if box.values is? bool kept[0]+kept[1] else 0}''',
+ '''main=():>int64=>{let fixed:array<int64 length=2>=[20 22]
+ let values:array<int64 length=2>|array<int64>=fixed
+ let kept:array<int64 length=2>=values
+ let grown:array<int64>=[1 2 3]
+ values=grown
+ return if values.length=?3 kept[0]+kept[1] else 0}''',
  HEADER+'''main=():>int64=>{let box=Box[[42]] let before:array<int64 length=1>=box.values
  box.values.clear box.values.push(99)
  return if before.length=?1 and box.values.length=?1 before[0] else 0}''',

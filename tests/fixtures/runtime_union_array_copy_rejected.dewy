@@ -1,0 +1,10 @@
+$explicit_copies
+make=():>array<int64>|bool=>[42]
+widen=(value:array<int64>|bool):>array<int64>|bool|none=>value
+main=():>int64=>{
+    let original=make()
+    let result=widen(original)
+    if result is? array<int64> {result.clear()}
+    if original is? array<int64> and original.length>?0 return original[0]
+    return 1
+}

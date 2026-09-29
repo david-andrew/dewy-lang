@@ -42,9 +42,10 @@ CASES += [RETAINED.replace('$explicit_copies', ''),
           RETAINED.replace('let snapshot=value', 'let snapshot=value.copy()')]
 ERRORS = [RETAINED,
     '''$explicit_copies
+make=():>array<int64>|bool=>[42]
 widen=(value:array<int64>|bool):>array<int64>|bool|none=>value
 main=():>int64=>{
-    let original:array<int64>|bool=[42]
+    let original=make()
     let result=widen(original)
     if result is? array<int64> {result.clear()}
     if original is? array<int64> and original.length>?0 return original[0]
@@ -60,6 +61,16 @@ main=():>int64=>{
 }''',
 ]
 CASES.append(ERRORS[1].replace('$explicit_copies', ''))
+BOUNDED = ERRORS[1].replace('let original=make()', 'let original:array<int64>|bool=[42]')
+CASES.append(BOUNDED)
+
+
+def test_bounded_union_payload_copy_stays_in_inventory():
+    from dewy.backend.udewy import lower
+    codegen(SrcFile(None, BOUNDED), debug_locations=False)
+    copies = [note for note in lower.last_copy_notes if note.kind == 'array'
+              and note.site == 'stored in a union']
+    assert copies and all(not note.runtime_sized for note in copies)
 
 @pytest.mark.parametrize('source', CASES)
 def test_local_union_payload_widening(tmp_path, source):

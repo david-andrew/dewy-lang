@@ -2590,12 +2590,20 @@ class _ArrayLowering(_ArraySharing):
                 hir.Declare(loc, ty.VOID_TYPE, 'let', moved.name, 'int64', self._int64_literal(loc, 0)),
                 transfer,
             ], moved
+        # Copy cost belongs to the value read, not to the wider destination
+        # contract. Packing a known fixed-size array into a growable union
+        # keeps a bounded copy, while runtime-sized elements still count.
+        current_type = ty.structural_base(source.type)
+        copy_type = (ty.ArrayType(array_type.element, current_type.length)
+                     if isinstance(current_type, ty.ArrayType)
+                     and current_type.element == array_type.element
+                     and current_type.length is not None else array_type)
         if isinstance(source, hir.ExpressedIdentifier):
             reason = 'it is used again later, or is not a local that owns its storage' if source.binding_id is not None else 'it is not a local'
             self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is copied when {site}: {reason}', False))
-            self._note_copy('array', array_type, site, f'`{source.name}` {reason}', source.loc)
+            self._note_copy('array', copy_type, site, f'`{source.name}` {reason}', source.loc)
         elif not self._array_expression_owns_fresh_storage(source):
-            self._note_copy('array', array_type, site, self._copy_reason(source), source.loc)
+            self._note_copy('array', copy_type, site, self._copy_reason(source), source.loc)
         # a literal or call result is a dying temporary: its element strings,
         # cells, and objects change owner rather than being cloned and lost
         fresh = self._array_expression_owns_fresh_storage(source)

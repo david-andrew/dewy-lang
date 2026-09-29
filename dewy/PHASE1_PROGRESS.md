@@ -24,6 +24,22 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Full-suite repair: bounded union-array copies (2026-09-29)
+
+Hosted source checking now retains a known array initializer's length through
+a union annotation, matching native reads without narrowing the write contract.
+Array-transfer copy reporting likewise uses a known source length instead of
+the wider destination's growable contract. A bounded copy remains inventoried;
+runtime-sized elements and unknown lengths retain their strict-copy obligation.
+The original local-union failure now executes as a bounded-copy positive, while
+the negative obtains its unknown-sized value from a function and is rejected.
+
+All 46 local-widening/strict-policy/injection checks pass with the paired native
+groups. Twelve field-read checks pass, including union field/binding replacement
+on both compilers/backends. The source-checker union-array comparison also
+passes against the frozen native checker. Four new manifest entries bring the
+corpus to 541. Artifacts use `dewy-bounded-union-*` and `dewy-union-*`.
+
 ## Full-suite repair: shared family adoption helpers (2026-09-29)
 
 Hosted last-use record adoption now shares one exact field-transfer helper per

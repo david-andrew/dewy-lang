@@ -1,0 +1,5 @@
+Box:type=[values:array<int64>|bool]
+main=():>int64=>{let box=Box[[20 22]]
+ let kept:array<int64 length=2>=box.values
+ box.values=false
+ return if box.values is? bool kept[0]+kept[1] else 0}
