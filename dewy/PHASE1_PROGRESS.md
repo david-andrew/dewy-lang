@@ -28,6 +28,31 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Numeric queries and tagged replacement transfers (2026-09-29)
+
+Index checking now compares borrowed length endpoints directly instead of
+building optional interval/bigint snapshots. Exact result endpoints still copy
+explicitly because the result retains them. Range normalization avoids an
+absolute-step snapshot and transfers its computed count after the final read;
+its mutable first endpoint explicitly owns a copy. Numeric HIR construction
+reads alias identities without copying their aggregate alternatives, uses a
+machine-word sign, and explicitly retains mathematical payloads.
+
+This exposed a hosted last-use gap: tagged-cell assignment did not participate
+in transfer discovery even though initialization and native assignment did.
+Replacement now uses the existing ownership/layout checks. Seven hosted cases
+cover same/widened unions, conditional transfers, record and bigint payloads,
+live-source rejection and cleanup. Three paired x86-64/C groups pass, including
+the surrounding field and injection tests (76.70 seconds). Fifty-four numeric,
+index and range checks pass, plus an exact-normalization kernel spanning 192
+combinations of large signed endpoints, step directions and open/closed bounds.
+
+All three modules pass strict checking on both routes, reaching 72 physical
+bootstrap modules. Seven fixtures bring the manifest to 620. Logs use
+`dewy-numeric-query-*`, `dewy-union-replacement-*` and
+`dewy-integer-range-normalization.log`. These changes postdate the ongoing
+613-case frozen integration.
+
 ## Lasting ownership for global replacements (2026-09-29)
 
 Hosted ordinary array/record assignment now uses the existing lasting-storage

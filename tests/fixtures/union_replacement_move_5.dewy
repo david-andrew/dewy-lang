@@ -1,0 +1,17 @@
+$explicit_copies
+make=(present:bool):>array<int64>|bool=>if present [20 22] else false
+work=(present:bool):>int64=>{
+    let value=make(present)
+    let result:array<int64>|bool|none=none
+    result=value
+    if value is? bool return 42
+    if result is? none return 1
+    if result is? bool return if not result 42 else 2
+    return if result.length=?2 result[0]+result[1] else 3
+}
+main=():>int64=>{
+    if work(true) not=?42 or work(false) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work(true) not=?42 or work(false) not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

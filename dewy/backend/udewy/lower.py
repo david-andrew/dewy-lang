@@ -4188,7 +4188,11 @@ class _Lowerer(
                 return
             if (isinstance(node, hir.Assign) and node.op == '='
                     and (isinstance(node.target.type, ty.ObjectType)
-                         or isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None)):
+                         or isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None
+                         or self._field_union_members(node.target.type) is not None)):
+                # Replacing an owning tagged cell is the same transfer
+                # boundary as initializing it. The union writer still checks
+                # payload layout and clears only a last-use owner's payload.
                 walk(node.target, depth, nested, {})
                 walk(node.value, depth, nested, transfer(node.value))
                 return

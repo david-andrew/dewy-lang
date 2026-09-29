@@ -1,0 +1,17 @@
+$explicit_copies
+Payload:type=[items:array<int64>]
+make=(present:bool):>Payload|bool=>if present Payload[[20 22]] else false
+work=(present:bool):>int64=>{
+    let value=make(present)
+    let result:Payload|bool|none=none
+    result=value
+    if result is? none return 1
+    if result is? bool return if not result 42 else 2
+    return if result.items.length=?2 result.items[0]+result.items[1] else 3
+}
+main=():>int64=>{
+    if work(true) not=?42 or work(false) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work(true) not=?42 or work(false) not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

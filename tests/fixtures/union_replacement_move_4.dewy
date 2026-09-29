@@ -1,0 +1,15 @@
+$explicit_copies
+make=(present:bool):>bigint=>if present 42 else 42
+work=(present:bool):>int64=>{
+    let value=make(present)
+    let result:bigint?=none
+    result=value
+    if result is? none return 1
+    return if result=?42 42 else 3
+}
+main=():>int64=>{
+    if work(true) not=?42 or work(false) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work(true) not=?42 or work(false) not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

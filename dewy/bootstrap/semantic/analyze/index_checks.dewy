@@ -1,8 +1,8 @@
+$explicit_copies
 from reporting import SrcFile, Error, Pointer
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
-import p"value_bounds.dewy" as values
 import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
 import p"intervals.dewy" as ranges
@@ -36,8 +36,20 @@ string_length = (id:addr nodes:types.Table):>addr? => {
     return none
 }
 constant = (interval:ranges.Interval):>Proven => Proven[
-    if ranges.same_endpoint(interval.lower interval.upper) interval.lower else none
+    # The result outlives the analysis interval that supplied its endpoint.
+    if ranges.same_endpoint(interval.lower interval.upper) interval.lower.copy() else none
 ]
+
+# Ask about the lower endpoint without constructing an owning optional
+# interval or bigint. Missing length evidence has the usual lower bound zero.
+below_minimum = (upper:bigint length:ranges.Interval?):>bool => {
+    if length is? none or length.lower is? none return upper <? 0
+    return upper <? length.lower
+}
+minimum_at_least = (length:ranges.Interval? offset:bigint):>bool => {
+    if length is? none or length.lower is? none return 0 >=? offset
+    return length.lower >=? offset
+}
 
 # `length_interval` includes the evaluated sequence's field/parameter
 # invariants. A route's state entry alone need not contain those bounds.
@@ -56,14 +68,12 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
     if length isnt? none and interval isnt? none and nonnegative and interval.upper isnt? none and interval.upper <? length return constant(interval)
     let array_id = terms.sequence_id(sequence context.env @registry)
     if array_id isnt? none and interval isnt? none and nonnegative {
-        let measured = if length_interval is? none values.length_default(context.env.cap) else length_interval
-        let minimum:bigint = if measured.lower is? none 0 else measured.lower
-        if interval.upper isnt? none and interval.upper <? minimum return constant(interval)
+        if interval.upper isnt? none and below_minimum(interval.upper length_interval) return constant(interval)
         if symbolic {
             let named = terms.binding_term(index context.env @registry)
             if named isnt? none and named.projection =? 'value' and facts.contains(state facts.index(named.binding_id array_id)) return Proven[]
             let offset = terms.length_offset(index array_id context.env @registry)
-            if offset isnt? none and minimum >=? offset return Proven[]
+            if offset isnt? none and minimum_at_least(length_interval offset) return Proven[]
             if proofs.upper(index array_id 1 state context observed @registry) return Proven[]
         }
     }
@@ -83,9 +93,7 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
 
 check_method_index = (method:string index:addr interval:ranges.Interval? state:facts.State array_id:addr length:ranges.Interval allow_end:bool context:proofs.Context observed:dict<addr ranges.Interval> srcfile:SrcFile @registry:bindings.Registry symbolic:bool=true):>Error? => {
     if interval isnt? none and interval.lower isnt? none and interval.lower >=? 0 {
-        let minimum:bigint = if length.lower is? none 0 else length.lower
-        let limit = minimum + (if allow_end 1 else 0)
-        if interval.upper isnt? none and interval.upper <? limit return none
+        if interval.upper isnt? none and (if allow_end minimum_at_least(length interval.upper) else below_minimum(interval.upper length)) return none
         if symbolic {
             let named = terms.binding_term(index context.env @registry)
             if named isnt? none and named.projection =? 'value' and facts.contains(state facts.index(named.binding_id array_id)) return none

@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Span
 import p"context.dewy" as contexts
 import p"bindings.dewy" as bindings
@@ -18,9 +19,10 @@ const bigint_binary:dict<string string>=[
 family = (name:string context:contexts.Context session:contexts.Session):>addr? => {
     let id=bindings.lookup(session.scopes context.scope name)
     if id is? none return none
-    let value=bindings.binding_at(session.registry id).type_value
-    return if value is? addr value else none
+    let binding=bindings.binding_at(session.registry id)
+    return family_id(binding.type_value)
 }
+family_id = (value:types.TypeAliasValue?):>addr? => if value is? addr value else none
 object_member = (type:addr nodes:types.Table):>addr => {
     let node=types.node_at(nodes type)
     if node isnt? types.TypeOr return type
@@ -54,7 +56,9 @@ nonzero_form = (type:addr name:string context:contexts.Context session:contexts.
 # merely constructing a similarly shaped user record never grants that fact.
 bigint_literal = (value:bigint declared:addr loc:Span @session:contexts.Session):>addr => {
     if value =? 0 return hir.append_node(@session.hir hir.Integer[loc types.integer_literal(0 @session.types) '0d' 0])
-    let magnitude=if value <? 0 (-value) else value
+    # Destructively divide a private magnitude; preserve the exact input in
+    # the emitted mathematical payload for later proof/constant passes.
+    let magnitude=if value <? 0 (-value) else value.copy()
     let limbs:array<addr>=[]
     let word=types.primitive('uint64' @session.types)
     loop magnitude >? 0 {
@@ -62,10 +66,10 @@ bigint_literal = (value:bigint declared:addr loc:Span @session:contexts.Session)
         limbs.push(hir.append_node(@session.hir hir.Integer[loc word '0d' limb]))
         magnitude //= 4294967296
     }
-    let sign:bigint=if value <? 0 (-1) else 1
+    let sign:int64=if value <? 0 (-1) else 1
     let sign_node=hir.append_node(@session.hir hir.Integer[loc types.integer_literal(sign @session.types) '0d' sign])
     let array=hir.append_node(@session.hir hir.ArrayLiteral[loc types.array_type(word limbs.length @session.types) limbs])
-    return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'sign' sign_node] hir.ObjectField[loc 'limbs' array]] value])
+    return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'sign' sign_node] hir.ObjectField[loc 'limbs' array]] value.copy()])
 }
 
 # A normalized literal needs no runtime gcd. Its parts are constructed using
@@ -74,8 +78,9 @@ bigint_literal = (value:bigint declared:addr loc:Span @session:contexts.Session)
 rational_literal = (numerator:bigint denominator:bigint declared:addr big:addr? loc:Span @session:contexts.Session):>addr => {
     $runtime_assert denominator >? 0
     if big isnt? none and numerator =? 0 return hir.append_node(@session.hir hir.Integer[loc types.integer_literal(0 @session.types) '0d' 0])
-    let top=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(numerator @session.types) '0d' numerator]) else bigint_literal(numerator big loc @session)
-    let bottom=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(denominator @session.types) '0d' denominator]) else bigint_literal(denominator big loc @session)
+    # Each HIR literal retains its exact payload independently of the caller.
+    let top=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(numerator @session.types) '0d' numerator.copy()]) else bigint_literal(numerator big loc @session)
+    let bottom=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(denominator @session.types) '0d' denominator.copy()]) else bigint_literal(denominator big loc @session)
     return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'numerator' top] hir.ObjectField[loc 'denominator' bottom]]])
 }
 const rational_binary:dict<string string>=[
