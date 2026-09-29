@@ -1,0 +1,7 @@
+read=(values:set<int64>):>int64=>if 42 in? values 42 else 0
+main=():>int64=>{
+ let values:set<int64>=set[42]
+ let answer:int64=0
+ loop item in values {answer+=read(values=values)}
+ return answer
+}

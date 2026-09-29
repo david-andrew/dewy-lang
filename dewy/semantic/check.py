@@ -8941,6 +8941,28 @@ def _iterated_container_routes(condition: hir.AST) -> set[tuple[str, tuple[str, 
     return routes
 
 
+def _runtime_syntax_children(node: p0.AST):
+    """Visit argument evaluation, without mistaking keyword labels for writes.
+
+    This is still a conservative pre-check scan. Only direct named rows in a
+    call's parentheses bind arguments; nested statements and place expressions
+    in their values retain their ordinary mutation behavior.
+    """
+    if isinstance(node, p0.BinOp) and isinstance(node.right, p0.Block) and node.right.kind == '()':
+        call = isinstance(node.op, t2.CallJuxtapose) or (
+            isinstance(node.op, t2.QJuxtapose) and any(isinstance(op, t2.CallJuxtapose) for op in node.op.options))
+        if call:
+            yield node.left
+            for argument in node.right.inner:
+                if (isinstance(argument, p0.BinOp) and _operator_symbol(argument.op) == '='
+                        and isinstance(argument.left, p0.Atom) and isinstance(argument.left.item, t1.Identifier)):
+                    yield argument.right
+                else:
+                    yield argument
+            return
+    yield from p0.children(node)
+
+
 def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
     """Separate sibling writes without assuming different indices are disjoint.
 
@@ -8988,7 +9010,7 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
             found = route(target)
             if found is not None:
                 routes.add(found[:2])
-        for child in p0.children(node):
+        for child in _runtime_syntax_children(node):
             walk(child)
 
     walk(ast)
@@ -9045,7 +9067,7 @@ def _binding_write_names(ast: p0.AST) -> tuple[set[str], set[str]]:
                 and node.right.item.name in _MUTATING_METHOD_NAMES
             ):
                 names.add(left_name)
-        for child in p0.children(node):
+        for child in _runtime_syntax_children(node):
             walk(child)
 
     walk(ast)

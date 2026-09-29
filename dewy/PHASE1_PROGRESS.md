@@ -36,6 +36,18 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): both source mutation pre-scans now distinguish call
+keyword labels from writes to caller bindings. `read(values=values)` inside
+an iteration no longer falsely says that `values` changed. Argument values
+still contribute their nested assignments, mutating calls and place exposure.
+This fixes both iterator exclusion and preliminary loop fact invalidation;
+it does not weaken the later checked effect analysis.
+
+Five focused hosted cases and paired x86-64/C execution pass, along with 32
+surrounding loop/fact checks. Set and dictionary iteration, nested mutating
+argument blocks, direct mutation and keyword places are covered. Two fixtures
+bring the full manifest to 356. The shared-selection batch remains in progress.
+
 Checkpoint (2026-09-28): hosted direct single-use union parameters now share
 native's consuming-input protocol. A caller supplies an independent frame cell;
 the callee transfers or releases its active payload. Fresh arguments and
@@ -55,7 +67,7 @@ fixed point (60/58/58 seconds under concurrent validation). Its complete native
 inventory reports 3,986 sites across 54,652 lines, or 72.934/KLOC, below the
 unchanged 4,500/85 gates. The frozen hosted inventory reports 2,106 nonexplicit
 runtime-sized obligations in 90 bootstrap modules; compiler-wide strict adoption
-remains open. The full 351-case integration run for that revision is pending.
+remains open. All 351 cases in its frozen paired integration manifest pass.
 
 Checkpoint (2026-09-28): shared storage proofs distinguish private fresh
 owners from incoming aliases. An unwritten local created by a literal or

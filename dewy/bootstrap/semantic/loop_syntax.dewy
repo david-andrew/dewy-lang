@@ -33,6 +33,26 @@ children = (node:tokens.Token):>array<addr> => {
     }
     return []
 }
+# A named call argument evaluates its value; its label is not an assignment
+# to a caller binding of that name. Preserve writes/place exposure inside the
+# value and leave other syntax conservative until ordinary checking resolves it.
+runtime_children = (node:tokens.Token nodes:array<tokens.Token>):>array<addr> => {
+    if node is? parser.BinOp {
+        let argument=tokens.node_at(nodes node.right)
+        let operator=tokens.node_at(nodes node.op)
+        let call=syntax.symbol(node.op nodes)=?'CallJuxtapose' or (operator is? post.Juxtapose and 'CallJuxtapose' in? operator.options)
+        if call and argument is? parser.Block and argument.delims=?'()' {
+            let result:array<addr>=[node.left]
+            loop id in argument.inner {
+                let row=tokens.node_at(nodes id)
+                if row is? parser.BinOp and syntax.is_operator(row.op '=' nodes) and syntax.identifier(row.left nodes) isnt? none {result.push(row.right)}
+                else {result.push(id)}
+            }
+            return result
+        }
+    }
+    return children(node)
+}
 root_name = (id:addr nodes:array<tokens.Token>):>string? => {
     let node = tokens.node_at(nodes syntax.unparen(id nodes))
     if node is? parser.BinOp {
@@ -94,7 +114,7 @@ mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<str
         let name=root_name(target nodes)
         if name isnt? none {names.push(name)}
     }
-    loop child in children(node) {
+    loop child in runtime_children(node nodes) {
         loop name in mutations(child nodes replacements) {names.push(name)}
     }
     return names
@@ -113,7 +133,7 @@ mutates_route = (id:addr name:string fields:array<string> nodes:array<tokens.Tok
             if overlaps return true
         }
     }
-    loop child in children(node) {if mutates_route(child name fields nodes) return true}
+    loop child in runtime_children(node nodes) {if mutates_route(child name fields nodes) return true}
     return false
 }
 contains_iterator = (id:addr nodes:array<tokens.Token>):>bool => {
