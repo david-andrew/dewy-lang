@@ -121,6 +121,26 @@ overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
     }
     return true
 }
+# Prove that other operands cannot observe a transferred component.
+disjoint_inputs=(scope:addr selected:addr route:Entry aliases:dict<addr addr> nodes:array<hir.AST>):>bool=>{
+    # Collapse maximal routes, retaining selector reads. An alias still has
+    # a whole-owner footprint; a direct sibling route can remain live.
+    let pending:array<addr>=[scope]
+    loop pending.length>?0 {
+        let id=pending.pop
+        if id=?selected continue
+        let access=field_route(id nodes wildcards=true)
+        let node=hir.node_at(nodes id)
+        if access isnt? none {
+            if route.binding in? roots(access.binding aliases) and (access.binding not=?route.binding or overlaps(route.path access.path)) return false
+            loop node is? hir.MemberAccess|hir.Index {
+                if node is? hir.Index {pending.push(node.index) node=hir.node_at(nodes node.array)}
+                else {node=hir.node_at(nodes node.value)}
+            }
+        } else {hir.push_children(node @pending)}
+    }
+    return true
+}
 # Whether a live entry needs the value a consumption of `path` takes.
 needed=(route:Entry live:Live aliases:dict<addr addr> propose:bool):>Requirements?=>{
     let clauses:Requirements=[]
@@ -400,7 +420,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
                 }
                 if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 {
                     # A selector may read siblings before this transfer.
-                    # Other operands still prevent a same-expression donation.
+                    # Overlapping operands still prevent a donation.
                     let own_reads:addr=0
                     let pending_reads:array<addr>=[selected]
                     loop pending_reads.length>?0 {
@@ -408,7 +428,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
                         if read is? hir.ExpressedIdentifier and read.binding_id isnt? none and route.binding in? roots(read.binding_id analysis.aliases) {own_reads+=1}
                         hir.push_children(read @pending_reads)
                     }
-                    if counts.get(route.binding 0) =? own_reads {analysis.candidates.push(selected)}
+                    if counts.get(route.binding 0) =? own_reads or disjoint_inputs(scope selected route analysis.aliases nodes) {analysis.candidates.push(selected)}
                 }
             }
         }

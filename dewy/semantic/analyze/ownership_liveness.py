@@ -126,6 +126,33 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                 result.update((root, (), 'read') for root in roots(child.binding_id))
         return result
 
+    def disjoint_inputs(scope, selected, route):
+        """Other operands may use siblings, but cannot observe a moved field.
+
+        Walk maximal routes instead of their identifier leaves. Aliases keep
+        their conservative whole-root footprint; selector expressions remain
+        reads even when the selected storage itself is disjoint.
+        """
+        pending = [scope]
+        while pending:
+            child = pending.pop()
+            if child is selected:
+                continue
+            access = field_route(child, wildcards=True)
+            if access is not None:
+                if route[0] in roots(access[0]) and (access[0] != route[0]
+                        or conflicts(route[1], access[1], 'read')):
+                    return False
+                while isinstance(child, (hir.MemberAccess, hir.Index)):
+                    if isinstance(child, hir.Index):
+                        pending.append(child.index)
+                        child = child.array
+                    else:
+                        child = child.value
+            else:
+                pending.extend(hir.children(child))
+        return True
+
     captured = set().union(*(roots(binding) for binding in captured)) if captured else set()
     # Inputs exist at every use in this function. Do not manufacture reads of
     # a later local, a changing loop selector, an exposed place or a capture.
@@ -154,9 +181,9 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             inputs, scope = [node.default], node.default
         elif isinstance(node, hir.Block) and resource(node.type) is not None:
             inputs = [item for item in node.items if resource(item.type) is not None]
-        # A borrowed sibling argument may still need the source after the
-        # callee starts. Do not move a root mentioned elsewhere in this input
-        # group, even when its final syntactic occurrence is an owning one.
+        # A borrowed argument may still need the source after the callee
+        # starts. Whole-root transfers require a unique read; component
+        # transfers can also prove the remaining operands disjoint below.
         counts = {}
         if inputs:
             for child in hir.walk(scope):
@@ -176,13 +203,13 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                 while isinstance(root, (hir.MemberAccess, hir.Index)):
                     root = root.value if isinstance(root, hir.MemberAccess) else root.array
                 # Selector reads happen before this component transfers.
-                # Other operands still prevent a same-expression donation;
+                # Overlapping operands prevent a same-expression donation;
                 # the backward walk checks the selector's own dependencies.
                 own_reads = sum(route[0] in roots(child.binding_id) for child in hir.walk(value)
                                 if isinstance(child, hir.ExpressedIdentifier))
                 if (route[0] in owners and route[0] not in captured and occurrences[id(root)] == 1
                         and resource(value.type) is not None and component(value)
-                        and counts.get(route[0]) == own_reads):
+                        and (counts.get(route[0]) == own_reads or disjoint_inputs(scope, value, route))):
                     candidates.add(id(value))
 
     consumes, obligations = {}, {}

@@ -233,6 +233,21 @@ The preceding sibling-field/dispatch hosted build prepared/emitted in
 inventory from 1,805 to 1,765 obligations across the same 73 modules. Memoized
 ownership queries retain this result; both focused native groups pass.
 
+## Disjoint operands share an owner (2026-09-29)
+
+Component liveness now checks the maximal storage routes of other operands.
+`consume(pair.left pair.right)` can transfer both fields; a whole-owner or
+overlapping argument still prevents the transfer. Aliases retain their
+conservative whole-root footprint, and selectors still contribute their own
+reads. Whole-root moves keep the unique-input requirement. This is shared by
+ordinary storage and logical resource cleanup.
+
+Forty-seven hosted argument/lifecycle checks and two paired native groups pass,
+including drop counts and overlapping-argument rejection. Five cases bring the
+manifest to 493. Enabling strict policy for the dispatch module additionally
+exposed native snapshots for defaulted record parameters; that protocol is being
+extended before adoption is committed. Full certification remains `db95f751`.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

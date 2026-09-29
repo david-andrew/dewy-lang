@@ -1,0 +1,22 @@
+$explicit_copies
+
+Inner:type=[values:array<int64>]
+Box:type=[inner:Inner answer:int64=42]
+make=(size:int64):>Box=>{
+    let values:array<int64>=[]
+    values.reserve(size+1)
+    loop i in 0.. and i <? size {values.push(i)}
+    return Box[Inner[values]]
+}
+take=(inner:Inner answer:Inner):>int64=>{
+ inner.values.push(42)
+ return if answer.values.length=?1024 and inner.values.length=?1025 inner.values[1024] else 1
+}
+work=():>int64=>{
+ let box=make(1024)
+ let before:int64=_arena_allocated_bytes
+ let result=take(box.inner box.inner)
+ if _arena_allocated_bytes-before>?1024 return 2
+ return result
+}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 3} return if _arena_live_bytes=?before 42 else 4}

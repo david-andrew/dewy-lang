@@ -1,0 +1,8 @@
+let drops:int64=0
+Handle=type of [value:int64
+$__drop__
+release=():>void=>{drops+=value}
+]
+Pair:type=[left:Handle right:Handle]
+consume=(left:Handle right:Handle):>void=>{let a=left let b=right}
+main=():>int64=>{let pair=Pair[Handle[20] Handle[22]] consume(pair.left pair.right) return drops}
