@@ -1,0 +1,19 @@
+# Read facts describe the current value; writes and places use the full slot.
+Box:type=[item:int64? values:array<int64>]
+replace=(@value:int64?):>void=>{value=42}
+main=():>int64=>{
+    let box=Box[none [1]]
+    box.item=2
+    box.item=none
+    replace(@box.item)
+    if box.item is? none return 1
+    if box.item not=?42 return 2
+    box.values=[20 22]
+    box.values.clear
+    box.values.push(42)
+    let optional:int64?=3
+    optional=none
+    optional=box.values[0]
+    if optional is? none return 3
+    return optional
+}

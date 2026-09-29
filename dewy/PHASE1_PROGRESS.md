@@ -30,6 +30,22 @@ existing decoded-string escape regression exposed this after array root facts
 were generalized. Twenty-three hosted conversion/field-fact checks and two
 paired native groups pass, including ownership and release of decoded payloads.
 
+## Integration repair (2026-09-29): read facts versus write slots
+
+Native assignments and place arguments now carry the destination's declared
+storage type on their target leaf. A previous `none` value in a resource union
+must not hide the slot from lifecycle replacement; an exact array read length
+must not change a writable descriptor's representation. Compound assignments
+keep their narrowed read expression separate. This matches the hosted checker's
+storage contract rule and restores the existing resource-slot regression.
+
+Five hosted checks and three paired native groups pass, covering optional
+resource replacement, mutable optional scalar fields, array replacement/growth,
+and retained field-read evidence. A new write-destination manifest case records
+the nonresource paths as well. The independent seed with the preceding loop and
+conversion repairs built successfully (233.57 seconds prepare, 238.88 emitted);
+full source bootstrap validation follows with this write-target repair included.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

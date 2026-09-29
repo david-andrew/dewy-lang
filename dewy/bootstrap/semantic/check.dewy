@@ -2134,6 +2134,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if member isnt? hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
         let error = writable(place id env session)
         if error isnt? none return error
+        place=storage_place(place @session)
         let value = expression(node.right env @session expected=store_type(place @session))
         if value is? Error return value
         container_state.replaced(place env.state @session)
@@ -2179,11 +2180,12 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
             if member isnt? hir.MemberAccess return problem(id 'cannot assign to a method' name env session)
             let error=writable(prior.replacement id env session)
             if error isnt? none return error
-            let value=expression(node.right env @session expected=store_type(prior.replacement @session))
+            let target=storage_place(prior.replacement @session)
+            let value=expression(node.right env @session expected=store_type(target @session))
             if value is? Error return value
-            container_state.replaced(prior.replacement env.state @session)
-            seed_replaced_route(prior.replacement value env @session)
-            return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) prior.replacement value] @session)
+            container_state.replaced(target env.state @session)
+            seed_replaced_route(target value env @session)
+            return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) target value] @session)
         }
         if prior.read_only_reason isnt? none return problem(id 'cannot assign to a constant' name env session)
         let required = if prior.store_type is? none prior.value_type else prior.store_type
@@ -2191,6 +2193,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if value is? Error return value
         let target = identifier(name target_id env @session)
         if target is? Error return target
+        target=storage_place(target @session)
         container_state.changed(existing env.state @session)
         container_state.seed(existing value env.state @session)
         container_state.seed_fields(existing value env.state @session)
@@ -3842,6 +3845,7 @@ place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
         else if binding.value_type isnt? none { store_type = binding.value_type }
         value = put(hir.ExpressedIdentifier[target.loc store_type target.name target.binding_id] @session)
     }
+    else {value=storage_place(value @session)}
     container_state.replaced(value env.state @session)
     if binding.value_type isnt? none { set_read_type(binding.id binding.value_type env @session) }
     let loc = contexts.node_at(id env.lexical session).loc
@@ -4115,6 +4119,7 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     result = against(result required id env @session)
     if result is? Error return result
     container_state.replaced(target env.state @session)
+    target=storage_place(target @session)
     if read is? hir.MemberAccess return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) target result] @session)
     $runtime_assert read is? hir.ExpressedIdentifier and read.binding_id isnt? none
     set_read_type(read.binding_id stored_read_type(result @session) env @session)
@@ -5681,6 +5686,20 @@ store_type = (id:addr @session:contexts.Session):>addr => {
         if declared isnt? none return declared
     }
     return node_at(id session).value_type
+}
+
+# Reads can carry a narrower union arm or exact array length. A write names
+# the full slot: lifetime preparation and representation lowering need its
+# declared layout even when the old value is currently `none`. Clone only
+# the leaf so compound assignments retain their separately checked read.
+storage_place = (id:addr @session:contexts.Session):>addr => {
+    let node=node_at(id session)
+    let stored=store_type(id @session)
+    if types.same_type(node.value_type stored session.types) return id
+    if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc stored node.name node.binding_id] @session)
+    if node is? hir.MemberAccess return put(hir.MemberAccess[node.loc stored node.value node.name node.mutable] @session)
+    if node is? hir.Index return put(hir.Index[node.loc stored node.array node.index node.constant_index] @session)
+    return id
 }
 
 MatchTest:type = const [conditions:array<addr> environment:Environment]
