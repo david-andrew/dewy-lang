@@ -3906,7 +3906,9 @@ class _Lowerer(
             and self.local_initializers.get(binding)
             and all(self._is_owned_string_result(value) for value in self.local_initializers[binding])
         }
-        cells: set[int] = set()
+        cells: set[int] = {parameter.binding_id
+                           for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
+                           if parameter.binding_id in self.owned_cell_parameters}
         element_owners: set[int] = set(owned)
         for node in hir.walk(literal.body):
             if not isinstance(node, hir.Declare) or node.binding_id is None:
@@ -5845,6 +5847,9 @@ class _Lowerer(
         if isinstance(node, hir.ArrayLiteral):
             return self._extract_array_literal(node)
         if isinstance(node, hir.ArrayLength):
+            if storage_borrows.common_array_field(node.array):
+                prelude, array = self._extract_forwarding_access(node.array, borrowed=True)
+                return prelude, self._load_i64_field(array, ARRAY_LENGTH_OFFSET, node.loc)
             raw_representation = self._array_use_representation(node.array)
             if raw_representation is not None:
                 return [], self._int64_literal(node.loc, self._raw_array_length(node.array))

@@ -588,8 +588,8 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
 # and the callee adopts it at that use instead of copying. Only functions
 # that are exclusively called directly qualify, so every caller and the
 # callee agree on the transfer.
-Consumed:type = [parameters:set<addr>=set[] uses:set<addr>=set[]]
-ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool]
+Consumed:type = [parameters:set<addr>=set[] uses:set<addr>=set[] owned:set<addr>=set[]]
+ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool observed:bool]
 ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false]
 # One pre-order walk per function records every read of its candidate
 # parameters: where it is, whether it may run never/many times, and whether
@@ -608,14 +608,20 @@ consuming_value_source=(id:addr nodes:array<hir.AST> type_nodes:types.Table):>ad
         else {return current}
     }
 }
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table @scan:ReadScan):>void => {
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table @scan:ReadScan exposed:bool=false):>void => {
     let source=consuming_value_source(id nodes type_nodes)
-    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes @scan) return}
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes @scan exposed=exposed) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
             let sites=scan.reads.get(node.binding_id default=[])
-            sites.push(ReadSite[id parent guarded scan.exited])
+            let owner=hir.node_at(nodes parent)
+            let observed=not exposed and owner is? hir.TypeTest|hir.ArrayLength
+            if not exposed and (owner is? hir.MemberAccess or (owner is? hir.ForwardingAccess and types.is_primitive(types.node_at(type_nodes owner.exception_type) 'never'))) {
+                let shape=types.node_at(type_nodes views.structural_base(owner.value_type type_nodes))
+                observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
+            }
+            sites.push(ReadSite[id parent guarded scan.exited observed])
             scan.reads[node.binding_id]=sites
         }
         return void
@@ -623,13 +629,15 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     # A read inside a nested literal, a flow arm, a loop or a short-circuit
     # operand may run never, once or many times: never a single consumption.
     let nested=guarded or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes @scan)}
+    let escapes=exposed or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Place|hir.Transmute|hir.Assign|hir.MemberAssign|hir.IndexAssign
+    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes @scan exposed=escapes)}
     if node is? hir.Return {scan.exited=true}
     return void
 }
-consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr> borrowed_literals:set<addr>):>Consumed => {
+consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr> borrowed_literals:set<addr> owned_protocol:bool=false retaining:set<addr>=set[] excluded:set<addr>=set[]):>Consumed => {
     let result=Consumed[]
     let candidates:dict<addr ReadSite>=[]
+    let owned:set<addr>=set[]
     loop [id function] in plan.functions {
         if id in? valued continue
         let literal=hir.node_at(nodes id)
@@ -653,9 +661,19 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
         loop binding in wanted {
             if binding not in? scan.reads continue
             const sites=@scan.reads[binding]
-            if sites.length not=?1 continue
-            let site=sites[0]
-            if not site.guarded and not site.after_exit {candidates[binding]=site}
+            if sites.length=?0 continue
+            let site=sites[sites.length-1]
+            if site.guarded continue
+            if sites.length=?1 and not site.after_exit {candidates[binding]=site continue}
+            if not owned_protocol or id in? retaining or binding in? excluded or not storage_borrows.borrowable(hir.node_at(nodes site.id).value_type type_nodes) continue
+            # Earlier scalar inspections create no alias. An early exit owns
+            # cleanup; ordinary last-use analysis chooses the final transfer.
+            let safe=true
+            loop i in 0.. and i<?sites.length {
+                if i=?sites.length-1 break
+                if not sites[i].observed {safe=false}
+            }
+            if safe {candidates[binding]=site owned.push(binding)}
         }
     }
     # Seed only actual ownership boundaries, then propagate through direct
@@ -697,7 +715,8 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
         if binding in? result.parameters {continue}
         $runtime_assert binding in? candidates
         result.parameters.push(binding)
-        result.uses.push(candidates[binding].id)
+        if binding in? owned {result.owned.push(binding)}
+        else {result.uses.push(candidates[binding].id)}
         if binding in? readers {
             const waiting=@readers[binding]
             loop reader in waiting {if reader not in? result.parameters {pending.push(reader)}}
@@ -821,8 +840,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop [call arguments] in storage_proofs.literal_arguments {
         loop argument in arguments {borrowed_literals.push(argument)}
     }
-    let consumed=consumed_parameters(nodes type_nodes plan valued borrowed_literals)
+    let consumed=consumed_parameters(nodes type_nodes plan valued borrowed_literals owned_protocol=owned_parameter_protocol retaining=retaining excluded=(captured | exposed))
     let owned:set<addr>=if owned_parameter_protocol owned_mutable_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
+    loop binding in consumed.owned {owned.push(binding)}
     let consumed_arguments:dict<addr set<addr>>=[]
     let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]

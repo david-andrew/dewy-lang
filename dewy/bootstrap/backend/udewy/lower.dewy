@@ -557,6 +557,13 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.ArrayLiteral return array_literal(id node @state)
     if node is? hir.ArrayLength {
         let prefix:array<addr>=[]
+        let source=hir.node_at(state.input.nodes node.array)
+        if source is? hir.ForwardingAccess and storage_borrows.common_array_field(source state.input.nodes state.type_nodes) {
+            # The measure is read immediately; no descriptor leaves this
+            # expression or survives another operand's evaluation.
+            let array=forwarding_field(source @state loan=true)
+            return read_word(array layouts.array_descriptor.length node @state)
+        }
         let receiver=read_operand(node.array @prefix @state)
         let value=read_word(receiver.value layouts.array_descriptor.length node @state)
         return finish_read(value receiver node @prefix @state)
@@ -5299,7 +5306,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         }
     }
     let moves_started=timing.start(state.timings)
-    state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents donations=state.consumed_arguments) else set[]
+    state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents donations=state.consumed_arguments parameters=state.owned_parameters) else set[]
     timing.accumulate(@state.move_time moves_started)
     note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]

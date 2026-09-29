@@ -62,3 +62,11 @@ ITERATOR_SNAPSHOT=MUTATING.replace('return size(owner.items mutate(@owner))',
  'let result:int64=0 loop item in owner.items {mutate(@owner); result+=item} return result')
 CASES.extend([ITERATING,ITERATING.replace('loop item in owner.items', 'loop item in owner.items and i in [0..2)'),ITERATOR_SNAPSHOT])
 ERRORS.append('$explicit_copies\n'+ITERATOR_SNAPSHOT)
+
+# Measuring a selected field ends the loan before any subsequent expression.
+# A later owner replacement cannot change the already-read scalar length.
+CASES.extend([
+ SOURCE.replace('size(owner.items)', 'owner.items.length+40'),
+ MUTATING.replace('size(owner.items mutate(@owner))',
+                  'owner.items.length + mutate(@owner) + 40'),
+])

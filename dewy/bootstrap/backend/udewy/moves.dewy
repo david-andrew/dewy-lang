@@ -293,11 +293,19 @@ borrow_live_after = (binding:addr sequence:addr path:addr borrows:dict<addr set<
     }
     return false
 }
-compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] donations:dict<addr set<addr>>=[]):>set<addr> => {
+compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] donations:dict<addr set<addr>>=[] parameters:set<addr>=set[]):>set<addr> => {
     let function=hir.node_at(nodes literal)
     let moves:set<addr>=set[]
     if function isnt? hir.FunctionLiteral return moves
     let analysis=Analysis[donations=donations]
+    # Caller-donated inputs are lexical owners from function entry. They
+    # obey the same later-read and live-borrow constraints as local owners.
+    loop parameter in function.pos_or_kw_args {
+        if parameter.binding_id isnt? none and parameter.binding_id in? parameters {analysis.declared[parameter.binding_id]=0}
+    }
+    loop parameter in function.kw_only_args {
+        if parameter.binding_id isnt? none and parameter.binding_id in? parameters {analysis.declared[parameter.binding_id]=0}
+    }
     walk(function.body 0 false nodes @analysis)
     loop [binding uses] in analysis.uses {
         let declared=analysis.declared.get(binding)

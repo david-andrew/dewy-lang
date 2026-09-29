@@ -1,9 +1,9 @@
-"""Direct-call ownership inputs whose sole use transfers the incoming value.
+"""Direct-call ownership inputs with one final consuming use.
 
 This is a private calling convention, not a source effect or ownership tag.
 Every caller materializes an independent argument and the callee owns it.
-The native lowerer uses the same single-use rule in borrowing.dewy. Ordinary
-mutable inputs and conditional/loop consumption retain their other protocols.
+Earlier scalar observations can inspect the owned value, but cannot keep an
+alias. Ordinary liveness still decides whether the final use can transfer.
 """
 from collections import defaultdict, deque
 
@@ -45,24 +45,27 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset()):
         if not wanted:
             continue
         reads = defaultdict(list)
-        exited = False
-
-        def visit(node, parent=None, guarded=False):
-            nonlocal exited
+        def visit(node, parent=None, guarded=False, exposed=False):
             value = value_source(node)
             if value is not node:
-                visit(value, parent, guarded)
+                visit(value, parent, guarded, exposed)
                 return
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id in wanted:
-                    reads[node.binding_id].append((node, parent, guarded or exited))
+                    observed = not exposed and (
+                        isinstance(parent, (hir.TypeTest, hir.ArrayLength))
+                        or (isinstance(parent, hir.MemberAccess) or
+                            isinstance(parent, hir.ForwardingAccess) and parent.exception_type == ty.BOTTOM_TYPE) and (
+                            ty.structural_base(parent.type) in ('bool', 'true', 'false')
+                            or ty.fixed_integer_layout(parent.type) is not None))
+                    reads[node.binding_id].append((node, parent, guarded, observed))
                 return
             nested = guarded or isinstance(node, (hir.FunctionLiteral, hir.Flow,
                                                    hir.IfArm, hir.LoopArm, hir.ShortCircuit))
+            exposed |= isinstance(node, (hir.FunctionLiteral, hir.Place, hir.Transmute,
+                                          hir.Assign, hir.MemberAssign, hir.IndexAssign))
             for child in hir.children(node):
-                visit(child, node, nested)
-            if isinstance(node, hir.Return):
-                exited = True
+                visit(child, node, nested, exposed)
 
         # Defaults can execute conditionally. Do not ignore an additional
         # reference there even though the donating parameter has no default.
@@ -71,8 +74,11 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset()):
                 visit(param.value, guarded=True)
         visit(literal.body, literal)
         for binding, sites in reads.items():
-            if len(sites) == 1 and not sites[0][2]:
-                candidates[binding] = sites[0][:2]
+            # Scalar inspections in guards/earlier loops create no surviving
+            # loan. Early exits release the donated parameter normally. A
+            # final read inside a loop or conditional keeps the old fallback.
+            if not sites[-1][2] and all(site[3] for site in sites[:-1]):
+                candidates[binding] = sites[-1][:2]
 
     proven = set()
     dependents = defaultdict(set)

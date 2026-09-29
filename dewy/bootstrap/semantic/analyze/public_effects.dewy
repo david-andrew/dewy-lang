@@ -363,6 +363,10 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         }
         return
     }
+    if node is? hir.ArrayLength {
+        let array=hir.node_at(input.nodes node.array)
+        if array is? hir.ForwardingAccess and storage_borrows.common_array_field(array input.nodes input.types) {record_access(array.value 'reads' input @scan) return}
+    }
     if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.OverloadedFunction|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread|hir.MultiIteratorExpression {
         loop child in hir.children(node) {visit(child input @scan)}
         return

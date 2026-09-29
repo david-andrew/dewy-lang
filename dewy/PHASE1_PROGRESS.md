@@ -36,6 +36,39 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): direct aggregate inputs may transfer after scalar
+observations, with normal owner cleanup on earlier exits. The final read must
+remain unguarded and every earlier read must be a non-retaining observation;
+first-class calls and exposed/captured inputs keep their ordinary fallback.
+Native donated owners now use ordinary last-use analysis, including live-view
+constraints. Hosted narrowed record transfers empty owned fields while leaving
+the containing union cell responsible for its payload root's cleanup.
+
+Common union-array field lengths now borrow only for the immediate measure,
+with the same proof consumed by public effect inference. Fifty-nine hosted
+ownership/field checks pass. Four native ownership groups passed (101.17 s);
+the fresh observed-input/common-field groups also pass on x86-64/C (61.47 s),
+including early-exit live-byte checks and zero-allocation length reads.
+
+The tokenizer now passes strict checking on both routes: recognition consumes
+candidate inputs after their length tests, selection tracks an index/count
+instead of constructing an owning candidate array, and its operator tables
+are constant literals ordered longest first. Its control-character table is
+constructed in a function-local owner. Strict adoption reaches **54 physical
+bootstrap modules**; six fixtures bring the manifest to 391. The tokenizer
+parity suite passes 55 cases, including the additional operator-table cases.
+The native test driver was staged with the newly added tokenizer directive
+disabled in its isolated build tree; the actual directive-enabled tokenizer
+was then checked independently. The latest full-program certification remains
+`25236513`; this slice does not claim a new fixed point.
+
+Two proof gaps encountered during this adoption remain explicit: dependent
+bounds inside an optional local do not survive a loop join, and a generated
+module-level comprehension accumulator cannot yet transfer to its final
+binding. Neither gap is worked around by assuming an unproved fact or hiding
+a copy report. The tokenizer uses an ordinary bounded index after excluding
+empty input and a local table-construction function.
+
 Checkpoint (2026-09-28): conditional array selections now compose with
 common-field loans across record unions. The shared proof checks each leaf's
 layout and owner stability; lowering dispatches only the selected arm. Public

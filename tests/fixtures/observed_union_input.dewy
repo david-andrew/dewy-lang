@@ -1,0 +1,19 @@
+$explicit_copies
+Item=type of [size:addr values:array<int64>]
+Other=type of [size:addr values:array<int64>]
+Node:type=Item|Other
+keep=(value:Node):>Node=>{
+ if value.size=?0 return Item[0 []]
+ return value
+}
+work=():>int64=>{
+ let value=keep(Item[2 [20 22]])
+ let empty=keep(Item[0 [99]])
+ return if empty.size=?0 and value.size=?2 value.size+40 else 1
+}
+main=():>int64=>{
+ loop i in [0..100) {if work() not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..100) {if work() not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

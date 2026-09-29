@@ -25,6 +25,13 @@ aliases participate in the same check. A loop cannot consume an owner that
 its next iteration may need. Both implementations bound branch comparisons
 to 4,096 per owner; exhausting that search retains the copy.
 
+A known direct callee may own an incoming aggregate even when it inspects
+scalar fields, tests its alternative, or reads its length before a final
+transfer. Those observations cannot retain an alias. Earlier returns release
+the parameter normally; the final use obeys ordinary liveness and borrowed
+reader constraints. First-class calls and exposed/captured storage retain the
+ordinary fallback. This is an inferred calling convention, not new syntax.
+
 A stable direct getter can lend a caller-owned record or tagged cell while
 preserving its guards and other effects. Its ordinary result still denotes
 an independent value when it escapes or is modified. An explicit `.copy()`

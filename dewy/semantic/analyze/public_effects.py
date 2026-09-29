@@ -419,6 +419,9 @@ def inventory(root, registry, allocator_scopes=None):
                     unknown()
                     visit(node.iterable)
                 return
+            if isinstance(node, hir.ArrayLength) and storage_borrows.common_array_field(node.array):
+                access(node.array.value, 'reads')
+                return
             if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm, hir.OverloadedFunction,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
                                  hir.StringLength, hir.ValueCast, hir.RepresentationCast, hir.Spread,

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"cli.dewy" as cli
 doc"""
 Context-sensitive lexical tokenization: narrow context -> probe -> select -> finish.
@@ -17,7 +19,10 @@ let TokenError = type of error & Error
 # Character/base tables shared by recognition and later literal decoding.
 const newline_chars = set['\n' '\r\n']
 const whitespace = set[' ' '\t' '\n' '\r\n' '\r']
-const ascii_control_chars = set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)] # most ascii<0x20 are ignored for security reasons
+# Construct the table in a local owner and transfer the result into the
+# module constant. The generated comprehension accumulator stays local.
+make_ascii_control_chars=():>set<string> => {return set[loop i in [0x0..0x20) if chr(i) not in? whitespace chr(i)]}
+const ascii_control_chars = make_ascii_control_chars() # most ascii<0x20 are ignored for security reasons
 const line_comment_start:'#' = '#'
 const block_comment_start: '#\{' = '#\{'
 const block_comment_end: '\}#' = '\}#'
@@ -87,27 +92,21 @@ const base10 = '0d'
 const base16 = '0x'
 const MAX_NUMBER_BASE = 16  # explicitly prefixed numbers; higher bases use strings/arrays
 
-# Mostly operators, but also some special identifiers
-# Symbols are case-sensitive
-symbols:array<nonemptystring> = [
-    '~' '@' '$' '`'
-    '?' ';'
-    '+' '-' '*' '/' '//' '%' '^'
-    '\\' # left divide e.g. given Ax=b x=A\b where A\B ≡ solve(A B) (note this is not the same as x=A⁻¹B) (TODO: move description to docs)
-    '=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?' '<=>'
-    '|' '&' '??'
-    '=' '::' ':=' # not a walrus operator. `x:=y` is sugar for `let x=y` (TODO: move this description to where ever we describe all operators e.g. docs)
-    '|>' '<|' '=>'
-    '->' '<->'
-    '.' '..' '...' ',' ':' ':>'
-    '∞' '∅'
-    # ⁂ ‰ ‱
+# Mostly operators, but also some special identifiers. Symbols are
+# case-sensitive and stored longest first, so recognition needs no mutable
+# startup table or runtime sort. Equal-length spellings cannot overlap.
+const symbols:array<nonemptystring> = [
+    'isnt?'
+    '>=?' '<=?' 'in?' 'is?' '<=>' '<->' '...'
+    '//' '=?' '>?' '<?' '??' '::' ':=' '|>' '<|' '=>' '->' '..' ':>'
+    '~' '@' '$' '`' '?' ';' '+' '-' '*' '/' '%' '^'
+    '\\' # left divide: given Ax=b, x=A\b (solve(A B), not x=A⁻¹B)
+    '|' '&' '=' '.' ',' ':' '∞' '∅'
+    # `x:=y` is sugar for `let x=y`, not a walrus operator.
+    # Pending symbol candidates: ⁂ ‰ ‱
 ]
-symbols.sort(key=(.length) reverse=true)
 LEN_LONGEST_SYMBOL = symbols[0].length
-
-shift_operators:array<nonemptystring> = ['<<' '>>' '<<<' '>>>' '<<!' '!>>']
-shift_operators.sort(key=(.length) reverse=true)
+const shift_operators:array<nonemptystring> = ['<<<' '>>>' '<<!' '!>>' '<<' '>>']
 
 # Normalize the opening information once. Frames contain immutable lexical
 # state; stack mutation is confined to the driver. An index is an identifier
@@ -656,12 +655,9 @@ select = (matches:array<Candidate> srcfile:SrcFile offset:addr):>Candidate | Tok
     loop m in matches {
         if m is? SymbolMatch or m is? NumberMatch or m is? ExponentMatch { beats_identifier = true }
     }
-    remaining:array<Candidate> = [
-        loop m in matches
-            if not (beats_identifier and m is? IdentifierMatch) m
-    ]
-    if remaining.length =? 1 return remaining[0]
-    if remaining.length =? 0 {
+    # An empty input has no valid index. Once it is excluded, keep a
+    # bounded index and a survivor count instead of copying a candidate array.
+    if matches.length =? 0 {
         return TokenError[
             srcfile=srcfile
             title="No token matched"
@@ -669,10 +665,23 @@ select = (matches:array<Candidate> srcfile:SrcFile offset:addr):>Candidate | Tok
             hint="Check the token spelling and the surrounding lexical context"
         ]
     }
+    let selected:addr<index => index <? matches.length> = 0
+    let count:addr=0
+    loop i in 0.. and i <? matches.length {
+        const candidate=@matches[i]
+        if beats_identifier and candidate is? IdentifierMatch continue
+        if count =? 0 {selected=i}
+        count+=1
+    }
+    # Precedence only removes identifiers when a non-identifier survives.
+    # Thus a nonempty input always has a winner (possibly an ambiguous one).
+    # The selected token escapes the borrowed input. Recognition call sites
+    # can transfer its owning fallback when their argument is no longer live.
+    if count =? 1 return matches[selected].copy()
     return TokenError[
         srcfile=srcfile
         title="Ambiguous token"
-        pointers=[Pointer[span=Span[offset offset+remaining[0].length] message="Multiple equally preferred tokens matched"]]
+        pointers=[Pointer[span=Span[offset offset+matches[selected].length] message="Multiple equally preferred tokens matched"]]
     ]
 }
 

@@ -583,14 +583,18 @@ class _ObjectLowering:
         Array elements need an arena root; synchronous owning calls can use
         the caller's frame. Reuse the result transfer: it clears moved string
         slots and empties adopted array descriptors, leaving source cleanup
-        valid on every path. Prepared trees and aggregate union payloads
+        valid on every path. Prepared trees and non-record union payloads
         retain their layout copy.
         """
         source = self._copy_source_expression(node)
+        payload = (isinstance(source, hir.ExpressedIdentifier)
+                   and id(source) in self.moved_payload_uses
+                   and any(ty.structural_base(member) == object_type
+                           for member in self._stored_union_members(source) or ()))
         if (not self._has_arena() or not isinstance(source, hir.ExpressedIdentifier)
-                or id(source) not in self.moved_uses
+                or not (payload or id(source) in self.moved_uses)
                 or ty.structural_base(source.type) != object_type
-                or local_binding_key(source) not in self.owned_objects
+                or not (payload or local_binding_key(source) in self.owned_objects)
                 or self.borrowed_fields.get(local_binding_key(source))):
             return None
 
@@ -2062,6 +2066,11 @@ class _ObjectLowering:
         if isinstance(item, hir.ObjectLiteral):
             return self._write_object_literal_result(dest, item, object_type)
         returned = self._copy_source_expression(item)
+        if isinstance(returned, hir.ExpressedIdentifier) and id(returned) in self.moved_payload_uses:
+            adopted = self._adopt_object_fields(item, object_type, arena=False,
+                                               site='returned', destination=dest)
+            if adopted is not None:
+                return adopted[0]
         moved = isinstance(returned, hir.ExpressedIdentifier) and id(returned) in self.moved_uses
         if moved:
             self.move_notes.append(MoveNote(self.srcfile, returned.loc, f'`{returned.name}` is moved when returned: this is its last use, so its arrays are adopted rather than copied', True))

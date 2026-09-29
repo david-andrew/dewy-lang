@@ -81,6 +81,8 @@ def read_dump(output):
     '0x[ff (10) ff] 0r[z]',
     '$name $ a << b <a >? b> <(a >> b)>',
     '0zXE 0zxe 0xAf 0tT',
+    'a isnt? b a >=? b a <=? b a <=> b a <-> b a ... b a := b a :: b',
+    'a <<< b a >>> b a <<! b a !>> b a << b a >> b',
     '1e10 1 e10 1e+10 1p0xAf',
     '"" r"" t""',
     '"hello" \'world\'',
