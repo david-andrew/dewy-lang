@@ -5157,6 +5157,20 @@ folded_number = (name:string arguments:array<addr> id:addr env:Environment @sess
     if dimension isnt? none return pending(id 'runtime quantity arithmetic materialization' env session)
     return none
 }
+# Value comparison observes element values without granting writable array
+# covariance. Length facts may differ; nominal identities and numeric layouts
+# must still agree. Nested arrays obey the same rule recursively.
+equality_array_elements = (left:addr right:addr @session:contexts.Session):>bool => {
+    let a=types.unfold(types.strip_refinement(left session.types) session.types)
+    let b=types.unfold(types.strip_refinement(right session.types) session.types)
+    let first=types.node_at(session.types a)
+    let second=types.node_at(session.types b)
+    let first_string=first is? types.StringType|types.StringLiteralType or (first is? types.Primitive and first.name in? ['string' 'grapheme' 'char'])
+    let second_string=second is? types.StringType|types.StringLiteralType or (second is? types.Primitive and second.name in? ['string' 'grapheme' 'char'])
+    if first_string and second_string return true
+    if first is? types.ArrayType and second is? types.ArrayType return equality_array_elements(first.element second.element @session)
+    return subtyping.is_subtype(a b session.links @session.types) and subtyping.is_subtype(b a session.links @session.types)
+}
 builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     let func = node_at(function session)
     if func isnt? hir.ExpressedIdentifier or func.binding_id is? none return none
@@ -5208,7 +5222,7 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
         # lengths (a different length is simply unequal).
         let a_shape=types.node_at(session.types views.structural_base(a.value_type session.types))
         let b_shape=types.node_at(session.types views.structural_base(b.value_type session.types))
-        if a_shape is? types.ArrayType and b_shape is? types.ArrayType and types.same_type(a_shape.element b_shape.element session.types) {
+        if a_shape is? types.ArrayType and b_shape is? types.ArrayType and equality_array_elements(a_shape.element b_shape.element @session) {
             let boolean=types.primitive('bool' @session.types)
             let loc=contexts.node_at(id env.lexical session).loc
             let signature=types.function_type([types.PosOrKwArg['left' a.value_type] types.PosOrKwArg['right' b.value_type]] [] none boolean [] @session.types)

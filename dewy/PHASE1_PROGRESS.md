@@ -31,6 +31,22 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Compare array values independently of element length facts (2026-09-29)
+
+Both builtin equality dispatchers now distinguish read-only value comparison
+from writable array compatibility. Strings with different known lengths and
+nested arrays with different static lengths remain comparable: length affects
+the result, not operator availability. Element refinements are erased only for
+that compatibility question. Numeric representations and nominal identities
+still must agree, and assignment/place rules retain their invariance.
+
+Seventeen hosted checks pass (59.75 seconds), including the new effect kernel.
+The final paired eight-case group passes (18.83 seconds), and the existing
+native evaluation-order group passes separately. Regressions cover both operand
+orders, projected arrays, nested arrays, scalar refinements, distinct numeric
+widths and distinct record brands. Eight fixtures bring the manifest to 694.
+Logs use `dewy-array-element-equality-*`.
+
 ## Effect propagation compares paths before retaining them (2026-09-29)
 
 A fixed-point transfer now compares its bounded prefix/suffix composition
@@ -47,7 +63,7 @@ against ordinary route normalization. Native effect equivalence and the kernel
 pass together (22.69 seconds); hosted equivalence passes (22.10 seconds), and
 the hosted kernel passes in the 17-check array-equality batch (59.75 seconds).
 That last check also needs the accompanying hosted array-equality correction,
-which is undergoing its native nested-array checks. The new fixture brings the
+whose paired nested-array checks now pass (see above). The new fixture brings the
 manifest to 686. Logs use `dewy-effect-translation-*`.
 
 ## Check ambient aliases throughout local-place lifetimes (2026-09-29)

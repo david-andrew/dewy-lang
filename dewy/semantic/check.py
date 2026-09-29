@@ -11478,6 +11478,21 @@ def _union_member_equality(args: list[hir.AST], *, negated: bool, loc: Span, sou
     return None
 
 
+def _equality_array_elements(left: ty.Type, right: ty.Type, *, ctx: Context) -> bool:
+    """Read-only comparisons need compatible values, not writable array types.
+
+    String lengths and nested array lengths affect equality's result, not its
+    availability. Preserve nominal identities and scalar representations; this
+    is deliberately not array covariance for assignments or place arguments.
+    """
+    left, right = ty.unfold(ty.strip_refinement(left)), ty.unfold(ty.strip_refinement(right))
+    if ty.is_string_spelling(left) and ty.is_string_spelling(right):
+        return True
+    if isinstance(left, ty.ArrayType) and isinstance(right, ty.ArrayType):
+        return _equality_array_elements(left.element, right.element, ctx=ctx)
+    return ctx.type_system.is_subtype(left, right) and ctx.type_system.is_subtype(right, left)
+
+
 def _dispatch_builtin(
     fname: str,
     args: list[hir.AST],
@@ -11578,8 +11593,7 @@ def _dispatch_builtin(
         # lengths (a different length is simply unequal).
         shapes = [ty.structural_base(arg.type) for arg in args]
         if (all(isinstance(shape, ty.ArrayType) for shape in shapes) and not any(_is_string_type(arg.type) for arg in args)
-                and ctx.type_system.is_subtype(shapes[0].element, shapes[1].element)
-                and ctx.type_system.is_subtype(shapes[1].element, shapes[0].element)):
+                and _equality_array_elements(shapes[0].element, shapes[1].element, ctx=ctx)):
             signature = ty.FunctionType([ty.PosOrKwArg('left', args[0].type), ty.PosOrKwArg('right', args[1].type)], [], None, 'bool', [])
             return hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, signature, fname), args, {})
     if (
