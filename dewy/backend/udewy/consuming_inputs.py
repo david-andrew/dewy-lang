@@ -26,7 +26,7 @@ def value_source(node):
             return node
 
 
-def parameters(analysis, excluded_literals):
+def parameters(analysis, excluded_literals, borrowed_literals=frozenset()):
     """Find ordinary aggregate inputs donated into a value boundary or proved input.
 
     A worklist propagates only from actual consuming operations. A forwarding
@@ -77,6 +77,10 @@ def parameters(analysis, excluded_literals):
     proven = set()
     dependents = defaultdict(set)
     for binding, (read, parent) in candidates.items():
+        if isinstance(parent, hir.ObjectLiteral) and id(parent) in borrowed_literals:
+            # A proved call-root loan never owns these field handles. Its
+            # construction is not a consumption endpoint for the parameter.
+            continue
         if isinstance(parent, (hir.Return, hir.ObjectLiteral, hir.ArrayLiteral)) or (
                 isinstance(parent, hir.FunctionLiteral) and value_source(parent.body) is read):
             shape = ty.structural_base(read.type)

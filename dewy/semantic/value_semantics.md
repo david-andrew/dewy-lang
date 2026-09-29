@@ -18,6 +18,21 @@ The implementation bounds these temporary roots to 4 KiB per function and
 reuses them across loop iterations; exceeding that proof budget never grants
 a `no allocates` promise.
 
+Last-use analysis distinguishes mutually exclusive conditional arms. An
+owner consumed in either arm can transfer on either path, while a later read
+after the conditional keeps the snapshot obligation. Reads through borrowed
+aliases participate in the same check. A loop cannot consume an owner that
+its next iteration may need. Both implementations bound branch comparisons
+to 4,096 per owner; exhausting that search retains the copy.
+
+A stable direct getter can lend a caller-owned record or tagged cell while
+preserving its guards and other effects. Its ordinary result still denotes
+an independent value when it escapes or is modified. An explicit `.copy()`
+can state that owning fallback without forcing storage for a proved stable
+reader; getter projection does not skip lifecycle hooks. Native also follows
+short forwarding chains; the hosted getter variant currently requires a
+terminal field, element or parameter read.
+
 A read-only local selection such as `const selected = if flag xs else [42]`
 can borrow each stable input and keep a small fresh arm in reusable frame
 storage. The shared proof covers complete conditionals whose leaves name

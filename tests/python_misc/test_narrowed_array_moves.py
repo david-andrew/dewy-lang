@@ -51,7 +51,9 @@ MOVES = [NARROWED_ARRAY, NARROWED_RETURN, BIND, ELEMENT, RETAG]
 @pytest.mark.parametrize('source', MOVES)
 def test_narrowed_array_payload_transfer(tmp_path, source):
     text = codegen(SrcFile(None, '$explicit_copies\n' + source), debug_locations=False)
-    assert any(note.moved and 'empties the owning cell' in note.message for note in lower.last_move_notes)
+    assert any(note.moved and ('empties the owning cell' in note.message
+                              or 'its payload changes owner' in note.message)
+               for note in lower.last_move_notes)
     execute(tmp_path, 'payload-take', text)
 
 

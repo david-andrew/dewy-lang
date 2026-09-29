@@ -8,7 +8,7 @@ expression (a `return`, a record or array literal, a field, element or
 dictionary store, a binding, an owning call argument) moves there: the lowering takes the local's
 handle and empties the local, so its scope-exit release does nothing. A use
 is the last one when no reference to the binding follows it in traversal
-order (a later sibling arm counts as after, conservatively), it is not
+order on a compatible branch path, it is not
 inside a loop the declaration is outside of (the next iteration would read
 the emptied local), and no nested function literal captures the binding.
 A `return` leaves every path, so a local returned there always moves,
@@ -20,7 +20,10 @@ declarations here and never move. Mirrors `_compute_moves` in the hosted
 lowering.
 """
 
-Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool returned:bool]
+Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool returned:bool path:addr]
+# Persistent lexical paths keep one word per use, rather than copying the
+# complete branch stack. Distinct arms of one conditional cannot both run.
+Branch:type = const [parent:addr depth:addr conditional:addr]
 # A transfer use in statement order, and one followed by a `return` of an
 # enclosing block: it moves if nothing in `(sequence, until]` intervenes.
 Transfer:type = const [binding:addr id:addr sequence:addr depth:addr]
@@ -29,7 +32,30 @@ Analysis:type = [
     donations:dict<addr set<addr>>=[]
     uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0
     transfers:array<Transfer>=[] exits:array<addr>=[] candidates:dict<addr array<Candidate>>=[]
+    paths:array<Branch>=[Branch[0 0 0]] path:addr=0 next_conditional:addr=0
 ]
+
+compatible = (left:addr right:addr paths:array<Branch>):>bool => {
+    loop left not=? right {
+        $runtime_assert left <? paths.length and right <? paths.length
+        let a=paths[left] let b=paths[right]
+        if a.depth >? b.depth {left=a.parent}
+        else if b.depth >? a.depth {right=b.parent}
+        else if a.conditional =? b.conditional {return false}
+        else {left=a.parent right=b.parent}
+    }
+    return true
+}
+walk_branch = (id:addr conditional:addr depth:addr nested:bool transfer:bool returned:bool nodes:array<hir.AST> @analysis:Analysis):>void => {
+    let parent=analysis.path
+    $runtime_assert parent <? analysis.paths.length
+    let branch=Branch[parent analysis.paths[parent].depth+1 conditional]
+    analysis.path=analysis.paths.length
+    analysis.paths.push(branch)
+    if transfer {walk_transfer(id depth nested returned nodes @analysis)}
+    else {walk(id depth nested nodes @analysis)}
+    analysis.path=parent
+}
 
 # The expression a transfer site hands over, through the wrappers that keep its storage.
 peel = (id:addr nodes:array<hir.AST>):>addr => {
@@ -48,7 +74,7 @@ note_use = (id:addr binding:addr depth:addr nested:bool transfer:bool returned:b
     analysis.counter+=1
     if binding not in? analysis.uses {analysis.uses[binding]=[]}
     let uses=@analysis.uses[binding]
-    uses.push(Use[id analysis.counter depth nested transfer returned])
+    uses.push(Use[id analysis.counter depth nested transfer returned analysis.path])
     if transfer and not nested and not returned {analysis.transfers.push(Transfer[binding id analysis.counter depth])}
 }
 # Statement `i` of a block falls through to the next `return` statement of
@@ -98,13 +124,15 @@ walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AS
         let conditional=true
         loop arm in node.arms {if hir.node_at(nodes arm) isnt? hir.IfArm {conditional=false}}
         if conditional {
+            analysis.next_conditional+=1
+            let choice=analysis.next_conditional
             loop arm_id in node.arms {
                 let arm=hir.node_at(nodes arm_id)
                 $runtime_assert arm is? hir.IfArm
                 walk(arm.condition depth nested nodes @analysis)
-                walk_transfer(arm.body depth nested returned nodes @analysis)
+                walk_branch(arm.body choice depth nested true returned nodes @analysis)
             }
-            if node.default isnt? none {walk_transfer(node.default depth nested returned nodes @analysis)}
+            if node.default isnt? none {walk_branch(node.default choice depth nested true returned nodes @analysis)}
             return
         }
     }
@@ -219,16 +247,24 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
         }
     }
     if node is? hir.Flow {
+        let conditional=true
+        loop arm_id in node.arms {if hir.node_at(nodes arm_id) isnt? hir.IfArm {conditional=false}}
+        analysis.next_conditional+=1
+        let choice=analysis.next_conditional
         loop arm_id in node.arms {
             let arm=hir.node_at(nodes arm_id)
             let arm_depth:addr=depth
             if arm is? hir.LoopArm {arm_depth=depth+1}
             if arm is? hir.IfArm|hir.LoopArm {
                 walk(arm.condition arm_depth nested nodes @analysis)
-                walk(arm.body arm_depth nested nodes @analysis)
+                if conditional {walk_branch(arm.body choice arm_depth nested false false nodes @analysis)}
+                else {walk(arm.body arm_depth nested nodes @analysis)}
             }
         }
-        if node.default isnt? none {walk(node.default depth nested nodes @analysis)}
+        if node.default isnt? none {
+            if conditional {walk_branch(node.default choice depth nested false false nodes @analysis)}
+            else {walk(node.default depth nested nodes @analysis)}
+        }
         return
     }
     let children:array<addr>=[]
@@ -241,7 +277,7 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
 # borrowed binding, including further borrows of that binding. Keep this
 # dependency separate from ordinary value reads: copying a scalar field does
 # not keep its former owner alive.
-borrow_live_after = (binding:addr sequence:addr borrows:dict<addr set<addr>> analysis:Analysis):>bool => {
+borrow_live_after = (binding:addr sequence:addr path:addr borrows:dict<addr set<addr>> analysis:Analysis):>bool => {
     let pending:array<addr>=[binding]
     let visited:set<addr>=set[]
     loop pending.length >? 0 {
@@ -250,7 +286,7 @@ borrow_live_after = (binding:addr sequence:addr borrows:dict<addr set<addr>> ana
         visited.push(owner)
         loop borrower in borrows.get(owner set[]) {
             loop use in analysis.uses.get(borrower []) {
-                if use.sequence >? sequence or use.nested return true
+                if use.nested or (use.sequence >? sequence and compatible(path use.path analysis.paths)) return true
             }
             pending.push(borrower)
         }
@@ -267,10 +303,8 @@ compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] don
         let declared=analysis.declared.get(binding)
         if declared is? none or uses.length =? 0 continue
         let nested=false
-        let last:Use=uses[0]
         loop use in uses {
             if use.nested {nested=true}
-            if use.sequence >? last.sequence {last=use}
         }
         if nested continue
         # A `return` leaves every path: a returned local is always at its
@@ -281,10 +315,24 @@ compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] don
             if borrow_live_between(binding candidate.sequence candidate.until borrows analysis) continue
             moves.push(candidate.id)
         }
-        if not last.transfer or last.returned continue
-        if last.depth >? declared continue
-        if borrow_live_after(binding last.sequence borrows analysis) continue
-        moves.push(last.id)
+        # Match the hosted finite comparison budget. Exhaustion retains the
+        # copy. The syntactic last read needs no comparison at all.
+        let budget:addr=4096
+        let cursor=uses.length
+        loop cursor >? 0 {
+            cursor-=1
+            let use=uses[cursor]
+            if not use.transfer or use.id in? moves or use.depth >? declared continue
+            let live=false
+            let later=uses.length
+            loop later >? cursor+1 {
+                later-=1
+                if budget=?0 {live=true break}
+                budget-=1
+                if compatible(use.path uses[later].path analysis.paths) {live=true break}
+            }
+            if not live and not borrow_live_after(binding use.sequence use.path borrows analysis) {moves.push(use.id)}
+        }
     }
     return moves
 }

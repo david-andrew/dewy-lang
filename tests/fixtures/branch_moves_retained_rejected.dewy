@@ -1,0 +1,17 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+make=():>array<int64>=>[42]
+work=(flag:bool):>int64=>{
+ let items=make()
+ let rows:array<Box>=[]
+ if flag {rows.push(Box[items])}
+ else {rows.push(Box[items])}
+ items.clear()
+ return if rows.length>?0 and rows[0].items.length>?0 rows[0].items[0] else 1
+}
+main=():>int64=>{
+ loop i in [0..100) {if work(true) not=?42 or work(false) not=?42 return 1}
+ let before:int64=_arena_live_bytes
+ loop i in [0..100) {if work(true) not=?42 or work(false) not=?42 return 2}
+ return if _arena_live_bytes=?before 42 else 3
+}

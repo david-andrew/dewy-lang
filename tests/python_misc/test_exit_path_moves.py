@@ -12,7 +12,11 @@ def test_exit_path_moves(tmp_path):
     source = SrcFile.from_path(FIXTURE)
     code = codegen(source, debug_locations=False)
     notes = [(note.message.split('`')[1], note.moved) for note in lower.last_move_notes if note.srcfile.path == source.path]
-    assert notes.count(('early', True)) == 2, notes
+    # A field can cross two successive ownership boundaries (constructor
+    # then donating call); both are moves of the same two source sites.
+    early_sites={note.loc.start for note in lower.last_move_notes
+                 if note.srcfile.path==source.path and note.moved and '`early`' in note.message}
+    assert len(early_sites)==2, notes
     assert ('inner', True) in notes and ('found', True) in notes and ('lent_items', True) in notes, notes
     for name in ['kept', 'looped', 'stays']:
         assert (name, True) not in notes, (name, notes)

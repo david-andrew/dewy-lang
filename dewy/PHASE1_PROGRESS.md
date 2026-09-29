@@ -36,6 +36,36 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): last-use proofs now distinguish mutually exclusive
+conditional arms in both lowerers. Persistent branch paths take one word per
+read and one entry per arm. Later compatible reads and borrowed readers still
+block transfer, and loop-depth checks retain owners needed by another iteration.
+Both searches cap pairwise branch comparisons at 4,096 per owner; exhaustion
+retains the copy. No condition is assumed true to justify a transfer.
+
+Frozen integration at `99f2592e` completed with **363/365**, not a full pass.
+Both compilers agreed on the two changed outcomes. One was a real regression:
+consuming-input inference mistook a proved temporary record loan for an owning
+constructor. Both analyses now exclude those borrowed roots as consumption
+endpoints. The other fixture tested an unused identity return, which can now
+transfer; it now retains a genuine implicit-copy obligation in the unused body.
+Its rejection still precedes reachability pruning. The complete native copy
+inventory at that frozen revision is 4,149 sites across 54,797 lines, or
+75.716/KLOC, passing the unchanged 4,500/85 gates. The three-generation fixed
+point passed (111/56/58 seconds, first generation executing the hosted-built
+seed). The full manifest must be rerun at a later corrected checkpoint.
+
+Nineteen initial hosted branch checks pass, followed by 61 focused ownership
+and regression checks. All three native paired groups pass on x86-64/C
+(61.99 seconds), including the 100-arm budget rejection, constructor loans,
+loop exits and retained snapshots. The revised unused-function fixture rejects
+on both routes. Move-note assertions now check distinct source sites and both
+valid payload-transfer forms rather than incidental wording/counts.
+Four fixtures bring the manifest to 373. Token strict adoption remains pending:
+the branch fix clears interpolation's last-use copy, but standalone checking
+also exposes a common-field borrowing gap across a record union. Strict
+adoption remains 45 physical bootstrap modules.
+
 Checkpoint (2026-09-28): hosted lowering now synthesizes stable getter
 variants for direct terminal record/cell reads. The complete guard/effect
 prefix remains, while the variant lends its caller's storage. Source and

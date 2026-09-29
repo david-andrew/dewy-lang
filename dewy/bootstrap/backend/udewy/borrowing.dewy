@@ -627,7 +627,7 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     if node is? hir.Return {scan.exited=true}
     return void
 }
-consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr>):>Consumed => {
+consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr> borrowed_literals:set<addr>):>Consumed => {
     let result=Consumed[]
     let candidates:dict<addr ReadSite>=[]
     loop [id function] in plan.functions {
@@ -665,6 +665,9 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
     let pending:array<addr>=[]
     loop [binding site] in candidates {
         let parent=hir.node_at(nodes site.parent)
+        # A temporary call root lends stable field handles; constructing it
+        # does not consume the source parameter or make it an owning input.
+        if parent is? hir.ObjectLiteral and site.parent in? borrowed_literals continue
         if parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
             # Prepared fixed-array call storage retains its existing protocol.
             let shape=types.node_at(type_nodes types.unfold(types.strip_refinement(hir.node_at(nodes site.id).value_type type_nodes) type_nodes))
@@ -814,7 +817,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if summary isnt? none {stable_parameters[binding]=summary}
         }
     }
-    let consumed=consumed_parameters(nodes type_nodes plan valued)
+    let borrowed_literals:set<addr>=set[]
+    loop [call arguments] in storage_proofs.literal_arguments {
+        loop argument in arguments {borrowed_literals.push(argument)}
+    }
+    let consumed=consumed_parameters(nodes type_nodes plan valued borrowed_literals)
     let owned:set<addr>=if owned_parameter_protocol owned_mutable_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
     let consumed_arguments:dict<addr set<addr>>=[]
     let array_snapshots:set<addr>=set[]

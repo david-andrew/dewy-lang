@@ -570,7 +570,9 @@ class _Lowerer(
         if self._has_arena():
             from .consuming_inputs import parameters as consuming_parameters
             consumed = consuming_parameters(self.allocator_analysis, self.value_function_ids | {
-                id(function.literal) for function in self.functions if self.lifted.get(id(function))})
+                id(function.literal) for function in self.functions if self.lifted.get(id(function))},
+                {argument for arguments in self.storage_borrow_proofs.literal_arguments.values()
+                 for argument in arguments})
             for function in self.functions:
                 literal = function.literal
                 if literal.object_receiver or id(literal) in self.value_function_ids or self.lifted.get(id(function)):
@@ -3860,8 +3862,7 @@ class _Lowerer(
         Transfer sites include owning results, bindings, array replacements,
         aggregate stores and owning call arguments. A use is
         the last one when no reference to the binding follows it in the
-        function's traversal order (branches count conservatively: a later
-        sibling branch's use is "after"), it is not inside a loop the
+        function's traversal order on a compatible branch path, it is not inside a loop the
         declaration is outside of (the next iteration would use it again —
         a `return` is exempt, it leaves the loop), and no nested function
         literal captures the binding. A transfer that a later `return`
@@ -3913,6 +3914,28 @@ class _Lowerer(
             ):
                 element_owners.add(node.binding_id)
         payload_candidates: set[int] = set()
+        # Persistent lexical paths: one entry per arm, one word per read.
+        # Conditions retain the enclosing path and therefore conservatively
+        # remain compatible with every arm.
+        paths = [(0, 0, 0)]  # parent, depth, identity of the conditional
+        use_paths: dict[int, int] = {}
+        path = 0
+        next_conditional = 0
+
+        def compatible(left: int, right: int) -> bool:
+            a, b = use_paths.get(left, 0), use_paths.get(right, 0)
+            while a != b:
+                ap, ad, af = paths[a]
+                bp, bd, bf = paths[b]
+                if ad > bd:
+                    a = ap
+                elif bd > ad:
+                    b = bp
+                elif af == bf:
+                    return False  # distinct arms of the same conditional
+                else:
+                    a, b = ap, bp
+            return True
 
         def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
@@ -3953,6 +3976,7 @@ class _Lowerer(
         def note_use(binding_id: int, depth: int, nested: bool, transfer: int | None) -> None:
             nonlocal counter
             counter += 1
+            use_paths[counter] = path
             uses.setdefault(binding_id, []).append((counter, depth, nested, transfer))
             if transfer is not None and not nested:
                 transfers.append((binding_id, transfer, counter, depth))
@@ -3982,7 +4006,7 @@ class _Lowerer(
                         candidates.setdefault(binding_id, []).append((transfer, sequence, until))
 
         def walk(node: object, depth: int, nested: bool, transfer_of: dict[int, int]) -> None:
-            nonlocal counter
+            nonlocal counter, path, next_conditional
             if isinstance(node, hir.FunctionLiteral):
                 walk(node.body, depth, True, {})
                 return
@@ -4020,6 +4044,22 @@ class _Lowerer(
                 return
             if isinstance(node, hir.Block):
                 walk_block(node.items, depth, nested, transfer_of)
+                return
+            if isinstance(node, hir.Flow) and all(isinstance(arm, hir.IfArm) for arm in node.arms):
+                parent = path
+                next_conditional += 1
+                conditional = next_conditional
+                for arm in node.arms:
+                    path = parent
+                    walk(arm.condition, depth, nested, {})
+                    path = len(paths)
+                    paths.append((parent, paths[parent][1] + 1, conditional))
+                    walk(arm.body, depth, nested, transfer_of)
+                if node.default is not None:
+                    path = len(paths)
+                    paths.append((parent, paths[parent][1] + 1, conditional))
+                    walk(node.default, depth, nested, transfer_of)
+                path = parent
                 return
             if isinstance(node, hir.Return) and node.item is not None:
                 result_transfers = transfer(node.item)
@@ -4134,7 +4174,8 @@ class _Lowerer(
                     continue
                 visited.add(owner)
                 for borrower in borrow_dependents.get(owner, ()):
-                    if any(seq > sequence or nested for seq, _depth, nested, _transfer in uses.get(borrower, ())):
+                    if any(nested or seq > sequence and compatible(sequence, seq)
+                           for seq, _depth, nested, _transfer in uses.get(borrower, ())):
                         return True
                     pending.append(borrower)
             return False
@@ -4158,16 +4199,25 @@ class _Lowerer(
             for transfer, sequence, until in candidates.get(binding_id, ()):
                 if transfer not in moves and quiet_until(references, sequence, until) and not borrow_live_between(binding_id, sequence, until):
                     moves.add(transfer)
-            last = max(references, key=lambda use: use[0])
-            _sequence, depth, _nested, transfer = last
-            if transfer is None or transfer in moves:
-                continue
-            site_in_loop = depth > declared_depth
-            if site_in_loop:
-                continue
-            if borrow_live_after(binding_id, _sequence):
-                continue
-            moves.add(transfer)
+            # Bound pairwise branch queries per owner. Exhaustion keeps the
+            # copy; it never manufactures last-use evidence. The syntactic
+            # last read costs no comparison and remains the common fast path.
+            budget = 4096
+            future = []
+            for sequence, depth, _nested, transfer in reversed(references):
+                if transfer is not None and transfer not in moves and depth <= declared_depth:
+                    live = False
+                    for later in future:
+                        if budget == 0:
+                            live = True
+                            break
+                        budget -= 1
+                        if compatible(sequence, later):
+                            live = True
+                            break
+                    if not live and not borrow_live_after(binding_id, sequence):
+                        moves.add(transfer)
+                future.append(sequence)
         self.moved_payload_uses = moves & payload_candidates
         return moves - payload_candidates
 
