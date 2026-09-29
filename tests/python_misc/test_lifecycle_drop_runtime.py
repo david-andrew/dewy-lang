@@ -38,10 +38,10 @@ def test_implicit_drop_effects_are_checked():
 
 @pytest.mark.parametrize('body', [
     'let h=TraceHandle[42] let other=h h.token=0 return other.token',
-    'let h=TraceHandle[42] let read=():>int64=>h.token return read()',
+    'let h=TraceHandle[42] let write=():>void=>{h.token=0} write() return h.token',
 ])
 def test_unimplemented_transfers_remain_explicitly_rejected(body):
-    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
+    with pytest.raises(ReportException, match='lifecycle ownership lowering|writing to `h`'):
         codegen(SrcFile(None, OWNER + 'main=():>int64=>{'+body+'}'))
 
 
@@ -119,11 +119,30 @@ def test_native_factory_result_ownership(tmp_path, name):
     'borrow=(@h:TraceHandle):>TraceHandle=>h',
     'borrow=(@h:TraceHandle):>void=>{let other=h h.token=0 printl(other.token)}',
     'borrow=(@h:TraceHandle):>void=>{h=TraceHandle[1]}',
-    'borrow=(@h:TraceHandle):>void=>{let get=():>int64=>h.token get();}',
+    'borrow=(@h:TraceHandle):>void=>{let write=():>void=>{h.token=0} write();}',
 ])
 def test_resource_borrow_cannot_create_an_owner_or_escape(helper):
-    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
+    with pytest.raises(ReportException, match='lifecycle ownership lowering|writing to `h`'):
         codegen(SrcFile(None, OWNER + helper + '\nmain=():>int64=>{let h=TraceHandle[42] borrow(@h); return 42}'))
+
+
+READ_ONLY_CAPTURES = [
+    OWNER + 'main=():>int64=>{let h=TraceHandle[42] let read=():>int64=>h.token return read()}',
+    OWNER + '''borrow=(@h:TraceHandle):>int64=>{let get=():>int64=>h.token return get()}
+main=():>int64=>{let h=TraceHandle[42] return borrow(@h)}''',
+]
+
+
+@pytest.mark.parametrize('source', READ_ONLY_CAPTURES)
+def test_synchronous_resource_capture_keeps_owner_until_drop(tmp_path, source):
+    for result in execute(tmp_path, 'resource-capture', codegen(SrcFile(None, source), debug_locations=False)):
+        assert result.stdout == '42\n'
+
+
+def test_native_synchronous_resource_captures(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path,
+                          cases=READ_ONLY_CAPTURES, errors=[], outputs=['42\n', '42\n'])
 
 
 def test_resource_parameter_local_view_keeps_the_callers_owner(tmp_path):
