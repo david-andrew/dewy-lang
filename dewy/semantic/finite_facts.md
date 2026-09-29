@@ -94,7 +94,10 @@ facts. Reading or copying the array transfers the surviving summaries. This is
 not a complete aggregate relational domain yet.
 
 Ownership liveness can request an ordinary checked disequality before moving
-two resource components selected by unchanged integer inputs. For nested
+two resource components selected by unchanged `int64` inputs or once-initialized
+locals. A local must dominate the consuming operation; checks never read a
+future or conditionally uninitialized selector. Loop-repeated declarations
+retain wildcard identities. For nested
 selections, separation of any coordinate suffices. The bounds pass checks the
 request after lifecycle effects are present; liveness itself supplies no fact.
 Mutable, exposed or captured selectors remain conservative, as do arbitrary

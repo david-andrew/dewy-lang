@@ -271,6 +271,23 @@ An independent hosted build of this snapshot prepared/emitted in
 **1,694 sites in 72 modules**, down from 1,805/73 at the certified checkpoint.
 The resulting native seed built its driver and passed the groups above.
 
+## Once-initialized local selector identities (2026-09-29)
+
+Resource separation can now use stable `int64` locals as well as inputs. A
+lexical availability pass records which declarations dominate each operation;
+liveness may request a disequality only when its referenced selectors already
+exist there. Nested branch/block locals are supported after initialization.
+Loop-repeated declarations keep wildcard identities. Mutation, capture and
+place-exposure exclusions remain in force; no selector expression is moved or
+reevaluated to manufacture a proof.
+
+Twenty-four hosted checks and two paired native groups pass on x86-64/C.
+Positive cases include `let`/`const`, branch-local initialization and changes
+to the original inputs after copying their values. Missing separation,
+future declarations, rewritten selectors and loop-repeated declarations are
+rejected. Eight fixtures bring the manifest to 506. Full certification remains
+`db95f751`; the remaining checklist is unchanged in scope.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

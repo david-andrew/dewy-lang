@@ -17,7 +17,7 @@ from ..parser import t0
 from .errors import not_implemented, user_error
 from ..reporting import Pointer
 from .analyze import public_effects, effects, predicate_effects
-from .analyze.ownership_liveness import conditional_consumptions, field_route, fixed_index, Selector
+from .analyze.ownership_liveness import conditional_consumptions, field_route, fixed_index, Selector, selector_locals
 
 
 def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True,
@@ -1684,10 +1684,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return True
         selector_inputs = {p.binding_id: p for p in params if not p.place
                            and p.binding_id is not None and ty.strip_refinement(p.type) == 'int64'}
+        local_selectors, selector_scopes = selector_locals(body, selector_inputs)
+        selector_inputs.update(local_selectors)
         conditional, declarations_by_read, view_conflicts, obligations = conditional_consumptions(
             body, parameter_owners, resource, component,
             call_writes=argument_writes, read_only_places=readonly_arguments,
-            selector_inputs=selector_inputs, move_only=lambda node: lifecycle.copy_blocker(node.type) is not None)
+            selector_inputs=selector_inputs, selector_scopes=selector_scopes,
+            move_only=lambda node: lifecycle.copy_blocker(node.type) is not None)
         if view_conflicts:
             mutation, view = view_conflicts[0]
             user_error(current_source, 'resource view conflicts with a storage mutation',

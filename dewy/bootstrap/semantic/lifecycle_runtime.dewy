@@ -2381,9 +2381,10 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
         }
         hir.push_children(current @pending)
     }
-    # Stable integer inputs exist throughout this function. Liveness removes
-    # inputs assigned, captured or exposed through a place. Arbitrary selector
-    # expressions keep the wildcard; no evaluation is moved by this proof.
+    # Inputs exist throughout the function; a once-initialized local is
+    # available only after its declaration on that lexical path. Liveness
+    # excludes mutations, captures and place exposure. Arbitrary expressions
+    # keep the wildcard; this proof never moves a selector's evaluation.
     let selector_inputs:set<addr>=set[]
     let selector_values:dict<addr addr>=[]
     loop parameter in params {
@@ -2392,7 +2393,15 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
             selector_values[parameter.binding_id]=put(hir.ExpressedIdentifier[function.loc parameter.value_type parameter.name parameter.binding_id] @session)
         }
     }
-    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types required_views=required_views call_writes=plan.argument_writes read_only_places=plan.readonly_arguments selector_inputs=selector_inputs)
+    let locals=ownership_liveness.selector_locals(function.body selector_inputs session.hir session.types)
+    loop [binding declaration_id] in locals.declarations {
+        let declaration=hir.node_at(session.hir declaration_id)
+        $runtime_assert declaration is? hir.Declare
+        let type=if declaration.annotation is? none hir.node_at(session.hir declaration.expr).value_type else declaration.annotation
+        selector_inputs.push(binding)
+        selector_values[binding]=put(hir.ExpressedIdentifier[declaration.loc type declaration.name binding] @session)
+    }
+    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types required_views=required_views call_writes=plan.argument_writes read_only_places=plan.readonly_arguments selector_inputs=selector_inputs selector_scopes=locals.scopes)
     loop [mutation view] in conditional.view_conflicts {
         if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource view conflicts with a storage mutation' pointers=[Pointer[hir.node_at(session.hir mutation).loc 'this operation may change storage still borrowed by the view'] Pointer[hir.node_at(session.hir view).loc 'this required view is still live']]]}
         return

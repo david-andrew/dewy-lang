@@ -19,6 +19,7 @@ Live:type=dict<string Entry>
 Analysis:type=[
     owners:set<addr>
     selectors:set<addr>=set[]
+    selector_scopes:dict<addr set<addr>>=[]
     obligations:dict<addr Requirements>=[]
     required_views:dict<addr addr>=[]
     view_conflicts:dict<addr addr>=[]
@@ -33,6 +34,36 @@ Analysis:type=[
     paths:dict<addr array<string|int64>>=[]
     declarations:dict<addr addr>=[]
 ]
+SelectorLocals:type=[declarations:dict<addr addr>=[] scopes:dict<addr set<addr>>=[]]
+# Once-initialized scalar locals have stable identities only after their
+# declaration, on the lexical path where it ran. A declaration in a loop is
+# a different value on each iteration and retains a wildcard identity.
+selector_locals=(body:addr inputs:set<addr> nodes:array<hir.AST> table:types.Table):>SelectorLocals=>{
+    let result=SelectorLocals[]
+    visit_selector_locals(body inputs false nodes table @result)
+    return result
+}
+visit_selector_locals=(id:addr visible:set<addr> repeated:bool nodes:array<hir.AST> table:types.Table @result:SelectorLocals):>void=>{
+    if id in? result.scopes {result.scopes[id]=result.scopes[id] & visible}
+    else {result.scopes[id]=visible}
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral return
+    if node is? hir.Block {
+        loop child in node.items {
+            visit_selector_locals(child visible repeated nodes table @result)
+            let declaration=hir.node_at(nodes child)
+            if not repeated and declaration is? hir.Declare and not declaration.view and declaration.binding_id isnt? none {
+                let type=if declaration.annotation is? none hir.node_at(nodes declaration.expr).value_type else declaration.annotation
+                if types.is_primitive(types.node_at(table types.strip_refinement(type table)) 'int64') {
+                    result.declarations[declaration.binding_id]=child
+                    visible.push(declaration.binding_id)
+                }
+            }
+        }
+        return
+    }
+    loop child in hir.children(node) {visit_selector_locals(child visible (repeated or node is? hir.LoopArm) nodes table @result)}
+}
 entry_key=(entry:Entry):>string=>{
     let key="{entry.binding}{if entry.store '!' else if entry.measure '?' else ':'}"
     loop name in entry.path {key+=if name is? string "f{name.length}:{name}" else "i{name};"}
@@ -142,7 +173,7 @@ disjoint_inputs=(scope:addr selected:addr route:Entry aliases:dict<addr addr> no
     return true
 }
 # Whether a live entry needs the value a consumption of `path` takes.
-needed=(route:Entry live:Live aliases:dict<addr addr> propose:bool):>Requirements?=>{
+needed=(route:Entry live:Live aliases:dict<addr addr> propose:bool available:set<addr>):>Requirements?=>{
     let clauses:Requirements=[]
     loop entry in live.values {
         if route.binding not in? roots(entry.binding aliases) continue
@@ -165,6 +196,7 @@ needed=(route:Entry live:Live aliases:dict<addr addr> propose:bool):>Requirement
                 let left=route.selectors.get(i) let right=entry.selectors.get(i)
                 if (a=?-1 and left is? none) or (b=?-1 and right is? none) continue
                 if left=?right continue
+                if (left isnt? none and left not in? available) or (right isnt? none and right not in? available) continue
                 alternatives.push(Distinct[if left is? none a else Selector[left] if right is? none b else Selector[right]])
             }
         }
@@ -177,7 +209,8 @@ LoopExit:type=const [after:Live repeated:Live]
 consume=(id:addr route:Entry saved_path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> table:types.Table):>void=>{
     let clauses:Requirements?=none
     if route.binding in? enabled and id in? analysis.candidates {
-        clauses=needed(route live analysis.aliases lifecycle.copy_blocker(hir.node_at(nodes id).value_type table) isnt? none)
+        let available=if analysis.selector_scopes.length=?0 analysis.selectors else analysis.selector_scopes.get(id set[])
+        clauses=needed(route live analysis.aliases lifecycle.copy_blocker(hir.node_at(nodes id).value_type table) isnt? none available)
     }
     if clauses isnt? none {
         analysis.consumes[id]=route.binding
@@ -346,8 +379,8 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
     loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes table exits)}
     return live
 }
-consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[]):>Analysis=>{
-    let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places]
+consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[] selector_scopes:dict<addr set<addr>>=[]):>Analysis=>{
+    let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places selector_scopes=selector_scopes]
     let order:array<addr>=[]
     let pending:array<addr>=[body]
     loop pending.length >? 0 {

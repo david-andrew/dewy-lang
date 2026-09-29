@@ -13,7 +13,7 @@ the component's old value.
 """
 from dataclasses import dataclass
 
-from .. import hir, bindings
+from .. import hir, bindings, ty
 from . import predicate_effects
 
 
@@ -27,8 +27,41 @@ def fixed_index(node):
 
 @dataclass(frozen=True)
 class Selector:
-    """An unchanged scalar input, never an arbitrary selector expression."""
+    """An unchanged available scalar binding, never an arbitrary expression."""
     binding: int
+
+
+def selector_locals(body, inputs):
+    """Find once-initialized word locals and where their declarations dominate.
+
+    Repeated declarations are different values on different iterations. They
+    keep wildcard identities. Branch/block locals are available only after
+    initialization and within that lexical path; a separation check must never
+    introduce a read of a later or conditionally uninitialized binding.
+    Mutation, place exposure and captures are filtered by liveness separately.
+    """
+    declarations, before = {}, {}
+
+    def visit(node, visible, repeated=False):
+        previous = before.get(id(node))
+        before[id(node)] = visible if previous is None else previous & visible
+        if isinstance(node, hir.FunctionLiteral):
+            return
+        if isinstance(node, hir.Block):
+            for item in node.items:
+                visit(item, visible, repeated)
+                if (not repeated and isinstance(item, hir.Declare) and not item.view
+                        and item.binding_id is not None
+                        and ty.strip_refinement(item.annotation or item.expr.type) == 'int64'):
+                    declarations[item.binding_id] = hir.ExpressedIdentifier(
+                        item.loc, item.annotation or item.expr.type, item.name, binding_id=item.binding_id)
+                    visible = visible | {item.binding_id}
+            return
+        for child in hir.children(node):
+            visit(child, visible, repeated or isinstance(node, hir.LoopArm))
+
+    visit(body, frozenset(inputs))
+    return declarations, before
 
 
 def field_route(node, *, allow_prefix=False, wildcards=False, selectors=frozenset()):
@@ -80,7 +113,7 @@ def conflicts(path, entry_path, kind):
     return True
 
 
-def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset(), selector_inputs=frozenset(), move_only=lambda node: False):
+def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset(), selector_inputs=frozenset(), selector_scopes=None, move_only=lambda node: False):
     nodes, owners, aliases, captured, occurrences = [], set(), {}, set(), {}
     owners.update(p.binding_id for p in parameter_owners)
     required_views, view_conflicts = {}, {}
@@ -213,7 +246,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                     candidates.add(id(value))
 
     consumes, obligations = {}, {}
-    def needed(binding, path, live, propose):
+    def needed(binding, path, live, propose, available):
         clauses = []
         for entry, entry_path, kind in live:
             if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, kind)):
@@ -223,14 +256,16 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                         if (left != right and -1 not in (left, right)
                                 and isinstance(left, (int, Selector)) and isinstance(right, (int, Selector))
                                 and (isinstance(left, Selector) or isinstance(right, Selector))):
-                            alternatives.append((left, right))
+                            if all(not isinstance(term, Selector) or term.binding in available for term in (left, right)):
+                                alternatives.append((left, right))
                 if not alternatives:
                     return None
                 clauses.append(alternatives)
         return clauses
 
     def consume(node, binding, path, live, enabled, *, stored_path=None):
-        clauses = needed(binding, path, live, move_only(node)) if binding in enabled and id(node) in candidates else None
+        available = selector_inputs if selector_scopes is None else selector_scopes.get(id(node), frozenset())
+        clauses = needed(binding, path, live, move_only(node), available) if binding in enabled and id(node) in candidates else None
         if clauses is not None:
             consumes[id(node)] = (binding, path if stored_path is None else stored_path)
             obligations[id(node)] = clauses
