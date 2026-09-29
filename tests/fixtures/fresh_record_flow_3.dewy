@@ -1,0 +1,20 @@
+$explicit_copies
+Box=type of [items:array<int64>]
+take=(input:Box):>Box?=>{
+    let copied=if input.items.length>?0 input.copy() else Box[[]]
+    copied.items.push(22)
+    return copied
+}
+work=():>int64=>{
+    let input=Box[[20]]
+    let output=take(input)
+    if output is? none return 1
+    if input.items.length not=?1 return 2
+    return if output.items.length=?2 output.items[0]+output.items[1] else 3
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i<?1000 {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

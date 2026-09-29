@@ -438,8 +438,11 @@ class _ObjectLowering:
         )
 
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
-        node = self._copy_source_expression(node)
-        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView, hir.CopyValue))
+        node = self._scoped_block_result(node)
+        # Record conditionals have one owning result on every normal arm,
+        # just like array conditionals. Their initializer and later transfer
+        # analysis must agree that this storage belongs to the local.
+        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView, hir.CopyValue, hir.Flow))
 
     def _lower_object_argument(
         self,

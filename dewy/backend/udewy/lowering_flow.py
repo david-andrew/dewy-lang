@@ -974,7 +974,7 @@ class _FlowLowering:
             # an object-valued flow: the temporary is a pointer word — to the arm's
             # own object (a literal, a call's result), or to a copy of a value that
             # lives on (a binding, a field), as `let t = x` copies
-            if isinstance(item_type, ty.ObjectType) and isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
+            if isinstance(item_type, ty.ObjectType) and self._object_expression_owns_fresh_storage(item):
                 return self._extract_object_pointer(item)
             if isinstance(item, hir.ExpressedIdentifier) and item.name in self.direct_default_inputs:
                 # The supplied-argument arm either borrows read-only storage

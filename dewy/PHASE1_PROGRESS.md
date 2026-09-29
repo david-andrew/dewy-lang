@@ -29,6 +29,21 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Conditional records retain their fresh ownership (2026-09-29)
+
+Hosted record flow results now share initializer ownership classification:
+an explicit copy, dictionary view or set result already owns storage. A
+conditional adopts that result instead of taking another snapshot. Record
+conditionals themselves use one owning convention, so a local initialized by
+such a flow can transfer at its last use. Scoped value blocks retain that
+classification without discarding their preceding statements.
+
+Ten focused hosted checks and the paired x86-64/C group pass, including
+conditional/block/nominal copies, retained input independence, rejected live
+source transfer and repeated live-byte recovery. Five fixtures bring the
+manifest to 650. Logs use `dewy-fresh-flow-*`. These are focused checks beyond
+the ongoing frozen 636-case integration.
+
 ## Optional numeric equality shares call applicability (2026-09-29)
 
 Native union equality now uses ordinary call acceptance when selecting its
