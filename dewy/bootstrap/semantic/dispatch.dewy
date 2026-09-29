@@ -146,17 +146,22 @@ match_ordered = (methods:array<addr> pos:array<addr> kw:dict<string addr> order:
         if apps.length >? 0 break
     }
     if apps.length =? 0 return DispatchError['no matching method for arguments in this order']
-    let winners:array<DispatchResult>=[]
-    loop candidate in apps {
+    # Selection needs one candidate index and an ambiguity count, not a
+    # second owning array of promotion plans. The index's fact records its
+    # connection to the unchanged candidate array until the final removal.
+    let winner:addr<index=>index<?apps.length>=0
+    let winner_count:int64=0
+    loop index in 0.. and index<?apps.length {
+        const candidate=@apps[index]
         let shadowed=false
         loop other in apps {
             if other.method_index =? candidate.method_index continue
             if more_specific(method_at(nodes other.method) method_at(nodes candidate.method) system @nodes) {shadowed=true break}
         }
-        if not shadowed {winners.push(candidate)}
+        if not shadowed {winner=index winner_count+=1}
     }
-    if winners.length not=? 1 return DispatchError["ambiguous call among {apps.length} applicable methods"]
-    return winners[0]
+    if winner_count not=?1 return DispatchError["ambiguous call among {apps.length} applicable methods"]
+    return apps.pop(winner)
 }
 
 method_at = (nodes:types.Table id:addr):>types.FunctionType => {

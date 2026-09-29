@@ -183,6 +183,21 @@ Eight fixtures bring the manifest to 476. The preceding `db95f751` source has
 reached a native fixed point and passed its 4,276-site / 77.204-per-KLOC copy
 gate; its complete 468-case parity run is still in progress.
 
+## Keep overload candidates in one owner (2026-09-29)
+
+Ordered dispatch now retains a checked candidate index and an ambiguity count
+instead of copying promotion plans into a second winners array. The selected
+index carries `index <? apps.length`; after proving uniqueness, `pop` transfers
+the winning record from the original array. The new field-liveness proof also
+transfers `bound.pos` while preserving the later `bound.kw` read.
+
+The focused compiler-import kernel passes hosted and native compilation and
+x86-64/C execution, covering exact selection, named/positional binding,
+numeric promotion, ambiguity and no match. Its hosted inventory has only the
+separate mapping-argument obligation in `dispatch.dewy`; the former argument
+array, winner insertion and result union copies are gone. One fixture brings
+the manifest to 477. No dispatch ranking or ambiguity rule changed.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
