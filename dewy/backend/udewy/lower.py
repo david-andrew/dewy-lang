@@ -3971,8 +3971,11 @@ class _Lowerer(
                 root = source
                 while isinstance(root, hir.MemberAccess) and isinstance(ty.structural_base(root.value.type), ty.ObjectType):
                     root = root.value
-                if (isinstance(array, ty.ArrayType) and isinstance(stored, ty.ArrayType)
-                        and stored.length is None and stored.element == array.element
+                transferable = (isinstance(array, ty.ArrayType) and isinstance(stored, ty.ArrayType)
+                                and stored.length is None and stored.element == array.element)
+                transferable |= (isinstance(array, ty.ObjectType) and array == stored
+                                 and self._record_fields_transferable(array))
+                if (transferable
                         and isinstance(root, hir.ExpressedIdentifier)
                         and (root.binding_id in element_owners or root.binding_id in cells)
                         and isinstance(ty.structural_base(root.type), ty.ObjectType)):

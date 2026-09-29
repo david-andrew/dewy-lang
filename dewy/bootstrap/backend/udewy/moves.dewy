@@ -378,11 +378,13 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
             if field isnt? hir.MemberAccess continue
             let array=types.node_at(table views.structural_base(field.value_type table))
             let receiver=types.node_at(table views.structural_base(hir.node_at(nodes field.value).value_type table))
-            if array isnt? types.ArrayType or receiver isnt? types.ObjectType continue
+            if receiver isnt? types.ObjectType continue
             let slot=types.object_field(receiver field.name)
             if slot is? none continue
             let stored=types.node_at(table views.structural_base(slot.value_type table))
-            if stored isnt? types.ArrayType or stored.length isnt? none or not types.same_type(stored.element array.element table) continue
+            let transferable=if array is? types.ArrayType and stored is? types.ArrayType stored.length is? none and types.same_type(stored.element array.element table)
+                else array is? types.ObjectType and types.same_type(slot.value_type field.value_type table)
+            if not transferable continue
             let root=hir.node_at(nodes field.value)
             loop root is? hir.MemberAccess {root=hir.node_at(nodes root.value)}
             if root isnt? hir.ExpressedIdentifier or not storage_borrows.ordinary(root.value_type table @eligible) continue

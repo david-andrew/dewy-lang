@@ -1,0 +1,25 @@
+$explicit_copies
+
+Inner:type=[values:array<int64>]
+Box:type=[inner:Inner answer:int64=42]
+make=(size:int64):>Box=>{
+    let values:array<int64>=[]
+    values.reserve(size+1)
+    loop i in 0.. and i <? size {values.push(i)}
+    return Box[Inner[values]]
+}
+work=():>int64=>{
+    let box=make(1024)
+    let before:int64=_arena_allocated_bytes
+    let inner=box.inner
+    inner.values.push(42)
+    if box.answer not=?42 return 1
+    # A fixed-size root/descriptor is permitted. Copying 1024 elements is not.
+    if _arena_allocated_bytes-before >?1024 return 2
+    return if inner.values.length=?1025 and inner.values[1024]=?42 42 else 3
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in [0..20) {if work() not=?42 return 4}
+    return if _arena_live_bytes=?before 42 else 5
+}

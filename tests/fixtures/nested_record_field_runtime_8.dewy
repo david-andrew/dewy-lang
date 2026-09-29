@@ -1,0 +1,5 @@
+$explicit_copies
+Inner:type=[values:array<int64>]
+Box:type=[inner:Inner answer:int64=42]
+work=():>int64=>{let box=Box[Inner[[20]]] let inner=box.inner inner.values.push(22) return if box.answer=?42 and inner.values.length=?2 inner.values[0]+inner.values[1] else 1}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 2} return if _arena_live_bytes=?before 42 else 3}

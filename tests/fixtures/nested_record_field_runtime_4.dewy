@@ -1,0 +1,13 @@
+$explicit_copies
+Box:type=[items:dict<int64 int64> answer:int64=42]
+make=():>Box=>{let items:dict<int64 int64>=[] loop i in [0..1024) {items[i]=i} return Box[items]}
+work=():>int64=>{
+ let box=make()
+ let before:int64=_arena_allocated_bytes
+ let items=box.items
+ if 0 in? items {items.pop(0);}
+ if box.answer not=?42 return 1
+ if _arena_allocated_bytes-before >?1024 return 2
+ return if items.get(42)=?42 42 else 3
+}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..20) {if work() not=?42 return 4} return if _arena_live_bytes=?before 42 else 5}

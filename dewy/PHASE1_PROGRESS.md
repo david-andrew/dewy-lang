@@ -210,6 +210,29 @@ separate mapping-argument obligation in `dispatch.dewy`; the former argument
 array, winner insertion and result union copies are gone. One fixture brings
 the manifest to 477. No dispatch ranking or ambiguity rule changed.
 
+## Transfer inline record fields (2026-09-29)
+
+The existing field liveness proof now also permits inline records and
+nested dictionaries to leave an ordinary owned root. Hosted lowering adopts
+their fields into destination storage; native lowering constructs a headed
+root and dispatches the transfer across the actual nominal family. Array
+handles transfer, frame-backed arrays promote, and moved string/union payload
+slots are emptied without disturbing sibling cleanup. Taking a native field
+detaches shared COW storage before changing it. Prepared fixed-array trees,
+live aliases and later overlapping reads retain their existing obligations.
+
+Twelve hosted checks, eighteen surrounding checks and two paired native groups
+pass on x86-64/C. The kernels bound allocation independently of a 1,024-element
+buffer and verify repeated live-byte recovery, dictionaries, nested fields,
+nominals, optional payloads, frame promotion and retained snapshots. Disabling
+field transfers makes the allocation control fail as expected. Eleven cases
+bring the manifest to 488. Full certification remains at `db95f751`.
+
+The preceding sibling-field/dispatch hosted build prepared/emitted in
+228.28/233.32 seconds and reduced the implicit runtime-sized bootstrap
+inventory from 1,805 to 1,765 obligations across the same 73 modules. Memoized
+ownership queries retain this result; both focused native groups pass.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

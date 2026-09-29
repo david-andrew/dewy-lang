@@ -614,11 +614,24 @@ class _ObjectLowering:
                    and id(source) in self.moved_payload_uses
                    and any(ty.structural_base(member) == object_type
                            for member in self._stored_union_members(source) or ()))
-        if (not self._has_arena() or not isinstance(source, hir.ExpressedIdentifier)
+        root = source
+        while isinstance(root, hir.MemberAccess):
+            root = root.value
+        owned = isinstance(root, hir.ExpressedIdentifier) and (
+            local_binding_key(root) in self.owned_objects
+            or root.name in self.owned_aggregate_cells and any(
+                ty.structural_base(member) == ty.structural_base(root.type)
+                for member in self.owned_aggregate_cells[root.name][0]))
+        if isinstance(source, hir.MemberAccess):
+            from ...semantic.analyze.storage_borrows import borrowable
+            receiver = ty.structural_base(source.value.type)
+            field = receiver.field(source.name) if isinstance(receiver, ty.ObjectType) else None
+            owned = owned and field is not None and ty.structural_base(field.type) == object_type and borrowable(root.type)
+        if (not self._has_arena() or not isinstance(root, hir.ExpressedIdentifier)
                 or not (payload or id(source) in self.moved_uses)
                 or ty.structural_base(source.type) != object_type
-                or not (payload or local_binding_key(source) in self.owned_objects)
-                or self.borrowed_fields.get(local_binding_key(source))):
+                or not (payload or owned)
+                or self.borrowed_fields.get(local_binding_key(root))):
             return None
 
         if not self._record_fields_transferable(object_type):
@@ -627,7 +640,12 @@ class _ObjectLowering:
         allocated, dest = (self._allocate_object_result_value(object_type, node.loc, arena=arena)
                            if destination is None else ([], destination))
         self.move_notes.append(MoveNote(self.srcfile, source.loc,
-            f'`{source.name}` is moved when {site}: this is its last use, so its owned fields change owner', True))
+            f'`{source.name}` is moved when {site}: its fields have no remaining reads and change owner', True))
+        if isinstance(source, hir.MemberAccess):
+            self.copy_notes.append(CopyNote(self.srcfile, source.loc,
+                'a bounded record root adopts owned handles; frame-backed array fields promote before the owner dies',
+                kind='record', type_name=type_to_dewy(object_type), site='transferred from an inline field',
+                runtime_sized=True, policy_exempt=True))
         return [*prelude, *allocated,
                 *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest
 
@@ -1848,12 +1866,11 @@ class _ObjectLowering:
             annotation='int64',
             expr=self._object_allocation(node.loc, size),
         )
-        if isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_payload_uses:
-            adopted = self._adopt_object_fields(node.expr, object_type, arena=False,
-                site=f'bound to `{node.name}`', destination=cell)
-            if adopted is not None:
-                self.borrowed_fields[local_binding_key(node)] = set()
-                return [declaration, *adopted[0]]
+        adopted = self._adopt_object_fields(node.expr, object_type, arena=False,
+            site=f'bound to `{node.name}`', destination=cell)
+        if adopted is not None:
+            self.borrowed_fields[local_binding_key(node)] = set()
+            return [declaration, *adopted[0]]
         prelude, src = self._extract_object_pointer(node.expr)
         self._note_copy('record', object_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
         return [declaration, *prelude, *self._object_copy(cell, src, object_type, node.loc)]
