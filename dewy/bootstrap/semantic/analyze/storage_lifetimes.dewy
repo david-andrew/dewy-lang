@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import SrcFile, Error, Pointer
 import p"../context.dewy" as contexts
 import p"../bindings.dewy" as bindings
@@ -35,6 +37,15 @@ root_of=(id:addr session:contexts.Session):>addr?=>{
 nonmutating=(id:addr session:contexts.Session):>bool=>{
     let signature=types.node_at(session.types types.unfold(types.strip_refinement(hir.node_at(session.hir id).value_type session.types) session.types))
     return signature is? types.FunctionType and rows.implies(signature.effects rows.Contract[excluded=[rows.Atom['mutates']]])
+}
+# Ask a boolean question of the existing set. A missing summary means the
+# complete tracked set; neither case needs an owning optional/fallback set.
+interferes=(changed:set<addr> binding:addr? borrowed:bool tracked:set<addr> session:contexts.Session):>bool=>{
+    loop item in changed {
+        let selected=owner(item session)
+        if selected isnt? none and (if borrowed selected in? tracked else selected =? binding) return true
+    }
+    return false
 }
 validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.Session):>Error?=>{
     let candidates:array<Candidate>=[]
@@ -122,41 +133,37 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
     loop candidate in candidates {
         let call=hir.node_at(session.hir candidate.id)
         $runtime_assert call is? hir.FunctionCall
-        let owned:set<addr>=if candidate.function is? none set[] else private.get(candidate.function set[])
         let binding=candidate.binding
-        let isolated=binding isnt? none and binding in? owned and binding not in? captured and binding not in? exposed
+        let isolated=binding isnt? none and candidate.function isnt? none and candidate.function in? private and binding in? private[candidate.function] and binding not in? captured and binding not in? exposed
         let borrowed=binding isnt? none and binding in? borrowed_parameters
-        let relevant:set<addr>=if borrowed tracked else if binding is? none set[] else set[binding]
         let key=call.kw_args.get('key')
         $runtime_assert candidate.source <? source_files.length
         let method=hir.node_at(session.hir call.func)
         $runtime_assert method is? hir.ArrayMethod
         let callbacks_safe=(key is? none or nonmutating(key session)) and (method.key_copy is? none or nonmutating(method.key_copy session))
         if key isnt? none and not isolated and not callbacks_safe {
-            loop changed in writes.get(candidate.id tracked) {
-                let selected=owner(changed session)
-                if selected isnt? none and selected in? relevant {
-                    return Error[srcfile=source_files[candidate.source] title='sort key may change its receiver' pointers=[Pointer[hir.node_at(session.hir key).loc 'the array storage must stay stable throughout key evaluation']] hint='keep receiver mutations outside the sort, or provide a callback contract proving no mutation']
-                }
+            let conflict=if candidate.id in? writes interferes(writes[candidate.id] binding borrowed tracked session) else interferes(tracked binding borrowed tracked session)
+            if conflict {
+                return Error[srcfile=source_files[candidate.source] title='sort key may change its receiver' pointers=[Pointer[hir.node_at(session.hir key).loc 'the array storage must stay stable throughout key evaluation']] hint='keep receiver mutations outside the sort, or provide a callback contract proving no mutation']
             }
         }
-        let arguments=call.pos_args
+        # Extend an independent argument worklist; preserve the checked call.
+        let arguments=call.pos_args.copy()
         loop arg in call.kw_args.values {arguments.push(arg)}
         loop argument in arguments {
-            let argument_writes=writes
+            # Sparse contract overrides retain the original summary table.
+            # Only calls proven nonmutating are omitted; their arguments still run.
+            let readonly_calls:set<addr>=set[]
             let nodes:array<addr>=[argument]
             loop nodes.length>?0 {
                 let id=nodes.pop
                 let node=hir.node_at(session.hir id)
                 if node is? hir.FunctionLiteral continue
-                if node is? hir.FunctionCall and nonmutating(node.func session) {argument_writes[id]=set[]}
+                if node is? hir.FunctionCall and nonmutating(node.func session) {readonly_calls.push(id)}
                 hir.push_children(node @nodes)
             }
-            loop changed in predicates.mutated_bindings(argument session.hir argument_writes readonly) {
-                let selected=owner(changed session)
-                if selected isnt? none and selected in? relevant {
-                    return Error[srcfile=source_files[candidate.source] title='sort option may change its receiver' pointers=[Pointer[hir.node_at(session.hir argument).loc 'this option changes the array while the sort is being prepared']] hint='evaluate the option before selecting the array to sort']
-                }
+            if interferes(predicates.mutated_bindings(argument session.hir writes readonly read_only_calls=readonly_calls) binding borrowed tracked session) {
+                return Error[srcfile=source_files[candidate.source] title='sort option may change its receiver' pointers=[Pointer[hir.node_at(session.hir argument).loc 'this option changes the array while the sort is being prepared']] hint='evaluate the option before selecting the array to sort']
             }
         }
     }

@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import Error, Pointer
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
@@ -83,12 +85,11 @@ lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? 
         let node=hir.node_at(session.hir id)
         hir.push_children(node @pending)
         if node isnt? hir.RuntimeFailure or node.lowered isnt? none continue
-        let index=indexed.get(node.source_file)
-        if index is? none {
-            index=lines.build(sources.file_at(node.source_file session).body)
-            indexed[node.source_file]=index
+        if node.source_file not in? indexed {
+            indexed[node.source_file]=lines.build(sources.file_at(node.source_file session).body)
         }
-        let result=materialize(node helpers index @session)
+        # Materialization reads the cached index; the cache keeps ownership.
+        let result=materialize(node helpers indexed[node.source_file] @session)
         if result is? Error return result
         $runtime_assert id <? session.hir.length
         node.lowered=result

@@ -28,6 +28,26 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Read-only compiler analyses avoid intermediate snapshots (2026-09-29)
+
+Callback analysis now keeps HIR ids rather than copied call records and reads
+supplied/discovered function sets through the same resolver. Its extended
+binding set and independently retained target arrays are explicit copies.
+Runtime reporting builds each source index directly into its cache and borrows
+that entry during materialization. Sort-lifetime checking asks membership
+questions of the original sets instead of constructing optional/selected sets.
+
+Sort option checks retain sparse nonmutating-call overrides instead of copying
+the whole program effects dictionary per argument. Direct writes and argument
+side effects still participate. The hosted route already uses a sparse ChainMap;
+this removes the native full-table counterpart without changing the contract.
+
+All three modules pass strict checking on both routes, reaching 68 physical
+bootstrap modules. A freshly emitted native driver passes 26 callback, sort
+lifetime and assertion/storage checks, including actual failure-report execution
+and stderr checks on x86-64/C. Logs use `dewy-lifetime-*` and
+`dewy-storage-lifetimes-*`; the corpus remains 600 cases.
+
 ## Returned field views take their local owner's storage (2026-09-29)
 
 A stable aggregate view returned at function exit can now transfer its field

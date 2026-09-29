@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/subtyping.dewy" as subtyping
@@ -56,7 +58,8 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # Iterators and sibling-field bindings have checked origins too, although
     # they are not Declare nodes. Include every lexical binding before deciding
     # that an identifier denotes an external callable/storage source.
-    let bindings=plan.globals
+    # Discovery extends this set without changing the capture plan.
+    let bindings=plan.globals.copy()
     let discovered:set<addr>=set[]
     captures.locals(root nodes @bindings @discovered)
     loop [id function] in plan.functions {
@@ -67,7 +70,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if parameter.binding_id isnt? none {parameters.push(parameter.binding_id)}
         }
     }
-    let calls:array<hir.FunctionCall>=[]
+    let calls:array<addr>=[]
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
     let callable_storage:dict<addr bool>=[]
@@ -90,7 +93,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 exposed.push(node.value_type)
                 loop argument in node.pos_args {exposed.push(hir.node_at(nodes argument).value_type)}
             }
-            if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none and callee.binding_id in? parameters {calls.push(node)}
+            if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none and callee.binding_id in? parameters {calls.push(id)}
         }
         loop type in exposed {
             if type not in? callable_storage {callable_storage[type]=contains_callable(type type_nodes)}
@@ -106,10 +109,17 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             pending.push(child)
         }
     }
+    if function_values isnt? none return resolve(calls nodes @type_nodes links function_values)
+    return resolve(calls nodes @type_nodes links captures.value_functions(root nodes plan))
+}
+# Read either the supplied or discovered function set in place. Keeping this
+# phase separate avoids materializing a selected optional set just to read it.
+resolve=(calls:array<addr> nodes:array<hir.AST> @type_nodes:types.Table links:subtyping.Graph values:set<addr>):>dict<addr array<addr>>=>{
     let signatures:dict<addr array<addr>>=[]
     let result:dict<addr array<addr>>=[]
-    let values=if function_values is? none captures.value_functions(root nodes plan) else function_values
-    loop call in calls {
+    loop id in calls {
+        let call=hir.node_at(nodes id)
+        $runtime_assert call is? hir.FunctionCall
         let signature=types.strip_refinement(hir.node_at(nodes call.func).value_type type_nodes)
         if types.node_at(type_nodes types.unfold(signature type_nodes)) isnt? types.FunctionType continue
         if signature not in? signatures {
@@ -121,7 +131,9 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             signatures[signature]=targets
         }
         let targets=signatures[signature]
-        if targets.length >? 0 {result[call.func]=targets}
+        # Each call result is an independent value; keep the signature cache
+        # available for subsequent calls with the same checked signature.
+        if targets.length >? 0 {result[call.func]=targets.copy()}
     }
     return result
 }

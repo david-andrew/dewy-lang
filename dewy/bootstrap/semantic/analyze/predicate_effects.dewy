@@ -37,7 +37,7 @@ write_target = (node:hir.AST nodes:array<hir.AST>):>addr? => {
     }
     return none
 }
-mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[]):>set<addr> => {
+mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] read_only_calls:set<addr>=set[]):>set<addr> => {
     let result:set<addr> = set[]
     let pending:array<addr> = [root]
     loop pending.length >? 0 {
@@ -46,7 +46,10 @@ mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<add
         if node is? hir.FunctionLiteral continue
         let target=write_target(node nodes)
         if node is? hir.Place and id in? read_only_places {target=none}
-        if node is? hir.FunctionCall and id in? call_writes {
+        # Checked contracts can override a conservative call summary. Keep
+        # direct writes and argument evaluation: only the call's own summary
+        # is excluded, without cloning a program-sized effects dictionary.
+        if node is? hir.FunctionCall and id not in? read_only_calls and id in? call_writes {
             # The summary is read-only; the result owns its own set.
             const writes=@call_writes[id]
             loop binding in writes {result.push(binding)}
