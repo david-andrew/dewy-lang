@@ -1098,6 +1098,24 @@ note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<
 }
 owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Index and id in? state.moved_uses and id not in? state.array_snapshots {
+        let owner=hir.node_at(state.input.nodes node.array)
+        if inline_record(node.value_type @state) and types.same_type(stored_type(id @state) node.value_type state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+            let binding=owner.binding_id
+            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and storage_borrows.borrowable(owner.value_type state.type_nodes) and record_transferable(node.value_type @state) {
+                # Array elements already own complete headed record roots.
+                # Detach the containing buffer before clearing its slot; a
+                # retained COW array must keep its element. The transferred
+                # record's own sharing count stays valid for later mutation.
+                let prefix:array<addr>=[]
+                let slot=snapshot(array_index(node @state writable=true) @prefix @state)
+                let result=snapshot(read_word(slot 0 node @state) @prefix @state)
+                prefix.push(store_word(word(0 node @state) slot 0 node @state))
+                prefix.push(result)
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
+    }
     if node is? hir.MemberAccess and id in? state.moved_uses {
         let array=array_type(node.value_type state)
         let stored=array_type(stored_type(id @state) state)
@@ -5449,7 +5467,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.moved_bindings=set[]
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
-        loop moved is? hir.MemberAccess {moved=hir.node_at(state.input.nodes moved.value)}
+        loop moved is? hir.MemberAccess|hir.Index {moved=hir.node_at(state.input.nodes if moved is? hir.MemberAccess moved.value else moved.array)}
         if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.push(moved.binding_id)}
     }
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]

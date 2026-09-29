@@ -3964,6 +3964,22 @@ class _Lowerer(
 
         def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
+            if isinstance(source, hir.Index):
+                root = source.array
+                stored = ty.structural_base(self._index_storage_type(source))
+                value = ty.structural_base(source.type)
+                # Taking a record empties its owned fields, not the array's
+                # shape. Exact element layout and ordinary ownership are
+                # required; selected union alternatives keep their cell.
+                if (isinstance(root, hir.ExpressedIdentifier)
+                        and root.binding_id in element_owners
+                        and isinstance(value, ty.ObjectType) and value == stored
+                        and storage_borrows.borrowable(root.type)
+                        and self._record_fields_transferable(value)
+                        and id(source) not in self.borrow_plan.array_snapshots):
+                    field_candidates[id(source)] = root.binding_id
+                    return {id(root): id(source)}
+                return {}
             if isinstance(source, hir.MemberAccess):
                 # Descriptor and inline-record fields can transfer their
                 # owned storage independently of siblings. Collect the whole-owner

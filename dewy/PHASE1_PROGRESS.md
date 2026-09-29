@@ -18,6 +18,25 @@ concurrent validation; its implicit runtime-sized bootstrap inventory is
 focused paired evidence and are entering independent hosted-build validation.
 Phase 1 remains open. Earlier checkpoints below retain their historical scope.
 
+## Last-use record elements (2026-09-29)
+
+Ordinary records can now transfer out of an owned array at their last use,
+including disjoint constant slots and a runtime-selected final read. Both
+lowerers detach the containing array before changing physical ownership, so
+retained COW snapshots stay independent. Native elements hand over their headed
+record root and clear the slot; hosted elements adopt owned fields into the
+receiving root and leave the emptied old root for array cleanup. The same
+field-sensitive liveness proof handles sibling reads, with live aliases,
+exposed storage, lifecycle hooks and incompatible layouts kept conservative.
+
+Validation: 29 surrounding hosted checks, 11 expanded hosted checks (including
+a disabled-move allocation control), and three paired native groups pass. A
+separate runtime-index case passes on both compilers/backends. The compound
+assertion's reusable hosted scratch-header pool is warmed before its retained-
+bytes measurement; repeated calls retain no additional storage. Eleven new
+manifest cases bring the corpus to 518. Artifacts use `dewy-record-selection-*`.
+The preceding frozen 507-case integration remains in progress; Phase 1 is open.
+
 ## Integration repair (2026-09-29): nested loop writes
 
 The independent hosted seed at `a2919429` exposed a missing hosted loop

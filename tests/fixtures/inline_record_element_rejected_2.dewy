@@ -1,0 +1,27 @@
+$explicit_copies
+
+Inner:type=[values:array<int64>]
+make=():>array<Inner>=>{
+    let values:array<int64>=[]
+    values.reserve(1025)
+    loop i in [0..1024) {values.push(i)}
+    return [Inner[values] Inner[[42]]]
+}
+work=():>int64=>{
+    let items=make()
+    $runtime_assert items.length =? 2
+    let before:int64=_arena_allocated_bytes
+    let first=items[0]
+    let again=items[0]
+    first.values.push(42)
+    # The selected element changes owner; the other slot remains readable.
+    if again.values.length=?0 return 6
+    if items[1].values.length not=?1 or items[1].values[0] not=?42 return 1
+    if _arena_allocated_bytes-before >?1024 return 2
+    return if first.values.length=?1025 and first.values[1024]=?42 42 else 3
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in [0..20) {if work() not=?42 return 4}
+    return if _arena_live_bytes=?before 42 else 5
+}

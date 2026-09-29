@@ -122,6 +122,16 @@ walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AS
         if node.binding_id isnt? none {note_use(inner node.binding_id depth nested true returned @analysis)}
         return
     }
+    if node is? hir.Index {
+        let root=hir.node_at(nodes node.array)
+        if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+            # The selector is evaluated before the selected value transfers.
+            # It remains an ordinary read/write participant in liveness.
+            walk(node.index depth nested nodes donations @analysis)
+            note_use(inner root.binding_id depth nested true returned @analysis)
+            return
+        }
+    }
     if node is? hir.MemberAccess {
         # A field transfer needs the complete containing owner's last-use
         # proof, including readers through aliases. The storage boundary
@@ -375,6 +385,15 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
         loop use in uses {
             if not use.transfer or use.id in? moves continue
             let field=hir.node_at(nodes use.id)
+            if field is? hir.Index {
+                let root=hir.node_at(nodes field.array)
+                let array=types.node_at(table views.structural_base(root.value_type table))
+                let value=types.node_at(table views.structural_base(field.value_type table))
+                if root is? hir.ExpressedIdentifier and array is? types.ArrayType and value is? types.ObjectType and types.same_type(array.element field.value_type table) and storage_borrows.ordinary(root.value_type table @eligible) {
+                    field_candidates.push(use.id) field_owners.push(binding)
+                }
+                continue
+            }
             if field isnt? hir.MemberAccess continue
             let array=types.node_at(table views.structural_base(field.value_type table))
             let receiver=types.node_at(table views.structural_base(hir.node_at(nodes field.value).value_type table))

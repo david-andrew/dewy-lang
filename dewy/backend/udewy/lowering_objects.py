@@ -617,6 +617,8 @@ class _ObjectLowering:
         root = source
         while isinstance(root, hir.MemberAccess):
             root = root.value
+        if isinstance(source, hir.Index):
+            root = source.array
         owned = isinstance(root, hir.ExpressedIdentifier) and (
             local_binding_key(root) in self.owned_objects
             or root.name in self.owned_aggregate_cells and any(
@@ -627,6 +629,13 @@ class _ObjectLowering:
             receiver = ty.structural_base(source.value.type)
             field = receiver.field(source.name) if isinstance(receiver, ty.ObjectType) else None
             owned = owned and field is not None and ty.structural_base(field.type) == object_type and borrowable(root.type)
+        if isinstance(source, hir.Index):
+            from ...semantic.analyze.storage_borrows import borrowable
+            owned = (isinstance(root, hir.ExpressedIdentifier)
+                     and (root.name in self.owned_array_names or root.name in self.owned_raw_arrays)
+                     and ty.structural_base(self._index_storage_type(source)) == object_type
+                     and borrowable(root.type)
+                     and id(source) not in self.borrow_plan.array_snapshots)
         if (not self._has_arena() or not isinstance(root, hir.ExpressedIdentifier)
                 or not (payload or id(source) in self.moved_uses)
                 or ty.structural_base(source.type) != object_type
@@ -636,15 +645,20 @@ class _ObjectLowering:
 
         if not self._record_fields_transferable(object_type):
             return None
-        prelude, pointer = self._extract_object_pointer(node)
+        # Extraction mutates the element's fields. Detach the array first so
+        # earlier value snapshots keep their own complete elements. The old
+        # element root remains in its slot for ordinary array cleanup.
+        prelude, pointer = (self._extract_projected_place_storage(source)
+                            if isinstance(source, hir.Index) else self._extract_object_pointer(node))
         allocated, dest = (self._allocate_object_result_value(object_type, node.loc, arena=arena)
                            if destination is None else ([], destination))
         self.move_notes.append(MoveNote(self.srcfile, source.loc,
-            f'`{source.name}` is moved when {site}: its fields have no remaining reads and change owner', True))
-        if isinstance(source, hir.MemberAccess):
+            f'`{root.name}` component is moved when {site}: its owned fields change owner after their last reads', True))
+        if isinstance(source, (hir.MemberAccess, hir.Index)):
             self.copy_notes.append(CopyNote(self.srcfile, source.loc,
                 'a bounded record root adopts owned handles; frame-backed array fields promote before the owner dies',
-                kind='record', type_name=type_to_dewy(object_type), site='transferred from an inline field',
+                kind='record', type_name=type_to_dewy(object_type),
+                site='transferred from an array element' if isinstance(source, hir.Index) else 'transferred from an inline field',
                 runtime_sized=True, policy_exempt=True))
         return [*prelude, *allocated,
                 *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest
