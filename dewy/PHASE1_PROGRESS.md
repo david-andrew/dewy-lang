@@ -8,14 +8,15 @@ extensions may proceed provisionally and are recorded here for David.
 
 ## Latest native/parity repair integration (2026-09-29)
 
-**541/541** paired acceptance/execution cases pass against frozen source
-`2850bc9a`. An independent hosted seed rebuilt the repaired native sources to
+**613/613** paired acceptance/execution cases pass against frozen source
+`748129bb`. An independent hosted seed rebuilt the repaired native sources to
 a byte-identical three-generation fixed point, including x86-64/C execution
-and scaling checks. The complete inventory reports **4,278 sites / 55,629 lines
-= 76.902/KLOC**, within the unchanged 4,500/85 gates. Generations 2/3 took
-92/83 seconds under concurrent validation, not isolated performance timings.
-Artifacts use `phase1-full-suite-repair-*` and `phase1-post-repair-*` outside
-the checkout. Subsequent ownership changes have focused evidence below.
+and scaling checks. The complete inventory reports **4,250 sites / 55,823 lines
+= 76.133/KLOC**, within the unchanged 4,500/85 gates. Generations 2/3 took
+59/68 seconds under concurrent validation, not isolated performance timings.
+Artifacts use `phase1-owner-closure-*` outside the checkout. The preceding
+541-case `2850bc9a` checkpoint measured 4,278 sites / 55,629 lines. Subsequent
+numeric/query changes have focused evidence below.
 
 The non-slow pytest run against the preceding frozen repair source finished
 with **6,092 passes, 4 failures and 13 skips** (95m49s). One failure is the
