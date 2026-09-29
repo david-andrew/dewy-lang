@@ -80,7 +80,7 @@ def test_assigning_the_root_drops_member_route_facts() -> None:
 
 
 def test_assigning_the_field_drops_member_route_facts() -> None:
-    with pytest.raises(UserError, match='index is not proven'):
+    with pytest.raises(UserError, match='array index is out of bounds'):
         _check_bag('    bag.items = [1]\n    let a = bag.items[2]')
     with pytest.raises(UserError, match='empty array|non-empty'):
         _check_bag('    bag.items = []\n    bag.items.clear\n    let a = bag.items.pop')

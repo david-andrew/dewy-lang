@@ -6,7 +6,11 @@ snapshot=(value:Box|none):>Box|none=>{
     value=none
     return saved
 }
-widen=(value:Box|none):>Box|int64|none=>value
+widen=(value:Box|none):>Box|int64|none=>{
+    let saved:Box|int64|none=value
+    if value is? Box {value.value=0}
+    return saved
+}
 keep=(text:string):>array<string>=>[text]
 main=():>int64=>{
     let original:Box|none=Box[42]

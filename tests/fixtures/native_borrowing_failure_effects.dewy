@@ -79,10 +79,11 @@ let main=():>int64=>{
     let allowed=lifetime.arguments
     if checks.length not=? 3 or arguments.length not=? 3 return 1
     if arguments[0] not in? allowed.get(checks[0] set[]) return 2
-    if arguments[1] in? allowed.get(checks[1] set[]) return 3
-    if arguments[2] in? allowed.get(checks[2] set[]) return 4
-    # Explicit reporting still prevents borrowing across ambient raw effects,
-    # but it receives its own values and cannot retain the reader's snapshot.
+    # Unrelated raw reporting cannot reach these unexposed, nonescaping
+    # by-value parameters. Both explicit and installed messages can therefore
+    # use their proven private input lifetime, as the ordinary body call can.
+    if arguments[1] not in? allowed.get(checks[1] set[]) return 3
+    if arguments[2] not in? allowed.get(checks[2] set[]) return 4
     loop index in 0..2 {
         if arguments[index] not in? lifetime.disposable_arguments.get(checks[index] set[]) return 5
     }

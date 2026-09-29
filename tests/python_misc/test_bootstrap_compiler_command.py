@@ -158,9 +158,10 @@ def test_native_compiler_command(tmp_path):
     # bytes, not a copy, so it no longer appears in the budget either.
     assert not any('`key`' in line for line in key_notes), key_notes
 
-    # Field, element and narrowed optional strings read with nothing running
-    # before their builtin consumer are borrowed; a binding owns its value,
-    # and an operand read before a call that may replace it is a snapshot.
+    # A string snapshot keeps immutable bytes alive across replacement;
+    # retaining those bytes is not a logical copy under the approved policy.
+    # Borrowed reads and retained snapshots therefore both stay out of this
+    # inventory. The string-read kernels separately check value independence.
     string_fixture = ROOT / 'tests/fixtures/string_read_borrows.dewy'
     string_inventory = subprocess.run([compiler, 'analyze', '--brief', string_fixture],
                                       cwd=tmp_path, env=real_env, capture_output=True, text=True, timeout=120, check=False)
@@ -168,10 +169,7 @@ def test_native_compiler_command(tmp_path):
     string_rows = {int(line.split('string_read_borrows.dewy:')[1].split(':')[0])
                    for line in string_inventory.stdout.splitlines()
                    if line.startswith('copy: ') and 'string_read_borrows.dewy:' in line}
-    lines = string_fixture.read_text().splitlines()
-    def rows(*fragments):
-        return {index + 1 for index, line in enumerate(lines) if any(fragment in line for fragment in fragments)}
-    assert string_rows == rows('let old=', '(holder.name =? rename', '"{holder.name}-{rename', '=holder.name + rename'), string_rows
+    assert not string_rows, string_rows
 
     # A read-only `get` binding views the stored element; a dictionary write
     # while it lives, or rebinding it, keeps an owned copy.

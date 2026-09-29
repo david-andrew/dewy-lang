@@ -24,6 +24,24 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Full-suite repair: superseded expectations (2026-09-29)
+
+The remaining expectation updates distinguish supported consuming returns from
+unused bodies that really require snapshots. The copy-inventory fixture now
+keeps its source live across retagging, so it still exercises a real copy rather
+than a newly supported move. Stronger array-length evidence reports a proven
+out-of-bounds access; the older tests expected only an unknown bound. The getter
+projection fixture now passes its required type table. The borrowing fixture
+accepts the already implemented proof that unrelated raw work cannot reach a
+private, unexposed input. The CLI string inventory expects retained immutable
+bytes to remain outside the logical-copy budget, as the approved policy states.
+
+Validation: 24 diagnostic/getter checks, 22 hosted copy-policy checks and 27
+paired strict-body/widening checks pass; the standalone borrowing fixture also
+passes. The fresh full CLI test is running against frozen
+`phase1-full-suite-repair-source`. Its result is still pending; these targeted
+repairs do not yet certify a green full suite or completion of Phase 1.
+
 ## Full-suite repair: bounded union-array copies (2026-09-29)
 
 Hosted source checking now retains a known array initializer's length through

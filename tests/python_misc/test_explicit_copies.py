@@ -37,7 +37,7 @@ def test_copy_keeps_explicit_intent_in_report(kind, source):
 
 
 def test_copy_does_not_share_length_facts():
-    with pytest.raises(UserError, match='not proven in bounds'):
+    with pytest.raises(UserError, match='array index is out of bounds'):
         codegen(SrcFile(None, '''
 R:type=[xs:array<int64>]
 main=():>int64=>{

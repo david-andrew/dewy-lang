@@ -10,7 +10,8 @@ from test_scalar_projection import execute
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / 'tests/fixtures/strict_unused_function.dewy').read_text()
-ERRORS = [SOURCE,
+ERRORS = [SOURCE]
+CONSUMING = [
     '''$explicit_copies
 unused=(values:array<int64>):>array<int64>=>values
 main=():>int64=>42''',
@@ -33,9 +34,10 @@ even=(n:int64):>bool=>if n=?0 true else odd(n-1)
 odd=(n:int64):>bool=>if n=?0 false else even(n-1)
 unused=():>int64=>153276824
 main=():>int64=>if even(8) and odd(7) 42 else 1'''
-CASES = [UNUSED, CALLBACK, RECURSIVE,
+CASES = [UNUSED, CALLBACK, RECURSIVE, *CONSUMING,
          SOURCE.replace('$explicit_copies', ''),
-         SOURCE.replace('=>value\n', '=>value.copy()\n')]
+         SOURCE.replace('let saved=value return value',
+                        'let saved=value.copy() return value.copy()')]
 
 
 def test_native_strict_parser_report(tmp_path):
