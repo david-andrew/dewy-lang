@@ -88,6 +88,22 @@ modules, unchanged from the preceding hosted inventory: the new proof enables
 nested loans but does not yet cover the compiler's full context constructors.
 Phase 1 remains open; these measurements are not a completion claim.
 
+## Optional record field transfers (2026-09-29)
+
+Last-use array-field transfer now includes owned optional/tagged record locals.
+The source cell or nullable record handle remains available for cleanup of
+untouched fields. Native lowering detaches any shared record before emptying the
+selected slot; hosted lowering requires its registered aggregate-cell owner.
+Exact member representation is required. Borrowed roots, exposed places, live
+aliases and later owner reads retain their ordinary copy obligation.
+
+Eight hosted checks pass, including a positive control that disables field
+moves and observes allocation, plus 58 surrounding field/union move checks.
+The final paired native group passes on x86-64/C (19.14 seconds), covering
+optional and mixed unions, nested records, returned fields, shared snapshots,
+repeated live-byte checks and rejected retained-reader cases. Seven fixtures
+bring the manifest to 448. Full integration remains certified at `da4a1aca`.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic

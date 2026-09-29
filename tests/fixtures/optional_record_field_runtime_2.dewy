@@ -1,0 +1,13 @@
+Box:type=[values:array<int64>]
+make=():>Box?=>{let values:array<int64>=[] values.push(20) return Box[values]}
+exercise=():>int64=>{
+ let original=make()
+ let copy=original
+ if copy is? none return 1
+ let values=copy.values
+ values.push(22)
+ if original is? none return 2
+ if original.values.length not=?1 or original.values[0] not=?20 return 3
+ return if values.length=?2 values[0]+values[1] else 4
+}
+main=():>int64=>{let before:int64=_arena_live_bytes loop i in [0..100) {if exercise() not=?42 return 1} return if _arena_live_bytes=?before 42 else 2}

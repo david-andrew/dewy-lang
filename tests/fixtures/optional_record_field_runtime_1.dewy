@@ -1,0 +1,23 @@
+$explicit_copies
+Box:type=[values:array<int64>]
+make=(present:bool):>Box|bool=>{
+    if not present return false
+    let values:array<int64>=[]
+    values.reserve(8) values.push(20)
+    return Box[values]
+}
+work=(present:bool):>int64=>{
+    let maybe=make(present)
+    if maybe is? bool return 42
+    let before:int64=_arena_allocated_bytes
+    let values=maybe.values
+    values.push(22)
+    if _arena_allocated_bytes not=?before return 1
+    return if values.length=?2 values[0]+values[1] else 2
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if work(true) not=?42 or work(false) not=?42 return 3}
+    return if _arena_live_bytes=?before 42 else 4
+}
+

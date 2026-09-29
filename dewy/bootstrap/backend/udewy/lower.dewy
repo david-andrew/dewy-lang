@@ -1107,7 +1107,14 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
             let part=hir.node_at(state.input.nodes root)
             if part isnt? hir.MemberAccess break
             let owner=hir.node_at(state.input.nodes part.value)
-            if not object_valued(owner.value_type @state) or stored_type(part.value @state) not=? owner.value_type {valid=false break}
+            let owner_store=stored_type(part.value @state)
+            let same=owner_store =? owner.value_type
+            # A narrowed owning union still owns the selected record. This
+            # includes nullable record handles as well as tagged cells.
+            # Keep that root for cleanup, detaching through its actual
+            # writable representation before emptying the selected field.
+            if owner is? hir.ExpressedIdentifier and (cell_members(owner_store @state) isnt? none or record_union(owner_store @state) isnt? none) and views.preserves_union_payload(views.structural_base(owner.value_type state.type_nodes) owner_store state.type_nodes) {same=true}
+            if not object_valued(owner.value_type @state) or not same {valid=false break}
             root=part.value
         }
         let owner=hir.node_at(state.input.nodes root)

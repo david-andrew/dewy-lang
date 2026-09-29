@@ -2476,8 +2476,12 @@ class _ArrayLowering(_ArraySharing):
                 root = root.value
             owner = ty.structural_base(source.value.type)
             field = owner.field(source.name) if isinstance(owner, ty.ObjectType) else None
+            owned_cell = (isinstance(root, hir.ExpressedIdentifier)
+                          and root.name in self.owned_aggregate_cells
+                          and any(ty.structural_base(member) == ty.structural_base(root.type)
+                                  for member in self.owned_aggregate_cells[root.name][0]))
             if (isinstance(root, hir.ExpressedIdentifier)
-                    and local_binding_key(root) in self.owned_objects
+                    and (local_binding_key(root) in self.owned_objects or owned_cell)
                     and not self.borrowed_fields.get(local_binding_key(root))
                     and field is not None and ty.structural_base(field.type) == array_type):
                 before, receiver = self._extract_object_pointer(source.value)

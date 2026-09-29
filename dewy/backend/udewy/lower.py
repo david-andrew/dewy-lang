@@ -3973,7 +3973,7 @@ class _Lowerer(
                 if (isinstance(array, ty.ArrayType) and isinstance(stored, ty.ArrayType)
                         and stored.length is None and stored.element == array.element
                         and isinstance(root, hir.ExpressedIdentifier)
-                        and root.binding_id in element_owners
+                        and (root.binding_id in element_owners or root.binding_id in cells)
                         and isinstance(ty.structural_base(root.type), ty.ObjectType)):
                     return {id(root): id(source)}
                 return {}

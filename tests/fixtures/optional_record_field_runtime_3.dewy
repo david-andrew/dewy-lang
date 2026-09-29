@@ -1,0 +1,15 @@
+$explicit_copies
+Box:type=[values:array<int64>]
+make=(present:bool):>Box?=>{
+    if not present return none
+    let values:array<int64>=[]
+    values.reserve(8) values.push(20)
+    return Box[values]
+}
+take=():>array<int64>=>{
+ let maybe=make(true)
+ if maybe is? none return []
+ return maybe.values
+}
+main=():>int64=>{let values=take() values.push(22) return if values.length=?2 values[0]+values[1] else 1}
+
