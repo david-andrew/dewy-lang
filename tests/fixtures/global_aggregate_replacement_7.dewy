@@ -1,0 +1,14 @@
+$explicit_copies
+Box:type=[text:string items:array<string>]
+let saved=Box['' []]
+update=(n:int64):>void=>{let text="{n}" saved=Box[text [text]]}
+work=():>int64=>{
+    update(42)
+    return if saved.text=?'42' and saved.items.length=?1 and saved.items[0]=?'42' 42 else 1
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let baseline:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?baseline 42 else 3
+}

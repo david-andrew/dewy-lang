@@ -1,0 +1,17 @@
+$explicit_copies
+let saved:array<int64 length=2>=[0 0]
+update=(n:int64):>void=>{saved=[n 22]}
+work=():>int64=>{
+    update(20)
+    let held=saved.copy()
+    saved=saved.copy()
+    if saved.length not=?2 return 1
+    saved[0]=21
+    return if held.length=?2 and held[0]=?20 saved[0]+saved[1]-1 else 2
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

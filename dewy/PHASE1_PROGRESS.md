@@ -28,6 +28,31 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Lasting ownership for global replacements (2026-09-29)
+
+Hosted ordinary array/record assignment now uses the existing lasting-storage
+replacement path for module owners, instead of blanket rejection. Global arrays
+release their prior descriptor after RHS evaluation, including repeated module
+initialization. Native globals now release previous owned values too: globals
+were absent from lexical cleanup frames, so repeated replacement leaked them.
+The native module-initialization path participates without pretending that a
+global has function-local cleanup. Exposed storage retains its conservative
+lifetime boundary; resource-bearing hosted global replacements remain outside
+this slice.
+
+Eight hosted cases pass, plus fifteen surrounding ownership checks and the
+fresh paired native group on x86-64/C. Kernels cover records, arrays, fixed and
+nested extents, retained snapshots, self-copy replacement, module startup,
+dynamic strings and repeated live-byte recovery. The initial native probe
+returned the leak failure (3); the repaired cases return 42. Eight fixtures
+bring the manifest to 613. Logs use `dewy-global-aggregate-*` and
+`dewy-global-owner-*`.
+
+An independent hosted seed pair built successfully from the preceding frozen
+snapshot: 191.49 seconds checking, 48.74 lowering, 4.83 emission and 24.20
+backend. It predates the final module-startup release adjustment; fresh native
+integration of the complete batch is still required.
+
 ## Parent-place validation adopts strict checking (2026-09-29)
 
 Parent-place validation borrows a membership-guarded parameter summary instead

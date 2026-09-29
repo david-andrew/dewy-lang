@@ -1,0 +1,7 @@
+$explicit_copies
+let saved:array<int64>=[]
+saved=[1 2]
+let baseline:int64=_arena_live_bytes
+saved=[20 22]
+let final:int64=_arena_live_bytes
+main=():>int64=>if final=?baseline and saved.length=?2 saved[0]+saved[1] else 1

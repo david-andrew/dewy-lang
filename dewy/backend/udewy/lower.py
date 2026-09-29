@@ -2450,6 +2450,11 @@ class _Lowerer(
                 and current_function is not None
                 and target_binding is not None
                 and target_binding.owner_function is None
+                # Ordinary globals own lasting storage. Replacement promotes
+                # nested handles before releasing the old value, just as for
+                # a caller's place. Resource hooks remain conservative here.
+                and not (self._has_arena() and isinstance(node.target.type, (ty.ObjectType, ty.ArrayType))
+                         and storage_borrows.borrowable(node.target.type))
             ):
                 self._target_error(
                     node,

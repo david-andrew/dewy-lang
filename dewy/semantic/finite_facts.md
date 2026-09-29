@@ -59,6 +59,11 @@ spellings. A term is a scalar value or a sequence length. Current facts include:
 - a symmetric disequality between two terms;
 - separately maintained literal/type alternatives and callable predicate facts.
 
+Replacing an array element changes its contents, not the extents of the arrays
+containing it. The stored element's old facts invalidate; containing lengths
+survive only if still known after RHS evaluation. This includes nested and
+named-selected arrays, without resurrecting lengths invalidated by RHS calls.
+
 An immutable sibling-field contract can establish a relation whenever its field
 is read. Mutable numeric selections can be named while their selectors stay
 unchanged. A changed selector, overlapping field/index write, length-changing

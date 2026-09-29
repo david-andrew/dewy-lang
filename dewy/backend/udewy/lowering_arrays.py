@@ -1121,7 +1121,9 @@ class _ArrayLowering(_ArraySharing):
                     *self._release_owned_array(replacement_owner, node.loc, element=array_type.element),
                     replace(node, value=fresh),
                     hir.Assign(node.loc, ty.VOID_TYPE, replacement_owner, '=', replace(node.target, type='int64'))]
-        if node.target.name in self.owned_array_names:
+        binding = self.binding_by_semantic_id.get(node.target.binding_id)
+        global_owner = binding is not None and binding.owner_function is None
+        if node.target.name in self.owned_array_names or global_owner:
             # the old value is dead once the new one is computed — compute it
             # first (`x = shift(x 2)` reads the old `x`), then release, then rebind
             statements = list(prelude)
@@ -1129,7 +1131,7 @@ class _ArrayLowering(_ArraySharing):
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('rebound'))
                 statements.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied))
                 assignment = replace(node, value=fresh)
-            statements.extend(self._release_owned_array(replace(node.target, type='int64'), node.loc, element=self.owned_array_elements.get(node.target.name)))
+            statements.extend(self._release_owned_array(replace(node.target, type='int64'), node.loc, element=array_type.element))
             return [*statements, assignment]
         return [*prelude, assignment]
 

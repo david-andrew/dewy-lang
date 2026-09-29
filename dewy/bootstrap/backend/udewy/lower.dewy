@@ -67,6 +67,7 @@ State:type = [
     # they empty, which must be declared `let` for the emptying store.
     moved_uses:set<addr>=set[]
     return_borrow_sources:dict<addr addr>=[]
+    module_startup:bool=false
     moved_bindings:set<addr>=set[]
     nodes:array<hir.AST>=[]
     type_nodes:types.Table=types.Table[]
@@ -717,7 +718,11 @@ expression = (id:addr @state:State):>addr => {
             let function=put(hir.ExpressedIdentifier[node.loc signature name] @state)
             value=put(hir.FunctionCall[node.loc operand_type function [if boxed array_load(target stored node @state) else target value] []] @state)
         }
-        if state.cleanup_enabled and original.binding_id isnt? none and (original.binding_id in? state.cleanup_owned or original.binding_id in? state.place_parameters) {
+        # Globals own their previous value too, although they never appear
+        # in a function's lexical cleanup frames. Replacement must release
+        # that value after evaluating the RHS, just as a caller's place does.
+        let global_owner=original.binding_id isnt? none and original.binding_id in? state.capture_plan.globals and original.binding_id not in? state.cleanup_excluded
+        if (state.cleanup_enabled or state.module_startup) and original.binding_id isnt? none and (original.binding_id in? state.cleanup_owned or original.binding_id in? state.place_parameters or global_owner) {
             let prefix:array<addr>=[]
             let replacement=snapshot(value @prefix @state)
             if original.binding_id in? state.addressed and inline_place(stored @state) {
@@ -5789,6 +5794,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         if item is? hir.Block and not item.scoped {loop inner in item.items {items.push(inner)}}
         else {items.push(id)}
     }
+    state.module_startup=true
     loop id in items {
         let owner=source_by_item.get(id)
         if owner isnt? none {state.source_index=owner}
@@ -5816,6 +5822,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             startup.push(put(hir.Assign[node.loc void_type target '=' declaration.expr] @state))
         } else {startup.push(expression(id @state))}
     }
+    state.module_startup=false
     # Module statements run in the generated initializer. Its nonlocal
     # exits need their own initialized signals before function lowering resets
     # the control state for each independently emitted body.
