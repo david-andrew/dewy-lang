@@ -570,17 +570,6 @@ let read = ():>int64 => {
 }
 ''',
         ),
-        (
-            'left',
-            '''
-let read = (choose_left:bool):>int64 => {
-    let left = [42 0]
-    let right = [0 42]
-    let selected = if choose_left { left } else { right }
-    return selected[0]
-}
-''',
-        ),
     ],
 )
 def test_local_array_representation_uses_keep_descriptors(
@@ -590,6 +579,25 @@ def test_local_array_representation_uses_keep_descriptors(
     representations, _ = _classify_array_representations(source)
 
     assert representations[name] == 'descriptor'
+
+
+def test_conditional_array_selection_keeps_frame_sources(tmp_path) -> None:
+    source = '''
+let read = (choose_left:bool):>int64 => {
+    let left = [42 0]
+    let right = [0 42]
+    let selected = if choose_left { left } else { right }
+    return selected[0]
+}
+let main = ():>int64 => if read(true)=?42 and read(false)=?0 42 else 1
+'''
+    representations, _ = _classify_array_representations(source)
+    # A read-only selection needs a descriptor, but its frame-backed sources
+    # stay alive throughout the loan and need no independently owned storage.
+    assert representations == {'left': 'stack_data', 'right': 'stack_data',
+                               'selected': 'descriptor'}
+    from test_scalar_projection import execute
+    execute(tmp_path, 'conditional-frame-array', codegen(SrcFile(None, source)))
 
 
 def test_module_const_word_array_uses_static_storage() -> None:

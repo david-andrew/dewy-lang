@@ -23,6 +23,17 @@ with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
 record/array-element changes have focused paired evidence and postdate this
 integration. Phase 1 remains open.
 
+## Full-suite repair: conditional frame-array expectation (2026-09-29)
+
+The older representation test required both branches of a read-only array
+selection to use owned descriptors. The current scoped-loan proof keeps their
+data in the frame and adapts only the selected view. The regression now checks
+that representation and executes both branches on x86-64/C. The targeted
+range/array/string pass had 107 passes and this one stale expectation; all ten
+representation checks pass after updating it. The nine existing record-element
+checks also pass with the corrected move explanation. The frozen broader run
+is still finishing and has additional failures to resolve.
+
 ## Effect syntax owns its retained snapshots (2026-09-29)
 
 `effect_syntax.dewy` now enables `$explicit_copies`. Its application parameter
