@@ -1164,6 +1164,31 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
             root=part.value
         }
         let owner=hir.node_at(state.input.nodes root)
+        # A tagged field is inline, but its active payload has its own owner.
+        # Move those two words into a fresh cell, emptying the old payload
+        # after detaching its containing record. The enclosing root keeps its
+        # normal cleanup. Family/layout conversions retain their copy path.
+        let stored_cell=stored_type(id @state)
+        let cell_result=cell_members(node.value_type @state) isnt? none
+        let same_payload=if cell_result cell_read_keeps_handle(stored_cell node.value_type @state) else payload_movable(stored_cell node.value_type node @state)
+        if valid and cell_members(stored_cell @state) isnt? none and same_payload and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+            let binding=owner.binding_id
+            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and storage_borrows.borrowable(owner.value_type state.type_nodes) {
+                let prefix:array<addr>=[]
+                let source=snapshot(field_pointer(node @state writable=true) @prefix @state)
+                let result=snapshot(if cell_result allocation(word(16 node @state) node @state) else read_word(source 8 node @state) @prefix @state)
+                if cell_result {
+                    prefix.push(store_word(read_word(source 0 node @state) result 0 node @state))
+                    prefix.push(store_word(read_word(source 8 node @state) result 8 node @state))
+                }
+                prefix.push(store_word(word(0 node @state) source 8 node @state))
+                prefix.push(result)
+                if cell_result {state.copy_notes.push(CopyNote['cell' copy_name(node.value_type @state) 'transferred from an inline field'
+                    'a bounded tag cell adopts the active payload; the source cell retains its ordinary cleanup'
+                    node.loc state.source_index false false true])}
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
         # An inline record is not a standalone headed allocation. Give it
         # a new root, adopting its owned handles field by field; the old
         # inline storage remains valid for its enclosing owner's cleanup.

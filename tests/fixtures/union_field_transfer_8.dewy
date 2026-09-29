@@ -1,0 +1,20 @@
+$explicit_copies
+Box:type=[item:array<int64>|bool]
+make=(present:bool):>Box=>Box[if present [20 22] else false]
+take=(present:bool):>array<int64>|bool=>{
+    let owner=make(present)
+    let result=owner.item
+    if owner.item is? bool return false
+    return result
+}
+work=(present:bool):>int64=>{
+    let value=take(present)
+    if value is? bool return if not value 42 else 1
+    return if value.length=?2 value[0]+value[1] else 2
+}
+main=():>int64=>{
+    if work(true) not=?42 or work(false) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..1000) {if work(true) not=?42 or work(false) not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

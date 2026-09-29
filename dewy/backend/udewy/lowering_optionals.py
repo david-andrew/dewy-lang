@@ -10,7 +10,7 @@ from ...utils import dataclass_replace as replace
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
-from .lowering_shared import LoopRegion, MoveNote
+from .lowering_shared import LoopRegion, MoveNote, local_binding_key
 
 
 class _OptionalLowering:
@@ -946,11 +946,24 @@ class _OptionalLowering:
             self._store_i64_field(source, 8, self._int64_literal(loc, 0), loc),
         ]
 
-    def _movable_cell_local(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> bool:
+    def _movable_cell_owner(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> bool:
         """A last-use owner whose active payload keeps its complete layout."""
-        if (not isinstance(value, hir.ExpressedIdentifier)
-                or id(value) not in self.moved_uses and id(value) not in self.moved_payload_uses
-                or (value.name not in self.owned_aggregate_cells and value.name not in self.owned_cells)):
+        if id(value) not in self.moved_uses and id(value) not in self.moved_payload_uses:
+            return False
+        if isinstance(value, hir.ExpressedIdentifier):
+            if value.name not in self.owned_aggregate_cells and value.name not in self.owned_cells:
+                return False
+        elif isinstance(value, hir.MemberAccess):
+            root = value.value
+            while isinstance(root, hir.MemberAccess):
+                root = root.value
+            from ...semantic.analyze.storage_borrows import borrowable
+            if (not isinstance(root, hir.ExpressedIdentifier) or not borrowable(root.type)
+                    or self.borrowed_fields.get(local_binding_key(root))
+                    or (local_binding_key(root) not in self.owned_objects
+                        and root.name not in self.owned_aggregate_cells)):
+                return False
+        else:
             return False
         stored = self._stored_union_members(value)
         possible = self._field_union_members(value.type) or (value.type,)
@@ -1037,16 +1050,25 @@ class _OptionalLowering:
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         stored_members = self._stored_union_members(value)
         possible = self._field_union_members(value.type)
-        if not reported and self._movable_cell_local(value, members):
-            if possible is None:
+        if not reported and self._movable_cell_owner(value, members):
+            if isinstance(value, hir.MemberAccess):
+                # The field cell stays in its owner's record; only the active
+                # payload transfers. Use the write route so retained sharing
+                # is detached before emptying any of its storage.
+                prelude, source = self._extract_projected_place_storage(
+                    replace(value, type=ty.union(*stored_members)))
+                origin = 'record field'
+            elif possible is None:
                 # A narrowed record expression extracts its payload pointer.
                 # Transfer from the original binding's cell instead; its tag
                 # and cleanup still belong to that cell after narrowing.
                 prelude, source = [], replace(value, type='int64', binding_id=None)
+                origin = f'`{value.name}`'
             else:
                 prelude, source = self._extract_expression(value)
+                origin = f'`{value.name}`'
             self.move_notes.append(MoveNote(self.srcfile, value.loc,
-                f'`{value.name}` is moved when stored in a union: this is its last use, so its payload changes owner', True))
+                f'{origin} is moved when stored in a union: this is its last use, so its payload changes owner', True))
             return [*prelude, *self._take_cell_payload(cell, source, value.loc)]
         if stored_members is not None and stored_members != members and possible is not None and all(self._union_target_member(member, members) is not None for member in possible):
             # a narrowed union (`length` after `isnt? none`): its cell still

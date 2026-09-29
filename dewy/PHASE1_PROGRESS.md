@@ -6,23 +6,43 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
-## Latest native/parity integration: `5d6a1baa` (2026-09-29)
+## Latest native/parity repair integration (2026-09-29)
 
-**507/507** paired acceptance/execution cases pass. An independent hosted seed
-rebuilds the native pair to a byte-identical three-generation fixed point,
-including its x86-64/C execution and scaling checks. The complete copy inventory
-reports **4,279 sites / 55,557 lines = 77.020/KLOC**, within the unchanged
-4,500/85 gates. Generations 2/3 took 89/103 seconds under concurrent validation;
-these are not isolated performance measurements. Artifacts use
-`phase1-ownership-closure-*` outside the checkout.
+**541/541** paired acceptance/execution cases pass against frozen source
+`2850bc9a`. An independent hosted seed rebuilt the repaired native sources to
+a byte-identical three-generation fixed point, including x86-64/C execution
+and scaling checks. The complete inventory reports **4,278 sites / 55,629 lines
+= 76.902/KLOC**, within the unchanged 4,500/85 gates. Generations 2/3 took
+92/83 seconds under concurrent validation, not isolated performance timings.
+Artifacts use `phase1-full-suite-repair-*` and `phase1-post-repair-*` outside
+the checkout. Subsequent ownership changes have focused evidence below.
 
-The broader non-slow pytest run finished with **6,039 passed, 20 failed and
-13 skipped** in 5,150.58 seconds; this is not a green full-suite checkpoint.
-The independent hosted seed before
-the last return-boundary adjustment prepared/emitted in 237.78/242.79 seconds,
-with 1,694 implicit runtime-sized bootstrap copies across 72 modules. The later
-record/array-element changes have focused paired evidence and postdate this
-integration. Phase 1 remains open.
+The fresh non-slow pytest run remains in progress against the preceding frozen
+repair source. It has found the contextual-literal follow-up already fixed in
+`2850bc9a`; do not treat this as a green full-suite checkpoint. The previous
+`5d6a1baa` run had 6,039 passes, 20 failures and 13 skips; the repairs below
+address those failures. The last hosted full strict-copy inventory still has
+1,694 implicit runtime-sized bootstrap sites across 72 modules, before the
+latest ownership slices. Phase 1 remains open.
+
+## Last-use tagged record fields (2026-09-29)
+
+Both lowerers now transfer the active payload of an ordinary record's last-use
+union field. The cell stays in the containing record for normal cleanup, with
+its payload emptied; the receiving cell owns the transferred value. Native
+lowering detaches shared enclosing roots before touching the field. Narrowed
+payloads retain their actual layout, and fixed frame trees and family-layout
+conversions keep the established copy path. Native field-sensitive liveness now
+includes these cells, including replacement after a transfer.
+
+Ten focused hosted checks (including a disabled-proof control), 60 surrounding
+move/union checks and the paired native group pass. Coverage includes optional
+owners, nested fields, narrowed array/record payloads, retained snapshots,
+replacement and 1,000 iterations with no retained heap bytes. Escaping named
+borrowed aliases still require separate owner-directed promotion; they are not
+silently reclassified as owners. Ten fixtures bring the manifest to 568.
+Artifacts use `dewy-union-field-*`. The `inferred_results.dewy` endpoint transfer
+now proves; its next obligation is a nested read-only getter call.
 
 ## Computed immutable startup owners (2026-09-29)
 

@@ -407,6 +407,7 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
             let stored=types.node_at(table views.structural_base(slot.value_type table))
             let transferable=if array is? types.ArrayType and stored is? types.ArrayType stored.length is? none and types.same_type(stored.element array.element table)
                 else array is? types.ObjectType and types.same_type(slot.value_type field.value_type table)
+            if stored is? types.TypeOr and views.preserves_union_payload(field.value_type slot.value_type table) {transferable=true}
             if not transferable continue
             let root=hir.node_at(nodes field.value)
             loop root is? hir.MemberAccess {root=hir.node_at(nodes root.value)}

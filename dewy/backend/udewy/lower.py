@@ -4003,6 +4003,9 @@ class _Lowerer(
                                 and stored.length is None and stored.element == array.element)
                 transferable |= (isinstance(array, ty.ObjectType) and array == stored
                                  and self._record_fields_transferable(array))
+                transferable |= (field is not None and self._field_union_members(field.type) is not None
+                                 and ty.preserves_union_payload(source.type, field.type)
+                                 and storage_borrows.borrowable(source.value.type))
                 if (transferable
                         and isinstance(root, hir.ExpressedIdentifier)
                         and (root.binding_id in element_owners or root.binding_id in cells)
