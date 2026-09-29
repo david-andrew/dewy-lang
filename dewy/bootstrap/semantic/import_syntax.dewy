@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Span
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -20,13 +21,13 @@ keyword = (id:addr expected:string nodes:array<tokens.Token>):>bool => {
 read_names = (id:addr context:contexts.Context session:contexts.Session):>array<Name>|Error => {
     $runtime_assert context.source <? session.sources.length
     let node = tokens.node_at(session.sources[context.source].nodes id)
-    let items:array<addr> = [id]
-    if node is? parser.Block and node.delims =? '()' { items = node.inner }
-    if node is? parser.Flat and syntax.is_operator(node.op ',' session.sources[context.source].nodes) { items = node.items }
-    if items.length =? 1 {
-        let first = tokens.node_at(session.sources[context.source].nodes items[0])
-        if first is? parser.Flat and syntax.is_operator(first.op ',' session.sources[context.source].nodes) { items = first.items }
-    }
+    # Parentheses and comma syntax select an existing list. Keep each
+    # selection immutable so its source stays alive through the name walk.
+    const initial_items:array<addr> = if node is? parser.Block and node.delims =? '()' node.inner
+        else if node is? parser.Flat and syntax.is_operator(node.op ',' session.sources[context.source].nodes) node.items
+        else [id]
+    let first = if initial_items.length =? 1 tokens.node_at(session.sources[context.source].nodes initial_items[0]) else none
+    const items:array<addr> = if first is? parser.Flat and syntax.is_operator(first.op ',' session.sources[context.source].nodes) first.items else initial_items
     let names:array<Name> = []
     loop item in items {
         let row = tokens.node_at(session.sources[context.source].nodes item)

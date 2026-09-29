@@ -56,6 +56,26 @@ def independent_materialization(node):
         hir.RepresentationCast, hir.Obligation)) for item in hir.walk(node))
 
 
+def private_origin(node):
+    """Fresh value boundaries stay private through lazy conditional selection."""
+    pending = [node]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, (hir.ObjectLiteral, hir.ArrayLiteral, hir.FunctionCall, hir.NoneValue)):
+            continue
+        if isinstance(item, hir.Flow):
+            if item.default is None or any(not isinstance(arm, hir.IfArm) for arm in item.arms):
+                return False
+            pending.extend([item.default, *(arm.body for arm in item.arms)])
+        elif isinstance(item, hir.Block) and len(item.items) == 1:
+            pending.append(item.items[0])
+        elif isinstance(item, hir.ValueCast):
+            pending.append(item.expr)
+        else:
+            return False
+    return True
+
+
 def union_loan_source(node, expected_type=None):
     """A pure member injection/widening whose existing payload layout is kept.
 
@@ -96,9 +116,9 @@ def array_selection(node):
     leaves, pending = [], [node]
     while pending:
         item = pending.pop()
-        actual = ty.structural_base(item.type)
-        if not isinstance(actual, ty.ArrayType) or actual.element != shape.element:
-            return None
+        # A nested join may retain a union of array lengths until its outer
+        # context widens it. Wrappers do not own storage: check each leaf's
+        # element representation instead of requiring a normalized join type.
         if isinstance(item, hir.Flow):
             if item.default is None or any(not isinstance(arm, hir.IfArm) for arm in item.arms):
                 return None
@@ -107,19 +127,20 @@ def array_selection(node):
             pending.append(item.items[0])
         elif isinstance(item, (hir.ValueCast, hir.RepresentationCast)):
             pending.append(item.expr)
-        elif isinstance(item, hir.ArrayLiteral):
-            if (actual.length != len(item.items) or len(item.items) > 64 or any(isinstance(value, hir.Spread) for value in item.items)
+        else:
+            actual = ty.structural_base(item.type)
+            if not isinstance(actual, ty.ArrayType) or actual.element != shape.element:
+                return None
+            if not isinstance(item, (hir.ArrayLiteral, hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+                return None
+            if isinstance(item, hir.ArrayLiteral) and (actual.length != len(item.items) or len(item.items) > 64 or any(isinstance(value, hir.Spread) for value in item.items)
                     or item.items and actual.element != 'bool' and ty.fixed_integer_layout(actual.element) is None):
                 return None
             leaves.append(item)
-        elif isinstance(item, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
-            leaves.append(item)
-        else:
-            return None
     return leaves
 
 
-def owning_array_reads(body, analysis, summaries):
+def owning_array_reads(body, analysis, summaries, selection_reads=()):
     """An owning use should keep a join's ordinary last-use move protocol."""
     owning = set()
     for parent in body:
@@ -137,7 +158,7 @@ def owning_array_reads(body, analysis, summaries):
         for child in hir.children(parent):
             if not isinstance(child, hir.ExpressedIdentifier) or child.binding_id is None:
                 continue
-            observed = (
+            observed = (id(child) in selection_reads or
                 isinstance(parent, (hir.Index, hir.ArrayLength)) and child is parent.array
                 or isinstance(parent, hir.MemberAccess) and child is parent.value
                 or isinstance(parent, hir.IteratorExpression) and child is parent.iterable
@@ -253,7 +274,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                              # Ordinary calls return independent values. The
                              # graph check below still excludes unknown/raw
                              # effects and writes/captures of these locals.
-                             and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral, hir.FunctionCall))}
+                             and private_origin(node.expr)}
         for node in body:
             if (isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr)
                     and union_loan_source(node) is None):
@@ -346,7 +367,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 continue
             local_views.add(node.binding_id)
             pending_views.extend(waiting_views.pop(node.binding_id, ()))
-        def stable_value(value):
+        def stable_value(value, selections=()):
             path = bindings.access_path(value, unwrap=_unwrap)
             source = path.root
             if not isinstance(source, hir.ExpressedIdentifier):
@@ -354,7 +375,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             own = parameters.get(source.binding_id)
             incoming = summaries.for_param_binding(own.binding_id) if own else None
             local = stable_locals[id(literal)].get(source.binding_id)
-            stable = source.binding_id in local_views or (local is not None and ordinary(local)) or (
+            stable = source.binding_id in local_views or source.binding_id in selections or (local is not None and ordinary(local)) or (
                 own is not None and ordinary(own.type) and incoming is not None
                 and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else step.name
                                                 for step in path.steps)))
@@ -372,11 +393,11 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # keeps its owner stable and every fresh arm fits bounded frame storage.
         # Mutating/escaping uses still pay their normal value-boundary cost.
         flow_bytes = 0
-        selections = [node for node in bodies[id(literal)] if isinstance(node, hir.Declare) and isinstance(node.expr, hir.Flow)]
-        owning_reads = owning_array_reads(bodies[id(literal)], analysis, summaries) if selections else set()
-        for node in selections:
-            if (not isinstance(node, hir.Declare) or node.binding_id is None or node.view
-                    or node.binding_id in writes[id(literal)] or node.binding_id in captured or node.binding_id in owning_reads
+        candidates, selection_reads = {}, set()
+        for node in bodies[id(literal)]:
+            if (not isinstance(node, hir.Declare) or not isinstance(node.expr, hir.Flow)
+                    or node.binding_id is None or node.view
+                    or node.binding_id in writes[id(literal)] or node.binding_id in captured
                     or not ordinary(node.expr.type)):
                 continue
             leaves = array_selection(node.expr)
@@ -385,11 +406,56 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 continue
             literals = [item for item in leaves if isinstance(item, hir.ArrayLiteral)]
             size = sum(64 + 8 * len(item.items) for item in literals)
-            if flow_bytes + size > 4096 or not all(isinstance(item, hir.ArrayLiteral) or stable_value(item) for item in leaves):
+            if flow_bytes + size > 4096:
                 continue
             flow_bytes += size
-            flow_views.add(node.binding_id)
-            local_views.add(node.binding_id)
+            candidates[node.binding_id] = (leaves, literals)
+            selection_reads.update(id(item) for item in leaves if isinstance(item, hir.ExpressedIdentifier))
+
+        # A selected view may itself feed another selection. First prove all
+        # sources from independent roots, then revoke the connected loans if
+        # any reader needs an owner. Neither a cycle nor a failed reader can
+        # bootstrap borrowing. Each edge is visited a bounded number of times.
+        owning_reads = owning_array_reads(bodies[id(literal)], analysis, summaries, selection_reads) if candidates else set()
+        dependencies, readers, invalid = {}, {}, set()
+        for binding, (leaves, _) in candidates.items():
+            needed = set()
+            if binding in owning_reads:
+                invalid.add(binding)
+            for leaf in leaves:
+                if isinstance(leaf, hir.ArrayLiteral):
+                    continue
+                if not stable_value(leaf, candidates):
+                    invalid.add(binding)
+                    continue
+                source = bindings.access_path(leaf, unwrap=_unwrap).root
+                if isinstance(source, hir.ExpressedIdentifier) and source.binding_id in candidates:
+                    needed.add(source.binding_id)
+                    readers.setdefault(source.binding_id, set()).add(binding)
+            dependencies[binding] = needed
+        counts = {binding: len(needed) for binding, needed in dependencies.items()}
+        pending = [binding for binding, count in counts.items() if not count and binding not in invalid]
+        proven = set()
+        while pending:
+            binding = pending.pop()
+            proven.add(binding)
+            for reader in readers.get(binding, ()):
+                counts[reader] -= 1
+                if not counts[reader] and reader not in invalid:
+                    pending.append(reader)
+        invalid.update(candidates.keys() - proven)
+        pending = list(invalid)
+        while pending:
+            binding = pending.pop()
+            for neighbor in dependencies.get(binding, set()) | readers.get(binding, set()):
+                if neighbor not in invalid:
+                    invalid.add(neighbor)
+                    pending.append(neighbor)
+        for binding, (leaves, literals) in candidates.items():
+            if binding in invalid:
+                continue
+            flow_views.add(binding)
+            local_views.add(binding)
             flow_literals.update(id(item) for item in literals)
             flow_sources.update(id(item) for item in leaves if isinstance(item, hir.ExpressedIdentifier))
 

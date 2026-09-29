@@ -182,6 +182,27 @@ def inventory(root, registry, allocator_scopes=None):
                 any(isinstance(step, (hir.Index, hir.DictLookup)) for step in path.steps)
                 or bool(path.steps) and path.binding_id in value_parameters)
 
+        def visit_selection(node):
+            # The shared proof already checked all leaf layouts and lifetimes.
+            # Intermediate joins/casts need no owned union cell on this path;
+            # conditions and actual leaf evaluation keep their own effects.
+            pending = [node]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, hir.Flow):
+                    for arm in item.arms:
+                        assert isinstance(arm, hir.IfArm)
+                        visit(arm.condition)
+                        pending.append(arm.body)
+                    assert item.default is not None
+                    pending.append(item.default)
+                elif isinstance(item, hir.Block) and len(item.items) == 1:
+                    pending.append(item.items[0])
+                elif isinstance(item, (hir.ValueCast, hir.RepresentationCast)):
+                    pending.append(item.expr)
+                else:
+                    visit(item)
+
         def visit(node):
             nonlocal summary
             if isinstance(node, hir.AllocatorBlock):
@@ -335,7 +356,10 @@ def inventory(root, registry, allocator_scopes=None):
                 # lowering must prove the storage demand or reject it.
                 if not node.view and node.binding_id not in storage_proofs.local_views and node.binding_id not in frame_values and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)) and not isinstance(node.expr.type, (ty.FunctionType, ty.OverloadType)):
                     storage()
-                visit(node.expr)
+                if node.binding_id in storage_proofs.flow_views:
+                    visit_selection(node.expr)
+                else:
+                    visit(node.expr)
                 return
             if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
                 path = bindings.access_path(node.target, unwrap=_unwrap, dictionaries=True)

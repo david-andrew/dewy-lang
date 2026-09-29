@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Pointer, SrcFile
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -11,16 +12,19 @@ bound = (id:addr source:SrcFile nodes:array<tokens.Token> pattern:bool=false):>E
     if name isnt? none and name in? RESERVED return Error[srcfile=source title="`{name}` is reserved" pointers=[Pointer[span=tokens.node_at(nodes id).loc message='choose another binding name']]]
     let node=tokens.node_at(nodes id)
     if pattern and node is? parser.Block and node.delims =? '<>' return none
-    let children:array<addr>=[]
-    if node is? parser.Block {children=node.inner}
-    else if node is? parser.Flat {children=node.items}
-    else if node is? parser.Prefix {children=[node.item]}
-    else if node is? parser.BinOp {
-        let op=syntax.symbol(node.op nodes)
-        if op in? [':' '=' ':=' '::' 'of' ':>'] {children=[node.left]}
-        else if op in? ['.' 'EllipsisJuxtapose'] {children=[node.right]}
-        else if op =? 'TypeParamJuxtapose' {children=[node.left node.right]}
-    }
+    # Select the children to inspect without giving them a new storage owner.
+    # Prefix/operator cases are bounded scalar lists; block/flat cases lend
+    # the unchanged node's existing list through the recursive walk.
+    let op=if node is? parser.BinOp syntax.symbol(node.op nodes) else ''
+    const children:array<addr>=if node is? parser.Block node.inner
+        else if node is? parser.Flat node.items
+        else if node is? parser.Prefix [node.item]
+        else if node is? parser.BinOp {
+            if op in? [':' '=' ':=' '::' 'of' ':>'] [node.left]
+            else if op in? ['.' 'EllipsisJuxtapose'] [node.right]
+            else if op =? 'TypeParamJuxtapose' [node.left node.right]
+            else []
+        } else []
     loop child in children {
         let error=bound(child source nodes pattern=pattern)
         if error isnt? none return error

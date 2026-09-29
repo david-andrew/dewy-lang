@@ -36,6 +36,30 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): array-selection loans now compose through other
+selected views and nested single-expression blocks. A finite dependency
+worklist establishes each source from stable storage, rejects self-supporting
+cycles, and revokes connected loans when a reader requires ownership. Both
+lowerers retain the original owner through all dependent last reads. Internal
+unions of array lengths are checked at their actual leaf layouts. Effect
+checking follows that same proved selection instead of charging its erased
+join casts for storage or unknown behavior; condition/leaf effects remain.
+
+Fresh conditional call/literal results may also seed a private owner. Copies
+from existing names, captures, exposure and writes remain outside that proof.
+`source_names.dewy` and `import_syntax.dewy` now describe their read-only lists
+as immutable selections and enable `$explicit_copies` without adding `.copy()`;
+both modules pass both compiler routes. Strict adoption is now 44 physical
+bootstrap modules. Compiler-wide adoption remains open.
+
+The expanded hosted storage suite passes 45 checks; all three paired groups
+pass on x86-64/C (83.87 seconds), including zero-allocation repetition, branch
+laziness, preserved snapshots, multistage liveness and rejection cases. An
+independent hosted-built native driver, followed by the native-built driver
+with matching effect analysis, supplies the paired route. Four fixtures bring
+the full manifest to 360. Full frozen integration is still certified at
+`41a4a3e2`; this checkpoint does not substitute focused checks for that gate.
+
 Checkpoint (2026-09-28): both source mutation pre-scans now distinguish call
 keyword labels from writes to caller bindings. `read(values=values)` inside
 an iteration no longer falsely says that `values` changed. Argument values

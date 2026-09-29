@@ -1,0 +1,13 @@
+$explicit_copies
+work=(xs:array<int64> flag:bool):>int64 & no_effects=>{
+ const first:array<int64>=if flag xs else {if flag [42] else []}
+ const second:array<int64>=if flag first else [42]
+ return if second.length>?0 second[0] else 1
+}
+main=():>int64=>{
+ let xs:array<int64>=[42]
+ if work(xs true) not=?42 or work(xs false) not=?42 return 1
+ let before:int64=_arena_allocated_bytes
+ loop i in [0..1000) {if work(xs true) not=?42 return 2}
+ return if _arena_allocated_bytes=?before 42 else 3
+}

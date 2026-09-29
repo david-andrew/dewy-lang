@@ -26,11 +26,19 @@ items, with a 4 KiB literal budget per function. Only the selected arm runs.
 Mutations, escaping uses and statement-bearing arms retain the ordinary
 ownership rules; returning the selected array still requires an independent
 value or a proved transfer. Allocation contracts consume the same evidence.
+Nested single-expression blocks may keep a union of array lengths internally;
+the selection proof checks the leaves' element layouts rather than requiring
+that intermediate join to have already been widened. A selected view may feed
+another selection. Both views must trace back to stable owners; an owning or
+mutating reader restores their snapshot obligations, and a cycle cannot prove
+its own stability. Dependent views keep the original owner live through their
+last reads.
 
 The stability proof distinguishes incoming storage from a private fresh owner.
 An unrelated helper's global effects may invalidate an incoming alias, but
 cannot reach a local value whose address never escapes and which no closure
-captures. Such local owners and their projections can remain borrowed across
+captures. A lazy conditional choosing fresh call/literal results also supplies a private
+owner. Such local owners and their projections can remain borrowed across
 those calls. Direct writes, exposed places, representation casts, raw or
 unresolved argument exposure, and captured owners retain their conservative
 ownership checks. A later lifted closure call also keeps its captured owner

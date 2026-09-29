@@ -70,6 +70,27 @@ independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
     }
     return true
 }
+# Only fresh value boundaries seed private ownership. Conditional selection
+# is lazy, but whichever branch returns supplies its own independent value.
+private_origin=(id:addr nodes:array<hir.AST>):>bool=>{
+    let pending:array<addr>=[id]
+    loop pending.length>?0 {
+        let item=hir.node_at(nodes pending.pop)
+        if item is? hir.ObjectLiteral|hir.ArrayLiteral|hir.FunctionCall|hir.NoneValue continue
+        if item is? hir.Flow {
+            if item.default is? none return false
+            pending.push(item.default)
+            loop id in item.arms {
+                let arm=hir.node_at(nodes id)
+                if arm isnt? hir.IfArm return false
+                pending.push(arm.body)
+            }
+        } else if item is? hir.Block and item.items.length=?1 {pending.push(item.items[0])}
+        else if item is? hir.ValueCast {pending.push(item.expr)}
+        else {return false}
+    }
+    return true
+}
 # Classify only exact member injection/widening. The call proof below still
 # supplies stability and read-only use; this is not permission by itself.
 # Type normalization stays inside the representation query; only an input
@@ -111,13 +132,13 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table):>array<
     }
     return arrays
 }
-stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool>):>bool=>{
+stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
     let path=bindings.access_path(value nodes)
     let source=hir.node_at(nodes path.root)
     if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
     let own=parameters.get(source.binding_id)
     let local=local_owners.get(source.binding_id)
-    let stable=source.binding_id in? local_views or (local isnt? none and ordinary(local table @eligible))
+    let stable=source.binding_id in? local_views or source.binding_id in? selections or (local isnt? none and ordinary(local table @eligible))
     if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
         const incoming=@summaries.by_param_binding[source.binding_id]
         stable=stable_projection(incoming path nodes)
@@ -151,8 +172,8 @@ array_selection=(id:addr nodes:array<hir.AST> table:types.Table):>array<addr> | 
     loop pending.length>?0 {
         let id=pending.pop
         let item=hir.node_at(nodes id)
-        let actual=types.node_at(table views.structural_base(item.value_type table))
-        if actual isnt? types.ArrayType or not types.same_type(actual.element shape.element table) return none
+        # Nested joins may still be a union of array lengths. Widening that
+        # join does not change a leaf's element layout or create an owner.
         if item is? hir.Flow {
             if item.default is? none return none
             pending.push(item.default)
@@ -163,19 +184,23 @@ array_selection=(id:addr nodes:array<hir.AST> table:types.Table):>array<addr> | 
             }
         } else if item is? hir.Block and item.items.length=?1 {pending.push(item.items[0])}
         else if item is? hir.ValueCast|hir.RepresentationCast {pending.push(item.expr)}
-        else if item is? hir.ArrayLiteral {
-            if actual.length is? none or actual.length not=?item.items.length or item.items.length>?64 return none
-            if item.items.length>?0 and not types.is_primitive(types.node_at(table actual.element) 'bool') and views.fixed_integer_layout(actual.element table) is? none return none
-            loop value in item.items {if hir.node_at(nodes value) is? hir.Spread return none}
+        else {
+            let actual=types.node_at(table views.structural_base(item.value_type table))
+            if actual isnt? types.ArrayType or not types.same_type(actual.element shape.element table) return none
+            if item isnt? hir.ArrayLiteral|hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return none
+            if item is? hir.ArrayLiteral {
+                if actual.length is? none or actual.length not=?item.items.length or item.items.length>?64 return none
+                if item.items.length>?0 and not types.is_primitive(types.node_at(table actual.element) 'bool') and views.fixed_integer_layout(actual.element table) is? none return none
+                loop value in item.items {if hir.node_at(nodes value) is? hir.Spread return none}
+            }
             leaves.push(id)
-        } else if item is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {leaves.push(id)}
-        else {return none}
+        }
     }
     return leaves
 }
 # A selection whose result must become an owner keeps the existing move
 # protocol. Otherwise borrowing it could turn a valid move into a later copy.
-owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST>):>set<addr>=>{
+owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> selection_reads:set<addr>=set[]):>set<addr>=>{
     let owning:set<addr>=set[]
     loop id in body {
         let parent=hir.node_at(nodes id)
@@ -208,7 +233,7 @@ owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects
         loop id in hir.children(parent) {
             let child=hir.node_at(nodes id)
             if child isnt? hir.ExpressedIdentifier or child.binding_id is? none continue
-            let observed=id in? borrowed
+            let observed=id in? borrowed or id in? selection_reads
             if parent is? hir.Index|hir.ArrayLength and id=?parent.array {observed=true}
             if parent is? hir.MemberAccess and id=?parent.value {observed=true}
             if parent is? hir.IteratorExpression and id=?parent.iterable {observed=true}
@@ -289,7 +314,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 let value=hir.node_at(nodes node.expr)
                 # Ordinary calls return independent values; the call graph
                 # below still rules out unknown/raw effects and captures.
-                if value is? hir.ObjectLiteral|hir.ArrayLiteral|hir.FunctionCall {candidates[node.binding_id]=value.value_type}
+                if private_origin(node.expr nodes) {candidates[node.binding_id]=value.value_type}
             }
         }
         loop binding in written {candidates.pop(binding default=0);}
@@ -416,37 +441,96 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             }
         }
         let flow_bytes:addr=0
-        let selections:array<addr>=[]
+        let selections:set<addr>=set[]
+        let selection_leaves:dict<addr array<addr>>=[]
+        let selection_reads:set<addr>=set[]
         loop item in body {
-            let declared=hir.node_at(nodes item)
-            if declared is? hir.Declare and hir.node_at(nodes declared.expr) is? hir.Flow {selections.push(item)}
-        }
-        let owning_reads:set<addr>=if selections.length>?0 owning_array_reads(body analysis summaries nodes) else set[]
-        loop item in selections {
             let node=hir.node_at(nodes item)
-            if node isnt? hir.Declare or node.binding_id is? none or node.view or node.binding_id in? written or node.binding_id in? captured or node.binding_id in? owning_reads continue
+            if node isnt? hir.Declare or node.binding_id is? none or node.view or node.binding_id in? written or node.binding_id in? captured continue
             let value=hir.node_at(nodes node.expr)
-            if not ordinary(value.value_type table @eligible) continue
+            if value isnt? hir.Flow or not ordinary(value.value_type table @eligible) continue
             let leaves=array_selection(node.expr nodes table)
             if leaves is? none continue
             if node.annotation isnt? none and not types.same_type(views.structural_base(node.annotation table) views.structural_base(value.value_type table) table) continue
-            let literals:set<addr>=set[]
             let size:addr=0
-            let valid=true
             loop leaf in leaves {
                 let selected=hir.node_at(nodes leaf)
                 if selected is? hir.ArrayLiteral {
-                    if selected.items.length>?64 or size>?4096 {valid=false break}
-                    literals.push(leaf) size+=64+8*selected.items.length
+                    if selected.items.length>?64 or size>?4096 {size=4097 break}
+                    size+=64+8*selected.items.length
                 }
-                else if not stable_value(leaf parameters local_owners local_views summaries nodes table @eligible) {valid=false}
             }
-            if not valid or flow_bytes+size>?4096 continue
+            if flow_bytes+size>?4096 continue
             flow_bytes+=size
-            flow_views.push(node.binding_id)
-            local_views.push(node.binding_id)
-            loop leaf in literals {flow_literals.push(leaf)}
-            loop leaf in leaves {if hir.node_at(nodes leaf) is? hir.ExpressedIdentifier {flow_sources.push(leaf)}}
+            selections.push(node.binding_id)
+            loop leaf in leaves {if hir.node_at(nodes leaf) is? hir.ExpressedIdentifier {selection_reads.push(leaf)}}
+            selection_leaves[node.binding_id]=leaves
+        }
+        # Prove sources from independent roots, then revoke connected loans
+        # if any reader needs an owner. A cycle or failed reader supplies no
+        # evidence. Worklists visit each dependency a bounded number of times.
+        let owning_reads:set<addr>=if selections.length>?0 owning_array_reads(body analysis summaries nodes selection_reads=selection_reads) else set[]
+        let dependencies:dict<addr set<addr>>=[]
+        let readers:dict<addr set<addr>>=[]
+        let invalid:set<addr>=set[]
+        let counts:dict<addr addr>=[]
+        let ready:array<addr>=[]
+        loop binding in selections {
+            $runtime_assert binding in? selection_leaves
+            const leaves=@selection_leaves[binding]
+            let needed:set<addr>=set[]
+            if binding in? owning_reads {invalid.push(binding)}
+            loop leaf in leaves {
+                if hir.node_at(nodes leaf) is? hir.ArrayLiteral continue
+                if not stable_value(leaf parameters local_owners local_views summaries nodes table @eligible selections=selections) {invalid.push(binding) continue}
+                let source=hir.node_at(nodes bindings.access_path(leaf nodes).root)
+                if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? selections {
+                    needed.push(source.binding_id)
+                    if source.binding_id in? readers {let waiting=@readers[source.binding_id] waiting.push(binding)}
+                    else {readers[source.binding_id]=set[binding]}
+                }
+            }
+            counts[binding]=needed.length
+            if needed.length=?0 and binding not in? invalid {ready.push(binding)}
+            dependencies[binding]=needed
+        }
+        let proven:set<addr>=set[]
+        loop ready.length>?0 {
+            let binding=ready.pop
+            proven.push(binding)
+            if binding not in? readers continue
+            const waiting=@readers[binding]
+            loop reader in waiting {
+                $runtime_assert reader in? counts
+                let count=counts[reader]
+                $runtime_assert count>?0
+                counts[reader]=count-1
+                if count=?1 and reader not in? invalid {ready.push(reader)}
+            }
+        }
+        loop binding in selections {if binding not in? proven {invalid.push(binding)}}
+        loop binding in invalid {ready.push(binding)}
+        loop ready.length>?0 {
+            let binding=ready.pop
+            if binding in? dependencies {
+                const needed=@dependencies[binding]
+                loop neighbor in needed {if neighbor not in? invalid {invalid.push(neighbor) ready.push(neighbor)}}
+            }
+            if binding in? readers {
+                const waiting=@readers[binding]
+                loop neighbor in waiting {if neighbor not in? invalid {invalid.push(neighbor) ready.push(neighbor)}}
+            }
+        }
+        loop binding in selections {
+            if binding in? invalid continue
+            flow_views.push(binding) local_views.push(binding)
+            $runtime_assert binding in? selection_leaves
+            const leaves=@selection_leaves[binding]
+            loop leaf in leaves {
+                let selected=hir.node_at(nodes leaf)
+                if selected is? hir.ArrayLiteral {flow_literals.push(leaf)}
+                if selected is? hir.ExpressedIdentifier {flow_sources.push(leaf)}
+            }
         }
         let literal_bytes:addr=0
         loop item in body {

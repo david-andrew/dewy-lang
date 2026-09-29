@@ -1,0 +1,12 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+let counter:int64=0
+tick=():>void=>{counter+=1}
+make=():>Box=>Box[[42]]
+work=(flag:bool):>int64=>{
+ let owner=if flag {make()} else none
+ const selected:array<int64>=if owner is? Box owner.items else [42]
+ tick()
+ return if selected.length>?0 selected[0] else 1
+}
+main=():>int64=>if work(true)=?42 and work(false)=?42 and counter=?2 42 else 1
