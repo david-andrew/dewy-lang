@@ -6,6 +6,11 @@ intended. It records the order in which the remaining pieces should land,
 why that order, and the strategy for the pieces where the project has
 previously bogged down.
 
+The [September 29 audit](AUDIT_2026_09_29.md) records fresh direct-native
+measurements, capability/validation gaps and proposed sequencing adjustments.
+Those proposals await review; the phase ordering below has not been changed by
+the audit.
+
 How this relates to the other documents:
 
 - [`status.md`](status.md) is the feature-by-feature implementation tracker

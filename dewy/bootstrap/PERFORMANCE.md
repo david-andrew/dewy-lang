@@ -688,9 +688,12 @@ analysis 1.6, initialization and reachability 1.1, emission 1.0.
 Each imported module prints `parse`, `imports` and `check` lines, and a
 module's `imports` line covers the modules it imports. Sub-phase lines
 (`validation.*`, `lowering.*`, `bounds.function:*`) repeat bytes already
-counted by their parent. Only the top-level phases add up: `prelude_restore`,
-`prelude_analysis`, `prelude_store`, `patterns`, `frontend`, `validation`,
-`initialization_and_reachability`, `lowering`, `emission` and `backend`.
+counted by their parent. Only the invocation's disjoint root intervals add up:
+`frontend`, `validation`, `initialization_and_reachability`, `lowering`,
+`emission` and `backend`. Prelude restore/analysis/store and pattern handling
+run inside `frontend`, so adding them separately also double-counts. The
+September 29 audit confirms this nesting from the invocation and module-loader
+boundaries; see `../AUDIT_2026_09_29.md` for the fresh disjoint measurements.
 The allocated totals in `PHASE1_PROGRESS.md` from 2026-09-24 to 2026-09-27
 (152.1, 122.7, 105.0, 91.2 and 87.7 GB, among others) summed every line and
 overstate the real volume about threefold. They were all counted the same
