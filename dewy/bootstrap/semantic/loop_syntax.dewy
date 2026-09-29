@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"../parser/t2.dewy" as post
@@ -12,16 +13,18 @@ the condition can then establish fresh facts for every body entry. Nested
 function bodies have their own execution boundary and are not traversed.
 """
 
+# The caller owns this traversal list; it can append or consume it without
+# modifying the immutable syntax node. Read-only callers may elide the copy.
 children = (node:tokens.Token):>array<addr> => {
     if node is? parser.BinOp return [node.left node.right]
     if node is? parser.Prefix|parser.Postfix return [node.item]
-    if node is? parser.Flat return node.items
-    if node is? parser.Block|parser.ParametricEscape return node.inner
-    if node is? parser.Ambiguous return node.candidates
-    if node is? parser.KeywordExpr return node.parts
-    if node is? parser.IString return node.content
+    if node is? parser.Flat return node.items.copy()
+    if node is? parser.Block|parser.ParametricEscape return node.inner.copy()
+    if node is? parser.Ambiguous return node.candidates.copy()
+    if node is? parser.KeywordExpr return node.parts.copy()
+    if node is? parser.IString return node.content.copy()
     if node is? parser.Flow {
-        let result = node.arms
+        let result = node.arms.copy()
         if node.default isnt? none { result.push(node.default) }
         return result
     }

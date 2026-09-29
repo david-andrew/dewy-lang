@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Span, Pointer
 import p"../hir.dewy" as hir
 import p"../bindings.dewy" as bindings
@@ -51,7 +52,7 @@ integer = (value:bigint loc:Span @session:contexts.Session):>addr => put(hir.Int
 word = (id:addr loc:Span @session:contexts.Session):>addr? => {
     let node=hir.node_at(session.hir id)
     let plain=types.node_at(session.types types.strip_refinement(node.value_type session.types))
-    if plain is? types.IntegerLiteralType return if plain.value <? -9223372036854775808 or plain.value >? 9223372036854775807 none else integer(plain.value loc @session)
+    if plain is? types.IntegerLiteralType return if plain.value <? -9223372036854775808 or plain.value >? 9223372036854775807 none else integer(plain.value.copy() loc @session)
     if types.is_primitive(plain 'int64') return id
     if views.fixed_integer_layout(node.value_type session.types) is? none return none
     return put(hir.ValueCast[loc types.primitive('int64' @session.types) id] @session)
@@ -112,6 +113,8 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
         let magnitude=power_of_two(if target_layout.signed bits - 1 else bits)
         let minimum:bigint=if target_layout.signed 0 - magnitude else 0
         let maximum:bigint=magnitude - 1
+        # Render before transferring the bounds into their retained HIR literals.
+        let message="this value was outside `{display.type_to_dewy(node.value_type session.types)}`'s range [{_bigint_as_string(minimum)}, {_bigint_as_string(maximum)}]"
         let parts:array<addr>=[]
         if not source_layout.signed {
             # an unsigned source: only the maximum can fail, compared unsigned
@@ -123,7 +126,7 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
             parts.push(comparison('__le__' value integer(if maximum <? 9223372036854775807 maximum else 9223372036854775807 loc @session) loc @session))
         }
         if parts.length =? 0 return none
-        return Check[conjoin(parts loc @session) "this value was outside `{display.type_to_dewy(node.value_type session.types)}`'s range [{_bigint_as_string(minimum)}, {_bigint_as_string(maximum)}]"]
+        return Check[conjoin(parts loc @session) message]
     }
     if site.kind =? 'obligation' {
         if site.refined is? none or not simple(id session) return none
@@ -138,7 +141,7 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
             let subject:addr?=if p.projection =? 'length' length_of(id loc @session) else word(id loc @session)
             if subject is? none return none
             if p.value <? -9223372036854775808 or p.value >? 9223372036854775807 return none
-            parts.push(comparison(name subject integer(p.value loc @session) loc @session))
+            parts.push(comparison(name subject integer(p.value.copy() loc @session) loc @session))
             requirements.push("{if p.projection =? 'length' 'length' else 'value'} {if p.op =? 'not=?' 'not =?' else p.op} {_bigint_as_string(p.value)}")
         }
         if parts.length =? 0 return none
@@ -149,11 +152,13 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
 # Wrap one site in place: the node's id now holds `{ check  moved }`.
 wrap = (id:addr site:Deferred source:addr @session:contexts.Session):>bool => {
     let node=hir.node_at(session.hir id)
-    # The check reads the moved copy: the site's id becomes the wrapping block.
-    let moved=put(node @session)
+    let loc=node.loc
+    let value_type=node.value_type
+    # The source arena retains this node while check construction can fail.
+    # Its appended copy becomes the expression inside a successful wrapper.
+    let moved=put(node.copy() @session)
     let check=check_of(moved site @session)
     if check is? none return false
-    let loc=node.loc
     let never=types.primitive('never' @session.types)
     let nothing=types.primitive('void' @session.types)
     let message=put(hir.String[loc types.string_literal(check.message @session.types) check.message] @session)
@@ -161,14 +166,14 @@ wrap = (id:addr site:Deferred source:addr @session:contexts.Session):>bool => {
     let panic=put(hir.Block[loc never [failure] true] @session)
     let arm=put(hir.IfArm[loc nothing check.condition put(hir.Void[loc nothing] @session)] @session)
     let flow=put(hir.Flow[loc nothing [arm] panic] @session)
-    contexts.replace_hir(id hir.Block[loc node.value_type [flow moved] false] @session)
+    contexts.replace_hir(id hir.Block[loc value_type [flow moved] false] @session)
     return true
 }
 # Returns the reports of sites no check could be built for.
 insert = (sites:dict<addr Deferred> source:addr @session:contexts.Session):>array<Error> => {
     let unhandled:array<Error>=[]
     loop [id site] in sites {
-        if not wrap(id site source @session) {unhandled.push(site.report)}
+        if not wrap(id site source @session) {unhandled.push(site.report.copy())}
     }
     return unhandled
 }

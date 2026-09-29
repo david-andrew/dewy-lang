@@ -29,6 +29,29 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Strict traversal, diagnostics and match coverage (2026-09-29)
+
+Four more physical modules enforce `$explicit_copies`, bringing adoption to
+80: loop syntax, prototype checks, match coverage and unsafe audit collection.
+Traversal results and retained diagnostics state their ownership explicitly;
+prototype checks render bound diagnostics before transferring the bounds.
+Match coverage updates actual array slots. Dictionary-coordinate normalization
+still keeps an explicit prior snapshot: a mutable entry view currently exposes
+a hosted/native lifetime-proof precision gap, rather than a reason to weaken
+checking. That gap remains follow-up work.
+
+Unsafe audit collection appends nested scopes into one output array and retains
+HIR identities until constructing entries. This preserves version 1's candidate
+inventory; it does not claim actual proof-consumer provenance. The new comparison
+checks nested/named/anonymous scopes, repeated assumptions and escaped source text
+against hosted collection on x86-64/C, both hosted-built and native-built.
+
+All four modules pass hosted/native strict checking. Native match comparisons,
+the audit and loop-keyword groups (2 tests, 32.66 seconds), and prototype success
+and panic execution pass. Hosted audit comparison passes (72.33 seconds).
+Logs use `dewy-strict-support-*`, `dewy-prototype-support-native.log`,
+`dewy-audit-collector-host.log` and `dewy-match-source-comparison.log`.
+
 ## Conditional records retain their fresh ownership (2026-09-29)
 
 Hosted record flow results now share initializer ownership classification:

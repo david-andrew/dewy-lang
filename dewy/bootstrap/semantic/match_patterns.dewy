@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Warning, Pointer
 import p"../parser/p0.dewy" as parser
 import p"context.dewy" as contexts
@@ -90,7 +91,7 @@ parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Er
         }
         return Pattern[id 'object' fields=fields]
     }
-    if node is? parser.Block and node.delims =? '()' return Pattern[id 'sequence' items=node.inner]
+    if node is? parser.Block and node.delims =? '()' return Pattern[id 'sequence' items=node.inner.copy()]
     return contexts.problem(id 'unsupported match pattern' 'patterns are `name:T`, `<T>`, `name`, `[fields]`, or `(patterns)`' context session)
 }
 
@@ -154,7 +155,8 @@ all_full = (coverage:array<Member>):>bool => {
 Product:type = const [coordinates:array<Coordinate>]
 fresh = (coverage:array<Member>):>array<Member> => {
     let result:array<Member>=[]
-    loop member in coverage {result.push(Member[member.value_type member.domain brands=member.brands])}
+    # Each arm owns its unchanged domains alongside its evolving coverage.
+    loop member in coverage {result.push(Member[member.value_type member.domain.copy() brands=member.brands.copy()])}
     return result
 }
 contains_member = (previous:Member current:Member):>bool => {
@@ -213,7 +215,9 @@ cover_member = (pattern:Pattern @member:Member @session:contexts.Session):>bool 
             let related=subtyping.is_subtype(member_base base session.links @session.types) or subtyping.is_subtype(base member_base session.links @session.types)
             if not related and types.node_at(session.types base) isnt? types.IntegerLiteralType return false
             let admitted=values.intersect(member.domain domain)
-            let combined=values.union(member.covered admitted)
+            # Keep the old coverage until change detection compares it with
+            # the independently normalized union.
+            let combined=values.union(member.covered.copy() admitted)
             let changed=not values.same(combined member.covered)
             member.covered=combined
             return changed
@@ -239,8 +243,9 @@ cover_member = (pattern:Pattern @member:Member @session:contexts.Session):>bool 
         let domain=values.integer_domain(declared session.types)
         let admitted=values.integer_domain(field.test session.types)
         if domain is? none or admitted is? none return false
-        let previous=member.fields.get(field.name FieldCoverage[domain])
-        let combined=values.union(previous.covered admitted)
+        # Keep one independent prior coordinate while normalizing its update.
+        let previous=if field.name in? member.fields member.fields[field.name].copy() else FieldCoverage[domain]
+        let combined=values.union(previous.covered.copy() admitted)
         let changed=not values.same(combined previous.covered)
         member.fields[field.name]=FieldCoverage[previous.domain combined]
         return changed
@@ -250,9 +255,7 @@ cover_member = (pattern:Pattern @member:Member @session:contexts.Session):>bool 
 cover = (pattern:Pattern @coverage:array<Member> @session:contexts.Session):>bool => {
     let changed=false
     loop i in 0.. and i <? coverage.length {
-        let member=coverage[i]
-        if cover_member(pattern @member @session) {changed=true}
-        coverage[i]=member
+        if cover_member(pattern @coverage[i] @session) {changed=true}
     }
     return changed
 }

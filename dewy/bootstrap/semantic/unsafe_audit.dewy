@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Span, SrcFile
 import p"hir.dewy" as hir
 import p"context.dewy" as contexts
@@ -25,7 +26,11 @@ source_at = (id:addr? fallback:SrcFile session:contexts.Session):>SrcFile => {
 collect = (root:addr source:SrcFile session:contexts.Session scope:string='<module>'):>array<Entry> => {
     if session.unsafe_assertions.length =? 0 return []
     let entries:array<Entry>=[]
-    let sites:array<hir.Assert>=[]
+    collect_into(root source session scope @entries)
+    return entries
+}
+collect_into = (root:addr source:SrcFile session:contexts.Session scope:string @entries:array<Entry>):>void => {
+    let sites:array<addr>=[]
     let checks:array<Check>=[]
     let keys:set<string>=set[]
     let seen:set<addr>=set[]
@@ -46,15 +51,15 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
         if node is? hir.Declare {
             let value=hir.node_at(session.hir node.expr)
             if value is? hir.FunctionLiteral {
-                loop entry in collect(node.expr source_at(value.source source session) session node.name) {entries.push(entry)}
+                collect_into(node.expr source_at(value.source source session) session node.name @entries)
                 continue
             }
         }
         if node is? hir.FunctionLiteral {
-            loop entry in collect(id source_at(node.source source session) session '<anonymous>') {entries.push(entry)}
+            collect_into(id source_at(node.source source session) session '<anonymous>' @entries)
             continue
         }
-        if node is? hir.Assert and node.unsafe {sites.push(node) continue}
+        if node is? hir.Assert and node.unsafe {sites.push(id) continue}
         let category=kind(node)
         if category isnt? none {
             let key="{node.loc.start}:{node.loc.stop}:{category}"
@@ -64,8 +69,12 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
         let index=children.length
         loop index >? 0 {index-=1 pending.push(children[index])}
     }
-    loop node in sites {entries.push(Entry[source node.loc node.source node.message scope checks])}
-    return entries
+    # Each retained assumption owns its candidate list after traversal ends.
+    loop id in sites {
+        let node=hir.node_at(session.hir id)
+        $runtime_assert node is? hir.Assert
+        entries.push(Entry[source node.loc node.source node.message scope checks.copy()])
+    }
 }
 
 # Escape bytes so CRLF graphemes and every JSON control character are
