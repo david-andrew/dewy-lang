@@ -31,6 +31,25 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Effect propagation compares paths before retaining them (2026-09-29)
+
+A fixed-point transfer now compares its bounded prefix/suffix composition
+against stored coverage before constructing a path. Each effect kind reads its
+source sequence directly, avoiding the old mutable selection snapshot. Only a
+new fact allocates an independent bounded route. Root coverage, prefix collapse
+and the eight-step recursion limit retain the existing semantics.
+
+The native-built repeated-transfer probe drops from 248,000 to zero allocated
+bytes over 1,000 unchanged transfers on both x86-64 and C. Hosted-built probes
+also allocate zero. The permanent kernel covers every effect kind, absent
+parameters, source preservation, live-byte recovery and a composition matrix
+against ordinary route normalization. Native effect equivalence and the kernel
+pass together (22.69 seconds); hosted equivalence passes (22.10 seconds), and
+the hosted kernel passes in the 17-check array-equality batch (59.75 seconds).
+That last check also needs the accompanying hosted array-equality correction,
+which is undergoing its native nested-array checks. The new fixture brings the
+manifest to 686. Logs use `dewy-effect-translation-*`.
+
 ## Check ambient aliases throughout local-place lifetimes (2026-09-29)
 
 A borrowed parameter can denote a global or captured owner at its call site;

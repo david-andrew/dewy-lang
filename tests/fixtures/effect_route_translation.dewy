@@ -1,0 +1,49 @@
+import p"../../dewy/bootstrap/semantic/analyze/effects.dewy" as effects
+
+# All four kinds propagate without constructing another path when the
+# destination already covers the bounded prefix + source route.
+exercise=():>int64=>{
+    let source=effects.ParameterEffects[
+        reads=[effects.Route[['x']] effects.Route[['y' 'z']]]
+        mutates=[effects.Route[['m']]]
+        rebinds=[effects.Route[[]]]
+        escapes=[effects.Route[['e']]]]
+    let params:dict<addr effects.ParameterEffects>=[1->effects.ParameterEffects[]]
+    let prefix=effects.Route[['a' 'b']]
+    if not effects.translated(1 source prefix @params) return 1
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..1000) {if effects.translated(1 source prefix @params) return 2}
+    if _arena_allocated_bytes not=? before return 3
+    if effects.translated(2 source prefix @params) return 4
+    $runtime_assert 1 in? params
+    const result=params[1]
+    if result.reads.length not=?2 or result.mutates.length not=?1 or result.rebinds.length not=?1 or result.escapes.length not=?1 return 5
+    if result.reads[0].steps not=? ['a' 'b' 'x'] return 6
+    if result.reads[1].steps not=? ['a' 'b' 'y' 'z'] return 7
+    if result.rebinds[0].steps not=? ['a' 'b'] return 8
+    if source.reads[0].steps not=? ['x'] return 9
+
+    # Compare bounded composition with ordinary route insertion over empty,
+    # short, long and prefix-related paths. The normalization order agrees.
+    let paths:array<effects.Route>=[effects.Route[[]] effects.Route[['a']]
+        effects.Route[['a' 'b']] effects.Route[['z']]
+        effects.Route[['0' '1' '2' '3' '4' '5' '6' '7' '8' '9']]]
+    loop prefix in paths {
+        let actual:array<effects.Route>=[]
+        let expected:array<effects.Route>=[]
+        loop suffix in paths {
+            let steps=prefix.steps.copy()
+            loop step in suffix.steps {steps.push(step)}
+            let wanted=effects.add_route(@expected effects.Route[steps])
+            let got=effects.add_translated_route(@actual prefix suffix)
+            if got not=?wanted or actual not=?expected return 10
+        }
+    }
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 20
+    let before:int64=_arena_live_bytes
+    loop i in [0..8) {if exercise() not=?42 return 21}
+    return if _arena_live_bytes=?before 42 else 22
+}

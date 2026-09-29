@@ -118,20 +118,43 @@ opaque = (binding_id:addr route:Route @params:dict<addr ParameterEffects>):>bool
     loop kind in kinds { if record(binding_id kind route @params) { changed = true } }
     return changed
 }
-translated = (binding_id:addr summary:ParameterEffects prefix:Route @params:dict<addr ParameterEffects>):>bool => {
-    let changed:bool = false
-    let kinds:array<Effect> = ['read' 'mutate' 'rebind' 'escape']
-    loop kind in kinds {
-        let routes = summary.reads
-        if kind =? 'mutate' { routes = summary.mutates }
-        else if kind =? 'rebind' { routes = summary.rebinds }
-        else if kind =? 'escape' { routes = summary.escapes }
-        loop route in routes {
-            let steps = prefix.steps
-            loop step in route.steps { steps.push(step) }
-            if record(binding_id kind Route[steps] @params) { changed = true }
+# Compare the bounded concatenation before allocating it. Fixed-point edges
+# usually add no information; constructing a new path on every revisit makes
+# convergence allocate in proportion to worklist traffic rather than new facts.
+add_translated_route = (@routes:array<Route> prefix:Route suffix:Route):>bool => {
+    loop stored in routes {
+        if stored.steps.length >? MAX_ROUTE_DEPTH continue
+        let matches=true
+        loop index in [0..stored.steps.length) {
+            if index <? prefix.steps.length {
+                if stored.steps[index] not=? prefix.steps[index] {matches=false break}
+            } else {
+                let offset=index-prefix.steps.length
+                if offset >=? suffix.steps.length {matches=false break}
+                if stored.steps[index] not=? suffix.steps[offset] {matches=false break}
+            }
         }
+        if matches return false
     }
+    let steps:array<string>=[]
+    loop step in prefix.steps {if steps.length =? MAX_ROUTE_DEPTH break; steps.push(step)}
+    loop step in suffix.steps {if steps.length =? MAX_ROUTE_DEPTH break; steps.push(step)}
+    return add_route(@routes Route[steps])
+}
+translated_routes = (routes:array<Route> prefix:Route @target:array<Route>):>bool => {
+    let changed=false
+    loop route in routes {if add_translated_route(@target prefix route) {changed=true}}
+    return changed
+}
+translated = (binding_id:addr summary:ParameterEffects prefix:Route @params:dict<addr ParameterEffects>):>bool => {
+    if binding_id not in? params return false
+    let target=@params[binding_id]
+    # Each source stays a read-only route sequence. Selecting a kind through
+    # a mutable local used to snapshot the source array at every iteration.
+    let changed=translated_routes(summary.reads prefix @target.reads)
+    if translated_routes(summary.mutates prefix @target.mutates) {changed=true}
+    if translated_routes(summary.rebinds prefix @target.rebinds) {changed=true}
+    if translated_routes(summary.escapes prefix @target.escapes) {changed=true}
     return changed
 }
 
