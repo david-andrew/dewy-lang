@@ -28,6 +28,20 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Element writes preserve containing array extents (2026-09-29)
+
+Both fact engines retain known lengths of every array containing an element
+store. Contents and descendant values still invalidate normally. Evidence is
+saved after RHS evaluation, so resizing/replacing calls cannot resurrect a
+pre-call length. Constant and named selectors, multiple nesting levels, row
+replacement and RHS mutation are covered.
+
+Thirty-eight focused/surrounding hosted checks pass, plus the paired native
+group on x86-64/C. Five fixtures bring the manifest to 605. This closes the
+nested extent gap exposed by the global replacement kernel below; it does not
+preserve a replaced element's own old extent. Logs use
+`dewy-element-store-lengths-host.log` and `dewy-global-owner-native-tests.log`.
+
 ## Read-only compiler analyses avoid intermediate snapshots (2026-09-29)
 
 Callback analysis now keeps HIR ids rather than copied call records and reads

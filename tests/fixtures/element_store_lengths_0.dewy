@@ -1,0 +1,6 @@
+change=(@rows:array<array<int64>>):>int64=>{
+    if rows.length not=?1 or rows[0].length not=?2 return 1
+    rows[0][0]=20
+    return rows[0][0]+rows[0][1]
+}
+main=():>int64=>{let rows:array<array<int64>>=[[1 22]] return change(@rows)}

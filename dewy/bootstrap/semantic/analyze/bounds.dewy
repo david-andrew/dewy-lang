@@ -179,6 +179,28 @@ forget_value = (id:addr @state:facts.State @checker:Checker keep_length:addr?=no
         if term isnt? none {facts.forget(@state term)}
     }
 }
+# An element replacement changes contents, not the extents of any containing
+# arrays. Only retain facts still present AFTER evaluating the RHS, whose
+# calls may already have changed or replaced those owners.
+forget_element_receiver=(id:addr @state:facts.State @checker:Checker):>void=>{
+    let lengths:array<facts.Entry>=[]
+    let current=id
+    loop true {
+        current=expressions.strip_casts(current checker.data.env.nodes)
+        let sequence=terms.sequence_id(current checker.data.env @checker.data.registry)
+        if sequence isnt? none {
+            let fact=facts.value(facts.Term[sequence 'length'])
+            let interval=facts.lookup(state fact)
+            if interval isnt? none {lengths.push(facts.Entry[fact interval])}
+        }
+        let node=node_at(current checker)
+        if node is? hir.Index {current=node.array}
+        else if node is? hir.MemberAccess {current=node.value}
+        else break
+    }
+    forget_value(id @state @checker)
+    loop entry in lengths {facts.put(@state entry.fact entry.interval)}
+}
 forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
     # Mutation reaches the endpoint, not the whole containing record.
     # Retain parent lengths and sibling fields, but discard element facts.
@@ -889,7 +911,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         let number=checker.data.snapshot.numbers.get(node.value)
         let nonzero=obligations.nonzero(node.value number state checker.data)
         let stable=intervals.stable(node.target checker.data.snapshot checker.data.env.nodes)
-        forget_value(target.array @state @checker)
+        forget_element_receiver(target.array @state @checker)
         let route=if stable bindings.array_route_id(node.target checker.data.env.nodes @checker.data.registry mutable_selectors=true) else none
         if route isnt? none {
             if number isnt? none {facts.set_value(@state facts.Term[route] number)}

@@ -3213,7 +3213,24 @@ class _BoundsValidator:
         nonzero = self._nonzero_proven(node.value, value, state)
         stable = not (self.predicate_bindings.read_bindings(node.target)
                       & self.predicate_bindings.mutated_bindings(node.value))
+        # Replacing an element changes contents, never the extents of its
+        # containing arrays. Snapshot only facts still present after RHS
+        # evaluation: its calls may already have invalidated old lengths.
+        lengths = {}
+        receiver = _strip_casts(node.target.array)
+        while True:
+            sequence = self._array_id(receiver)
+            key = _length_key(sequence) if sequence is not None else None
+            if key is not None and key in state:
+                lengths[key] = state[key]
+            if isinstance(receiver, hir.Index):
+                receiver = _strip_casts(receiver.array)
+            elif isinstance(receiver, hir.MemberAccess):
+                receiver = _strip_casts(receiver.value)
+            else:
+                break
         self._forget_container_value(node.target.array, state)
+        state.update(lengths)
         stored_into = self._array_id(node.target.array)
         if stored_into is not None:
             self._store_element(state, stored_into, node.value, node.loc)
