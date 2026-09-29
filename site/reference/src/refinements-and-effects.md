@@ -401,6 +401,19 @@ answer = ():>int64 & no_effects => {
 }
 ```
 
+A bounded temporary record passed to a read-only helper can also lend stable
+array descriptors and inline record fields. The root lives in frame storage;
+its fields keep their original owners. Known helper chains may forward this
+root when every use ultimately projects fields. A helper that owns or returns
+the complete record keeps the ordinary ownership boundary. Scalar union fields
+pack directly into the root, without a temporary allocation.
+
+Closed literal initializers of startup `const` bindings supply stable storage,
+and reading those immutable values has no external effect. The current shared
+proof excludes mutable globals, captured local bindings and startup values
+whose initialization it cannot establish. Exact array-length facts do not
+change the declaration's storage representation.
+
 Built-in array growth, removal, reservation and joining now have bounded
 storage effects, as do dictionary/set lookup, membership, stores, removal,
 entry snapshots and built-in array iteration. They conservatively require

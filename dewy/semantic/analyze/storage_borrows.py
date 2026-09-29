@@ -126,6 +126,7 @@ class Proofs:
     flow_views: set[int] = field(default_factory=set)
     flow_literals: set[int] = field(default_factory=set)
     flow_sources: set[int] = field(default_factory=set)
+    constants: frozenset[int] = frozenset()
 
 
 def array_selection(node):
@@ -239,7 +240,7 @@ def scalar_loan_cell(type_):
         or ty.fixed_integer_layout(plain) is not None for member in shape.items)
 
 
-def record_loan_fields(node, sizes):
+def record_loan_fields(node, sizes, constants):
     """A call-scoped root lends stable fields without acquiring owners.
 
     Inline records containing words and array handles use the same lifetime
@@ -262,7 +263,12 @@ def record_loan_fields(node, sizes):
         actual = ty.structural_base(field.value.type)
         if isinstance(stored, ty.ArrayType) and stored.length is None:
             if actual != stored:
-                return None
+                # Exact read facts do not turn a declared dynamic descriptor
+                # into fixed-array storage. Check the owner's store contract.
+                value = field.value
+                declaration = constants.get(value.binding_id) if isinstance(value, hir.ExpressedIdentifier) else None
+                if declaration is None or ty.structural_base(declaration) != stored:
+                    return None
             borrowed.append(field.value)
         elif isinstance(stored, ty.ObjectType) and actual == stored:
             borrowed.append(field.value)
@@ -287,6 +293,12 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     writes, captured = {}, set()
     eligible = {}
     loan_sizes = {}
+    # Only closed immutable startup values enter the ambient-storage proof.
+    # Remove declarations found inside functions below; local const views
+    # and captured/reexecuted declarations keep their existing lifetime rules.
+    constants = {binding: node.annotation or node.expr.type for binding, node in analysis.declares.items()
+                 if node.decltype == 'const' and not node.view and independent_materialization(node.expr)}
+    ambient_reads = {}
 
     def ordinary(type_):
         key = id(type_)
@@ -307,6 +319,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             body.append(node)
             if isinstance(node, hir.Declare):
                 local.add(node.binding_id)
+                constants.pop(node.binding_id, None)
             if isinstance(node, hir.ObjectLiteral):
                 # Later fields/defaults can name earlier fields. These names
                 # belong to this construction, not to an ambient owner.
@@ -362,7 +375,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if (node.binding_id not in local
                         and not (node.binding_id is None and node.name in OPERATORS)
                         and analysis._flatten_callable(node, frozenset()) is None):
-                    blocked.add(key)
+                    ambient_reads.setdefault(key, set()).add(node.binding_id)
             elif isinstance(node, hir.FunctionCall):
                 targets = analysis._direct_targets(node)
                 if targets is None:
@@ -373,6 +386,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 else:
                     for target in targets:
                         edges.setdefault(id(target), set()).add(key)
+    blocked.update(key for key, reads in ambient_reads.items() if not reads <= constants.keys())
     pending = deque(blocked)
     while pending:
         for caller in edges.get(pending.popleft(), ()):
@@ -429,6 +443,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # Private fresh owners have no such alias: their direct writes,
         # exposure and captures were excluded above. Keep the graph-wide
         # restriction for parameters, without applying it to private locals.
+        constant_owners = constants if id(literal) not in blocked else {}
         params = _literal_params(literal)
         # One incoming place cannot alias another place formal. Its unwritten
         # projections may lend storage under the same route effect proof.
@@ -456,7 +471,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             incoming = summaries.for_param_binding(own.binding_id) if own else None
             if not isinstance(source, hir.ExpressedIdentifier) or source.binding_id is None:
                 continue
-            private = stable_locals[id(literal)].get(source.binding_id)
+            private = stable_locals[id(literal)].get(source.binding_id, constant_owners.get(source.binding_id))
             if own is None and source.binding_id not in local_views and not (private is not None and ordinary(private)):
                 # Each candidate depends on one named owner. Wake it only
                 # when that owner is proved; cycles and unknown owners never
@@ -489,7 +504,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 return False
             own = parameters.get(source.binding_id)
             incoming = summaries.for_param_binding(own.binding_id) if own else None
-            local = stable_locals[id(literal)].get(source.binding_id)
+            local = stable_locals[id(literal)].get(source.binding_id, constant_owners.get(source.binding_id))
             stable = source.binding_id in local_views or source.binding_id in selections or (local is not None and ordinary(local)) or (
                 own is not None and ordinary(own.type) and incoming is not None
                 and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else
@@ -598,7 +613,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     source = path.root
                     own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     incoming = summaries.for_param_binding(own.binding_id) if own else None
-                    local = stable_locals[id(literal)].get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
+                    local = stable_locals[id(literal)].get(source.binding_id, constant_owners.get(source.binding_id)) if isinstance(source, hir.ExpressedIdentifier) else None
                     outgoing = summaries.for_param_binding(parameter.binding_id) if parameter else None
                     # An exact union wrapper may lend the same stable payload.
                     stable = (isinstance(source, hir.ExpressedIdentifier)
@@ -612,7 +627,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)
                     same_storage |= loan is not None
-                    fields = record_loan_fields(argument, loan_sizes)
+                    fields = record_loan_fields(argument, loan_sizes, constants)
                     if (fields is not None and argument.type == expected
                             and parameter is not None and parameter.binding_id not in unprojected_reads
                             and all(stable_value(field) for field in fields)):
@@ -638,4 +653,4 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if loans:
                     literal_arguments[id(node)] = loans
                 result[id(node)] = allowed
-    return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources)
+    return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources, frozenset(constants))

@@ -120,7 +120,7 @@ def inventory(root, registry, allocator_scopes=None):
             if path.binding_id in places:
                 fields = tuple(step.name if isinstance(step, hir.MemberAccess) else '[]' for step in path.steps)
                 return rows.Subject('parameter', places[path.binding_id], fields)
-            if path.binding_id in private:
+            if path.binding_id in private or path.binding_id in storage_proofs.constants:
                 return None
             if isinstance(path.root, (hir.FunctionCall, hir.ObjectLiteral, hir.ArrayLiteral, hir.CopyValue, hir.Block, hir.Flow)):
                 # A computed value owns its result. Evaluating that result

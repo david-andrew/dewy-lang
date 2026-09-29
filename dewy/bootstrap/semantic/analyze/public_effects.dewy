@@ -20,7 +20,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
     if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
-Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[] local_views:set<addr>=set[] literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[]]
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[] local_views:set<addr>=set[] literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[] constants:set<addr>=set[]]
 Call:type = const [source:rows.Contract subjects:dict<string rows.Subject?>]
 Scope:type = const [id:addr summary:rows.Contract calls:array<Call>]
 ScopeContract:type = const [id:addr source:addr? behavior:rows.Contract]
@@ -66,7 +66,7 @@ location = (id:addr input:Input scan:Scan):>Location => {
         }
         return Location[true rows.Subject['parameter' scan.places[root.binding_id] fields]]
     }
-    return Location[root.binding_id in? scan.private]
+    return Location[root.binding_id in? scan.private or root.binding_id in? input.constants]
 }
 contribute = (contract:rows.Contract @scan:Scan):>void => {scan.summary=rows.join(scan.summary contract)}
 unknown = (@scan:Scan):>void => {contribute(rows.Contract[] @scan)}
@@ -385,7 +385,7 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let storage_proofs=storage_borrows.prove(analysis access_summaries session.hir session.types session.registry)
     let borrowed=storage_proofs.arguments
-    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed storage_proofs.local_views storage_proofs.literal_arguments storage_proofs.flow_views]
+    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed storage_proofs.local_views storage_proofs.literal_arguments storage_proofs.flow_views storage_proofs.constants]
     let local:dict<addr rows.Contract>=[]
     let projections:dict<string inference.Projection>=[]
     let scopes:array<ScopeContract>=[]

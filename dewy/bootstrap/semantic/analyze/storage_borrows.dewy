@@ -185,7 +185,7 @@ record_loan_size=(type:addr table:types.Table families:array<addr> @memo:dict<ad
 }
 # A bounded call root owns no fields: words, borrowed array handles, and
 # inline records with those representations share the same lifetime proof.
-record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families:array<addr> @sizes:dict<addr addr?>):>array<addr>|none=>{
+record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families:array<addr> constants:dict<addr addr> @sizes:dict<addr addr?>):>array<addr>|none=>{
     if node isnt? hir.ObjectLiteral or not borrowable(node.value_type table) return none
     if record_loan_size(node.value_type table families @sizes) is? none return none
     let shape=types.node_at(table views.structural_base(node.value_type table))
@@ -199,7 +199,11 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
         let stored=types.node_at(table stored_id)
         let actual=types.node_at(table actual_id)
         if stored is? types.ArrayType and stored.length is? none {
-            if not types.same_type(actual_id stored_id table) return none
+            if not types.same_type(actual_id stored_id table) {
+                # Read length facts preserve a dynamic owner's descriptor.
+                let value=hir.node_at(nodes field.value)
+                if value isnt? hir.ExpressedIdentifier or value.binding_id is? none or value.binding_id not in? constants or not types.same_type(views.structural_base(constants[value.binding_id] table) stored_id table) return none
+            }
             arrays.push(field.value)
         } else if stored is? types.ObjectType and types.same_type(actual_id stored_id table) {
             arrays.push(field.value)
@@ -217,12 +221,13 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
     }
     return arrays
 }
-stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
+stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> constants:dict<addr addr> allow_constants:bool summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
     let path=bindings.access_path(value nodes forwarding=common_array_field(hir.node_at(nodes value) nodes table))
     let source=hir.node_at(nodes path.root)
     if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
     let own=parameters.get(source.binding_id)
     let local=local_owners.get(source.binding_id)
+    if local is? none and allow_constants {local=constants.get(source.binding_id)}
     let stable=source.binding_id in? local_views or source.binding_id in? selections or (local isnt? none and ordinary(local table @eligible))
     if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
         const incoming=@summaries.by_param_binding[source.binding_id]
@@ -329,7 +334,7 @@ owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects
     }
     return owning
 }
-Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[] flow_literals:set<addr>=set[] flow_sources:set<addr>=set[]]
+Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[] flow_literals:set<addr>=set[] flow_sources:set<addr>=set[] constants:set<addr>=set[]]
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let loan_sizes:dict<addr addr?>=[]
     let families:array<addr>=[]
@@ -347,6 +352,16 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let captured:set<addr>=set[]
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
+    let constants:dict<addr addr>=[]
+    let ambient_reads:dict<addr set<addr>>=[]
+    # Closed immutable startup values cannot change through ordinary writes.
+    # Remove function-local declarations before resolving ambient readers.
+    loop [binding id] in analysis.declares {
+        let node=hir.node_at(nodes id)
+        if node is? hir.Declare and node.decltype=?'const' and not node.view and independent_materialization(node.expr nodes) {
+            constants[binding]=if node.annotation is? none hir.node_at(nodes node.expr).value_type else node.annotation
+        }
+    }
     loop id in analysis.literals {
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
@@ -361,7 +376,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             let node=hir.node_at(nodes item)
             if item in? seen or node is? hir.FunctionLiteral continue
             seen.push(item) body.push(item)
-            if node is? hir.Declare and node.binding_id isnt? none {locals.push(node.binding_id)}
+            if node is? hir.Declare and node.binding_id isnt? none {locals.push(node.binding_id) constants.pop(node.binding_id default=0);}
             # Constructor field names are private locals, including names
             # used by a later default. They do not expose ambient storage.
             if node is? hir.ObjectLiteral {
@@ -422,7 +437,11 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
                 let operation=primitive(node registry)
-                if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {blocked.push(id)}
+                if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {
+                    if node.binding_id is? none {blocked.push(id)}
+                    else if id in? ambient_reads {let reads=@ambient_reads[id] reads.push(node.binding_id)}
+                    else {ambient_reads[id]=set[node.binding_id]}
+                }
             } else if node is? hir.FunctionCall {
                 let targets=effects.direct_targets(node analysis nodes)
                 if targets is? none {
@@ -440,6 +459,9 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         }
         # Retain the inventory only after its final local read, allowing a move.
         bodies[id]=body
+    }
+    loop [id reads] in ambient_reads {
+        loop binding in reads {if binding not in? constants {blocked.push(id) break}}
     }
     let pending:array<addr>=[]
     loop id in blocked {pending.push(id)}
@@ -558,7 +580,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 # Keep the direct-forwarding rule when naming a projection:
                 # sibling writes preserve its bytes, overlapping writes do not.
                 if not ordinary(owner table @eligible) or not stable_projection(incoming path nodes) continue
-            } else if source.binding_id not in? local_views and (source.binding_id not in? local_owners or not ordinary(local_owners[source.binding_id] table @eligible)) {
+            } else if source.binding_id not in? local_views and (source.binding_id not in? local_owners or not ordinary(local_owners[source.binding_id] table @eligible)) and not (id not in? blocked and source.binding_id in? constants and ordinary(constants[source.binding_id] table @eligible)) {
                 # One dependency per candidate. Only a proved owner wakes its
                 # readers; cycles or unknown owners cannot establish a loan.
                 if source.binding_id in? waiting_views {let readers=@waiting_views[source.binding_id] readers.push(item)}
@@ -627,7 +649,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if binding in? owning_reads {invalid.push(binding)}
             loop leaf in leaves {
                 if hir.node_at(nodes leaf) is? hir.ArrayLiteral continue
-                if not stable_value(leaf parameters local_owners local_views summaries nodes table @eligible selections=selections) {invalid.push(binding) continue}
+                if not stable_value(leaf parameters local_owners local_views constants (id not in? blocked) summaries nodes table @eligible selections=selections) {invalid.push(binding) continue}
                 let source=hir.node_at(nodes bindings.access_path(leaf nodes forwarding=common_array_field(hir.node_at(nodes leaf) nodes table)).root)
                 if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? selections {
                     needed.push(source.binding_id)
@@ -707,6 +729,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
                             let own=parameters.get(source.binding_id)
                             let local=local_owners.get(source.binding_id)
+                            if local is? none and id not in? blocked {local=constants.get(source.binding_id)}
                             let stable=source.binding_id in? local_views or (local isnt? none and ordinary(local table @eligible))
                             if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
                                 const incoming=@summaries.by_param_binding[source.binding_id]
@@ -725,11 +748,11 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                             }
                         }
                         if expected isnt? none and pair.parameter isnt? none and pair.parameter not in? unprojected_reads and pair.parameter in? summaries.by_param_binding and types.same_type(arg.value_type expected table) {
-                            let fields=record_loan_fields(arg nodes table families @loan_sizes)
+                            let fields=record_loan_fields(arg nodes table families constants @loan_sizes)
                             if fields isnt? none {
                                 const outgoing=@summaries.by_param_binding[pair.parameter]
                                 safe=effects.read_only(outgoing)
-                                loop field in fields {if not stable_value(field parameters local_owners local_views summaries nodes table @eligible) {safe=false}}
+                                loop field in fields {if not stable_value(field parameters local_owners local_views constants (id not in? blocked) summaries nodes table @eligible) {safe=false}}
                             }
                         }
                         if safe {current.push(pair.argument)} else {rejected.push(pair.argument)}
@@ -763,5 +786,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if accepted.length>?0 {result[item]=accepted}
         }
     }
-    return Proofs[result local_views literal_arguments flow_views flow_literals flow_sources]
+    let constant_bindings:set<addr>=set[]
+    loop [binding type] in constants {constant_bindings.push(binding)}
+    return Proofs[result local_views literal_arguments flow_views flow_literals flow_sources constant_bindings]
 }

@@ -140,6 +140,29 @@ Native reporting also retains the bounded two-word copies of existing scalar
 cells in call roots. An independent hosted build of the forwarding proof is in
 progress; full integration remains certified at `da4a1aca`.
 
+## Immutable startup storage loans (2026-09-29)
+
+Closed literal initializers of immutable startup bindings now supply shared
+storage evidence to allocation effects and lowering. Function-local/captured
+const declarations and required views are excluded from this startup proof;
+mutable globals and initializers with calls or existing-storage reads remain
+unknown. Reading a proved immutable startup value adds no external effect.
+Borrowing still excludes raw/unknown call graphs.
+
+A dynamic array's declared descriptor layout is preserved when its read type
+carries an exact length. The call-root proof checks the startup declaration's
+store contract before using that descriptor; fixed-array storage retains its
+ordinary conversion obligation.
+
+Five hosted checks, 150 surrounding hosted effect/borrow checks and paired
+native x86-64/C cases pass. Repeated calls allocate zero bytes, preserve array
+contents and reject mutable or unproved startup storage. Five fixtures bring
+the manifest to 468. The preceding forwarding source's independent hosted
+build prepared/emitted in 231.48/236.57 seconds and reduced implicit
+runtime-sized bootstrap copies from 1,823 to 1,804 sites across 73 modules.
+Full integration remains certified at `da4a1aca`; the new batch follows below
+when its integration completes.
+
 ## Current completion checklist (2026-09-28)
 
 Phase 1 is **not complete**. The entries below replace the original generic
