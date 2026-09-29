@@ -874,10 +874,12 @@ def analyze_global_writes(root: hir.AST, globals: set[int], *, source_reports: b
         else:
             targets[key] = analysis._direct_targets(call)
     summaries: dict[int, set[int]] = {}
+    private: dict[int, set[int]] = {}
     callers: dict[int, set[int]] = {}
     for literal in analysis.literals:
         key = id(literal)
         expressions = [literal.body, *(p.value for p in _literal_params(literal) if isinstance(p, hir.BoundParam))]
+        local = {param.binding_id for param in _literal_params(literal)}
         writes: set[int] = set()
         for expression in expressions:
             writes.update(mutated_bindings(expression) & globals)
@@ -886,6 +888,12 @@ def analyze_global_writes(root: hir.AST, globals: set[int], *, source_reports: b
                 node = pending.pop()
                 if isinstance(node, hir.FunctionLiteral):
                     continue
+                if isinstance(node, hir.Declare):
+                    local.add(node.binding_id)
+                elif isinstance(node, hir.ObjectLiteral):
+                    local.update(field.binding_id for field in node.fields)
+                elif isinstance(node, hir.IteratorExpression):
+                    local.add(node.target.binding_id)
                 if isinstance(node, hir.FunctionCall):
                     resolved = targets[id(node)]
                     if resolved is None:
@@ -894,14 +902,18 @@ def analyze_global_writes(root: hir.AST, globals: set[int], *, source_reports: b
                         for callee in resolved:
                             callers.setdefault(id(callee), set()).add(key)
                 pending.extend(hir.children(node))
-        summaries[key] = writes
+        # A nested function may mutate this activation's captured local.
+        # That write remains visible at the nested call, but cannot become
+        # an ambient write at the containing function's caller boundary.
+        private[key] = local
+        summaries[key] = writes - local
     pending = deque(summaries)
     queued = set(pending)
     while pending:
         callee = pending.popleft()
         queued.remove(callee)
         for caller in callers.get(callee, ()):
-            incoming = summaries[callee] - summaries[caller]
+            incoming = summaries[callee] - summaries[caller] - private[caller]
             if incoming:
                 summaries[caller].update(incoming)
                 if caller not in queued:

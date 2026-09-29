@@ -1,0 +1,7 @@
+compute=():>int64=>{let private:int64=40
+read=():>int64=>private
+private=read()+2 return read()}
+set=(@value:int64 result:int64):>void=>{value=result}
+forward=(@table:dict<string int64>):>int64=>{
+if 'x' in? table {set(@table['x'] compute()) return table['x']} return 1}
+main=():>int64=>{let table:dict<string int64>=['x'->0] return forward(@table)}

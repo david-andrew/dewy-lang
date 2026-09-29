@@ -30,6 +30,27 @@ run had 6,039 passes, 20 failures and 13 skips. The refreshed hosted strict-copy
 inventory has 1,587 implicit runtime-sized bootstrap sites across 69 modules,
 before the latest conversion/iterator work. Phase 1 remains open.
 
+## Ambient writes stop at the owning activation (2026-09-29)
+
+Both transitive ambient-effect solvers now subtract a function's own parameters,
+locals, constructor fields and iterator bindings at its caller boundary. A
+nested call still reports writes to its enclosing captures. Those writes stop
+at the containing activation; recursive propagation cannot reintroduce them as
+writes to a caller's unrelated storage. Explicit place-parameter effects remain
+in their separate summaries, and genuine globals/unknown calls retain their
+conservative write sets.
+
+Four hosted checks and 80 surrounding capture, dictionary, sort and length-fact
+checks pass. The HIR comparison passes when hosted-built (33.48 seconds) and
+native-built (19.06 seconds), covering captures, recursion, own parameters and
+unknown calls. Three paired source groups pass (56.87 seconds). The source
+fixtures use supported read-only captures with mutations in their owning
+function; this does not implement writable or escaping closures. Three fixtures
+bring the manifest to 671. Logs use `dewy-ambient-effects-*`.
+
+An independent hosted seed for the preceding `9df1d08f` checkpoint completed;
+its native integration is running. This effect-summary follow-up is later work.
+
 ## Select complete dictionary places before call barriers (2026-09-29)
 
 Both frontends now select an entire `@` argument path before invalidating the

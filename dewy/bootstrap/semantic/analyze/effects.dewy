@@ -669,6 +669,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
         hir.push_children(node @pending)
     }
     let summaries:dict<addr set<addr>>=[]
+    let private:dict<addr set<addr>>=[]
     let callers:dict<addr set<addr>>=[]
     loop id in analysis.literals {
         let literal=hir.node_at(nodes id)
@@ -676,6 +677,10 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
         let expressions:array<addr>=[literal.body]
         loop parameter in literal_params(literal) {
             if parameter is? hir.BoundParam {expressions.push(parameter.value)}
+        }
+        let local:set<addr>=set[]
+        loop parameter in literal_params(literal) {
+            if parameter.binding_id isnt? none {local.push(parameter.binding_id)}
         }
         let writes:set<addr>=set[]
         loop expression in expressions {
@@ -688,6 +693,14 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
                 let node=hir.node_at(nodes child)
                 # A literal's body is summarized under its own call boundary.
                 if node is? hir.FunctionLiteral continue
+                if node is? hir.Declare and node.binding_id isnt? none {local.push(node.binding_id)}
+                if node is? hir.ObjectLiteral {
+                    loop field in node.fields {if field.binding_id isnt? none {local.push(field.binding_id)}}
+                }
+                if node is? hir.IteratorExpression {
+                    let target=hir.node_at(nodes node.target)
+                    if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.push(target.binding_id)}
+                }
                 if node is? hir.FunctionCall {
                     if child not in? targets {writes=globals}
                     else {
@@ -701,6 +714,10 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
                 hir.push_children(node @pending)
             }
         }
+        # Captures owned by this activation stop at its call boundary.
+        # Their nested-call summaries still name the captured bindings.
+        loop binding in local {writes.pop(binding default=binding);}
+        private[id]=local
         summaries[id]=writes
     }
     pending=analysis.literals
@@ -716,6 +733,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
             let writes=summaries[caller]
             let changed=false
             loop binding in incoming {
+                if caller in? private and binding in? private[caller] continue
                 if binding not in? writes {writes.push(binding) changed=true}
             }
             if not changed continue
