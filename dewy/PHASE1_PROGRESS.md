@@ -146,6 +146,31 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Immutable records share without a costly copy (2026-09-30)
+
+David's copy principle (sharing immutable data is not a costly copy) already
+exempted strings from `$explicit_copies`. Both copy policies now also treat
+an immutable (`const`) record as bounded in sharing mode. Nothing writes
+through such a record, so copying it can never defer a detach; its arrays
+and strings are shared. Native copies of an immutable record are bounded by
+its size. Hosted may still copy such a record physically, as it copies
+strings. Both compilers accept and reject the same programs.
+
+Evidence:
+- `tests/python_misc/test_immutable_record_sharing.py`: a `const` record
+  copy is accepted in both compilers (the previous policy rejects it); the
+  writable version is still an `unproven copy`.
+- The C2 probe drops from 1,409 to 1,112 rejections.
+- All 779 strict-copy tests pass, and the local gate passed (6,320 tests).
+
+Tried and withdrawn:
+- **Immutable `BigInt`:** would have removed about 200 more sites, but
+  `test_bigint_word_conversion` deliberately allows writes to a bigint's
+  `sign` and `limbs`, so it is a language decision for David.
+- **Sharing immutable record-union copies natively:** segfaulted the pair
+  checks.
+- **An immutable `Fact` family:** removed only 9 sites.
+
 ## Element borrows require handle storage; copy-report comparison (2026-09-30)
 
 - **Handle check on element borrows.** Following the September 30 roadmap

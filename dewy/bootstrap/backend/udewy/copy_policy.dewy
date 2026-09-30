@@ -7,8 +7,10 @@ import p"../../semantic/subtyping.dewy" as subtyping
 
 # Fixed outer layouts can contain runtime-sized owned storage. Grapheme
 # counts do not bound string bytes, and a COW handle does not bound the
-# logical copy it defers. Immutable string sharing is bounded. Memoization belongs to one closed
-# compilation and one sharing mode.
+# logical copy it defers. Sharing immutable data is bounded: a string, or an
+# immutable (`const`) record, which nothing writes through, so no deferred
+# detach can follow. Memoization belongs to one closed compilation and one
+# sharing mode.
 runtime_sized = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> share_strings:bool=false):>bool => {
     let known=memo.get(views.structural_base(id nodes))
     if known isnt? none return known
@@ -41,6 +43,7 @@ inspect = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bo
         loop member in type.items {if visit(member nodes registry @memo @active share_strings) return true}
     }
     if type is? types.ObjectType {
+        if share_strings and type.immutable return false
         loop field in type.fields {if visit(field.value_type nodes registry @memo @active share_strings) return true}
         # Copy dispatch preserves fields only present in a concrete child,
         # including those carried by a structural parent.

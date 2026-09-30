@@ -26,6 +26,10 @@ def runtime_sized(type_: ty.Type, memo: dict[int, tuple[ty.Type, bool]] | None =
             return not share_strings and plain.length != 0
         if isinstance(plain, ty.ArrayType) and plain.length is None:
             return True
+        # Nothing writes through an immutable record, so sharing it defers
+        # no detach: like a string, its sharing is bounded.
+        if share_strings and isinstance(plain, ty.ObjectType) and plain.immutable:
+            return False
         active.add(identity)
         if isinstance(plain, ty.ArrayType):
             children = [] if plain.length == 0 else [plain.element]
