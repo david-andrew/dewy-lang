@@ -16,14 +16,20 @@ everything to each place argument.
 The finite route depth makes recursive calls converge. Absence of an effect
 is a guarantee; presence says only that it may happen. Lowering can use a
 read-only summary to borrow a value at a call boundary instead of copying it.
+
+An append (`push`, `reserve`) grows the array at its route but leaves every
+existing element unchanged. It is a write like any other, except to a view of
+one of that array's elements (`element_stable_at`). A route truncated at the
+depth bound no longer names the array that grew, so it records a mutation.
 """
 
 const MAX_ROUTE_DEPTH:addr = 8
-Effect:type = 'read' | 'mutate' | 'rebind' | 'escape'
+Effect:type = 'read' | 'mutate' | 'append' | 'rebind' | 'escape'
 Route:type = const [steps:array<string>]
 ParameterEffects:type = [
     reads:array<Route>=[] mutates:array<Route>=[]
     rebinds:array<Route>=[] escapes:array<Route>=[]
+    appends:array<Route>=[]
 ]
 ProgramEffects:type = [by_param_binding:dict<addr ParameterEffects>]
 EffectTransfer:type = const [caller_parameter:addr prefix:Route]
@@ -41,7 +47,7 @@ ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
 ArgumentPair:type = const [argument:addr parameter:addr?]
 Pairing:type = [target:addr pairs:array<ArgumentPair>]
 
-writes = (summary:ParameterEffects):>bool => summary.mutates.length >? 0 or summary.rebinds.length >? 0
+writes = (summary:ParameterEffects):>bool => summary.mutates.length >? 0 or summary.rebinds.length >? 0 or summary.appends.length >? 0
 read_only = (summary:ParameterEffects):>bool => not writes(summary) and summary.escapes.length =? 0
 # A projection must be stable above and below its route. Sibling record
 # fields are independent; the shared [] step never proves indices disjoint.
@@ -52,7 +58,21 @@ disjoint_routes = (routes:array<Route> route:Route):>bool => {
     return true
 }
 read_only_at = (summary:ParameterEffects route:Route):>bool => {
-    return disjoint_routes(summary.mutates route) and disjoint_routes(summary.rebinds route) and disjoint_routes(summary.escapes route)
+    return disjoint_routes(summary.mutates route) and disjoint_routes(summary.rebinds route) and disjoint_routes(summary.escapes route) and disjoint_routes(summary.appends route)
+}
+# The elements of the array at `route` keep their values and storage: nothing
+# writes, replaces or exposes them, and appends reach that array itself only.
+# Element storage is a scalar or a handle, so growth moves no element record.
+element_stable_at = (summary:ParameterEffects route:Route):>bool => {
+    let element=route.steps.copy()
+    element.push('[]')
+    let view=Route[element]
+    if not disjoint_routes(summary.mutates view) or not disjoint_routes(summary.rebinds view) or not disjoint_routes(summary.escapes view) return false
+    loop other in summary.appends {
+        if other.steps.length =? route.steps.length and bindings.path_starts_with(route.steps other.steps) continue
+        if not disjoint_routes([other] view) return false
+    }
+    return true
 }
 accesses_at = (summary:ParameterEffects route:Route):>bool => {
     return not disjoint_routes(summary.reads route) or not read_only_at(summary route)
@@ -101,6 +121,10 @@ add_route = (@routes:array<Route> route:Route):>bool => {
 record_summary = (kind:Effect route:Route @summary:ParameterEffects):>bool => {
     if kind =? 'read' return add_route(@summary.reads route)
     if kind =? 'mutate' return add_route(@summary.mutates route)
+    if kind =? 'append' {
+        if route.steps.length >? MAX_ROUTE_DEPTH return add_route(@summary.mutates route)
+        return add_route(@summary.appends route)
+    }
     if kind =? 'rebind' return add_route(@summary.rebinds route)
     return add_route(@summary.escapes route)
 }
@@ -152,6 +176,11 @@ translated = (binding_id:addr summary:ParameterEffects prefix:Route @params:dict
     if translated_routes(summary.mutates prefix @target.mutates) {changed=true}
     if translated_routes(summary.rebinds prefix @target.rebinds) {changed=true}
     if translated_routes(summary.escapes prefix @target.escapes) {changed=true}
+    loop route in summary.appends {
+        if prefix.steps.length + route.steps.length >? MAX_ROUTE_DEPTH {
+            if add_translated_route(@target.mutates prefix route) {changed=true}
+        } else if add_translated_route(@target.appends prefix route) {changed=true}
+    }
     return changed
 }
 
@@ -469,7 +498,7 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
     if function is? hir.ArrayMethod {
         # Joining reads its receiver. A separator or other argument can still
         # have effects, so retain the ordinary argument walk in either case.
-        let kind:Effect = if function.name =? 'join' 'read' else 'mutate'
+        let kind:Effect = if function.name =? 'join' 'read' else if function.name in? ['push' 'reserve'] 'append' else 'mutate'
         let changed = visit_route(function.array kind [] @params @analysis nodes type_nodes)
         if visit_all(arguments @params @analysis nodes type_nodes) { changed = true }
         return changed
@@ -599,6 +628,7 @@ preserves_storage = (summary:ParameterEffects type:addr table:types.Table):>bool
     if types.node_at(table views.structural_base(type table)) isnt? types.ObjectType return false
     loop route in summary.mutates {if route.steps.length =? 0 return false}
     loop route in summary.rebinds {if route.steps.length =? 0 return false}
+    loop route in summary.appends {if route.steps.length =? 0 return false}
     return true
 }
 PlaceLoans:type = const [nonescaping:set<addr> fixed_storage:set<addr>]

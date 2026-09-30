@@ -179,7 +179,15 @@ class _ObjectLowering:
         if stored != call.type:
             return None
         owner = borrowing.route(argument)
-        if owner is None or not borrowing.stable_owner(owner, self.borrow_plan):
+        if owner is None:
+            return None
+        if isinstance(read, hir.Index) and borrowing.exact_route(argument):
+            # An element result only needs that array's existing elements to
+            # stay: the caller may still append to the array meanwhile.
+            elements = borrowing.Route(owner.binding, owner.fields + route.fields)
+            if not borrowing.stable_elements(elements, self.borrow_plan):
+                return None
+        elif not borrowing.stable_owner(owner, self.borrow_plan):
             return None
         key = (id(function), ())
         variant = self.scalar_projections.get(key)

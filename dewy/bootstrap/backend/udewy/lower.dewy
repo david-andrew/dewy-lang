@@ -1301,7 +1301,13 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # A logical record upcast preserves the owned allocation, including
         # its dynamic child fields. Do not abandon a constructor/call result
         # merely because contextual typing inserted a transparent cast.
-        if object_valued(source.value_type @state) and object_valued(node.value_type @state) return owned_record(owned_value(node.expr @state site) source.value_type node.value_type node @state)
+        if object_valued(source.value_type @state) and object_valued(node.value_type @state) {
+            # A fresh literal is allocated at the parent's size directly.
+            if source is? hir.ObjectLiteral and state.frame_records.get(node.expr) is? none {
+                return object_literal(node.expr source @state reserve=object_layout(node.value_type node @state).size)
+            }
+            return owned_record(owned_value(node.expr @state site) source.value_type node.value_type node @state)
+        }
         if node is? hir.ValueCast and cell_members(source.value_type @state) is? none and cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state site) source.value_type node.value_type node @state owned=true)
     }
     # A record read out of a moved cell local moves the payload out: the
@@ -1538,6 +1544,15 @@ array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     loop item in node.items { if hir.node_at(state.input.nodes item) is? hir.Spread { spread=true } }
     if spread return spread_array_literal(node type.element layout.size @state)
     let frame=state.frame_arrays.get(id)
+    if frame is? none and node.items.length =? 0 and state.allocator isnt? none {
+        # An empty literal shares one static descriptor per site instead of
+        # allocating one per evaluation. Its owner count starts far above
+        # one and never reaches it, so every mutation detaches a private
+        # owner first (`array_unique`), sharing and release only move the
+        # count, and without the arena-descriptor flag nothing frees it.
+        let words=[word(0 node @state) word(0 node @state) word(0 node @state) word(layout.size node @state) word(layouts.array_flags.mutable node @state) word(4611686018427387904 node @state)]
+        return intrinsic_call('__static_words__' words types.primitive('int64' @state.type_nodes) node @state)
+    }
     let memory=if frame is? none array_memory(word(node.items.length node @state) layout.size node @state) else frame
     if frame isnt? none {
         memory.prefix=frame_array_header(memory word(node.items.length node @state) layout.size node @state)
@@ -4532,10 +4547,21 @@ mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {
 # own parameters. A terminal call to another getter contributes the route of
 # the argument bound to that getter's route parameter, provided the call
 # borrows it. Depth is bounded so recursive wrappers stay finite.
+#
+# A result that is one element of an array ends in a `[]` step after that
+# array's route, which a caller can keep across appends to the array
+# (`borrowing.stable_elements`). A wrapper keeps the step only when its
+# argument names the inner getter's owner exactly, field by field.
 getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     let node=hir.node_at(state.input.nodes read)
     if node is? hir.CopyValue return getter_route(node.value depth @state)
-    if node isnt? hir.FunctionCall return borrowing.route(read state.input.nodes)
+    if node isnt? hir.FunctionCall {
+        let base=borrowing.route(read state.input.nodes)
+        if base is? none or node isnt? hir.Index return base
+        let fields=base.fields
+        fields.push('[]')
+        return borrowing.Route[base.binding fields]
+    }
     if depth >? 4 or (not object_valued(node.value_type @state) and cell_members(node.value_type @state) is? none) return none
     let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
     if direct is? none return none
@@ -4559,7 +4585,22 @@ getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     let argument=hir.node_at(state.input.nodes source)
     if argument isnt? hir.ExpressedIdentifier|hir.MemberAccess return none
     if argument.value_type not=? parameter.value_type return none
-    return borrowing.route(source state.input.nodes)
+    let outer=borrowing.route(source state.input.nodes)
+    if outer is? none or not element_route(inner_route) or not exact_route(source state.input.nodes) return outer
+    let fields=outer.fields
+    loop step in inner_route.fields {fields.push(step)}
+    return borrowing.Route[outer.binding fields]
+}
+element_route = (route:borrowing.Route):>bool => route.fields.length >? 0 and route.fields[route.fields.length-1] =? '[]'
+# Every step from the binding is a field: no index shortened the route.
+exact_route = (id:addr nodes:array<hir.AST>):>bool => {
+    let current=id
+    loop true {
+        $runtime_assert current <? nodes.length
+        const node=@nodes[current]
+        if node is? hir.MemberAccess {current=node.value continue}
+        return node is? hir.ExpressedIdentifier
+    }
 }
 # The callee/argument half of a getter borrow: a direct, capture-free getter
 # returning a record or tagged-cell route of one read-only parameter, with a
@@ -4594,7 +4635,14 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     let argument=hir.node_at(state.input.nodes source)
     if argument isnt? hir.ExpressedIdentifier|hir.MemberAccess return none
     let owner=borrowing.route(source state.input.nodes)
-    if owner is? none or not borrowing.stable_owner(owner state.stable_bindings state.stable_parameters) return none
+    if owner is? none return none
+    # An element result only needs that array's existing elements to stay:
+    # the caller may still append to the array while the view is live.
+    if element_route(route) and exact_route(source state.input.nodes) {
+        let fields=owner.fields
+        loop i in 0.. and i <? route.fields.length-1 {fields.push(route.fields[i])}
+        if not borrowing.stable_elements(borrowing.Route[owner.binding fields] state.stable_bindings state.stable_parameters) return none
+    } else if not borrowing.stable_owner(owner state.stable_bindings state.stable_parameters) return none
     if argument.value_type not=? parameter.value_type return none
     let key="borrow:{direct}"
     let existing=state.scalar_projections.get(key)
@@ -4809,7 +4857,9 @@ initialize_frame=(id:addr destination:addr @state:State):>addr=>{
     else {state.frame_records[id]=previous}
     return value
 }
-object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>addr => {
+# `reserve` sizes the block for the parent type the literal is cast to (see
+# `owned_record`), so constructing a child as its parent needs no resize.
+object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false reserve:addr=0):>addr => {
     let layout=object_layout(node.value_type node @state)
     let record=object_type(node.value_type @state)
     $runtime_assert record isnt? none
@@ -4817,7 +4867,8 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false):>
     let temporary:array<OwnedLocal>=[]
     let frame=state.frame_records.get(id)
     $runtime_assert not loan or frame isnt? none
-    let destination=if frame is? none snapshot(record_allocation(layout node @state) @prefix @state) else frame
+    let block=if reserve >? layout.size layouts.Record[reserve layout.alignment layout.offsets] else layout
+    let destination=if frame is? none snapshot(record_allocation(block node @state) @prefix @state) else frame
     loop item in node.fields {
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
@@ -6948,16 +6999,20 @@ dict_rebuild_body = (parts:DictParts room:addr node:hir.AST @state:State):>addr 
     prefix.push(while_loop(compare('__lt__' reader writer node @state) entries node @state))
     return sequence(prefix node @state)
 }
+# Probing needs a hash table with room; iteration (`compact`) needs only
+# dense live entries. A dictionary without an index, such as an empty one
+# whose arrays are still the shared static empties, is iterated as it is:
+# its index is built by the first probe that needs it.
 dict_ensure = (parts:DictParts node:hir.AST @state:State room:addr=0 compact:bool=false):>addr => {
-    let slots=read_word(dict_field(parts 'indices' node @state) layouts.array_descriptor.length node @state)
     let entries=read_word(dict_field(parts 'keys' node @state) layouts.array_descriptor.length node @state)
+    if compact {
+        let dead=compare('__gt__' entries dict_field(parts 'live' node @state) node @state)
+        return conditional(dead dict_rebuild(parts room node @state) node @state)
+    }
+    let slots=read_word(dict_field(parts 'indices' node @state) layouts.array_descriptor.length node @state)
     let condition=compare('__eq__' slots word(0 node @state) node @state)
     let crowded=compare('__gt__' word_op('__mul__' word_op('__add__' entries word(room node @state) node @state) word(3 node @state) node @state) word_op('__mul__' slots word(2 node @state) node @state) node @state)
     condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'or' condition crowded] @state)
-    if compact {
-        let dead=compare('__gt__' entries dict_field(parts 'live' node @state) node @state)
-        condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'or' condition dead] @state)
-    }
     return conditional(condition dict_rebuild(parts room node @state) node @state)
 }
 dict_probe = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:State):>DictProbe => {

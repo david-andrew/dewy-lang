@@ -64,3 +64,24 @@ def test_failed_build_is_not_recorded(tmp_path, monkeypatch):
     log: list = []
     driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log))
     assert len(log) == 1
+
+
+def test_pruning_spares_entries_in_use(tmp_path, monkeypatch):
+    store = tmp_path / 'store'
+    monkeypatch.setenv('DEWY_TEST_DRIVER_DIR', str(store))
+    monkeypatch.delenv('DEWY_TEST_DRIVER_CACHE', raising=False)
+    monkeypatch.setattr(driver_artifacts, '_KEEP', 1)
+    source = tmp_path / 'driver.dewy'
+    log: list = []
+    used = []
+    for value in range(3):
+        source.write_text(f'main=():>int64=>{value}\n')
+        used.append(driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log)))
+    # This process still holds every entry it used; none may disappear.
+    assert all(path.is_file() for path in used) and len(log) == 3
+    # Entries no process holds are pruned down to the kept count.
+    for path in used:
+        driver_artifacts._held.pop(path.parent).close()
+    source.write_text('main=():>int64=>9\n')
+    driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log))
+    assert sum(1 for path in used if path.is_file()) == 0

@@ -545,12 +545,13 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     # typed source operations. Raw exposure still defeats that guarantee,
     # including addresses saved by module initialization.
     plan.stable_bindings.update(constants - exposed)
-    # A single place parameter can be stable too, provided no call can
-    # change it through an ambient alias. Unknown calls write the sentinel.
+    # A place parameter can be stable too, provided no call can change it
+    # through an ambient alias. Unknown calls write the sentinel. Two places
+    # of one call never overlap (checked at the call, receivers included), so
+    # each parameter's own summary covers every write reaching its storage.
     ambient = analyze_global_writes(root, plan.globals | captured | nonlocal_bindings(root) | {-1}, source_reports=True)
     for function in plan.functions.values():
-        place_stable = (len(function.places) == 1
-                        and not function.writes & (plan.globals | captured)
+        place_stable = (not function.writes & (plan.globals | captured)
                         and not any(ambient.get(id(node)) for node in _walk_function(function.literal)
                                     if isinstance(node, hir.FunctionCall)))
         for binding in function.locals:
@@ -706,10 +707,28 @@ def stable_owner(source: Route, plan: Plan) -> bool:
     summary = plan.stable_parameters.get(source.binding)
     if summary is None:
         return False
-    for change in (*summary.mutates, *summary.rebinds, *summary.escapes):
+    for change in (*summary.mutates, *summary.rebinds, *summary.escapes, *summary.appends):
         if overlap(source, Route(source.binding, tuple(step for step in change))):
             return False
     return True
+
+
+def stable_elements(source: Route, plan: Plan) -> bool:
+    """The elements of the array at ``source`` keep their storage while its function runs.
+
+    The array itself may grow (``ParameterEffects.element_stable_at``).
+    """
+    if source.binding in plan.stable_bindings:
+        return True
+    summary = plan.stable_parameters.get(source.binding)
+    return summary is not None and summary.element_stable_at(source.fields)
+
+
+def exact_route(node: hir.AST) -> bool:
+    """Every step from the binding is a field: no index shortened the route."""
+    while isinstance(node, hir.MemberAccess):
+        node = node.value
+    return isinstance(node, hir.ExpressedIdentifier)
 
 
 def union_argument_loans(analysis, summaries: ProgramEffects, plan: Plan, source_bindings: set[int]) -> dict[int, set[int]]:

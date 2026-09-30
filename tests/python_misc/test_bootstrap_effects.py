@@ -129,6 +129,11 @@ def effect_program():
         hir.Assign(LOC, 'void', read(35), '=', hir.ArrayLiteral(LOC, ARRAY, [number()]))], kw_only=[param(35)])
     function(132, [param(36), param(37), param(38)], [hir.FunctionCall(LOC, 'void', read(131, CALLABLE),
         [place(read(37))], {'p33': place(read(36)), 'p35': place(read(38))})])
+    # Growth is an append: it keeps existing elements, forwarded through a
+    # field place as for any other effect.
+    push_type = ty.FunctionType([], [], None, 'void')
+    function(133, [param(39)], [hir.FunctionCall(LOC, 'void', hir.ArrayMethod(LOC, push_type, read(39), 'push'), [number()], {})])
+    function(134, [param(40, record_type)], [call(133, [place(hir.MemberAccess(LOC, ARRAY, read(40, record_type), 'items'))])])
     return hir.Block(LOC, 'void', declarations, True)
 
 
@@ -213,6 +218,8 @@ def test_native_effect_analysis_matches_hosted(tmp_path):
     assert expected.by_param_binding[36].mutates == {('[]',)}
     assert expected.by_param_binding[37].read_only
     assert expected.by_param_binding[38].rebinds == {()}
+    assert expected.by_param_binding[39].appends == {()} and not expected.by_param_binding[39].mutates
+    assert expected.by_param_binding[40].appends == {('items',)}
     lines, root_id = emit_hir(root)
     source = tmp_path / 'effects.dewy'
     source.write_text(f'''
@@ -238,6 +245,7 @@ main = ():>int64 => {{
         emit(binding_id 'mutate' summary.mutates)
         emit(binding_id 'rebind' summary.rebinds)
         emit(binding_id 'escape' summary.escapes)
+        emit(binding_id 'append' summary.appends)
     }}
     return 0
 }}
@@ -249,6 +257,6 @@ main = ():>int64 => {{
     assert result.returncode == 0, result.stderr + result.stdout
     rows = []
     for binding_id, summary in expected.by_param_binding.items():
-        for kind, routes in [('read', summary.reads), ('mutate', summary.mutates), ('rebind', summary.rebinds), ('escape', summary.escapes)]:
+        for kind, routes in [('read', summary.reads), ('mutate', summary.mutates), ('rebind', summary.rebinds), ('escape', summary.escapes), ('append', summary.appends)]:
             rows.extend(f'{binding_id}|{kind}|{".".join(route)}' for route in routes)
     assert sorted(result.stdout.splitlines()) == sorted(rows)

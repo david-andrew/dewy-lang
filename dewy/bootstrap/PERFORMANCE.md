@@ -800,3 +800,73 @@ reserving its result buffer. Allocated bytes fall from 32,000 to zero, matching
 the hosted path. Companion tests require snapshots when a later argument or
 another place argument mutates the source. Full self-build allocation and time
 measurements must be refreshed before attributing a total-volume improvement.
+
+### Throughput batch: appends, static literals, node construction (2026-09-30)
+
+Roadmap step 3. Each row is a cold self-build with direct x86-64 output
+(`timing.sh`, two interleaved rounds, quiet machine), averaged. Intermediate
+rows compiled the batch's source as it stood at that stage; the sources differ
+only by this batch's analysis and lowering edits. Allocation sums the disjoint
+root phases.
+
+| Compiler | Wall | Allocated | Peak |
+|---|---|---|---|
+| `559f0834` pair (baseline) | 63.2 s | 43.1 GB | 2.90 GB |
+| + static empty arrays | 63.4 s | 41.0 GB | 2.84 GB |
+| + element views across appends, multi-place stability | 58.5 s | 33.1 GB | 2.84 GB |
+| + iteration without an index | 57.5 s | 32.2 GB | 2.40 GB |
+| + parent-sized node literals | 57.1 s | 31.3 GB | 2.39 GB |
+
+Attribution comes from `tools/allocation_sites.py` with the `node_at` getters'
+site markers removed, so their allocations count against each calling
+statement.
+
+- **Element views across appends.** 11.9 GB of the 38 GB that the
+  instrumented build requested were `node_at` snapshots. The hottest callers
+  (`t2.rewrite_child`/`rewrite_list`, `statements.expression`, the `bounds`
+  checker) read a node and then append to the same arena. Appending changed
+  nothing that the view reads, yet effect summaries recorded `push` as a
+  mutation of the whole array. Effects now keep `appends` apart. An append
+  is still a write for every existing query; `element_stable_at` alone
+  accepts a view of one element of the appended array. Array elements are
+  scalars or handles, so growth moves no record. A route truncated at the
+  depth bound records a mutation instead. Getter routes carry the element
+  step through wrappers when the argument names the owner field by field.
+  The one-place restriction on stable place parameters is gone: the checker
+  already rejects overlapping places in one call, receivers included. These
+  snapshots fell to 3.9 GB. `tests/fixtures/element_getter_appends.dewy`
+  reads an element across 100 appends with zero allocation on both
+  compilers (the baseline native compiler returns 2). Companion cases
+  replace, pop, clear or grow the element itself and must keep the earlier
+  value.
+- **Static empty array literals.** An empty literal shares a static
+  descriptor per site. Its owner count starts at 2⁶² and never reaches one,
+  so the first mutation detaches (`array_unique`). Sharing and release only
+  move the count, and nothing frees it. New descriptors fell from 105.8 M
+  to 16.8 M. Arrays that are later pushed now pay at their first mutation
+  instead of their creation.
+- **Constant non-empty literals stay fresh.** Treating them the same way
+  saved only 0.13 GB. It also broke a documented guarantee: a fresh literal
+  given to an owning parameter is mutated without a detach
+  (`owning_array_parameters.dewy`). Static storage suits only literals whose
+  consumer just reads them, such as `x in? [...]`. The borrow plan cannot
+  yet lend a literal argument, which has no storage route, so this waits
+  for that proof.
+- **Iteration needs no hash index.** `dict_ensure(compact=true)` (entry
+  loops, `.keys`/`.values`, set-algebra sources) rebuilt the index whenever
+  a dictionary had none. On an empty dictionary whose arrays are the shared
+  static empties, that meant three or four detaches on every
+  `kw_args.values` visit. Iteration now compacts tombstones only; the first
+  probe builds the index.
+- **Node literals at their parent's size.** A parent-typed record block
+  reserves room for every descendant, so `owned_record` resized an owned
+  child literal by copying it into a parent-sized block and freeing the
+  original. Every `put(hir.X[...])` did this. A literal cast directly to its
+  parent is now allocated at the parent's size.
+
+Remaining large sources, in order: array growth (6.2 GB; about 2 GB are
+first 8-slot buffers of short local lists), new records (5.2 GB, of which
+`fact_state.put` entries are 1 GB), record copies (3.8 GB, including
+`fact_state.join`'s interval copy into the owned `combined`), dictionary
+index rebuilds (3.2 GB), detaches (2.8 GB), and the remaining `node_at`
+snapshots in `bounds`, `statements.inline_temporaries` and `exposed_roots`.

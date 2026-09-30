@@ -74,7 +74,38 @@ let render_changing = (@words:array<string>):>string => words.join(separator(@wo
     assert reader.reads == {ROOT}
     changing = _param_effects(effects, _function(root, 'render_changing'))
     assert changing.reads == {ROOT}
-    assert changing.mutates == {ROOT}
+    assert changing.appends == {ROOT} and not changing.mutates
+    assert changing.writes and not changing.read_only_at(ROOT)
+
+
+def test_append_preserves_existing_elements_only() -> None:
+    root, effects = _analyze('''
+Holder:type = [items:array<int64> other:array<int64>]
+let grow = (@holder:Holder):>void => {holder.items.push(1) holder.other.reserve(4)}
+let shrink = (@holder:Holder):>void => {if holder.items.length >? 0 {holder.items.pop;}}
+let replace = (@holder:Holder):>void => {if holder.items.length >? 0 {holder.items[0] = 2}}
+''')
+    grown = _param_effects(effects, _function(root, 'grow'))
+    assert grown.appends == {('items',), ('other',)} and not grown.mutates
+    # The elements of an appended array stay; the array itself changes.
+    assert grown.element_stable_at(('items',)) and grown.element_stable_at(('other',))
+    assert not grown.read_only_at(('items',)) and not grown.read_only_at(('items', INDEX_STEP))
+    assert not grown.read_only_at(())
+    shrunk = _param_effects(effects, _function(root, 'shrink'))
+    assert shrunk.mutates == {('items',)} and not shrunk.element_stable_at(('items',))
+    replaced = _param_effects(effects, _function(root, 'replace'))
+    assert not replaced.element_stable_at(('items',))
+
+
+def test_truncated_append_route_records_a_mutation() -> None:
+    summary = ParameterEffects()
+    deep = tuple(f'f{i}' for i in range(12))
+    summary.add_append(deep)
+    assert not summary.appends and summary.mutates == {deep[:8]}
+    assert not summary.element_stable_at(deep[:8])
+    translated = ParameterEffects()
+    translated.merge_translated(ParameterEffects(appends={deep[:6]}), ('a', 'b', 'c'))
+    assert not translated.appends and translated.mutates == {('a', 'b', 'c', *deep[:5])}
 
 
 def test_index_write_records_element_mutation() -> None:

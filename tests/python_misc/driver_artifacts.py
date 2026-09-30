@@ -8,7 +8,8 @@ the hosted compiler and µDewy toolchain sources, the native compiler sources it
 imports, the library, the build options and the Python version. The first
 worker to need an identity builds it under a file lock; the others wait and
 reuse the result, as do later sessions until any input changes. A failed
-build is never recorded.
+build is never recorded. A process keeps a shared lock on every entry it uses
+until it exits, and pruning removes only entries nobody holds.
 
 Each case still starts a fresh driver process with its own compiler session.
 Only the executable is shared, never analysis state.
@@ -34,6 +35,7 @@ _INPUT_DIRECTORIES = ('dewy', 'udewy', 'library')
 _INPUT_SUFFIXES = {'.py', '.dewy', '.udewy', '.bin', '.c', '.h', '.json', '.s', '.S'}
 _KEEP = 12
 _inputs_digest: str | None = None
+_held: dict[Path, object] = {}   # entry -> its lock file, held shared until exit
 
 
 def _toolchain_digest() -> str:
@@ -84,30 +86,64 @@ def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Pa
     }, sort_keys=True).encode()).hexdigest()[:32]
     entry = _store() / f'{name}-{identity}'
     executable = entry / 'driver'
-    entry.mkdir(parents=True, exist_ok=True)
-    with open(entry / '.lock', 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    if entry not in _held:
+        lock = _lock(entry, fcntl.LOCK_SH)
         if not executable.is_file():
-            built = build()
-            staged = entry / 'driver.partial'
-            shutil.copy2(built, staged)
-            os.replace(staged, executable)
-            (entry / 'identity.json').write_text(json.dumps({
-                'name': name, 'source': str(source), 'options': options,
-                'inputs': _toolchain_digest(), 'built': time.time(),
-            }, indent=2))
+            # Only a missing driver needs the exclusive lock: no process
+            # holds an entry shared before its driver exists.
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+            lock = _lock(entry, fcntl.LOCK_EX)
+            try:
+                if not executable.is_file():
+                    built = build()
+                    staged = entry / 'driver.partial'
+                    shutil.copy2(built, staged)
+                    os.replace(staged, executable)
+                    (entry / 'identity.json').write_text(json.dumps({
+                        'name': name, 'source': str(source), 'options': options,
+                        'inputs': _toolchain_digest(), 'built': time.time(),
+                    }, indent=2))
+            except BaseException:
+                lock.close()
+                raise
+            fcntl.flock(lock, fcntl.LOCK_SH)
+        _held[entry] = lock
     os.utime(entry)
     _prune(entry.parent)
     return executable
 
 
+def _lock(entry: Path, mode: int):
+    """The entry's lock file, locked in `mode`, retrying if pruning removed it meanwhile."""
+    while True:
+        entry.mkdir(parents=True, exist_ok=True)
+        lock = open(entry / '.lock', 'a')
+        fcntl.flock(lock, mode)
+        try:
+            if os.path.samestat(os.fstat(lock.fileno()), os.stat(entry / '.lock')):
+                return lock
+        except FileNotFoundError:
+            pass
+        lock.close()
+
+
 def _prune(store: Path) -> None:
     """Keep the most recently used identities; drop the rest."""
-    entries = sorted((path for path in store.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, reverse=True)
-    for stale in entries[_KEEP:]:
-        lock_path = stale / '.lock'
+    entries = []
+    for path in store.iterdir():
         try:
-            with open(lock_path, 'w') as lock:
+            if path.is_dir():
+                entries.append((path.stat().st_mtime, path))
+        except FileNotFoundError:
+            continue
+    entries.sort(reverse=True)
+    for _, stale in entries[_KEEP:]:
+        if stale in _held:
+            continue
+        try:
+            with open(stale / '.lock', 'a') as lock:
+                # A holder anywhere (shared or building) keeps the entry.
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 shutil.rmtree(stale, ignore_errors=True)
         except (BlockingIOError, FileNotFoundError):

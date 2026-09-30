@@ -1,4 +1,4 @@
-"""A read-only single-place parameter can lend a checked local view."""
+"""A read-only place parameter can lend a checked local view."""
 import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile, ReportException
@@ -8,13 +8,14 @@ CASES = ['''read=(@xs:array<int64>):>int64=>{const saved=@xs return saved.length
 main=():>int64=>{let xs:array<int64>=[20 22] return read(@xs)+40}''',
 '''length=(@xs:array<int64>):>int64=>xs.length
 read=(@xs:array<int64>):>int64=>{const saved=@xs return saved.length+length(@xs)}
-main=():>int64=>{let xs:array<int64>=[20 22] return read(@xs)+38}''']
+main=():>int64=>{let xs:array<int64>=[20 22] return read(@xs)+38}''',
+# Places of one call never overlap, so writing one leaves the other's view.
+'''read=(@xs:array<int64> @ys:array<int64>):>int64=>{const saved=@xs ys.clear return saved.length}
+main=():>int64=>{let xs:array<int64>=[42] let ys:array<int64>=[42] return read(@xs @ys)+41}''']
 ERRORS = ['''let xs:array<int64>=[42]
 change=():>void=>{xs.clear}
 read=(@values:array<int64>):>int64=>{const saved=@values change() return saved.length}
 main=():>int64=>read(@xs)''',
-'''read=(@xs:array<int64> @ys:array<int64>):>int64=>{const saved=@xs ys.clear return saved.length}
-main=():>int64=>{let xs:array<int64>=[42] let ys:array<int64>=[42] return read(@xs @ys)}''',
 '''let values:array<int64>=[42]
 change=():>void=>{values.clear}
 read=(@xs:array<int64> f:():>void):>int64=>{const saved=@xs f() return saved.length}

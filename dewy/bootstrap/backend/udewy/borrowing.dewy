@@ -887,6 +887,14 @@ stable_owner = (source:Route stable:set<addr> parameters:dict<addr effects.Param
     if summary is? none return false
     return effects.read_only_at(summary effects.Route[source.fields])
 }
+# The elements of the array at `source` keep their storage while its function
+# runs, although the array itself may grow (`effects.element_stable_at`).
+stable_elements = (source:Route stable:set<addr> parameters:dict<addr effects.ParameterEffects>):>bool => {
+    if source.binding in? stable return true
+    let summary=parameters.get(source.binding)
+    if summary is? none return false
+    return effects.element_stable_at(summary effects.Route[source.fields])
+}
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false registry:bindings.Registry=bindings.Registry[]):>Plan => {
     let valued=captures.value_functions(root nodes plan)
@@ -948,15 +956,14 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
-        let parameters=effects.literal_params(literal)
-        let place_count:addr=0
-        loop parameter in parameters {if parameter.place {place_count+=1}}
-        loop parameter in parameters {
+        loop parameter in effects.literal_params(literal) {
             let binding=parameter.binding_id
             if binding is? none or binding in? captured or binding in? plan.globals or binding in? exposed continue
-            # A place owner can also be named by a global. Exclude ambient
-            # writes and, conservatively, functions with multiple places.
-            if parameter.place and (place_count not=? 1 or (id in? dirty and id in? aliased)) continue
+            # A place owner can also be named by a global: exclude ambient
+            # writes. Two places of one call never overlap (the checker's
+            # `remember_place`, receivers included), so each parameter's own
+            # summary covers every write that can reach its storage.
+            if parameter.place and id in? dirty and id in? aliased continue
             let summary=summaries.by_param_binding.get(binding)
             if summary isnt? none {stable_parameters[binding]=summary}
         }

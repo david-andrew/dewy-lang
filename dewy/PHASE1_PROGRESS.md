@@ -129,6 +129,48 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Throughput batch: appends keep element views (2026-09-30)
+
+Roadmap step 3. A cold direct self-build of the same source fell from
+**63.2 s to 57.1 s**, allocation from **43.1 GB to 31.3 GB**, and peak
+memory from **2.90 GB to 2.39 GB**. Details and per-change measurements are
+in `bootstrap/PERFORMANCE.md` ("Throughput batch: appends, static literals,
+node construction").
+
+- **Appends.** Both effect analyses record `push`/`reserve` as `appends`,
+  kept apart from `mutates`. Every existing query still counts an append as
+  a write; `element_stable_at` alone lets a view of one element outlive
+  appends to its array.
+- **Getter borrows.** Both compilers' getter borrows use this fact for
+  element results. Native wrapper getters keep the element step when their
+  argument names the owner exactly.
+- **Stable place parameters.** Functions with several place parameters may
+  now have stable ones. The checker rejects overlapping places in one call,
+  so each parameter's own summary covers every write that can reach it.
+  `tests/python_misc/test_place_parameter_views.py` moves its two-place case
+  from the rejected list to the accepted one.
+- **Native lowering.** Static descriptors for empty array literals;
+  entry iteration without building a hash index; child node literals
+  allocated at their parent's size. Static constant literals were tried and
+  dropped (see `PERFORMANCE.md`).
+
+Evidence:
+- `tests/python_misc/test_element_getter_appends.py`
+  (`F/element_getter_appends.dewy` plus replace, pop, reset and nested-growth
+  snapshot cases; hosted and native).
+- New append cases in `test_semantic_effects.py` and in the hosted/native
+  comparison `test_bootstrap_effects.py`.
+- Native pair checks.
+- The local gate: 6,311 passed, 4 failed. Two failures were a race in the
+  shared driver store: pruning could delete an entry another worker was
+  running. Workers now hold each used entry shared until they exit, and
+  pruning skips held entries. The other two came from static constant
+  literals: the first mutation of a fresh literal now detached. That change
+  was withdrawn, so those tests stand unchanged.
+
+S5 stays open: the element fact now lives in the shared effect summary, but
+the getter borrow that consumes it is still a lowering shortcut.
+
 ## Latest native/parity repair integration (2026-09-29)
 
 **668/668** paired acceptance/execution cases pass against frozen source

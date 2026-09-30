@@ -81,16 +81,23 @@ class ParameterEffects:
     value at that route and everything below it. ``rebinds`` records
     whole-value replacement of the value at the route, which for the empty
     route is rebinding the parameter itself.
+
+    ``appends`` records growth (``push``, ``reserve``) of the array at the
+    route. Existing elements keep their values, so an append is a write to
+    everything except a view of one of that array's elements
+    (``element_stable_at``). A route truncated at the depth bound no longer
+    names the array that grew and records a mutation instead.
     """
 
     reads: set[Route] = field(default_factory=set)
     mutates: set[Route] = field(default_factory=set)
     rebinds: set[Route] = field(default_factory=set)
     escapes: set[Route] = field(default_factory=set)
+    appends: set[Route] = field(default_factory=set)
 
     @property
     def writes(self) -> bool:
-        return bool(self.mutates or self.rebinds)
+        return bool(self.mutates or self.rebinds or self.appends)
 
     @property
     def read_only(self) -> bool:
@@ -104,13 +111,25 @@ class ParameterEffects:
         step, so this does not assume that two selections are disjoint.
         """
         return all(not (route[:len(other)] == other or other[:len(route)] == route)
-                   for routes in (self.mutates, self.rebinds, self.escapes)
+                   for routes in (self.mutates, self.rebinds, self.escapes, self.appends)
                    for other in routes)
+
+    def element_stable_at(self, route: Route) -> bool:
+        """The elements of the array at ``route`` keep their values and storage.
+
+        Nothing writes, replaces or exposes them, and appends reach that array
+        itself only. Element storage is a scalar or a handle, so growth moves
+        no element record.
+        """
+        view = route + (INDEX_STEP,)
+        return all(not (view[:len(other)] == other or other[:len(view)] == view)
+                   for routes in (self.mutates, self.rebinds, self.escapes, self.appends)
+                   for other in routes if not (routes is self.appends and other == route))
 
     def accesses_at(self, route: Route) -> bool:
         """Whether any observed operation may need this component alive."""
         return any(route[:len(other)] == other or other[:len(route)] == route
-                   for routes in (self.reads, self.mutates, self.rebinds, self.escapes)
+                   for routes in (self.reads, self.mutates, self.rebinds, self.escapes, self.appends)
                    for other in routes)
 
     def add_read(self, route: Route) -> bool:
@@ -118,6 +137,11 @@ class ParameterEffects:
 
     def add_mutate(self, route: Route) -> bool:
         return _add_route(self.mutates, route)
+
+    def add_append(self, route: Route) -> bool:
+        if len(route) > MAX_ROUTE_DEPTH:
+            return self.add_mutate(route)
+        return _add_route(self.appends, route)
 
     def add_rebind(self, route: Route) -> bool:
         return _add_route(self.rebinds, route)
@@ -148,6 +172,8 @@ class ParameterEffects:
             changed |= self.add_rebind(prefix + route)
         for route in other.escapes:
             changed |= self.add_escape(prefix + route)
+        for route in other.appends:
+            changed |= self.add_append(prefix + route)
         return changed
 
     def copy(self) -> ParameterEffects:
@@ -156,6 +182,7 @@ class ParameterEffects:
             set(self.mutates),
             set(self.rebinds),
             set(self.escapes),
+            set(self.appends),
         )
 
 
@@ -628,13 +655,15 @@ class _EffectAnalyzer:
         params: dict[int, ParameterEffects],
     ) -> None:
         if isinstance(call.func, hir.ArrayMethod):
-            # Joining reads the receiver; growth/reordering methods mutate it.
+            # Joining reads the receiver; growth appends; reordering mutates.
             # Argument expressions still contribute their own effects below.
             resolved = self._resolve_route(call.func.array, params)
             if resolved is not None:
                 binding_id, route, inner = resolved
                 if call.func.name == 'join':
                     params[binding_id].add_read(route)
+                elif call.func.name in ('push', 'reserve'):
+                    params[binding_id].add_append(route)
                 else:
                     params[binding_id].add_mutate(route)
                 for expr in inner:
@@ -767,7 +796,7 @@ def preserves_storage(summary: ParameterEffects, type_) -> bool:
     """
     return not summary.escapes and (summary.read_only or (
         isinstance(ty.structural_base(type_), ty.ObjectType)
-        and ROOT not in summary.mutates and ROOT not in summary.rebinds))
+        and ROOT not in summary.mutates and ROOT not in summary.rebinds and ROOT not in summary.appends))
 
 
 def place_loans(analysis: _EffectAnalyzer, summaries: ProgramEffects) -> PlaceLoans:

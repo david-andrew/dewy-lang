@@ -1,0 +1,24 @@
+# A getter's element view stays valid while its array grows: appends change
+# no existing element, and elements are handles that growth never moves.
+Node:type = [items:array<int64> value:int64]
+node_at=(nodes:array<Node> id:addr<i => i <? nodes.length>):>Node=>nodes[id].copy()
+grow=(@nodes:array<Node> value:int64):>void=>{nodes.push(Node[[value] value])}
+walk=(@nodes:array<Node>):>int64=>{
+    let viewed:int64=0
+    let total:int64=0
+    loop i in 0..99 {
+        if nodes.length =? 0 return 3
+        let before=_arena_allocated_bytes
+        let node=node_at(nodes 0)
+        viewed+=_arena_allocated_bytes-before
+        grow(@nodes 2)
+        total+=node.value+node.items.length
+    }
+    if viewed not=?0 return 2
+    if total not=?200 or nodes.length not=?101 return 1
+    return 42
+}
+main=():>int64=>{
+    let nodes:array<Node>=[Node[[7] 1]]
+    return walk(@nodes)
+}
