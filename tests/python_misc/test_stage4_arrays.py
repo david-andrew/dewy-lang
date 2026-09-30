@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.errors import NotImplementedYet, TypeCheckError, UserError
+from test_scalar_projection import execute
 
 
 def _check(source: str) -> hir.Block:
@@ -309,16 +310,20 @@ let main = ():>int64 => {
     assert '__store_i64__(42 ' in emitted
 
 
-def test_udewy_still_rejects_local_array_escape_to_module_storage() -> None:
-
-    with pytest.raises(NotImplementedYet, match='cannot escape'):
-        codegen(SrcFile(None, """
+def test_local_array_replaces_module_storage(tmp_path) -> None:
+    # A module array can take a local array's storage (lasting ownership for
+    # global replacements, 2026-09-29); it used to be rejected.
+    execute(tmp_path, 'module-array-replacement', codegen(SrcFile(None, """
 let saved:array<int64> = [0]
 let replace_saved = ():>void => {
     let local:array<int64> = [42]
     saved = local
 }
-"""))
+let main = ():>int64 => {
+    replace_saved()
+    return if saved.length =? 1 and saved[0] =? 42 42 else 1
+}
+"""), debug_locations=False))
 
 
 def test_exact_array_returns_support_owned_handle_storage() -> None:

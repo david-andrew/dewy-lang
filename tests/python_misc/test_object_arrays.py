@@ -28,7 +28,7 @@ def test_loop_variable_over_objects_is_a_read_only_borrow() -> None:
         ('s.start = 5', 'cannot mutate a field of a const object'),
         ('s.tags.push(1)', 'cannot mutate a field of a const binding'),
         ('s = [start=0 stop=0 tags=[]]', 'cannot assign to a read-only binding'),
-        ('bump(@s)', 'cannot assign to a read-only binding'),
+        ('bump(@s)', 'cannot pass a const binding as a mutable place'),
     ]:
         with pytest.raises(UserError, match=title) as info:
             _compile(SPAN + 'let bump = (@s:Span):>void => { s.start = s.start + 1  return void }\n' + body % statement)

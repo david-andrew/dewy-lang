@@ -46,4 +46,7 @@ def test_parameters_and_module_arrays_are_not_released() -> None:
         'let f = (items:array<int64>):>int64 => items.length\n'
         'let main = ():>int64 => f(xs)\n'
     )
-    assert '_arena_release(' not in emitted[emitted.index('let f ='):]
+    # Only these two bodies: generated release helpers are emitted after them.
+    for name in ('let f =', 'let main ='):
+        start = emitted.index(name)
+        assert '_arena_release(' not in emitted[start:emitted.index('\n}\n', start)]

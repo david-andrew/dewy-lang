@@ -43,7 +43,7 @@ def test_the_qualifier_is_part_of_the_type() -> None:
     ("let f = ():>void => { let info = BaseInfo['01' true []]  info.alphabet = \"abc\" }\n", 'assign a field of an immutable record'),
     ("let f = (info:BaseInfo) => { info.extra_chars.pop(\"z\") }\n", 'mutate a dictionary member of an immutable record'),
     ("let f = (info:BaseInfo) => { if \"z\" in? info.extra_chars { info.extra_chars[\"z\"] = 1 } }\n", 'store into a dictionary member of an immutable record'),
-    ("let bump = (@n:uint8) => { n += 1 }\nlet f = (info:BaseInfo) => { bump(@info.radix) }\n", 'take the place of a field of an immutable record'),
+    ("let bump = (@n:uint8) => { n += 1 }\nlet f = (info:BaseInfo) => { bump(@info.radix) }\n", 'cannot pass a member of an immutable record'),
     ("let f = (info:BaseInfo) => { let c = info  c.radix = 3 }\n", 'assign a field of an immutable record'),                       # a copy is the same immutable type
     ("let f = (infos:array<BaseInfo>) => { if infos.length >? 0 { infos[0].radix = 3 } }\n", 'assign a field of an immutable record'),   # through a container
     ("let g = (x:[alphabet:string case_sensitive:bool extra_chars:dict<string int8?> radix:uint8]) => { x.radix = 3 }\nlet f = (info:BaseInfo) => { g(info) }\n", 'type mismatch'),   # a writable contract
