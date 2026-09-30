@@ -1481,7 +1481,14 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State anchor:addr?=n
     # capacity and release ignores a null pointer, so `[]` costs only its
     # descriptor instead of a second allocation for zero bytes.
     let count=hir.node_at(state.nodes length)
-    let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(if anchor isnt? none owner_allocation(anchor size node @state) else allocation(size node @state) @prefix @state)
+    let allocated=if anchor isnt? none owner_allocation(anchor size node @state) else allocation(size node @state)
+    # A detached empty array (the first write to a shared static `[]`) is
+    # likewise left without a data block; its length is a snapshot here.
+    if anchor isnt? none and count isnt? hir.Integer {
+        let empty=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__eq__' length word(0 node @state) node @state) word(0 node @state)] @state)
+        allocated=put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [empty] allocated] @state)
+    }
+    let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(allocated @prefix @state)
     let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
     let helper=if anchor is? none construction_helper('new_array' 6 node @state) else none
     if helper isnt? none {
@@ -4596,6 +4603,12 @@ getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
     return borrowing.Route[outer.binding fields]
 }
 element_route = (route:borrowing.Route):>bool => route.fields.length >? 0 and route.fields[route.fields.length-1] =? '[]'
+# Array elements of this type hold a one-word handle to separate storage.
+element_handle = (type:addr @state:State):>bool => {
+    let layout=layouts.element(type @state.type_nodes nominals=state.layout_context.nominals)
+    if layout is? layouts.Pending or layout.size not=? 8 return false
+    return object_valued(type @state) or cell_members(type @state) isnt? none
+}
 # Every step from the binding is a field: no index shortened the route.
 exact_route = (id:addr nodes:array<hir.AST>):>bool => {
     let current=id
@@ -4641,8 +4654,11 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     let owner=borrowing.route(source state.input.nodes)
     if owner is? none return none
     # An element result only needs that array's existing elements to stay:
-    # the caller may still append to the array while the view is live.
-    if element_route(route) and exact_route(source state.input.nodes) {
+    # the caller may still append to the array while the view is live. That
+    # also needs the element to be a handle, so growth moves no element
+    # storage: value preservation across appends is not address stability,
+    # and a dense (inline) element layout would need its own evidence.
+    if element_route(route) and exact_route(source state.input.nodes) and element_handle(literal.rettype @state) {
         let fields=owner.fields
         loop i in 0.. and i <? route.fields.length-1 {fields.push(route.fields[i])}
         if not borrowing.stable_elements(borrowing.Route[owner.binding fields] state.stable_bindings state.stable_parameters) return none

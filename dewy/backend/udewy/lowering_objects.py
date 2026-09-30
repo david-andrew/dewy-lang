@@ -181,9 +181,13 @@ class _ObjectLowering:
         owner = borrowing.route(argument)
         if owner is None:
             return None
-        if isinstance(read, hir.Index) and borrowing.exact_route(argument):
+        if (isinstance(read, hir.Index) and borrowing.exact_route(argument)
+                and self._array_element_layout(read.type, read) == (8, True)):
             # An element result only needs that array's existing elements to
-            # stay: the caller may still append to the array meanwhile.
+            # stay: the caller may still append to the array meanwhile. The
+            # element must be a one-word handle, so growth moves no element
+            # storage; value preservation is not address stability, and a
+            # dense element layout would need its own evidence.
             elements = borrowing.Route(owner.binding, owner.fields + route.fields)
             if not borrowing.stable_elements(elements, self.borrow_plan):
                 return None

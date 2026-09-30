@@ -881,6 +881,7 @@ cache directory and re-analyzes the prelude).
 | batch 1 (`7e22c065`) | 57.3 s | 31.3 GB | 17.9 s |
 | + shared joins | 54.8 s | 29.8 GB | 15.7 s |
 | + frame place slots for arrays and strings | 54.9 s | 29.7 GB | 15.7 s |
+| + detached empty arrays without a data block | 54.2 s | 29.4 GB | 15.6 s |
 
 - **Joins share unchanged evidence.** `fact_state.join` rebuilt its result
   fact by fact on every merge. When every path holds exactly the first
@@ -891,6 +892,10 @@ cache directory and re-analyzes the prelude).
   place boxed it in an 8-byte arena block on each call (`hir.children`: 7.2 M
   allocations). Boxed handle locals now use the frame slot that scalars
   already used. Their contents keep the ordinary cleanup; only the box moved.
+- **Detached empty arrays own no data block.** The first mutation of a
+  shared static `[]` detached a descriptor together with a zero-length data
+  block, and the first push then allocated the real buffer. A detached empty
+  array now has a null data pointer, as a fresh `[]` always had.
 
 A 50 ms CPU profile of batch 1 remains flat. Runtime storage helpers take
 about 40% of samples; the bounds prover's path refinement about 11%, of

@@ -146,6 +146,40 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Element borrows require handle storage; copy-report comparison (2026-09-30)
+
+- **Handle check on element borrows.** Following the September 30 roadmap
+  (value preservation during append is not address stability), both
+  compilers' getter element borrows now check that the element is a one-word
+  handle before accepting a view across appends. A future dense layout will
+  need its own evidence.
+- **Empty detaches.** Detaching an empty array no longer allocates a data
+  block (native): 54.2 s and 29.4 GB for a cold self-build. The local gate
+  passed (6,316 tests).
+- **C3 comparison tool.** `tools/copy_parity.py` compares hosted and native
+  `copy_report.py --json` inventories note by note. A difference is
+  hosted-only, native-only, a reason change at the same boundary, or a
+  paired copy on the same row described at a different boundary. The tool
+  exits nonzero while any difference is unclassified.
+
+C3 baseline on the whole compiler (`dewy/bootstrap/main.dewy` at `6a443515`):
+- hosted 6,236 copies, native 4,247; 1,800 identical;
+- 4,947 differences: 2,500 hosted-only, 511 native-only, 1,815 paired and
+  121 reason changes.
+
+Largest groups:
+- 1,866 hosted string placements, where hosted copies frame-built or
+  borrowed strings into the arena and native shares its string descriptors;
+- boundary vocabulary: "passed to a call" vs "donated to a call" (330),
+  "stored in a union" vs "stored in a field" (233), record-literal fields
+  (176 + 153).
+
+The 80 strict-copy modules account for 986 hosted and 485 native notes; both
+compilers accept all of them. Next, unify the vocabulary where both
+compilers make the same decision, then record a class and explanation for
+each remaining strategy difference. C3 stays open until every difference is
+classified.
+
 ## Throughput batch 2: shared joins, frame place slots (2026-09-30)
 
 Validation fell from 17.9 s to 15.7 s and a cold self-build from 57.3 s to
