@@ -6,6 +6,129 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
+## Phase 1 closure matrix (frozen 2026-09-29)
+
+This is the finite closure matrix the September 29 roadmap asks for. It
+bounds the remaining Phase 1 work without reducing its approved scope. **F** is
+`tests/fixtures/`, **T** is `tests/python_misc/`; (M) marks a case in
+`F/phase1_parity_cases.json`, the paired hosted/native manifest. Status:
+**done** means implemented in both compilers with the cited evidence;
+**boundary** is a recorded conservative limit (a valid rejection or fallback,
+never a miscompilation) that does not block closure; **open** must be
+finished, or explicitly reassigned, before Phase 1 closes.
+
+### Ownership and placement
+
+| # | Operation | Accepts | Rejects | Status |
+| --- | --- | --- | --- | --- |
+| O1 | Last-use move of a local owner (custom `$__move__` too) | F/lifecycle_local_transfers.dewy (M) | F/narrowed_array_repeat_copy_rejected.dewy (M) | done |
+| O2 | Conditional whole-owner transfer | F/lifecycle_conditional_moves.dewy, F/conditional_value_moves.dewy (M) | T/test_lifecycle_conditional_moves.py ERRORS | done |
+| O3 | Branch last-uses at joins | F/branch_last_uses.dewy, F/flow_owned_joins.dewy (M) | F/branch_moves_retained_rejected.dewy (M) | done; boundary: 4,096 pair cap per owner keeps the copy |
+| O4 | Move before `break`/labeled exit | T/test_lifecycle_loop_exit_moves.py | same file, repeating-use cases | done |
+| O5 | Owner replacement across loop backedges | T/test_lifecycle_renewed_owners.py | same file, unrenewed paths | done |
+| O6 | Last-use field/element transfer | F/record_field_moves.dewy, F/inline_record_element_moves.dewy (M) | F/record_field_copy_rejected.dewy (M) | done; boundary: drop-hook wrappers need their receiver unless the hook's access proof allows it (O12) |
+| O7 | Field/element return from an exiting owner | F/array_field_return.dewy (M) | F/array_field_drop_read_rejected.dewy (M) | done |
+| O8 | Conditional component transfer | F/lifecycle_conditional_components.dewy, F/lifecycle_conditional_component_moves.dewy, F/lifecycle_conditional_container_fields.dewy (M) | T/test_lifecycle_conditional_components.py ERRORS | done |
+| O9 | Constant/runtime-selected element transfers | F/lifecycle_constant_slots.dewy, F/lifecycle_conditional_dynamic_slot.dewy, F/lifecycle_disjoint_dynamic_paths.dewy (M) | F/lifecycle_local_selector_rejected_0.dewy (M) | done; boundary: overlapping, loop-repeated or mutable selectors |
+| O10 | Field/ancestor renewal | F/record_field_replacement_moves.dewy (M) | T/test_lifecycle_field_renewal.py ERRORS | done; boundary: conditional replacement |
+| O11 | Array renewal after dynamic element transfer | F/lifecycle_dynamic_renewal.dewy (M) | T/test_lifecycle_dynamic_renewal.py | done; boundary: stores into a partial array |
+| O12 | Transfer out of a drop-hook wrapper (hook access proof) | F/lifecycle_partial_drop_effects.dewy, F/lifecycle_partial_hook_wrappers.dewy (M) | T/test_lifecycle_partial_drop_effects.py | done |
+| O13 | Local, global and union owner replacement | F/array_local_replacement.dewy, F/global_aggregate_replacement_0.dewy, F/union_replacement_move_0.dewy (M) | F/array_replacement_view_rejected.dewy, F/union_replacement_move_5.dewy (M) | done; boundary: hosted global replacements holding resources |
+| O14 | Owning by-value parameters, fresh arguments | F/lifecycle_owning_parameters.dewy, F/owned_record_parameters.dewy (M) | F/owned_default_record_rejected_0.dewy (M) | done |
+| O15 | `@` parameters and place loans (dictionary entries too) | F/lifecycle_borrowed_parameters.dewy, F/dictionary_argument_place_ok_0.dewy (M) | F/dictionary_argument_place_error_0.dewy, F/place_projection_argument_rejected_0.dewy (M) | done; boundary: several place parameters per call |
+| O16 | Loans of fresh call-root records | F/record_argument_loans.dewy, F/nested_record_argument_loans.dewy (M) | F/nested_record_loan_rejected_0.dewy (M) | done |
+| O17 | Required views `const x = @route` | F/explicit_local_views.dewy, F/scoped_local_views.dewy (M) | F/explicit_local_view_write_rejected.dewy, F/scoped_view_write_rejected.dewy (M) | done |
+| O18 | Inferred views, dependent-alias last use | F/view_last_use.dewy, F/inferred_view_last_use.dewy (M) | F/view_last_use_alias_rejected.dewy, F/view_last_use_loop_rejected.dewy (M) | done |
+| O19 | Projection views (`get`, returned field views) | F/lifecycle_resource_views.dewy, F/get_views.dewy, F/returned_field_views_0.dewy (M) | F/returned_field_views_7.dewy, F/array_field_live_view_rejected.dewy (M) | done |
+| O20 | Mutable local places `let p = @xs[i]` | F/mutable_local_places.dewy (M) | F/local_place_ambient_error_0.dewy (M) | done |
+| O21 | Dictionary entry places | T/test_dictionary_local_places.py | same file, rejected cases | done; boundary: other dictionary mutations while an entry place lives |
+| O22 | Imported helpers in owner/place lifetimes | F/imported_local_place_ok_0.dewy, F/lifecycle_imported_owner.dewy (M) | F/imported_local_place_error_0.dewy (M) | done |
+| O23 | Read-only nonescaping captures of owners/places | F/captured_owner_place.dewy, F/captured_resource_place.dewy (M) | F/captured_array_transfer_rejected.dewy (M) | done; escaping/writable captures are **Phase 2** (closures) |
+| O24 | Custom copy/move/drop hooks, inherited composition | F/lifecycle_drop_runtime.dewy, F/lifecycle_copy_runtime.dewy, F/lifecycle_move_runtime.dewy, F/lifecycle_inherited_copy_runtime.dewy (M) | F/lifecycle_move_only_copy_rejected.dewy, F/lifecycle_call_rejected.dewy (M) | done |
+| O25 | Resource array operations | F/lifecycle_resource_array_methods.dewy, F/lifecycle_resource_array_truncate.dewy, F/lifecycle_resource_sort.dewy (M) | T/test_lifecycle_resource_sort.py | done |
+| O26 | Resource dictionary operations | F/lifecycle_resource_dict_entries.dewy, F/lifecycle_resource_dict_pop.dewy, F/lifecycle_resource_dict_clear.dewy (M) | T/test_lifecycle_resource_dict_pop.py ERRORS | done |
+| O27 | Frame placement of fixed scalar aggregates | F/frame_record_placement.dewy, F/frame_array_storage.dewy (M) | T/test_frame_record_placement.py | done for acceptance; hosted physical placement is a cost difference, not a parity requirement |
+| O28 | `$allocator` blocks | F/allocator_local_exits.dewy, F/scalar_allocator_placement.dewy, F/allocator_storage_ownership.dewy (M) | F/allocator_result_before_trailing.dewy, F/allocator_insert_escape_rejected.dewy (M) | done; boundary: aggregate block results and module-level `Arena` owners fall back |
+| O29 | Owner promotion into a destination allocator | F/allocator_store_promotion_release.dewy (M) | (fallback with report) | boundary: only optional/union replacements promote; general owner-directed promotion is a continuing goal |
+| O30 | `$lend` scoped storage loans | F/scoped_storage_read.dewy, F/scoped_storage_writable.dewy (M) | T/test_scoped_storage.py | done |
+
+### Shared storage decisions
+
+| # | Decision | Evidence | Status |
+| --- | --- | --- | --- |
+| S1 | One storage proof for arguments and literals (`storage_borrows.prove`) feeds allocation contracts, borrowing and lowering | T/test_borrowed_allocation_effects.py; F/borrowed_allocation_effects.dewy, F/allocation_effects.dewy, F/allocation_effect_rejected.dewy (M) | done |
+| S2 | Runtime report boundary shares the storage proof | T/test_assertion_storage_borrows.py; F/shared_report_storage_loans_0.dewy..2 (M) | done |
+| S3 | Copy policy agrees with borrowing | F/strict_copy_rejected.dewy, F/strict_copy_argument.dewy, F/strict_copy_shared_strings.dewy (M); T/test_strict_copy_policy.py | done |
+| S4 | Hook effects survive physical elision | T/test_lifecycle_implicit_copies.py, T/test_lifecycle_component_copies.py; F/lifecycle_copy_effect_rejected.dewy (M) | done |
+| S5 | Lowering-only borrow shortcuts are consumed by the policy | both `storage_borrows` modules still note that lowering "may have more precise borrow proofs" | **open**: inventory the shortcuts; move each into the shared proof or record it as cost-only |
+
+### Proof and unsafe boundary
+
+| # | Item | Evidence | Status |
+| --- | --- | --- | --- |
+| P1 | Facts survive transfer; mutation and aliasing invalidate | T/test_mutable_selector_facts.py, T/test_readonly_call_facts.py, T/test_consuming_input_aliases.py, F/unsafe_after_resize.dewy (M) | done |
+| P2 | Exhausted search budgets stay unknown | T/test_loop_convergence_budget.py, T/test_nested_loop_search_budget.py, T/test_weighted_fact_budget.py | done |
+| P3 | Unsafe audit lists **actual** assumption consumers | both `unsafe_audit` modules report every check in the assumption's function scope (`conservative function scope`) | **open**: carry assumption origins on facts through transfer, joins, invalidation and contracts, and report demonstrated consumers |
+| P4 | Unknown proofs explain their reason (unsupported fragment, invalidated identity, missing contract, exhausted budget) | verdicts are `bool | None`; no reason is kept | **open**: record reasons and query counts in both checkers |
+
+### Compiler source and inventory
+
+| # | Item | Evidence | Status |
+| --- | --- | --- | --- |
+| C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: agree the scope, then adopt it through proofs rather than annotations |
+| C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
+
+### Integration
+
+| # | Item | Status |
+| --- | --- | --- |
+| I1 | Independent hosted seed → native three-generation fixed point at the closing revision | **open** (last: `9df1d08f`) |
+| I2 | Complete paired manifest at the same revision (698 cases now) | **open** (last complete: 668 at `9df1d08f`) |
+| I3 | Full pytest at the same revision | **open** (last: 6,092 passed + 4 rechecked, older source) |
+| I4 | Performance evidence at the same revision (cold/warm build, memory, allocation) | **open**; the throughput campaign runs alongside |
+
+Continuing goals that are **not** exit criteria: the full ideal solver, every
+lifetime shape, general owner-directed promotion, and the open resource-
+exhaustion/failure designs.
+
+## Feedback path and certification tiers (2026-09-29)
+
+Roadmap step 2. Compiler-sized test drivers (the program, lowering,
+source-check, module-check, stream, source-validation and prelude-cache
+drivers) are hosted builds of the native compiler. They were rebuilt once
+per pytest worker and per session. `tests/python_misc/driver_artifacts.py`
+now identifies each driver by everything its build reads:
+- the driver source (and its location, when relative imports resolve
+  from it);
+- the hosted compiler, µDewy and native compiler sources;
+- the library;
+- build options and Python version.
+
+The first worker to need an identity builds it under a file lock; other
+workers and later sessions reuse it until an input changes. Failed builds
+are not recorded, and each case still runs a fresh driver process.
+`DEWY_TEST_DRIVER_CACHE=0` restores independent builds for certification.
+The seven driver-backed test files went from 449 s to 54 s on reuse. The
+non-slow suite took 61 minutes with 8 workers (6,303 passed). Its four
+failures also fail on clean `559f0834`: expectation drift in hosted tests,
+followed up below.
+
+`tools/certify.sh` names the tiers:
+- `local` is the per-batch gate.
+- `integration OUTPUT [COMMIT]` freezes one commit and runs, in order: an
+  independent hosted seed, the three-generation native fixed point,
+  `check_native`, the complete paired manifest, and full pytest with
+  independently built drivers. It records every step's log and status
+  against that commit.
+
+The release workflow now publishes only a revision that the full test suite
+passed. It triggers on the completed "Run test suite" run and checks out
+exactly the tested commit; a manual dispatch must find a successful run for
+its commit. It also runs the complete paired manifest against the freshly
+built pair before packaging. A changed-input check against the last
+published pair replaces the old push path filter.
+
 ## Latest native/parity repair integration (2026-09-29)
 
 **668/668** paired acceptance/execution cases pass against frozen source

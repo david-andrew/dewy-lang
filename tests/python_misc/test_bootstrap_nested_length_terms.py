@@ -7,6 +7,7 @@ from dewy.reporting import SrcFile
 from tests.python_misc.test_nested_length_terms import APPEND, PREFIX, index_snapshot_source, positive_source
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import hosted_driver
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,8 +71,5 @@ main=():>int64=>{
 
 
 def test_native_nested_length_contracts(tmp_path):
-    output = tmp_path / 'source-validation.udewy'
-    output.write_text(codegen(SrcFile.from_path(ROOT / 'tests/fixtures/bootstrap_source_validation.dewy'),
-                              debug_locations=False))
-    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    check_nested_lengths(cache_artifact(output).resolve(), tmp_path)
+    driver = hosted_driver('source-validation', ROOT / 'tests/fixtures/bootstrap_source_validation.dewy', tmp_path, debug_locations=False)
+    check_nested_lengths(driver, tmp_path)

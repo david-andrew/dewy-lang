@@ -8,6 +8,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic.errors import TypeCheckError, UserError
 from udewy.cache import cache_artifact
+from driver_artifacts import shared_driver
 from udewy.frontend import EntryPointOptions, entry_point
 
 
@@ -43,10 +44,13 @@ def build_program_driver(tmp_path):
     global _PROGRAM_DRIVER
     if _PROGRAM_DRIVER is not None:
         return _PROGRAM_DRIVER
-    output = tmp_path / 'program-driver.udewy'
-    output.write_text(codegen(SrcFile.from_path(native_lowering.ROOT / 'tests/fixtures/bootstrap_program.dewy'), debug_locations=False))
-    assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
-    _PROGRAM_DRIVER = cache_artifact(output).resolve()
+    source = native_lowering.ROOT / 'tests/fixtures/bootstrap_program.dewy'
+    def build():
+        output = tmp_path / 'program-driver.udewy'
+        output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
+        return cache_artifact(output).resolve()
+    _PROGRAM_DRIVER = shared_driver('program', source, {'debug_locations': False, 'debug_info': False}, build)
     return _PROGRAM_DRIVER
 
 

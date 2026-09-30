@@ -9,6 +9,7 @@ from pathlib import Path
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
+from driver_artifacts import shared_driver
 from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -598,9 +599,13 @@ main = (argv:array<string>):>int64 => {{
     # These drivers check execution, not debugger metadata. Use the ordinary
     # compiler path so every lowering regression does not rebuild DWARF and
     # variable descriptions for the bootstrap compiler itself.
-    seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
-    assert entry_point(seed, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
-    _LOWERING_DRIVER = cache_artifact(seed).resolve()
+    def build():
+        seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+        assert entry_point(seed, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
+        return cache_artifact(seed).resolve()
+    # The generated source imports by absolute path, so its location is not
+    # part of the driver's identity.
+    _LOWERING_DRIVER = shared_driver('lowering', source, {'debug_locations': False, 'debug_info': False}, build, located=False)
     return _LOWERING_DRIVER
 
 

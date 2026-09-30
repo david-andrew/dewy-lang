@@ -1,23 +1,14 @@
 name: Release native Dewy
 
 on:
-  push:
+  # Publish only a revision the full test suite has certified: this runs
+  # after "Run test suite" finishes and checks out exactly the commit it
+  # tested. Manual dispatch is for explicit recovery and still requires a
+  # successful test run for the same commit.
+  workflow_run:
+    workflows: ["Run test suite"]
+    types: [completed]
     branches: [master]
-    paths:
-      - 'dewy/bootstrap/**/*.dewy'
-      - 'udewy/bootstrap/**/*.udewy'
-      - 'udewy/stdlib/**/*.udewy'
-      - 'library/**/*.dewy'
-      - 'library/**/*.bin'
-      - 'VERSION'
-      - 'tools/bootstrap_native.sh'
-      - 'tools/bootstrap_hosted_seed.sh'
-      - 'tools/check_native.sh'
-      - 'tools/package_native.sh'
-      - 'tools/dewy_test.dewy'
-      - 'tools/dewy_gdb.py'
-      - 'tools/dewy_lldb.py'
-      - '.github/workflows/release-native.yml'
   workflow_dispatch:
     inputs:
       hosted_seed:
@@ -40,9 +31,48 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
+    # A push-triggered test run that failed or was cancelled certifies nothing.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    env:
+      CERTIFIED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CERTIFIED_SHA }}
+          fetch-depth: 0
+      - name: Require a successful full test run for this exact revision
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          passed=$(gh run list --workflow tests.yml --commit "$CERTIFIED_SHA" --status success --json databaseId --jq length)
+          if [[ "$passed" -lt 1 ]]; then
+            echo "No successful test-suite run for $CERTIFIED_SHA; publication needs one." >&2
+            exit 1
+          fi
+      - name: Check whether release inputs changed since the last published pair
+        id: relevant
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          previous=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""')
+          base=""
+          if [[ "$previous" == native-* ]]; then
+            base=$(git rev-parse --verify --quiet "${previous#native-}^{commit}" || true)
+          fi
+          if [[ -z "$base" || "${{ github.event_name }}" == workflow_dispatch ]]; then
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$base" "$CERTIFIED_SHA" -- 'dewy/bootstrap/**/*.dewy' 'udewy/bootstrap/**/*.udewy' \
+              'udewy/stdlib/**/*.udewy' 'library/**/*.dewy' 'library/**/*.bin' VERSION tools/bootstrap_native.sh \
+              tools/bootstrap_hosted_seed.sh tools/check_native.sh tools/package_native.sh tools/dewy_test.dewy \
+              tools/dewy_gdb.py tools/dewy_lldb.py .github/workflows/release-native.yml; then
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Check seed selection
         env:
           HOSTED_SEED: ${{ inputs.hosted_seed }}
@@ -53,14 +83,14 @@ jobs:
             exit 2
           fi
       - uses: actions/setup-python@v5
-        if: inputs.hosted_seed == true
+        if: steps.relevant.outputs.needed == 'true'
         with:
           python-version: '3.14'
       - name: Recover stage zero with the dependency-free hosted compiler
-        if: inputs.hosted_seed == true
+        if: inputs.hosted_seed == true && steps.relevant.outputs.needed == 'true'
         run: bash tools/bootstrap_hosted_seed.sh seed
       - name: Download a published native seed pair
-        if: inputs.hosted_seed != true
+        if: inputs.hosted_seed != true && steps.relevant.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SEED_RELEASE: ${{ inputs.seed_release }}
@@ -76,6 +106,7 @@ jobs:
           seed/dewy --version
           seed/udewy --help > /dev/null
       - name: Rebuild both native compilers and verify matching generations
+        if: steps.relevant.outputs.needed == 'true'
         # This includes both-backend execution checks of generation one.
         # Generation two must then match it byte for byte.
         env:
@@ -84,9 +115,19 @@ jobs:
         # generation lowers this source differently; the last two of three
         # generations are both products of this source and must match.
         run: bash tools/bootstrap_native.sh --target c --generations 3 seed/dewy seed/udewy native-pair
+      - name: Certify hosted/native agreement on the complete paired manifest
+        if: steps.relevant.outputs.needed == 'true'
+        # Acceptance, rejection and execution of every case, with independent
+        # expected results. Any failed case blocks publication.
+        run: |
+          python3 tools/check_compiler_parity.py --native-executable native-pair/dewy \
+            --udewy-executable native-pair/udewy --cases tests/fixtures/phase1_parity_cases.json \
+            --output parity-results --shared-prelude-cache
       - name: Package the verified pair and matching library
+        if: steps.relevant.outputs.needed == 'true'
         run: bash tools/package_native.sh native-pair dewy-linux-x86_64.tar.gz
       - name: Compare with previous release
+        if: steps.relevant.outputs.needed == 'true'
         id: changed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,15 +141,15 @@ jobs:
           fi
           echo 'changed=true' >> "$GITHUB_OUTPUT"
       - name: Publish the native pair
-        if: steps.changed.outputs.changed == 'true'
+        if: steps.relevant.outputs.needed == 'true' && steps.changed.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cp native-pair/udewy udewy-linux-x86_64
           sha256sum dewy-linux-x86_64.tar.gz > dewy-linux-x86_64.tar.gz.sha256
           sha256sum udewy-linux-x86_64 > udewy-linux-x86_64.sha256
-          release_tag="native-${GITHUB_SHA::12}"
+          release_tag="native-${CERTIFIED_SHA::12}"
           gh release create "$release_tag" dewy-linux-x86_64.tar.gz dewy-linux-x86_64.tar.gz.sha256 \
             udewy-linux-x86_64 udewy-linux-x86_64.sha256 \
-            --latest --target "$GITHUB_SHA" --title "Dewy native ${GITHUB_SHA::12}" \
-            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; the last two of three native generations verified byte-for-byte, with matching runtime library. Stage-zero seed recovery used the hosted compiler: ${{ inputs.hosted_seed == true }}. All verification generations are native. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
+            --latest --target "$CERTIFIED_SHA" --title "Dewy native ${CERTIFIED_SHA::12}" \
+            --notes "Development native Dewy/µDewy pair from ${CERTIFIED_SHA} for Linux x86_64. Certified for this exact revision: the full test suite passed, the complete paired hosted/native manifest passed, and the last two of three native generations match byte-for-byte, with matching runtime library. Stage-zero seed recovery used the hosted compiler: ${{ inputs.hosted_seed == true }}. All verification generations are native. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
