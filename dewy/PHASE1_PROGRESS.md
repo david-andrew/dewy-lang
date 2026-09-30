@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: agree the scope, then adopt it through proofs rather than annotations |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -179,6 +179,29 @@ compilers accept all of them. Next, unify the vocabulary where both
 compilers make the same decision, then record a class and explanation for
 each remaining strategy difference. C3 stays open until every difference is
 classified.
+
+**C2 scope.** David confirmed that strict-copy adoption covers every compiler
+module, with no subsets. A probe build treated every `dewy/bootstrap` module
+as strict and listed each copy it would reject. That is 1,409 native copies
+in 59 files, including `library/bigint.dewy`, which the compiler imports.
+
+Largest files:
+- `check` 156;
+- `bounds` 145;
+- `lifecycle_runtime` 97;
+- `lower` 93;
+- `context` 59.
+
+Reasons:
+- no proven last-use move: 324 record, 102 array, 57 cell;
+- owned by a container with no read-only view: 279 record, 201 array,
+  115 cell;
+- callee not resolved statically: 111;
+- `get` results owning their payload: about 150.
+
+Each is to be removed by a stronger proof or a necessary source change, not
+by annotation. This matches the throughput campaign's next allocation
+targets.
 
 ## Throughput batch 2: shared joins, frame place slots (2026-09-30)
 
