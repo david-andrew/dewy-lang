@@ -269,11 +269,14 @@ def main() -> int:
     for run in range(args.runs):
         work = output / f'run-{run:02}'
         work.mkdir()
+        # Hosted parse/prelude caches live in a private per-user store by
+        # default; give each run its own, so a cold run stays cold.
+        run_env = env | {'DEWY_HOSTED_CACHE_DIR': str(work / 'hosted-cache')}
         command = ['/usr/bin/time', '-f', '%M', '-o', 'rss-kib.txt', *compiler,
                    *(['--timings'] if args.phase_timings else []), '--target', args.target, '-c', str(source)]
         priming = None
         if args.cache_state == 'warm':
-            priming = invocation(command, work, env, args.timeout, profile=args.profile, prefix='priming-')
+            priming = invocation(command, work, run_env, args.timeout, profile=args.profile, prefix='priming-')
             if priming['status'] != 0:
                 record = {'run': run, 'status': 'priming_failed', 'priming': priming}
                 with (output / 'results.jsonl').open('a') as results:
@@ -282,7 +285,7 @@ def main() -> int:
                 failed = True
                 continue
             prepare_warm_rebuild(source, work)
-        record = {'run': run, **invocation(command, work, env, args.timeout, profile=args.profile)}
+        record = {'run': run, **invocation(command, work, run_env, args.timeout, profile=args.profile)}
         status = record['status']
         if priming is not None:
             record['priming'] = priming

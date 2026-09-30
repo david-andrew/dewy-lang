@@ -194,6 +194,10 @@ begin = (source:contexts.Context @session:contexts.Session inherited:dict<string
     if inherited.length >? 0 {
         parent=contexts.child(parent @session)
         loop [name binding_id] in inherited {bindings.bind(@session.scopes parent.scope name binding_id)}
+        loop name in ['print' 'printl'] {
+            let output=inherited.get(name)
+            if output isnt? none {session.prelude_outputs.push(output)}
+        }
     }
     let lexical=contexts.child(parent @session)
     let state = session.read_states.length
@@ -3121,6 +3125,13 @@ flow_inner = (id:addr node:parser.Flow env:Environment @session:contexts.Session
 
 # An absent argument block denotes an implicit zero-argument construction;
 # callers need no synthesized parser node merely to express an empty list.
+# `print` as written here resolves to the prelude's own writer.
+prelude_writer = (id:addr env:Environment @session:contexts.Session):>bool => {
+    let writer=identifier('print' id env @session)
+    if writer is? Error return false
+    let node=node_at(writer session)
+    return node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? session.prelude_outputs
+}
 source_arguments = (id:addr? env:Environment session:contexts.Session):>array<addr> => {
     if id is? none return []
     let arguments=contexts.node_at(id env.lexical session)
@@ -3133,16 +3144,17 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
     # Match the hosted output path: the ordinary generic print receives each
     # interpolation part in source order. Numeric families keep their print
     # protocols; a materialized string still requires a string conversion.
-    if callee is? hir.ExpressedIdentifier and callee.name in? ['print' 'printl'] and signature is? types.FunctionType and signature.type_params.length >? 0 and items.length =? 1 {
+    # Only the prelude's own `print`/`printl` (by binding, not by spelling)
+    # stream, and every field is evaluated before anything is written, as
+    # when the string is materialized first.
+    if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none and callee.binding_id in? session.prelude_outputs and callee.name in? ['print' 'printl'] and signature is? types.FunctionType and signature.type_params.length >? 0 and items.length =? 1 and prelude_writer(id env @session) {
         let source=contexts.node_at(items[0] env.lexical session)
         if source is? parser.IString {
-            let value=interpolated_string(items[0] source env @session for_output=true)
-            if value is? Error return value
-            let interpolation=node_at(value session)
-            $runtime_assert interpolation is? hir.InterpolatedString
-            let parts=interpolation.parts
+            let output=output_parts(source env @session)
+            if output is? Error return output
+            let statements=output.declarations
+            let parts=output.parts
             if callee.name =? 'printl' {parts.push(put(hir.String[source.loc types.string_literal('\n' @session.types) '\n'] @session))}
-            let statements:array<addr>=[]
             loop part in parts {
                 let printed=library_call('print' [part] id env @session)
                 if printed is? Error return printed
@@ -5267,6 +5279,28 @@ numeric_zero_field = (type:addr env:Environment session:contexts.Session):>strin
 # A generic's checked signature participates in normal dispatch, but its body
 # belongs to the defining source/scope. Call-site names only determine actual
 # types; they must not change how names inside that body resolve.
+# `inner` occurs as a proper component of the type `outer`: an element,
+# member, argument, field or refinement base, at any depth.
+strictly_contains = (outer:addr inner:addr nodes:types.Table):>bool => {
+    if types.same_type(outer inner nodes) return false
+    let pending:array<addr>=[outer]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id)
+        if id not=? outer and types.same_type(id inner nodes) return true
+        let node=types.node_at(nodes id)
+        if node is? types.ArrayType {pending.push(node.element)}
+        else if node is? types.TypeOr|types.TypeAnd|types.SequenceType {loop item in node.items {pending.push(item)}}
+        else if node is? types.TypeParameterize {pending.push(node.head) loop item in node.args {pending.push(item)}}
+        else if node is? types.RefinedType {pending.push(node.base)}
+        else if node is? types.TypeNot {pending.push(node.item)}
+        else if node is? types.QuantityType {pending.push(node.number)}
+        else if node is? types.ObjectType {loop field in node.fields {pending.push(field.value_type)}}
+    }
+    return false
+}
 instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType positional:array<addr> keyword:dict<string addr> expected:addr? id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     if callee.binding_id is? none return none
     let original = bindings.binding_at(session.registry callee.binding_id)
@@ -5321,6 +5355,19 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         let binding = bindings.binding_at(session.registry cached)
         $runtime_assert binding.value_type isnt? none
         return put(hir.ExpressedIdentifier[callee.loc binding.value_type binding.name binding.id] @session)
+    }
+    # Every instance checks its whole body. An instance still being checked
+    # that needs its own generic at a type argument strictly containing its
+    # own needs a larger one in turn: that chain never ends.
+    loop [instance_id instance] in session.registry.generic_instances {
+        if instance.generic not=? callee.binding_id continue
+        if bindings.binding_at(session.registry instance_id).function isnt? none continue
+        loop [name actual] in arguments {
+            let prior = instance.type_arguments.get(name)
+            if prior isnt? none and strictly_contains(actual prior session.types) {
+                return contexts.problem(id 'generic instantiation grows without bound' "`{generic.name}` for `{name}` = `{display.type_to_dewy(prior session.types)}` needs `{generic.name}` for `{name}` = `{display.type_to_dewy(actual session.types)}`, and so on" env.lexical session hint='each instance checks its whole body, so this call is instantiated for ever-larger types')
+            }
+        }
     }
     let source = generic.source
     $runtime_assert source.literal <? session.syntax_refs.length
@@ -6857,7 +6904,7 @@ object_text_function = (owner:addr id:addr env:Environment @session:contexts.Ses
     session.hoisted.push(declaration)
     return helper
 }
-interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session for_output:bool=false):>addr|Error => {
+interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
     let parts:array<addr>=[]
     let string=types.primitive('string' @session.types)
     loop part_id in node.content {
@@ -6870,16 +6917,65 @@ interpolated_string = (id:addr node:parser.IString env:Environment @session:cont
         if part isnt? parser.Block or part.inner.length not=? 1 return problem(part_id 'string interpolation requires one expression' 'place exactly one expression between these braces' env session)
         let value=expression(part.inner[0] env @session)
         if value is? Error return value
-        let prepared:addr|Error=value
-        if for_output {
-            let type=types.node_at(session.types node_at(value session).value_type)
-            if type is? types.RationalLiteralType {prepared=widen(value part_id env @session)}
-            else if type is? types.Primitive and type.name in? ['int' 'uint'] {prepared=against(value types.primitive(if type.name =? 'uint' 'uint64' else 'int64' @session.types) part_id env @session)}
-        } else {prepared=text_part(value part_id env @session)}
+        let prepared=text_part(value part_id env @session)
         if prepared is? Error return prepared
         parts.push(prepared)
     }
     return put(hir.InterpolatedString[node.loc string parts] @session)
+}
+OutputParts:type = [declarations:array<addr> parts:array<addr>]
+# `print"…{x}…"`: each chunk and field as `print` receives it (rational
+# literals widened, abstract integers as words the bounds analysis proves).
+# Reads of names and literals cannot run anything between them; otherwise
+# every field is first evaluated into a hidden local, in source order, as
+# when the string is materialized before printing.
+output_parts = (node:parser.IString env:Environment @session:contexts.Session):>OutputParts|Error => {
+    let values:array<addr>=[]
+    let sources:array<addr?>=[]
+    let settled=true
+    loop part_id in node.content {
+        let part=contexts.node_at(part_id env.lexical session)
+        if part is? tokens.StringChunk {
+            if part.content not=? '' {
+                values.push(put(hir.String[part.loc types.string_literal(part.content @session.types) part.content] @session))
+                sources.push(none)
+            }
+            continue
+        }
+        if part is? parser.ParametricEscape return pending(part_id 'parametric escape inside an interpolated string' env session)
+        if part isnt? parser.Block or part.inner.length not=? 1 return problem(part_id 'string interpolation requires one expression' 'place exactly one expression between these braces' env session)
+        let value=expression(part.inner[0] env @session)
+        if value is? Error return value
+        if node_at(value session) isnt? hir.ExpressedIdentifier|hir.Integer|hir.Bool {settled=false}
+        values.push(value)
+        sources.push(part_id)
+    }
+    let result=OutputParts[[] []]
+    loop i in 0.. and i <? values.length and i <? sources.length {
+        let part_id=sources[i]
+        if part_id is? none {result.parts.push(values[i]) continue}
+        let value=values[i]
+        if not settled {
+            let field=node_at(value session)
+            # A source-offset name is the same with or without a cached prelude.
+            let name="__dewy_output_{field.loc.start}"
+            let binding_id=bindings.allocate(@session.registry none name 'value' field.loc)
+            let binding=bindings.binding_at(session.registry binding_id)
+            binding.value_type=field.value_type binding.store_type=field.value_type
+            let declaration=put(hir.Declare[field.loc types.primitive('void' @session.types) 'let' name field.value_type value binding_id] @session)
+            binding.declaration=declaration
+            bindings.store_binding(@session.registry binding_id binding)
+            result.declarations.push(declaration)
+            value=put(hir.ExpressedIdentifier[field.loc field.value_type name binding_id] @session)
+        }
+        let type=types.node_at(session.types node_at(value session).value_type)
+        let prepared:addr|Error=value
+        if type is? types.RationalLiteralType {prepared=widen(value part_id env @session)}
+        else if type is? types.Primitive and type.name in? ['int' 'uint'] {prepared=against(value types.primitive(if type.name =? 'uint' 'uint64' else 'int64' @session.types) part_id env @session)}
+        if prepared is? Error return prepared
+        result.parts.push(prepared)
+    }
+    return result
 }
 
 

@@ -848,6 +848,17 @@ class _ObjectLowering:
         cached = self.object_layouts.get(id(object_type))
         if cached is not None:
             return cached[1]
+        if id(object_type) in self.object_layouts_active:
+            # A record that contains itself (through a field or a family
+            # member's field) has no finite inline layout, as native reports.
+            self._target_error(node, 'recursive record storage needs an indirection')
+        self.object_layouts_active.add(id(object_type))
+        try:
+            return self._object_layout_uncached(object_type, node)
+        finally:
+            self.object_layouts_active.discard(id(object_type))
+
+    def _object_layout_uncached(self, object_type: ty.ObjectType, node: hir.AST) -> tuple[int, dict[str, int]]:
         brand = object_type.brand if ty.user_branded(object_type) else None
         carriers = ty.structure_carriers(object_type) if brand is None else []
         root_fields = (

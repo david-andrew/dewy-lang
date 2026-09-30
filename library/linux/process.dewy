@@ -125,7 +125,12 @@ let capture = (program:string args:array<string>):>Output|SpawnError => {
     let out_pipe:int64 = __alloca__(8)
     let err_pipe:int64 = __alloca__(8)
     if __syscall2__(293 out_pipe 0) <? 0 { return SpawnError }       # pipe2
-    if __syscall2__(293 err_pipe 0) <? 0 { return SpawnError }
+    if __syscall2__(293 err_pipe 0) <? 0 {
+        # The first pipe is already open: close both of its ends.
+        let closed_read:int64 = __syscall1__(3 _pipe_end(out_pipe 0))
+        let closed_write:int64 = __syscall1__(3 _pipe_end(out_pipe 4))
+        return SpawnError
+    }
     let out_read:int64 = _pipe_end(out_pipe 0)
     let out_write:int64 = _pipe_end(out_pipe 4)
     let err_read:int64 = _pipe_end(err_pipe 0)

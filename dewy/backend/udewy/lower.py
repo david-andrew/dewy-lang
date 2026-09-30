@@ -300,10 +300,10 @@ class _Lowerer(
         # rebuilding it for every constructor, type test and copy arm.
         self.brand_numbers = ty.brand_ids()
         self.srcfile = srcfile
-        self.preserve_raw_udewy_shifts = bool(re.search(
-            r'(?m)^\s*\$no_prelude\s*=\s*true\b',
-            srcfile.body,
-        ))
+        # The parsed directive, never its spelling: comments and layout do
+        # not change what `$no_prelude = true` means.
+        from ...semantic.check import _parse_module
+        self.preserve_raw_udewy_shifts = _parse_module(srcfile)[1].no_prelude
         self.module_scope = _Scope(None, (), None, {})
         self.next_binding_order = 0
         self.next_function_order = 0
@@ -367,6 +367,7 @@ class _Lowerer(
         self.object_copy_names = {}
         self.object_release_names = {}
         self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
+        self.object_layouts_active: set[int] = set()   # layouts being computed: a re-entry is recursive storage
         self.object_frame_copies: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.object_field_transfers: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.object_prepared_storage: dict[int, tuple[ty.ObjectType, bool]] = {}

@@ -146,6 +146,83 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Semantic composition and library boundary regressions (2026-09-30)
+
+Roadmap step 2 asks for the September 29 audit follow-up's regressions and
+small independent library boundary cases. Each fix below has a regression
+test that fails on the previous revision.
+
+- **Directives by meaning.** Hosted lowering read `$no_prelude` with a
+  regular expression over the raw source, so `$no_prelude = # comment` and
+  `true` on the next line changed raw-shift semantics. It now uses the parsed
+  module directive, as native already did.
+- **Output by binding.** Both checkers streamed `print"…{x}…"`/`printl"…"`
+  part by part for any generic function spelled `print`/`printl`, bypassing
+  a user's shadowing definition. The rewrite now applies only to the
+  prelude's own bindings. Native records them from the inherited prelude
+  scope (`prelude_outputs` in the checking state, codec regenerated). The
+  parts must also go to the prelude's `print`: a user `print` falls back to
+  the materialized string.
+- **Output keeps evaluation order.** Streaming wrote chunks before later
+  fields were evaluated, so `printl"A{side()}B"` printed `ASIDE\n2B`. When a
+  field is anything but a name or literal, every field is now evaluated, in
+  order, into a hidden local before anything is written, as when the string
+  is materialized first. Locals are named by source offset, so output is
+  identical with or without a cached prelude. Fields keep their own types,
+  and printing prepares each local as it prepared the field, so big integers
+  still print. Covered by `test_composition_regressions.py`, both compilers,
+  with expected stdout.
+- **Hosted pickle caches.** The hosted parser and checked-prelude caches
+  unpickled `__dewycache__` files relative to the project, so a planted file
+  ran code (confirmed against the old code). Both caches now live in a
+  private per-user store (`dewy/cache_location.py`:
+  `$XDG_CACHE_HOME/dewy/hosted`, mode 0700). A file is loaded only if it and
+  its directory belong to this user and nobody else can write them.
+  `tools/measure_compiler.py` gives each run its own store, so cold runs stay
+  cold (`test_hosted_cache_trust.py`).
+- **Library boundaries** (`test_library_boundaries.py`). Expected values come
+  from exact arithmetic and the operating system, not from either compiler.
+  - Fixed-point division by the minimum value no longer returns zero. The
+    quotient is `|a.raw| / 2^31`, rounded as `_muldiv_shift32` rounds, and the
+    minimum divided by itself is one. Checked against `Fraction`.
+  - A path containing NUL is refused (a null C path, so the call reports its
+    file error) instead of naming the prefix's file.
+  - `capture` closes its first pipe when the second cannot be created. This
+    is checked under `RLIMIT_NOFILE` = 5.
+- **Nonterminating shapes** (`test_nonterminating_shapes.py`).
+  - Hosted layout of a record that contains its own family reported
+    `RecursionError`. It now reports native's "recursive record storage needs
+    an indirection".
+  - A generic whose instance needs itself at a strictly larger type argument
+    (`f<T>` calling `f([x])`) exhausted hosted recursion and crashed native.
+    Both checkers now report "generic instantiation grows without bound".
+    Every instance checks its whole body, so the chain cannot end;
+    same-sized and smaller recursion still instantiates. This is a checker
+    diagnostic, not a budget on programmer-written compile-time code.
+
+The local gate passed 6,336 tests. Its one failure was a test-construction
+problem: native no-prelude mode cannot lower aggregate arguments, so the
+finite-recursion case now uses the prelude. All four tests in that file pass.
+
+Open for David: whether bigint components stay writable (an immutable
+`BigInt` would remove about 200 strict-copy sites), and the capacity policy
+for strings beyond `uint32` offsets. At present, lazy segmentation of such a
+string caches a grapheme count of zero.
+
+**C3 acceptance comparison.** Both compilers can list the copies they would
+reject if every compiler module were strict: native through a probe build,
+hosted by reading the lowering's notes. On the whole compiler:
+- hosted rejects 1,116 copies (491 record, 375 array, 250 cell);
+- native rejects 1,112 (545 record, 388 array, 179 cell);
+- only 737 source rows are shared; 206 rows are hosted-only and 233
+  native-only.
+
+Nearly equal totals therefore hide real acceptance differences. The two
+closure rows converge: C2 (every module strict, violations removed by proofs)
+ends with both lists empty, which gives acceptance parity on the compiler's
+own sources. The note-by-note comparison (`tools/copy_parity.py`) still has
+to classify the remaining reported-but-accepted differences.
+
 ## Immutable records share without a costly copy (2026-09-30)
 
 David's copy principle (sharing immutable data is not a costly copy) already

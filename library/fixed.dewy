@@ -82,8 +82,15 @@ let _fixed_div = (a:Fixed b:Fixed<raw not=? 0>):>Fixed => {
         if negative { return [raw = -raw] }
         return [raw = raw]
     }
-    # only the minimum value's magnitude wraps negative; |a / b| is then below the resolution
-    return [raw = 0]
+    # b is the minimum value, -2^31: |b.raw| = 2^63 does not fit a word, so
+    # divide by that power of two directly. |a / b| is |a.raw| / 2^31 raw
+    # units, rounded half away from zero as `_muldiv_shift32` rounds, with
+    # a's sign negated. The minimum divided by itself is exactly one.
+    if a.raw =? b.raw { return [raw = 4294967296] }
+    let magnitude:int64 = _int_abs(a.raw)
+    let raw:int64 = (magnitude >> 31) + ((magnitude >> 30) and 1)
+    if a.raw <? 0 { return [raw = raw] }
+    return [raw = -raw]
 }
 
 # Division by a small positive integer, exact in the raw scale.

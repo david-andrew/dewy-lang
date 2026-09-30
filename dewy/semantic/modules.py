@@ -195,9 +195,11 @@ class ModuleCompiler:
     # and their checked form only changes when the library or the compiler
     # does. The compiler's state right after the prelude is loaded — the
     # type system, the binding registry, the module records (parse trees,
-    # checked HIR, exports) — is pickled once under `__dewycache__/prelude/`,
-    # keyed by the target and a digest of the library and compiler sources,
-    # and later compiles start from it. `DEWY_NO_PRELUDE_CACHE=1` disables it.
+    # checked HIR, exports) — is pickled once in this user's private cache
+    # directory (`cache_location`), keyed by the target and a digest of the
+    # library and compiler sources, and later compiles start from it. It is
+    # never loaded from a project directory. `DEWY_NO_PRELUDE_CACHE=1`
+    # disables it.
     _PRELUDE_STATE_FIELDS = (
         'type_system', 'registry', 'records', 'order', 'prelude_bindings',
         'prelude_loaded', 'prelude_paths', 'representation_notes', 'finished_roots',
@@ -210,6 +212,10 @@ class ModuleCompiler:
         from .prelude import library
         if os.environ.get('DEWY_NO_PRELUDE_CACHE'):
             return None
+        from ..cache_location import private_cache_dir
+        directory = private_cache_dir('prelude')
+        if directory is None:
+            return None
         digest = hashlib.sha256()
         digest.update(f'checked-prelude-{_PRELUDE_CACHE_VERSION}:{self.target}\0'.encode())
         digest.update(str(library.resolve()).encode() + b'\0')
@@ -220,7 +226,7 @@ class ModuleCompiler:
         for path in sorted(root.rglob('*.py')):
             if '__pycache__' not in path.parts:
                 digest.update(path.read_bytes())
-        return Path('__dewycache__') / 'prelude' / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
+        return directory / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
 
     @staticmethod
     def _prelude_inputs_match(records: dict[Path, ModuleRecord], included: dict[Path, bytes], resolutions: dict[Path, Path]) -> bool:
@@ -249,8 +255,9 @@ class ModuleCompiler:
             # a `$no_prelude` module was checked first and lives in this
             # registry: the prelude must be checked into it, not swapped in
             return False
+        from ..cache_location import trusted_cache_file
         cache_path = self._checked_prelude_path()
-        if cache_path is None or not cache_path.is_file():
+        if cache_path is None or not trusted_cache_file(cache_path):
             return False
         resident = _resident_preludes.get(cache_path)
         stat = cache_path.stat()

@@ -54,6 +54,10 @@ CheckState:type = [
     # Synthesized helpers and method implementations are module declarations,
     # but do not become source-facing namespace exports.
     hidden_bindings:set<addr>=set[]
+    # The prelude's own `print`/`printl`: an interpolated output call is
+    # streamed part by part only for these bindings, never for a name that
+    # merely spells the same.
+    prelude_outputs:set<addr>=set[]
     # Proof syntax is keyed by source arena, then function-body/marker node.
     # Speculative checking restores these along with ordinary declarations.
     proof_literals:dict<addr set<addr>>=[]
@@ -111,6 +115,7 @@ checkpoint = (session:Session):>Checkpoint => {
         constructors=session.constructors
         methods=session.methods
         hidden_bindings=session.hidden_bindings
+        prelude_outputs=session.prelude_outputs
         object_strings=session.object_strings
         preparing_methods=session.preparing_methods
         prepared_methods=session.prepared_methods

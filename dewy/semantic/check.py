@@ -3,6 +3,7 @@ semantic analysis pass 0:
 - type checking
 - ambiguity resolution
 """
+import dataclasses
 import copy
 import os
 from pathlib import Path
@@ -236,11 +237,15 @@ def _parse_cache_path(srcfile: SrcFile) -> Path | None:
     """
     if srcfile.path is None or os.environ.get('DEWY_NO_PARSE_CACHE'):
         return None
+    from ..cache_location import private_cache_dir
+    directory = private_cache_dir('parse')
+    if directory is None:
+        return None
     import hashlib
     digest = hashlib.sha256()
     digest.update(_PARSER_SOURCE_DIGEST)
     digest.update(srcfile.body.encode('utf-8'))
-    return Path('__dewycache__') / 'parse' / f'{Path(str(srcfile.path)).stem}-{digest.hexdigest()[:24]}.pickle'
+    return directory / f'{Path(str(srcfile.path)).stem}-{digest.hexdigest()[:24]}.pickle'
 
 
 def _parser_source_digest() -> bytes:
@@ -272,8 +277,9 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
     block = _parsed_modules.get(key) if key is not None else None
     if block is None:
         import pickle
+        from ..cache_location import staging_path, trusted_cache_file
         cache_path = _parse_cache_path(srcfile)
-        if cache_path is not None and cache_path.is_file():
+        if cache_path is not None and trusted_cache_file(cache_path):
             try:
                 block = pickle.loads(cache_path.read_bytes())
             except Exception:
@@ -283,7 +289,7 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
             if cache_path is not None:
                 try:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = cache_path.with_suffix('.tmp')
+                    tmp = staging_path(cache_path)
                     tmp.write_bytes(pickle.dumps(block, protocol=pickle.HIGHEST_PROTOCOL))
                     tmp.replace(cache_path)
                 except OSError:
@@ -7581,6 +7587,51 @@ def _instantiate_generic_call(
     return callee, ty.DispatchResult(instance.type, result.method_index, result.promote_pos)
 
 
+# Instantiations whose bodies are being checked, innermost last.
+_INSTANTIATING: list[tuple[int, dict[str, ty.TypeExpr]]] = []
+
+
+def _strictly_contains(outer: object, inner: object) -> bool:
+    """`inner` occurs as a proper part of the type expression `outer`."""
+    if outer == inner:
+        return False
+    pending = [outer]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current == inner:
+            return True
+        if dataclasses.is_dataclass(current) and not isinstance(current, type):
+            pending.extend(getattr(current, field.name) for field in dataclasses.fields(current))
+        elif isinstance(current, (list, tuple, frozenset, set)):
+            pending.extend(current)
+        elif isinstance(current, dict):
+            pending.extend(current.values())
+    return False
+
+
+def _refuse_growing_instance(generic: hir.GenericFunction, bindings: dict[str, ty.TypeExpr], *, ctx: Context, call_loc: Span | None) -> None:
+    """Every instance's body is checked in full, so an instance whose body
+    needs the same generic at a type argument that strictly contains its own
+    needs another, larger one in turn: that chain never ends."""
+    for source_id, active in _INSTANTIATING:
+        if source_id != id(generic.source):
+            continue
+        for name, value in bindings.items():
+            previous = active.get(name)
+            if previous is not None and _strictly_contains(value, previous):
+                user_error(
+                    ctx.srcfile,
+                    'generic instantiation grows without bound',
+                    Pointer(span=call_loc or generic.loc,
+                            message=f'`{generic.name}` for `{name}` = `{type_to_dewy(previous)}` needs `{generic.name}` for `{name}` = `{type_to_dewy(value)}`, and so on'),
+                    hint='each instance checks its whole body, so this call is instantiated for ever-larger types',
+                )
+
+
 def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[str, ty.TypeExpr], *, ctx: Context, call_loc: Span | None = None) -> sb.Binding:
     """Check the generic body with its type parameters bound to concrete types
     and hoist the result as an ordinary module-level function. A body that
@@ -7588,6 +7639,7 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
     a generic from another module, whose source the caller is not looking
     at — at the call, with the same title and reason."""
     source = generic.source
+    _refuse_growing_instance(generic, bindings, ctx=ctx, call_loc=call_loc)
     defining: Context = source.context  # type: ignore[assignment]
     instance_ctx = replace(
         defining,
@@ -7641,6 +7693,7 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
         plain = replace(literal_ast, left=replace(signature, left=signature.left.right))
     else:
         plain = replace(literal_ast, left=signature.right)
+    _INSTANTIATING.append((id(source), bindings))
     try:
         literal = tcr_function_literal(plain, ctx=instance_ctx, expected=instance_type)
     except BaseException as error:
@@ -7663,6 +7716,8 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
             hint=report.hint,
             notes=report.notes,
         )) from None
+    finally:
+        _INSTANTIATING.pop()
     declaration = hir.Declare(generic.loc, ty.VOID_TYPE, 'let', name, None, literal, binding_id=binding.id)
     binding.declaration = declaration
     binding.function = literal
@@ -16248,14 +16303,21 @@ def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *,
 def _tcr_output_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.AST | None:
     """`print"…{x}…"` / `printl"…{x}…"`: the interpolation is written part by
     part — each literal chunk and field passed to `print` — rather than built
-    into one string first. A representation choice only; nothing else about
-    these calls is special."""
+    into one string first. A representation choice only: it applies to the
+    prelude's own `print`/`printl` (by resolved binding, never by spelling),
+    and every field is evaluated before anything is written, exactly as when
+    the string is materialized first."""
+    prelude = ctx.prelude_bindings.get(left.name) if isinstance(left, hir.ExpressedIdentifier) else None
     if not (
         isinstance(left, hir.ExpressedIdentifier)
         and left.name in {'print', 'printl'}
+        and prelude is not None and left.binding_id == prelude.id
         and isinstance(left.type, ty.FunctionType)
         and left.type.type_params
     ):
+        return None
+    writer = ctx.prelude_bindings.get('print')
+    if writer is None or tcr_identifier(t1.Identifier(left.loc, 'print'), ctx=ctx).binding_id != writer.id:
         return None
     items = list(right.inner) if isinstance(right, p0.Block) and right.kind == '()' else [right]
     if len(items) != 1 or not isinstance(items[0], p0.IString):
@@ -16265,10 +16327,25 @@ def _tcr_output_call(left: hir.AST, right: p0.AST, *, ctx: Context) -> hir.AST |
     parts = list(interpolation.parts)
     if left.name == 'printl':
         parts.append(hir.String(loc, ty.StringLiteralType('\n'), '\n'))
-    statements = [
-        _library_call('print', [_prepared_single_argument(part, ctx=ctx)], part.loc, ctx=ctx)
-        for part in parts
-    ]
+    statements: list[hir.AST] = []
+    written: list[hir.AST] = []
+    # Reads of names and literals cannot run anything between them; any other
+    # field is evaluated, with all the others, before the first write.
+    settled = all(isinstance(part, (hir.String, hir.ExpressedIdentifier, hir.Integer, hir.Bool)) for part in parts)
+    for part in parts:
+        if settled or isinstance(part, hir.String):
+            written.append(part)
+            continue
+        # The field keeps its own type (an abstract integer may still become
+        # big); printing prepares the local exactly as it prepared the field.
+        # A source-offset name is the same whether or not the prelude is cached.
+        binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), f'__dewy_output_{part.loc.start}', 'value', part.loc)
+        binding.type = part.type
+        declaration = hir.Declare(part.loc, ty.VOID_TYPE, 'let', binding.name, part.type, part, binding_id=binding.id)
+        binding.declaration = declaration
+        statements.append(declaration)
+        written.append(hir.ExpressedIdentifier(part.loc, part.type, binding.name, binding_id=binding.id))
+    statements.extend(_library_call('print', [_prepared_single_argument(value, ctx=ctx)], value.loc, ctx=ctx) for value in written)
     return hir.Block(loc, ty.VOID_TYPE, statements, False)
 
 

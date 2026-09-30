@@ -24,12 +24,16 @@ let _file_error = (status:int64):>FileNotFound|FileAccessDenied|IsDirectory|File
 
 # The kernel reads a path through a raw pointer, and exposing an array's
 # storage pins it for good. Copy the path into the caller's PATH_MAX frame
-# buffer instead; a path that does not fit gives the null pointer, which
-# the kernel rejects (EFAULT, a `FileError`).
+# buffer instead. A path that does not fit, or that contains NUL (the
+# kernel would stop reading there and name a different file), gives the
+# null pointer, which the kernel rejects (EFAULT, a `FileError`).
 let _c_path_into = (path:string buffer:int64):>int64 => {
     let bytes:array<uint8> = path as array<uint8>
     if bytes.length >=? 4096 return 0
-    loop index in [0..bytes.length) { __store_u8__(bytes[index] buffer + index) }
+    loop index in [0..bytes.length) {
+        if bytes[index] =? 0 return 0
+        __store_u8__(bytes[index] buffer + index)
+    }
     __store_u8__(0 buffer + bytes.length)
     return buffer
 }
