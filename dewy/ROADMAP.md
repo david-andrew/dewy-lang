@@ -8,8 +8,12 @@ previously bogged down.
 
 The [September 29 audit](AUDIT_2026_09_29.md) records fresh direct-native
 measurements, capability/validation gaps and proposed sequencing adjustments.
-Those proposals await review; the phase ordering below has not been changed by
-the audit.
+Its sequencing recommendations were accepted on September 29 and are reflected
+below: bound the remaining Phase 1 closure work, improve the feedback path,
+and resume the throughput campaign within Phase 1. The same review makes
+generated-program performance and efficient CPU/GPU array execution explicit
+project goals. The audit remains a record of that revision's measurements,
+not certification of later changes.
 
 How this relates to the other documents:
 
@@ -34,6 +38,9 @@ and accepted by David for phases 1.1 through 1.3; later phases are a
 preliminary proposal and will be revised as earlier phases land.
 The immediate parity and performance sequence below was reviewed and
 accepted on 2026-09-14 after the native fixed point completed.
+The current immediate work order and performance goals were updated with
+David's review on 2026-09-29. Later feature designs still need review where
+their semantics are unsettled.
 
 ## Organizing principle
 
@@ -53,6 +60,55 @@ One structural cost shapes everything: while the hosted Python compiler and
 the bootstrap compiler stay in parity, every feature costs twice. That cost
 is accepted on purpose for now; see "The hosted compiler's role" below for
 what it buys and when it stops being worth paying.
+
+## Performance goals across the roadmap (accepted 2026-09-29)
+
+**Compiler speed:** the final target is compilation on the order of Jai's
+compiler, allowing Dewy to be somewhat slower for its richer semantics, but
+not by a large factor. Under 30 seconds for a full native compiler build is
+the nearer minimum milestone; under 10 seconds is the next milestone, not
+the destination. Use recorded machines and comparable workloads when making
+external comparisons; source lines alone do not normalize proof work or
+language differences. User source must rebuild without incremental state or
+program caches; the fixed checked prelude is the allowed exception.
+
+**Program speed:** straightforward, idiomatic Dewy should produce programs
+close to C/Rust performance and be comfortable for games and other demanding
+applications. Aim for ordinary code under the default development compilation
+path to reach roughly **80% of the throughput** attainable by well-optimized
+Dewy for representative workloads. For fixed work that corresponds to about
+1.25 times the elapsed time. This is a workload-level engineering target,
+not a guarantee for every algorithm or program. Compare the same task and
+algorithm, and distinguish compiler optimization from a programmer changing
+the algorithm, data layout or use of libraries. Optimized Dewy's absolute
+performance also matters: 80% of a slow optimized program is not success.
+
+The fast development backend must therefore produce useful machine code,
+not merely compile quickly. Measure compile latency and output execution
+separately, including the native compiler as an output program. Track CPU
+time, peak memory, allocation/copy volume, and latency spikes where relevant.
+Use small kernels plus complete workloads: compiler data structures, numeric
+arrays, and eventually a game-like update/render workload. Record default
+versus optimizing code generation and idiomatic versus manually tuned source
+as separate comparisons, plus equivalent systems-language baselines where
+available. Keep benchmark source, options and hardware with the results.
+
+Simple value-oriented code should benefit from inferred borrows, moves,
+placement, efficient containers and good generated code. Requiring pervasive
+explicit views, manual `.copy()` annotations or raw handles to obtain ordinary
+performance would miss this goal. Preserve value semantics, facts and effect
+contracts while removing their avoidable implementation costs. Copy-on-write
+remains provisional: its deferred copies and latency spikes leave predictable,
+near-zero-cost storage behavior an open long-term design question.
+
+**CPU/GPU execution:** compatible array problems should run efficiently on
+the GPU, and applications using both processors should avoid unnecessary
+transfers, allocations and synchronization. Phase 3 develops the array
+execution model; Phase 4 supplies the broader interop/platform integration.
+Establish an efficient CPU baseline first and measure end-to-end GPU workloads,
+including transfer and synchronization costs. This direction does not settle
+device selection, buffer residency, numeric equivalence or synchronization
+syntax; those designs need review before implementation.
 
 ## The hosted compiler's role
 
@@ -124,8 +180,10 @@ Exit criteria that the later phases depend on:
   alone on 2026-09-18;
 - the native pair passes the full end-to-end corpus, the differential
   `test_bootstrap_*` groups, and the `$test` runner;
-- installer and release wired to the verified package (achieved); CI green
-  remains a separate gate;
+- installer and release wired to the verified package (achieved); publication
+  must be gated by full test and differential certification for the same
+  source revision as the packaged fixed point. Historical green checkpoints
+  do not certify a newer package;
 - the Python compiler remains the behavioral reference and stays in
   parity (see "The hosted compiler's role"); its retirement is not a Phase
   0 exit criterion;
@@ -140,198 +198,191 @@ Exit criteria that the later phases depend on:
   Establish the baselines and workload budgets before accepting optimization
   batches, rather than treating a successful self-build as sufficient.
 
-### Immediate work order
+### Immediate work order (accepted 2026-09-29)
 
-**Review checkpoint (2026-09-20):** keep the order below, with a short
-correctness/parity closure pass before expanding Phase 1.1. Recent borrow
-elision crossed value boundaries through aliased places and raw-exposed
-records; regression fixes and the review are recorded in
-[`bootstrap/REVIEW_2026_09_20.md`](bootstrap/REVIEW_2026_09_20.md).
-Finish the corpus expectation for `nat_types`, use explicit fixture outcomes
-(including arguments and expected failures), and verify ownership changes
-with a second-generation compiler as well as hosted/native comparisons.
-Do not mistake agreement between implementations or a fixed point for an
-independent correctness oracle.
+The [September 20 review](bootstrap/REVIEW_2026_09_20.md) established the
+correctness requirements: value boundaries must survive aliasing and raw
+exposure; test fixtures need independent expected outcomes; ownership changes
+need second-generation execution as well as hosted/native comparison. Those
+requirements remain. The September 29 audit updates the execution order:
 
-Complete copy-report coverage and module attribution before enforcing
-`$explicit_copies` across the compiler. Its approved explicit remedies must
-work before diagnostics prescribe them. Strict-mode acceptance must agree
-between compilers even when their optimization choices differ. Continue
-targeted alias/effect and move work in this checkpoint; broader lifecycle
-and proof-engine work follows the Phase 0 gates rather than replacing them.
-
-1. Establish a bidirectional semantic parity inventory and isolated
-   regressions for acceptance, rejection, and execution. A first unsupported
-   construct must not conceal the rest of a corpus bundle. Use
-   `bootstrap/IMPLEMENTATION.md` as the starting inventory, not an exhaustive
-   list of gaps. Establish reproducible performance baselines alongside it.
-2. Run the dedicated performance campaign once the compiler's own source and
-   the optimization regression cases work reliably on both implementations.
-   Unrelated parity gaps can remain while this campaign runs.
-3. Finish the remaining Phase 0 parity, corpus, and release/CI gates with the
-   faster development loop.
-4. Proceed into the broader ownership, proof, and effects work. Targeted
-   ownership improvements, and the proofs or effects needed to justify them,
-   can be pulled into the performance campaign where measurements warrant it.
-   Ownership does not wait for the complete solver.
+1. **Freeze the remaining Phase 1 closure matrix.** Use
+   [`PHASE1_PROGRESS.md`](PHASE1_PROGRESS.md) to enumerate supported ownership
+   operations, shared storage decisions across checking/effects/lowering,
+   actual unsafe-assumption provenance, strict-source adoption and report
+   parity, and final integration. Give each row acceptance/rejection examples,
+   implementation status and completion evidence. Keep conservative unsupported
+   cases visible. Closure-dependent captures stay in Phase 2; genuinely open
+   resource/failure designs stay in their design track. This bounds the work
+   without declaring unfinished support complete or reducing approved scope.
+2. **Improve feedback and revision-specific certification alongside closure.**
+   Reuse test-driver builds identified by source/library revision, target and
+   relevant options. Separate fast local semantic/allocation gates, frozen
+   integration checkpoints, and complete scheduled/release certification.
+   Publication must require full pytest, the complete paired manifest and
+   native fixed-point evidence for the exact packaged revision. Keep explicit
+   expected-result tests and the independent hosted recovery route.
+3. **Resume the sustained throughput campaign within Phase 1.** Do not wait
+   for every compiler module to adopt strict mode. Prioritize allocation
+   elimination, redundant graph/state analysis, and the performance of direct
+   generated code. Land coherent batches with bounded kernel checks, then
+   full self-builds at integration checkpoints. Strict-copy reporting must
+   remain complete; annotating unwanted copies or suppressing bounded stores
+   is not a performance improvement.
+4. **Close Phase 1 with fresh integration evidence.** Complete the agreed
+   matrix and source adoption, then certify the full paired corpus and native
+   loop at the same revision. Record remaining conservative boundaries and
+   performance measurements explicitly. Maintain one concise current
+   capability/certification table with fixture links; historical checkpoint
+   prose must not be the only way to discover current support.
+5. **Start a focused Phase 2 library customer.** After Phase 1 closure, use a
+   small generic/reflection slice to move one real abstraction out of checker
+   special cases. Expand from demonstrated contracts and performance, then
+   continue closures/error completeness, numerics, reach and ecosystem work.
 
 ### Dedicated performance campaign
 
-Plan a sustained optimization effort early in Phase 0, potentially about a
-week when started. The duration is an investment in reaching the target,
-not a guarantee that the target will be achieved within a week. This
-milestone consolidates the performance work below and selected parts of
-Phase 1.1, rather than spreading it across ordinary feature development.
+Resume a sustained optimization effort during the remaining Phase 1 work,
+potentially about a week of concentrated work when started. The duration is
+an investment, not a guarantee of reaching the target within a week. This
+consolidates measured compiler, ownership and generated-code work instead of
+making each small edit wait for another expensive bootstrap.
 
-**Status (reviewed 2026-09-20):** the campaign paused at 18.2-18.5 s cold
-using a C-built executing compiler and direct output; later source grew this
-to about 20 s. The direct-built executing compiler remains around 44.6-44.7 s
-for the same kind of full build. The accelerated route meets 30 s; the
-no-C route does not yet. Track these as separate benchmark rows, with an
-explicit seed provenance, and retain the under-10-second stretch goal.
-Slices, numbers and the remaining levers are recorded in
-`bootstrap/PHASE0_MEASUREMENTS.md`. Resume measured batches that remove
-repeated work or improve generated code, including Phase 1.1 where justified.
-Static copy-site counts supplement elapsed time and runtime allocation/copy
-counters; a lower site count alone is not evidence of a faster compiler.
+**Current baseline (audited 2026-09-29, source `a202b734`):** an independently
+hosted-seeded, direct-built executing compiler took **97.33 s** for a cold
+single-generation direct x86-64 self-build, without C acceleration, and used
+**4.39 GiB peak process RSS**. The benchmark machine was an i7-6700 at 3.4 GHz
+(4 cores / 8 threads); the process and artifact directory were fresh, but OS
+page caches were uncontrolled. This is one observation, not a repeated
+performance certification. Disjoint root phases requested **57.04 GB** of
+storage and reported **1.40 GB** of payload copies. Frontend, validation and
+lowering dominated; emission and backend together took about six seconds.
+The seed's zero live/peak allocation gauges were invalid because of an imported
+scalar-contract bug, since fixed; RSS remains usable. Rebuild the corrected
+seed before drawing conclusions from those gauges. Details and artifacts are
+in the [audit](AUDIT_2026_09_29.md).
 
-**Acceptance target (revised 2026-09-15):** the native compiler builds the
-Dewy compiler from source into an executable in **under 30 seconds** on a
-recorded benchmark machine; **under 10 seconds** is the stretch goal. Keep
-the dependency-free Python-hosted compiler usable and measured, but it need
-not reach the native target before the campaign can succeed. Time the complete
-invocation, including checking,
-lowering, emission, µDewy compilation, and linking; include C compilation
-when that route uses it. Measure one compiler generation separately from
-the two-generation bootstrap verification and its execution checks.
+**Historical milestones:** the September 15/16 campaign reached 18.2–18.5 s
+using a C-built executing compiler and direct output; later September
+checkpoints measured roughly 20 s on that route and 45 s direct. These are
+older, different inputs and seeds, not a matched regression comparison or
+current target certification. Keep C-built and direct-built executing
+compilers in separate rows with seed provenance. The last full paired
+certification covered 668 cases at `9df1d08f`; the post-audit manifest has
+698 cases and requires a fresh complete run. Focused checks do not replace it.
 
-Record cold full builds, warm full builds, and incremental builds separately,
-with the machine, toolchain, backend, options, and cache state. A cached
-executable or an incremental result cannot establish the full-build target.
-Retain semantic and expected-result tests, deterministic bootstrap checks,
+**Near-term acceptance:** build the Dewy compiler from source into an
+executable in **under 30 seconds**, then **under 10 seconds**, on the recorded
+benchmark machine. The direct-built executing compiler and no-C output route
+must meet the minimum; a C-accelerated result is a separate useful measurement.
+These are waypoints toward the Jai-class goal above. Keep dependency-free
+hosted Python usable and measured, though it may lag behind the native target.
+Time the complete invocation, including parsing/checking, validation, lowering,
+emission, µDewy compilation and linking; include C compilation when used.
+Measure one generation separately from complete bootstrap verification.
+
+Record cold and warm full builds, with machine, toolchain, target, options,
+executing-compiler provenance and fixed-prelude cache state. Warm means another
+whole-program compilation, not reuse of user-program analysis or artifacts.
+Cached executables and incremental results cannot establish this target.
+Retain expected-result tests, semantic parity, deterministic bootstrap checks
 and bounded memory budgets throughout the campaign.
 
 Use the machine's compute and memory throughput to challenge the amount of
-work performed: record source and output bytes, node counts, allocation and
-copy volume, and repeated visits alongside elapsed time. Distinguish an
-idealized bandwidth/cycle budget from an achievable compiler time; parsing,
-proofs, pointer chasing and toolchain startup cannot be priced as a single
-streaming copy. Prioritize eliminating redundant representations and passes
-when costs exceed those justified by the workload, rather than chasing small
-speedups in already cheap operations.
+work performed: record source/output bytes, node counts, allocation and copy
+volume, detachments and repeated visits alongside elapsed time. Distinguish an
+idealized bandwidth/cycle budget from achievable compiler time; parsing,
+proofs, pointer chasing and startup are not a streaming copy. Prioritize
+eliminating categories of waste over local improvements to cheap operations.
 
-The campaign covers the whole compilation path:
+The next batches should address:
 
-- Eliminate repeated type queries, expensive cache keys, redundant tree
-  transformations, and unnecessary intermediate representation construction.
-  Keep hosted and native profiles separate and prioritize measured costs.
-- Implement native checked-prelude caching. This should particularly improve
-  ordinary edit/run cycles; measure its effect on full self-builds separately.
-  Restore binding and type identities correctly, and invalidate cached state
-  when compiler/cache format, library inputs, target, or relevant options
-  change. Cached and uncached compilation must agree semantically.
-- Reduce generated-code expansion through helper reuse, static data, and
-  cheaper emission, and reduce text-processing overhead between stages.
-  The verified self-build emitted roughly 97 MB of µDewy. Its downstream
-  compilation takes minutes, so faster analysis alone cannot meet the target.
-- Improve the µDewy and C compilation paths as measured bottlenecks warrant.
-  Keep the direct backend as a measured route throughout, preserving the
-  goal of a reasonably performant full bootstrap without C acceleration.
-- Pull forward targeted ownership and allocation improvements from Phase 1.1
-  where copying or reclamation dominates, together with the specific proof
-  and effect improvements needed to make them sound.
+- **Storage operations remaining after copy elimination.** Remove repeated
+  empty-container descriptors, use static immutable literals with correct
+  ownership on mutation, and prove inline/frame placement for small
+  non-escaping growable containers. Build analysis state directly in its
+  destination rather than repeatedly materializing owning snapshots.
+- **Repeated analysis and representation work.** Reuse immutable lookup tables
+  and revision/mode-bound analysis context, propagate changes through
+  dependency worklists, and compact hot state/identity representations where
+  measured. Do not memoize mutable proof state without dependency invalidation
+  or duplicate the same wasted work across threads.
+- **The compiler as a generated program.** Profile native execution, calls,
+  spills, retain/release traffic and hot loops. Improve existing code generation
+  where it holds back both compiler throughput and ordinary Dewy programs.
+  Register allocation already exists; assess its output rather than treating
+  its introduction as future work.
+- **Remaining stage overhead where justified.** Bytecode/object output and
+  checked-prelude caching have landed. Preserve cache identity/invalidation and
+  cached/uncached agreement. Internal token and assembly representations still
+  incur work, but the current downstream six-second cost is not the dominant
+  part of a 97-second build. Keep all routes measured and prioritize accordingly.
 
-Work in coherent optimization batches against bounded representative
-benchmarks. Run full compiler builds and bootstrap comparisons at meaningful
-integration checkpoints, rather than after every small edit. Reaching the
-target is likely to require eliminating whole categories of repeated work;
-small local speedups alone are unlikely to be sufficient.
+Use bounded, representative semantic/allocation/scaling kernels for the inner
+loop. Run full self-builds, paired comparisons and fixed-point checks at
+meaningful integration points and before publication. Do not skip required
+checks because they are slow; make setup reusable and scope explicit. Static
+copy-site counts are one metric alongside execution time, memory, allocation
+volume and work counts, not a proxy for all performance.
 
-### Compile-time throughput as a design constraint (2026-09-23)
+### Compile-time throughput as a design constraint
 
-David's position: Dewy should recompile large programs, the compiler
-included, at scripting-language speed **without incremental builds or
-caches**. The model is Jai, whose custom backend builds about 100k lines in
-roughly a second. Whole-program batch compilation every time is a feature:
-deterministic builds, no invalidation bugs, no daemon state, every compile
-re-runs every proof. The one cache the position tolerates is the checked
-prelude, treated as fixed input; the user's program always rebuilds from
-scratch. Jai holds the same line.
+David's September 23 direction, reaffirmed September 29: large programs,
+including the compiler, should recompile at scripting-language speed through
+whole-program batch compilation. The final comparison is Jai-class compiler
+throughput, somewhat slower if necessary for Dewy's semantics, but close.
+There is no user-program incremental cache or daemon requirement; every
+invocation rechecks the program and its proofs. The checked prelude is fixed
+input and the allowed cache exception.
 
-Where that puts the targets: the compiler's ~49k lines build in about 20 s
-on the C route and 45 s direct (2.5k and 1.1k lines/s); the 30 s and 10 s
-targets above are 1.6k and 5k lines/s; the Jai class is ~100k lines/s. The
-stretch goal is therefore a waypoint, not the destination. Cross-language
-lines-per-second comparisons motivate investigating wasted work; they do not
-establish which redesigns are necessary or what time Dewy can achieve. Use
-phase profiles, allocation volume and scaling tests to choose those changes.
+The audited native source contains about 56k lines in 137 compiler modules.
+A 97-second direct build is far from the goal. Cross-language lines per second
+help motivate investigating wasted work, but cannot establish achievable
+Dewy time by themselves. Use phase profiles, allocation volume, generated-code
+performance and increasing-input scaling tests to choose changes.
 
-What Jai does that Dewy does not, and the lever each implies:
+The architectural levers are:
 
-1. **No textual intermediate stages.** Jai goes AST → bytecode → machine
-   code in memory, then writes an object and links. Dewy serializes 17 MB
-   of µDewy text, reparses it in a separate tool, emits assembly text, and
-   the system assembler parses that again: three serialize-and-reparse
-   cycles. Lever: a µDewy bytecode input that replays straight into the
-   backends, and object-byte output instead of assembly text. Both are
-   specified under "Direct binary fast path" below, and both landed on
-   2026-09-25.
-2. **The unoptimized backend is the fast one.** Jai uses LLVM only for
-   release builds and its own backend for development. Lever: make the direct
-   backend a fast development path, with C (or a later optimizing path) for
-   release builds. Measure frontend time, backend time and generated-code
-   throughput separately: development output is also the next compiler and
-   the test runner. Distinguish a C-built executing compiler from a compiler
-   emitting C.
-3. **Never freeing.** Jai's compiler allocates from arenas and lets the
-   process exit reclaim everything: no reference counts, no releases. Lever:
-   the context allocator (ownership tier 3, `status.md`) pushed at the top
-   of the compiler can remove individual reclamation at suitable lifetime
-   boundaries. It does not remove copy obligations: two independently mutable
-   values must remain independent even if neither is freed. Measure working
-   set as well as time; a module-sized bounds-checker arena increased memory
-   without improving time in the first experiment. The compiler remains
-   the mechanism's first customer, at measured lifetime boundaries.
-4. **A worklist, not passes.** Declarations typecheck out of order from a
-   queue; a job that meets an unresolved dependency requeues; compile-time
-   execution runs in the same loop. Nothing walks the whole program eight
-   times. Lever: queue-driven checking, which is also the natural home for
-   Phase 2 compile-time execution.
-5. **Parallel per-procedure work.** Eight cores are idle during a Dewy
-   build; only the assembler runs in parallel. Value semantics makes
-   per-function checking, lowering and emission safer to parallelize than
-   it was for Jai.
-6. **A cheap semantic layer.** Jai has no proofs, no effects, no ownership
-   analysis and no operator ambiguity; typechecking is near-linear and
-   local. Dewy cannot copy this: proofs are its reason to exist. The
-   constraint instead is **measured scaling and bounded proof effort**:
-   bound qualifier generation, propagate changes through dependency worklists,
-   and give expensive searches explicit budgets. Budget exhaustion yields
-   unknown or a diagnostic, never an assumed proof. Track time, work and
-   memory for bounds, effects, borrowing and moves on increasing inputs;
-   a blanket linearity guarantee is not realistic for the intended proofs.
-
-Other measured costs with the same flavor: the multi-stage parser is far
-slower than Jai's (juxtaposition ambiguity itself is small: 622 ambiguous
-nodes and about 2% of a self-build, measured 2026-09-27), and the
-compiler as a Dewy program pays copies, retain/release pairs and string
-work that Jai's compiler never performs (Phase 1.1 removes these as a side
-effect; the copy budget is the metric).
+1. **Reduce intermediate serialization.** Binary µDewy input and native object
+   output landed September 25. Further simplification of internal tokens and
+   assembly should follow measured cost, while retaining diagnostic/text paths.
+2. **A fast development backend with good output.** Keep direct compilation
+   fast without making its output an inefficient interpreter of the source.
+   Measure frontend/backend latency and generated-program execution separately.
+   Distinguish a C-built executing compiler from one emitting C; an eventual
+   optimizing path must not be the only way to get useful runtime performance.
+3. **Ownership and lifetime-directed storage.** Borrows, moves, inline/static
+   placement and scoped arenas remove different costs. An arena does not prove
+   independent mutable values can share storage. Measure working set and
+   reclamation as well as time: a module-sized bounds-checker arena already
+   increased memory without improving time. Avoid universal arenas.
+4. **Dependency-driven work.** Use bounded worklists instead of revisiting
+   unrelated declarations or rebuilding graph summaries. The targeted analyses
+   can improve now; general compile-time execution joins this model in Phase 2.
+5. **Parallel work after ownership/dependencies are explicit.** Available CPU
+   parallelism is mostly unused. Independent procedure analysis/code generation
+   may eventually help, but first avoid replication of mutable graph state and
+   redundant analysis. Parallelism must preserve deterministic output and proof
+   boundaries, not mask single-thread inefficiency.
+6. **Bounded proof effort.** Limit qualifier generation, propagate dependency
+   changes and give expensive searches explicit budgets. Exhaustion means
+   unknown or a diagnostic, never an assumed proof. Track bounds/effects/borrow/
+   move work and memory as inputs grow; there is no blanket linearity promise
+   for the intended proof language.
 
 **Juxtaposition narrowing (decided against, 2026-09-27):** David keeps
-`a(x)^2` (a number `a`) and `(x+1)5^2` as multiplications, and the measured
-cost of ambiguity is small (see `PHASE1_DESIGN_PROPOSALS.md`), so the
-surface stays as decided in 1.4 item 1.
+`a(x)^2` (a number `a`) and `(x+1)5^2` as multiplications. Measured ambiguity
+was about 2% of a self-build, so the surface stays as decided in 1.4 item 1.
+A broad parser rewrite is not the first throughput response.
 
-Sequencing: levers 1, 2 and 5 need no language change and belong to the
-next performance batch after Phase 1.1's current slices; lever 3 lands
-with the context allocator; lever 4 with Phase 2; lever 6 is a standing
-rule from now on. Measure every batch as lines per second on the
-compiler's own sources, C route and direct route separately, with the
-allocation volume of the top-level `--timings` phases alongside (the
-nested per-module and sub-phase lines must not be summed; see
-`bootstrap/PERFORMANCE.md`). The allocation fixes scheduled under 1.1
-("Allocation profile") join the lever 1, 2 and 5 batch.
+Allocation and repeated-analysis reductions join generated-code improvements
+in the next batch inside Phase 1. Scoped storage follows demonstrated lifetime
+boundaries; general evaluation remains Phase 2; parallel checking follows
+explicit graph dependencies. Record wall time and allocation volume of the
+**disjoint root phases**: frontend, validation, initialization/reachability,
+lowering, emission and backend. Prelude and per-module/sub-phase counters
+are nested, and must not be summed with their parents; see
+[`bootstrap/PERFORMANCE.md`](bootstrap/PERFORMANCE.md).
 
 ### Direct binary fast path (2026-09-24)
 
@@ -573,6 +624,32 @@ changing registries or facts.
 
 ## Phase 1: foundations to their intended designs
 
+### Closure and performance work
+
+Phase 1 remains in progress. Freeze a finite closure matrix in
+[`PHASE1_PROGRESS.md`](PHASE1_PROGRESS.md), preserving the approved scope:
+
+| Area | Required closure evidence |
+| --- | --- |
+| Ownership and placement | Supported borrow/move/lifecycle/owner-promotion operations compose correctly across aliases, selectors, calls, imports and joins; conservative unsupported cases are explicit. |
+| Shared storage decisions | Copy policy, allocation effects, borrow legality and lowering consume compatible proof decisions for supported shapes. Logical hook effects survive physical elision. |
+| Proof and unsafe boundary | Checked facts survive transfer/invalidation correctly; unsafe audit records actual obligation dependencies, not just candidate checks in an assumption-bearing scope. Budget exhaustion remains unknown. |
+| Compiler source and inventory | Strict-source adoption is completed for the agreed compiler scope; hosted/native acceptance and report coverage agree, with bounded stores retained in the inventory. |
+| Integration | Independently hosted-seeded native fixed point, complete paired manifest, surrounding tests and performance evidence identify the same source revision. |
+
+Each row needs executable examples and implementation/parity status, not only
+a design note. Instrument unknown proof reasons (unsupported fragment,
+invalidated identity, missing contract, exhausted budget) and scaling before
+adding broader entailment rules. Finishing the full ideal solver, every lifetime
+shape or unsettled resource-exhaustion policy is not an implicit exit criterion.
+Keep these continuing goals recorded; environment ownership for escaping or
+writable captures remains the explicit Phase 2 closure work.
+
+The throughput campaign runs alongside these rows. Allocation and generated-code
+improvements should make ordinary value-oriented programs faster as well as the
+compiler. A lower static copy count or broader strict-mode adoption alone does
+not establish either performance goal.
+
 ### 1.1 Memory and ownership model
 
 The intended design is recorded in `status.md` ("Ownership and storage
@@ -611,9 +688,10 @@ silently.
    fixed budget per kernel and per thousand lines. The native command test now
    gates the bootstrap inventory at 4,500 static sites and 85 sites/KLOC.
    The corrected inventory at `f899b2b5` measured 4,301 sites and
-   80.762/KLOC across 53,255 source lines. The fully certified 2026-09-29
-   `db95f751` checkpoint measures 4,276 sites and 77.204/KLOC across 55,386
-   lines, retaining about 5% headroom under the total-site gate.
+   80.762/KLOC across 53,255 source lines. The latest fully certified
+   `9df1d08f` checkpoint measures 4,220 sites and 75.272/KLOC across 56,063
+   inventory lines. This is checkpoint evidence, not coverage certification
+   of subsequent source changes.
    Earlier 3,000/60 gates were based on incomplete reporting: retained inline
    record-field snapshots were omitted, including 1,336 two-word Span stores.
    Rebaselining retains all entries, including bounded copies; it changes no
@@ -650,40 +728,40 @@ silently.
    nested storage, without a CLI-only scan. Reporting coverage and ownership
    proof parity remain in progress.
 
-**Allocation profile (2026-09-28).** A self-build allocates about 32 GB in
-402 million allocations, 2.6 GB peak live; the per-site measurement is in
-`bootstrap/PERFORMANCE.md` ("Allocation profile of a self-build"). This profile
-measures arena requests. Existing bounded scalar record/array placement and
-borrowed cells/views do not yet cover the main compiler aggregates below. The
-groups it found, and when each is dealt with:
+**Allocation profile (updated 2026-09-29).** The September 28 per-site profile
+at `86a86d8a` attributed about 32 GB to 402 million arena allocations, with
+2.6 GB peak live storage; see `bootstrap/PERFORMANCE.md`. This is historical
+attribution. The fresh audit reports 57.04 GB of disjoint root-phase requests
+on a different revision/seed. Refresh per-site counts after recent changes
+before claiming which old category still dominates.
 
-- *With the current borrow and move slices:* narrowed AST nodes copied
-  into read-only parameters (`hir.push_children(node @pending)` in tree
-  walks; 15 M copies, 3.9 GB). This is the shape the 2026-09-20 relative-
-  cast borrow covered; confirm why it no longer applies to record-union
-  handles, then restore the borrow. It counts against the copy budget like
-  any other unexplained copy.
-- *In the next performance batch, alongside throughput levers 1, 2 and 5:*
-  representation and compiler-code fixes that need no new proofs. An empty
-  `[]` shares one static descriptor and allocates at the first `push` or
-  `reserve` (73.7 M descriptors, 4.7 GB). Constant array literals in
-  expression position become static data. `fact_state.join` reserves its
-  result from the largest input state instead of growing it by doubling
-  (the bounds checker's fact states are 3.5 GB). `lifecycle_runtime.resource`
-  caches its per-type answer for the compile. Measure each against the
-  allocation profile, not only the self-build time.
-- *As the third mechanism above, once the lifetime work below is closed:*
-  frame placement. Small non-escaping local lists get inline frame slots
-  that spill to the arena (28 M growth steps never pass their first 8-slot
-  buffer). Fresh records and arrays returned to a caller that keeps them
-  local are built in caller-provided storage, the destination-result
-  protocol `status.md` describes for caller-region results. Both consume
-  the escape facts the move and view analyses already compute; an
-  unproven case keeps its arena allocation.
-- *With the context allocator (throughput lever 3):* the large tables (HIR
-  nodes, tokens, cache bytes). Their growth is ordinary doubling (0.85 GB
-  in 3,180 steps); per-phase arenas release them wholesale rather than
-  avoiding them.
+`fact_state.join` reservation and completed per-type
+`lifecycle_runtime.resource` caching already exist. Narrowed-node borrowing
+has also received substantial repairs. Measure their remaining costs instead
+of scheduling their initial implementation again. Priorities now are:
+
+- **Empty descriptors and constant arrays.** Empty arrays avoid a data buffer
+  but still allocate a private descriptor. Introduce a shared immutable empty
+  representation and static constant literals, materializing a private owner
+  on mutation. Check places, reserve, nested fields, allocator lifetime and
+  cleanup; sharing must never make the static descriptor writable.
+- **Small non-escaping scratch lists.** Extend existing bounded scalar frame
+  placement to proven growable scratch owners with inline storage and a spill
+  path. Parser candidates, child worklists and effect paths are customers.
+  Cover the supported lifetime shapes now; do not wait for every lifetime case.
+  Caller-local aggregate results can follow through the destination-result
+  protocol in `status.md`, with an allocating fallback when placement is unknown.
+- **Owning analysis-state construction.** Borrow immutable inputs, build mutable
+  results with one owner, and transfer completed state. Compact IDs/entries can
+  remove nested ownership trees. COW detachments and repeated snapshots need
+  measurement even when reported payload copying is small.
+- **Repeated graph discovery.** Share revision/mode-bound route and analysis
+  context where semantics match; drive summary updates by dependencies. Keep
+  distinct raw-exposure/escape modes and invalidation rules explicit.
+- **Scoped storage for large tables.** HIR nodes, tokens and cache bytes are
+  candidates at proven lifetime boundaries. Arenas can reduce reclamation;
+  they do not remove table construction or growth. Accept them only with
+  measured time and working-set improvements.
 
 The difference from the earlier attempt is the order and the gate: each
 mechanism lands against a measured kernel and the compiler's own sources,
@@ -1218,6 +1296,16 @@ design but belongs to Phase 3.
 
 ## Phase 2: expressiveness on top of the foundations
 
+**First customer after Phase 1 closure:** a narrow generic/reflection/library
+slice that removes one real checker special case. Named generic functions
+already instantiate; explicit generic function arguments and user generic
+object/container types remain incomplete. Choose one useful abstraction,
+establish its ordinary contracts in both compilers, and measure its default
+runtime performance before migrating whole container families. Reusable
+primitives should let library code be as efficient as a compiler builtin;
+the checker must not recognize a library name to make it work. This is the
+first slice below, not a requirement to finish all reflection ahead of closures.
+
 - **Parameterized types**, explicit type arguments, monomorphization. This
   unlocks the stated long-term goal of moving arrays, dictionaries, sets, and
   strings out of the compiler into Dewy libraries, which shrinks the
@@ -1229,8 +1317,9 @@ design but belongs to Phase 3.
   unrolled literals). Then general compile-time execution under the purity
   and termination rules. This replaces pressure for compiler builtins; the
   rule stands that library features are built on reusable primitives, never
-  on the checker recognizing a library call. Note: compile-time execution
-  does not make the compiler faster; it makes it smaller and more uniform.
+  on the checker recognizing a library call. Compile-time execution is not
+  itself a throughput optimization: reducing special cases may simplify the
+  compiler, while evaluation adds work that needs bounded, measured costs.
 - **Error propagation completeness:** transformed propagation, pipe
   forwarding, the `exception` family finished.
 
@@ -1244,11 +1333,48 @@ Phase 2 because it needs generic types, compile-time shapes, and the
 juxtaposition decision. `semantic/numerical_stress_test.md` is the
 evaluation plan.
 
+Runtime performance is part of this phase's acceptance, rather than a later
+optimization pass. Start with contiguous CPU arrays and ordinary numeric
+loops, then measure compatible fused operations, vectorization, broadcasting
+and linear algebra. Preserve facts and effect order while avoiding temporary
+arrays, unnecessary bounds work and per-element allocation. Keep default and
+optimized Dewy comparisons plus equivalent CPU baselines for representative
+sizes; small arrays and large streaming workloads need different cost choices.
+
+**GPU array execution and CPU/GPU interop:** compatible array computations
+should have a GPU execution path that preserves the intended problem model
+without requiring a wholesale rewrite. Develop this after the CPU array and
+shape contracts are usable, with Phase 4 platform/FFI support as needed:
+
+- Identify eligible array operations and composed kernels; measure fusion,
+  launch overhead and the size at which GPU execution helps. Keep an efficient
+  CPU path for small or incompatible work.
+- Establish buffer layout, residency and lifetime contracts so data can stay
+  on the GPU across operations. Support applications that alternate CPU and
+  GPU work without repeated full-buffer copies or hidden synchronization.
+- Measure total application latency/throughput, transfers, temporary storage
+  and synchronization, not only kernel time. Use numeric workloads and a
+  game-like CPU update/GPU workload as concrete customers.
+- Review device selection, synchronization/effects, capacity/failure behavior,
+  and floating-point/reduction ordering before committing their semantics.
+  Preserve observable effects and explicit numeric policies across execution
+  paths; compatible shape alone is not proof an operation can move to a GPU.
+
+This records an execution direction, not new GPU syntax or a decision that
+all arrays automatically move between devices. Start with a small end-to-end
+CPU/GPU example on a recorded device before generalizing APIs or backends.
+
 ## Phase 4: reach
 
 - A stable foreign-function interface; target triples with structured
   `$target` gating (`status.md`, "Proper compilation target list"); full
   prelude on wasm32; at least one non-Linux host.
+- CPU/GPU platform and graphics interop supporting Phase 3's array execution:
+  device buffers and host APIs must use coherent resource identity, lifetime
+  and effect contracts. Evaluate integration with game-like workloads. Share
+  the language's storage rules rather than creating an unchecked parallel
+  ownership system. This can proceed as a focused dependency of Phase 3;
+  it need not wait for unrelated portability or general concurrency work.
 - The concurrency model (`semantic/safety_and_concurrency.md`):
   partition-first fork-join, `Send`/`Sync` as structural properties, then
   the resource-exhaustion policy. Deliberately last among language
@@ -1265,11 +1391,18 @@ DewyOS explorations. These make the language real to other people, but
 should not be built twice, so they wait for the native compiler and a
 stable surface.
 
+Small library examples and performance workloads belong alongside the earlier
+phases now; a complete game engine or ecosystem is not required to test runtime
+quality. Carry those examples into documentation as their contracts stabilize.
+
 ## Deprioritized
 
-- Additional µDewy backends, the browser playground, and the hypothetical
+- Additional general-purpose µDewy backends without a measured workload need,
+  the browser playground, and the hypothetical
   ndewy rung (a TBD section in `../udewy/trusted_computing_concept.md`; no
   code exists). Finished enough, or not started, and correctly so for now.
+  The planned GPU array execution path is a Phase 3 goal, not part of this
+  general backend deferral.
 - Matching the native compiler's storage cost in the hosted lowering.
   Parity is semantic; the hosted compiler is the reference and the seed,
   not the performance target.
@@ -1283,7 +1416,13 @@ stable surface.
   it. The bootstrap memory blocker is resolved; the purpose now is predictable
   costs and practical native development, without making either project wait
   for the other to be complete.
-- Whether compile-time reflection deserves to move into Phase 1 so more of
-  the standard library can be written in Dewy earlier. Current lean: no; it
-  does not help compiler performance and its purity rules want effects
-  (1.3) first.
+- Keep general reflection/evaluation in Phase 2, after its Phase 1 proof/effect
+  prerequisites. Its first focused library customer may reduce compiler
+  special cases; that does not make broad reflection an immediate performance
+  prerequisite.
+- Improve compile latency and generated-program performance together without
+  conflating their budgets. Jai-class compilation and near-systems-language
+  runtime are final goals; the 30/10-second self-build and approximate 80%
+  default/optimized throughput targets provide nearer evidence.
+- CPU/GPU placement, synchronization and numeric policies remain design work.
+  The direction is approved; fundamentally new semantics still need review.
