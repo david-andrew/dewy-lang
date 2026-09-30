@@ -1,0 +1,114 @@
+[
+  {
+    "name": "unannotated",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/unannotated.dewy:3:24]\n  3 | main=():>int64=>{let x=choose([1] [2 3]) return x.length}\n    \u00b7                        \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.0058561660116538405
+  },
+  {
+    "name": "typed_local",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/typed_local.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.007326174061745405
+  },
+  {
+    "name": "typed_return",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/typed_return.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.007348008919507265
+  },
+  {
+    "name": "monomorphic_argument",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/monomorphic_argument.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.007358263013884425
+  },
+  {
+    "name": "generic_argument",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/generic_argument.dewy:4:46]\n  4 | main=():>int64=>{let x:array<int64>=identity(choose([1] [2 3])) return x.length}\n    \u00b7                                              \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                                      \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.006385219981893897
+  },
+  {
+    "name": "typed_intermediate_then_generic",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/typed_intermediate_then_generic.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.007931118016131222
+  },
+  {
+    "name": "record_result_context",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/record_result_context.dewy:3:45]\n  3 | main=():>int64=>{let x:[value:array<int64>]=wrap([1] [2 3]) return x.value.length}\n    \u00b7                                             \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                                    \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.0061555689899250865
+  },
+  {
+    "name": "optional_result_context",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/optional_result_context.dewy:3:42]\n  3 | main=():>int64=>{let x:array<int64>|none=choose([1] [2 3]) return if x isnt? none x.length else 0}\n    \u00b7                                          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                                  \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.006437866948544979
+  },
+  {
+    "name": "nested_array_result_context",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/nested_array_result_context.dewy:3:44]\n  3 | main=():>int64=>{let x:array<array<int64>>=wrap([1] [2 3]) return x.length}\n    \u00b7                                            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                                   \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.006237789988517761
+  },
+  {
+    "name": "nested_generic_with_annotated_inputs",
+    "hosted": "UserError",
+    "native": 1,
+    "output": "Error: no matching function\n\n    \u256d\u2500[<probe-output>/nested_generic_with_annotated_inputs.dewy:4:81]\n  4 | main=():>int64=>{let a:array<int64>=[1] let b:array<int64>=[2 3] let x=identity(choose(a b)) return x.length}\n    \u00b7                                                                                 \u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\n    \u00b7                                                                                      \u2570\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.006684790947474539
+  },
+  {
+    "name": "erased_input_lengths",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/erased_input_lengths.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.008293375023640692
+  },
+  {
+    "name": "generic_forwarder",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/generic_forwarder.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.00789045705460012
+  },
+  {
+    "name": "record_argument_context",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/record_argument_context.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.007634994923137128
+  },
+  {
+    "name": "imported_typed_local",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/lib.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.00837194302584976
+  },
+  {
+    "name": "imported_typed_return",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/lib.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.008399382000789046
+  },
+  {
+    "name": "imported_generic_forwarder",
+    "hosted": "accepted",
+    "native": 1,
+    "output": "Error: native lowering implementation pending\n\n    \u256d\u2500[<probe-output>/lib.dewy:2:12]\n  2 | let choose=<T>(a:T b:T):>T=>a\n    \u00b7            \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    \u00b7                    \u2570\u2500 aggregate results need the prelude arena allocator\n    \u2570\u2500\u2500\u2500\n",
+    "seconds": 0.008676656056195498
+  }
+]

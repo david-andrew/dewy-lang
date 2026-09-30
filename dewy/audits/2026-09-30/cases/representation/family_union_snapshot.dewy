@@ -1,0 +1,10 @@
+let Root=type of [x:int64]
+let Child=type of Root & [y:int64]
+make=(flag:bool):>Root=>if flag Child[20 22] else Root[42]
+score=(x:Root):>int64=>if x is? Child x.x+x.y else x.x
+Choice:type=Root|none
+pass=(x:Choice):>Choice=>x
+main=():>int64=>{
+let original:Choice=make(true) let saved=pass(original)
+if original isnt? none {original.x=100}
+return if saved isnt? none score(saved) else 1}

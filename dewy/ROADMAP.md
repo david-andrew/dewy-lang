@@ -24,6 +24,14 @@ Library-defined validation is the provisional default: prefer checked guarantees
 allow a narrow documented trust boundary where needed, and revisit it with
 library experience. The exact validator/proof interface remains open.
 
+The [focused September 30 audit](AUDIT_2026_09_30.md) adds bounded inference,
+type-algebra, specialization and leaf-code evidence, a source-inspected string
+capacity hazard, and an append-stability dependency for future dense arrays.
+Its [follow-through](#focused-audit-follow-through-2026-09-30) records targeted
+work within the current phases. Largest-descendant layout, dense storage and
+variant reuse remain attributed to the earlier review; temporary-cache work
+does not become a permanent architecture priority.
+
 How this relates to the other documents:
 
 - [`status.md`](status.md) is the feature-by-feature implementation tracker
@@ -134,10 +142,14 @@ The first focused batches should:
   or escape boundaries; review largest-descendant layout as a general boundary
   representation rather than the inevitable form of every local;
 - extend demanded-field results and plan dense aggregate arrays with explicit
-  stride, lifetime, mutation and borrowing rules;
+  stride, lifetime, mutation and borrowing rules. Separate preservation of
+  existing element values during append from physical address stability:
+  today's boxed-record guarantee must not authorize dense-storage borrows
+  across backing-store growth without representation-specific evidence;
 - reuse variants with the same representation, ownership protocol and result
-  demand. Measure compilation work and code size; unlimited per-call cloning is
-  not the objective.
+  demand. Measure generic body checks separately from emitted variants and
+  code size; emission-only deduplication leaves repeated checking intact.
+  Unlimited per-call cloning is not the objective.
 
 Acceptance kernels should establish that an unused subtype does not enlarge a
 proven exact local, taking a function's address does not degrade an unchanged
@@ -146,6 +158,9 @@ aggregate array has its intended dense layout. Include negative cases where
 heterogeneous values, unknown calls, mutation or exposed addresses require a
 general form. These are staged implementation targets, not claims of present
 support or a new requirement to finish every representation before Phase 1 closes.
+Include the same getter/read-across-growth kernel for boxed and future dense
+arrays, plus replacement and exposed-address cases. A selected layout must
+preserve meaning with an honest borrow/address strategy.
 
 **CPU/GPU execution:** compatible array problems should run efficiently on
 the GPU, and applications using both processors should avoid unnecessary
@@ -452,6 +467,73 @@ explicit graph dependencies. Record wall time and allocation volume of the
 lowering, emission and backend. Prelude and per-module/sub-phase counters
 are nested, and must not be summed with their parents; see
 [`bootstrap/PERFORMANCE.md`](bootstrap/PERFORMANCE.md).
+
+### Focused audit follow-through (2026-09-30)
+
+The [audit](AUDIT_2026_09_30.md) and [probe record](audits/2026-09-30/README.md)
+distinguish new findings from corroboration of existing plans. The observations
+are revision-specific and do not certify the current compiler. These tasks fit
+the existing correctness, throughput and early-library work; they do not expand
+the frozen Phase 1 closure matrix or settle new language syntax.
+
+| Task | Placement and completion evidence |
+| --- | --- |
+| Preserve known context at generic calls | Early Phase 2 generic-library slice. A type parameter unrelated to an explicitly typed argument must not discard that argument's known context. Cover nested calls and expected results containing `T` under records, optionals and arrays, with deliberate ambiguity diagnostics. |
+| Reduce repeated specialization work | Current throughput campaign and generic-library slice. Track body checks, instance-lookup visits, emitted variants and code size separately; reduce checking for distinctions the body does not use. Retain semantic contracts and behavior identities. |
+| Contain automatic Boolean type expansion | Current throughput/scaling campaign. Measure normalization clauses and visits independently of numeric-proof budgets. Avoid eagerly materializing exponential DNF for simple queries; exhausted automatic search yields unknown or a complexity diagnostic. |
+| Make small helpers cheap | Current development-backend campaign. Investigate used-register saves, leaf frames and register use across calls, with stack/ABI correctness and helper-heavy runtime kernels. Measure output instruction traffic and compile cost. |
+| Repair lazy-string metadata capacity | Targeted correctness work. Confirm and remove the inspected `write_boundaries -> none -> count zero` fallback when uint32 offsets cannot represent the input. Establish a capacity contract, wider/chunked representation or explicit failure before caching metadata. |
+| Measure deferred text costs | Current runtime campaign, then text-library slice. Record first length/segmentation cost, metadata bytes and backing bytes retained by small slices, alongside copies and allocations. Determine whether explicit preparation/compaction is needed from workloads. |
+| Expose semantic feedback and annotation burden | Early Phase 2, alongside the first generic-library customer. Start with batch inspection of types/effects, specialization and failed obligations; use ordinary application/refactoring kernels before committing to the full Phase 5 language server. |
+
+**Inference acceptance:** the recorded hosted matrix has 11 accepted and seven
+rejected forms. Both checkers reject an inner common-array call when an otherwise
+monomorphic consumer gains only an unrelated generic tag; its array parameter
+remains completely known. Propagate independently known parameter constraints
+before all generic variables are solved. Also test typed locals, declared returns,
+record fields, imported/forwarded generics, helper extraction and nested/wrapped
+results. Establish a deterministic local bidirectional policy and explicit
+ambiguity boundary, rather than unrestricted whole-program inference. Count
+annotations and their placement: moving the same contract through an ordinary
+refactoring should not unexpectedly make it unusable. Some forms already work;
+retain those positive cases.
+
+**Specialization acceptance:** the two-parameter constant-result kernel causes
+9/25/49 hosted body checks and emitted functions for 9/25/49 explicit calls;
+native decoded operation groups confirm 9/49 duplicate bodies. This is not
+exponential growth relative to source size. Use reusable body requirements and
+dependency summaries to distinguish necessary fresh checking from unused
+call-site facts. Index native instances per generic instead of scanning unrelated
+instances; replace hosted whole-type textual keys with compact retained identities
+where valid. A 21-node shared type graph rendered 462,554 bytes in the original
+probe. Within-invocation reuse must retain selected operations, effects, defaults,
+lifecycle obligations and invariant storage contracts; layout equality alone
+does not authorize sharing. These are implementation targets within the already
+accepted variant-reuse direction.
+
+**Scaling acceptance:** the bounded normalization kernel expands 14 binary choices
+to 16,384 clauses and 229,376 literal entries; accepted source reaches the same
+distribution path at smaller sizes even for an uncalled function. Track formula
+size/nesting, overload counts, instance counts, effect vocabulary and control-flow
+joins as separate axes. Prune or answer cheap subtype/disjointness questions
+before distribution; compact Boolean expressions or lazy clause exploration are
+candidate implementations. These automatic solver/optimizer limits do not add
+mandatory execution budgets to programmer-written compile-time code. Growing
+generic expansion remains existing diagnostics/cancellation work.
+
+**Text correctness and cost:** test offset-range boundaries through a bounded
+helper/model or controlled failure injection; do not require a multi-gigabyte
+allocation in routine tests. This inspected representation-capacity hazard is
+distinct from out-of-memory behavior. Preserve grapheme semantics and honest
+effects while measuring first-touch scans, metadata allocation and owner retention.
+The capacity representation/failure policy remains a design choice, not a claim
+that the current code already handles the boundary.
+
+**Temporary caches:** the hosted executable shortcut can choose the same artifact
+for different requested targets. Bypass/remove it wherever it obstructs target
+checks, certification, dogfooding or measurements; a small guard is sufficient
+if current tooling still needs it. Do not build permanent read-set/cache machinery
+for this finding. Persistent caches, including the prelude, remain transitional.
 
 ### Direct binary fast path (2026-09-24)
 
@@ -1380,6 +1462,17 @@ first slice below, not a requirement to finish all reflection ahead of closures.
   unlocks the stated long-term goal of moving arrays, dictionaries, sets, and
   strings out of the compiler into Dewy libraries, which shrinks the
   compiler and makes the ownership model testable in library code.
+- **Inference and semantic inspection, alongside the first library slice:**
+  implement the [focused inference gates](#focused-audit-follow-through-2026-09-30)
+  and expose source-linked batch diagnostics, inferred types/effects and
+  explanations for specialization, missing proofs and borrow/copy decisions.
+  Start with small checker/query interfaces and incomplete-input recovery;
+  this does not require an incremental compiler or resident process. Repeated
+  customers should include a text/file utility, validated data transform,
+  record-array update loop and generic helper library. Count explicit types,
+  casts, repeated guards, copies and unsafe assumptions before and after normal
+  API composition. This is an early usability milestone; full editor/package
+  integration remains Phase 5.
 - **Closures as environment records**, using the ownership model for
   captures (today: lambda-lifted non-escaping local functions only).
 - **Compile-time evaluation, first slice:** the reflection primitives in
@@ -1483,6 +1576,9 @@ imports, the documentation projects and case studies in
 DewyOS explorations. These make the language real to other people, but
 should not be built twice, so they wait for the native compiler and a
 stable surface.
+
+The narrow batch semantic-feedback path and ordinary-program ergonomics gates
+start in early Phase 2 as recorded above; they should inform these later tools.
 
 Small library examples and performance workloads belong alongside the earlier
 phases now; a complete game engine or ecosystem is not required to test runtime

@@ -1,0 +1,8 @@
+Pair:type=[x:int64 y:int64]
+Choice:type=Pair|none
+replace=(@x:Choice):>void=>{x=Pair[20 22]}
+main=():>int64=>{
+let choices:array<Choice>=[none none] replace(@choices[0])
+if choices[1] isnt? none return 1
+if choices[0] is? Pair return choices[0].x+choices[0].y
+return 2}

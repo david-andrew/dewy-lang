@@ -1,0 +1,146 @@
+{
+  "normalization": [
+    {
+      "choices": 6,
+      "clauses": 64,
+      "literal_entries": 384,
+      "cpu_seconds": 0.00013159100000001422
+    },
+    {
+      "choices": 10,
+      "clauses": 1024,
+      "literal_entries": 10240,
+      "cpu_seconds": 0.0005806170000000055
+    },
+    {
+      "choices": 14,
+      "clauses": 16384,
+      "literal_entries": 229376,
+      "cpu_seconds": 0.012263465000000001
+    }
+  ],
+  "generic_programs": [
+    {
+      "name": "length_specialization",
+      "status": "accepted",
+      "message": "",
+      "instances": [
+        {
+          "function": "identity",
+          "types": {
+            "T": "ArrayType(element='int64', length=1)"
+          }
+        },
+        {
+          "function": "identity",
+          "types": {
+            "T": "ArrayType(element='int64', length=2)"
+          }
+        },
+        {
+          "function": "identity",
+          "types": {
+            "T": "ArrayType(element='int64', length=3)"
+          }
+        }
+      ],
+      "instance_count": 3,
+      "cpu_seconds": 0.67284493
+    },
+    {
+      "name": "array_join_inference",
+      "status": "UserError",
+      "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[input:5:13]\n  \u001b[38;5;245m5\u001b[0m |     let a = choose([1] [2 3])\n    \u00b7             \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7               \u001b[96m\u2502\u001b[0m        \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7               \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+      "instances": [],
+      "instance_count": 0,
+      "cpu_seconds": 0.015142343999999919
+    },
+    {
+      "name": "array_join_context",
+      "status": "accepted",
+      "message": "",
+      "instances": [
+        {
+          "function": "choose",
+          "types": {
+            "T": "ArrayType(element='int64', length=None)"
+          }
+        }
+      ],
+      "instance_count": 1,
+      "cpu_seconds": 0.32834011100000005
+    },
+    {
+      "name": "record_join_inference",
+      "status": "accepted",
+      "message": "",
+      "instances": [
+        {
+          "function": "choose",
+          "types": {
+            "T": "ObjectType(fields=(ObjectField(name='x', type='int64', mutable=True, default=None, refinement=()),), brand=None, methods=(), constructors=[], immutable=False)"
+          }
+        }
+      ],
+      "instance_count": 1,
+      "cpu_seconds": 0.32064613899999994
+    },
+    {
+      "name": "growing_generic_recursion",
+      "status": "RecursionError",
+      "message": "maximum recursion depth exceeded",
+      "instances": [
+        {
+          "function": "grow",
+          "types": {
+            "T": "'int64'"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element='int64', length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element='int64', length=1), length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element=ArrayType(element='int64', length=1), length=1), length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element='int64', length=1), length=1), length=1), length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element='int64', length=1), length=1), length=1), length=1), length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element='int64', length=1), length=1), length=1), length=1), length=1), length=1)"
+          }
+        },
+        {
+          "function": "grow",
+          "types": {
+            "T": "ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element=ArrayType(element='int64', length=1), length=1), length=1), length=1), length=1), length=1), length=1)"
+          }
+        }
+      ],
+      "instance_count": 23,
+      "cpu_seconds": 0.022245094000000076
+    }
+  ]
+}

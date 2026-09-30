@@ -1,0 +1,44 @@
+[
+  {
+    "name": "source_type_intersection",
+    "choices": 4,
+    "status": "accepted",
+    "message": "",
+    "distribution": {
+      "calls": 5,
+      "output_clauses": 46,
+      "max_clauses": 16
+    },
+    "cpu_seconds": 0.656557746
+  },
+  {
+    "name": "source_type_intersection",
+    "choices": 8,
+    "status": "accepted",
+    "message": "",
+    "distribution": {
+      "calls": 9,
+      "output_clauses": 766,
+      "max_clauses": 256
+    },
+    "cpu_seconds": 0.433556277
+  },
+  {
+    "name": "inline_guard",
+    "status": "accepted",
+    "message": "",
+    "cpu_seconds": 0.3485066720000001
+  },
+  {
+    "name": "helper_guard",
+    "status": "UserError",
+    "message": "Error: \u001b[31marray index is not proven in bounds\u001b[0m\n\n    \u256d\u2500[input:4:65]\n  \u001b[38;5;245m4\u001b[0m | let read = (xs:array<int64> i:int64):>int64 => if fits(i xs) xs[i] else 0\n    \u00b7                                                                 \u001b[96m\u252c\u001b[0m\n    \u00b7                                                                 \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 the index interval here is `-9223372036854775808..9223372036854775807`\u001b[0m\n    \u2570\u2500\u2500\u2500\n  \u001b[38;5;245mnote:\u001b[0m nothing establishes the array's length here, so even a small index may be past the end\n  \u001b[38;5;245mhelp:\u001b[0m establish both a nonnegative lower bound and an upper bound below the array length",
+    "cpu_seconds": 0.020534486999999935
+  },
+  {
+    "name": "wrapped_helper_guard",
+    "status": "UserError",
+    "message": "Error: \u001b[31marray index is not proven in bounds\u001b[0m\n\n    \u256d\u2500[input:4:68]\n  \u001b[38;5;245m4\u001b[0m | let read = (xs:array<int64> i:int64):>int64 => if wrapped(i xs) xs[i] else 0\n    \u00b7                                                                    \u001b[96m\u252c\u001b[0m\n    \u00b7                                                                    \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 the index interval here is `-9223372036854775808..9223372036854775807`\u001b[0m\n    \u2570\u2500\u2500\u2500\n  \u001b[38;5;245mnote:\u001b[0m nothing establishes the array's length here, so even a small index may be past the end\n  \u001b[38;5;245mhelp:\u001b[0m establish both a nonnegative lower bound and an upper bound below the array length",
+    "cpu_seconds": 0.020958370000000004
+  }
+]

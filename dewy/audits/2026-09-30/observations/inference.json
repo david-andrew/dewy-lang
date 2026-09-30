@@ -1,0 +1,154 @@
+[
+  {
+    "name": "unannotated",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/unannotated.dewy:3:24]\n  \u001b[38;5;245m3\u001b[0m | main=():>int64=>{let x=choose([1] [2 3]) return x.length}\n    \u00b7                        \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                          \u001b[96m\u2502\u001b[0m        \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                          \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.10856590200000005
+  },
+  {
+    "name": "typed_local",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.057510964
+  },
+  {
+    "name": "typed_return",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.004086495000000023
+  },
+  {
+    "name": "monomorphic_argument",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.0035730939999999434
+  },
+  {
+    "name": "monomorphic_unrelated_tag",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.00412056999999999
+  },
+  {
+    "name": "generic_unrelated_tag",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/generic_unrelated_tag.dewy:4:24]\n  \u001b[38;5;245m4\u001b[0m | main=():>int64=>length(choose([1] [2 3]) 0)\n    \u00b7                        \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                          \u001b[96m\u2502\u001b[0m        \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                          \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.002398475000000011
+  },
+  {
+    "name": "generic_argument",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/generic_argument.dewy:4:46]\n  \u001b[38;5;245m4\u001b[0m | main=():>int64=>{let x:array<int64>=identity(choose([1] [2 3])) return x.length}\n    \u00b7                                              \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                                                \u001b[96m\u2502\u001b[0m        \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                                                \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.0025141189999999813
+  },
+  {
+    "name": "typed_intermediate_then_generic",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64",
+      "identity__array_int64"
+    ],
+    "cpu_seconds": 0.006249270999999945
+  },
+  {
+    "name": "record_result_context",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/record_result_context.dewy:3:45]\n  \u001b[38;5;245m3\u001b[0m | main=():>int64=>{let x:[value:array<int64>]=wrap([1] [2 3]) return x.value.length}\n    \u00b7                                             \u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                                              \u001b[96m\u2502\u001b[0m       \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                                              \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.002395452999999992
+  },
+  {
+    "name": "optional_result_context",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/optional_result_context.dewy:3:42]\n  \u001b[38;5;245m3\u001b[0m | main=():>int64=>{let x:array<int64>|none=choose([1] [2 3]) return if x isnt? none x.length else 0}\n    \u00b7                                          \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                                            \u001b[96m\u2502\u001b[0m        \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                                            \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.0023462130000000414
+  },
+  {
+    "name": "nested_array_result_context",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/nested_array_result_context.dewy:3:44]\n  \u001b[38;5;245m3\u001b[0m | main=():>int64=>{let x:array<array<int64>>=wrap([1] [2 3]) return x.length}\n    \u00b7                                            \u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                                             \u001b[96m\u2502\u001b[0m       \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                                             \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.0020636290000000113
+  },
+  {
+    "name": "nested_generic_with_annotated_inputs",
+    "status": "UserError",
+    "message": "Error: \u001b[31mno matching method for call\u001b[0m\n\n    \u256d\u2500[<probe-output>/nested_generic_with_annotated_inputs.dewy:4:81]\n  \u001b[38;5;245m4\u001b[0m | main=():>int64=>{let a:array<int64>=[1] let b:array<int64>=[2 3] let x=identity(choose(a b)) return x.length}\n    \u00b7                                                                                 \u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u252c\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[96m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u252c\u001b[0m\u001b[92m\u2500\u001b[0m\u001b[92m\u2500\u001b[0m\n    \u00b7                                                                                   \u001b[96m\u2502\u001b[0m     \u001b[92m\u2570\u001b[0m\u001b[92m\u2500 no overload takes (`array<int64 length=1>`, `array<int64 length=2>`)\u001b[0m\n    \u00b7                                                                                   \u001b[96m\u2570\u001b[0m\u001b[96m\u2500 calling this\u001b[0m\n    \u2570\u2500\u2500\u2500",
+    "instances": [],
+    "cpu_seconds": 0.005039942999999991
+  },
+  {
+    "name": "erased_input_lengths",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64",
+      "identity__array_int64"
+    ],
+    "cpu_seconds": 0.005172595000000002
+  },
+  {
+    "name": "generic_forwarder",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64",
+      "forward__array_int64"
+    ],
+    "cpu_seconds": 0.004424615999999992
+  },
+  {
+    "name": "record_argument_context",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.004363243000000017
+  },
+  {
+    "name": "imported_typed_local",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.02017093000000003
+  },
+  {
+    "name": "imported_typed_return",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64"
+    ],
+    "cpu_seconds": 0.004468743999999969
+  },
+  {
+    "name": "imported_generic_forwarder",
+    "status": "accepted",
+    "message": "",
+    "instances": [
+      "choose__array_int64",
+      "forward__array_int64"
+    ],
+    "cpu_seconds": 0.004847154999999992
+  }
+]

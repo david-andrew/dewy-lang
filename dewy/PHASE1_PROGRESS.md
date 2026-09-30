@@ -14,6 +14,15 @@ work. Validator trust remains provisional; general compile-time execution trusts
 the programmer and persistent caches are transitional. This documentation change
 implements no fixes and changes none of the checkpoint/certification statuses below.
 
+The [focused audit](AUDIT_2026_09_30.md) and
+[durable probe record](audits/2026-09-30/README.md) add inference/refactoring
+counterexamples, specialization work counts, automatic type-normalization
+scaling, leaf-code costs and an inspected lazy-string capacity hazard. The
+[roadmap follow-through](ROADMAP.md#focused-audit-follow-through-2026-09-30)
+places those tasks and records the append-stability dependency for dense arrays.
+Positive composition probes are dated evidence, not certification or new
+closure-matrix entries; the historical results retain their separate baselines.
+
 ## Phase 1 closure matrix (frozen 2026-09-29)
 
 This is the finite closure matrix the September 29 roadmap asks for. It
