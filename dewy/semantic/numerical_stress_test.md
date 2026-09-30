@@ -61,6 +61,15 @@ Cover shape checking, broadcasting, layout, scalar/array promotion, and typed ex
 
 ## Independent answers and measurements
 
+The September 30 audit follow-up pulls a small boundary subset forward into the
+current compiler/library correctness gates; it need not wait for the applications
+or Phase 3. Begin with representable endpoints (including a fixed-point value with
+raw `INT64_MIN` divided by itself, whose result must be one), exact zero/nonzero
+identities, rounding boundaries and invalid canonical forms. Runtime arithmetic
+needs independent expected answers even when hosted and native compilers agree.
+Record current malformed-representation acceptance separately from the proposed
+library-validator mechanism; a future validator is not a present guarantee.
+
 Use a separate oracle based on Python integers and `fractions.Fraction` for exact calculations, constructed from decimal strings or integer ratios rather than binary floats. Model fixed-point rounding with explicit integer arithmetic according to the documented operation, without translating the Dewy library's implementation. Preserve the small hand-calculated cases as checks on the oracle. For future floating-point tests, use a higher-precision reference and state absolute/relative tolerances, including an absolute bound near zero. A matching result from another compiler backend alone is not an independent oracle.
 
 For each workload, retain the input or generator seed, expected result, source revision, target, toolchain, optimization settings, numeric types, and resource limits. Measure compilation separately from execution, excluding printing and input parsing from kernel timings. Report repeated-run timing distributions, peak memory, retained memory over repeated batches, and the representation choices reported by `dewy analyze`. Separate necessary growth of exact values from storage retained after values die.

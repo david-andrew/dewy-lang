@@ -6,6 +6,14 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
+**Documentation follow-up, 2026-09-30:** the
+[audit addendum](AUDIT_2026_09_29.md#follow-up-2026-09-30) records additional
+counterexamples at `7dcf7672` and the accepted local-specialization direction.
+The roadmap now includes their focused correctness gates and staged representation
+work. Validator trust remains provisional; general compile-time execution trusts
+the programmer and persistent caches are transitional. This documentation change
+implements no fixes and changes none of the checkpoint/certification statuses below.
+
 ## Phase 1 closure matrix (frozen 2026-09-29)
 
 This is the finite closure matrix the September 29 roadmap asks for. It

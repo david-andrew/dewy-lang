@@ -47,11 +47,19 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - display units for printing quantities, `as unit`, offset units, and declaring base dimensions in library code;
 - runtime-length aggregate ownership, returns, and escaping places;
 - user-defined managed handles, including lifecycle hooks, typed allocation capabilities, and lifetime-bounded payload places;
+- the value-preservation obligations of elidable copy/move hooks; permission for observable hook effects does not by itself settle whether relocation may change the abstract payload;
+- local concrete/polymorphic representations and dense aggregate-array storage, including explicit transitions at general calling or stable-address boundaries;
+- library-defined validators and the checked-versus-trusted bridge from invariants to facts; the provisional default prefers static guarantees and permits a narrow documented trust boundary where needed;
 - pattern matching, stored generators, and general unpack/collect behavior;
 - compile-time evaluation and metaprogramming beyond type-valued expressions and imports;
 - the final Unicode identifier repertoire and source-normalization policy.
 
 Whether a unit-like nominal type value and its canonical inhabitant are literally the same semantic object remains open; the shared spelling is settled independently of that representation question.
+
+General compile-time execution is intended to trust the programmer and need not
+terminate (clarified 2026-09-30). Its capability/effect interfaces remain provisional;
+checked proof constructs still cannot treat incomplete search as evidence. See
+[Compile-Time Facilities](compile-time.md#general-compile-time-evaluation).
 
 A normative page may describe the decided portion of one of these areas, but must not silently choose an unresolved rule.
 

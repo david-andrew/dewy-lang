@@ -45,6 +45,23 @@ Directive metatags are forms with their own argument grammar rather than scope m
 
 ## General Compile-Time Evaluation
 
-The direction is for compile-time execution to reuse Dewy semantics while enforcing termination, purity, reproducibility, capability, and diagnostic requirements appropriate to compilation.
+The direction is for general compile-time execution to reuse Dewy semantics and
+trust the programmer (clarified 2026-09-30). A compile-time program may run
+indefinitely or exhaust resources; no mandatory termination proof or execution
+budget is selected. Cancellation, progress and useful diagnostics are tooling
+goals. Effect/capability and reproducibility requirements remain provisional.
+
+Checked proof constructs have their own stricter requirements: incomplete proof
+search supplies no evidence. Allowing general compile-time execution to run
+indefinitely does not let an unchecked assertion silently become a checked fact.
+
+Library-defined validators are an intended use. They may reject known invalid
+values during compilation and establish reusable predicates. Runtime inputs need
+checked construction/preservation, explicit fallible validation or the documented
+trusted boundary; further facts need checked implications or a narrow documented
+trusted contract. The default
+strategy prefers static guarantees while permitting an explicit trust boundary
+where needed, subject to reevaluation. The validator interface is not yet settled
+or generally implemented; see the [provisional design status](design-status.md#provisional-designs).
 
 The complete evaluation boundary, user-defined metatag model, generated declarations, syntax extension facilities, and artifact APIs remain provisional. Implementations must reject unsupported compile-time operations rather than silently defer them to runtime when that would change meaning.

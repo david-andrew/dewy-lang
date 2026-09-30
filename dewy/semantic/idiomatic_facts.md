@@ -57,6 +57,47 @@ The goal is a small understandable checking boundary, not arbitrary executable c
 
 ## Early compile-time library sketch
 
+### Library validation default (2026-09-30)
+
+David's audit follow-up favors library-defined compile-time validators for
+invariants that are awkward to express in the ordinary type/fact system. The
+ideal remains guarantees traceable to language/type-system checking. Requiring
+arbitrary invariant proofs may introduce disproportionate complexity, so the
+provisional strategy permits a narrow, explicitly documented trusted library
+boundary where needed. Reevaluate that tradeoff after a concrete library customer;
+the mechanism and the final checked-versus-trusted split are not settled.
+
+Distinguish three jobs:
+
+1. **Known values:** execute a validator during compilation and reject failure.
+   The audit's malformed bigint literal is a concrete first case.
+2. **Runtime values:** establish the invariant through checked construction and
+   preservation, an explicit fallible runtime validator, or the documented trusted
+   library boundary. Compile-time code can generate a validator or inspect/prove
+   construction code; executing a predicate during compilation cannot inspect
+   future runtime input.
+3. **Exported facts:** validation success can carry an opaque predicate fact.
+   Further logical consequences require checked implications or an identified
+   trusted contract. Document what the library promises, what the compiler checks,
+   and which obligations depend on the trusted portion.
+
+Validation must apply at every relevant construction and mutation boundary;
+calling a helper only by convention leaves a bypass. Cover structural conversion,
+copying and supported reflection/generated constructors too. Evidence belongs to
+the validated value/version and must be invalidated by mutations that can falsify
+it. Automatic validator obligations are a possible construction-authority mechanism;
+this does not decide module privacy or require hidden representation fields.
+
+The first customer should demonstrate known invalid input rejection, runtime input
+handling, invariant preservation, mutation invalidation and useful exported facts
+in both compilers. Keep trusted guarantees visible rather than silently recording
+them as checked theorems. This direction introduces no new validator syntax and
+does not claim that those facilities are already implemented.
+
+General programmer-written compile-time execution is allowed to fail to terminate.
+That choice does not turn an incomplete proof search into evidence or remove the
+checking/trust distinction above.
+
 Separate three jobs: compile-time code **creates** a type and its contracts; construction or validation **establishes** its invariant; operations **expose and preserve** useful consequences. Compile-time input can be validated at compile time. Runtime input still needs runtime evidence unless its properties are already known. Generating a validator does not prove that its implementation validates the claimed predicate.
 
 ### Start with a fact already in the ordinary fragment

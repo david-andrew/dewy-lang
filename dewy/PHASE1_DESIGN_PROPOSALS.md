@@ -455,6 +455,18 @@ an optimization that happens to remove a call is not by itself a source-level
 promise that the hook has no effects. Copy/move elision remains an ownership
 decision, not permission to omit effects from a hook body that does execute.
 
+**Open value-preservation question (audit follow-up, 2026-09-30):** returning
+the same nominal type does not ensure that a copy/move preserves its abstract
+value. A move hook returning `Token[id+100]` currently makes a direct constructor
+return produce `1` while binding that constructor to a local before returning it
+produces `101`. This follows the current hook rules; it is not evidence that
+observable effects were accidentally permitted. Decide what an elidable operation
+must preserve, and whether that obligation is checked, trusted or conventional,
+before broader local representation and call specialization rely on it. Separating
+semantic user operations from storage relocation is another option. Invocation-count
+freedom and payload-value freedom are different questions. The audit records this
+as unresolved and does not revoke the approved observable-effects/elision behavior.
+
 Separate boundaries remain: a drop must not replace an in-progress return or
 error, and the current public resource rows do not prove that a raw address
 denotes a particular owned resource. Allowing observable effects does not

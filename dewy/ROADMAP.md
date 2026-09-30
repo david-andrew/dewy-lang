@@ -15,6 +15,15 @@ generated-program performance and efficient CPU/GPU array execution explicit
 project goals. The audit remains a record of that revision's measurements,
 not certification of later changes.
 
+The [September 30 follow-up](AUDIT_2026_09_29.md#follow-up-2026-09-30)
+adds semantic-composition and library-boundary counterexamples, local
+representation/call specialization, and lifecycle value-preservation questions.
+David accepted the local-specialization direction and clarified fresh builds
+without persistent caches and programmer-trusted general compile-time execution.
+Library-defined validation is the provisional default: prefer checked guarantees,
+allow a narrow documented trust boundary where needed, and revisit it with
+library experience. The exact validator/proof interface remains open.
+
 How this relates to the other documents:
 
 - [`status.md`](status.md) is the feature-by-feature implementation tracker
@@ -69,8 +78,11 @@ not by a large factor. Under 30 seconds for a full native compiler build is
 the nearer minimum milestone; under 10 seconds is the next milestone, not
 the destination. Use recorded machines and comparable workloads when making
 external comparisons; source lines alone do not normalize proof work or
-language differences. User source must rebuild without incremental state or
-program caches; the fixed checked prelude is the allowed exception.
+language differences. The final target is a fresh whole-program build without
+incremental state or persistent compiler caches, including the checked prelude
+(clarified 2026-09-30). Existing prelude caching is a transitional implementation
+aid, not a permanent exception. Reusing analysis within one invocation is compatible
+with this goal; record cached and uncached measurements separately during transition.
 
 **Program speed:** straightforward, idiomatic Dewy should produce programs
 close to C/Rust performance and be comfortable for games and other demanding
@@ -100,6 +112,40 @@ performance would miss this goal. Preserve value semantics, facts and effect
 contracts while removing their avoidable implementation costs. Copy-on-write
 remains provisional: its deferred copies and latency spikes leave predictable,
 near-zero-cost storage behavior an open long-term design question.
+
+**Local representation and private call specialization (accepted 2026-09-30):**
+choose physical forms from proven uses, with explicit conversion where broader
+behavior is required. A semantic type describes permitted values; a local value
+need not carry every descendant, union alternative, ownership mode or calling
+convention that some other use of that type/function needs. Preserve exact
+constructor information, reachable alternatives, consumer field/result demand,
+ownership and stable-address requirements through lowering.
+
+Extend existing projected/borrowed getters, direct ownership inputs and local
+array placement into shared representation decisions consumed by allocation
+contracts, copy policy, cleanup and calls. Distinguish logical narrowing from the
+physical layout already stored; transitions must explicitly materialize or convert
+values, preserving effects, aliases, value independence and lifecycle obligations.
+The first focused batches should:
+
+- retain a private direct-call entry when the function also needs a general
+  function-value entry or adapter;
+- keep proven exact records compact and generalize only at actual joins, writes
+  or escape boundaries; review largest-descendant layout as a general boundary
+  representation rather than the inevitable form of every local;
+- extend demanded-field results and plan dense aggregate arrays with explicit
+  stride, lifetime, mutation and borrowing rules;
+- reuse variants with the same representation, ownership protocol and result
+  demand. Measure compilation work and code size; unlimited per-call cloning is
+  not the objective.
+
+Acceptance kernels should establish that an unused subtype does not enlarge a
+proven exact local, taking a function's address does not degrade an unchanged
+direct call, a field-only consumer avoids a whole-record copy, and a homogeneous
+aggregate array has its intended dense layout. Include negative cases where
+heterogeneous values, unknown calls, mutation or exposed addresses require a
+general form. These are staged implementation targets, not claims of present
+support or a new requirement to finish every representation before Phase 1 closes.
 
 **CPU/GPU execution:** compatible array problems should run efficiently on
 the GPU, and applications using both processors should avoid unnecessary
@@ -222,6 +268,9 @@ requirements remain. The September 29 audit updates the execution order:
    Publication must require full pytest, the complete paired manifest and
    native fixed-point evidence for the exact packaged revision. Keep explicit
    expected-result tests and the independent hosted recovery route.
+   Add the follow-up's spelling/binding/effect-order regressions and small
+   independent library boundary cases to the relevant gates. Compiler agreement
+   alone cannot validate a shared arithmetic or OS-library algorithm.
 3. **Resume the sustained throughput campaign within Phase 1.** Do not wait
    for every compiler module to adopt strict mode. Prioritize allocation
    elimination, redundant graph/state analysis, and the performance of direct
@@ -229,6 +278,9 @@ requirements remain. The September 29 audit updates the execution order:
    full self-builds at integration checkpoints. Strict-copy reporting must
    remain complete; annotating unwanted copies or suppressing bounded stores
    is not a performance improvement.
+   Include the local-specialization batches above. Settle the scope of general
+   record storage and the value-preservation obligations of elidable lifecycle
+   hooks before broad optimizations depend on an assumed answer.
 4. **Close Phase 1 with fresh integration evidence.** Complete the agreed
    matrix and source adoption, then certify the full paired corpus and native
    loop at the same revision. Record remaining conservative boundaries and
@@ -239,6 +291,9 @@ requirements remain. The September 29 audit updates the execution order:
    small generic/reflection slice to move one real abstraction out of checker
    special cases. Expand from demonstrated contracts and performance, then
    continue closures/error completeness, numerics, reach and ecosystem work.
+   Include one invariant-bearing library type with mandatory validation at its
+   relevant construction/mutation boundaries and an explicit account of checked
+   versus trusted facts; see [idiomatic facts](semantic/idiomatic_facts.md#library-validation-default-2026-09-30).
 
 ### Dedicated performance campaign
 
@@ -285,6 +340,8 @@ Record cold and warm full builds, with machine, toolchain, target, options,
 executing-compiler provenance and fixed-prelude cache state. Warm means another
 whole-program compilation, not reuse of user-program analysis or artifacts.
 Cached executables and incremental results cannot establish this target.
+During the prelude-cache transition, report both prelude-cached and fully
+uncached rows. Only the fully uncached row establishes the final fresh-build goal.
 Retain expected-result tests, semantic parity, deterministic bootstrap checks
 and bounded memory budgets throughout the campaign.
 
@@ -313,8 +370,11 @@ The next batches should address:
   Register allocation already exists; assess its output rather than treating
   its introduction as future work.
 - **Remaining stage overhead where justified.** Bytecode/object output and
-  checked-prelude caching have landed. Preserve cache identity/invalidation and
-  cached/uncached agreement. Internal token and assembly representations still
+  checked-prelude caching have landed. While caches remain, preserve input
+  identity and cached/uncached agreement and remove or disable executable
+  project-relative pickle loading; filename hashes establish freshness, not
+  producer trust. Retire persistent caches as fresh-build throughput permits.
+  Internal token and assembly representations still
   incur work, but the current downstream six-second cost is not the dominant
   part of a 97-second build. Keep all routes measured and prioritize accordingly.
 
@@ -331,9 +391,12 @@ David's September 23 direction, reaffirmed September 29: large programs,
 including the compiler, should recompile at scripting-language speed through
 whole-program batch compilation. The final comparison is Jai-class compiler
 throughput, somewhat slower if necessary for Dewy's semantics, but close.
-There is no user-program incremental cache or daemon requirement; every
-invocation rechecks the program and its proofs. The checked prelude is fixed
-input and the allowed cache exception.
+The final model has no incremental builds, resident compiler requirement or
+persistent compiler cache; every invocation builds from source and rechecks the
+program and its proofs. The former checked-prelude exception is transitional,
+superseded as a long-term policy by David's September 30 clarification.
+Within-invocation memoization and identified test-driver reuse are distinct from
+retaining user-build analysis between invocations.
 
 The audited native source contains about 56k lines in 137 compiler modules.
 A 97-second direct build is far from the goal. Cross-language lines per second
@@ -369,6 +432,12 @@ The architectural levers are:
    unknown or a diagnostic, never an assumed proof. Track bounds/effects/borrow/
    move work and memory as inputs grow; there is no blanket linearity promise
    for the intended proof language.
+
+Those solver and optimizer budgets do not impose mandatory execution limits or
+termination proofs on programmer-written general compile-time code. The latter
+trusts the programmer and may run indefinitely; cancellation, progress and useful
+instantiation diagnostics are tooling goals. Preserve the stricter contracts of
+checked proof constructs, where incomplete search must never supply evidence.
 
 **Juxtaposition narrowing (decided against, 2026-09-27):** David keeps
 `a(x)^2` (a number `a`) and `(x+1)5^2` as multiplications. Measured ambiguity
@@ -633,6 +702,7 @@ Phase 1 remains in progress. Freeze a finite closure matrix in
 | --- | --- |
 | Ownership and placement | Supported borrow/move/lifecycle/owner-promotion operations compose correctly across aliases, selectors, calls, imports and joins; conservative unsupported cases are explicit. |
 | Shared storage decisions | Copy policy, allocation effects, borrow legality and lowering consume compatible proof decisions for supported shapes. Logical hook effects survive physical elision. |
+| Semantic composition and library boundaries | Parsed directives and resolved bindings determine behavior; transformations preserve evaluation/effect order. Small independent numeric and OS-boundary expectations supplement paired agreement. |
 | Proof and unsafe boundary | Checked facts survive transfer/invalidation correctly; unsafe audit records actual obligation dependencies, not just candidate checks in an assumption-bearing scope. Budget exhaustion remains unknown. |
 | Compiler source and inventory | Strict-source adoption is completed for the agreed compiler scope; hosted/native acceptance and report coverage agree, with bounded stores retained in the inventory. |
 | Integration | Independently hosted-seeded native fixed point, complete paired manifest, surrounding tests and performance evidence identify the same source revision. |
@@ -1314,12 +1384,25 @@ first slice below, not a requirement to finish all reflection ahead of closures.
   captures (today: lambda-lifted non-escaping local functions only).
 - **Compile-time evaluation, first slice:** the reflection primitives in
   `semantic/argparse_and_reflection.md` (`fields`, `members`, `$field`,
-  unrolled literals). Then general compile-time execution under the purity
-  and termination rules. This replaces pressure for compiler builtins; the
-  rule stands that library features are built on reusable primitives, never
+  unrolled literals). Then general compile-time execution that trusts the
+  programmer; no mandatory termination proof or user-code execution budget is
+  selected. Effect/capability and reproducibility contracts still need design,
+  and checked proof constructs retain their own soundness requirements.
+  This replaces pressure for compiler builtins; library features remain built on
+  reusable primitives, never
   on the checker recognizing a library call. Compile-time execution is not
   itself a throughput optimization: reducing special cases may simplify the
-  compiler, while evaluation adds work that needs bounded, measured costs.
+  compiler, while evaluation adds work to measure and make diagnosable/cancellable.
+- **Library-defined validation:** make one invariant-bearing type a complete
+  customer. Validate known values at compile time; for runtime values use checked
+  construction/preservation, an explicit fallible validator or the documented
+  trusted boundary. Success may carry predicate facts; further consequences need
+  checked implications or a narrow documented trusted library contract.
+  Prefer eventual language/type-system
+  guarantees, but do not require a general proof framework before this first
+  slice. Cover constructor, conversion, mutation, copy and supported reflection
+  routes. The exact trust mechanism is provisional and should be reevaluated
+  from use, as recorded in [idiomatic facts](semantic/idiomatic_facts.md#library-validation-default-2026-09-30).
 - **Error propagation completeness:** transformed propagation, pipe
   forwarding, the `exception` family finished.
 
@@ -1333,6 +1416,12 @@ Phase 2 because it needs generic types, compile-time shapes, and the
 juxtaposition decision. `semantic/numerical_stress_test.md` is the
 evaluation plan.
 
+Pull its small independent integer/Fraction and fixed-point boundary checks into
+the current correctness gates; they do not depend on the larger Phase 3 workload.
+The audit's representable fixed-point minimum divided by itself must yield one.
+Canonical numeric representations and explicit rounding boundaries need expected
+answers independent of the shared Dewy libraries.
+
 Runtime performance is part of this phase's acceptance, rather than a later
 optimization pass. Start with contiguous CPU arrays and ordinary numeric
 loops, then measure compatible fused operations, vectorization, broadcasting
@@ -1340,6 +1429,10 @@ and linear algebra. Preserve facts and effect order while avoiding temporary
 arrays, unnecessary bounds work and per-element allocation. Keep default and
 optimized Dewy comparisons plus equivalent CPU baselines for representative
 sizes; small arrays and large streaming workloads need different cost choices.
+Specify dense aggregate and optional-element layouts alongside scalar arrays,
+including the boundary to heterogeneous/polymorphic storage. Use particle,
+complex-number and optional-number workloads to check stride, indirection,
+allocation, borrowing stability and eventual foreign/device buffer compatibility.
 
 **GPU array execution and CPU/GPU interop:** compatible array computations
 should have a GPU execution path that preserves the intended problem model
