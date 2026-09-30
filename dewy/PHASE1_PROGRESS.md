@@ -146,6 +146,19 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Throughput batch 2: shared joins, frame place slots (2026-09-30)
+
+Validation fell from 17.9 s to 15.7 s and a cold self-build from 57.3 s to
+54.9 s (29.7 GB allocated). Both changes are native-only and preserve every
+result; details are in `bootstrap/PERFORMANCE.md`.
+- `fact_state.join` shares the first state when every path carries the same
+  evidence. The compiler built by the new generation is byte-identical to
+  the one built by the old.
+- Array and string locals passed as places use a frame slot instead of an
+  arena box.
+
+The local gate passed: 6,316 tests.
+
 ## Throughput batch: appends keep element views (2026-09-30)
 
 Roadmap step 3. A cold direct self-build of the same source fell from

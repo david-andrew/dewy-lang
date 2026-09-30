@@ -690,7 +690,11 @@ expression = (id:addr @state:State):>addr => {
                 $runtime_assert state.cleanup_frames.length >? 0
                 let frame=state.cleanup_frames.pop
                 let box:addr?=none
-                if node.binding_id in? state.boxed {box=read read=array_load(read stored node @state)}
+                if node.binding_id in? state.boxed {
+                    # A frame slot is not an arena block: release its contents only.
+                    if node.binding_id not in? state.frame_boxes {box=read}
+                    read=array_load(read stored node @state)
+                }
                 frame.push(OwnedLocal[read stored box])
                 state.cleanup_owned.push(node.binding_id)
                 state.cleanup_frames.push(frame)
@@ -5521,7 +5525,10 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     loop binding in capture.locals {
         if binding not in? state.boxed or binding in? excluded or binding in? state.place_parameters continue
         let stored=state.storage_types.get(binding)
-        if stored is? none or (not borrowing.word_value(stored state.type_nodes) and binding not in? frame_array_bindings) continue
+        # A boxed local holds one word: a scalar, or an array/string handle
+        # (records and cells are places in their own storage). Its slot lives
+        # in the frame; the handle it holds keeps its ordinary cleanup.
+        if stored is? none or (not borrowing.word_value(stored state.type_nodes) and binding not in? frame_array_bindings and inline_place(stored @state)) continue
         let word_type=types.primitive('int64' @state.type_nodes)
         let name=fresh('place_slot' @state)
         let slot=intrinsic_call('__alloca__' [word(8 node @state)] word_type node @state)
@@ -5651,10 +5658,14 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         # A missing default is owned here; an explicit read-only argument is
         # still owned by its caller. Boxed/rebound parameters own their local
         # copy on both paths. The condition is the existing ABI presence bit.
-        if enabled and (private or argument is? hir.BoundParam) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded and argument.binding_id not in? state.frame_boxes) {
+        let framed=argument.binding_id isnt? none and argument.binding_id in? state.frame_boxes
+        if enabled and (private or argument is? hir.BoundParam) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded and (not framed or releasable(argument.value_type @state))) {
             let value=put(hir.ExpressedIdentifier[node.loc type name argument.binding_id] @state)
             let box:addr?=none
-            if boxed {box=value value=array_load(value argument.value_type node @state)}
+            if boxed {
+                if not framed {box=value}
+                value=array_load(value argument.value_type node @state)
+            }
             $runtime_assert state.cleanup_frames.length >? 0
             let frame=state.cleanup_frames.pop
             frame.push(OwnedLocal[value argument.value_type box condition])

@@ -398,11 +398,33 @@ reserve_join = (@state:State capacity:addr):>void => {
     state.next.reserve(capacity)
 }
 
+# Every path holds exactly the first path's facts with the same bounds and
+# provenance: equal counts, and each first-path fact held alike elsewhere.
+# Their join is then the first state itself, fact for fact and in order.
+same_evidence = (states:array<State>):>bool => {
+    $runtime_assert states.length >? 0
+    let first=states[0]
+    loop state in states {if state.values.length not=? first.values.length return false}
+    loop entry in first.values {
+        loop index in 1.. and index <? states.length {
+            let other=states[index]
+            let position=position_of(other entry.fact)
+            if position <? 0 return false
+            $runtime_assert position <? other.values.length
+            let held=other.values[position].interval
+            if not ranges.same_bounds(held entry.interval) or held.capped not=? entry.interval.capped return false
+        }
+    }
+    return true
+}
+
 join = (states:array<State> context:Context):>State => {
     # A single reachable path already carries exactly the joined evidence.
     # Returning its value preserves snapshot independence on later mutation.
     if states.length =? 0 return State[]
     if states.length =? 1 return states[0]
+    # Paths that changed no evidence share it instead of rebuilding it.
+    if same_evidence(states) return states[0]
     # Every fact of any state is a candidate, first occurrence first. A fact
     # an earlier state holds was already considered: a lookup, where
     # collecting candidates into a state of their own allocated per fact.

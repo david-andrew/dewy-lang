@@ -870,3 +870,32 @@ first 8-slot buffers of short local lists), new records (5.2 GB, of which
 `fact_state.join`'s interval copy into the owned `combined`), dictionary
 index rebuilds (3.2 GB), detaches (2.8 GB), and the remaining `node_at`
 snapshots in `bounds`, `statements.inline_temporaries` and `exposed_roots`.
+
+### Throughput batch 2: shared joins, frame place slots (2026-09-30)
+
+Same protocol as the previous batch (cold, uncached: every round deletes the
+cache directory and re-analyzes the prelude).
+
+| Compiler | Wall | Allocated | Validation |
+|---|---|---|---|
+| batch 1 (`7e22c065`) | 57.3 s | 31.3 GB | 17.9 s |
+| + shared joins | 54.8 s | 29.8 GB | 15.7 s |
+| + frame place slots for arrays and strings | 54.9 s | 29.7 GB | 15.7 s |
+
+- **Joins share unchanged evidence.** `fact_state.join` rebuilt its result
+  fact by fact on every merge. When every path holds exactly the first
+  path's facts, with the same bounds and provenance, the join is that state:
+  it is now returned shared. The self-built compiler is byte-identical with
+  and without the shortcut.
+- **Frame place slots for handles.** Passing an array or string local as a
+  place boxed it in an 8-byte arena block on each call (`hir.children`: 7.2 M
+  allocations). Boxed handle locals now use the frame slot that scalars
+  already used. Their contents keep the ordinary cleanup; only the box moved.
+
+A 50 ms CPU profile of batch 1 remains flat. Runtime storage helpers take
+about 40% of samples; the bounds prover's path refinement about 11%, of
+which relation-graph construction per order query is 2.5%. In lowering, the
+borrow plan (`borrowing.details`) takes about 5% and `normalize` about 5%.
+Union cells are 72 M of 455 M allocations: `addr?` and other bounded-integer
+optionals could be one word with a niche value, and optionals of handle
+types a nullable handle. This is the next structural representation lever.
