@@ -186,11 +186,11 @@ cannot_be_callable = (id:addr nodes:types.Table seen:set<addr>=set[]):>bool => {
     seen.push(current)
     let type = types.node_at(nodes current)
     if type is? types.TypeOr {
-        loop item in type.items { if not cannot_be_callable(item nodes seen) return false }
+        loop item in type.items { if not cannot_be_callable(item nodes seen.copy) return false }
         return true
     }
     if type is? types.TypeAnd {
-        loop item in type.items { if cannot_be_callable(item nodes seen) return true }
+        loop item in type.items { if cannot_be_callable(item nodes seen.copy) return true }
         return false
     }
     if type is? types.TypeVariable return cannot_be_callable(type.bound nodes seen)
@@ -213,7 +213,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
     if node is? hir.OverloadedFunction {
         let result:array<addr> = []
         loop alternate in node.alternates {
-            let found = callable_targets(alternate parameters seen seen_nodes checker)
+            let found = callable_targets(alternate parameters seen.copy seen_nodes checker)
             if found is? none return none
             loop target in found { result.push(target) }
         }
@@ -249,14 +249,14 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         if node.default isnt? none { bodies.push(node.default) }
         let result:array<addr> = []
         loop body in bodies {
-            let found = callable_targets(body parameters seen seen_nodes checker)
+            let found = callable_targets(body parameters seen.copy seen_nodes checker)
             if found is? none return none
             loop target in found { result.push(target) }
         }
         return result
     }
     if node is? hir.FunctionCall {
-        let producers = callable_targets(node.func parameters seen seen_nodes checker)
+        let producers = callable_targets(node.func parameters seen.copy seen_nodes checker)
         if producers is? none return none
         let result:array<addr> = []
         loop producer in producers {
@@ -267,7 +267,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
             $runtime_assert literal is? hir.FunctionLiteral
             let values = function_results(literal.body checker)
             loop value in values {
-                let found = callable_targets(value parameters seen visited checker)
+                let found = callable_targets(value parameters seen.copy visited checker)
                 if found is? none return none
                 loop target in found { result.push(target) }
             }
@@ -294,7 +294,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         }
         let result:array<addr> = []
         loop item in items {
-            let found = callable_targets(item parameters seen seen_nodes checker)
+            let found = callable_targets(item parameters seen.copy seen_nodes checker)
             if found is? none return none
             loop target in found { result.push(target) }
         }
@@ -302,7 +302,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
     }
     if node is? hir.MemberAccess {
         if member_was_reassigned(current checker) return none
-        let field = object_field_value(node.value node.name parameters seen seen_nodes checker)
+        let field = object_field_value(node.value node.name parameters seen.copy seen_nodes.copy checker)
         if field isnt? none return callable_targets(field parameters seen seen_nodes checker)
     }
     return none
@@ -326,7 +326,7 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
     if node is? hir.FunctionCall {
         if current in? seen_nodes return none
         seen_nodes.push(current)
-        let producers = callable_targets(node.func parameters seen seen_nodes checker)
+        let producers = callable_targets(node.func parameters seen.copy seen_nodes checker)
         if producers is? none return none
         loop producer in producers {
             let literal = hir.node_at(checker.nodes producer)
@@ -388,7 +388,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
     if node is? hir.ExpressedIdentifier { require_initialized(node initialized @checker) return initialized }
     if node is? hir.FunctionLiteral return check_defaults(node initialized parameters stack @checker)
     if node is? hir.Block {
-        let current = check_block(node initialized parameters stack @checker)
+        let current = check_block(node initialized.copy parameters stack @checker)
         return if node.scoped initialized else current
     }
     if node is? hir.Declare {
@@ -397,7 +397,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
         return current
     }
     if node is? hir.FunctionCall {
-        let current = check_children(hir.children(node) initialized parameters stack @checker)
+        let current = check_children(hir.children(node) initialized.copy parameters stack @checker)
         let targets = callable_targets(node.func parameters set[] set[] checker)
         if targets is? none {
             let function = hir.node_at(checker.nodes node.func)
@@ -410,7 +410,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
             }
             return current
         }
-        loop target in targets { check_function(target current node.pos_args node.kw_args parameters stack @checker) }
+        loop target in targets { check_function(target current node.pos_args node.kw_args parameters stack.copy @checker) }
         return current
     }
     if node is? hir.Flow {
@@ -547,7 +547,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     let source=checker.srcfile
     if function.source isnt? none {checker.srcfile=hir.source_at(function.source checker.source_files)}
     let body = hir.node_at(checker.nodes function.body)
-    if body is? hir.Block { check_block(body available parameter_effects stack @checker); }
+    if body is? hir.Block { check_block(body available.copy parameter_effects stack @checker); }
     else { check_eager(function.body available parameter_effects stack @checker); }
     checker.srcfile=source
     $runtime_assert checker.frames.length >? 0

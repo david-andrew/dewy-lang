@@ -50,7 +50,7 @@ visit_selector_locals=(id:addr visible:set<addr> repeated:bool nodes:array<hir.A
     if node is? hir.FunctionLiteral return
     if node is? hir.Block {
         loop child in node.items {
-            visit_selector_locals(child visible repeated nodes table @result)
+            visit_selector_locals(child visible.copy repeated nodes table @result)
             let declaration=hir.node_at(nodes child)
             if not repeated and declaration is? hir.Declare and not declaration.view and declaration.binding_id isnt? none {
                 let type=if declaration.annotation is? none hir.node_at(nodes declaration.expr).value_type else declaration.annotation
@@ -319,7 +319,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
     }
     if node is? hir.Return {return if node.item is? none [] else visit(node.item [] analysis.owners @analysis nodes table exits)}
     if node is? hir.Flow {
-        let following=if node.default is? none live else visit(node.default live enabled @analysis nodes table exits)
+        let following=if node.default is? none live else visit(node.default live.copy enabled @analysis nodes table exits)
         let index=node.arms.length
         loop index >? 0 {
             index-=1
@@ -333,7 +333,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
                 loop true {
                     let nested=exits.copy
                     nested.push(LoopExit[live head])
-                    let entering=visit(arm.body head enabled @analysis nodes table nested)
+                    let entering=visit(arm.body head.copy enabled @analysis nodes table nested)
                     merge(@entering following)
                     let next=visit(arm.condition entering enabled @analysis nodes table nested)
                     let before=head.length
@@ -342,7 +342,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
                 }
                 following=head
             } else {
-                let taken=visit(arm.body live enabled @analysis nodes table exits)
+                let taken=visit(arm.body live.copy enabled @analysis nodes table exits)
                 merge(@following taken)
                 following=visit(arm.condition following enabled @analysis nodes table exits)
             }
@@ -367,7 +367,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             loop [key entry] in live {if not fixed or entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
             if fixed {kept=renew_siblings(kept node.target route nodes table)}
             add_entry(@kept Entry[route.binding route.path true selectors=route.selectors])
-            let before=visit(node.value kept enabled @analysis nodes table exits)
+            let before=visit(node.value kept.copy enabled @analysis nodes table exits)
             return visit_selectors(node.target before enabled @analysis nodes exits table)
         }
     }

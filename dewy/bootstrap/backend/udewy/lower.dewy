@@ -1852,7 +1852,7 @@ layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>str
     if members isnt? none {
         visiting.push(plain)
         let parts:array<string>=[]
-        loop member in members {parts.push("{member_tag(member @state)}:{layout_key_inner(member node visiting @state)}")}
+        loop member in members {parts.push("{member_tag(member @state)}:{layout_key_inner(member node visiting.copy @state)}")}
         return "c<{parts.join(' ')}>"
     }
     if object_valued(plain @state) {

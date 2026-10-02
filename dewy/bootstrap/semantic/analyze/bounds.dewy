@@ -730,7 +730,7 @@ bind_arm = (id:addr body_id:addr arm_state:facts.State @checker:Checker validate
     let current:facts.State=reached
     let value_type=types.node_at(checker.data.env.types node_at(value checker).value_type)
     if types.is_primitive(value_type 'never') {
-        let transfer=analyze(value current @checker validate)
+        let transfer=analyze(value current.copy @checker validate)
         output.normal=transfer.normal
         append_exits(@output transfer)
         expire_scope(@output locals @checker)
@@ -756,7 +756,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         if output.normal isnt? none {state=output.normal}
         return
     }
-    if node is? hir.FunctionLiteral {function_body(id node state @checker validate) return}
+    if node is? hir.FunctionLiteral {function_body(id node state.copy @checker validate) return}
     if node is? hir.OverloadedFunction {
         loop alternate in node.alternates {evaluate(alternate @state @checker validate)}
         return
@@ -1311,7 +1311,7 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         }
         if pass >=? 8 and iterators.length >? 0 break
         checker.data.snapshot=intervals.Snapshot[]
-        let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
+        let current=if iterators.length >? 0 enter_iterators(iterators head.copy @checker word_candidates) else head
         let positive:facts.State?=current
         if iterators.length =? 0 {
             evaluate(arm.condition @current @checker false)
@@ -1364,7 +1364,7 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         }
         let body:Transfer=Transfer[none]
         if unbounded.length >? 0 {
-            body=analyze(arm.body positive @checker false)
+            body=analyze(arm.body positive.copy @checker false)
             let proved=word_candidates and iterator_steps_fit(unbounded body checker)
             if word_candidates and not proved return loop_body(arm state @checker validate false)
             if validate {

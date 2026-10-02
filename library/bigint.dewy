@@ -24,11 +24,10 @@ let _bigint_trim = (@limbs:array<uint64>):>void => {
 # Pack a magnitude: trimmed limbs with a sign, or zero when nothing is left.
 let _bigint_from_limbs = (negative:bool limbs:array<uint64>):>BigInt => {
     _bigint_trim(@limbs)
-    if limbs.length >? 0 {
-        if negative { return [sign = -1 limbs = limbs] }
-        return [sign = 1 limbs = limbs]
-    }
-    return 0
+    if limbs.length =? 0 { return 0 }
+    let sign:-1|1 = 1
+    if negative { sign = -1 }
+    return [sign = sign limbs = limbs]
 }
 
 # A nonzero word has one or two limbs, so the literal shapes cover it.
@@ -76,7 +75,7 @@ let _bigint_to_int = (value:BigInt):>int64 => _bigint_to_uint(value) transmute i
 
 let _bigint_limbs = (value:BigInt):>array<uint64> => {
     if value =? 0 { return [] }
-    return value.limbs
+    return value.limbs.copy
 }
 
 # --- magnitude helpers (limb arrays) ---
@@ -598,7 +597,7 @@ let _bigint_exact_div_positive = (value:BigInt<sign =? 1> divisor:BigInt & ~0):>
 # decimal digits, most significant first, by repeated division by 10^9
 let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
     let chunks:array<uint64> = []          # least significant chunk first
-    let current:array<uint64> = limbs      # a copy, divided in place
+    let current:array<uint64> = limbs.copy      # divided in place
     loop current.length >? 0 {
         # short division by 10^9, most significant limb first: each quotient
         # limb depends only on the limb it replaces and the running remainder

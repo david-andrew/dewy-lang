@@ -262,7 +262,7 @@ rewrite_call = (id:addr node:hir.FunctionCall @state:State @session:contexts.Ses
             }
         }
     } else if signature is? types.FunctionType {
-        let replacement=reinstantiate(node func @state @session)
+        let replacement=reinstantiate(node.copy func @state @session)
         if replacement isnt? none return node_at(replacement session)
     }
     return node

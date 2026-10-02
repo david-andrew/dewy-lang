@@ -720,9 +720,9 @@ observes_argument = (call:hir.FunctionCall read:addr plan:captures.Plan summarie
     return false
 }
 read_count = (scan:ReadScan binding:addr):>addr => if binding in? scan.reads scan.reads[binding].length else 0
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false returning:addr?=none):>void => {
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false returning:addr?=none lent:bool=false):>void => {
     let source=consuming_value_source(id nodes type_nodes)
-    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed returning=returning) return}
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed returning=returning lent=lent) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
@@ -734,6 +734,9 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
                 observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
             }
             if not exposed and owner is? hir.FunctionCall {observed=observes_argument(owner id plan summaries nodes type_nodes)}
+            # A place lent to a call ends when the call returns: the callee
+            # may change the input, never keep an alias of it.
+            if lent and owner is? hir.Place {observed=true}
             sites.push(ReadSite[id parent guarded scan.exited observed returning])
             scan.reads[node.binding_id]=sites
         }
@@ -756,7 +759,8 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     let counts:dict<addr addr>=[]
     if node is? hir.Return {loop binding in candidates {counts[binding]=read_count(scan binding)}}
     let enclosing=if node is? hir.Return id else returning
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes returning=enclosing)}
+    let lends=node is? hir.Place and hir.node_at(nodes parent) is? hir.FunctionCall
+    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes returning=enclosing lent=lends)}
     loop [binding count] in counts {
         if read_count(scan binding) =? count and count <? scan.bare.get(binding default=count+1) {scan.bare[binding]=count}
     }
@@ -914,7 +918,7 @@ stable_elements = (source:Route stable:set<addr> parameters:dict<addr effects.Pa
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false registry:bindings.Registry=bindings.Registry[]):>Plan => {
     let valued=captures.value_functions(root nodes plan)
-    let indirect=callbacks.analyze(root nodes type_nodes plan links function_values=valued)
+    let indirect=callbacks.analyze(root nodes type_nodes.copy plan links function_values=valued)
     # Compiler-generated callers also keep the ordinary ABI. They are not
     # added to source callback targets merely because the runtime calls them.
     loop id in external {valued.push(id)}
@@ -922,7 +926,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # storage. At a value boundary lowering supplies an independent owner,
     # including an aggregate wrapped into an optional result.
     let analysis=effects.collect(root nodes)
-    let summaries=effects.analyze_collected(analysis nodes type_nodes indirect value_casts_escape=false)
+    let summaries=effects.analyze_collected(analysis.copy nodes type_nodes indirect value_casts_escape=false)
     let storage_proofs=storage_borrows.prove(analysis summaries nodes type_nodes registry)
     let forwarded=storage_proofs.arguments
     let ambient=ambient_graph(plan nodes type_nodes indirect)

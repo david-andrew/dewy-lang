@@ -47,7 +47,7 @@ callables = (id:addr plan:Plan nodes:array<hir.AST> seen:set<addr>=set[]):>array
     } else if node is? hir.OverloadedFunction {
         let result:array<addr>=[]
         loop alternative in node.alternates {
-            let resolved=callables(alternative plan nodes seen)
+            let resolved=callables(alternative plan nodes seen.copy)
             if resolved is? none return none
             loop function in resolved {result.push(function)}
         }

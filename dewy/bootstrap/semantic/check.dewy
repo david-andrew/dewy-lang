@@ -1237,7 +1237,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
     let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
     let hint=call_hint(expected function positional env session)
-    let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types kw_types hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
+    let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types.copy kw_types.copy hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
     if matched is? dispatch.DispatchError {
         if keyword.length =? 0 and positional.length =? 2 and func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and func.name in? ['__eq__' '__ne__'] {
             let comparison=stored_union_equality(function positional func.name =? '__ne__' id env @session)

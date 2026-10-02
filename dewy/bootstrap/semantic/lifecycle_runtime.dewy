@@ -2360,7 +2360,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
     if function.lifecycle is? none and not mentions_resource(id session @plan) {plan.source=previous plan.function_source=previous_function_source plan.result_type=previous_result return}
     if resource(function.rettype session.types @plan.resource_types) isnt? none and returnable_result(function.body session @plan) {function.body=return_result(function.body @session)}
     function.body=scoped_body(function.body @session)
-    local_transfers(function.body parameter_owners allowed @plan session)
+    local_transfers(function.body parameter_owners allowed.copy @plan session)
     # Add branch-sensitive transfers. Keep flagged owners in lexical owner
     # lists so nested scope/loop cleanup boundaries retain their indices.
     let owned:set<addr>=set[]

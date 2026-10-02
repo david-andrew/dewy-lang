@@ -238,7 +238,7 @@ flatten_callable = (id:addr seen:set<addr> analysis:Analysis nodes:array<hir.AST
     if node is? hir.OverloadedFunction {
         let result:array<addr> = []
         loop alternate in node.alternates {
-            let resolved = flatten_callable(alternate seen analysis nodes)
+            let resolved = flatten_callable(alternate seen.copy analysis nodes)
             if resolved is? none return none
             loop target in resolved { result.push(target) }
         }
@@ -683,7 +683,7 @@ analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> regist
 analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<addr> registry:bindings.Registry=bindings.Registry[]):>dict<addr set<addr>> => {
     let result:dict<addr set<addr>>=[]
     if globals.length =? 0 return result
-    let analysis=collect_roots(roots nodes)
+    let analysis=collect_roots(roots.copy nodes)
     let targets:dict<addr array<addr>>=[]
     let pending=roots
     let seen:set<addr>=set[]
@@ -834,7 +834,7 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
     if calls.length =? 0 return safe
     let unsafe:set<addr>=set[]
     let analysis=collect_roots(roots nodes)
-    let summaries=analyze_collected(analysis nodes type_nodes)
+    let summaries=analyze_collected(analysis.copy nodes type_nodes)
     loop id in calls {
         let call=hir.node_at(nodes id)
         $runtime_assert call is? hir.FunctionCall

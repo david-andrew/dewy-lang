@@ -125,10 +125,10 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
         # Per input: the fewest reads preceding an exit that reads it not at
         # all. A donation on such a path is simply released.
         bare_exits = {}
-        def visit(node, parent=None, guarded=False, exposed=False, returning=None):
+        def visit(node, parent=None, guarded=False, exposed=False, returning=None, lent=False):
             value = value_source(node)
             if value is not node:
-                visit(value, parent, guarded, exposed, returning)
+                visit(value, parent, guarded, exposed, returning, lent)
                 return
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id in wanted:
@@ -139,6 +139,9 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                             isinstance(parent, hir.ForwardingAccess) and parent.exception_type == ty.BOTTOM_TYPE) and (
                             ty.structural_base(parent.type) in ('bool', 'true', 'false')
                             or ty.fixed_integer_layout(parent.type) is not None))
+                    # A place lent to a call ends when the call returns: the
+                    # callee may change the input, never keep an alias of it.
+                    observed = observed or lent and isinstance(parent, hir.Place)
                     reads[node.binding_id].append((node, parent, guarded, observed, returning))
                 return
             terminal = node
@@ -157,8 +160,9 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
             counts = {binding: len(reads.get(binding, ())) for binding in wanted} if isinstance(node, hir.Return) else None
             if isinstance(node, hir.Return):
                 returning = id(node)
+            lends = isinstance(node, hir.Place) and isinstance(parent, hir.FunctionCall)
             for child in hir.children(node):
-                visit(child, node, nested, exposed, returning)
+                visit(child, node, nested, exposed, returning, lends)
             if counts is not None:
                 for binding, count in counts.items():
                     if len(reads.get(binding, ())) == count:

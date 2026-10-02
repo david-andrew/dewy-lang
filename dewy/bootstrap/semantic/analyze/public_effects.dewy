@@ -381,7 +381,7 @@ Inventory:type = const [bodies:dict<addr rows.Contract> projections:dict<string 
 body_name=(id:addr):>string=>"{inference.PREFIX}body:{id}"
 inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>Inventory => {
     let analysis=access.collect_roots(roots session.hir)
-    let access_summaries=access.analyze_collected(analysis session.hir session.types)
+    let access_summaries=access.analyze_collected(analysis.copy session.hir session.types)
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let storage_proofs=storage_borrows.prove(analysis access_summaries session.hir session.types session.registry)
     let borrowed=storage_proofs.arguments

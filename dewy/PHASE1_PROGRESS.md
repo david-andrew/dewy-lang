@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620) |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,45 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Lent-parameter ownership and argument copies (2026-10-02)
+
+Native rejections: 538 → 508. Hosted: 623 → 578.
+
+- **Place lends before a transfer.** A parameter lent as a place to a call
+  before its final transfer can still be owned (both compilers). The lend
+  ends when the call returns: the callee may change the input but never
+  keeps an alias. Callers donate a dying argument instead of the callee
+  copying it on entry. A local view that outlives the lend still keeps the
+  copy.
+- **Defaults of viewed lookups (fix to the previous batch).** A defaulted
+  `get` read in place keeps its default only as long as its reader:
+  - a loop keeps it for the loop;
+  - a membership test or an explicit `.copy` releases it at once.
+  The previous batch released every such default with the enclosing
+  statement. A default evaluated inside a conditional operand (`a and k in?
+  d.get(x set[])`) was therefore released out of scope. The batch passed
+  the local gate, but its first-generation compiler failed to compile the
+  compiler (`Undefined function`); fixed in `b37fea37`.
+- **Arguments a callee keeps.** 38 calls pass a local that the caller still
+  uses to a callee that owns or mutates its own copy (`seen` sets,
+  worklists, analysis state). These are spelled `.copy`: each call gets an
+  independent value by design. Donations that are the caller's last use,
+  reassignments before the next read, and reads inside `return` were left
+  to the ownership proofs.
+- **Bigint.**
+  - `_bigint_from_limbs` keeps its sign in a `-1|1` local and has one final
+    transfer.
+  - The documented decimal-chunk copy and `_bigint_limbs`'s owned result
+    are spelled `.copy`.
+  - The remaining bigint sites stay. Compiler-emitted runtime helpers keep a
+    fixed ABI, so ownership specialization never applies to them.
+
+Evidence:
+- `test_lent_parameter_ownership`, hosted and native, with the aliased
+  twin rejected under `$explicit_copies`.
+- Both generations build from the batch sources.
+- Local gate: 6,388 passed.
 
 ## Strict-copy proofs: immutable placement, field renewal, set views, intended copies (2026-10-02)
 

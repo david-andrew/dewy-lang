@@ -471,7 +471,7 @@ covered = (member:addr other:addr seen:set<string> links:Graph @nodes:types.Tabl
                 }
                 if not found return false
             }
-            if not covered(actual.value_type required.value_type seen links @nodes) return false
+            if not covered(actual.value_type required.value_type seen.copy links @nodes) return false
         }
     }
     else if m is? types.ArrayType and o is? types.ArrayType {
