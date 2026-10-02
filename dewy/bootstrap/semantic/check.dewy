@@ -79,7 +79,7 @@ label_scope = (name:string control:Control):>addr? => {
     return none
 }
 function_control = (control:Control):>Control => {
-    let names=control.outer_labels
+    let names=control.outer_labels.copy
     loop scope in control.scopes {loop [name position] in scope.labels {names.push(name)}}
     return Control[outer_labels=names]
 }
@@ -94,7 +94,7 @@ collect_labels = (node:parser.Block env:Environment session:contexts.Session):>C
         if label_scope(tag.name env.control) isnt? none return problem(id "scope metatag `${tag.name}` shadows an active declaration" 'metatag names may be reused only in disjoint sibling scopes' env session)
         labels[tag.name]=id
     }
-    let scopes=env.control.scopes
+    let scopes=env.control.scopes.copy
     scopes.push(LabelScope[labels])
     return Control[scopes env.control.loops env.control.outer_labels]
 }
@@ -283,7 +283,7 @@ against_shape = (value:addr expected:addr id:addr env:Environment @session:conte
             let index=expressed[0]
             let checked=against(node.items[index] expected id env @session)
             if checked is? Error return checked
-            let items=node.items
+            let items=node.items.copy
             items[index]=checked
             return put(hir.Block[node.loc node_at(checked session).value_type items node.scoped] @session)
         }
@@ -1269,7 +1269,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     }
     let args:array<addr> = []
     let places:array<addr> = []
-    let named=keyword
+    let named=keyword.copy
     loop i in 0.. and i <? positional.length and i <? method.pos_or_kw.length {
         let name=method.pos_or_kw[i].name
         if name isnt? none {named[name]=positional[i]}
@@ -2548,7 +2548,7 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     # Abstract integers keep mathematical arithmetic until bounds analysis
     # chooses their representation. Selecting a word here would silently
     # give an `int` function wrapping arithmetic before its proofs run.
-    let effect_parameters=parameters
+    let effect_parameters=parameters.copy
     let syntax=contexts.node_at(parameter_id lexical session)
     let source_parameters:array<addr>=if syntax is? parser.Block and syntax.delims =? '()' syntax.inner else [parameter_id]
     loop index in 0.. and index <? effect_parameters.length and index <? source_parameters.length {
@@ -2626,7 +2626,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
 # annotations and place parameters keep their declared contracts; generic
 # expected functions require their own instantiation before contextual use.
 contextual_parameters = (literal:parser.BinOp shape:types.FunctionType expected:addr? env:Environment session:contexts.Session):>array<types.PosOrKwArg> => {
-    let parameters=shape.pos_or_kw
+    let parameters=shape.pos_or_kw.copy
     if expected is? none return parameters
     let wanted=types.node_at(session.types types.strip_refinement(expected session.types))
     if wanted isnt? types.FunctionType or wanted.type_params.length >? 0 return parameters
@@ -2774,7 +2774,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         $runtime_assert inner.lexical.scope <? session.scopes.length
         session.scopes[inner.lexical.scope]=parameter_scope
     }
-    let all_parameters=parameters
+    let all_parameters=parameters.copy
     loop param in keyword_parameters {all_parameters.push(param)}
     if not infer {
         let unknown=contracts.unknown_parameter(contract all_parameters session.types)
@@ -2926,9 +2926,9 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         let effective_truth = if node.op in? ['nand' 'nor'] not truth else truth
         let conjunction = node.op in? ['and' 'nand']
         if effective_truth =? conjunction {
-            let changed = invalidated
+            let changed = invalidated.copy
             loop binding in predicate_effects.mutated_bindings(node.right session.hir) { changed.push(binding) }
-            let compacted = moved
+            let compacted = moved.copy
             loop binding in predicate_effects.compacted_bindings(node.right session.hir) { compacted.push(binding) }
             result = refined(node.left effective_truth result @session invalidated=changed moved=compacted)
             result = refined(node.right effective_truth result @session invalidated=invalidated moved=moved)
@@ -3479,7 +3479,7 @@ forwarding_member = (receiver:addr union:types.TypeOr name:string id:addr env:En
     loop member in ordinary {
         if types.node_at(session.types views.structural_base(member session.types)) isnt? types.ObjectType return none
     }
-    let results=exceptions
+    let results=exceptions.copy
     loop member in ordinary {
         let object=types.node_at(session.types views.structural_base(member session.types))
         $runtime_assert object is? types.ObjectType
@@ -4844,7 +4844,7 @@ container_literal = (id:addr node:parser.Block env:Environment @session:contexts
     let annotation = if expected is? none none else views.container_entry_types(expected session.types)
     let key_nodes:array<addr> = []
     let value_nodes:array<addr> = []
-    if is_set { key_nodes = node.inner }
+    if is_set { key_nodes = node.inner.copy }
     else {
         loop row_id in node.inner {
             let row = contexts.node_at(row_id env.lexical session)
@@ -5728,7 +5728,7 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
         let admitted:array<patterns.Coordinate>=[]
         loop i in 0.. and i <? selected.length {
             $runtime_assert i <? coverage.length
-            let member=coverage[i].members
+            let member=coverage[i].members.copy
             let fresh=patterns.fresh(member)
             if patterns.cover(selected[i] @member @session) {progressed=true}
             if not patterns.all_full(member) {complete=false}
@@ -6000,7 +6000,7 @@ flow_value_type = (results:array<addr> id:addr env:Environment @session:contexts
 # return or fall through into an implicit expression result.
 record_return = (type:addr loc:Span env:Environment @session:contexts.Session):>void => {
     $runtime_assert env.return_collector isnt? none and env.return_collector <? session.return_collectors.length
-    let collector=session.return_collectors[env.return_collector]
+    let collector=session.return_collectors[env.return_collector].copy
     collector.sites.push(contexts.ReturnSite[type loc])
     session.return_collectors[env.return_collector]=collector
 }
@@ -7013,34 +7013,35 @@ constructor_overload = (constructor:hir.TypeValue arguments_id:addr? id:addr env
     $runtime_assert type is? types.ObjectType
     let overloads=session.constructors.get(owner contexts.ConstructorSet[type.constructors])
     if overloads.bindings.length =? 0 return none
-    let trial=session
+    # Speculative checking rolls back through a checkpoint rather than a
+    # copy of the whole session.
+    let saved=contexts.checkpoint(session)
     let parameters:array<types.PosOrKwArg>=[]
     loop field in type.fields {parameters.push(types.PosOrKwArg[field.name field.value_type field.default is? none and not implemented_slot(type field session)])}
-    let fieldwise=types.function_type(parameters [] none owner [] @trial.types)
+    let fieldwise=types.function_type(parameters [] none owner [] @session.types)
     let signatures:array<addr>=[fieldwise]
     loop id in overloads.bindings {
-        let binding=bindings.binding_at(trial.registry id)
+        let binding=bindings.binding_at(session.registry id)
         $runtime_assert binding.value_type isnt? none
         signatures.push(binding.value_type)
     }
-    let shape=types.overload_type(signatures @trial.types)
-    let callee=put(hir.ExpressedIdentifier[constructor.loc shape '__dewy_constructor_choice' none] @trial)
-    let checked=call_syntax(callee arguments_id id env @trial)
+    let shape=types.overload_type(signatures @session.types)
+    let callee=put(hir.ExpressedIdentifier[constructor.loc shape '__dewy_constructor_choice' none] @session)
+    let checked=call_syntax(callee arguments_id id env @session)
     # As in the hosted dispatcher, the ordinary constructor reports failures
     # when no unique user overload wins. Do not leak speculative declarations.
-    if checked is? Error return none
-    let call_node=node_at(checked trial)
+    if checked is? Error {contexts.restore(saved @session) return none}
+    let call_node=node_at(checked session)
     $runtime_assert call_node is? hir.FunctionCall and call_node.selected_method_index isnt? none
     let selected=call_node.selected_method_index
-    if selected =? 0 return none
+    if selected =? 0 {contexts.restore(saved @session) return none}
     let position=selected - 1
     $runtime_assert position >=? 0 and position <? overloads.bindings.length
-    let binding=bindings.binding_at(trial.registry overloads.bindings[position])
+    let binding=bindings.binding_at(session.registry overloads.bindings[position])
     $runtime_assert binding.value_type isnt? none
-    let function=put(hir.ExpressedIdentifier[constructor.loc binding.value_type binding.name binding.id] @trial)
-    let result=call(function call_node.pos_args call_node.kw_args id env @trial expected=expected)
-    if result is? Error return result
-    session=trial
+    let function=put(hir.ExpressedIdentifier[constructor.loc binding.value_type binding.name binding.id] @session)
+    let result=call(function call_node.pos_args call_node.kw_args id env @session expected=expected)
+    if result is? Error {contexts.restore(saved @session) return result}
     return result
 }
 
@@ -7088,7 +7089,7 @@ capture_pushes = (id:addr receiver:addr element:addr syntax:addr env:Environment
     let void_type=types.primitive('void' @session.types)
     if node is? hir.Block {
         if node.items.length =? 0 return id
-        let items=node.items
+        let items=node.items.copy
         $runtime_assert items.length >? 0
         let last=items.length-1
         $runtime_assert last <? items.length

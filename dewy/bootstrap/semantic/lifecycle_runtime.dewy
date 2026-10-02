@@ -290,7 +290,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let equal=put(hir.ExpressedIdentifier[loc signature '__eq__' none] @session)
         let condition=put(hir.FunctionCall[loc boolean greater [cursor.value zero] []] @session)
         let element=put(hir.Index[loc type.element value cursor.value none] @session)
-        let nested=ancestors
+        let nested=ancestors.copy
         nested.push(owner)
         let selected_dynamic:array<SelectedPresence>=[]
         let unequal=put(hir.ExpressedIdentifier[loc signature '__ne__' none] @session)
@@ -413,7 +413,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
             let condition=put(hir.FunctionCall[loc boolean comparison [cursor.value endpoint] []] @session)
             let body:array<addr>=[put(hir.Assign[loc empty cursor.value '-=' one] @session)]
             let element=put(hir.Index[loc type.element receiver cursor.value none] @session)
-            let nested=ancestors
+            let nested=ancestors.copy
             nested.push(owner)
             drop_value(element type.element loc nested @body @plan @session)
             let block=put(hir.Block[loc empty body true] @session)
@@ -446,7 +446,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let arms:array<addr>=[]
         let empty=types.primitive('void' @session.types)
         let boolean=types.primitive('bool' @session.types)
-        let nested=ancestors
+        let nested=ancestors.copy
         nested.push(owner)
         loop member in type.items {
             if resource(member session.types @plan.resource_types) is? none continue
@@ -699,7 +699,7 @@ transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr =
         let arms:array<addr>=[]
         let boolean=types.primitive('bool' @session.types)
         loop member in type.items {
-            let narrowed=value
+            let narrowed=value.copy
             narrowed.value_type=member
             let selected=put(narrowed @session)
             let result=transfer(selected member @plan @session)
@@ -938,7 +938,7 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     }
     if candidate is? hir.Block|hir.Flow and frame isnt? none {
         # Capture a fresh value on each branch before cleaning its locals.
-        let active=frame.owners
+        let active=frame.owners.copy
         if candidate is? hir.Block {store(id hir.Block[candidate.loc candidate.value_type candidate.items true] @session)}
         statement(id @active frame.loops frame.allowed frame.inherited frame.owning_result @plan @session composed_parent=frame.composed_parent fresh_result=true)
         return
@@ -1002,7 +1002,7 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
                 if receiver is? hir.FunctionCall|hir.ObjectLiteral {
                     fresh(place.target allowed inherited @plan @session frame=frame)
                     let owner=capture_result(place.target candidate.loc @session)
-                    let copied:hir.FunctionCall=candidate
+                    let copied:hir.FunctionCall=candidate.copy
                     copied.pos_args=[put(hir.Place[place.loc place.value_type owner.value] @session)]
                     let result=capture_result(put(copied @session) candidate.loc @session)
                     let items:array<addr>=[owner.declaration result.declaration]
@@ -1088,7 +1088,7 @@ prepare_iterations=(id:addr @seen:set<addr> @plan:Plan @session:contexts.Session
     if not needed return
     let tail=node.default
     let changed=false
-    let arms=node.arms
+    let arms=node.arms.copy
     loop arms.length >? 0 {
         let arm_id=arms.pop
         let arm=hir.node_at(session.hir arm_id)
@@ -1524,7 +1524,7 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
         }
     }
     if frame isnt? none and node is? hir.Block|hir.Flow|hir.Return|hir.Break|hir.Continue {
-        let active=frame.owners
+        let active=frame.owners.copy
         if node is? hir.Block and not node.scoped {node.scoped=true store(id node @session)}
         statement(id @active frame.loops frame.allowed frame.inherited frame.owning_result @plan @session composed_parent=frame.composed_parent)
         return
@@ -1617,7 +1617,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
     let frame=Frame[owners loops allowed inherited owning_result composed_parent]
-    let live=allowed
+    let live=allowed.copy
     loop binding in plan.view_bindings {live.push(binding)}
     loop owner in owners {
         let declaration=hir.node_at(session.hir owner)
@@ -1625,7 +1625,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         live.push(declaration.binding_id)
     }
     if node is? hir.Block {
-        let current:hir.Block=node
+        let current:hir.Block=node.copy
         let active=owners
         let start=if entry 0 else active.length
         let items:array<addr>=[]
@@ -1858,13 +1858,13 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         return
     }
     if node is? hir.Flow {
-        let current:hir.Flow=node
+        let current:hir.Flow=node.copy
         loop arm_id in current.arms {
             let arm=hir.node_at(session.hir arm_id)
             $runtime_assert arm is? hir.IfArm|hir.LoopArm
             let branch:hir.IfArm|hir.LoopArm=arm
-            let branch_allowed=allowed
-            let branch_live=live
+            let branch_allowed=allowed.copy
+            let branch_live=live.copy
             loop iterator_id in iterator_leaves(branch.condition session.hir) {
                 let iterator=hir.node_at(session.hir iterator_id)
                 $runtime_assert iterator is? hir.IteratorExpression
@@ -1874,10 +1874,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 }
             }
             expression(branch.condition branch_live inherited @plan @session frame=frame)
-            let boundaries=loops
+            let boundaries=loops.copy
             if branch is? hir.LoopArm {boundaries.push(owners.length)}
             let body=scoped_body(branch.body @session)
-            let active=owners
+            let active=owners.copy
             statement(body @active boundaries branch_allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result)
             let rewritten=if branch is? hir.IfArm hir.IfArm[branch.loc branch.value_type branch.condition body] else hir.LoopArm[branch.loc branch.value_type branch.condition body]
             store(arm_id rewritten @session)
@@ -1984,7 +1984,7 @@ mentions_resource = (root:addr session:contexts.Session @plan:Plan):>bool => {
 owning_inputs=(node:hir.AST):>array<addr>=>{
     if node is? hir.Declare and not node.view return [node.expr]
     if node is? hir.FunctionCall {
-        let items=node.pos_args
+        let items=node.pos_args.copy
         loop [name value] in node.kw_args {items.push(value)}
         return items
     }
@@ -2234,7 +2234,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
                         value=hir.node_at(session.hir selected)
                     }
                     let root=selected
-                    let owner=value
+                    let owner=value.copy
                     loop owner is? hir.MemberAccess|hir.Index {
                         root=if owner is? hir.MemberAccess owner.value else owner.array
                         owner=hir.node_at(session.hir root)
@@ -2282,7 +2282,7 @@ return_result = (id:addr @session:contexts.Session):>addr => {
     if types.is_primitive(types.node_at(session.types node.value_type) 'never') return id
     let bottom=types.primitive('never' @session.types)
     if node is? hir.Block {
-        let block:hir.Block=node
+        let block:hir.Block=node.copy
         $runtime_assert block.items.length >? 0
         let selected:addr?=none
         loop index in 0.. and index <? block.items.length {
@@ -2301,7 +2301,7 @@ return_result = (id:addr @session:contexts.Session):>addr => {
         return id
     }
     if node is? hir.Flow {
-        let flow:hir.Flow=node
+        let flow:hir.Flow=node.copy
         loop arm_id in flow.arms {
             let arm=hir.node_at(session.hir arm_id)
             $runtime_assert arm is? hir.IfArm
@@ -2334,7 +2334,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
         $runtime_assert function.source <? session.sources.length
         plan.source=session.sources[function.source].srcfile
     }
-    let params=function.pos_or_kw_args
+    let params=function.pos_or_kw_args.copy
     loop parameter in function.kw_only_args {params.push(parameter)}
     if function.rest_args isnt? none {params.push(function.rest_args)}
     # Direct local functions borrow live enclosing resources. They never
@@ -2506,7 +2506,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
             plan.composed_moves[body.items[1]]=receiver
         }
     }
-    let owners=parameter_owners
+    let owners=parameter_owners.copy
     statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types @plan.resource_types) isnt? none @plan @session composed_parent=composed_parent entry=true)
     let prefix:array<addr>=[]
     loop owner in parameter_owners {

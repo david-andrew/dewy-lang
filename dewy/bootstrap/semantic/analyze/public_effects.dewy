@@ -106,7 +106,7 @@ record_access = (id:addr family:string input:Input @scan:Scan):>void => {
 }
 call_subjects = (call:hir.FunctionCall signature:types.FunctionType input:Input scan:Scan):>dict<string rows.Subject?> | none => {
     let supplied:dict<string rows.Subject?>=[]
-    let params=signature.pos_or_kw
+    let params=signature.pos_or_kw.copy
     loop parameter in signature.kw_only {params.push(types.PosOrKwArg[parameter.name parameter.value_type parameter.required parameter.place])}
     loop index in 0.. and index <? params.length {
         let parameter=params[index]
@@ -244,7 +244,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             visit(node.func input @scan)
         }
         else {unknown(@scan)}
-        let arguments=node.pos_args
+        let arguments=node.pos_args.copy
         loop arg in node.kw_args.values {arguments.push(arg)}
         loop arg in arguments {
             let value=hir.node_at(input.nodes arg)
@@ -470,7 +470,7 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
 validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:array<Warning> word_iterators:set<addr>=set[]):>Error? => {
     let requested=false
     let constrained:array<addr>=[]
-    let pending=roots
+    let pending=roots.copy
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let id=pending.pop

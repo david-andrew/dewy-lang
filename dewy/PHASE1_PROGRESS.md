@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851) |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,64 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict-copy proofs: immutable placement, field renewal, set views, intended copies (2026-10-02)
+
+C2 continues module-wide. Native rejections: 814 → 538. Hosted:
+851 → 623 (measured before the hosted kept-default change).
+
+Proofs and fixes (both compilers unless noted):
+- **Immutable placement.** Storage that an immutable record holds, placed
+  into an immutable record literal, is a bounded share. Immutability is
+  deep, so no holder of either record can ever write it. A writable source
+  or destination still copies.
+- **Field take and renewal.**
+  - A store to a fixed field path means a later whole read of the owner
+    reads the new value there. Before the store, only the sibling fields
+    stay live (`renew_siblings`). So
+    `let x=r.f … r.f=x … return r` moves `r.f` out and back.
+  - Optional fields:
+    - native takes a nullable record handle (read whole or narrowed) and
+      leaves `none`;
+    - hosted adopts from an optional field's present record, and a union
+      field with a record member is a transfer site for the put-back.
+  - A read of the old value in between keeps the copy.
+- **Returning transfers.** A parameter transferred in early `return`s and
+  again at its final read is consumed on every path, so the function owns
+  it. An exit that drops the parameter before its final read disqualifies
+  this: there a donation would only be released, as in `types.path_type`'s
+  cache hit, where callers holding views would otherwise copy for nothing.
+- **Set-valued `get` views.**
+  - Native: a loop over `d.get(k set[])` reads the stored set when the loop
+    keeps `d`; a membership test reads it when its key cannot write;
+    `d.get(k default).copy` copies once instead of twice.
+  - Hosted: a local bound to a record-valued `get` keeps its default as an
+    ordinary owned local, so the binding is a view, as native already had
+    it.
+- **Hosted miscompile fixed.** A loop over a dictionary or set read from
+  another dictionary iterated freed storage when the body replaced that
+  entry: a crash for sets, a wrong total for key/value loops. Hosted now
+  snapshots the entries, as native does.
+
+Restructurings:
+- About 115 intended copies spelled `.copy`, each reviewed:
+  - mutable copies of HIR node fields, parameter fields, or locals that stay
+    in use;
+  - save/restore snapshots (`let saved=x.f` … `x.f=saved`).
+  Take-out/put-back shapes were left to the proofs above.
+- Speculative constructor dispatch rolls back through
+  `contexts.checkpoint`/`restore` instead of copying the whole session.
+- `bounds.analyze_result` evaluates once, with an explicit obligations
+  snapshot, so its state parameter is owned.
+
+Evidence:
+- New tests, hosted and native, each with strict-error twins where a copy
+  must remain:
+  - `test_immutable_placement`;
+  - `test_field_take_and_renew`;
+  - `test_returning_parameter_transfers`;
+  - `test_set_get_views` (includes the hosted crash and the pair-loop case).
+- Local gate: 6,383 passed.
 
 ## Strict-copy proofs: loops, defaults, loans, field moves, `get` views (2026-10-02)
 

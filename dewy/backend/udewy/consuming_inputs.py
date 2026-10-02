@@ -122,10 +122,13 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
             continue
         needed_locals = owning_locals(literal)
         reads = defaultdict(list)
-        def visit(node, parent=None, guarded=False, exposed=False):
+        # Per input: the fewest reads preceding an exit that reads it not at
+        # all. A donation on such a path is simply released.
+        bare_exits = {}
+        def visit(node, parent=None, guarded=False, exposed=False, returning=None):
             value = value_source(node)
             if value is not node:
-                visit(value, parent, guarded, exposed)
+                visit(value, parent, guarded, exposed, returning)
                 return
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id in wanted:
@@ -136,7 +139,7 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                             isinstance(parent, hir.ForwardingAccess) and parent.exception_type == ty.BOTTOM_TYPE) and (
                             ty.structural_base(parent.type) in ('bool', 'true', 'false')
                             or ty.fixed_integer_layout(parent.type) is not None))
-                    reads[node.binding_id].append((node, parent, guarded, observed))
+                    reads[node.binding_id].append((node, parent, guarded, observed, returning))
                 return
             terminal = node
             if guarded:
@@ -151,8 +154,15 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                                                    hir.IfArm, hir.LoopArm, hir.ShortCircuit))
             exposed |= isinstance(node, (hir.FunctionLiteral, hir.Place, hir.Transmute,
                                           hir.Assign, hir.MemberAssign, hir.IndexAssign))
+            counts = {binding: len(reads.get(binding, ())) for binding in wanted} if isinstance(node, hir.Return) else None
+            if isinstance(node, hir.Return):
+                returning = id(node)
             for child in hir.children(node):
-                visit(child, node, nested, exposed)
+                visit(child, node, nested, exposed, returning)
+            if counts is not None:
+                for binding, count in counts.items():
+                    if len(reads.get(binding, ())) == count:
+                        bare_exits[binding] = min(bare_exits.get(binding, count), count)
 
         # Defaults can execute conditionally. Do not ignore an additional
         # reference there even though the donating parameter has no default.
@@ -163,8 +173,14 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
         for binding, sites in reads.items():
             # Scalar inspections in guards/earlier loops create no surviving
             # loan. Early exits release the donated parameter normally. A
-            # final read inside a loop or conditional keeps the old fallback.
-            if not sites[-1][2] and all(site[3] for site in sites[:-1]):
+            # read inside another `return` ends its path before the final
+            # read; it is accepted only when no exit before the final read
+            # drops the input, so the donation is never released unused.
+            # A final read inside a loop or conditional keeps the old fallback.
+            final = sites[-1][4]
+            returning_only = all(site[3] or site[4] is not None and site[4] != final for site in sites[:-1])
+            inspected = all(site[3] for site in sites[:-1])
+            if not sites[-1][2] and (inspected or returning_only and bare_exits.get(binding, len(sites)) >= len(sites)):
                 parent = sites[-1][1]
                 if not isinstance(parent, hir.Declare) or parent.binding_id in needed_locals:
                     candidates[binding] = sites[-1][:2]

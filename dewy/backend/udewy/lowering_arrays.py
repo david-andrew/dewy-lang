@@ -3814,7 +3814,8 @@ class _ArrayLowering(_ArraySharing):
         raw_representation = self._array_use_representation(iterator.iterable)
         if self._iterable_common_field(iterator.iterable):
             prelude, array = self._extract_forwarding_access(iterator.iterable, borrowed=True)
-        elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
+        elif self._iteration_snapshot_needed(iterator.iterable, arm.body) or (
+                isinstance(iterator.iterable, hir.DictEntries) and self._entries_snapshot_needed(iterator.iterable, arm.body)):
             # The value the source had on entry, as in multi-iterator loops.
             self._note_copy('array', array_type, 'iterated', self._copy_reason(iterator.iterable), iterator.iterable.loc)
             prelude, array = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)

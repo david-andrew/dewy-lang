@@ -66,6 +66,9 @@ State:type = [
     # Identifier uses that move their local (moves.compute), and the locals
     # they empty, which must be declared `let` for the emptying store.
     moved_uses:set<addr>=set[]
+    # Placing storage an immutable record holds into an immutable record:
+    # nothing can ever write either, so the copy is a bounded share.
+    frozen_placement:bool=false
     # Field uses inside a call that also lends their root as a place.
     place_conflicts:set<addr>=set[]
     return_borrow_sources:dict<addr addr>=[]
@@ -200,7 +203,7 @@ note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state
     if kind =? 'string' and not explicit and not escape return
     let name=copy_name(type @state)
     let dynamic=copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.copy_bound_memo)
-    let exempt=not escape and not copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.shared_copy_bound_memo share_strings=true)
+    let exempt=not escape and (state.frozen_placement or not copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.shared_copy_bound_memo share_strings=true))
     state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic exempt])
 }
 # Values leaving `$allocator` blocks are copies (see allocator_escapes).
@@ -343,7 +346,7 @@ runtime_type_uncached = (id:addr node:hir.AST @state:State):>addr => {
 # Discover before lowering any initializer/body, preserving forward function
 # references. A later capture pass can use the same binding-to-symbol map.
 parameters = (node:hir.FunctionLiteral):>array<hir.Param> => {
-    let result=node.pos_or_kw_args
+    let result=node.pos_or_kw_args.copy
     loop parameter in node.kw_only_args {result.push(parameter)}
     return result
 }
@@ -446,8 +449,16 @@ expression = (id:addr @state:State):>addr => {
         }
         # A dying fresh result already is independent. Otherwise retain the
         # receiver before any surrounding operation can mutate its source.
-        if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
         let kind=if owned_string(node.value_type state) 'string' else copy_kind(node.value_type @state)
+        if receiver is? hir.DictLookup and receiver.default isnt? none and default_view_lookup(receiver @state) and node.value not in? state.array_snapshots {
+            # The explicit copy is the only one: copy the stored element (or
+            # the kept default) rather than a lookup result made to own it.
+            if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
+            let viewed=dict_lookup(receiver @state view=true)
+            keep_fallback(hir.node_at(state.input.nodes receiver.default).value_type @state)
+            return copy_value(viewed node.value_type node @state)
+        }
+        if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
         if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
         return copy_value(expression(node.value @state) node.value_type node @state)
     }
@@ -1124,6 +1135,21 @@ take_array_slot=(slot:addr array:types.ArrayType node:hir.AST origin:string @sta
         node.loc state.source_index false true true])
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }
+# Whether a read names storage inside an immutable record, which no holder
+# can write (immutability is deep).
+immutably_held = (id:addr state:State):>bool => {
+    let current=moves.peel(id state.input.nodes)
+    loop true {
+        let node=hir.node_at(state.input.nodes current)
+        if node is? hir.MemberAccess {
+            let owner=types.node_at(state.type_nodes views.structural_base(hir.node_at(state.input.nodes node.value).value_type state.type_nodes))
+            if owner is? types.ObjectType and owner.immutable return true
+            current=moves.peel(node.value state.input.nodes)
+        } else if node is? hir.Index {current=moves.peel(node.array state.input.nodes)}
+        else return false
+    }
+    return false
+}
 # A place lent to a call ends when it returns, so a field of a place-lent
 # local moves at its last use unless that use is inside a call that also
 # lends the local: the callee would see the emptied field.
@@ -1258,6 +1284,22 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                 if cell_result {state.copy_notes.push(CopyNote['cell' copy_name(node.value_type @state) 'transferred from an inline field'
                     'a bounded tag cell adopts the active payload; the source cell retains its ordinary cleanup'
                     node.loc state.source_index false false true])}
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
+        # A nullable record handle field, read whole or narrowed to its
+        # present record: take the handle and leave `none`, after detaching
+        # a shared root.
+        let handle_field=record_union(stored_cell @state)
+        let same_handle=types.same_type(stored_cell node.value_type state.type_nodes) or object_valued(node.value_type @state) and types.same_type(present_record(stored_cell @state) node.value_type state.type_nodes)
+        if valid and handle_field isnt? none and handle_field.nullable and same_handle and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
+            let binding=owner.binding_id
+            if binding in? state.cleanup_owned and field_movable(binding id state) and storage_borrows.borrowable(owner.value_type state.type_nodes) {
+                let prefix:array<addr>=[]
+                let slot=snapshot(field_pointer(node @state writable=true) @prefix @state)
+                let result=snapshot(read_word(slot 0 node @state) @prefix @state)
+                prefix.push(store_word(word(0 node @state) slot 0 node @state))
+                prefix.push(result)
                 return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
             }
         }
@@ -1586,7 +1628,7 @@ array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
 frame_array_header=(memory:ArrayMemory length:addr stride:addr node:hir.AST @state:State):>array<addr>=>{
     # The frame owns the descriptor and data. Mutable writes need no COW
     # detachment, and ordinary release must not free either frame block.
-    let prefix=memory.prefix
+    let prefix=memory.prefix.copy
     let fields:array<addr>=[memory.data length length word(stride node @state) word(layouts.array_flags.mutable node @state) word(0 node @state)]
     let offset:addr=0
     loop value in fields {prefix.push(store_word(value memory.descriptor offset node @state)) offset+=8}
@@ -4935,7 +4977,9 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false re
     $runtime_assert not loan or frame isnt? none
     let block=if reserve >? layout.size layouts.Record[reserve layout.alignment layout.offsets] else layout
     let destination=if frame is? none snapshot(record_allocation(block node @state) @prefix @state) else frame
+    let previous_frozen=state.frozen_placement
     loop item in node.fields {
+        state.frozen_placement=record.immutable and immutably_held(item.value state)
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
         $runtime_assert field isnt? none and offset isnt? none
@@ -5015,6 +5059,7 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State loan:bool=false re
         }
         prefix.push(field_write(address(destination offset node @state) value field.value_type node @state))
     }
+    state.frozen_placement=previous_frozen
     let offset=layout.offsets.get(layouts.brand_field)
     if offset isnt? none {
         let number:addr=0
@@ -5393,7 +5438,7 @@ code_type = (id:addr node:hir.AST @state:State result:addr?=none):>addr => {
     let runtime=runtime_type(literal.value_type node @state)
     let signature=types.node_at(state.type_nodes runtime)
     $runtime_assert signature is? types.FunctionType
-    let arguments=signature.pos_or_kw
+    let arguments=signature.pos_or_kw.copy
     loop binding in capture.captures {
         let stored=state.storage_types.get(binding)
         $runtime_assert stored isnt? none
@@ -5425,7 +5470,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     if node.object_receiver and capture.captures.length >? 0 return reject(node 'an object method reading enclosing locals needs closure storage' @state)
     let previous_receiver=state.receiver_symbol
     let previous_receiver_type=state.receiver_type
-    let previous_receiver_fields=state.receiver_fields
+    let previous_receiver_fields=state.receiver_fields.copy
     if node.object_receiver {
         let receiver=fresh('self' @state)
         arguments.push(hir.Param[receiver types.primitive('int64' @state.type_nodes)])
@@ -5750,7 +5795,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     let body=owned_value(node.body @state)
     state.result_projection=none
     if state.loop_prologue.length >? 0 {
-        let initialized=state.loop_prologue
+        let initialized=state.loop_prologue.copy
         loop item in prologue {initialized.push(item)}
         prologue=initialized
     }
@@ -5956,7 +6001,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     # exits need their own initialized signals before function lowering resets
     # the control state for each independently emitted body.
     if state.loop_prologue.length >? 0 {
-        let initialized=state.loop_prologue
+        let initialized=state.loop_prologue.copy
         loop item in startup {initialized.push(item)}
         startup=initialized
     }
@@ -6252,7 +6297,9 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
             # than losing it behind its borrowed entry-array descriptor.
             let parts=sources.get(source.dictionary)
             if parts is? none {
-                parts=dict_parts(source.dictionary @prefix @state)
+                let route=borrowing.route(source.dictionary state.input.nodes)
+                let kept=route isnt? none and (borrowing.stable_owner(route state.stable_bindings state.stable_parameters) or loop_keeps(route state))
+                parts=dict_parts(source.dictionary @prefix @state view=kept)
                 prefix.push(dict_ensure(parts node @state compact=true))
                 sources[source.dictionary]=parts
                 if parts.owner_type isnt? none {
@@ -6441,7 +6488,7 @@ loop_checkpoint = (node:hir.AST @state:State):>addr => {
     # releasing every target frame at the original site would double-release
     # iterator storage while unwinding through these checkpoints.
     let cleanup=loop_cleanup(node @state)
-    let target=cleanup
+    let target=cleanup.copy
     target.push(loop_assignment(levels word(0 node @state) node @state))
     target.push(dispatch)
     let propagate=cleanup
@@ -6861,10 +6908,17 @@ dict_owner = (parts:DictParts):>addr => {
     let owner=parts.owner
     return if owner isnt? none owner else parts.pointer
 }
-dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false mutate:bool=false):>DictParts => {
+dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false mutate:bool=false view:bool=false):>DictParts => {
     let source=hir.node_at(state.input.nodes dictionary)
     let entries=views.container_entry_types(types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes) state.type_nodes)
     $runtime_assert entries isnt? none
+    # A defaulted `get` the caller proved stable for this read: the stored
+    # record (or its kept default) serves the operation without a copy.
+    if view and not copy and not mutate and source is? hir.DictLookup and source.default isnt? none and default_view_lookup(source @state) and dictionary not in? state.array_snapshots {
+        let pointer=snapshot(dict_lookup(source @state view=true) @prefix @state)
+        keep_fallback(hir.node_at(state.input.nodes source.default).value_type @state)
+        return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value none]
+    }
     # A field of a fresh record (`layout(...).offsets.get(k)`): the call's
     # result owns the block, which may be shared with the callee's storage.
     # Release that record after the lookup, never the field on its own.
@@ -6877,10 +6931,20 @@ dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false m
     let owner:addr?=if copy or temporary_owner(dictionary @state) source.value_type else none
     return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value owner]
 }
-dict_from_keys = (keys:addr @prefix:array<addr> @state:State mutate:bool=false):>DictParts => {
+dict_from_keys = (keys:addr @prefix:array<addr> @state:State mutate:bool=false view:bool=false):>DictParts => {
     let member=hir.node_at(state.input.nodes keys)
     $runtime_assert member is? hir.MemberAccess
-    return dict_parts(member.value @prefix @state mutate=mutate)
+    return dict_parts(member.value @prefix @state mutate=mutate view=view)
+}
+# An operand that cannot write any storage: no calls, places or stores.
+quiet_operand = (id:addr state:State):>bool => {
+    let pending:array<addr>=[id]
+    loop pending.length >? 0 {
+        let node=hir.node_at(state.input.nodes pending.pop)
+        if node is? hir.FunctionCall|hir.Place|hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.FunctionLiteral|hir.DictStore|hir.DictRemove|hir.DictMethod return false
+        hir.push_children(node @pending)
+    }
+    return true
 }
 # A mutable entry denotes a slot in this dictionary's private values array.
 # Detach the containing record and array first; then a record/array payload
@@ -7180,7 +7244,8 @@ dict_probe_body = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @st
 
 dict_contains = (node:hir.DictContains @state:State):>addr => {
     let prefix:array<addr>=[]
-    let parts=dict_from_keys(node.keys @prefix @state)
+    # The key is evaluated after the receiver; a quiet key cannot disturb it.
+    let parts=dict_from_keys(node.keys @prefix @state view=quiet_operand(node.key state))
     let key_view=string_frame_view(node.key @prefix @state immediate=true)
     let key=if key_view isnt? none key_view else snapshot(owned_value(node.key @state) @prefix @state)
     prefix.push(dict_ensure(parts node @state))

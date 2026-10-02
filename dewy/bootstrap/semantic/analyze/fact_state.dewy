@@ -528,7 +528,7 @@ widen = (previous:State current:State context:Context):>State => {
 TermPair:type = const [left:Term right:Term]
 LoopCandidate:type = const [interval:ranges.Interval term:Term]
 seed_loop_relations = (state:State changing:set<addr> mentioned:array<TermPair>=[]):>State => {
-    let result=state
+    let result=state.copy
     let representatives:array<LoopCandidate>=[]
     let remaining:addr=64
     loop fact_entry in state.values {

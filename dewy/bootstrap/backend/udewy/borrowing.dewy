@@ -68,7 +68,7 @@ overlap = (a:Route b:Route):>bool => {
     return true
 }
 arguments = (call:hir.FunctionCall):>array<addr> => {
-    let result=call.pos_args
+    let result=call.pos_args.copy
     loop value in call.kw_args.values {result.push(value)}
     return result
 }
@@ -622,8 +622,10 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
 # that are exclusively called directly qualify, so every caller and the
 # callee agree on the transfer.
 Consumed:type = [parameters:set<addr>=set[] uses:set<addr>=set[] owned:set<addr>=set[]]
-ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool observed:bool]
-ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false]
+ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool observed:bool returning:addr?=none]
+# `bare` maps an input to the fewest reads preceding an exit that does not
+# read it: a donation on that path is simply released.
+ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false bare:dict<addr addr>=[]]
 # One pre-order walk per function records every read of its candidate
 # parameters: where it is, whether it may run never/many times, and whether
 # an earlier return could skip it.
@@ -717,9 +719,10 @@ observes_argument = (call:hir.FunctionCall read:addr plan:captures.Plan summarie
     }
     return false
 }
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false):>void => {
+read_count = (scan:ReadScan binding:addr):>addr => if binding in? scan.reads scan.reads[binding].length else 0
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false returning:addr?=none):>void => {
     let source=consuming_value_source(id nodes type_nodes)
-    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed) return}
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed returning=returning) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
@@ -731,12 +734,12 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
                 observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
             }
             if not exposed and owner is? hir.FunctionCall {observed=observes_argument(owner id plan summaries nodes type_nodes)}
-            sites.push(ReadSite[id parent guarded scan.exited observed])
+            sites.push(ReadSite[id parent guarded scan.exited observed returning])
             scan.reads[node.binding_id]=sites
         }
         return void
     }
-    let terminal=node
+    let terminal=node.copy
     if guarded {
         loop terminal is? hir.Block and terminal.items.length >? 0 {terminal=hir.node_at(nodes terminal.items[terminal.items.length-1])}
     }
@@ -750,7 +753,13 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     # operand may run never, once or many times: never a single consumption.
     let nested=guarded or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit
     let escapes=exposed or node is? hir.FunctionLiteral|hir.GenericFunction|hir.Place|hir.Transmute|hir.Assign|hir.MemberAssign|hir.IndexAssign
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes)}
+    let counts:dict<addr addr>=[]
+    if node is? hir.Return {loop binding in candidates {counts[binding]=read_count(scan binding)}}
+    let enclosing=if node is? hir.Return id else returning
+    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes returning=enclosing)}
+    loop [binding count] in counts {
+        if read_count(scan binding) =? count and count <? scan.bare.get(binding default=count+1) {scan.bare[binding]=count}
+    }
     if node is? hir.Return {scan.exited=true}
     return void
 }
@@ -791,11 +800,18 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
             if not owned_protocol or id in? retaining or binding in? excluded or not storage_borrows.borrowable(hir.node_at(nodes site.id).value_type type_nodes) continue
             # Earlier scalar inspections create no alias. An early exit owns
             # cleanup; ordinary last-use analysis chooses the final transfer.
-            let safe=true
+            # A read inside another `return` ends its path before the final
+            # read; it is accepted only when no exit before the final read
+            # drops the input, so the donation is never released unused.
+            let inspected=true
+            let returning_only=true
             loop i in 0.. and i<?sites.length {
                 if i=?sites.length-1 break
-                if not sites[i].observed {safe=false}
+                if not sites[i].observed {inspected=false}
+                let exits=sites[i].returning isnt? none and sites[i].returning not=? site.returning
+                if not sites[i].observed and not exits {returning_only=false}
             }
+            let safe=inspected or returning_only and scan.bare.get(binding default=sites.length) >=? sites.length
             if safe {candidates[binding]=site owned.push(binding)}
         }
     }
@@ -910,7 +926,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let storage_proofs=storage_borrows.prove(analysis summaries nodes type_nodes registry)
     let forwarded=storage_proofs.arguments
     let ambient=ambient_graph(plan nodes type_nodes indirect)
-    let initial=ambient.opaque
+    let initial=ambient.opaque.copy
     loop id in ambient.globals {initial.push(id)}
     let dirty=propagate_ambient(initial ambient.callers)
     # Raw address operations and unknown callbacks can expose storage even

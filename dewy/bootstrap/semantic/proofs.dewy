@@ -52,7 +52,7 @@ check_call = (node:hir.FunctionCall @state:State parameters:(set<addr>)?=none):>
         fail(node 'a proof requires a known direct callee' 'proofs cannot be called through a callback or stored handle' @state)
         return none
     }
-    let args=node.pos_args
+    let args=node.pos_args.copy
     loop arg in node.kw_args.values {args.push(arg)}
     loop arg in args {
         if not fact_term(arg state.input parameters) {fail(hir.node_at(state.input.nodes arg) 'a proof argument must be a pure fact term' 'use a name, literal, trusted measure, or arithmetic over those; the call is erased' @state)}
@@ -70,7 +70,7 @@ body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void
     if node is? hir.Block {
         # A proof local names a checked mathematical value in this lexical
         # block. It owns no runtime storage and cannot affect the caller.
-        let available=parameters
+        let available=parameters.copy
         loop item in node.items {
             body(item available @dependencies @state)
             let declaration=hir.node_at(state.input.nodes item)
@@ -118,7 +118,7 @@ visit = (id:addr statement:bool @state:State):>void => {
         let saved=state.source
         if node.source isnt? none {state.source=source_at(node.source state.input)}
         if node.proof {
-            let params=node.pos_or_kw_args
+            let params=node.pos_or_kw_args.copy
             loop param in node.kw_only_args {params.push(param)}
             let ids:set<addr>=set[]
             if node.rest_args isnt? none {fail(node 'proof parameters must be explicit values' 'rest parameters are outside the initial proof subset' @state)}

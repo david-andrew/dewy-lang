@@ -180,7 +180,7 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
     if block is? hir.Block {
         # A module item desugared into a statement group (an unpacking
         # assignment) still declares globals.
-        let pending:array<addr>=block.items
+        let pending:array<addr>=block.items.copy
         loop pending.length >? 0 {
             let id=pending.pop
             let node=hir.node_at(nodes id)
@@ -197,7 +197,7 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         let function=result.functions[id]
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
-        let parameters=literal.pos_or_kw_args
+        let parameters=literal.pos_or_kw_args.copy
         loop parameter in literal.kw_only_args {parameters.push(parameter)}
         loop parameter in parameters {if parameter.binding_id isnt? none {function.locals.push(parameter.binding_id)}}
         seen=set[]
@@ -239,7 +239,7 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         if other is? none continue
         loop caller in callers.get(id []) {
             $runtime_assert caller in? result.functions
-            let function=result.functions[caller]
+            let function=result.functions[caller].copy
             let changed=false
             loop binding in other.captures {
                 if binding in? result.globals or binding in? function.locals or binding in? function.captures continue

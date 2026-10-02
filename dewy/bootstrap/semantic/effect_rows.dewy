@@ -82,7 +82,7 @@ substitute = (row:Row rows:dict<string Row> subjects:dict<string Subject?>=[]):>
         if subject isnt? none and subject.kind =? 'parameter' and subject.key in? subjects {
             let supplied=subjects[subject.key]
             if supplied is? none continue
-            let route=supplied.route
+            let route=supplied.route.copy
             loop field in subject.route {route.push(field)}
             subject=Subject[supplied.kind supplied.key route]
         }
@@ -195,7 +195,7 @@ display = (contract:Contract? parameters:dict<string string>):>string => {
 join = (left:Contract right:Contract):>Contract => {
     let allowed:Row?=none
     if left.allowed isnt? none and right.allowed isnt? none {allowed=merge(left.allowed right.allowed)}
-    let candidates=left.excluded
+    let candidates=left.excluded.copy
     loop atom in right.excluded {candidates.push(atom)}
     let excluded:array<Atom>=[]
     loop atom in candidates {
@@ -266,7 +266,7 @@ replace_contracts = (contract:Contract? solutions:dict<string Contract>):>Contra
         let part=solutions.get(name Contract[Row[variables=[name]]])
         combined=join(combined part)
     }
-    let excluded=contract.excluded
+    let excluded=contract.excluded.copy
     let known:set<string>=set[]
     loop atom in excluded {known.push(atom_key(atom))}
     loop atom in combined.excluded {

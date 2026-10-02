@@ -291,7 +291,7 @@ meet_atoms = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>addr? => {
         # checks those promises at value boundaries.
         let nested=types.node_at(nodes met)
         if nested is? types.RefinedType {
-            let promises=nested.propositions
+            let promises=nested.propositions.copy
             loop promise in a.propositions {promises.push(promise)}
             return types.refined_type(nested.base promises @nodes)
         }
@@ -303,7 +303,7 @@ meet_atoms = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>addr? => {
         if types.same_type(met b.base nodes) return b_id
         let nested=types.node_at(nodes met)
         if nested is? types.RefinedType {
-            let promises=nested.propositions
+            let promises=nested.propositions.copy
             loop promise in b.propositions {promises.push(promise)}
             return types.refined_type(nested.base promises @nodes)
         }

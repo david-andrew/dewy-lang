@@ -191,7 +191,7 @@ negate = (id:addr @state:State):>addr => {
     if node is? hir.Bool return put(hir.Bool[node.loc node.value_type not node.value] @state)
     if node is? hir.ShortCircuit and node.op in? ['and' 'or'] return put(hir.ShortCircuit[node.loc node.value_type if node.op =? 'and' 'or' else 'and' negate(node.left @state) negate(node.right @state)] @state)
     if node is? hir.Block and not node.scoped and node.items.length >? 0 {
-        let items=node.items
+        let items=node.items.copy
         items[end]=negate(items[end] @state)
         return put(hir.Block[node.loc node.value_type items false] @state)
     }
@@ -578,7 +578,7 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         inline_block(lowered uses @state)
         # Keyword-only parameters follow the positional ones in the emitted
         # signature; call lowering already orders arguments the same way.
-        let merged:array<hir.Param>=function.pos_or_kw_args
+        let merged:array<hir.Param>=function.pos_or_kw_args.copy
         loop parameter in function.kw_only_args {merged.push(parameter)}
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type merged [] function.rest_args function.rettype lowered source=function.source] @state)])
     }

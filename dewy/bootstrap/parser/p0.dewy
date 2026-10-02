@@ -355,8 +355,8 @@ reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<compound.Token>
                 let expanded:array<Work> = []
                 loop option in options {
                     loop branch in branches {
-                        let items = branch.items
-                        let shifts = branch.shifts
+                        let items = branch.items.copy
+                        let shifts = branch.shifts.copy
                         $runtime_assert position <? shifts.length
                         shifts[position] = option.direction
                         let left = option.left
@@ -416,9 +416,9 @@ parse_node = (id:addr srcfile:SrcFile @nodes:array<compound.Token>):>addr | comp
     }
     let children:array<addr> = []
     if node is? compound.Block | compound.ParametricEscape { children = node.inner }
-    else if node is? compound.IString { children = node.content }
-    else if node is? post.KeywordExpr { children = node.parts }
-    else if node is? post.Flow { children = node.arms }
+    else if node is? compound.IString { children = node.content.copy }
+    else if node is? post.KeywordExpr { children = node.parts.copy }
+    else if node is? post.Flow { children = node.arms.copy }
     loop i in 0.. and i <? children.length {
         let child = compound.node_at(nodes children[i])
         if child is? compound.Keyword | compound.StringChunk continue
@@ -496,7 +496,7 @@ children_of = (node:compound.Token):>array<addr> => {
     if node is? KeywordExpr return node.parts
     let children:array<addr> = []
     if node is? Flow {
-        children = node.arms
+        children = node.arms.copy
         if node.default isnt? none { children.push(node.default) }
         return children
     }

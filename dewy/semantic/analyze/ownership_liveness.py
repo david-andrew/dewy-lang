@@ -64,6 +64,38 @@ def selector_locals(body, inputs):
     return declarations, before
 
 
+def renew_siblings(live, target, binding, path):
+    """After a store to a fixed field path, a later whole read of an ancestor
+    reads the new value there. Before the store it needs every other field
+    on the way down, but not the replaced component's old value."""
+    owners = []
+    node = target
+    while isinstance(node, hir.MemberAccess):
+        owners.append(ty.structural_base(node.value.type))
+        node = node.value
+    if len(owners) != len(path):
+        return live   # an indexed step: keep the whole read
+    owners.reverse()
+    result = set()
+    for entry in live:
+        owner, prefix, kind = entry
+        if owner != binding or kind != 'read' or len(prefix) >= len(path) or path[:len(prefix)] != prefix:
+            result.add(entry)
+            continue
+        expanded = set()
+        for level in range(len(prefix), len(path)):
+            record = owners[level]
+            if not isinstance(record, ty.ObjectType):
+                expanded = None
+                break
+            expanded.update((binding, path[:level] + (field.name,), 'read') for field in record.fields if field.name != path[level])
+        if expanded is None:
+            result.add(entry)
+        else:
+            result |= expanded
+    return result
+
+
 def field_route(node, *, allow_prefix=False, wildcards=False, selectors=frozenset()):
     """A stable route, or conservatively its prefix before an unknown slot."""
     path = []
@@ -360,6 +392,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             binding, path = route
             if not any(step == -1 or isinstance(step, Selector) for step in path):
                 live = {entry for entry in live if entry[0] != binding or entry[1][:len(path)] != path}
+                live = renew_siblings(live, node.target, binding, path)
             live.add((binding, path, 'store'))
             return visit_selectors(node.target, visit(node.value, live, enabled, exits), enabled, exits)
         if isinstance(node, hir.Declare):

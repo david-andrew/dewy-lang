@@ -472,6 +472,9 @@ class _Lowerer(
         self.rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.direct_default_inputs: set[str] = set()
+        # Placing storage an immutable record holds into an immutable record:
+        # nothing can ever write either, so the copy is a bounded share.
+        self.frozen_placement = False
         # Omitted-default arms (name, span) that view a stable `const` global.
         self.static_default_arms: set[tuple[str, int, int]] = set()
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
@@ -4207,7 +4210,11 @@ class _Lowerer(
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
                 field_type = node.target.type
-                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign) or isinstance(field_type, ty.ObjectType))
+                # A record field, or a union field with a record member,
+                # adopts an owned record local at its last use.
+                record_field = isinstance(field_type, ty.ObjectType) or any(
+                    isinstance(ty.structural_base(member), ty.ObjectType) for member in self._field_union_members(field_type) or ())
+                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign) or record_field)
                 walk(node.value, depth, nested, site)
                 return
             if isinstance(node, hir.DictStore):

@@ -84,7 +84,7 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     }
     if not promised return state
     let survivors:array<addr>=[]
-    let type_nodes=data.env.types
+    let type_nodes=data.env.types.copy
     let matches=truth not=? node.negated
     loop member in result.items {
         let base=types.strip_refinement(member type_nodes)
@@ -115,7 +115,7 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
     let node=hir.node_at(context.nodes id)
     if node is? hir.Bool return if node.value =? truth state else none
     if node is? hir.TypeTest {
-        let current=state
+        let current=state.copy
         let tested_id=expressions.strip_casts(node.value data.env.nodes)
         let tested=hir.node_at(data.env.nodes tested_id)
         # A successful type test contributes its numeric width even when

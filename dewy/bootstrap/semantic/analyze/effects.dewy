@@ -493,7 +493,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:ar
 
 visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let function = hir.node_at(nodes call.func)
-    let arguments = call.pos_args
+    let arguments = call.pos_args.copy
     loop argument in call.kw_args.values { arguments.push(argument) }
     if function is? hir.ArrayMethod {
         # Joining reads its receiver. A separator or other argument can still
@@ -815,7 +815,7 @@ read_only_places = (root:addr nodes:array<hir.AST> type_nodes:types.Table):>set<
 # Solve the frozen loaded graph once, then lend the result to every module.
 read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
     let calls:array<addr>=[]
-    let pending=roots
+    let pending=roots.copy
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let id=pending.pop
@@ -839,7 +839,7 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
         let call=hir.node_at(nodes id)
         $runtime_assert call is? hir.FunctionCall
         let targets=direct_targets(call analysis nodes)
-        let arguments=call.pos_args
+        let arguments=call.pos_args.copy
         loop arg in call.kw_args.values {arguments.push(arg)}
         loop arg in arguments {
             if hir.node_at(nodes arg) isnt? hir.Place continue

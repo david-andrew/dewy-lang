@@ -261,7 +261,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         let result:array<addr> = []
         loop producer in producers {
             if producer in? seen_nodes continue
-            let visited = seen_nodes
+            let visited = seen_nodes.copy
             visited.push(producer)
             let literal = hir.node_at(checker.nodes producer)
             $runtime_assert literal is? hir.FunctionLiteral
@@ -287,7 +287,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         }
         if array isnt? hir.ArrayLiteral return none
         loop item in array.items { if hir.node_at(checker.nodes item) is? hir.Spread return none }
-        let items = array.items
+        let items = array.items.copy
         if node.constant_index isnt? none and node.constant_index <? items.length {
             $runtime_assert node.constant_index >=? 0
             items = [items[node.constant_index]]
@@ -414,7 +414,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
         return current
     }
     if node is? hir.Flow {
-        let current = initialized
+        let current = initialized.copy
         let reached:bool = false
         loop arm_id in node.arms {
             let arm = hir.node_at(checker.nodes arm_id)
@@ -460,7 +460,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
     }
     if node is? hir.IteratorExpression return check_eager(node.iterable initialized parameters stack @checker)
     if node is? hir.MultiIteratorExpression {
-        let current = initialized
+        let current = initialized.copy
         loop iterator_id in node.iterators {
             let iterator = hir.node_at(checker.nodes iterator_id)
             $runtime_assert iterator is? hir.IteratorExpression
@@ -472,7 +472,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
         # A field's binding is initialized once the literal is built; a
         # method of the literal reads sibling fields through that binding
         # when it is called later (`sum = ():>int64 => a + b`).
-        let current = initialized
+        let current = initialized.copy
         loop field in node.fields {
             current = check_eager(field.value current parameters stack @checker)
             if field.binding_id isnt? none { dense.add(@current field.binding_id) }
@@ -514,7 +514,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     let function = hir.node_at(checker.nodes id)
     $runtime_assert function is? hir.FunctionLiteral
     let parameter_effects:dict<addr CallableEffect> = []
-    let params = function.pos_or_kw_args
+    let params = function.pos_or_kw_args.copy
     loop param in function.kw_only_args { params.push(param) }
     loop i in 0.. and i <? params.length {
         let param = params[i]
@@ -538,7 +538,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     # Parameters and receiver fields are initialized by the call itself.
     # A cached proof depends only on reads supplied by the caller, so a cache
     # hit never needs to build or detach the body-local availability set.
-    let available = initialized
+    let available = initialized.copy
     loop field in function.object_fields { dense.add(@available field.id) }
     loop param in params { if param.binding_id isnt? none { dense.add(@available param.binding_id) } }
     if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { dense.add(@available function.rest_args.binding_id) }

@@ -702,7 +702,7 @@ substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<strin
 
 substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table effects:dict<string effect_rows.Contract>=[]):>addr => {
     let inner = bindings
-    let params = node.type_params
+    let params = node.type_params.copy
     if instantiate { params = [] }
     else {
         loop param in params {
@@ -802,7 +802,7 @@ distribute = (left:array<Clause> right:array<Clause>):>array<Clause> => {
     let output:array<Clause> = []
     loop a in left {
         loop b in right {
-            let literals = a.literals
+            let literals = a.literals.copy
             loop item in b.literals { literals.push(item) }
             output.push(Clause[literals=literals])
         }

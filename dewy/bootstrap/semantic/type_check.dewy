@@ -39,7 +39,7 @@ refine = (base:addr propositions:array<facts.Proposition> @session:contexts.Sess
     let node = types.node_at(session.types base)
     let all:array<facts.Proposition> = []
     let plain = base
-    if node is? types.RefinedType { all = node.propositions plain = node.base }
+    if node is? types.RefinedType { all = node.propositions.copy plain = node.base }
     loop p in propositions { if not views.has_proposition(all p) { all.push(p) } }
     return types.refined_type(plain all @session.types)
 }
@@ -1239,7 +1239,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         if node is? types.ObjectType and node.minted {
             if ancestor isnt? none return contexts.unsupported(id 'a minted type with two nominal parents' context session)
             ancestor = operand
-            fields = node.fields methods = node.methods
+            fields = node.fields.copy methods = node.methods.copy
         }
     }
     loop operand in all {
@@ -1255,7 +1255,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         # identity during this compatibility check; merge keeps the original
         # field type, mutability, and predicates. Construction checks the
         # saved expression against that same contract.
-        let additions=node.fields
+        let additions=node.fields.copy
         loop i in 0.. and i <? additions.length {
             let field=additions[i]
             if field.name not in? default_only or field.default is? none continue

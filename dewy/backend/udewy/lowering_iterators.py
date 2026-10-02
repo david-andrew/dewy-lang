@@ -58,7 +58,20 @@ class _IteratorLowering:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, 'int64', name)
 
-    def _iteration_snapshot_needed(self, iterable: hir.AST, body: hir.AST | None = None, setup: hir.AST | None = None) -> bool:
+    def _entries_snapshot_needed(self, entries: hir.DictEntries, body: hir.AST, setup: hir.AST | None = None) -> bool:
+        """Whether a loop over a container's entries must iterate a snapshot.
+
+        The container is a value: a write that replaces or frees the storage
+        it was read from (an entry of another dictionary, say) must not
+        change what the loop iterates. Writes to the iterated container
+        itself are rejected by checking."""
+        dictionary = entries.dictionary
+        if isinstance(dictionary, hir.DictView):
+            dictionary = dictionary.dictionary
+        return self._iteration_snapshot_needed(dictionary, body, setup, sequence=False)
+
+    def _iteration_snapshot_needed(self, iterable: hir.AST, body: hir.AST | None = None, setup: hir.AST | None = None,
+                                   sequence: bool = True) -> bool:
         """Whether a loop over this array or string route must iterate a snapshot.
 
         A route whose owner nothing in the function writes stays in place for
@@ -67,7 +80,7 @@ class _IteratorLowering:
         """
         if not self._has_arena() or self.lowering_module_startup or not hasattr(self, 'borrow_plan'):
             return False
-        if not isinstance(ty.unfold(ty.strip_refinement(iterable.type)), ty.ArrayType) and not self._is_string_valued(iterable.type):
+        if sequence and not isinstance(ty.unfold(ty.strip_refinement(iterable.type)), ty.ArrayType) and not self._is_string_valued(iterable.type):
             return False
         source = borrowing.route(iterable)
         if source is None or borrowing.stable_owner(source, self.borrow_plan):
@@ -257,6 +270,18 @@ class _IteratorLowering:
                 )
                 if isinstance(iterator.iterable, hir.DictEntries):
                     array_prelude, array_value = self._extract_dict_entries(iterator.iterable, dictionary_sources)
+                    if self._entries_snapshot_needed(iterator.iterable, arm.body, condition):
+                        # Iterate the entries the container had on entry; the
+                        # loop may replace or free the storage they live in.
+                        array_type = ty.unfold(ty.strip_refinement(iterator.iterable.type))
+                        self._note_copy('array', array_type, 'iterated', self._copy_reason(iterator.iterable.dictionary), iterator.iterable.loc)
+                        entries = hir.ExpressedIdentifier(iterator.iterable.loc, array_type, self._new_iterator_name('entries'))
+                        array_prelude.append(hir.Declare(iterator.iterable.loc, ty.VOID_TYPE, 'let', entries.name, 'int64', array_value))
+                        clone_prelude, array_value = self._clone_dynamic_array_value(entries, array_type, arena=True)
+                        array_prelude.extend(clone_prelude)
+                        array_prelude_tail, array_value = self._array_result_temporary(replace(iterator.iterable, type=array_type), array_value, [])
+                        array_prelude.extend(array_prelude_tail)
+                        array_representation = None
                 elif self._iterable_common_field(iterator.iterable):
                     array_prelude, array_value = self._extract_forwarding_access(iterator.iterable, borrowed=True)
                 elif self._iteration_snapshot_needed(iterator.iterable, arm.body, condition):

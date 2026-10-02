@@ -87,7 +87,7 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
     # copy policy. Add those bodies and dependencies to the checking graph;
     # legalization removes them from the executable after checking.
     let strict_sources=explicit_copy_sources(engine)
-    let proof_live=live
+    let proof_live=live.copy
     let proof_seen=seen
     let additional=false
     loop [binding declaration] in functions {
@@ -137,7 +137,7 @@ const helper_names=['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_s
 # _utf8_grapheme_scan`) to keep the original function's identity. An import
 # alias is no export, so look it up in that module's scope.
 runtime_helpers = (engine:modules.Engine):>dict<string addr> => {
-    let helpers=engine.prelude_bindings
+    let helpers=engine.prelude_bindings.copy
     loop name in helper_names {
         if name in? helpers continue
         loop module in engine.modules {

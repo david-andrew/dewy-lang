@@ -331,7 +331,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
                 # through continue leaves the old one live on that backedge.
                 let head=following
                 loop true {
-                    let nested=exits
+                    let nested=exits.copy
                     nested.push(LoopExit[live head])
                     let entering=visit(arm.body head enabled @analysis nodes table nested)
                     merge(@entering following)
@@ -365,6 +365,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             loop step in route.path {if step=?-1 {fixed=false}}
             let kept:Live=[]
             loop [key entry] in live {if not fixed or entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
+            if fixed {kept=renew_siblings(kept node.target route nodes table)}
             add_entry(@kept Entry[route.binding route.path true selectors=route.selectors])
             let before=visit(node.value kept enabled @analysis nodes table exits)
             return visit_selectors(node.target before enabled @analysis nodes exits table)
@@ -378,6 +379,49 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
     let children=hir.children(node)
     loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes table exits)}
     return live
+}
+# After a store to a fixed field path, a later whole read of an ancestor
+# reads the new value there. Before the store it needs every other field on
+# the way down, but not the replaced component's old value.
+renew_siblings=(live:Live target:addr route:Entry nodes:array<hir.AST> table:types.Table):>Live=>{
+    let inner:array<addr>=[]
+    let current=hir.node_at(nodes target)
+    loop current is? hir.MemberAccess {
+        let value=hir.node_at(nodes current.value)
+        inner.push(value.value_type)
+        current=value
+    }
+    # An indexed step keeps the whole read.
+    if inner.length not=? route.path.length return live
+    # Owner types from the root down, matching the path.
+    let owners:array<addr>=[]
+    let index=inner.length
+    loop index >? 0 {
+        index-=1
+        owners.push(inner[index])
+    }
+    let result:Live=[]
+    loop [key entry] in live {
+        if entry.binding not=? route.binding or entry.store or entry.measure or entry.path.length >=? route.path.length or not under(route.path entry.path) {result[key]=entry continue}
+        let expanded:array<Entry>=[]
+        let complete=true
+        let level=entry.path.length
+        loop level <? route.path.length and level <? owners.length {
+            let record=types.node_at(table types.unfold(types.strip_refinement(owners[level] table) table))
+            if record isnt? types.ObjectType {complete=false break}
+            loop field in record.fields {
+                if field.name =? route.path[level] continue
+                let path:array<string|int64>=[]
+                loop i in 0.. and i <? level {path.push(route.path[i])}
+                path.push(field.name)
+                expanded.push(Entry[route.binding path])
+            }
+            level+=1
+        }
+        if not complete {result[key]=entry continue}
+        loop item in expanded {add_entry(@result item)}
+    }
+    return result
 }
 consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[] selector_scopes:dict<addr set<addr>>=[]):>Analysis=>{
     let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places selector_scopes=selector_scopes]
@@ -398,7 +442,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
         }
         hir.push_children(node @pending)
     }
-    let captured=analysis.captured
+    let captured=analysis.captured.copy
     loop binding in captured {loop root in roots(binding analysis.aliases) {analysis.captured.push(root)}}
     let changed=predicate_effects.mutated_bindings(body nodes call_writes=call_writes)
     loop binding in selector_inputs {
@@ -409,10 +453,10 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
         let inputs:array<addr>=[]
         let scope=id
         if node is? hir.FunctionCall {
-            inputs=node.pos_args
+            inputs=node.pos_args.copy
             loop item in node.kw_args.values {inputs.push(item)}
         } else if node is? hir.ObjectLiteral {loop field in node.fields {inputs.push(field.value)}}
-        else if node is? hir.ArrayLiteral {inputs=node.items}
+        else if node is? hir.ArrayLiteral {inputs=node.items.copy}
         else if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {inputs.push(node.value)}
         else if node is? hir.DictStore and node.value isnt? none {inputs.push(node.value)}
         else if node is? hir.Declare {

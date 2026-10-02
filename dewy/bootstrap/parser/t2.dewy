@@ -115,10 +115,10 @@ rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>
     # Most visits are leaves. They have no child vector to snapshot or edit.
     if node isnt? compound.IString | Chain | KeywordExpr | Flow | Directive return id
     let children:array<addr> = []
-    if node is? compound.IString { children = node.content }
-    else if node is? Chain { children = node.items }
-    else if node is? KeywordExpr { children = node.parts }
-    else if node is? Flow { children = node.arms }
+    if node is? compound.IString { children = node.content.copy }
+    else if node is? Chain { children = node.items.copy }
+    else if node is? KeywordExpr { children = node.parts.copy }
+    else if node is? Flow { children = node.arms.copy }
     let changed_children=false
     loop i in 0.. and i <? children.length {
         let changed = rewrite_child(children[i] pass srcfile @nodes)
@@ -376,7 +376,7 @@ collect_atom = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @n
         return Collected[compound.append_node(@nodes KeywordExpr[loc=loc parts=parts]) i]
     }
     if kw.name =? 'else' return compound.lexical_error(srcfile kw.loc '`else` is not a match arm')
-    let first_stop = stop
+    let first_stop = stop.copy
     if kw.name =? 'import' { first_stop = stop|set['from'] }
     if kw.name =? 'from' { first_stop = stop|set['import'] }
     let first = collect_expr(items i first_stop srcfile @nodes)
@@ -511,7 +511,7 @@ children_of = (node:compound.Token):>array<addr> => {
     if node is? Broadcast | CombinedAssignment | OpFn return [node.op]
     let children:array<addr> = []
     if node is? Flow {
-        children = node.arms
+        children = node.arms.copy
         if node.default isnt? none { children.push(node.default) }
     }
     if node is? Directive {

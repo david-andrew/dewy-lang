@@ -98,7 +98,7 @@ node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nod
 # Element routes allocated during validation join the vacuous-fact roots
 # (the hosted rule reads the registry live), including the path context's copy.
 note_element_routes = (array:addr @checker:Checker):>void => {
-    let known=checker.data.relations.facts.element_roots
+    let known=checker.data.relations.facts.element_roots.copy
     let before=known.length
     elements.note_roots(array @known checker.data.registry)
     if known.length =? before return
@@ -284,7 +284,7 @@ release_literal_fields = (expression:addr @state:facts.State @checker:Checker):>
     }
     let roots=checker.literal_fields[expression]
     if roots.length=?0 return
-    let expired=roots
+    let expired=roots.copy
     loop root in roots {
         loop route in bindings.routes_under(checker.data.registry root []) {expired.push(route)}
     }
@@ -317,12 +317,12 @@ expire_scope = (@output:Transfer locals:set<addr> @checker:Checker):>void => {
     }
     let breaks:array<Exit>=[] let continues:array<Exit>=[]
     loop exit in output.breaks {
-        let remaining=exit.state
+        let remaining=exit.state.copy
         stores.forget_many(@remaining locals @checker.data)
         breaks.push(Exit[exit.levels remaining])
     }
     loop exit in output.continues {
-        let remaining=exit.state
+        let remaining=exit.state.copy
         stores.forget_many(@remaining locals @checker.data)
         continues.push(Exit[exit.levels remaining])
     }
@@ -398,8 +398,8 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     let prototype=checker.prototype
     if node.proof {checker.prototype=false}
     let enclosing=state
-    let saved=checker.data.snapshot
-    let saved_calls=checker.data.member_calls
+    let saved=checker.data.snapshot.copy
+    let saved_calls=checker.data.member_calls.copy
     checker.data.snapshot=intervals.Snapshot[]
     let globals=checker.mutable_globals
     loop global in globals {stores.forget(@enclosing global @checker.data)}
@@ -408,7 +408,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     stores.forget_many(@enclosing checker.mutable_captures @checker.data keep_lengths=checker.stable_capture_lengths)
     let source=checker.srcfile
     if node.source isnt? none {checker.srcfile=hir.source_at(node.source checker.source_files)}
-    let parameters=node.pos_or_kw_args
+    let parameters=node.pos_or_kw_args.copy
     loop parameter in node.kw_only_args {parameters.push(parameter)}
     if node.rest_args isnt? none {parameters.push(node.rest_args)}
     loop parameter in parameters {if parameter is? hir.BoundParam {evaluate(parameter.value @enclosing @checker validate)}}
@@ -523,11 +523,13 @@ attach_result_obligation = (id:addr refined:addr @checker:Checker):>void => {
 # Install only around evaluation of the selected result, not its condition
 # or preceding statements. Shared HIR leaves may also occur in those places.
 analyze_result = (id:addr state:facts.State required:array<addr> @checker:Checker validate:bool):>Transfer => {
-    if not validate or required.length =? 0 return analyze(id state @checker validate)
-    let previous=checker.result_obligations
-    loop refined in required {attach_result_obligation(id refined @checker)}
+    # One evaluation consumes the state; the obligations in force around it
+    # are a snapshot restored afterwards.
+    let installing=validate and required.length >? 0
+    let previous:dict<addr array<addr>>=if installing checker.result_obligations.copy else []
+    if installing {loop refined in required {attach_result_obligation(id refined @checker)}}
     let result=analyze(id state @checker validate)
-    checker.result_obligations=previous
+    if installing {checker.result_obligations=previous}
     return result
 }
 # Hidden key/value arrays share one receiver evaluation. Mutating operations
@@ -546,7 +548,7 @@ dictionary_children=(node:hir.DictLookup|hir.DictContains|hir.DictStore|hir.Dict
         let indexed=false
         loop step in access.steps {if node_at(step checker) is? hir.Index|hir.DictLookup {indexed=true}}
         if indexed and root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
-            let selected=arguments
+            let selected=arguments.copy
             loop step in access.steps {
                 let selector=node_at(step checker)
                 if selector is? hir.Index {selected.push(selector.index)}
@@ -572,7 +574,7 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
 evaluate_checked = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
     let node=node_at(id checker)
     if node is? hir.Obligation {
-        let previous=checker.result_obligations
+        let previous=checker.result_obligations.copy
         if validate {
             attach_result_obligation(node.value node.refined @checker)
             loop required in previous.get(id []) {attach_result_obligation(node.value required @checker)}
@@ -677,7 +679,7 @@ value_flow_of = (id:addr checker:Checker):>addr? => {
 bind_conditional = (id:addr flow_id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
     let flow=node_at(flow_id checker)
     $runtime_assert flow is? hir.Flow
-    let remaining:facts.State?=state
+    let remaining:facts.State?=state.copy
     let exits:array<facts.State>=[]
     let output=Transfer[none]
     loop arm_id in flow.arms {
@@ -801,7 +803,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         evaluate(node.func @state @checker validate)
         # The call can write borrowed endpoints only after all arguments
         # have been evaluated and their entry preconditions checked.
-        let arguments=node.pos_args
+        let arguments=node.pos_args.copy
         loop argument in node.kw_args.values {arguments.push(argument)}
         let places:array<addr>=[]
         loop argument in arguments {if node_at(argument checker) is? hir.Place {places.push(argument)}}
@@ -1234,7 +1236,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
 }
 search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool):>Transfer => {
     let iterators=iterators_of(arm.condition checker)
-    let incoming=state
+    let incoming=state.copy
     loop id in iterators {
         let iterator=node_at(id checker)
         $runtime_assert iterator is? hir.IteratorExpression
@@ -1289,7 +1291,7 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         }
     }
     if selected.length>?0 {incoming=loop_qualifiers.seed(incoming selected changing checker.data.relations.facts)}
-    let head=incoming
+    let head=incoming.copy
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.
     let pass:addr=0
@@ -1325,7 +1327,7 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         }
         loop exit in body.continues {
             if exit.levels =? 0 {
-                let next=exit.state
+                let next=exit.state.copy
                 remove_targets(@next iterators @checker)
                 candidates.push(next)
             }
@@ -1342,7 +1344,7 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
     }
     checker.data.snapshot=intervals.Snapshot[]
     let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
-    let positive:facts.State?=current
+    let positive:facts.State?=current.copy
     let negative:facts.State?=none
     if iterators.length =? 0 {
         evaluate(arm.condition @current @checker validate)
@@ -1434,7 +1436,7 @@ validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void =>
             if binding not in? checker.resized {checker.stable_capture_lengths.push(binding)}
         }
     }
-    let tracked=checker.mutable_globals
+    let tracked=checker.mutable_globals.copy
     if checker.container_receivers.length>?0 {
         loop binding in effects.nonlocal_bindings(root checker.data.env.nodes) {
             if binding in? checker.container_receivers {tracked.push(binding)}
@@ -1452,7 +1454,7 @@ validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void =>
         if result.normal is? none break
         state=result.normal
     }
-    let deferred=checker.deferred
+    let deferred=checker.deferred.copy
     checker.deferred.clear
     checker.root_items.clear
     loop id in deferred {

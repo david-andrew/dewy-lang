@@ -15,7 +15,7 @@ Context:type = const [facts:facts.Context minimum_lengths:dict<addr bigint>=[]]
 # (the hosted rule reads the registry live). The context is immutable, so a
 # changed root table rebuilds it.
 with_element_roots = (context:Context roots:dict<addr addr>):>Context => {
-    let updated=context.facts
+    let updated=context.facts.copy
     updated.element_roots=roots
     return Context[updated context.minimum_lengths]
 }

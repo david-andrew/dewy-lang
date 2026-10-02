@@ -662,7 +662,12 @@ class _ObjectLowering:
             from ...semantic.analyze.storage_borrows import borrowable
             receiver = ty.structural_base(source.value.type)
             field = receiver.field(source.name) if isinstance(receiver, ty.ObjectType) else None
-            owned = owned and field is not None and ty.structural_base(field.type) == object_type and borrowable(root.type)
+            # A narrowed optional field adopts from its present record; the
+            # emptied record stays in the field for ordinary cleanup.
+            present = ty.optional_payload(field.type) if field is not None else None
+            owned = (owned and field is not None and borrowable(root.type)
+                     and (ty.structural_base(field.type) == object_type
+                          or present is not None and ty.structural_base(present) == object_type))
         if isinstance(source, hir.Index):
             from ...semantic.analyze.storage_borrows import borrowable
             owned = (isinstance(root, hir.ExpressedIdentifier)
@@ -1248,8 +1253,8 @@ class _ObjectLowering:
             name = name[:45] + '...'
         self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site, explicit,
                                         copy_policy.runtime_sized(type_, self.copy_bound_memo),
-                                        policy_exempt=not escape and not copy_policy.runtime_sized(
-                                            type_, self.shared_copy_bound_memo, share_strings=True)))
+                                        policy_exempt=not escape and (self.frozen_placement or not copy_policy.runtime_sized(
+                                            type_, self.shared_copy_bound_memo, share_strings=True))))
 
     def _copy_reason(self, expr: hir.AST) -> str:
         """Why the copied expression could not be borrowed or moved."""
@@ -1422,8 +1427,10 @@ class _ObjectLowering:
         }
         self.object_literal_contexts.append((dest, node.type, field_names))
         statements: list[hir.AST] = self._brand_word_store(dest, node.type, node.loc)
+        previous_frozen = self.frozen_placement
         try:
             for field in node.fields:
+                self.frozen_placement = node.type.immutable and self._immutably_held(field.value)
                 address = self._field_address(dest, offsets[field.name], field.loc)
                 expected = node.type.field(field.name)
                 field_type = expected.type if expected is not None else field.value.type
@@ -1482,8 +1489,23 @@ class _ObjectLowering:
                     self._value_store(value, address, field_type, field.loc)
                 )
         finally:
+            self.frozen_placement = previous_frozen
             self.object_literal_contexts.pop()
         return statements
+
+    def _immutably_held(self, value: hir.AST) -> bool:
+        """Whether a read names storage inside an immutable record, which no
+        holder can write (immutability is deep)."""
+        node = borrowing.unwrap(value)
+        while isinstance(node, (hir.MemberAccess, hir.Index)):
+            if isinstance(node, hir.MemberAccess):
+                owner = ty.structural_base(node.value.type)
+                if isinstance(owner, ty.ObjectType) and owner.immutable:
+                    return True
+                node = borrowing.unwrap(node.value)
+            else:
+                node = borrowing.unwrap(node.array)
+        return False
 
     def _extract_object_pointer(
         self,
@@ -1808,21 +1830,25 @@ class _ObjectLowering:
         return ty.unfold(ty.strip_refinement(element)) == ty.unfold(ty.strip_refinement(payload))
 
     def _default_view_lookup(self, expr: hir.AST) -> bool:
-        """A `get` with an empty array default whose result is the stored element.
+        """A `get` whose result is the stored element, with a default that
+        owns nothing or is kept for the view's lifetime.
 
-        Either arm owns nothing: the stored descriptor stays with the
-        dictionary and an empty literal has no storage to release. (Native
+        An empty array literal has no storage to release; a record literal
+        default is kept as an owned local (`_lower_object_declare`). (Native
         `default_view_lookup` also keeps a general eagerly evaluated default.)
         """
         if not isinstance(expr, hir.DictLookup) or expr.proven or expr.default is None:
             return False
         default = borrowing.unwrap(expr.default)
-        if not isinstance(default, hir.ArrayLiteral) or default.items:
-            return False
         element = getattr(expr.values.type, 'element', None) if expr.values is not None else None
+        if element is None:
+            return False
         read = ty.unfold(ty.strip_refinement(expr.type))
-        return (element is not None and isinstance(read, ty.ArrayType)
-                and ty.unfold(ty.strip_refinement(element)) == read)
+        if ty.unfold(ty.strip_refinement(element)) != read:
+            return False
+        if isinstance(default, hir.ObjectLiteral):
+            return isinstance(read, ty.ObjectType) and ty.unfold(ty.strip_refinement(default.type)) == read
+        return isinstance(default, hir.ArrayLiteral) and not default.items and isinstance(read, ty.ArrayType)
 
     def _borrowed_route_local(self, node: hir.Declare, value_type: ty.Type) -> bool:
         """`let x = a[i]` / `a.f` / `d[k]` binds the storage it reads when both stay stable.
@@ -1877,9 +1903,17 @@ class _ObjectLowering:
         object_type: ty.ObjectType,
     ) -> list[hir.AST]:
         if self._borrowed_route_local(node, object_type):
-            prelude, pointer = self._extract_object_pointer(node.expr)
+            expr = borrowing.unwrap(node.expr)
+            kept: list[hir.AST] = []
+            if isinstance(expr, hir.DictLookup) and isinstance(borrowing.unwrap(expr.default), hir.ObjectLiteral):
+                # A viewing `get` keeps its fallback for the view's lifetime:
+                # an ordinary owned local the scope releases.
+                fallback = hir.ExpressedIdentifier(expr.default.loc, expr.default.type, self._new_optional_name('kept_default'))
+                kept = self._lower_statement(hir.Declare(expr.default.loc, ty.VOID_TYPE, 'let', fallback.name, expr.default.type, expr.default))
+                expr = replace(expr, default=fallback)
+            prelude, pointer = self._extract_object_pointer(expr)
             self.borrowed_fields[local_binding_key(node)] = set()
-            return [*prelude, replace(node, decltype='let', annotation='int64', expr=pointer)]
+            return [*kept, *prelude, replace(node, decltype='let', annotation='int64', expr=pointer)]
         flow = self._unwrap_transparent(node.expr)
         leading: list[hir.AST] = []
         if isinstance(flow, hir.Block):
@@ -2242,8 +2276,10 @@ class _ObjectLowering:
         }
         self.object_literal_contexts.append((dest, object_type, field_names))
         statements: list[hir.AST] = self._brand_word_store(dest, object_type, node.loc)
+        previous_frozen = self.frozen_placement
         try:
             for field in node.fields:
+                self.frozen_placement = object_type.immutable and self._immutably_held(field.value)
                 expected = object_type.field(field.name)
                 field_type = expected.type if expected is not None else field.value.type
                 address = self._field_address(dest, offsets[field.name], field.loc)
@@ -2296,6 +2332,7 @@ class _ObjectLowering:
                         self._value_store(value, address, field_type, field.loc)
                     )
         finally:
+            self.frozen_placement = previous_frozen
             self.object_literal_contexts.pop()
         return statements
 

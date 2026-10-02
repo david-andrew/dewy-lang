@@ -42,7 +42,7 @@ changed = (binding:addr state:addr @session:contexts.Session projection:array<st
         }
         if related.length >? 0 {
             related.push(selected)
-            let affected=related
+            let affected=related.copy
             loop id in related {loop route in bindings.routes_under(session.registry id []) {affected.push(route)}}
             loop id in affected {current=keys.forget(current changed=id)}
             $runtime_assert state <? session.read_states.length
