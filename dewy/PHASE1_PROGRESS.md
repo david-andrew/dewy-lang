@@ -146,6 +146,42 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Throughput: static constant literal arguments (2026-10-02)
+
+Static copy-site counts moved a lot in the strict-copy batches, but the
+self-build did not: 53.9 s / 29.4 GB at `70d620b1` against 54.2 s / 29.5 GB
+at `b37fea37`. Each compiler compiled its own source, cold, interleaved. A
+fresh allocation profile of `b37fea37` counts 382 M allocations (27.2 GB
+requested):
+- array growth 41 M, of which first 8-slot buffers are 31.8 M;
+- new records and unions 71 M;
+- new union cells 44 M and union cell copies 22 M, mostly `addr?` returns;
+- strings 36 M.
+
+The work therefore returned to allocation-driven throughput.
+
+- **Constant literal arguments are static data.**
+  - What changes: a literal of integer or string constants, passed where the
+    caller keeps the value (borrowed, disposable or reclaimable, never
+    consumed), is emitted once as a static descriptor. It uses the static
+    empty literal's owner count, so release never frees it and any mutation
+    detaches a private copy first. The compiler's 169 `x in? [...]` tests no
+    longer allocate an array per evaluation.
+  - Effect: allocation fell by about 0.7 GB.
+  - Native only: hosted keeps its representation.
+  - A literal passed to an optional or union parameter is wrapped first, so
+    it stays an ordinary literal. The first version peeled that wrapping and
+    passed the bare static descriptor; two native gate cases
+    (`test_union_storage_borrows`, `test_record_argument_loans`) crashed and
+    were fixed before the commit.
+
+Evidence:
+- `test_static_array_arguments`, hosted and native: membership, a callee
+  that changes its own copy of a shared literal, and an optional parameter.
+- Local gate: 6,388 passed; the two failing native cases pass after the fix.
+- Three-generation fixed point, `check_native` and the 698-case paired
+  manifest at `857eb4d2`.
+
 ## Lent-parameter ownership and argument copies (2026-10-02)
 
 Native rejections: 538 → 508. Hosted: 623 → 578.
