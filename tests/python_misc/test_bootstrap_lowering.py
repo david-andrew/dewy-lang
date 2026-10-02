@@ -289,8 +289,11 @@ ARENA_CASES = [
     # Growing a descriptor moves its element handles and returns only the
     # obsolete data block. The allocator must be able to reuse that block.
     # Growth starts from a floor of eight elements (64 bytes here), so the
-    # net live growth is that block less the released eight-byte one.
-    ('let main=():>int64=>{let values:array<int64>=[40] let before=_arena_live_bytes values.push(2) return if _arena_live_bytes-before =? 56 values[0]+values[1] else 0}', 42),
+    # net live growth is that block less the released eight-byte one. (A
+    # returned array is arena storage; a local literal starts in the frame.)
+    ('let make=():>array<int64>=>[40]\nlet main=():>int64=>{let values=make() let before=_arena_live_bytes values.push(2) return if _arena_live_bytes-before =? 56 values[0]+values[1] else 0}', 42),
+    # A local worklist literal grows within its frame slots without allocating.
+    ('let main=():>int64=>{let values:array<int64>=[40] let before=_arena_live_bytes values.push(2) return if _arena_live_bytes =? before values[0]+values[1] else 0}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40] let saved=values values.push(2) let reused=_arena_alloc(8) __store_i64__(99 reused) return saved[0]+values[1]}', 42),
     ('let identity=(values:array<int64>):>array<int64>=>values\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=__load_i64__(identity(values)) __store_i64__(99 pointer) return values[0]}', 42),
     ('Box:type=[values:array<int64>]\nlet identity=(box:Box):>Box=>box\nlet main=():>int64=>{let box=Box[[42]] let pointer=__load_i64__(identity(box).values) __store_i64__(99 pointer) return box.values[0]}', 42),

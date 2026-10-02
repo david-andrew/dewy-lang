@@ -145,6 +145,8 @@ State:type = [
     frame_boxes:dict<addr addr>=[]
     # Fixed scalar arrays proven local share reusable function-frame storage.
     frame_arrays:dict<addr ArrayMemory>=[]
+    # Frame-started growable worklists: their bindings keep ordinary cleanup.
+    frame_growables:set<addr>=set[]
     flow_views:set<addr>=set[]
     flow_literals:set<addr>=set[]
     flow_sources:set<addr>=set[]
@@ -682,7 +684,7 @@ expression = (id:addr @state:State):>addr => {
             if node.view return required_view_error(node @state)
             value=owned_value(node.expr @state "bound to `{node.name}`")
         }
-        if node.binding_id isnt? none and (node.binding_id in? state.frame_record_bindings or node.expr in? state.frame_arrays) {borrowed=true}
+        if node.binding_id isnt? none and (node.binding_id in? state.frame_record_bindings or node.expr in? state.frame_arrays and node.expr not in? state.frame_growables) {borrowed=true}
         # An addressed union local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
@@ -1531,7 +1533,7 @@ owned_record = (value:addr actual:addr expected:addr node:hir.AST @state:State):
     prefix.push(result)
     return put(hir.Block[node.loc runtime_type(expected node @state) prefix false] @state)
 }
-ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
+ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr> capacity:addr?=none]
 # Fresh descriptors and union cells are built by one generated helper per
 # program (`_new_array`, `_new_cell`) rather than an allocate-and-store
 # sequence at every construction site: the same work, a call's worth of
@@ -1631,9 +1633,13 @@ array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
 }
 frame_array_header=(memory:ArrayMemory length:addr stride:addr node:hir.AST @state:State):>array<addr>=>{
     # The frame owns the descriptor and data. Mutable writes need no COW
-    # detachment, and ordinary release must not free either frame block.
+    # detachment, and ordinary release must not free either frame block
+    # (owner 0); a growable worklist has spare frame capacity, and growth
+    # moves its data to an arena block that release then frees (owner 1).
     let prefix=memory.prefix.copy
-    let fields:array<addr>=[memory.data length length word(stride node @state) word(layouts.array_flags.mutable node @state) word(0 node @state)]
+    let spare=memory.capacity
+    let capacity=if spare is? none length else word(spare node @state)
+    let fields:array<addr>=[memory.data length capacity word(stride node @state) word(layouts.array_flags.mutable node @state) word(0 node @state)]
     let offset:addr=0
     loop value in fields {prefix.push(store_word(value memory.descriptor offset node @state)) offset+=8}
     return prefix
@@ -1979,7 +1985,13 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
     let owner=snapshot(read_word(source layouts.array_descriptor.owner node @state) @prefix @state)
     let shared:array<addr>=[store_word(word_op('__add__' owner word(1 node @state) node @state) source layouts.array_descriptor.owner node @state) source]
     # A descriptor from another `$allocator` region is copied, never shared.
-    let condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' compare('__ge__' owner word(1 node @state) node @state) shareable(source node @state)] @state)
+    # So is a frame descriptor whose worklist outgrew its frame slots (sole
+    # owner, no arena flag): the frame block dies with its function.
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let arena=compare('__ne__' word_op('__and__' read_word(source layouts.array_descriptor.flags node @state) word(layouts.array_flags.arena_descriptor node @state) node @state) word(0 node @state) node @state)
+    let counted_owner=put(hir.ShortCircuit[node.loc boolean 'or' compare('__gt__' owner word(1 node @state) node @state) arena] @state)
+    let counted=put(hir.ShortCircuit[node.loc boolean 'and' compare('__ge__' owner word(1 node @state) node @state) counted_owner] @state)
+    let condition=put(hir.ShortCircuit[node.loc boolean 'and' counted shareable(source node @state)] @state)
     let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) condition sequence(shared node @state)] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [arm] array_copy_storage(source type node @state)] @state))
     return sequence(prefix node @state)
@@ -5610,7 +5622,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
-    state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
+    state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[] state.frame_growables=set[]
     loop initializer in selected_literals {
         let literal=hir.node_at(state.input.nodes initializer)
         $runtime_assert literal is? hir.ArrayLiteral
@@ -5638,10 +5650,13 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         state.frame_records[initializer]=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
     }
     let frame_array_bindings:set<addr>=set[]
-    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments selected_reads=state.flow_sources) {
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments selected_reads=state.flow_sources growables=true consumed_values=state.consumed_arguments) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let initializer=placement.initializer(declaration.expr state.input.nodes state.input.types)
+        # A growable worklist's frame belongs to the literal inside its cast.
+        let grown=placement.growable_literal(declaration_id state.input.nodes state.type_nodes)
+        if grown isnt? none {initializer=grown}
         let literal=hir.node_at(state.input.nodes initializer)
         if object_valued(literal.value_type @state) {
             # No whole-value copy, capture or call can outlive this record.
@@ -5662,11 +5677,14 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         if layout is? layouts.Pending return reject(literal layout.detail @state)
         let name=fresh('array_frame' @state)
         let word_type=types.primitive('int64' @state.type_nodes)
-        let size=layouts.array_descriptor.size+type.length*layout.size
+        let grows=grown isnt? none
+        let slots=if grows placement.GROWABLE_SLOTS else type.length
+        let size=layouts.array_descriptor.size+slots*layout.size
         let allocated=intrinsic_call('__alloca__' [word(size literal @state)] word_type literal @state)
         prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
         let descriptor=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
-        state.frame_arrays[initializer]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) []]
+        state.frame_arrays[initializer]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) [] (if grows slots else none)]
+        if grows {state.frame_growables.push(initializer)}
         frame_array_bindings.push(binding)
     }
     loop binding in capture.locals {
