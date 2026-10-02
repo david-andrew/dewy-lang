@@ -1638,6 +1638,34 @@ frame_array_header=(memory:ArrayMemory length:addr stride:addr node:hir.AST @sta
     loop value in fields {prefix.push(store_word(value memory.descriptor offset node @state)) offset+=8}
     return prefix
 }
+# A non-empty literal of integer or string constants as one static
+# descriptor per site, with the static empty literal's owner count: release
+# only moves the count and never frees it, and any mutation detaches a
+# private copy first. Only for consumers that never own the value.
+static_array = (argument:addr @state:State):>addr? => {
+    let id=moves.peel(argument state.input.nodes)
+    let node=hir.node_at(state.input.nodes id)
+    if node isnt? hir.ArrayLiteral or node.items.length =? 0 or state.allocator is? none or id in? state.frame_arrays return none
+    # The peeled casts must keep the array representation; a literal passed
+    # to an optional or union parameter is wrapped, never bare.
+    let type=array_type(hir.node_at(state.input.nodes argument).value_type state)
+    if type is? none return none
+    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    if layout is? layouts.Pending or layout.size not=? 8 return none
+    let strings=owned_string(type.element state)
+    let words:array<addr>=[]
+    loop item in node.items {
+        # Literal elements arrive cast to the element type.
+        let value=hir.node_at(state.input.nodes moves.peel(item state.input.nodes))
+        if strings and value is? hir.String {words.push(string_literal(value @state))}
+        else if not strings and value is? hir.Integer and views.fixed_integer_layout(views.structural_base(type.element state.type_nodes) state.type_nodes) isnt? none {words.push(word(value.value node @state))}
+        else return none
+    }
+    let data=intrinsic_call('__static_words__' words types.primitive('int64' @state.type_nodes) node @state)
+    let count=word(node.items.length node @state)
+    let descriptor=[data count count word(8 node @state) word(layouts.array_flags.mutable node @state) word(4611686018427387904 node @state)]
+    return intrinsic_call('__static_words__' descriptor types.primitive('int64' @state.type_nodes) node @state)
+}
 array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     let type=array_type(node.value_type state)
     $runtime_assert type isnt? none
@@ -5384,6 +5412,13 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
     if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
+    # A constant literal the caller keeps (the callee only reads it) is
+    # built once, as static data: `name in? ['push' 'pop']` no longer
+    # allocates per call.
+    if argument in? disposable or argument in? borrowed or argument in? reclaimable {
+        let constant=static_array(argument @state)
+        if constant isnt? none return snapshot(constant @prefix @state)
+    }
     if argument in? borrowed {
         let source=hir.node_at(state.input.nodes argument)
         if source is? hir.ForwardingAccess and storage_borrows.common_array_field(source state.input.nodes state.type_nodes) {
