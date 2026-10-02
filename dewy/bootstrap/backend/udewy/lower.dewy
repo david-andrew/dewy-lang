@@ -115,6 +115,7 @@ State:type = [
     scoped_views:set<addr>=set[]
     # The default a viewing `get` kept alive; its caller releases it later.
     kept_fallback:addr?=none
+    kept_fallback_type:addr?=none
     # Functions that may keep a value beyond an `$allocator` block that
     # calls them (computed once, when a block needs it).
     allocator_hazards:set<addr>=set[]
@@ -454,9 +455,12 @@ expression = (id:addr @state:State):>addr => {
             # The explicit copy is the only one: copy the stored element (or
             # the kept default) rather than a lookup result made to own it.
             if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
-            let viewed=dict_lookup(receiver @state view=true)
-            keep_fallback(hir.node_at(state.input.nodes receiver.default).value_type @state)
-            return copy_value(viewed node.value_type node @state)
+            let prefix:array<addr>=[]
+            let viewed=snapshot(dict_lookup(receiver @state view=true) @prefix @state)
+            let copied=snapshot(copy_value(viewed node.value_type node @state) @prefix @state)
+            drop_fallback(node @prefix @state)
+            prefix.push(copied)
+            return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
         }
         if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
         if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
@@ -6300,6 +6304,9 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
                 let route=borrowing.route(source.dictionary state.input.nodes)
                 let kept=route isnt? none and (borrowing.stable_owner(route state.stable_bindings state.stable_parameters) or loop_keeps(route state))
                 parts=dict_parts(source.dictionary @prefix @state view=kept)
+                # A viewed lookup's default lives as long as the loop reads it.
+                let kept_type=state.kept_fallback_type
+                if state.kept_fallback isnt? none and kept_type isnt? none {keep_fallback(kept_type @state)}
                 prefix.push(dict_ensure(parts node @state compact=true))
                 sources[source.dictionary]=parts
                 if parts.owner_type isnt? none {
@@ -6914,9 +6921,10 @@ dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false m
     $runtime_assert entries isnt? none
     # A defaulted `get` the caller proved stable for this read: the stored
     # record (or its kept default) serves the operation without a copy.
+    # The caller keeps or drops the lookup's default (`state.kept_fallback`)
+    # according to how long it reads the result.
     if view and not copy and not mutate and source is? hir.DictLookup and source.default isnt? none and default_view_lookup(source @state) and dictionary not in? state.array_snapshots {
         let pointer=snapshot(dict_lookup(source @state view=true) @prefix @state)
-        keep_fallback(hir.node_at(state.input.nodes source.default).value_type @state)
         return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value none]
     }
     # A field of a fresh record (`layout(...).offsets.get(k)`): the call's
@@ -6965,6 +6973,13 @@ dict_entry_slot=(node:hir.DictLookup @prefix:array<addr> @state:State):>addr=>{
 # Container operations retain a temporary receiver until their result has
 # been materialized. Iteration instead keeps this owner for the whole arm.
 # Release a viewing `get`'s kept default when the current cleanup frame ends.
+# A view read by one operation: release the kept default once it has its result.
+drop_fallback = (node:hir.AST @prefix:array<addr> @state:State):>void => {
+    let kept=state.kept_fallback
+    let type=state.kept_fallback_type
+    state.kept_fallback=none
+    if kept isnt? none and type isnt? none {prefix.push(release_value(kept type node @state))}
+}
 keep_fallback = (type:addr @state:State):>void => {
     let kept=state.kept_fallback
     state.kept_fallback=none
@@ -7251,6 +7266,7 @@ dict_contains = (node:hir.DictContains @state:State):>addr => {
     prefix.push(dict_ensure(parts node @state))
     let probe=dict_probe(parts key node @prefix @state)
     if key_view is? none {prefix.push(release_value(key parts.key node @state))}
+    drop_fallback(node @prefix @state)
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) probe.position] @state))}
     return finish_dictionary(probe.found parts node @prefix @state)
 }
@@ -7296,6 +7312,8 @@ dict_lookup = (node:hir.DictLookup @state:State view:bool=false):>addr => {
             # The stored element is read in place; the default stays alive
             # until the caller's view ends (see `keep_fallback`).
             state.kept_fallback=fallback
+            let default_id=node.default
+            if default_id isnt? none {state.kept_fallback_type=hir.node_at(state.input.nodes default_id).value_type}
         } else {
             let selected:array<addr>=[]
             let kind=copy_kind(parts.value @state)

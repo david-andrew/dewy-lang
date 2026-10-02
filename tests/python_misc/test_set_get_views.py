@@ -56,7 +56,23 @@ main=():>int64=>{
     return if total =? 46 and tables.get(1 []).length =? 0 42 else 1
 }
 '''
-CASES = [VIEWED, REPLACED, PAIRS]
+# A viewed lookup inside a conditional operand: its default is released by
+# that operand, where it was evaluated, not by the enclosing statement.
+NESTED = '''$explicit_copies
+count=(users:dict<int64 set<int64>> name:int64 probe:int64):>int64=>{
+    let total:int64=name
+    if total >? 0 and probe in? users.get(name set[]) {total+=100}
+    let copied:set<int64>=if probe >? 0 users.get(name set[]).copy else set[]
+    return total+copied.length*1000
+}
+main=():>int64=>{
+    let users:dict<int64 set<int64>>=[]
+    users[1]=set[2 3]
+    let ok=count(users 1 3) =? 2101 and count(users 9 3) =? 9 and count(users 1 0) =? 1
+    return if ok 42 else 1
+}
+'''
+CASES = [VIEWED, REPLACED, PAIRS, NESTED]
 ERRORS = ['$explicit_copies\n' + REPLACED]
 
 
