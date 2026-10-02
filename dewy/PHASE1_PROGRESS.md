@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,23 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Immutable bigints (2026-10-02)
+
+David decided that bigints are immutable values (ROADMAP, decided
+2026-10-02). The library already builds every result rather than editing an
+existing value. `BigInt` is now `0 | const [sign limbs]`: writes to `sign` or
+`limbs` are refused as writes to an immutable record. Copying a bigint is a
+bounded share under `$explicit_copies` in both compilers. Reusing a dying
+bigint's storage for its successor is recorded as the follow-on direction.
+
+Evidence:
+- `test_bigint_word_conversion` now expects component writes to be refused.
+- `test_scoped_union_argument_loans` keeps its accepted `bigint?` loans. Its
+  unproven-loan errors now use a writable `array<int64>|none` payload, since
+  a bigint copy is no longer costly.
+- C2 probe: 1,112 → 914 native rejections.
+- Local gate: 6,334 passed; the three failures were these expectations.
 
 ## Semantic composition and library boundary regressions (2026-09-30)
 

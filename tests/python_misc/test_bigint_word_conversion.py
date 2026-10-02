@@ -71,9 +71,11 @@ def test_unproven_bigint_word_boundaries_are_rejected(body):
         codegen(SrcFile(None, f'let f = (x:bigint):>int64 => {{ {body} }}'))
 
 
+# A bigint is an immutable value (David, 2026-10-02): its library builds
+# new values, and nothing writes the components of an existing one.
 @pytest.mark.parametrize('write', ['x.sign = -1', 'x.limbs[0] = 256', 'x.limbs.push(1)'])
-def test_component_writes_invalidate_the_containing_integer(write):
-    with pytest.raises(UserError, match='integer.*fit'):
+def test_component_writes_are_refused(write):
+    with pytest.raises(UserError, match='immutable record'):
         codegen(SrcFile(None, f'''let f = (x:bigint):>uint8 => {{
     if x =? 0 return 0
     if x <? 1 or x >? 127 return 0

@@ -23,10 +23,15 @@ make=():>Box=>Box[[20 22]]
 read=(box:Box?):>int64=>if box is? none 0 else box.items.length+40
 main=():>int64=>{let box=make() return read(box)}''',
 ]
+# An immutable `bigint` payload is shared, never a costly copy. A writable
+# payload keeps the copy whenever the loan cannot be proven.
+WRITABLE = (SOURCE.replace('bigint?', 'array<int64>|none').replace('Bounds[42 42]', 'Bounds[[42] [42]]')
+            .replace('return a=?b', 'return a.length=?b.length'))
+CASES.append(WRITABLE)
 ERRORS = [
-    SOURCE.replace('return a=?b', 'a=7\n    return a=?b'),
-    SOURCE.replace('same=(a:bigint? b:bigint?)', 'same=(a:bigint? b:bigint? ignored:int64)')
-          .replace('main=', 'alter=(@value:Bounds?):>int64=>{if value is? none return 0 value.lower=7 return 0}\nmain=')
+    WRITABLE.replace('return a.length=?b.length', 'a=[7 7]\n    return a.length=?b.length'),
+    WRITABLE.replace('same=(a:array<int64>|none b:array<int64>|none)', 'same=(a:array<int64>|none b:array<int64>|none ignored:int64)')
+          .replace('main=', 'alter=(@value:Bounds?):>int64=>{if value is? none return 0 value.lower=[7 7] return 0}\nmain=')
           .replace('same(interval.lower interval.upper)', 'same(interval.lower interval.upper alter(@interval))'),
 ]
 # Without strict mode the conflicting later write must still produce a

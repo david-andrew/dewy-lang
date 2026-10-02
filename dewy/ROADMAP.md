@@ -529,6 +529,26 @@ effects while measuring first-touch scans, metadata allocation and owner retenti
 The capacity representation/failure policy remains a design choice, not a claim
 that the current code already handles the boundary.
 
+**Decided 2026-10-02 (David):**
+- *Bigints are immutable values.* The library already builds every result
+  rather than editing an existing value, so `BigInt` is `0 | const [sign
+  limbs]`: component writes are refused, and copying a bigint is a bounded
+  share under `$explicit_copies`. Direction: when an operation consumes a
+  bigint that dies there and produces one with mostly the same parts, reuse
+  the dying value's storage (for example a `push` on its limbs) instead of
+  allocating a fresh value. This is ownership-driven reuse, never in-place
+  mutation of a value someone can still observe.
+- *Strings use tiered internal representations* with identical semantics:
+  - tiny strings packed in one word;
+  - small strings (under about 1 KiB) in frame storage where placement
+    allows;
+  - larger strings with 32-bit grapheme offsets up to 4 GiB;
+  - 64-bit offsets beyond 4 GiB. Offsets beyond 64 bits are moot on current
+    machines.
+
+  The 64-bit tier is the repair for the metadata-capacity hazard above: it
+  replaces the fallback that caches a grapheme count of zero.
+
 **Temporary caches:** the hosted executable shortcut can choose the same artifact
 for different requested targets. Bypass/remove it wherever it obstructs target
 checks, certification, dogfooding or measurements; a small guard is sufficient

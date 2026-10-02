@@ -7,7 +7,7 @@
 # zero limbs (`_bigint_from_limbs` is the only place limbs are packed).
 # Operations are ordinary Dewy functions; the checker only routes
 # `+ - * // % ^` and comparisons here and promotes integer operands.
-let BigInt:type = 0 | [sign:-1|1 limbs:array<uint64 length >? 0>]
+let BigInt:type = 0 | const [sign:-1|1 limbs:array<uint64 length >? 0>]
 
 # Representation constants are immutable startup values, including the
 # shared magnitude for one. Working arithmetic values keep their own owners.
