@@ -626,7 +626,10 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                 else:
                     unsafe_places.add(id(arg))
     safe_places -= unsafe_places
-    excluded_owners = captured | exposed | places
+    # A place parameter no ambient alias names (`stable_parameters`) changes
+    # only through this function's own writes and places, which the view's
+    # region scan checks like a local's.
+    excluded_owners = captured | exposed | {binding for binding in places if binding not in plan.stable_parameters}
     for function in plan.functions.values():
         view_candidates = set()
         for node in _walk_function(function.literal):

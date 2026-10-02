@@ -66,6 +66,8 @@ State:type = [
     # Identifier uses that move their local (moves.compute), and the locals
     # they empty, which must be declared `let` for the emptying store.
     moved_uses:set<addr>=set[]
+    # Field uses inside a call that also lends their root as a place.
+    place_conflicts:set<addr>=set[]
     return_borrow_sources:dict<addr addr>=[]
     module_startup:bool=false
     moved_bindings:set<addr>=set[]
@@ -1122,6 +1124,50 @@ take_array_slot=(slot:addr array:types.ArrayType node:hir.AST origin:string @sta
         node.loc state.source_index false true true])
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }
+# A place lent to a call ends when it returns, so a field of a place-lent
+# local moves at its last use unless that use is inside a call that also
+# lends the local: the callee would see the emptied field.
+field_movable = (binding:addr use:addr state:State):>bool => binding not in? state.addressed or use not in? state.place_conflicts
+place_conflicts = (body:addr nodes:array<hir.AST>):>set<addr> => {
+    let result:set<addr>=set[]
+    let pending:array<addr>=[body]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.FunctionCall {
+            let lent:set<addr>=set[]
+            let inner=borrowing.arguments(node)
+            loop argument in inner {
+                let value=hir.node_at(nodes argument)
+                if value is? hir.Place {
+                    let binding=captures.root_binding(value.target nodes)
+                    if binding isnt? none {lent.push(binding)}
+                }
+            }
+            loop inner.length >? 0 and lent.length >? 0 {
+                let part=inner.pop
+                let child=hir.node_at(nodes part)
+                if child is? hir.FunctionLiteral continue
+                if child is? hir.MemberAccess|hir.Index {
+                    let binding=captures.root_binding(part nodes)
+                    if binding isnt? none and binding in? lent {result.push(part)}
+                }
+                hir.push_children(child @inner)
+            }
+        }
+        hir.push_children(node @pending)
+    }
+    return result
+}
+
+# A `const` global no function writes or exposes: its storage outlives
+# every call, so a read-only view of it needs no copy and no cleanup.
+static_global = (id:addr @state:State):>bool => {
+    let node=hir.node_at(state.input.nodes id)
+    return node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? state.capture_plan.constants and node.binding_id in? state.stable_bindings
+}
+
 owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if site =? 'returned' and state.result_projection is? none and node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? state.return_borrow_sources {
@@ -1199,7 +1245,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         let same_payload=if cell_result cell_read_keeps_handle(stored_cell node.value_type @state) else payload_movable(stored_cell node.value_type node @state)
         if valid and cell_members(stored_cell @state) isnt? none and same_payload and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
             let binding=owner.binding_id
-            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and storage_borrows.borrowable(owner.value_type state.type_nodes) {
+            if binding in? state.cleanup_owned and field_movable(binding id state) and storage_borrows.borrowable(owner.value_type state.type_nodes) {
                 let prefix:array<addr>=[]
                 let source=snapshot(field_pointer(node @state writable=true) @prefix @state)
                 let result=snapshot(if cell_result allocation(word(16 node @state) node @state) else read_word(source 8 node @state) @prefix @state)
@@ -1220,7 +1266,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # inline storage remains valid for its enclosing owner's cleanup.
         if valid and inline_record(node.value_type @state) and types.same_type(stored_type(id @state) node.value_type state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
             let binding=owner.binding_id
-            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and storage_borrows.borrowable(owner.value_type state.type_nodes) and record_transferable(node.value_type @state) {
+            if binding in? state.cleanup_owned and field_movable(binding id state) and storage_borrows.borrowable(owner.value_type state.type_nodes) and record_transferable(node.value_type @state) {
                 let prefix:array<addr>=[]
                 let source=snapshot(field_pointer(node @state writable=true) @prefix @state)
                 let result=snapshot(record_allocation(object_layout(node.value_type node @state) node @state) @prefix @state)
@@ -1236,7 +1282,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # layout. Element representation must still match the stored array.
         if valid and array isnt? none and stored isnt? none and types.same_type(array.element stored.element state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
             let binding=owner.binding_id
-            if binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed {
+            if binding in? state.cleanup_owned and field_movable(binding id state) {
                 # Keep the record root for normal cleanup of the untouched
                 # fields. The selected descriptor now has exactly one owner.
                 let prefix:array<addr>=[]
@@ -5472,7 +5518,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                     let exposed=hir.node_at(state.input.nodes argument).value_type
                     if aggregate(exposed @state) and not array_valued(exposed state) and not owned_string(exposed state) {enabled=false}
                 }
-                loop argument in current.pos_args {mark_mutated(argument @mutated state)}
+                # A checked read-only loan's raw reads leave the owner unchanged.
+                if not current.scoped_read {loop argument in current.pos_args {mark_mutated(argument @mutated state)}}
             }
         }
         hir.push_children(current @pending)
@@ -5614,6 +5661,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     }
     let moves_started=timing.start(state.timings)
     state.moved_uses=if enabled moves.compute(id state.input.nodes state.type_nodes borrow_dependents donations=state.consumed_arguments parameters=state.owned_parameters) else set[]
+    state.place_conflicts=if enabled place_conflicts(node.body state.input.nodes) else set[]
     timing.accumulate(@state.move_time moves_started)
     note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]
@@ -5643,6 +5691,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         if owned and (not enabled or (argument.binding_id isnt? none and argument.binding_id in? excluded)) return reject(node 'an owning parameter without a proven cleanup lifetime' @state)
         let private=owned or boxed or releasable(argument.value_type @state) and argument.binding_id isnt? none and (argument.binding_id in? rebound or (argument.binding_id in? mutated and array_valued(argument.value_type state)) or whole)
         let condition:addr?=none
+        let static_default=argument is? hir.BoundParam and not private and static_global(argument.value @state)
         if argument is? hir.BoundParam {
             let incoming=fresh('incoming' @state)
             let present=fresh('present' @state)
@@ -5655,7 +5704,9 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                 note_parameter_copy(argument boxed rebound mutated written node @state)
                 supplied=copy_value(supplied argument.value_type node @state shared=whole)
             }
-            let default=owned_value(argument.value @state)
+            # A read-only parameter whose default names a stable `const`
+            # global views that global, as an explicit argument would.
+            let default=if static_default expression(argument.value @state) else owned_value(argument.value @state)
             let arm=put(hir.IfArm[node.loc type present_value supplied] @state)
             let selected=put(hir.Flow[node.loc type [arm] default] @state)
             if boxed {selected=box_value(selected argument.value_type node @state binding=argument.binding_id) type=types.primitive('int64' @state.type_nodes)}
@@ -5675,7 +5726,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         # still owned by its caller. Boxed/rebound parameters own their local
         # copy on both paths. The condition is the existing ABI presence bit.
         let framed=argument.binding_id isnt? none and argument.binding_id in? state.frame_boxes
-        if enabled and (private or argument is? hir.BoundParam) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded and (not framed or releasable(argument.value_type @state))) {
+        if enabled and (private or argument is? hir.BoundParam and not static_default) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded and (not framed or releasable(argument.value_type @state))) {
             let value=put(hir.ExpressedIdentifier[node.loc type name argument.binding_id] @state)
             let box:addr?=none
             if boxed {
@@ -6069,15 +6120,26 @@ iteration_snapshot = (id:addr @state:State):>bool => {
     if temporary_owner(id @state) or iterated_view(id @state) return false
     let route=borrowing.route(id state.input.nodes)
     if route is? none or borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return false
+    return not loop_keeps(route state)
+}
+# Whether nothing the current loop runs can replace or free storage at a
+# route: the value it had on entry stays in place for the whole loop.
+loop_keeps = (route:borrowing.Route state:State):>bool => {
     let body=state.iterated_body
-    if body is? none return true
+    if body is? none return false
     # A later multi-iterator source is evaluated after this route, before
     # the first body. Its writes must not invalidate the earlier value.
-    if state.iterated_condition isnt? none and not borrowing.iterator_body_stable(state.iterated_condition route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return true
-    if borrowing.iterator_body_stable(body route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return false
-    # An owner other code can reach may change through any call in the body.
-    if route.binding in? state.boxed or route.binding in? state.place_parameters or route.binding in? state.capture_plan.globals return true
-    return writes_binding(body route.binding state)
+    if state.iterated_condition isnt? none and not borrowing.iterator_body_stable(state.iterated_condition route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return false
+    if borrowing.iterator_body_stable(body route state.iterator_private state.input.nodes state.type_nodes state.capture_plan) return true
+    # A global may change through any call in the body. A place parameter is
+    # reached only through this function's own writes and places, unless an
+    # ambient alias may name it (`stable_parameters` excludes those); its box
+    # is merely how the place is passed. A boxed local likewise: places never
+    # outlive their call and captured writes are rejected.
+    if route.binding in? state.place_parameters {
+        if route.binding not in? state.stable_parameters return false
+    } else if route.binding in? state.capture_plan.globals return false
+    return not writes_binding(body route.binding state)
 }
 # Whether a subtree writes, lends or mutates storage rooted at a binding.
 writes_binding = (root:addr binding:addr state:State):>bool => {
@@ -6100,7 +6162,10 @@ iterated_view = (id:addr @state:State):>bool => {
     let node=hir.node_at(state.input.nodes id)
     if not default_view_lookup(node @state) or id in? state.array_snapshots return false
     let route=borrowing.route(id state.input.nodes)
-    return route isnt? none and route.binding not in? state.boxed and borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
+    if route is? none return false
+    if route.binding not in? state.boxed and borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return true
+    # A dictionary only this loop could change, and does not.
+    return loop_keeps(route state)
 }
 # An iterator only reads the entries of `d.keys` / `d.values` / `s.values`.
 # Reuse a stable owner's live entries instead of constructing the ordinary

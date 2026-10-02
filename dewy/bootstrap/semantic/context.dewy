@@ -71,7 +71,8 @@ CheckState:type = [
     brands:brands.Registry=brands.Registry[]
     # Unit-like error mints are named primitive types, not object brands.
     error_types:set<addr>=set[]
-    links:subtyping.Graph=subtyping.default_links
+    # Each session extends its own copy with the program's nominal links.
+    links:subtyping.Graph=subtyping.default_links.copy
     builtin_aliases:dict<string addr>=[]
     pending_aliases:dict<addr PendingAlias>=[]
     resolving_aliases:set<addr>=set[]
@@ -99,39 +100,40 @@ Session:type = CheckState & [
     syntax_refs_indexed:addr=0
 ]
 Checkpoint:type = const [state:CheckState syntax_refs:addr types:addr hir:addr edits:addr]
+# A checkpoint is an independent snapshot of the session's mutable state.
 checkpoint = (session:Session):>Checkpoint => {
     let state=CheckState[
-        local_place_roots=session.local_place_roots
-        local_view_probes=session.local_view_probes
-        warnings=session.warnings
-        pending_brand_matches=session.pending_brand_matches
-        read_states=session.read_states
-        retained_read_states=session.retained_read_states
-        value_keys=session.value_keys
-        return_collectors=session.return_collectors
-        prepared_imports=session.prepared_imports
+        local_place_roots=session.local_place_roots.copy
+        local_view_probes=session.local_view_probes.copy
+        warnings=session.warnings.copy
+        pending_brand_matches=session.pending_brand_matches.copy
+        read_states=session.read_states.copy
+        retained_read_states=session.retained_read_states.copy
+        value_keys=session.value_keys.copy
+        return_collectors=session.return_collectors.copy
+        prepared_imports=session.prepared_imports.copy
         next_key_position=session.next_key_position
-        hoisted=session.hoisted
-        constructors=session.constructors
-        methods=session.methods
-        hidden_bindings=session.hidden_bindings
-        prelude_outputs=session.prelude_outputs
-        object_strings=session.object_strings
-        preparing_methods=session.preparing_methods
-        prepared_methods=session.prepared_methods
-        registry=session.registry
-        scopes=session.scopes
-        brands=session.brands
-        error_types=session.error_types
-        links=session.links
-        builtin_aliases=session.builtin_aliases
-        pending_aliases=session.pending_aliases
-        resolving_aliases=session.resolving_aliases
-        named_refs=session.named_refs
+        hoisted=session.hoisted.copy
+        constructors=session.constructors.copy
+        methods=session.methods.copy
+        hidden_bindings=session.hidden_bindings.copy
+        prelude_outputs=session.prelude_outputs.copy
+        object_strings=session.object_strings.copy
+        preparing_methods=session.preparing_methods.copy
+        prepared_methods=session.prepared_methods.copy
+        registry=session.registry.copy
+        scopes=session.scopes.copy
+        brands=session.brands.copy
+        error_types=session.error_types.copy
+        links=session.links.copy
+        builtin_aliases=session.builtin_aliases.copy
+        pending_aliases=session.pending_aliases.copy
+        resolving_aliases=session.resolving_aliases.copy
+        named_refs=session.named_refs.copy
         capture_pairs=session.capture_pairs
-        proof_literals=session.proof_literals
-        proof_markers=session.proof_markers
-        unsafe_assertions=session.unsafe_assertions
+        proof_literals=session.proof_literals.copy
+        proof_markers=session.proof_markers.copy
+        unsafe_assertions=session.unsafe_assertions.copy
     ]
     return Checkpoint[state session.syntax_refs.length session.types.entries.length session.hir.length session.hir_edits.length]
 }
@@ -161,36 +163,38 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     }
     session.syntax_refs.truncate(checkpoint.syntax_refs)
     if session.syntax_refs_indexed >? session.syntax_refs.length {session.syntax_refs_indexed=session.syntax_refs.length}
-    session.local_place_roots=checkpoint.state.local_place_roots
-    session.local_view_probes=checkpoint.state.local_view_probes
-    session.warnings=checkpoint.state.warnings
-    session.pending_brand_matches=checkpoint.state.pending_brand_matches
-    session.read_states=checkpoint.state.read_states
-    session.retained_read_states=checkpoint.state.retained_read_states
-    session.value_keys=checkpoint.state.value_keys
-    session.return_collectors=checkpoint.state.return_collectors
-    session.prepared_imports=checkpoint.state.prepared_imports
+    # One checkpoint may be restored more than once (each reading of an
+    # ambiguous expression starts from it), so restoring copies its state.
+    session.local_place_roots=checkpoint.state.local_place_roots.copy
+    session.local_view_probes=checkpoint.state.local_view_probes.copy
+    session.warnings=checkpoint.state.warnings.copy
+    session.pending_brand_matches=checkpoint.state.pending_brand_matches.copy
+    session.read_states=checkpoint.state.read_states.copy
+    session.retained_read_states=checkpoint.state.retained_read_states.copy
+    session.value_keys=checkpoint.state.value_keys.copy
+    session.return_collectors=checkpoint.state.return_collectors.copy
+    session.prepared_imports=checkpoint.state.prepared_imports.copy
     session.next_key_position=checkpoint.state.next_key_position
-    session.hoisted=checkpoint.state.hoisted
-    session.constructors=checkpoint.state.constructors
-    session.methods=checkpoint.state.methods
-    session.hidden_bindings=checkpoint.state.hidden_bindings
-    session.object_strings=checkpoint.state.object_strings
-    session.preparing_methods=checkpoint.state.preparing_methods
-    session.prepared_methods=checkpoint.state.prepared_methods
-    session.registry=checkpoint.state.registry
-    session.scopes=checkpoint.state.scopes
-    session.brands=checkpoint.state.brands
-    session.error_types=checkpoint.state.error_types
-    session.links=checkpoint.state.links
-    session.builtin_aliases=checkpoint.state.builtin_aliases
-    session.pending_aliases=checkpoint.state.pending_aliases
-    session.resolving_aliases=checkpoint.state.resolving_aliases
-    session.named_refs=checkpoint.state.named_refs
+    session.hoisted=checkpoint.state.hoisted.copy
+    session.constructors=checkpoint.state.constructors.copy
+    session.methods=checkpoint.state.methods.copy
+    session.hidden_bindings=checkpoint.state.hidden_bindings.copy
+    session.object_strings=checkpoint.state.object_strings.copy
+    session.preparing_methods=checkpoint.state.preparing_methods.copy
+    session.prepared_methods=checkpoint.state.prepared_methods.copy
+    session.registry=checkpoint.state.registry.copy
+    session.scopes=checkpoint.state.scopes.copy
+    session.brands=checkpoint.state.brands.copy
+    session.error_types=checkpoint.state.error_types.copy
+    session.links=checkpoint.state.links.copy
+    session.builtin_aliases=checkpoint.state.builtin_aliases.copy
+    session.pending_aliases=checkpoint.state.pending_aliases.copy
+    session.resolving_aliases=checkpoint.state.resolving_aliases.copy
+    session.named_refs=checkpoint.state.named_refs.copy
     session.capture_pairs=checkpoint.state.capture_pairs
-    session.proof_literals=checkpoint.state.proof_literals
-    session.proof_markers=checkpoint.state.proof_markers
-    session.unsafe_assertions=checkpoint.state.unsafe_assertions
+    session.proof_literals=checkpoint.state.proof_literals.copy
+    session.proof_markers=checkpoint.state.proof_markers.copy
+    session.unsafe_assertions=checkpoint.state.unsafe_assertions.copy
 }
 
 # Branch environments live only while checking their enclosing flow/body.

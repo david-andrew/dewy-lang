@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints |
+| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,76 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict-copy proofs: loops, defaults, loans, field moves, `get` views (2026-10-02)
+
+C2 work toward strict copies in every compiler module, by proof or necessary
+restructuring rather than annotation. Native rejections: 914 → 814. Hosted:
+1,116 → 851. Spelling the checkpoint and restore snapshots `.copy` then
+removes about 60 more in each compiler.
+
+Proofs (both compilers unless noted):
+- **Loops over place-reached storage.** A loop over a place parameter, or
+  over a local lent as a place before the loop, borrows its source when the
+  loop body cannot write it. Places never outlive their call, and captured
+  writes are rejected. Native had snapshotted every boxed local; hosted
+  already used its per-call scan.
+- **`const` global defaults.** A read-only parameter whose default names a
+  stable `const` global views that global, as an explicit argument does.
+  Neither path releases it (hosted marks the parameter never-owned). The
+  `subtyping.default_links` parameter defaults were the compiler's copies.
+- **Read-only loans (native).** A `$lend(bytes)` body's checked raw reads
+  (`scoped_read`) no longer make a parameter private. Hosted already treated
+  them as reads, so the `library/linux` write wrappers borrow their bytes.
+- **Field moves from place-lent locals (native).** A field of a local lent
+  as a place moves at its last use, unless that use is inside a call that
+  also lends the local (`place_conflicts`). This matches hosted, for example
+  the generated cache encoder's `return output.bytes`.
+- **Hosted miscompile fixed.** Hosted moved such a field even inside the
+  lending call. In `take(@w G[w.bytes])` the callee saw `w.bytes` emptied
+  whenever it had arena storage. Both compilers now share the same-call
+  conflict rule. `test_place_lent_field_moves` exercises the arena case.
+- **`get` views.**
+  - Native: a loop over `d.get(k default)` views the stored array when the
+    loop cannot change `d`, even if the function writes it elsewhere.
+  - Both: a local bound to such a lookup is a scoped view when nothing in
+    its lifetime can change the dictionary, including a place parameter no
+    ambient alias names (`stable_parameters`).
+  - Hosted: now views a defaulted lookup whose default is an empty array
+    literal. Native also keeps a general eagerly evaluated default.
+
+Restructurings (no annotations):
+- `.copy` where a copy is intended:
+  - the session snapshot a checkpoint takes, and its restoration, which can
+    run more than once (each reading of an ambiguous expression);
+  - a session's own nominal-link graph;
+  - the bounds checker's graph, taken once rather than a default copy
+    followed by an overwrite;
+  - template and scratch tables;
+  - snapshots taken before mutation;
+  - per-file test arguments.
+- `linear_facts` scales the non-constant operand through a helper instead of
+  binding either operand.
+- Report rendering no longer mutates the report: demoted pointer messages
+  join a render-local note list, and the drawn pointers are kept as indexes.
+  Pointer segmentation is a module helper both compilers resolve statically
+  (the `segments_of` member forwards to it).
+
+Evidence:
+- `test_place_iterator_loans`: iterating one place parameter while
+  clearing another is now accepted. Two places of one call never overlap,
+  and a stable place parameter has no ambient alias. The test and parity
+  fixture `place_iterator_loans_4` were updated; the 2026-09-29 snapshot was
+  conservative.
+- New tests:
+  - `test_place_parameter_iteration` (lent locals);
+  - `test_static_global_defaults`;
+  - `test_place_lent_field_moves`;
+  - `test_get_loop_views`;
+  - the lent-parameter case in `test_scoped_storage`.
+- Each is hosted and native, and each has a strict-error twin where a copy
+  must remain.
+- Local gate: 6,360 passed. The two failures were that expectation.
 
 ## Immutable bigints (2026-10-02)
 

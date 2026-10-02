@@ -48,12 +48,12 @@ form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr
         let left_constant=a.coefficients.length=?0 or (a.number.lower isnt? none and ranges.same_endpoint(a.number.lower a.number.upper))
         let right_constant=b.coefficients.length=?0 or (b.number.lower isnt? none and ranges.same_endpoint(b.number.lower b.number.upper))
         if not left_constant and not right_constant return none
-        let constant=if a.coefficients.length=?0 or (b.coefficients.length>?0 and left_constant) a else b
-        let base=if a.coefficients.length=?0 or (b.coefficients.length>?0 and left_constant) b else a
-        let scale=if constant.coefficients.length=?0 constant.constant else constant.number.lower
+        let constant_left=a.coefficients.length=?0 or (b.coefficients.length>?0 and left_constant)
+        # The constant operand is only read: its scale is a constant term or its exact value.
+        let scale=if constant_left (if a.coefficients.length=?0 a.constant else a.number.lower) else (if b.coefficients.length=?0 b.constant else b.number.lower)
         $runtime_assert scale isnt? none
-        loop entry in base.coefficients {if scale*entry.weight not=?0 {result.push(Coefficient[entry.term scale*entry.weight])}}
-        return Form[scale*base.constant result number]
+        let terms=if constant_left scaled(b.coefficients scale) else scaled(a.coefficients scale)
+        return Form[scale*(if constant_left b.constant else a.constant) terms number]
     }
     let scale:bigint=if operation=?'__add__' 1 else -1
     let merged=a.coefficients
@@ -63,12 +63,19 @@ form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr
     return Form[a.constant+scale*b.constant result number]
 }
 
+# The other operand's terms of a product with a constant, without zeros.
+scaled=(coefficients:array<Coefficient> scale:bigint):>array<Coefficient>=>{
+    let result:array<Coefficient>=[]
+    loop entry in coefficients {if scale*entry.weight not=?0 {result.push(Coefficient[entry.term scale*entry.weight])}}
+    return result
+}
+
 # Pair opposite coefficients using established difference paths, then use
 # ordinary endpoint bounds for the unmatched terms. This greedy selection is
 # deliberately incomplete. Each contribution has a concrete evidence path;
 # failure to find a pairing never establishes the opposite predicate.
 lower=(value:Form sign:bigint state:facts.State context:relations.Context):>ranges.Interval=>{
-    let remaining=value.coefficients
+    let remaining=value.coefficients.copy
     loop i in 0.. and i<?remaining.length {remaining[i].weight*=sign}
     let result=sign*value.constant
     let capped=value.number.capped

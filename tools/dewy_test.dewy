@@ -73,7 +73,7 @@ let run_directory = (directory:string json:bool command:array<string>):>int64 =>
         # the module prints its marks after the name: `tests/x.dewy ...F.`
         if not json { print"{file} " }
         # `env` searches PATH for the explicitly supplied compiler command.
-        let test_args=command
+        let test_args=command.copy
         if json { test_args.push("--json") } else { test_args.push("--brief") }
         test_args.push(file)
         let failures:int64 = 0

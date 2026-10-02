@@ -976,7 +976,8 @@ class _FlowLowering:
             # lives on (a binding, a field), as `let t = x` copies
             if isinstance(item_type, ty.ObjectType) and self._object_expression_owns_fresh_storage(item):
                 return self._extract_object_pointer(item)
-            if isinstance(item, hir.ExpressedIdentifier) and item.name in self.direct_default_inputs:
+            if isinstance(item, hir.ExpressedIdentifier) and (item.name in self.direct_default_inputs
+                                                               or (item.name, item.loc.start, item.loc.stop) in self.static_default_arms):
                 # The supplied-argument arm either borrows read-only storage
                 # or receives a donated owner. The parameter's ABI selects
                 # conditional or unconditional cleanup for those cases.

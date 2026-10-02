@@ -65,8 +65,7 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
     let access=bindings.access_path(value data.env.nodes facts=true)
     let owner=hir.node_at(data.env.nodes access.root)
     let root=if owner is? hir.ExpressedIdentifier owner.binding_id else none
-    let existing=bindings.member_fields(access data.env.nodes)
-    let route:array<string>=if existing is? none [] else existing
+    let route:array<string>=member_route(access data.env.nodes)
     if not intervals.stable(value data.snapshot data.env.nodes) {root=none}
     let declared=expressions.member_invariant(value data.env.nodes data.env.types)
     loop name in path {
@@ -84,12 +83,11 @@ field_subject = (value:addr path:array<string> projection:propositions.Projectio
             owner=hir.node_at(data.env.nodes access.root)
             root=if owner is? hir.ExpressedIdentifier owner.binding_id else none
             if not intervals.stable(found data.snapshot data.env.nodes) {root=none}
-            existing=bindings.member_fields(access data.env.nodes)
-            route=if existing is? none [] else existing
+            route=member_route(access data.env.nodes)
             declared=expressions.member_invariant(found data.env.nodes data.env.types)
             continue
         }
-        let inherited=declared
+        let inherited=declared.copy
         let refined=types.node_at(data.env.types types.unfold(type data.env.types))
         if refined is? types.RefinedType {loop p in refined.propositions {inherited.push(p)}}
         inherited=project(inherited name)
@@ -177,6 +175,11 @@ sum_operand_below = (operand:addr term:facts.Term? bound:facts.Term state:facts.
     return actual isnt? none and actual.upper isnt? none and limit.lower isnt? none and actual.upper <=? limit.lower
 }
 
+# The field route of a member access, or none for its root.
+member_route = (access:bindings.AccessPath nodes:array<hir.AST>):>array<string> => {
+    let existing=bindings.member_fields(access nodes)
+    return if existing is? none [] else existing
+}
 verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<addr> @data:predicates.Data):>bool? => {
     if p.tested_type isnt? none {
         # `:> x is? T` holds when the result is true and the returned value
@@ -199,7 +202,8 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
                 if subject_id isnt? none and operand.binding_id isnt? none and operand.binding_id =? subject_id {same=true}
                 else if name isnt? none and operand.name =? name {same=true}
             }
-            let type_nodes=data.env.types
+            # Subtyping may intern into a private scratch table.
+            let type_nodes=data.env.types.copy
             let exact=subtyping.is_subtype(returned.test_type tested data.links @type_nodes) and subtyping.is_subtype(tested returned.test_type data.links @type_nodes)
             # The result is true exactly when the returned test holds. A
             # fact conditioned on the result follows when its operator is
@@ -321,10 +325,14 @@ check = (node:hir.Obligation state:facts.State assigned:set<addr> srcfile:SrcFil
     let refined=types.node_at(data.env.types node.refined)
     $runtime_assert refined is? types.RefinedType
     loop p in refined.propositions {
-        let current:facts.State?=state
-        if p.when isnt? none {current=predicates.refine_with_context(state node.value p.when context @data)}
-        if current is? none continue
-        let decided=verdict(p node.value current assigned @data)
+        # Only a conditional proposition needs its own refined state.
+        let decided:bool?=none
+        if p.when is? none {decided=verdict(p node.value state assigned @data)}
+        else {
+            let current=predicates.refine_with_context(state node.value p.when context @data)
+            if current is? none continue
+            decided=verdict(p node.value current assigned @data)
+        }
         if decided =? true continue
         let condition=if p.when is? none '' else " when the result is {p.when}"
         return Error[srcfile=srcfile title=(if decided =? false 'refinement refuted' else 'cannot prove refinement') pointers=[Pointer[span=hir.node_at(data.env.nodes node.value).loc message="`{describe(p)}` is required{condition}"]] hint='establish it with a guard, or check it with `$runtime_assert`']

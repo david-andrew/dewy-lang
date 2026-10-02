@@ -998,7 +998,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let source=route(node.expr nodes)
             # An unwritten let uses the same lifetime proof as const. Skip
             # excluded owners before preparing per-scope dependency graphs.
-            let inferred=not word_value(expr.value_type type_nodes) and expr is? hir.Index|hir.MemberAccess|hir.DictLookup and node.binding_id in? stable and source isnt? none and source.binding not in? plan.globals and source.binding not in? captured and source.binding not in? exposed and source.binding not in? places and not stable_owner(source stable stable_parameters)
+            let inferred=not word_value(expr.value_type type_nodes) and expr is? hir.Index|hir.MemberAccess|hir.DictLookup and node.binding_id in? stable and source isnt? none and source.binding not in? plan.globals and source.binding not in? captured and source.binding not in? exposed and (source.binding not in? places or source.binding in? stable_parameters) and not stable_owner(source stable stable_parameters)
             if node.view or inferred {view_demands.push(node.binding_id)}
         }
         if node is? hir.Index {
@@ -1149,7 +1149,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     }
     let excluded=captured
     loop binding in exposed {excluded.push(binding)}
-    loop binding in places {excluded.push(binding)}
+    # A place parameter no ambient alias names (`stable_parameters`) changes
+    # only through this function's own writes and places, which the view's
+    # region scan checks like a local's.
+    loop binding in places {if binding not in? stable_parameters {excluded.push(binding)}}
     # Nonescaping calls only lend storage during the call. Conflicts inside
     # a view's live interval are still checked, including mutable places.
     loop binding in escaping {excluded.push(binding)}

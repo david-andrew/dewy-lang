@@ -94,10 +94,14 @@ apply_contract = (@result:Applied contract:types.RefinedType call:addr truth:boo
             }
         }
         if result.state is? none return
-        result.state=comparisons.refine(result.state p.op subject bound true relation)
-        if result.state is? none return
+        # Refine into an owned local, extend it, then store it once.
+        let refined=comparisons.refine(result.state p.op subject bound true relation)
+        if refined is? none {
+            result.state=none
+            return
+        }
+        let current:facts.State=refined
         if window isnt? none {
-            let current=result.state
             loop direction in terms.directions(p.op) {
                 if direction.direction not=? 'upper' continue
                 let gap=direction.gap-window.adjust
@@ -114,7 +118,7 @@ apply_contract = (@result:Applied contract:types.RefinedType call:addr truth:boo
                     facts.put(@current key ranges.Interval[(if previous is? none needed else ranges.maximum_lower(previous.lower needed)) none])
                 }
             }
-            result.state=current
         }
+        result.state=current
     }
 }

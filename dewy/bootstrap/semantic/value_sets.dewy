@@ -70,7 +70,7 @@ exclude = (values:Values hole:bigint):>Values => {
 }
 constrain = (domain:Values props:array<propositions.Proposition>):>Values => {
     let interval=ranges.propositions_interval(props)
-    let result=if interval is? none domain else intersect(domain [interval])
+    let result=if interval is? none domain.copy else intersect(domain [interval])
     loop p in props {
         if p.subject =? 'self' and p.op =? 'not=?' {result=exclude(result p.value)}
     }

@@ -253,7 +253,8 @@ preserves_union_payload=(actual:addr expected:addr table:types.Table):>bool=>{
     let wanted=types.unfold(types.strip_refinement(expected table) table)
     let target=types.node_at(table wanted)
     if target isnt? types.TypeOr or string_valued(wanted table) or enum_members(wanted table) isnt? none return false
-    if grouped_string_payload(actual table) or grouped_string_payload(expected table) return normalized_union_payload(actual expected table)
+    # Normalizing a grouped string payload interns into a scratch table.
+    if grouped_string_payload(actual table) or grouped_string_payload(expected table) return normalized_union_payload(actual expected table.copy)
     let plain=types.unfold(types.strip_refinement(actual table) table)
     let source=types.node_at(table plain)
     if source is? types.TypeOr and not string_valued(plain table) and enum_members(plain table) is? none {

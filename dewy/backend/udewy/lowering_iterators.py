@@ -96,8 +96,12 @@ class _IteratorLowering:
             return True
         # Only a write during the loop can change what it iterates. An owner
         # other code can reach (a capture or a place) may change through a call.
-        if any(isinstance(param, hir.Param) and param.place and param.binding_id == source.binding
-               for param in (self.current_literal.pos_or_kw_args + self.current_literal.kw_only_args if self.current_literal is not None else [])):
+        # A place parameter is reached only through this function's own writes
+        # and places, unless an ambient alias may name it (`stable_parameters`
+        # excludes those): the scan below decides.
+        if source.binding not in self.borrow_plan.stable_parameters and any(
+                isinstance(param, hir.Param) and param.place and param.binding_id == source.binding
+                for param in (self.current_literal.pos_or_kw_args + self.current_literal.kw_only_args if self.current_literal is not None else [])):
             return True
         pending = [body]
         while pending:

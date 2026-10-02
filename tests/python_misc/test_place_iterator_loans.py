@@ -23,11 +23,13 @@ main=():>int64=>{
 CASES = [SOURCE,
     SOURCE.replace('output.push(item)', 'box.count+=1 output.push(item)'),
     SOURCE.replace('loop item in box.items', 'loop item in box.items and index in [0..2)'),
-]
-ERRORS = [SOURCE.replace('output.push(item)', 'box.items.clear output.push(item)'),
+    # Two places of one call never overlap, and no ambient alias names a
+    # stable place parameter: writing `other` cannot change `box`.
     SOURCE.replace('collect=(@box:Box)', 'collect=(@box:Box @other:Box)')
           .replace('output.push(item)', 'other.items.clear output.push(item)')
           .replace('let values=collect(@box)', 'let other=Box[[1] 0]\n let values=collect(@box @other)'),
+]
+ERRORS = [SOURCE.replace('output.push(item)', 'box.items.clear output.push(item)'),
     SOURCE.replace('output.push(item)', 'let address=box.items transmute int64 output.push(item)'),
     SOURCE.replace('collect=', 'later=(@box:Box):>array<int64>=>{box.items.clear return [1]}\ncollect=')
           .replace('loop item in box.items', 'loop item in box.items and other in later(@box)'),

@@ -29,10 +29,10 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     timing.finish('validation.proofs' proofs_started)
     if proof_error isnt? none return proof_error
     let bounds_started=timing.start(timings)
-    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
+    # The checker owns its view of the module's nominal links.
+    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry links=session.links.copy]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)
-    checker.data.links=session.links
     checker.prototype=module.options.prototype and not module.prelude
     checker.timings=timings
     bounds.validate(module.root @checker read_only=read_only)

@@ -472,6 +472,8 @@ class _Lowerer(
         self.rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.direct_default_inputs: set[str] = set()
+        # Omitted-default arms (name, span) that view a stable `const` global.
+        self.static_default_arms: set[tuple[str, int, int]] = set()
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.moved_payload_uses: set[int] = set()  # last-use narrowed aggregates still stored in owned union cells
@@ -1211,8 +1213,13 @@ class _Lowerer(
                     # supplied record borrows the caller's storage. Only the
                     # omitted default belongs to this function's cleanup.
                     direct_default_inputs.add(incoming_name)
-                    default_owner_conditions[local_binding_key(target)] = self._bool_not(
-                        hir.ExpressedIdentifier(literal.loc, 'bool', present_name))
+                    owner = self._bool_not(hir.ExpressedIdentifier(literal.loc, 'bool', present_name))
+                    if self._static_global(default):
+                        # A default naming a stable `const` global views it,
+                        # as an explicit argument would: neither path owns it.
+                        self.static_default_arms.add((default.name, default.loc.start, default.loc.stop))
+                        owner = hir.Bool(literal.loc, 'bool', False)
+                    default_owner_conditions[local_binding_key(target)] = owner
                 # Select before dereferencing: an omitted aggregate argument
                 # is an ignored zero pointer. The ordinary value-flow path
                 # constructs a default lazily and otherwise borrows a proven
@@ -4351,8 +4358,28 @@ class _Lowerer(
                  if p.binding_id in owned],
                 ordinary_ownership, component=lambda value: id(value) in pending_fields)
             moves.update(pending_fields & consumed.keys())
+        # A place lent to a call ends when it returns. A use inside a call
+        # that also lends its root stays in place: the callee sees the root.
+        moves -= self._place_conflicts(literal.body)
         self.moved_payload_uses = moves & payload_candidates
         return moves - payload_candidates
+
+    @staticmethod
+    def _place_conflicts(body: hir.AST) -> set[int]:
+        """Uses of a binding inside a call that also lends it as a place."""
+        conflicts: set[int] = set()
+        for call in hir.walk(body):
+            if not isinstance(call, hir.FunctionCall):
+                continue
+            arguments = [*call.pos_args, *call.kw_args.values()]
+            lent = {borrowing.root_binding(argument.target) for argument in arguments if isinstance(argument, hir.Place)} - {None}
+            if not lent:
+                continue
+            for argument in arguments:
+                for node in hir.walk(argument):
+                    if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) and borrowing.root_binding(node) in lent:
+                        conflicts.add(id(node))
+        return conflicts
 
     def _insert_releases(self, body: hir.AST, exit_statements: list[hir.AST] = ()) -> hir.AST:
         """Drop-at-scope-exit for owned array locals, over a lowered function body.

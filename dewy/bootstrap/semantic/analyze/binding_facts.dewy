@@ -15,7 +15,7 @@ import p"relations.dewy" as relations
 import p"intervals.dewy" as ranges
 
 note_element_routes = (array:addr @data:predicates.Data):>void => {
-    let known=data.relations.facts.element_roots
+    let known=data.relations.facts.element_roots.copy
     let before=known.length
     elements.note_roots(array @known data.registry)
     if known.length not=? before {data.relations=relations.with_element_roots(data.relations known)}
@@ -194,7 +194,7 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
             elements.copy(@state saved.term.binding_id subject word_type loc @data.registry)
             note_element_routes(subject @data)
             # Snapshot the routes before allocating copies of them.
-            let routes=data.registry.routes_by_root.get(saved.term.binding_id [])
+            let routes=data.registry.routes_by_root.get(saved.term.binding_id []).copy
             loop route in routes {
                 if route.path.length >? 0 and route.path[0] not=? '*' {
                     let copied=bindings.route_id(@data.registry subject route.path word_type loc)
@@ -225,7 +225,7 @@ fields = (@state:facts.State root:addr declared:types.ObjectType value:addr path
     loop actual in literal.fields {
         let field=types.object_field(declared actual.name)
         if field is? none continue
-        let route=path
+        let route=path.copy
         route.push(actual.name)
         let nested=expressions.object_of(field.value_type data.env.types)
         if nested isnt? none {

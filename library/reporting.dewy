@@ -283,6 +283,74 @@ let _adjacent = (left:Segment right:Segment):>bool => {
     return right.start_col =? left.end_col or right.start_col + 1 =? left.end_col or right.start_col =? left.start_col
 }
 
+# the segments of pointer `p` — one per line its spans touch; a span
+# crossing lines shows its message on the last line that has width
+let _segments_of = (p:Pointer group:int64 src:SrcFile):>array<Segment> => {
+    let out:array<Segment> = []
+    # the pointer's own placement, if it gave one
+    let placement:Placement = "below"
+    let auto:bool = true
+    let given = p.placement
+    if given isnt? none { placement = given  auto = false }
+    let infos:array<[line:int64 start_col:int64 end_col:int64]> = []
+    loop span in _pointer_spans(p) {
+        let start_line:int64 = src.line_of(span.start)
+        let end_line:int64 = start_line
+        if span.stop >? span.start { end_line = src.line_of(span.stop - 1) } else { end_line = src.line_of(span.stop) }
+        let line:int64 = start_line
+        loop line <=? end_line {
+            let line_len:int64 = src.line_length(line)
+            let start_col:int64 = 0
+            if line =? start_line { start_col = src.column_of(span.start) }
+            if start_col >? line_len { start_col = line_len }
+            let end_col:int64 = line_len
+            if span.is_zero_width { end_col = start_col }
+            else if line =? end_line and src.line_of(span.stop) =? line {
+                end_col = src.column_of(span.stop)
+                if end_col >? line_len { end_col = line_len }
+            }
+            if start_col >? end_col { let t:int64 = start_col  start_col = end_col  end_col = t }
+            infos.push([line=line start_col=start_col end_col=end_col])
+            line += 1
+        }
+    }
+    if infos.length =? 0 { return out }
+    if infos.length =? 1 {
+        let info = infos[0]
+        let start_col:int64 = info.start_col
+        let end_col:int64 = info.end_col
+        let anchor:int64 = start_col
+        if start_col =? end_col {
+            if start_col >? 0 { start_col -= 1  end_col = start_col }
+            anchor = start_col
+        } else {
+            anchor = start_col + (end_col - start_col - 1) // 2
+        }
+        out.push(Segment[message=p.message line=info.line start_col=start_col end_col=end_col anchor_col=anchor placement=placement color_name=p.color group=group auto_placed=auto])
+        return out
+    }
+    # the message goes on the last line with width
+    let message_at:int64 = infos.length - 1
+    loop k in 0.. and k <? infos.length { if infos[k].end_col >? infos[k].start_col { message_at = k } }
+    let idx:int64 = 0
+    loop idx <? infos.length {
+        let info = infos[idx]
+        let start_col:int64 = info.start_col
+        let end_col:int64 = info.end_col
+        let is_message:bool = idx =? message_at
+        if is_message and start_col =? end_col and start_col >? 0 { start_col -= 1  end_col = start_col }
+        let anchor:int64 = start_col
+        if is_message and start_col not=? end_col { anchor = start_col + (end_col - start_col - 1) // 2 }
+        let render:bool = true
+        let show_anchor:bool = is_message
+        if not is_message and start_col =? end_col { render = false  show_anchor = false }
+        let placed:bool = not auto or not is_message      # a line without the message is always below
+        out.push(Segment[message=p.message line=info.line start_col=start_col end_col=end_col anchor_col=anchor placement=placement color_name=p.color group=group auto_placed=(not placed) render_pointer=render show_message=is_message show_anchor=show_anchor])
+        idx += 1
+    }
+    return out
+}
+
 # ---- Report ----
 let Report = type of [
     severity:Severity
@@ -320,79 +388,14 @@ let Report = type of [
 
     # ---- layout: pointers to segments ----
 
-    # the segments of pointer `index` — one per line its spans touch; a span
-    # crossing lines shows its message on the last line that has width
-    segments_of = (p:Pointer group:int64 src:SrcFile):>array<Segment> => {
-        let out:array<Segment> = []
-        # the pointer's own placement, if it gave one
-        let placement:Placement = "below"
-        let auto:bool = true
-        let given = p.placement
-        if given isnt? none { placement = given  auto = false }
-        let infos:array<[line:int64 start_col:int64 end_col:int64]> = []
-        loop span in _pointer_spans(p) {
-            let start_line:int64 = src.line_of(span.start)
-            let end_line:int64 = start_line
-            if span.stop >? span.start { end_line = src.line_of(span.stop - 1) } else { end_line = src.line_of(span.stop) }
-            let line:int64 = start_line
-            loop line <=? end_line {
-                let line_len:int64 = src.line_length(line)
-                let start_col:int64 = 0
-                if line =? start_line { start_col = src.column_of(span.start) }
-                if start_col >? line_len { start_col = line_len }
-                let end_col:int64 = line_len
-                if span.is_zero_width { end_col = start_col }
-                else if line =? end_line and src.line_of(span.stop) =? line {
-                    end_col = src.column_of(span.stop)
-                    if end_col >? line_len { end_col = line_len }
-                }
-                if start_col >? end_col { let t:int64 = start_col  start_col = end_col  end_col = t }
-                infos.push([line=line start_col=start_col end_col=end_col])
-                line += 1
-            }
-        }
-        if infos.length =? 0 { return out }
-        if infos.length =? 1 {
-            let info = infos[0]
-            let start_col:int64 = info.start_col
-            let end_col:int64 = info.end_col
-            let anchor:int64 = start_col
-            if start_col =? end_col {
-                if start_col >? 0 { start_col -= 1  end_col = start_col }
-                anchor = start_col
-            } else {
-                anchor = start_col + (end_col - start_col - 1) // 2
-            }
-            out.push(Segment[message=p.message line=info.line start_col=start_col end_col=end_col anchor_col=anchor placement=placement color_name=p.color group=group auto_placed=auto])
-            return out
-        }
-        # the message goes on the last line with width
-        let message_at:int64 = infos.length - 1
-        loop k in 0.. and k <? infos.length { if infos[k].end_col >? infos[k].start_col { message_at = k } }
-        let idx:int64 = 0
-        loop idx <? infos.length {
-            let info = infos[idx]
-            let start_col:int64 = info.start_col
-            let end_col:int64 = info.end_col
-            let is_message:bool = idx =? message_at
-            if is_message and start_col =? end_col and start_col >? 0 { start_col -= 1  end_col = start_col }
-            let anchor:int64 = start_col
-            if is_message and start_col not=? end_col { anchor = start_col + (end_col - start_col - 1) // 2 }
-            let render:bool = true
-            let show_anchor:bool = is_message
-            if not is_message and start_col =? end_col { render = false  show_anchor = false }
-            let placed:bool = not auto or not is_message      # a line without the message is always below
-            out.push(Segment[message=p.message line=info.line start_col=start_col end_col=end_col anchor_col=anchor placement=placement color_name=p.color group=group auto_placed=(not placed) render_pointer=render show_message=is_message show_anchor=show_anchor])
-            idx += 1
-        }
-        return out
-    }
+    # the segments of pointer `p` (see `_segments_of`)
+    segments_of = (p:Pointer group:int64 src:SrcFile):>array<Segment> => _segments_of(p group src)
 
     # every segment of the report, laid out: overlapping pointers demoted to
-    # notes, placements decided, colors assigned
-    layout = (src:SrcFile theme:Theme):>array<Segment> => {
+    # notes (`shown`, the report's notes so far), placements decided, colors assigned
+    layout = (src:SrcFile theme:Theme @shown:array<string>):>array<Segment> => {
         let segments:array<Segment> = []
-        let kept:array<Pointer> = []
+        let kept:array<int64> = []    # indexes of the pointers drawn so far
         # a named color takes no group; a pointer without one gets its own
         let next_group:int64 = 0
         loop p in pointers { if p.group >=? next_group { next_group = p.group + 1 } }
@@ -401,7 +404,7 @@ let Report = type of [
             let p:Pointer = pointers[index]
             let clashes:bool = false
             loop k in kept {
-                loop a in _pointer_spans(k) {
+                loop a in _pointer_spans(pointers[k]) {
                     loop b in _pointer_spans(p) {
                         if a.start <? b.stop and b.start <? a.stop and not a.is_zero_width and not b.is_zero_width and (a.start not=? b.start or a.stop not=? b.stop) { clashes = true }
                     }
@@ -409,14 +412,14 @@ let Report = type of [
             }
             if clashes {
                 let already:bool = false
-                loop n in notes { if n =? p.message { already = true } }
-                if not already { notes.push(p.message) }
+                loop n in shown { if n =? p.message { already = true } }
+                if not already { shown.push(p.message) }
             } else {
-                kept.push(p)
+                kept.push(index)
                 let group:int64 = p.group
                 if p.color isnt? none { group = -1 }
                 else if group <? 0 { group = next_group  next_group += 1 }
-                loop seg in segments_of(p group src) { segments.push(seg) }
+                loop seg in _segments_of(p group src) { segments.push(seg) }
             }
             index += 1
         }
@@ -692,8 +695,8 @@ let Report = type of [
     }
 
     # `note:` lines and `help:` after the excerpt
-    print_trailer = (theme:Theme) => {
-        if notes.length >? 0 { print_labelled("note:" notes theme) }
+    print_trailer = (theme:Theme shown:array<string>) => {
+        if shown.length >? 0 { print_labelled("note:" shown theme) }
         if hint.length >? 0 { print_labelled("help:" hint.lines theme) }
     }
 
@@ -715,11 +718,14 @@ let Report = type of [
         }
         if pointers.length =? 0 {
             # nothing points into the source: a summary report has no excerpt
-            print_trailer(theme)
+            print_trailer(theme notes)
             _set_output_stderr(previous)
             return void
         }
-        let segments:array<Segment> = layout(src theme)
+        # rendering leaves the report unchanged: demoted pointers join a local list
+        let shown:array<string> = []
+        loop n in notes { shown.push(n) }
+        let segments:array<Segment> = layout(src theme @shown)
         # the header points at the earliest pointer
         let first_offset:addr = 0
         let found:bool = false
@@ -753,7 +759,7 @@ let Report = type of [
         }
         gutter(digits)
         print"╰───\n"
-        print_trailer(theme)
+        print_trailer(theme shown)
         _set_output_stderr(previous)
         return void
     }

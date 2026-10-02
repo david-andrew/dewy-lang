@@ -82,7 +82,7 @@ seed_term = (@state:facts.State subject:addr p:propositions.Proposition context:
     }
 }
 seed_binding = (@state:facts.State @declared:Declared subject:addr refined:types.RefinedType context:Context loc:Span @registry:bindings.Registry):>void => {
-    declared[subject] = refined
+    declared[subject] = refined.copy
     loop p in refined.propositions {
         if p.term isnt? none { seed_term(@state subject p context) continue }
         if propositions.field(p) isnt? none { seed_field(@state subject p refined.base context loc @registry) continue }
@@ -96,7 +96,7 @@ seed_binding = (@state:facts.State @declared:Declared subject:addr refined:types
     }
 }
 seed_parameters = (@state:facts.State @declared:Declared function:hir.FunctionLiteral context:Context @registry:bindings.Registry):>void => {
-    let parameters = function.pos_or_kw_args
+    let parameters = function.pos_or_kw_args.copy
     loop parameter in function.kw_only_args { parameters.push(parameter) }
     loop parameter in parameters {
         let type = types.node_at(context.env.types parameter.value_type)
@@ -118,10 +118,12 @@ locate = (node:hir.MemberAccess env:values.Environment):>Member? => {
     fields.push(node.name)
     return Member[object root.binding_id fields]
 }
+# The route of a sibling field: the same owner path with its last step renamed.
 sibling_path = (path:array<string> name:string):>array<string> => {
     $runtime_assert path.length >? 0
-    let result = path
-    result[result.length-1] = name
+    let result:array<string> = []
+    loop i in 0.. and i <? path.length-1 {result.push(path[i])}
+    result.push(name)
     return result
 }
 seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment @registry:bindings.Registry):>void => {

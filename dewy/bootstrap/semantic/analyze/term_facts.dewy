@@ -293,7 +293,8 @@ seed_sum = (@state:facts.State subject:addr id:addr mathematical:ranges.Interval
         let constant = values.constant(offset env)
         if term is? none or constant is? none or constant.lower is? none or not ranges.same_endpoint(constant.lower constant.upper) continue
         let shift = if function.name =? '__add__' constant.lower else -constant.lower
-        let entries = state.values
+        # The loop adds facts to `state`; it reads the facts it started with.
+        let entries = state.values.copy
         loop entry in entries {
             let fact = entry.fact
             let lower = entry.interval.lower
@@ -325,7 +326,8 @@ seed_sum = (@state:facts.State subject:addr id:addr mathematical:ranges.Interval
     let left = binding_term(node.pos_args[0] env @registry)
     let right = binding_term(node.pos_args[1] env @registry)
     if left is? none or right is? none or left.projection not=? 'value' or right.projection not=? 'value' return
-    let entries = state.values
+    # The loop adds facts to `state`; it reads the facts it started with.
+    let entries = state.values.copy
     loop entry in entries {
         let fact = entry.fact
         let lower = entry.interval.lower

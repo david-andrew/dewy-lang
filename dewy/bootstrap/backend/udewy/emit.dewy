@@ -83,7 +83,7 @@ name = (text:string):>string => {
 intrinsic_names = ():>set<string> => {
     let nodes:types.Table=types.Table[]
     let functions=builtins.intrinsic_types(@nodes)
-    return functions.keys
+    return functions.keys.copy
 }
 const intrinsics=intrinsic_names()
 
@@ -545,10 +545,10 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
             }
             let name="__dewy_include_{state.includes.length+1}"
             state.includes[path]=name
-            if out.stream {state.pending_includes.push(Include[name node.content]) token_name(name @out)} else {write(name @out)}
+            if out.stream {state.pending_includes.push(Include[name node.content.copy]) token_name(name @out)} else {write(name @out)}
             return
         }
-        if out.stream {bytecode.push_blob(node.content @out.tokens) out.adjacent=true} else {write(binary_literal(node.content) @out)}
+        if out.stream {bytecode.push_blob(node.content.copy @out.tokens) out.adjacent=true} else {write(binary_literal(node.content) @out)}
         return
     }
     if node is? hir.ExpressedIdentifier {
@@ -640,7 +640,7 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
         if node.scoped {brace(@out)} else {open(@out)}
         newline(@out) nest(@out)
         if node.scoped {
-            let child=scope
+            let child=scope.copy
             write_statements(node.items @child input @state @out)
         } else {write_statements(node.items @scope input @state @out)}
         unnest(@out) newline(@out)
@@ -692,7 +692,7 @@ contains_return = (id:addr input:Input):>bool => {
 }
 write_function = (name:string function:hir.FunctionLiteral scope:Scope input:Input @state:State @out:Writer):>void => {
     if function.kw_only_args.length >? 0 or function.rest_args isnt? none {reject(function 'function parameters require positional legalization' scope @state) return}
-    let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else hir.source_at(function.source input.source_files)]
+    let inner=Scope[scope.direct_functions.copy set[] if function.source is? none scope.source else hir.source_at(function.source input.source_files)]
     inner.forwards=function_forwards(function input state)
     if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(hir.source_at(function.source input.source_files))}
     if out.stream {

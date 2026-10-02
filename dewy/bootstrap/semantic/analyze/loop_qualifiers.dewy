@@ -65,7 +65,7 @@ add_pairs=(@pairs:array<facts.TermPair> left:array<facts.Term> right:array<facts
 # A separate finite vocabulary of weighted sums handles invariants such as
 # `2*i <= j` when i advances once and j twice. These are candidates only.
 add_linear=(@selected:array<facts.Linear> left:Shape right:Shape):>void=>{
-    let merged=left.coefficients
+    let merged=left.coefficients.copy
     loop item in right.coefficients {facts.combine_coefficient(@merged item.term (-item.weight))}
     let forward=facts.linear(merged)
     if forward.coefficients.length<?2 or forward.coefficients.length>?32 return
@@ -81,7 +81,7 @@ add_linear=(@selected:array<facts.Linear> left:Shape right:Shape):>void=>{
     }
 }
 seed=(state:facts.State selected:array<facts.Linear> changing:set<addr> context:facts.Context):>facts.State=>{
-    let result=state
+    let result=state.copy
     loop candidate in selected {
         let changed=false
         loop item in candidate.coefficients {if item.term.binding_id in? changing {changed=true break}}

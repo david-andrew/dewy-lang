@@ -23,7 +23,7 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     engine.session.target=request.target
     engine.timings=request.timings
     if executable isnt? none {
-        engine.prelude_cache=prelude_cache.Config[executable "{cwd}/__dewycache__/prelude" request.target engine.library_roots engine.prelude_files]
+        engine.prelude_cache=prelude_cache.Config[executable "{cwd}/__dewycache__/prelude" request.target engine.library_roots engine.prelude_files.copy]
     }
     engine.test_mode=request.command =? 'test'
     engine.debug_names=request.command =? 'debug'

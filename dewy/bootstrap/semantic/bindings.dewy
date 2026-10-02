@@ -141,7 +141,7 @@ route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:
     let id = registry.next_route_id
     registry.next_route_id += 2
     store_binding(@registry id Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root])
-    routes.push(Route[id=id root=root path=path])
+    routes.push(Route[id=id root=root path=path.copy])
     registry.routes_by_root[root]=routes
     return id
 }
@@ -181,7 +181,9 @@ push_scope = (@scopes:array<Scope> parent:addr?):>addr<i => i <? scopes.length> 
 }
 scope_at = (scopes:array<Scope> id:addr):>Scope => {
     $runtime_assert id <? scopes.length
-    return scopes[id]
+    # Owning callers get an independent scope; stable readers use the
+    # proved getter loan and elide this fallback snapshot.
+    return scopes[id].copy
 }
 lookup = (scopes:array<Scope> scope:addr name:string):>addr? => {
     let current:addr? = scope

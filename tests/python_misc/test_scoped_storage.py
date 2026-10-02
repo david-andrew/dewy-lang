@@ -52,6 +52,30 @@ def test_native_scoped_reads(tmp_path):
                           cases=[READ, WRITE, KERNEL], errors=ERRORS, outputs=['', 'abc', ''])
 
 
+# A checked read-only loan leaves a parameter read-only: it stays borrowed.
+LENT_PARAMETER = '''$explicit_copies
+first=(bytes:array<uint8>):>int64=>{
+    return $lend(bytes) {let address=__load_i64__(bytes) __load_u8__(address) as int64}
+}
+main=():>int64=>{
+    let bytes:array<uint8>=[42 7]
+    let a=first(bytes)
+    bytes.push(1)
+    let ok=a =? 42 and first(bytes) =? 42
+    return if ok 42 else 1
+}
+'''
+
+
+def test_lent_parameter_is_borrowed(tmp_path):
+    execute(tmp_path, 'lent-parameter', codegen(SrcFile(None, LENT_PARAMETER)))
+
+
+def test_native_lent_parameter_is_borrowed(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[LENT_PARAMETER], errors=[])
+
+
 OUTPUT = (FIXTURES / 'scoped_storage_output.dewy').read_text()
 
 

@@ -449,6 +449,13 @@ class _ObjectLowering:
             or isinstance(node.func, hir.ArrayMethod) and node.func.name == 'pop'
         )
 
+    def _static_global(self, node: hir.AST) -> bool:
+        """A `const` global no function writes or exposes: its storage
+        outlives every call, so a read-only view needs no copy or cleanup."""
+        return (isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None
+                and node.binding_id in self.borrow_plan.globals
+                and node.binding_id in self.borrow_plan.stable_bindings)
+
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._scoped_block_result(node)
         # Record conditionals have one owning result on every normal arm,
@@ -1800,6 +1807,23 @@ class _ObjectLowering:
             return ty.strip_refinement(element) == ty.strip_refinement(expr.type)
         return ty.unfold(ty.strip_refinement(element)) == ty.unfold(ty.strip_refinement(payload))
 
+    def _default_view_lookup(self, expr: hir.AST) -> bool:
+        """A `get` with an empty array default whose result is the stored element.
+
+        Either arm owns nothing: the stored descriptor stays with the
+        dictionary and an empty literal has no storage to release. (Native
+        `default_view_lookup` also keeps a general eagerly evaluated default.)
+        """
+        if not isinstance(expr, hir.DictLookup) or expr.proven or expr.default is None:
+            return False
+        default = borrowing.unwrap(expr.default)
+        if not isinstance(default, hir.ArrayLiteral) or default.items:
+            return False
+        element = getattr(expr.values.type, 'element', None) if expr.values is not None else None
+        read = ty.unfold(ty.strip_refinement(expr.type))
+        return (element is not None and isinstance(read, ty.ArrayType)
+                and ty.unfold(ty.strip_refinement(element)) == read)
+
     def _borrowed_route_local(self, node: hir.Declare, value_type: ty.Type) -> bool:
         """`let x = a[i]` / `a.f` / `d[k]` binds the storage it reads when both stay stable.
 
@@ -1824,11 +1848,11 @@ class _ObjectLowering:
             return False
         # Only an inferred view: an explicit `@` demand names the
         # dictionary's storage, which a lookup result is not.
-        get_view = self._get_view_lookup(expr) and not node.view
+        get_view = (self._get_view_lookup(expr) or self._default_view_lookup(expr)) and not node.view
         if (isinstance(expr, hir.DictLookup) and not expr.proven
                 and not isinstance(value_type, ty.ObjectType) and not get_view):
             return False  # other optional/fallback lookups construct result storage
-        if isinstance(expr, hir.DictLookup) and expr.default is not None and not expr.proven:
+        if isinstance(expr, hir.DictLookup) and expr.default is not None and not expr.proven and not get_view:
             # The fallback may be a temporary released after this statement.
             # Stability of the dictionary alone cannot lend that other owner.
             return False

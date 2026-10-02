@@ -70,7 +70,7 @@ facts_to_dewy = (items:array<facts.Proposition> nodes:types.Table):>string => {
 refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:types.Table):>string => {
     let node = types.node_at(nodes base)
     let name = type_to_dewy(base nodes)
-    let remaining:array<facts.Proposition> = props
+    let remaining:array<facts.Proposition> = props.copy
     if node is? types.Primitive and views.has_proposition(props views.NAT) {
         let named:array<facts.Proposition> = []
         if node.name =? 'int64' and views.has_proposition(props views.ADDR) {
