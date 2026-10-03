@@ -146,6 +146,31 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Throughput: token probes and normalization (2026-10-02)
+
+- **First-character checks in the tokenizer.**
+  - `probe_symbol` tried every symbol with `startswith` at each token start.
+    It now returns at once when the first character starts no symbol; that
+    set is derived from the symbol table, which stays the only source.
+  - Base prefixes (`0x`, `0b`, …) all start with `0`. The number,
+    based-block and based-string probes no longer slice a two-character
+    prefix from every other token start.
+- **Normalization copies only moved nodes.** `syntax_normalization.prepare`
+  copied every token node and stored it back into its own slot, even when
+  the node did not move (the common case).
+- Effect: 50.8 → 49.6 s; frontend 16.7 → 15.4 s.
+- The emitted program is byte-identical with and without these changes.
+
+The same source built through C self-builds in 21.8 s, and only because GCC
+inlines small callees. Without that inlining GCC matches the direct backend
+(49.5 s), so an inliner is the next lever. See
+[`bootstrap/PERFORMANCE.md`](bootstrap/PERFORMANCE.md) "Throughput batch 3".
+
+Evidence:
+- Output identity: the self-build's `main.ubc` is byte-identical.
+- Three-generation fixed point.
+- Local gate: 6,396 passed.
+
 ## Throughput: probes, type tests, string equality, overlapped teardown (2026-10-02)
 
 Allocation volume no longer predicts wall time. Static literal arguments and

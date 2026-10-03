@@ -68,6 +68,8 @@ prepare = (original:array<tokens.Token>):>array<tokens.Token> => {
     let count = nodes.length
     loop i in 0.. and i <? count and i <? nodes.length {
         let id = sink(i @nodes)
+        # Most nodes sink to themselves; only a moved node is copied back.
+        if id =? i continue
         let normalized = tokens.node_at(nodes id)
         $runtime_assert i <? nodes.length
         nodes[i] = normalized

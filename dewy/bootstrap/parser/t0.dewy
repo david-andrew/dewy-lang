@@ -106,6 +106,14 @@ const symbols:array<nonemptystring> = [
     # Pending symbol candidates: ⁂ ‰ ‱
 ]
 LEN_LONGEST_SYMBOL = symbols[0].length
+# The characters a symbol can start with, built once: most token starts
+# (identifiers, digits, quotes) rule out every symbol by their first one.
+symbol_starts = ():>set<string> => {
+    let result:set<string>=set[]
+    loop op in symbols {result.push(op[0])}
+    return result
+}
+const SYMBOL_STARTS=symbol_starts()
 const shift_operators:array<nonemptystring> = ['<<<' '>>>' '<<!' '!>>' '<<' '>>']
 
 # Normalize the opening information once. Frames contain immutable lexical
@@ -295,6 +303,7 @@ probe_identifier = (src:nonemptystring):>IdentifierMatch? => {
 }
 
 probe_symbol = (src:nonemptystring):>SymbolMatch? => {
+    if src[0] not in? SYMBOL_STARTS return none
     loop op in symbols {
         if src.startswith(op) return SymbolMatch[length=op.length]
     }
@@ -316,7 +325,7 @@ probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile offse
     base:BasePrefix = default_base
     i:addr = 0
     explicit_prefix = false
-    if src.length >=? 2 {
+    if src.length >=? 2 and src[0] =? '0' {
         prefix = src[..2)
         if prefix is? BasePrefix {
             base = prefix
@@ -366,7 +375,8 @@ probe_block_opener = (src:nonemptystring):>OpenBlockMatch? => {
     if src.startswith('[') return OpenBlockMatch[length=1 kind='square']
     if src.startswith('(') return OpenBlockMatch[length=1 kind='round']
     if src.startswith('\{') return OpenBlockMatch[length=1 kind='curly']
-    if src.length >=? 3 {
+    # Every base prefix starts with `0`; other starts need no slice.
+    if src.length >=? 3 and src[0] =? '0' {
         prefix = src[..2)
         if prefix is? BasePrefix and src[2] =? '[' {
             return OpenBlockMatch[length=3 kind='based' base=prefix]
@@ -463,7 +473,7 @@ probe_special_string = (src:nonemptystring at_root:bool srcfile:SrcFile offset:a
 }
 
 probe_based_string = (src:nonemptystring):>OpenBasedStringMatch? => {
-    if src.length <? 3 return none
+    if src.length <? 3 or src[0] not=? '0' return none
     prefix = src[..2)
     if prefix isnt? BasePrefix return none
     opening = probe_string_opener(src[2..])

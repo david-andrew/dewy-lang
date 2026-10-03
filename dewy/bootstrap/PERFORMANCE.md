@@ -904,3 +904,87 @@ borrow plan (`borrowing.details`) takes about 5% and `normalize` about 5%.
 Union cells are 72 M of 455 M allocations: `addr?` and other bounded-integer
 optionals could be one word with a niche value, and optionals of handle
 types a nullable handle. This is the next structural representation lever.
+
+### Throughput batch 3: allocation stops paying; dispatch and comparisons (2026-10-02)
+
+Same protocol (cold, interleaved, two rounds, every compiler building the
+same source).
+
+| Compiler | Wall | Allocated |
+|---|---|---|
+| strict-copy batch (`e11e2f2c`) | 54.2 s | 29.8 GB |
+| + static constant literal arguments (`857eb4d2`) | 54.3 s | 29.1 GB |
+| + frame worklists (`fbbf2719`) | 53.9 s | 28.7 GB |
+| + integer-key probes without stored hashes | 53.9 s | 28.7 GB |
+| + merged brand ranges in type tests | 52.0 s | 28.7 GB |
+| + teardown while the backend runs | 51.6 s | 28.7 GB |
+| + word-wise string equality (`7589e083`) | 50.6 s | 28.7 GB |
+| + tokenizer first-character checks, normalization without self-copies | 49.8 s | 28.3 GB |
+
+Root phases (seconds), second round:
+
+| Compiler | Frontend | Validation | Init. | Lowering | Emission | Backend | Wall |
+|---|---|---|---|---|---|---|---|
+| `e11e2f2c` | 16.9 | 15.8 | 1.4 | 13.0 | 1.8 | 4.0 | 54.3 |
+| `7589e083` | 16.7 | 14.6 | 1.3 | 12.1 | 1.6 | 4.0 | 50.8 |
+| next batch | 15.4 | 14.5 | 1.4 | 12.2 | 1.7 | 4.0 | 49.6 |
+| next batch, C-built (GCC `-O2 -flto=8`, no PRE) | 6.2 | 6.1 | 0.6 | 6.1 | 0.7 | 1.7 | 21.8 |
+
+Removing 1.1 GB of allocation (static literals, frame worklists) moved the
+build by 0.3 s. The next three changes removed instructions on hot paths
+and saved 3.3 s:
+- the dispatch chains over HIR node kinds;
+- the comparison of every analysis term's projection string;
+- the teardown of the program graph before exit.
+
+Inline storage guards were tried and withdrawn:
+- testing the owner before `_unique_array` and the capacity before
+  `_reserve_array` at each site saved about 0.15 s;
+- they cost 5% more code, 0.2 GB of lowering allocation and 100 MB of peak
+  memory.
+
+A 50 ms stack sample of the frame-worklist compiler (1,257 samples):
+
+| Self time | Item |
+|---|---|
+| 10.1% | `_probe_dict`: spread over `position_of`, `retain_reachable`, `find_binding`, `collect_roots` |
+| 6.4% | waiting for the µDewy backend |
+| 4.5% | `_release` (13.4% inclusive) |
+| 3.7% | `push_children` |
+| 3.4% | `_bytes_equal` |
+
+Validation (the bounds prover's loop search) is about 30% of samples once
+truncated deep stacks are counted. Lowering is 24%, tokenizing and token
+rewriting 7%.
+
+The direct x86-64 code is the remaining broad cost:
+- every function saves all five callee-saved registers;
+- the value-stack cache holds three values, so four-argument calls spill
+  through the stack;
+- small helpers (`same_term`, `_unique_array`) pay a full frame per call.
+
+The same compiler source built through C runs the identical work (same
+allocation volume, same output) in 21.8 s instead of 49.6 s. Every phase is
+2.2 to 2.7 times faster. The difference is inlining, not per-function code:
+
+| Same C, GCC options | Wall |
+|---|---|
+| `-O2 -flto=8` (no PRE/hoisting) | 22.2 s |
+| `-O2 -flto=8`, inlining only the `static inline` memory intrinsics | 49.5 s |
+| direct x86-64 backend | 49.6 s |
+| `-O2 -fno-inline` (memory intrinsics become calls too) | 92.0 s |
+| `-O1 -fno-inline` | 105.6 s |
+| `-O0` | 276.9 s |
+
+Without cross-function inlining, GCC's code runs this compiler no faster than
+the direct backend's. Small callees dominate: node getters, term comparisons
+and the generated storage helpers (`_unique_array`, `_push`, `_release*`,
+probes). Inlining them is the lever for the direct route; a new register
+allocator is not.
+
+The `addr?` niche named above needs a decision first. `addr` is `int64`
+refined to non-negative, so `-1` could encode `none` in one word. But
+`transmute` checks only the representation shape, and `(-1) transmute addr`
+is accepted, so a negative `addr` can exist. A niche needs transmutes into
+refined types to be rejected or checked; that is a language decision.
+Narrow integers (32 bits and below) have spare values without it.
