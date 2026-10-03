@@ -20,21 +20,78 @@ The direct backend's code within one function is as fast as GCC's. The
 inlined. Expanding calls without that follow-up gained nothing (49.6 →
 49.5 s with leaf callees; no gain with wrappers).
 
-## Placement
+## Decisions (David, 2026-10-03)
 
-The optimizer runs in the native compiler between statement normalization
-and µDewy emission. Its input and output are the same lowered program:
-- functions are statement lists over word values;
-- control flow is structured (if/loop/break/continue);
-- memory is explicit `__load_*`/`__store_*` intrinsics;
-- ownership operations are explicit calls.
+- The optimizer and code generator live in the Dewy compiler.
+- The bootstrap sequence is unchanged. The µDewy compiler still builds the
+  Dewy compiler from its µDewy output, and µDewy stays a complete, slower
+  route to every target.
+- No target is special. Development happens on x86-64 Linux, but every
+  supported and planned backend and OS must be comfortable. Wasm is of
+  particular interest and is developed alongside x86-64, not after it.
+- Prefer the architecture that is best for the language long term over the
+  smallest change.
 
-Emission and the µDewy toolchain are unchanged. Every target benefits,
-including C, and the Python µDewy compiler needs no parity work.
+## Architecture
 
-The hosted compiler stays the reference and does not optimize. Behavioral
-parity is unaffected. Debug builds (`debug_names`) skip the optimizer, so
-every source function stays a frame.
+```
+lowered HIR ──► SSA form ──► optimizations ──┬─► µDewy (expression trees)   every µDewy target
+  (statements.normalize                      ├─► wasm (expression trees)
+   for debug builds)                         └─► x86-64, AArch64, RISC-V (shared register allocator)
+```
+
+- **One target-independent middle.** Inlining, propagation, folding,
+  dead-code removal and redundancy elimination run on the SSA form. Every
+  target gets them.
+- **Thin emitters.**
+  - µDewy and wasm both want expression trees, so they share one
+    *tree-forming* step: a value with a single use moves into that use when
+    nothing between them can change its meaning.
+  - The register targets share one allocator over the same form.
+  - Encoders are ported from the µDewy object writers.
+- **Debug builds** (`debug_names`) keep the existing normalize-and-emit
+  route, so every source function and local stays visible.
+- **The hosted compiler** stays the unoptimized reference. Behavioral parity
+  is unaffected.
+
+## The SSA form
+
+The form is structured: wasm requires structured control flow, the lowered
+program already has it, and µDewy text needs it back.
+
+- **Values.** Each value is defined once. Kinds:
+
+  | Kind | Meaning |
+  |---|---|
+  | parameter | a function parameter |
+  | constant | an integer or boolean word |
+  | leaf | static data or a function reference: pure, movable, never duplicated |
+  | operation | a pure word operation; narrow widths wrap as µDewy emission does |
+  | load | reads memory; ordered against stores and calls |
+  | call | direct, indirect or an effectful intrinsic (stores, syscalls, frame allocation) |
+  | global read / write | ordered like loads and stores |
+  | merge | the value of a variable where control paths join |
+
+- **Regions.** A function body is a tree of regions. A region is a sequence
+  of items: a value to evaluate, `if`, `loop`, `break`, `continue`, `return`,
+  or a *copy* into a merge.
+- **Merges are copies.** A merge value has no operand list. Each path that
+  reaches the join ends with a copy `merge ← value`. Copies at one point are
+  parallel. This is the form wasm locals, µDewy locals and a register
+  allocator all consume directly.
+- **Loops** are unconditional with explicit exits. `loop c { body }` is
+  `loop { if c { body } else { break } }`; emitters recognize that shape.
+- **Conditions** keep µDewy's lazy `and`/`or`: a condition is a tree whose
+  later leaves own the instructions that compute them, evaluated only when
+  reached.
+- **Scope is lexical.** A value is visible in its region after its
+  definition and in nested regions. Optimizations reuse only visible values,
+  so every emitter can bind a value where it is defined.
+
+Memory model, as µDewy defines it:
+- Loads and stores may alias unless their addresses are provably distinct.
+- A call clobbers memory unless the callee is known not to write it.
+- Evaluation order and the effects of `__syscall*` stay as written.
 
 ## Constraints
 
@@ -42,37 +99,26 @@ every source function stays a frame.
   every compile, including the self-build it speeds up. Each pass is linear
   or near linear in function size, with explicit budgets: inlining depth,
   inlined size and growth per caller.
-- **µDewy semantics only.**
-  - Loads and stores may alias unless their addresses are provably distinct.
-  - A call clobbers memory unless the callee is known not to write it.
-  - Evaluation order and the effects of `__syscall*` stay as written.
-- **Measured stages.** Each stage lands only with a self-build timing that
-  shows its gain, and its output is checked by the existing gates.
+- **Measured steps.** Each step lands with a self-build timing and the
+  existing gates. Wasm gains are measured on a benchmark set under a wasm
+  runtime, since the self-build runs only on x86-64 here.
 
-## Stages
+## Steps
 
-1. **Inlining with cleanup.** Expand small callees (renamed locals,
-   parameters bound in order, early returns as exits from an enclosing block).
-   Then, within the caller:
-   - *copy and constant propagation* of single-assignment locals;
-   - *constant folding*, and *branch folding* on decided conditions;
-   - *dead-code removal* of unused pure values and unreachable arms.
+1. **SSA form through µDewy.** Build the form from the lowered program and
+   write it back as µDewy through tree-forming. No new optimization yet:
+   this proves the form, the builder and the writer on every existing target.
+   Copy propagation and removal of unused pure values fall out of
+   construction.
+2. **Middle optimizations.** Inlining on the form (budgets as measured
+   below), constant and branch folding, redundant-load elimination within
+   straight-line code.
+3. **Wasm and x86-64 emitters**, side by side: wasm from trees; x86-64 with
+   the shared allocator. Each is checked against the µDewy route on the
+   existing suites.
+4. **AArch64 and RISC-V** on the same allocator.
 
-   Inlined helpers' checks (null handles, owner counts, capacity) often
-   decide at the call site.
-2. **Redundancy.** Local value numbering of pure expressions and loads
-   within straight-line segments, killed by stores to possibly aliasing
-   addresses and by calls. Hoisting loop-invariant loads where the loop
-   provably stores nothing that aliases them.
-3. **Allocation.** Larger inlined bodies hold more live values. If the µDewy
-   backend's five allocatable registers then limit the gain, widen its
-   budget, or emit x86-64 from an SSA form of this program directly. That is
-   decided by the stage 2 measurements, not in advance.
-
-Stage 0 is the scaffolding: the pass boundary, counters (inlined sites,
-folded branches, removed statements) and timing under `lowering.optimize`.
-
-## Stage 1 measurements (2026-10-03)
+## Inlining measurements before the SSA form (2026-10-03)
 
 Each row is a cold self-build, interleaved, with every compiler building its
 own source:
@@ -98,9 +144,7 @@ Conclusion: GCC's 2.3× needs both inlining and a code generator that keeps
 an inlined body's values in registers across a large function. Without
 inlining, calls dominate and code quality barely matters (GCC without
 inlining ties the direct backend). Without good allocation, inlining buys
-about 8%. The next step is therefore stage 3 rather than more stage 1 tuning:
-an SSA form of the lowered program with register allocation over all
-general registers. That is a substantial new code generator. Whether it
-emits machine code from the Dewy compiler, or replaces the µDewy backend's
-single-pass emitter, is open for David. The inliner prototype is kept outside
-the tree until a code generator can use it.
+about 8%. The plan above follows from this: an SSA form of the lowered
+program, with register allocation over all general registers on the register
+targets. The inliner prototype is kept outside the tree until the SSA form
+can host it.
