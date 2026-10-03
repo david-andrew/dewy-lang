@@ -276,6 +276,39 @@ Still to do on this route:
 - foreign functions and floating-point intrinsics; debug information;
 - AArch64 and RISC-V on the same allocator; wasm from the tree form.
 
+## After the application baseline (2026-10-03)
+
+The application benchmarks ([`../benchmarks/apps/`](../benchmarks/apps/README.md))
+showed where the first emitter's code lost to C; three changes followed.
+
+- **Division by a constant.** The x86-64 emitter turns `//` and `%` by a
+  constant of 2 to 2³¹ − 1 into a shift (a power of two) or a multiplication
+  by a reciprocal (Hacker's Delight 10-1, computed in signed words), with no
+  test for a zero divisor or the overflowing case. Unsigned 64-bit operands
+  keep the division. `tests/python_misc/test_ssa_form.py` compares both
+  forms against division by the same numbers met only at run time.
+- **The test for sharing, in place.** `_unique_array` and `_unique_object`
+  were one function each: a test of the owner count, then the copy. They
+  are now a small function holding the test and a `_detach_…` function
+  holding the copy, so the form builds the test where it is used and only a
+  shared value pays a call. This is a change to the lowering, so both routes
+  and any later emitter have it.
+- **Value numbering.** While a body is built, an operation without effects
+  (arithmetic, comparison, load) whose operands are the same values as an
+  earlier one's is that earlier value, when the earlier one was computed on
+  every path to here: entries made inside an arm, a lazy operand, a loop or
+  a block built in place end with it. A load is reused only while no call
+  has been made since (stores are calls here) and never across a loop's
+  start.
+
+Self-build, same source: 49.2 s on the µDewy route (52.2 s when built by the
+previous compiler) and 36.9 s on the native route (39.8 s), executable
+9.87 MB; both fixed points hold.
+
+What the benchmarks point at next: bounds checks and sharing tests that a
+loop repeats without anything able to change their outcome; records stored
+flat in arrays; the dictionary probe by key type; `push`.
+
 ## Inlining measurements before the SSA form (2026-10-03)
 
 Each row is a cold self-build, interleaved, with every compiler building its

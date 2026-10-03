@@ -1,0 +1,59 @@
+# Dictionary and graph traversal: breadth-first search over a generated
+# graph whose nodes are sparse integer labels held in dictionaries.
+from p"harness.dewy" import size_argument, clock, mix
+
+const DEGREE:int64=4
+
+label = (index:int64):>int64 => index*7919+13
+
+# Every node's neighbours, `DEGREE` each.
+generate = (count:int64):>dict<int64 array<int64>> => {
+    let edges:dict<int64 array<int64>>=[]
+    let seed:int64=4242
+    let i:int64=0
+    loop i <? count {
+        let targets:array<int64>=[label((i+1)%count)]
+        let j:int64=1
+        loop j <? DEGREE {
+            seed=(seed*1103515245+12345)%2147483648
+            targets.push(label(seed%count))
+            j+=1
+        }
+        edges[label(i)]=targets
+        i+=1
+    }
+    return edges
+}
+
+kernel = (edges:dict<int64 array<int64>>):>int64 => {
+    let distance:dict<int64 int64>=[]
+    let queue:array<int64>=[label(0)]
+    distance[label(0)]=0
+    let hash:int64=11
+    let head:addr=0
+    loop head <? queue.length {
+        let node=queue[head]
+        head+=1
+        let reached=distance.get(node)
+        let targets=edges.get(node)
+        if reached is? none or targets is? none {continue}
+        hash=mix(hash node%1000+reached)
+        loop target in targets {
+            if distance.get(target) is? none {
+                distance[target]=reached+1
+                queue.push(target)
+            }
+        }
+    }
+    return mix(hash queue.length as int64)
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 200000)
+    let edges=generate(count)
+    let started=clock()
+    let result=kernel(edges)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

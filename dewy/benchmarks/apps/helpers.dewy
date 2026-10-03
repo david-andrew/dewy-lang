@@ -1,0 +1,44 @@
+# Helper-heavy scalar loops: small functions called from a hot loop.
+from p"harness.dewy" import size_argument, clock, mix
+
+gcd = (a:int64 b:int64):>int64 => {
+    let x=a
+    let y=b
+    loop y not=? 0 {
+        let rest=x%y
+        x=y
+        y=rest
+    }
+    return x
+}
+collatz = (start:int64):>int64 => {
+    let steps:int64=0
+    let value=start
+    loop value >? 1 and steps <? 200 {
+        value=if value%2 =? 0 value//2 else 3*value+1
+        steps+=1
+    }
+    return steps
+}
+clamp = (value:int64 low:int64 high:int64):>int64 => if value <? low low else if value >? high high else value
+
+kernel = (count:int64):>int64 => {
+    let hash:int64=7
+    let i:int64=1
+    loop i <=? count {
+        hash=mix(hash gcd(i 360360))
+        hash=mix(hash collatz(i))
+        hash=mix(hash clamp(i%1000-500 (-100) 100)+100)
+        i+=1
+    }
+    return hash
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 200000)
+    let started=clock()
+    let result=kernel(count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

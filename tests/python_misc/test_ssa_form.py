@@ -3,8 +3,9 @@ as expression trees (dewy/bootstrap/OPTIMIZER.md).
 
 These programs pin what the form must preserve: a name bound to a variable
 keeps the value it saw, values do not move past the assignments and calls
-that would change them, lazy conditions stay lazy, and a small function
-built in place of its call behaves as the call did."""
+that would change them, lazy conditions stay lazy, a small function built in
+place of its call behaves as the call did, and an operation is reused only
+where its earlier result still stands."""
 from test_bootstrap_structural_text import build_program_driver, check_structural_text
 
 CASES = [
@@ -142,6 +143,51 @@ work=():>int64=>{
     return later+total-index
 }
 main=():>int64=>if work()=?83 42 else 1''',
+    # Division by a constant is done by multiplying or shifting: it agrees
+    # with division by the same number met only when the program runs.
+    '''main=():>int64=>{
+    let values:array<int64>=[0 1 (-1) 7 (-7) 1000000007 (-1000000007) 9223372036854775807 (0-9223372036854775807-1) 4611686018427387904 123456789012345 (-123456789012345)]
+    let divisors:array<int64>=[2 3 7 8 10 1000 4096 1000000007 2147483647]
+    let bad:int64=0
+    loop x in values {
+        let quotients:array<int64>=[x//2 x//3 x//7 x//8 x//10 x//1000 x//4096 x//1000000007 x//2147483647]
+        let remainders:array<int64>=[x%2 x%3 x%7 x%8 x%10 x%1000 x%4096 x%1000000007 x%2147483647]
+        loop i in 0.. and i <? divisors.length and i <? quotients.length and i <? remainders.length {
+            let d=divisors[i]
+            if d >? 0 and (x//d not=? quotients[i] or x%d not=? remainders[i]) {bad+=1}
+        }
+    }
+    return if bad=?0 42 else bad
+}''',
+    # A value read from storage is read again after a store, a call or a
+    # loop round that may have changed it.
+    '''bump=(@cells:array<int64>):>void=>{if cells.length >? 0 {cells[0]=cells[0]+1}}
+main=():>int64=>{
+    let cells:array<int64>=[5 7]
+    let first=cells[0]+cells[1]
+    cells[0]=20
+    let second=cells[0]+cells[1]
+    bump(@cells)
+    if cells.length <? 2 return 1
+    let third=cells[0]+cells[1]
+    let i:int64=0
+    let seen:int64=0
+    loop i <? 3 {
+        seen+=cells[1]
+        cells[1]=cells[1]+1
+        i+=1
+    }
+    return if first=?12 and second=?27 and third=?28 and seen=?24 42 else 1
+}''',
+    # An operation computed once is reused only where that computation
+    # always ran: not from the lazy side of a test, nor from another arm.
+    '''pick=(a:int64 b:int64 flag:bool):>int64=>{
+    let result:int64=0
+    if flag or a*b >? 100 {result=a*b}
+    if flag {result+=a*b+1} else {result+=a*b+2}
+    return result+a*b
+}
+main=():>int64=>if pick(3 4 true)=?37 and pick(3 4 false)=?26 and pick(20 30 false)=?1802 42 else 1''',
 ]
 
 

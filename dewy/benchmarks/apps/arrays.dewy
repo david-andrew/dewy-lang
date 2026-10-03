@@ -1,0 +1,74 @@
+# Flat integer-array loops: fill, prefix sums, a sieve, an in-place reverse.
+from p"harness.dewy" import size_argument, clock, mix
+
+fill = (count:int64):>array<int64> => {
+    let values:array<int64>=[]
+    let seed:int64=12345
+    let i:int64=0
+    loop i <? count {
+        seed=(seed*1103515245+12345)%2147483648
+        values.push(seed%1000)
+        i+=1
+    }
+    return values
+}
+
+prefix_sums = (@values:array<int64>):>void => {
+    let total:int64=0
+    loop i in 0.. and i <? values.length {
+        total=(total+values[i])%1000000007
+        values[i]=total
+    }
+}
+
+# Primes below the length of `flags`, which starts as all ones.
+sieve = (@flags:array<int64>):>int64 => {
+    let found:int64=0
+    loop i in 2.. and i <? flags.length {
+        if flags[i] =? 1 {
+            found+=1
+            let j=i+i
+            loop j <? flags.length {
+                flags[j]=0
+                j+=i
+            }
+        }
+    }
+    return found
+}
+
+reverse = (@values:array<int64>):>void => {
+    let low:addr=0
+    let high=values.length
+    loop low+1 <? high {
+        high-=1
+        let kept=values[low]
+        values[low]=values[high]
+        values[high]=kept
+        low+=1
+    }
+}
+
+kernel = (@values:array<int64> @flags:array<int64>):>int64 => {
+    prefix_sums(@values)
+    reverse(@values)
+    let hash=sieve(@flags)
+    loop i in 0.. and i <? values.length {hash=mix(hash values[i])}
+    return hash
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 1000000)
+    let values=fill(count)
+    let flags:array<int64>=[]
+    let i:int64=0
+    loop i <? count {
+        flags.push(1)
+        i+=1
+    }
+    let started=clock()
+    let result=kernel(@values @flags)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

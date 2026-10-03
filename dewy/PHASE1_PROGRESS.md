@@ -146,6 +146,30 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Application benchmarks; division, sharing tests, value numbering (2026-10-03)
+
+The small cross-language application suite the roadmap accepted on
+2026-10-03 exists: [`benchmarks/apps/`](benchmarks/apps/README.md), five
+workloads (helper-heavy scalar loops, flat integer arrays, an array of small
+records, byte scanning and parsing, dictionary/graph traversal), each in
+ordinary Dewy with a C counterpart, checksums compared, kernel timed apart
+from setup, small and larger inputs, default and optimizing routes.
+[`RESULTS.md`](benchmarks/apps/RESULTS.md) holds the baseline at 51bb1ed8
+and this batch.
+
+The baseline chose the batch (details in
+[`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md)): division by a constant
+without a division, the test for a shared array or record built in place,
+and value numbering in the SSA builder. Optimizing-route kernels at the
+larger inputs, as multiples of C at `-O2`: helpers 6.5 → 1.7, arrays
+2.9 → 1.9, records 7.2 → 4.7, text 3.6 → 2.0, graph 3.6 (unchanged).
+Compiler self-build: 49.2 s µDewy route, 36.9 s native route.
+
+Evidence: both fixed points hold (three generations on the µDewy route, the
+native route rebuilding itself); three new cases in
+`tests/python_misc/test_ssa_form.py`, run through the hosted compiler, the
+µDewy route and the native route. Full local gate: 6,398 passed.
+
 ## Optimizing tier: native x86-64 emitter (2026-10-03)
 
 The Dewy compiler can now write a program's executable itself: no µDewy

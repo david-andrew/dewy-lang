@@ -1,0 +1,60 @@
+# Loops over an array of small records: integer particles stepped in a box.
+from p"harness.dewy" import size_argument, clock, mix
+
+Particle:type = [x:int64 y:int64 dx:int64 dy:int64]
+
+const BOX:int64=4096
+
+populate = (count:int64):>array<Particle> => {
+    let particles:array<Particle>=[]
+    let seed:int64=2024
+    let i:int64=0
+    loop i <? count {
+        seed=(seed*1103515245+12345)%2147483648
+        let x=seed%BOX
+        seed=(seed*1103515245+12345)%2147483648
+        let y=seed%BOX
+        seed=(seed*1103515245+12345)%2147483648
+        particles.push(Particle(x=x y=y dx=seed%17-8 dy=(seed//32)%17-8))
+        i+=1
+    }
+    return particles
+}
+
+step = (@particles:array<Particle>):>void => {
+    loop i in 0.. and i <? particles.length {
+        let x=particles[i].x+particles[i].dx
+        let y=particles[i].y+particles[i].dy
+        if x <? 0 or x >=? BOX {
+            particles[i].dx=0-particles[i].dx
+            x=particles[i].x
+        }
+        if y <? 0 or y >=? BOX {
+            particles[i].dy=0-particles[i].dy
+            y=particles[i].y
+        }
+        particles[i].x=x
+        particles[i].y=y
+    }
+}
+
+kernel = (@particles:array<Particle> rounds:int64):>int64 => {
+    let round:int64=0
+    loop round <? rounds {
+        step(@particles)
+        round+=1
+    }
+    let hash:int64=3
+    loop particle in particles {hash=mix(mix(hash particle.x) particle.y)}
+    return hash
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 100000)
+    let particles=populate(count)
+    let started=clock()
+    let result=kernel(@particles 50)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

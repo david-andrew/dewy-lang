@@ -1,0 +1,25 @@
+# Shared by the application benchmarks: a size from the command line, a
+# monotonic clock, and a checksum step. A program prints its checksum and the
+# nanoseconds its kernel took: `<checksum> <nanoseconds>`.
+
+# The decimal number in `text`, or `fallback` when it is not one.
+size_argument = (args:array<string> fallback:int64):>int64 => {
+    if args.length <? 2 return fallback
+    let value:int64=0
+    let text=args[1] as array<uint8>
+    loop byte in text {
+        if byte <? 48 or byte >? 57 return fallback
+        value=value*10+(byte as int64)-48
+        if value >? 1000000000 return fallback
+    }
+    return value
+}
+
+# CLOCK_MONOTONIC in nanoseconds.
+clock = ():>int64 => {
+    let buffer:int64=__alloca__(16)
+    if __syscall2__(228 1 buffer) not=? 0 return 0
+    return __load_i64__(buffer)*1000000000+__load_i64__(buffer+8)
+}
+
+mix = (hash:int64 value:int64):>int64 => (hash*31+value)%1000000007

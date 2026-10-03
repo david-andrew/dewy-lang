@@ -132,6 +132,8 @@ imul_imm = (to:int64 source:int64 value:int64 @out:array<uint8>):>void => {
     if fits8(value) {byte(107 @out) modrm(3 to source @out) imm8(value @out)}
     else {byte(105 @out) modrm(3 to source @out) imm32(value @out)}
 }
+# `rdx:rax` becomes the signed product of `rax` and `reg`.
+imul_wide = (reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 5 reg @out)}
 neg = (reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 3 reg @out)}
 invert = (reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 2 reg @out)}
 # Shifts by `cl`: `kind` is 4 (left), 5 (logical right) or 7 (arithmetic right).

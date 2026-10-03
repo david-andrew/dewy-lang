@@ -1913,8 +1913,17 @@ record_helper = (kind:string value:addr type:addr node:hir.AST @state:State):>ad
         state.copy_helpers[key]=generated name=generated
         let parameter=fresh("{kind}_source" @state)
         let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
-        let body=if kind =? 'share_object' record_share_body(source type node @state) else record_unique_body(source type node @state)
-        finish_copy(generated parameter body node @state)
+        if kind =? 'share_object' {finish_copy(generated parameter record_share_body(source type node @state) node @state)}
+        else {
+            # The test for a shared record is its own small function, built
+            # in place by the optimizing tier; the copy stays out of line.
+            let detach=fresh('detach_object' @state)
+            finish_copy(detach parameter record_unique_body(source type node @state) node @state)
+            let word_type=types.primitive('int64' @state.type_nodes)
+            let current=read_word(record_header(source node @state) 0 node @state)
+            let arm=put(hir.IfArm[node.loc word_type compare('__gt__' record_count(current node @state) word(1 node @state) node @state) intrinsic_call(detach [source] word_type node @state)] @state)
+            finish_copy(generated parameter put(hir.Flow[node.loc word_type [arm] source] @state) node @state)
+        }
     }
     $runtime_assert name isnt? none
     return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
@@ -2005,8 +2014,13 @@ array_unique = (descriptor:addr element:addr node:hir.AST @state:State):>addr =>
         state.copy_helpers[key]=generated name=generated
         let parameter=fresh('unique_source' @state)
         let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
-        let body=array_unique_body(source element node @state)
-        finish_copy(generated parameter body node @state)
+        # As for records: the test in place, the copy out of line.
+        let detach=fresh('detach_array' @state)
+        finish_copy(detach parameter array_unique_body(source element node @state) node @state)
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let owner=read_word(source layouts.array_descriptor.owner node @state)
+        let arm=put(hir.IfArm[node.loc word_type compare('__gt__' owner word(1 node @state) node @state) intrinsic_call(detach [source] word_type node @state)] @state)
+        finish_copy(generated parameter put(hir.Flow[node.loc word_type [arm] source] @state) node @state)
     }
     $runtime_assert name isnt? none
     return intrinsic_call(name [descriptor] types.primitive('int64' @state.type_nodes) node @state)

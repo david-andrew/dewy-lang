@@ -325,6 +325,99 @@ compare = (cc:int64 @program:Program):>void => {
     x86.set_bool(cc x86.RAX @program.image.code)
 }
 
+# Signed division by a constant as a multiplication: the quotient is the
+# high word of `multiplier * x` (plus `x` when the multiplier is negative),
+# shifted right by `shift`, plus one when `x` is negative.
+Reciprocal:type = const [multiplier:int64 shift:int64]
+# For a divisor from 3 to 2^31 - 1 (Hacker's Delight, 10-1). The remainders
+# stay below 2^63, so signed words carry the whole computation.
+reciprocal = (divisor:int64):>Reciprocal => {
+    if divisor <? 3 return Reciprocal[0 0]
+    # 2^63 divided by the divisor, from 2^62.
+    let q2=(4611686018427387904//divisor)*2
+    let r2=(4611686018427387904%divisor)*2
+    if r2 >=? divisor {
+        q2+=1
+        r2-=divisor
+    }
+    # 2^63 divided by `limit`, the largest multiple of the divisor below
+    # 2^63, less one.
+    let limit=9223372036854775807-r2
+    let q1:int64=1
+    let r1=r2+1
+    let power:int64=63
+    loop power <? 127 {
+        power+=1
+        if r1 >=? limit-r1 {
+            q1=q1*2+1
+            r1=r1-(limit-r1)
+        } else {
+            q1=q1*2
+            r1=r1*2
+        }
+        q2=q2*2
+        r2=r2*2
+        if r2 >=? divisor {
+            q2+=1
+            r2-=divisor
+        }
+        let delta=divisor-r2
+        if not (q1 <? delta or (q1 =? delta and r1 =? 0)) {break}
+    }
+    return Reciprocal[q2+1 power-64]
+}
+# The power of two a divisor is, or -1.
+power_of_two = (divisor:int64):>int64 => {
+    let power:int64=1
+    let value:int64=2
+    loop power <? 31 {
+        if divisor =? value return power
+        value=value*2
+        power+=1
+    }
+    return -1
+}
+# Whether a division's constant divisor is one `divide_by` handles: the
+# checks for a zero divisor and for the overflowing case are then moot.
+reducible = (divisor:int64|none width:Width):>bool => {
+    if divisor is? none or divisor <? 2 return false
+    return not (width.known and not width.signed and width.bits =? 64)
+}
+# `x` divided by a constant, or its remainder, without a division: `x` is
+# in `left`, which is none of the scratch registers `rax` and `rdx`. The
+# result is in the register returned.
+divide_by = (divisor:int64 remainder:bool left:int64 @program:Program):>int64 => {
+    let power=power_of_two(divisor)
+    if power >? 0 {
+        # Truncation rounds toward zero: a negative `x` is biased first.
+        x86.mov(x86.RAX left @program.image.code)
+        x86.shift_imm(7 x86.RAX 63 @program.image.code)
+        x86.shift_imm(5 x86.RAX 64-power @program.image.code)
+        x86.arith(x86.ADD x86.RAX left @program.image.code)
+        if not remainder {
+            x86.shift_imm(7 x86.RAX power @program.image.code)
+            return x86.RAX
+        }
+        x86.arith_imm(x86.AND x86.RAX 0-divisor @program.image.code)
+        x86.mov(x86.RDX left @program.image.code)
+        x86.arith(x86.SUB x86.RDX x86.RAX @program.image.code)
+        return x86.RDX
+    }
+    let by=reciprocal(divisor)
+    x86.constant(x86.RAX by.multiplier @program.image.code)
+    x86.imul_wide(left @program.image.code)
+    if by.multiplier <? 0 {x86.arith(x86.ADD x86.RDX left @program.image.code)}
+    if by.shift >? 0 {x86.shift_imm(7 x86.RDX by.shift @program.image.code)}
+    x86.mov(x86.RAX left @program.image.code)
+    x86.shift_imm(5 x86.RAX 63 @program.image.code)
+    x86.arith(x86.ADD x86.RDX x86.RAX @program.image.code)
+    if not remainder return x86.RDX
+    x86.imul_imm(x86.RDX x86.RDX divisor @program.image.code)
+    x86.mov(x86.RAX left @program.image.code)
+    x86.arith(x86.SUB x86.RAX x86.RDX @program.image.code)
+    return x86.RAX
+}
+
 # A two-operand word operation: operands in `rax` and `rcx`, result in `rax`.
 binary = (name:string width:Width @g:Gen @program:Program):>void => {
     let unsigned=width.known and not width.signed
@@ -537,6 +630,14 @@ evaluate = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen 
             if target not=? left {x86.mov(target left @program.image.code)}
             if count isnt? none {x86.shift_imm(shift_kind(name width) target count @program.image.code)}
             keep(id target body g @program)
+        } else if (name =? '__floordiv__' or name =? '__mod__') and reducible(immediate(entry.b body nodes) width) {
+            let divisor=immediate(entry.b body nodes)
+            let left=operand(entry.a x86.RCX body nodes g @program)
+            if divisor isnt? none {
+                let result=divide_by(divisor name =? '__mod__' left @program)
+                wrap_in(result width @program)
+                keep(id result body g @program)
+            }
         } else {
             fetch(entry.a x86.RAX body nodes g @program)
             fetch(entry.b x86.RCX body nodes g @program)
