@@ -184,7 +184,7 @@ State:type = [
     none_cell:string?=none
     problem:Error?=none
 ]
-Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[] placements:array<PlacementNote>=[]]
+Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[] placements:array<PlacementNote>=[] native:array<uint8>|none=none]
 copy_name = (type:addr @state:State):>string => {
     # Checked type descriptions are immutable during lowering. Render once,
     # even when thousands of sites copy the same arena-node or context type.
@@ -5989,7 +5989,7 @@ validate_required_views = (root:addr @state:State):>void => {
     state.view_writes=[] state.mutated_roots=set[]
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false):>Result|Error => {
     let captures_started=timing.start(timings)
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
@@ -6170,7 +6170,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value]
     if proof_root not=?root {assembled=program.retain_reachable(assembled state.nodes)}
     # Debug builds keep every function and local as written.
-    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files] optimizing=not state.debug_names timings=timings)
+    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files] optimizing=not state.debug_names timings=timings native_code=native_code)
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
@@ -6181,7 +6181,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             notes=['This module enables `$explicit_copies`; COW sharing does not prove that a logical copy is free.']]
     }
     timing.report('lowering.moves' state.move_time timings)
-    return Result[normalized.program normalized.input state.copy_notes state.placement_notes]
+    return Result[normalized.program normalized.input state.copy_notes state.placement_notes normalized.native]
 }
 
 # C argv is process-lifetime byte storage. Describe each validated UTF-8

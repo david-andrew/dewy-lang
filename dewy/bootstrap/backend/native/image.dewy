@@ -1,0 +1,114 @@
+import p"x86.dewy" as x86
+
+doc"""
+A static ELF executable built in memory: code, initialized data and zeroed
+storage, with the references between them resolved here. No assembler and no
+linker run (see `../../OPTIMIZER.md`).
+
+Code and data are emitted first with their references recorded; `finish`
+places both, patches every reference and writes the file's bytes.
+"""
+
+# What a reference points into.
+const CODE:int64=0
+const DATA:int64=1
+const ZEROED:int64=2
+
+# A 32-bit field in the code, relative to the instruction's end.
+Site:type = const [at:addr section:int64 offset:int64]
+# The same, to a function named before it is placed.
+Call:type = const [at:addr symbol:string]
+# A data word that holds an address.
+Word:type = const [at:addr section:int64 offset:int64 symbol:string='']
+
+Image:type = [
+    code:array<uint8>=[]
+    data:array<uint8>=[]
+    zeroed:int64=0
+    sites:array<Site>=[]
+    calls:array<Call>=[]
+    words:array<Word>=[]
+    functions:dict<string addr>=[]
+    entry:addr=0
+]
+
+const BASE:int64=4194304
+const PAGE:int64=4096
+const HEADERS:int64=176
+
+u16 = (value:int64 @out:array<uint8>):>void => {x86.byte(x86.low(value 0) @out) x86.byte(x86.low(value 8) @out)}
+u32 = (value:int64 @out:array<uint8>):>void => {x86.imm32(value @out)}
+u64 = (value:int64 @out:array<uint8>):>void => {x86.imm64(value @out)}
+
+# Reserve `size` zeroed bytes; the result is their offset.
+reserve = (size:int64 @image:Image):>int64 => {
+    let offset=image.zeroed
+    image.zeroed=offset+((size+7)//8)*8
+    return offset
+}
+# Append a word of data; the result is its offset.
+word = (value:int64 @image:Image):>int64 => {
+    let offset=image.data.length as int64
+    u64(value @image.data)
+    return offset
+}
+# Bytes with their length in the word before them, as µDewy lays out a
+# string: the result is the offset of the bytes.
+bytes = (content:array<uint8> @image:Image):>int64 => {
+    u64(content.length as int64 @image.data)
+    let offset=image.data.length as int64
+    loop item in content {image.data.push(item)}
+    loop image.data.length%8 not=? 0 {image.data.push(0)}
+    return offset
+}
+overwrite64 = (at:addr value:int64 @out:array<uint8>):>void => {
+    loop i in 0.. and i <? 8 {
+        let index=at+i
+        $runtime_assert index <? out.length
+        out[index]=x86.low(value (i as int64)*8) transmute uint8
+    }
+}
+
+program_header = (flags:int64 offset:int64 address:int64 file_size:int64 memory_size:int64 @out:array<uint8>):>void => {
+    u32(1 @out) u32(flags @out) u64(offset @out) u64(address @out) u64(address @out)
+    u64(file_size @out) u64(memory_size @out) u64(PAGE @out)
+}
+
+# The executable's bytes, or the name of a function that was called but
+# never defined.
+finish = (@image:Image):>array<uint8>|string => {
+    let code_size=image.code.length as int64
+    let data_offset=((HEADERS+code_size+PAGE-1)//PAGE)*PAGE
+    let data_size=image.data.length as int64
+    let code_address=BASE+HEADERS
+    let data_address=BASE+data_offset
+    let zeroed_address=data_address+((data_size+7)//8)*8
+    loop call in image.calls {
+        let target=image.functions.get(call.symbol)
+        if target is? none return call.symbol
+        x86.patch32(call.at (target as int64)-((call.at as int64)+4) @image.code)
+    }
+    loop site in image.sites {
+        let target=(if site.section =? CODE code_address else if site.section =? DATA data_address else zeroed_address)+site.offset
+        x86.patch32(site.at target-(code_address+(site.at as int64)+4) @image.code)
+    }
+    loop entry in image.words {
+        let target:int64=0
+        if entry.symbol not=? '' {
+            let function=image.functions.get(entry.symbol)
+            if function is? none return entry.symbol
+            target=code_address+(function as int64)
+        } else {target=(if entry.section =? CODE code_address else if entry.section =? DATA data_address else zeroed_address)+entry.offset}
+        overwrite64(entry.at target @image.data)
+    }
+    let out:array<uint8>=[127 69 76 70 2 1 1 0 0 0 0 0 0 0 0 0]
+    u16(2 @out) u16(62 @out) u32(1 @out)
+    u64(code_address+(image.entry as int64) @out) u64(64 @out) u64(0 @out)
+    u32(0 @out) u16(64 @out) u16(56 @out) u16(2 @out) u16(64 @out) u16(0 @out) u16(0 @out)
+    program_header(5 0 BASE HEADERS+code_size HEADERS+code_size @out)
+    program_header(6 data_offset data_address data_size ((data_size+7)//8)*8+image.zeroed @out)
+    loop item in image.code {out.push(item)}
+    loop (out.length as int64) <? data_offset {out.push(0)}
+    loop item in image.data {out.push(item)}
+    return out
+}

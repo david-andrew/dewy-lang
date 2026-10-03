@@ -1,0 +1,248 @@
+doc"""
+x86-64 instruction encoding for the native emitter (see `../../OPTIMIZER.md`).
+
+Each function appends one instruction's bytes. Registers are their hardware
+numbers. Operations are 64-bit unless the name says otherwise. A memory
+operand is `base + disp`, optionally `+ index * scale`.
+
+Branches, calls and references to data are written with a 32-bit field the
+caller patches once the target's place is known (`patch32`).
+"""
+
+const RAX:int64=0
+const RCX:int64=1
+const RDX:int64=2
+const RBX:int64=3
+const RSP:int64=4
+const RBP:int64=5
+const RSI:int64=6
+const RDI:int64=7
+const R8:int64=8
+const R9:int64=9
+const R10:int64=10
+const R11:int64=11
+const R12:int64=12
+const R13:int64=13
+const R14:int64=14
+const R15:int64=15
+
+# Condition codes, as the low nibble of `jcc`/`setcc`.
+const CC_B:int64=2
+const CC_AE:int64=3
+const CC_E:int64=4
+const CC_NE:int64=5
+const CC_BE:int64=6
+const CC_A:int64=7
+const CC_L:int64=12
+const CC_GE:int64=13
+const CC_LE:int64=14
+const CC_G:int64=15
+# The condition that holds exactly when `cc` does not.
+inverse = (cc:int64):>int64 => if cc%2 =? 0 cc+1 else (cc//2)*2
+
+# Two-operand arithmetic, by the opcode of its `r/m, r` form; the `/n`
+# extension of its immediate form is that opcode divided by eight.
+const ADD:int64=1
+const OR:int64=9
+const AND:int64=33
+const SUB:int64=41
+const XOR:int64=49
+const CMP:int64=57
+
+byte = (value:int64 @out:array<uint8>):>void => {out.push((value%256) transmute uint8)}
+low = (value:int64 shift:int64):>int64 => (((value transmute uint64) >> (shift transmute uint64)) and 255) transmute int64
+imm8 = (value:int64 @out:array<uint8>):>void => {byte(low(value 0) @out)}
+imm32 = (value:int64 @out:array<uint8>):>void => {
+    byte(low(value 0) @out) byte(low(value 8) @out) byte(low(value 16) @out) byte(low(value 24) @out)
+}
+imm64 = (value:int64 @out:array<uint8>):>void => {
+    imm32(value @out)
+    byte(low(value 32) @out) byte(low(value 40) @out) byte(low(value 48) @out) byte(low(value 56) @out)
+}
+fits8 = (value:int64):>bool => value >=? -128 and value <=? 127
+fits32 = (value:int64):>bool => value >=? -2147483648 and value <=? 2147483647
+# Overwrite the 32-bit field at `at` with `value`.
+patch32 = (at:addr value:int64 @out:array<uint8>):>void => {
+    $runtime_assert at+3 <? out.length
+    out[at]=low(value 0) transmute uint8
+    out[at+1]=low(value 8) transmute uint8
+    out[at+2]=low(value 16) transmute uint8
+    out[at+3]=low(value 24) transmute uint8
+}
+
+# The REX prefix: `wide` selects 64-bit operands; the three registers supply
+# their high bits. `force` writes it even when empty (byte registers 4-7).
+rex = (wide:bool reg:int64 index:int64 base:int64 force:bool @out:array<uint8>):>void => {
+    let bits=(if wide 8 else 0)+(reg//8)*4+(index//8)*2+base//8
+    if bits >? 0 or force {byte(64+bits @out)}
+}
+modrm = (mode:int64 reg:int64 rm:int64 @out:array<uint8>):>void => {byte(mode*64+(reg%8)*8+rm%8 @out)}
+# The ModRM, SIB and displacement bytes of `[base + disp]`.
+memory = (reg:int64 base:int64 disp:int64 @out:array<uint8>):>void => {
+    let mode:int64=if disp =? 0 and base%8 not=? 5 0 else if fits8(disp) 1 else 2
+    modrm(mode reg base @out)
+    if base%8 =? 4 {byte(36 @out)}
+    if mode =? 1 {imm8(disp @out)} else if mode =? 2 {imm32(disp @out)}
+}
+# `[base + index * scale + disp]`; `scale` is 1, 2, 4 or 8 and `index` is
+# never the stack pointer.
+indexed = (reg:int64 base:int64 index:int64 scale:int64 disp:int64 @out:array<uint8>):>void => {
+    let mode:int64=if disp =? 0 and base%8 not=? 5 0 else if fits8(disp) 1 else 2
+    modrm(mode reg 4 @out)
+    let power:int64=if scale =? 8 3 else if scale =? 4 2 else if scale =? 2 1 else 0
+    byte(power*64+(index%8)*8+base%8 @out)
+    if mode =? 1 {imm8(disp @out)} else if mode =? 2 {imm32(disp @out)}
+}
+
+mov = (to:int64 source:int64 @out:array<uint8>):>void => {
+    rex(true source 0 to false @out) byte(137 @out) modrm(3 source to @out)
+}
+# A constant: the shortest form that leaves the full 64-bit value.
+constant = (to:int64 value:int64 @out:array<uint8>):>void => {
+    if value =? 0 {
+        rex(false to 0 to false @out) byte(49 @out) modrm(3 to to @out)
+    } else if value >=? 0 and value <=? 4294967295 {
+        rex(false 0 0 to false @out) byte(184+to%8 @out) imm32(value @out)
+    } else if fits32(value) {
+        rex(true 0 0 to false @out) byte(199 @out) modrm(3 0 to @out) imm32(value @out)
+    } else {
+        rex(true 0 0 to false @out) byte(184+to%8 @out) imm64(value @out)
+    }
+}
+# `op to, source` for ADD, SUB, AND, OR, XOR and CMP.
+arith = (op:int64 to:int64 source:int64 @out:array<uint8>):>void => {
+    rex(true source 0 to false @out) byte(op @out) modrm(3 source to @out)
+}
+arith_imm = (op:int64 to:int64 value:int64 @out:array<uint8>):>void => {
+    rex(true 0 0 to false @out)
+    if fits8(value) {byte(131 @out) modrm(3 op//8 to @out) imm8(value @out)}
+    else {byte(129 @out) modrm(3 op//8 to @out) imm32(value @out)}
+}
+arith_load = (op:int64 to:int64 base:int64 disp:int64 @out:array<uint8>):>void => {
+    rex(true to 0 base false @out) byte(op+2 @out) memory(to base disp @out)
+}
+test_reg = (left:int64 right:int64 @out:array<uint8>):>void => {
+    rex(true right 0 left false @out) byte(133 @out) modrm(3 right left @out)
+}
+imul = (to:int64 source:int64 @out:array<uint8>):>void => {
+    rex(true to 0 source false @out) byte(15 @out) byte(175 @out) modrm(3 to source @out)
+}
+imul_imm = (to:int64 source:int64 value:int64 @out:array<uint8>):>void => {
+    rex(true to 0 source false @out)
+    if fits8(value) {byte(107 @out) modrm(3 to source @out) imm8(value @out)}
+    else {byte(105 @out) modrm(3 to source @out) imm32(value @out)}
+}
+neg = (reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 3 reg @out)}
+invert = (reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 2 reg @out)}
+# Shifts by `cl`: `kind` is 4 (left), 5 (logical right) or 7 (arithmetic right).
+shift = (kind:int64 reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(211 @out) modrm(3 kind reg @out)}
+shift_imm = (kind:int64 reg:int64 count:int64 @out:array<uint8>):>void => {
+    rex(true 0 0 reg false @out) byte(193 @out) modrm(3 kind reg @out) imm8(count @out)
+}
+cqo = (@out:array<uint8>):>void => {byte(72 @out) byte(153 @out)}
+# Signed (7) or unsigned (6) division of `rdx:rax` by `reg`.
+divide = (kind:int64 reg:int64 @out:array<uint8>):>void => {rex(true 0 0 reg false @out) byte(247 @out) modrm(3 kind reg @out)}
+# `reg` becomes -1 when `cc` holds, else 0 (µDewy's booleans).
+set_bool = (cc:int64 reg:int64 @out:array<uint8>):>void => {
+    rex(false 0 0 reg true @out) byte(15 @out) byte(144+cc @out) modrm(3 0 reg @out)
+    rex(true reg 0 reg false @out) byte(15 @out) byte(182 @out) modrm(3 reg reg @out)
+    neg(reg @out)
+}
+
+# Loads: `bits` wide, sign- or zero-extended to the full register.
+load = (to:int64 base:int64 disp:int64 bits:int64 signed:bool @out:array<uint8>):>void => {
+    if bits =? 64 {rex(true to 0 base false @out) byte(139 @out)}
+    else if bits =? 32 and signed {rex(true to 0 base false @out) byte(99 @out)}
+    else if bits =? 32 {rex(false to 0 base false @out) byte(139 @out)}
+    else {
+        rex(signed to 0 base false @out) byte(15 @out)
+        byte((if bits =? 16 183 else 182)+(if signed 8 else 0) @out)
+    }
+    memory(to base disp @out)
+}
+load_indexed = (to:int64 base:int64 index:int64 scale:int64 disp:int64 bits:int64 signed:bool @out:array<uint8>):>void => {
+    if bits =? 64 {rex(true to index base false @out) byte(139 @out)}
+    else if bits =? 32 and signed {rex(true to index base false @out) byte(99 @out)}
+    else if bits =? 32 {rex(false to index base false @out) byte(139 @out)}
+    else {
+        rex(signed to index base false @out) byte(15 @out)
+        byte((if bits =? 16 183 else 182)+(if signed 8 else 0) @out)
+    }
+    indexed(to base index scale disp @out)
+}
+store_prefix = (source:int64 index:int64 base:int64 bits:int64 @out:array<uint8>):>void => {
+    if bits =? 16 {byte(102 @out)}
+    rex(bits =? 64 source index base bits =? 8 @out)
+    byte(if bits =? 8 136 else 137 @out)
+}
+store = (source:int64 base:int64 disp:int64 bits:int64 @out:array<uint8>):>void => {
+    store_prefix(source 0 base bits @out)
+    memory(source base disp @out)
+}
+store_indexed = (source:int64 base:int64 index:int64 scale:int64 disp:int64 bits:int64 @out:array<uint8>):>void => {
+    store_prefix(source index base bits @out)
+    indexed(source base index scale disp @out)
+}
+lea = (to:int64 base:int64 disp:int64 @out:array<uint8>):>void => {
+    rex(true to 0 base false @out) byte(141 @out) memory(to base disp @out)
+}
+lea_indexed = (to:int64 base:int64 index:int64 scale:int64 disp:int64 @out:array<uint8>):>void => {
+    rex(true to index base false @out) byte(141 @out) indexed(to base index scale disp @out)
+}
+# Narrow a register in place to `bits`, extending as the type does.
+extend = (reg:int64 bits:int64 signed:bool @out:array<uint8>):>void => {
+    if bits =? 32 and signed {rex(true reg 0 reg false @out) byte(99 @out) modrm(3 reg reg @out)}
+    else if bits =? 32 {rex(false reg 0 reg false @out) byte(137 @out) modrm(3 reg reg @out)}
+    else {
+        rex(signed reg 0 reg bits =? 8 @out) byte(15 @out)
+        byte((if bits =? 16 183 else 182)+(if signed 8 else 0) @out)
+        modrm(3 reg reg @out)
+    }
+}
+
+# A reference relative to the next instruction: the address of the returned
+# 32-bit field is patched with `target - (field + 4)`.
+lea_relative = (to:int64 @out:array<uint8>):>addr => {
+    rex(true to 0 0 false @out) byte(141 @out) modrm(0 to 5 @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+load_relative = (to:int64 @out:array<uint8>):>addr => {
+    rex(true to 0 0 false @out) byte(139 @out) modrm(0 to 5 @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+store_relative = (source:int64 @out:array<uint8>):>addr => {
+    rex(true source 0 0 false @out) byte(137 @out) modrm(0 source 5 @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+jump = (@out:array<uint8>):>addr => {
+    byte(233 @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+jump_if = (cc:int64 @out:array<uint8>):>addr => {
+    byte(15 @out) byte(128+cc @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+call = (@out:array<uint8>):>addr => {
+    byte(232 @out)
+    let field=out.length
+    imm32(0 @out)
+    return field
+}
+call_register = (reg:int64 @out:array<uint8>):>void => {
+    rex(false 0 0 reg false @out) byte(255 @out) modrm(3 2 reg @out)
+}
+ret = (@out:array<uint8>):>void => {byte(195 @out)}
+push_reg = (reg:int64 @out:array<uint8>):>void => {rex(false 0 0 reg false @out) byte(80+reg%8 @out)}
+pop_reg = (reg:int64 @out:array<uint8>):>void => {rex(false 0 0 reg false @out) byte(88+reg%8 @out)}
+syscall = (@out:array<uint8>):>void => {byte(15 @out) byte(5 @out)}
+breakpoint = (@out:array<uint8>):>void => {byte(204 @out)}

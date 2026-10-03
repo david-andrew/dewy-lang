@@ -25,9 +25,18 @@ main=(argv:array<string>):>int64=>{
     if entry is? Error {entry.fail}
     let expected=environment('DEWY_TEST_PRELUDE_CACHE')
     if expected isnt? none and (expected =? 'hit') not=? engine.prelude_cache_restored return 3
-    let compilation=graph.compile(entry @engine)
+    # DEWY_TEST_NATIVE names where to write the program as an executable built
+    # by the native route (4: the route does not cover this program yet).
+    let native_path=environment('DEWY_TEST_NATIVE')
+    let compilation=graph.compile(entry @engine native_code=native_path isnt? none)
     if compilation is? Error {compilation.fail}
     loop warning in compilation.analysis.warnings {warning.warn}
+    if native_path isnt? none {
+        let image=compilation.lowered.native
+        if image is? none return 4
+        let written=p(native_path).write_bytes(image)
+        return if written is? int64 0 else 5
+    }
     if environment('DEWY_TEST_ALLOCATOR_NOTES') =? '1' {
         loop note in compilation.lowered.placements {printl(note.reason)}
         return 0

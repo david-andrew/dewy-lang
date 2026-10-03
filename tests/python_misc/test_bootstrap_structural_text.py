@@ -1,4 +1,5 @@
 """Container text uses the source library and preserves evaluation order."""
+import os
 import subprocess
 
 import pytest
@@ -81,6 +82,19 @@ def check_structural_text(binary, tmp_path, *, cases=None, errors=None, outputs=
                 assert result.returncode == 42, (implementation, target, text, result)
                 if outputs is not None:
                     assert result.stdout.decode() == outputs[index], (implementation, target, text, result.stdout)
+        # The native route (dewy/bootstrap/OPTIMIZER.md) builds the same
+        # program as an executable itself. A program it does not cover yet
+        # exits 4 and keeps the µDewy route; one it builds must behave alike.
+        image = tmp_path / f'image-{index}'
+        built = subprocess.run([binary, source, native_lowering.ROOT / 'library', prelude_cache], capture_output=True,
+                               text=True, timeout=120, env={**os.environ, 'DEWY_TEST_NATIVE': str(image)})
+        assert built.returncode in (0, 4), text + '\n' + built.stdout + built.stderr
+        if built.returncode == 0:
+            image.chmod(0o755)
+            result = subprocess.run([image], capture_output=True, timeout=10)
+            assert result.returncode == 42, ('native route', text, result)
+            if outputs is not None:
+                assert result.stdout.decode() == outputs[index], ('native route', text, result.stdout)
     for index, text in enumerate(errors):
         source = tmp_path / f'error-{index}.dewy'
         source.write_text(text)

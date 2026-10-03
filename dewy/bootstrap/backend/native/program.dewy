@@ -1,0 +1,106 @@
+from reporting import Span
+import p"x86_64.dewy" as code
+import p"image.dewy" as images
+import p"../udewy/program.dewy" as units
+import p"../udewy/ssa.dewy" as ssa
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+
+doc"""
+A whole lowered program as a static x86-64 executable (see
+`../../OPTIMIZER.md`): its globals, every function through the SSA form, the
+startup function, the entry that calls the program's `main`, and the process
+entry. When the program needs something this route does not cover yet, the
+result names it and the caller keeps the µDewy route.
+"""
+
+Kinds:type = const [nothing:addr word:addr]
+# Why this route cannot build a program.
+Failure:type = const [reason:string]
+
+# A global's data word: a constant, or the address of static data.
+global = (declaration:hir.Declare @nodes:array<hir.AST> @program:code.Program):>void => {
+    let initial=hir.node_at(nodes declaration.expr)
+    loop initial is? hir.Transmute|hir.ValueCast {initial=hir.node_at(nodes initial.expr)}
+    let at=program.image.data.length
+    if initial is? hir.Integer {program.globals[declaration.name]=images.word(code.word_of(initial.value) @program.image)}
+    else if initial is? hir.Bool {program.globals[declaration.name]=images.word((if initial.value (-1) else 0) @program.image)}
+    else {code.fail("global `{declaration.name}` has an initial value this route does not cover" @program)}
+}
+
+build = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? ctx:ssa.Context kinds:Kinds table:types.Table @nodes:array<hir.AST>):>array<uint8>|Failure => {
+    if not source.needs_startup return Failure['a program without a startup function']
+    let program=code.Program[]
+    let none_loc=Span[0 0]
+    loop entry in functions {program.symbols.push(entry.symbol)}
+    program.symbols.push(source.startup_symbol)
+    program.symbols.push('main')
+    loop id in source.globals {
+        let declaration=hir.node_at(nodes id)
+        if declaration isnt? hir.Declare return Failure['a global that is no declaration']
+        global(declaration @nodes @program)
+    }
+    if program.problem not=? '' return Failure[program.problem]
+    loop entry in functions {
+        let function=hir.node_at(nodes entry.literal)
+        if function isnt? hir.FunctionLiteral return Failure['a function unit that is no function']
+        let form=ssa.build(entry.symbol function nodes ctx)
+        if form is? none return Failure["`{entry.symbol}` uses a form the SSA construction does not cover"]
+        code.emit_function(entry.symbol form nodes table @program)
+        if program.problem not=? '' return Failure[program.problem]
+    }
+    # The startup function: the program's module initialization, in order.
+    let startup_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=startup scoped=true])
+    let startup_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=[] kw_only_args=[] rest_args=none rettype=kinds.nothing body=startup_body]
+    let startup_form=ssa.build(source.startup_symbol startup_function nodes ctx)
+    if startup_form is? none return Failure['startup uses a form the SSA construction does not cover']
+    code.emit_function(source.startup_symbol startup_form nodes table @program)
+    # `main`: startup, the command line, then the program's entry function.
+    let items:array<addr>=[]
+    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=source.startup_symbol])
+    items.push(hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=kinds.nothing func=callee pos_args=[] kw_args=[]]))
+    let parameters:array<hir.Param>=[]
+    if prologue isnt? none {
+        parameters.push(hir.Param['__dewy_argc' kinds.word])
+        parameters.push(hir.Param['__dewy_argv' kinds.word])
+        loop item in prologue {items.push(item)}
+    }
+    let zero=hir.append_node(@nodes hir.Integer[loc=none_loc value_type=kinds.word prefix='0d' value=0])
+    let user=source.user_main_symbol
+    if user is? none {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))}
+    else {
+        let valued=false
+        loop entry in functions {
+            if entry.symbol not=? user continue
+            let function=hir.node_at(nodes entry.literal)
+            if function is? hir.FunctionLiteral {valued=function.rettype not=? kinds.nothing}
+        }
+        let target=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=user])
+        let passed:array<addr>=[]
+        if argument isnt? none {passed.push(argument)}
+        let entered=hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=(if valued kinds.word else kinds.nothing) func=target pos_args=passed kw_args=[]])
+        if valued {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=entered]))}
+        else {
+            items.push(entered)
+            items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))
+        }
+    }
+    let main_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=items scoped=true])
+    let main_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=parameters kw_only_args=[] rest_args=none rettype=kinds.word body=main_body]
+    let main_form=ssa.build('main' main_function nodes ctx)
+    if main_form is? none return Failure['the entry uses a form the SSA construction does not cover']
+    code.emit_function('main' main_form nodes table @program)
+    code.start('main' @program)
+    if program.problem not=? '' return Failure[program.problem]
+    # A development aid: DEWY_NATIVE_MAP names a file to receive each
+    # function's address, for profiles of an executable without symbols.
+    let map_path=environment('DEWY_NATIVE_MAP')
+    if map_path isnt? none {
+        let lines:array<string>=[]
+        loop [symbol offset] in program.image.functions {lines.push("{images.BASE+images.HEADERS+(offset as int64)} {symbol}")}
+        p(map_path).write_text(lines.join('\n'));
+    }
+    let finished=images.finish(@program.image)
+    if finished is? string return Failure["`{finished}` is called but never defined"]
+    return finished
+}

@@ -146,6 +146,31 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Optimizing tier: native x86-64 emitter (2026-10-03)
+
+The Dewy compiler can now write a program's executable itself: no µDewy
+process, no assembler, no linker. `backend/native/` holds the instruction
+encoder, the static ELF image, the code generator over the SSA form (with a
+linear-scan register allocator) and the program driver. Details and
+measurements are in [`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md).
+
+- **Opt-in for now**: `DEWY_EMIT=native` with the `run` command on x86-64.
+  The µDewy route is unchanged and remains the default and the bootstrap
+  path.
+- **Fallback**: a program this route does not cover yet (foreign functions,
+  floating-point intrinsics, a loop `else` arm) reports why and takes the
+  µDewy route as a whole.
+- **Effect**: the natively built compiler self-builds in 39.8 s against
+  50.8 s on the µDewy route, and is 9.7 MB against 13.2 MB.
+
+Evidence:
+- The natively built compiler rebuilds itself to the identical executable.
+- The 698-case paired manifest passes with the native route producing every
+  native-side program: 692 built by the route itself, 6 through its fallback
+  (a loop `else` arm).
+- Every case of `check_structural_text` (the shared helper of the native
+  execution tests) now also runs through the native route. Full local gate: 6,398 passed.
+
 ## Optimizing tier: SSA form, tree writer, inlining (2026-10-03)
 
 David's direction (2026-10-03): the optimizer and code generator live in the

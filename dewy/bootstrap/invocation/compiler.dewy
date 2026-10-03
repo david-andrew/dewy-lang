@@ -33,7 +33,9 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     timing.finish('frontend' started)
     if entry is? Error return entry
     loop warning in engine.session.warnings {warning.warn}
-    let result=graph.compile(entry @engine timings=request.timings)
+    # The native route is opt-in while it grows: DEWY_EMIT=native.
+    let native_code=environment('DEWY_EMIT') =? 'native' and request.target =? 'x86_64' and request.command is? 'run'
+    let result=graph.compile(entry @engine timings=request.timings native_code=native_code)
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
     return result
@@ -86,6 +88,27 @@ start = (request:options.Request cwd:string executable:string):>Started|int64|Er
         loop note in compiled.analysis.notes {printl(note.message)}
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0
+    }
+    # A program the native route built is already an executable.
+    let native=compiled.lowered.native
+    if native isnt? none {
+        $runtime_assert request.source isnt? none
+        let listing=cache.artifact(request.source cwd '.ubc')
+        let failed=platform.directories(p(listing).parent.path)
+        if failed isnt? none return failed
+        let built=cache.artifact(listing cwd)
+        let written=p(built).write_bytes(native)
+        if written isnt? int64 return Error[title='cannot write the executable' message=built]
+        let name=built as array<uint8>
+        name.push(0)
+        if __syscall2__(90 __load_i64__(name) 493) not=? 0 return Error[title='cannot mark the executable' message=built]
+        if request.compile_only {
+            printl("Compiled: {built}")
+            return 0
+        }
+        let status=run(paths.absolute(built cwd) request.arguments)
+        if status isnt? int64 return Error[title='could not start the compiled program' message=built]
+        return status
     }
     # The µDewy compiler reads bytecode (udewy/BYTECODE.md) by default; the
     # text route stays available as DEWY_EMIT=udewy for reading the output.

@@ -115,7 +115,8 @@ operand_at = (body:Body index:addr):>addr => {
 # A function small enough to build in place of a call to it. `plain`: its
 # only return is its last statement.
 Inline:type = const [literal:addr size:addr plain:bool valued:bool leaf:bool]
-Context:type = const [globals:set<string> inlines:dict<string Inline>]
+# `eager`: build every small callee in place, wherever it is called.
+Context:type = const [globals:set<string> inlines:dict<string Inline> eager:bool=false]
 
 # Callee size limit, in non-leaf nodes, and what one function may gain.
 const INLINE_NODES:addr=40
@@ -444,7 +445,7 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
         let arguments:array<addr>=[]
         loop argument in node.pos_args {arguments.push(value(argument nodes ctx @b))}
         let target=ctx.inlines.get(name)
-        if target isnt? none and b.active.length <? INLINE_DEPTH and name not in? b.active and b.growth+target.size <=? CALLER_GROWTH and wanted(target b) {
+        if target isnt? none and b.active.length <? INLINE_DEPTH and name not in? b.active and b.growth+target.size <=? CALLER_GROWTH and wanted(target ctx.eager b) {
             let callee=hir.node_at(nodes target.literal)
             if callee is? hir.FunctionLiteral and callee.pos_or_kw_args.length =? arguments.length {
                 b.active.push(name)
@@ -468,7 +469,7 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
 # Which calls are built in place: a callee that calls nothing further
 # anywhere; any other small callee only inside a loop, where the saved call
 # repeats.
-wanted = (target:Inline b:Builder):>bool => target.leaf or b.loops.length >? 0
+wanted = (target:Inline eager:bool b:Builder):>bool => eager or target.leaf or b.loops.length >? 0
 
 # The value of an expression, evaluated in the current region.
 value = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {

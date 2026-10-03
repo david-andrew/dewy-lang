@@ -223,6 +223,59 @@ Two defects found by the gate, both with regression cases in
 
 Gate: 6,398 passed.
 
+
+## The x86-64 emitter, as landed (2026-10-03)
+
+`backend/native/`: `x86.dewy` (instruction encoding), `image.dewy` (the static
+ELF executable), `x86_64.dewy` (code for one function from its SSA form) and
+`program.dewy` (globals, every function, startup, `main`, the process
+entry). It is opt-in for now: `DEWY_EMIT=native` with the `run` command on
+x86-64. A program it does not cover yet (foreign functions, floating-point
+intrinsics, a loop `else` arm) reports why and takes the µDewy route.
+
+- **No assembler, no linker, no µDewy process.** The compiler writes the
+  executable's bytes itself and resolves every reference when it places
+  code and data.
+- **Places by linear scan.** Items are numbered in the order they run. A
+  place's span runs from where it is first set to where it is last needed;
+  a place set before a loop and touched inside it lasts until that loop
+  ends. A span that contains a call takes a register calls preserve (`rbx`,
+  `r12`–`r15`); other spans take `rsi`, `rdi`, `r8`–`r10` first; the rest get
+  frame slots. `rax`, `rcx`, `rdx` and `r11` are scratch.
+- **Evaluated at the use**: a comparison right before its branch becomes
+  `cmp` and a conditional jump; an address `base + offset` or
+  `base + index * scale` right before its load or store becomes the memory
+  operand.
+- **Inlining is eager on this route**: every small callee is built in place.
+
+Self-build, cold. The native rows build and are built by the native route:
+
+| Route | Wall | Frontend | Validation | Lowering | Compiler size |
+|---|---|---|---|---|---|
+| µDewy route (`c13dae29`) | 50.8 s | 14.8 | 14.5 | 14.0 (+5.7 emission and backend) | 13.2 MB |
+| native, every value in a frame slot | 99.8 s | 31.6 | 30.8 | 33.1 | 19.0 MB |
+| native, registers | 45.8 s | 13.9 | 13.8 | 15.9 | 10.6 MB |
+| + address operands, no write-back | 40.9 s | 13.1 | 12.7 | 13.2 | 9.7 MB |
+| + eager inlining | 39.8 s | 12.6 | 12.4 | 12.9 | 10.7 MB |
+
+The natively built compiler rebuilds itself to the identical executable.
+
+Defects found on the way, each a liveness or allocation rule:
+- A parameter nobody reads shared a register with a live one, and its
+  arrival overwrote it. It now has no place.
+- A place touched in two sibling loops was kept only to the end of the
+  first. Every loop that touches a place set before it now keeps it.
+- `[-1 -1 -1 -1 -1]` is one element (a subtraction chain), so each register
+  pool held one register. Negative elements are parenthesized.
+
+Still to do on this route:
+- build the form straight from lowered HIR (statement normalization is
+  5.3 s of the remaining lowering time and only feeds µDewy text);
+- redundant-load elimination and values kept across more of a function
+  (the C-built compiler is still about twice as fast in every phase);
+- foreign functions and floating-point intrinsics; debug information;
+- AArch64 and RISC-V on the same allocator; wasm from the tree form.
+
 ## Inlining measurements before the SSA form (2026-10-03)
 
 Each row is a cold self-build, interleaved, with every compiler building its
