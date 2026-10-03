@@ -71,3 +71,36 @@ every source function stays a frame.
 
 Stage 0 is the scaffolding: the pass boundary, counters (inlined sites,
 folded branches, removed statements) and timing under `lowering.optimize`.
+
+## Stage 1 measurements (2026-10-03)
+
+Each row is a cold self-build, interleaved, with every compiler building its
+own source:
+
+| Variant | Wall | Frontend | Validation | Lowering | Emission | Backend | Binary |
+|---|---|---|---|---|---|---|---|
+| no inlining | 49.6 s | 15.4 | 14.6 | 12.3 | 1.7 | 4.0 | 12.9 MB |
+| any callee ≤ 40 nodes, separate pass | 50.2 s | 14.2 | 13.7 | 13.4 | 2.3 | 5.0 | 15.6 MB |
+| leaf callees anywhere, others inside loops, during normalization | 49.7 s | 14.8 | 14.5 | 12.6 | 1.8 | 4.3 | 13.9 MB |
+
+Broad inlining makes the compiler's own code about 8% faster (frontend and
+validation). But the self-build compiles that larger compiler: lowering,
+emission and the µDewy backend absorb the gain. Restricting inlining to hot
+sites keeps the cost small and loses most of the gain.
+
+Register budget in the µDewy x86-64 backend:
+- Values live across calls can use only `rbx` and `r15`; `r12`–`r14` cache
+  the expression stack.
+- Moving `r13` and `r14` from the cache to locals made the build slower,
+  51.7 s against 49.4 s: expression values then spill instead.
+
+Conclusion: GCC's 2.3× needs both inlining and a code generator that keeps
+an inlined body's values in registers across a large function. Without
+inlining, calls dominate and code quality barely matters (GCC without
+inlining ties the direct backend). Without good allocation, inlining buys
+about 8%. The next step is therefore stage 3 rather than more stage 1 tuning:
+an SSA form of the lowered program with register allocation over all
+general registers. That is a substantial new code generator. Whether it
+emits machine code from the Dewy compiler, or replaces the µDewy backend's
+single-pass emitter, is open for David. The inliner prototype is kept outside
+the tree until a code generator can use it.
