@@ -146,6 +146,104 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Throughput: probes, type tests, string equality, overlapped teardown (2026-10-02)
+
+Allocation volume no longer predicts wall time. Static literal arguments and
+frame worklists removed 1.1 GB of 29.8 GB, yet the self-build only moved
+from 54.2 to 53.9 s. A 50 ms stack-sample profile (1,257 samples) is flat:
+- dictionary probing 10.1% self;
+- waiting for the µDewy backend 6.4%;
+- releases 13.4% inclusive, 2.4% of it the compilation's teardown at exit;
+- `push_children` 3.7%;
+- byte comparisons 3.4%.
+
+Measured cold and interleaved, two rounds each, every compiler building the
+same source:
+
+| Step | Wall |
+|---|---|
+| static literal arguments (`857eb4d2`) | 54.2 s |
+| + frame worklists (`fbbf2719`) | 53.9 s |
+| + dictionary probes | 53.9 s |
+| + merged brand ranges | 52.0 s |
+| + teardown during the backend | 51.6 s |
+| + word-wise string equality | 50.6 s |
+
+- **Dictionary probes (no measured change).**
+  - Integer keys compare the key alone. Their hash is a function of the key,
+    so the stored-hash comparison only cost a load from a third array. String
+    keys still compare stored hashes first.
+  - The slot and key data pointers are read once per probe instead of on
+    every step.
+- **Type tests over branded records.** Each brand and its descendants are
+  one numbered range. `is? A|B|C` merges the members' ranges into:
+  - one unsigned comparison per merged range;
+  - one equality for a leaf brand.
+
+  Members that can never match drop out. Previously each member cost two
+  comparisons, and the compiler's HIR dispatch tests name dozens of node
+  kinds.
+- **String equality.** The shared byte-comparison helper answers at once for
+  the same storage (interned literals such as `'value'`, which every
+  analysis term carries). Other contents compare eight bytes at a time and
+  finish the tail by bytes.
+- **Teardown overlaps the backend.** The command now spawns the µDewy backend
+  and releases the compilation, the whole program graph, while the backend
+  compiles; then it waits.
+- **Inline storage checks (withdrawn).** Testing the owner count before
+  `_unique_array` and the capacity before `_reserve_array` at every site
+  saved about 0.15 s, within noise. It cost 5% more code, 0.2 GB more
+  allocation during lowering and 100 MB more peak memory.
+
+Evidence:
+- `test_brand_range_tests`, hosted and native:
+  - disjoint siblings;
+  - a sibling merged with a family;
+  - a negated test;
+  - a family test.
+- `test_string_equality_words`, hosted and native:
+  - lengths 0–20;
+  - a difference at every position;
+  - shared storage and empty strings.
+- Three-generation fixed point for each step.
+- Local gate: 6,396 passed.
+
+## Throughput: worklists start in the frame (2026-10-02)
+
+- **Frame-started worklists.**
+  - What changes: a literal of at most 16 word-sized integers bound to a
+    runtime-length local (`let body:array<addr>=[]`) starts in 16 frame
+    slots instead of the arena.
+  - The local may still grow, but only through:
+    - its own methods (`push`, `pop`, …);
+    - iteration;
+    - places lent to calls that keep no alias;
+    - the read-only uses frame arrays already allow.
+  - A captured or donated worklist stays ordinary storage.
+  - Past its frame slots, the data moves to the arena and the frame
+    descriptor becomes its sole owner; release then frees that data.
+  - Effect: allocation fell by about 0.5 GB; wall time 54.2 → 53.9 s.
+    Native only.
+- **Copies never share a frame descriptor.** Array copies share a
+  descriptor by count once its owner is at least 1. A worklist that outgrew
+  its frame slots has owner 1 but lives in the frame. A callee keeping a
+  copy of a lent worklist (`finish_dictionary` stores its `prefix` in a
+  block) therefore kept a frame address: the second-generation compiler
+  crashed compiling the compiler. Bisected to `dict_contains`. Copies now
+  share only owners above 1 or arena descriptors; others copy their
+  storage. Borrowed byte views in frame storage had the same latent hazard.
+
+Evidence:
+- `test_frame_worklists`, hosted and native:
+  - a lent worklist that grows and is then kept by the callee;
+  - an explicit copy after growth;
+  - a pop/push worklist and iteration;
+  - a captured worklist.
+- `test_bootstrap_lowering`'s arena growth case now grows a returned
+  array; a local literal's push no longer allocates (new case).
+- Local gate: 6,391 passed; the one failure was that arena case, which
+  measured a local literal's growth.
+
 ## Throughput: static constant literal arguments (2026-10-02)
 
 Static copy-site counts moved a lot in the strict-copy batches, but the

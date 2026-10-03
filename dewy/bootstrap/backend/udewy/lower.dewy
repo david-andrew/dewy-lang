@@ -3368,11 +3368,36 @@ bytes_equal_helper = (node:hir.AST @state:State):>string? => {
     let a_length=put(hir.ExpressedIdentifier[node.loc word_type names[1]] @state)
     let b=put(hir.ExpressedIdentifier[node.loc word_type names[2]] @state)
     let b_length=put(hir.ExpressedIdentifier[node.loc word_type names[3]] @state)
-    let body=string_equal_bytes_inline(a a_length b b_length node false @state)
+    let body=string_equal_words(a a_length b b_length node @state)
     let signature=types.function_type(slots [] none boolean [] @state.type_nodes)
     let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none boolean body source=state.source_index] @state)
     state.generated.push(program.Function[generated literal])
     return generated
+}
+# The shared helper's body: equal lengths, then the same storage (interned
+# literals) answers at once; other contents compare a word at a time and
+# finish the tail by bytes. Loads stay within both strings' bytes.
+string_equal_words = (left:addr left_length:addr right:addr right_length:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let void_type=types.primitive('void' @state.type_nodes)
+    let length=snapshot(left_length @prefix @state)
+    let same=snapshot(intrinsic_call('__eq__' [length right_length] boolean node @state) @prefix @state)
+    let a=snapshot(left @prefix @state)
+    let b=snapshot(right @prefix @state)
+    let cursor=snapshot(word(0 node @state) @prefix @state)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let byte_type=types.primitive('uint8' @state.type_nodes)
+    let words_equal=intrinsic_call('__eq__' [intrinsic_call('__load_i64__' [word_op('__add__' a cursor node @state)] word_type node @state) intrinsic_call('__load_i64__' [word_op('__add__' b cursor node @state)] word_type node @state)] boolean node @state)
+    let bytes_equal=intrinsic_call('__eq__' [intrinsic_call('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state) intrinsic_call('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)] boolean node @state)
+    let whole=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__le__' word_op('__add__' cursor word(8 node @state) node @state) length node @state)] @state)
+    let tail=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__lt__' cursor length node @state)] @state)
+    let by_words=while_loop(whole [put(hir.Assign[node.loc void_type same '=' words_equal] @state) set_local(cursor word_op('__add__' cursor word(8 node @state) node @state) node @state)] node @state)
+    let by_bytes=while_loop(tail [put(hir.Assign[node.loc void_type same '=' bytes_equal] @state) set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state)
+    let distinct=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__ne__' a b node @state)] @state)
+    prefix.push(conditional(distinct sequence([by_words by_bytes] node @state) node @state))
+    prefix.push(same)
+    return put(hir.Block[node.loc boolean prefix false] @state)
 }
 string_equal_bytes_inline = (left:addr left_length:addr right:addr right_length:addr node:hir.AST negated:bool @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -5151,6 +5176,14 @@ integer_predicate = (value:addr actual:addr tested:addr node:hir.AST @state:Stat
 object_predicate = (tag:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
     let boolean=types.primitive('bool' @state.type_nodes)
     let type=types.node_at(state.type_nodes types.unfold(tested state.type_nodes))
+    if type is? types.TypeOr {
+        let ranges=brand_ranges(actual type @state)
+        if ranges isnt? none {
+            let result=put(hir.Bool[node.loc boolean false] @state)
+            loop range in ranges {result=put(hir.ShortCircuit[node.loc boolean 'or' result brand_range_test(tag range node @state)] @state)}
+            return result
+        }
+    }
     if type is? types.TypeOr|types.TypeAnd {
         let conjunction=type is? types.TypeAnd
         let result=put(hir.Bool[node.loc boolean conjunction] @state)
@@ -5168,9 +5201,49 @@ object_predicate = (tag:addr actual:addr tested:addr node:hir.AST @state:State):
     if record.brand is? none return reject(node 'a structural runtime record test' @state)
     let brand=brand_number(record.brand state)
     if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
-    let lower=intrinsic_call('__ge__' [tag word(brand.first node @state)] boolean node @state)
-    let upper=intrinsic_call('__lt__' [tag word(brand.limit node @state)] boolean node @state)
-    return put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
+    return brand_range_test(tag brand node @state)
+}
+# A brand and its descendants are one numbered range: a leaf is one equality,
+# a family one unsigned comparison of the offset into the range.
+brand_range_test = (tag:addr range:brands.NumberedBrand node:hir.AST @state:State):>addr => {
+    if range.limit =? range.first+1 return compare('__eq__' tag word(range.first node @state) node @state)
+    let unsigned=types.primitive('uint64' @state.type_nodes)
+    let offset=uword_op('__sub__' put(hir.Transmute[node.loc unsigned tag] @state) uword(range.first node @state) node @state)
+    return compare('__lt__' offset uword(range.limit-range.first node @state) node @state)
+}
+# The members of a union of branded records as merged brand ranges, or none
+# when some member is not a plain branded record or always matches. Merged
+# ranges never touch, so absorbing every range a new one touches keeps them
+# disjoint.
+brand_ranges = (actual:addr type:types.TypeOr @state:State):>array<brands.NumberedBrand>|none => {
+    let merged:array<brands.NumberedBrand>=[]
+    loop member in type.items {
+        let decided=type_tests.decide(actual member state.links @state.type_nodes)
+        if decided isnt? none {
+            if decided return none
+            continue
+        }
+        let shape=types.node_at(state.type_nodes types.unfold(member state.type_nodes))
+        if shape is? types.TypeOr|types.TypeAnd|types.TypeNot return none
+        let record=object_type(member @state)
+        if record is? none return none
+        let name=record.brand
+        if name is? none return none
+        let brand=brand_number(name state)
+        if brand is? none return none
+        let first=brand.first
+        let limit=brand.limit
+        let kept:array<brands.NumberedBrand>=[]
+        loop range in merged {
+            if range.first <=? limit and first <=? range.limit {
+                if range.first <? first {first=range.first}
+                if range.limit >? limit {limit=range.limit}
+            } else {kept.push(range)}
+        }
+        kept.push(brands.NumberedBrand[brand.name first limit])
+        merged=kept
+    }
+    return merged
 }
 object_matches = (value:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -7081,6 +7154,11 @@ dict_element_pointer = (descriptor:addr index:addr element:addr node:hir.AST @st
     return word_op('__add__' read_word(descriptor layouts.array_descriptor.data node @state) word_op('__mul__' index word(layout.size node @state) node @state) node @state)
 }
 dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => array_load(dict_element_pointer(descriptor index element node @state) element node @state)
+data_element = (data:addr index:addr element:addr node:hir.AST @state:State):>addr => {
+    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
+    if layout is? layouts.Pending return reject(node layout.detail @state)
+    return array_load(word_op('__add__' data word_op('__mul__' index word(layout.size node @state) node @state) node @state) element node @state)
+}
 # Dictionary arrays are detached by dict_array before any element store.
 dict_store_element = (descriptor:addr index:addr value:addr element:addr node:hir.AST @state:State):>addr => {
     return array_store(value dict_element_pointer(descriptor index element node @state) element node @state)
@@ -7291,17 +7369,22 @@ dict_probe_body = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @st
     let position=snapshot(word(-1 node @state) @prefix @state)
     let slot=snapshot(word(-1 node @state) @prefix @state)
     let dummy=snapshot(word(-1 node @state) @prefix @state)
+    # The probe changes nothing: each array's data is read once, not per step.
+    let slot_data=snapshot(read_word(slots layouts.array_descriptor.data node @state) @prefix @state)
+    let key_data=snapshot(read_word(keys layouts.array_descriptor.data node @state) @prefix @state)
     let body:array<addr>=[]
-    let entry=snapshot(dict_element(slots cursor word_type node @state) @body @state)
+    let entry=snapshot(data_element(slot_data cursor word_type node @state) @body @state)
     let use_dummy=put(hir.IfArm[node.loc word_type compare('__ge__' dummy word(0 node @state) node @state) dummy] @state)
     let selected=put(hir.Flow[node.loc word_type [use_dummy] cursor] @state)
     let stop=set_local(searching put(hir.Bool[node.loc boolean false] @state) node @state)
     let empty=sequence([set_local(slot selected node @state) stop] node @state)
     let deleted=conditional(compare('__lt__' dummy word(0 node @state) node @state) set_local(dummy cursor node @state) node @state)
-    let existing=dict_element(keys entry parts.key node @state)
-    let equal=if string_type(parts.key state) string_equal_values(existing key node false @state) else compare('__eq__' existing key node @state)
-    let same_hash=compare('__eq__' dict_element(hashes entry word_type node @state) hash node @state)
-    let same=put(hir.ShortCircuit[node.loc boolean 'and' same_hash equal] @state)
+    let existing=data_element(key_data entry parts.key node @state)
+    # An integer key's hash is a function of the key alone, so the key
+    # comparison decides; stored hashes only filter string comparisons.
+    let strings=string_type(parts.key state)
+    let equal=if strings string_equal_values(existing key node false @state) else compare('__eq__' existing key node @state)
+    let same=if strings put(hir.ShortCircuit[node.loc boolean 'and' compare('__eq__' dict_element(hashes entry word_type node @state) hash node @state) equal] @state) else equal
     let hit=sequence([set_local(found put(hir.Bool[node.loc boolean true] @state) node @state) set_local(position entry node @state) set_local(slot cursor node @state) stop] node @state)
     let arms:array<addr>=[put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__eq__' entry word(-1 node @state) node @state) empty] @state) put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__eq__' entry word(-2 node @state) node @state) deleted] @state)]
     body.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms conditional(same hit node @state)] @state))

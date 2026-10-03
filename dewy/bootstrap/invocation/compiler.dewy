@@ -38,7 +38,10 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     loop warning in result.analysis.warnings {warning.warn}
     return result
 }
-execute = (request:options.Request cwd:string executable:string):>int64|Error => {
+# The started backend and the artifact it builds. The compilation is local to
+# `start`, so it is released while the backend compiles, not after it.
+Started:type = [child:Child backend:string source:string spawned:timing.Stamp?]
+start = (request:options.Request cwd:string executable:string):>Started|int64|Error => {
     if request.command =? 'test' and request.source isnt? none and p(request.source).is_dir {
         return directory_tests.run_directory(request.source request.json [executable 'test' '--target' request.target])
     }
@@ -110,10 +113,18 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     if request.compile_only or request.command is? 'debug'|'test' {arguments.push('-c')}
     arguments.push(source)
     if request.command =? 'run' {loop argument in request.arguments {arguments.push(argument)}}
-    let backend_started=timing.start(request.timings)
-    let status=run(backend arguments)
-    timing.finish((if request.compile_only or request.command is? 'debug'|'test' 'backend' else 'backend_and_run') backend_started)
-    if status isnt? int64 return Error[title='could not start the native µDewy compiler' message=backend]
+    let spawned=timing.start(request.timings)
+    let child=spawn(backend arguments)
+    if child isnt? Child return Error[title='could not start the native µDewy compiler' message=backend]
+    return Started[child backend source spawned]
+}
+execute = (request:options.Request cwd:string executable:string):>int64|Error => {
+    let started=start(request cwd executable)
+    if started isnt? Started return started
+    let backend=started.backend
+    let source=started.source
+    let status=started.child.wait
+    timing.finish((if request.compile_only or request.command is? 'debug'|'test' 'backend' else 'backend_and_run') started.spawned)
     if request.command =? 'test' and status not=? 0 return 102
     # A backend that only compiles and fails is named: an installed `udewy`
     # older than this compiler rejects its arguments. (A run's status may be
