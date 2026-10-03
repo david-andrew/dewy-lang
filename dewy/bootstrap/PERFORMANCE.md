@@ -982,6 +982,20 @@ and the generated storage helpers (`_unique_array`, `_push`, `_release*`,
 probes). Inlining them is the lever for the direct route; a new register
 allocator is not.
 
+Inlining alone does not reproduce the gain. An experimental pass expanded
+direct calls to small lowered functions (renamed locals, parameters bound in
+argument order) before statement normalization:
+- with any callee under 24 nodes, it mostly expanded runtime wrappers
+  (`_new_cell`, `_release*`, `_alloc`). Static call sites rose from 123 k to
+  141 k, and the build was no faster;
+- with leaf callees only (µDewy intrinsics as their only calls), 838 call
+  sites went away, and the build moved 49.6 → 49.5 s.
+
+GCC's advantage is inlining followed by optimization across the inlined code
+(folding, propagation, dead-code removal, allocation over larger regions).
+The direct route would need such an optimizing tier; the experiment is not
+committed.
+
 The `addr?` niche named above needs a decision first. `addr` is `int64`
 refined to non-negative, so `-1` could encode `none` in one word. But
 `transmute` checks only the representation shape, and `(-1) transmute addr`
