@@ -92,16 +92,22 @@ incremental state or persistent compiler caches, including the checked prelude
 aid, not a permanent exception. Reusing analysis within one invocation is compatible
 with this goal; record cached and uncached measurements separately during transition.
 
-**Program speed:** straightforward, idiomatic Dewy should produce programs
-close to C/Rust performance and be comfortable for games and other demanding
-applications. Aim for ordinary code under the default development compilation
-path to reach roughly **80% of the throughput** attainable by well-optimized
-Dewy for representative workloads. For fixed work that corresponds to about
-1.25 times the elapsed time. This is a workload-level engineering target,
-not a guarantee for every algorithm or program. Compare the same task and
-algorithm, and distinguish compiler optimization from a programmer changing
-the algorithm, data layout or use of libraries. Optimized Dewy's absolute
-performance also matters: 80% of a slow optimized program is not success.
+**Program speed (clarified with David, 2026-10-03):** straightforward,
+idiomatic Dewy should approach the performance of equivalent, idiomatic C/Rust
+and be comfortable for games and other demanding applications. Common
+abstractions should compile efficiently without pervasive performance
+annotations. The default compiler should provide useful application performance
+with very fast compilation; further optimization may trade compilation time
+for execution speed. Matching C/Rust is the ambition, not a claim of current
+measured parity.
+
+This clarification replaces the earlier approximate 80% default/optimized
+throughput target with workload-specific evaluation. No universal percentage
+is selected: the cost of language semantics, the quality of ordinary source
+and representations, and the gap between fast and optimizing code generation
+are separate questions. Establish numeric budgets for named workloads from
+comparable measurements and application needs. Report important regressions
+individually rather than allowing an aggregate average to conceal them.
 
 The fast development backend must therefore produce useful machine code,
 not merely compile quickly. Measure compile latency and output execution
@@ -296,6 +302,9 @@ requirements remain. The September 29 audit updates the execution order:
    Include the local-specialization batches above. Settle the scope of general
    record storage and the value-preservation obligations of elidable lifecycle
    hooks before broad optimizations depend on an assumed answer.
+   Start the small cross-language application benchmarks below alongside the
+   current optimizer/emitter work. Use supported language features first;
+   extend the workloads through Phase 2 and Phase 3 as their prerequisites land.
 4. **Close Phase 1 with fresh integration evidence.** Complete the agreed
    matrix and source adoption, then certify the full paired corpus and native
    loop at the same revision. Record remaining conservative boundaries and
@@ -399,6 +408,48 @@ meaningful integration points and before publication. Do not skip required
 checks because they are slow; make setup reusable and scope explicit. Static
 copy-site counts are one metric alongside execution time, memory, allocation
 volume and work counts, not a proxy for all performance.
+
+### Small cross-language application benchmarks (accepted 2026-10-03)
+
+Start this suite during the current Phase 1 throughput campaign, alongside
+the optimizing tier in [`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md).
+It supplies application evidence in addition to the compiler self-build and
+mechanism kernels. Establish a baseline before using it to assess the new
+emitters; compare subsequent optimization batches at integration checkpoints.
+This is measurement work within the existing campaign, not an additional
+Phase 1 closure criterion or a prerequisite that pauses emitter development.
+
+Begin with a few small, deterministic application workloads using currently
+supported features: helper-heavy scalar and flat integer-array loops,
+dictionary/graph traversal, text scanning or parsing, and loops over arrays
+of small records. Give each an independently checked result and runtime inputs
+that prevent the entire computation from folding away. Keep setup and output
+separate from kernel timing, and measure complete application execution too.
+Include small and larger input sizes to expose startup, scaling, working-set
+and layout costs. Start with a C or Rust counterpart for each workload; add
+the other where it provides useful independent evidence.
+
+Compare the same task and algorithm with matching numerical, text and value
+semantics. An exact-rational calculation is not a floating-point baseline,
+and grapheme processing is not byte processing. Record required safety/error
+behavior, libraries, and any differences in data layout. Distinguish necessary
+semantic work from avoidable allocation, copying, indirection and instructions.
+
+Keep ordinary Dewy source as the primary customer. Compare its default and
+optimizing compilation paths on the same source where both are available;
+record manually tuned Dewy separately. Record each C/Rust toolchain's build
+options. Measure fresh compile latency including the prelude, runtime
+distributions, peak memory and allocation/copy traffic where available. Retain
+source revisions, inputs, hardware, results and required annotations, explicit
+views, casts or proof workarounds. Report ordinary-versus-tuned Dewy and
+Dewy-versus-C/Rust separately; neither comparison substitutes for the other.
+
+Extend the suite through the Phase 2 library customer to test abstraction and
+refactoring costs. Phase 3 adds IEEE arithmetic, shapes, broadcasting, dense
+aggregate/optional arrays and the numerical stress-test applications as those
+capabilities land; their absence does not block the initial supported workloads.
+Use measured application needs to set per-workload budgets, preserving explicit
+coverage of weak workloads rather than selecting one language-wide percentage.
 
 ### Compile-time throughput as a design constraint
 
@@ -1631,7 +1682,7 @@ quality. Carry those examples into documentation as their contracts stabilize.
   prerequisite.
 - Improve compile latency and generated-program performance together without
   conflating their budgets. Jai-class compilation and near-systems-language
-  runtime are final goals; the 30/10-second self-build and approximate 80%
-  default/optimized throughput targets provide nearer evidence.
+  runtime are final goals; the 30/10-second self-build milestones and the small
+  cross-language application suite's per-workload measurements provide nearer evidence.
 - CPU/GPU placement, synchronization and numeric policies remain design work.
   The direction is approved; fundamentally new semantics still need review.
