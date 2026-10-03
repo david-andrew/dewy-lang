@@ -6169,7 +6169,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let normalize_started=timing.start(timings)
     let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value]
     if proof_root not=?root {assembled=program.retain_reachable(assembled state.nodes)}
-    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files])
+    # Debug builds keep every function and local as written.
+    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files] optimizing=not state.debug_names timings=timings)
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}

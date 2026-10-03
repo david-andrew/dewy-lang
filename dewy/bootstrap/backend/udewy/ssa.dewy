@@ -1,0 +1,841 @@
+import p"emit.dewy" as emit
+import p"../../semantic/hir.dewy" as hir
+
+doc"""
+The structured SSA form of a lowered function (see `../../OPTIMIZER.md`) and
+its construction from normalized HIR.
+
+A value is defined once. A function body is a tree of regions; a region is a
+sequence of items.
+
+A variable that is assigned after its declaration is a *web*: one local and a
+sequence of versions. A version is a merge value, defined by one copy item
+(an assignment) or at a join of control paths, where copy items on the
+joining paths record its sources. Every version of a web lives in the web's
+local, so a copy between two versions of one web moves nothing. Emitters bind
+a web to a local (µDewy, wasm) or to registers.
+
+A name bound once to a variable's value takes a snapshot (`K_MOVE`), so it
+never reads the local after a later assignment.
+
+Value 0 and region 0 are reserved as "none".
+"""
+
+# Value kinds. Constants are not items: every use spells them again. Every
+# other kind is evaluated where its item stands.
+const K_PARAM:addr=1
+# An integer, boolean or string literal, or a name that is neither a local nor a
+# global (a function reference): `node` is its HIR node.
+const K_CONST:addr=2
+# Static data (`__static_words__`, `__static_alloca__`, embedded bytes):
+# pure and movable, but each one is one storage, never spelled twice.
+const K_LEAF:addr=3
+# Pure word operations. `node` is the HIR callee, whose type selects the
+# width and signedness as µDewy emission does.
+const K_UNARY:addr=4
+const K_BINARY:addr=5
+const K_TRANSMUTE:addr=6
+# Memory and global reads: ordered against stores and calls.
+const K_LOAD:addr=7
+const K_GLOBAL_GET:addr=8
+# Effects. A call's operands are `operands[a .. a+b)`; a call through a value
+# has its callee first.
+const K_GLOBAL_SET:addr=9
+const K_CALL:addr=10
+const K_CALL_VALUE:addr=11
+# A version of a web. `a` is the first value id of the control structure it
+# joins (its own id otherwise); `b` is the web: its first version, or the
+# parameter the variable is. A parameter that is assigned has `b` set to
+# its own id.
+const K_MERGE:addr=12
+# A snapshot of a version.
+const K_MOVE:addr=13
+
+Value:type = const [kind:addr type:addr a:addr=0 b:addr=0 node:addr=0]
+
+const I_VALUE:addr=1
+# a=condition, b=then region, c=else region, d=merge declarations
+const I_IF:addr=2
+# a=body region, d=merge declarations
+const I_LOOP:addr=3
+const I_BREAK:addr=4
+const I_CONTINUE:addr=5
+# a=value, b=1 when it returns a value
+const I_RETURN:addr=6
+# a=version, b=source: an assignment, or a join's source on this path
+const I_COPY:addr=7
+const I_NOTHING:addr=8
+# a=first version, b=source: the web's local begins here
+const I_DECLARE:addr=9
+Item:type = const [kind:addr a:addr=0 b:addr=0 c:addr=0 d:addr=0]
+
+# A condition keeps µDewy's lazy `and`/`or`. A leaf is a value; a lazy leaf
+# owns the region that computes it, evaluated only when the leaf is reached.
+const C_LEAF:addr=1
+const C_AND:addr=2
+const C_OR:addr=3
+Cond:type = const [kind:addr a:addr=0 b:addr=0]
+
+# A merge declared at its control structure, initialized with `init` (0: a
+# zero word).
+Declared:type = const [merge:addr init:addr=0]
+
+Body:type = [
+    values:array<Value>
+    operands:array<addr>=[]
+    regions:array<array<Item>>
+    conds:array<Cond>=[]
+    declared:array<array<Declared>>
+    params:array<addr>=[]
+    names:array<string>=[]
+    root:addr=0
+]
+
+value_at = (body:Body id:addr):>Value => {
+    $runtime_assert id <? body.values.length
+    return body.values[id]
+}
+region_at = (body:Body id:addr):>array<Item> => {
+    $runtime_assert id <? body.regions.length
+    return body.regions[id]
+}
+cond_at = (body:Body id:addr):>Cond => {
+    $runtime_assert id <? body.conds.length
+    return body.conds[id]
+}
+declared_at = (body:Body id:addr):>array<Declared> => {
+    $runtime_assert id <? body.declared.length
+    return body.declared[id]
+}
+operand_at = (body:Body index:addr):>addr => {
+    $runtime_assert index <? body.operands.length
+    return body.operands[index]
+}
+
+# A function small enough to build in place of a call to it. `plain`: its
+# only return is its last statement.
+Inline:type = const [literal:addr size:addr plain:bool valued:bool leaf:bool]
+Context:type = const [globals:set<string> inlines:dict<string Inline>]
+
+# Callee size limit, in non-leaf nodes, and what one function may gain.
+const INLINE_NODES:addr=40
+const CALLER_GROWTH:addr=400
+const INLINE_DEPTH:addr=3
+# The variable an inlined body's returns assign.
+const RESULT='$result'
+
+Loop:type = [names:array<string> headers:array<addr> exits:array<addr>]
+Builder:type = [
+    body:Body
+    # Variables assigned after their declaration, by current value.
+    env:dict<string addr>=[]
+    # Every other local: one value for the whole function.
+    fixed:dict<string addr>=[]
+    mutable:set<string>=set[]
+    region:addr=0
+    # The current path has left its region (return, break, continue).
+    dead:bool=false
+    loops:array<Loop>=[]
+    unsupported:bool=false
+    # Building an inlined body: a return assigns the result and leaves its
+    # block. `active` holds the functions being built, outermost first.
+    inlined:bool=false
+    active:array<string>=[]
+    growth:addr=0
+]
+
+new_region = (@b:Builder):>addr => {
+    let id=b.body.regions.length
+    let items:array<Item>=[]
+    b.body.regions.push(items)
+    return id
+}
+new_declared = (@b:Builder):>addr => {
+    let id=b.body.declared.length
+    let items:array<Declared>=[]
+    b.body.declared.push(items)
+    return id
+}
+place = (item:Item @b:Builder):>void => {
+    $runtime_assert b.region <? b.body.regions.length
+    b.body.regions[b.region].push(item)
+}
+place_in = (region:addr item:Item @b:Builder):>void => {
+    $runtime_assert region <? b.body.regions.length
+    b.body.regions[region].push(item)
+}
+declare_in = (list:addr entry:Declared @b:Builder):>void => {
+    $runtime_assert list <? b.body.declared.length
+    b.body.declared[list].push(entry)
+}
+add = (value:Value @b:Builder):>addr => {
+    let id=b.body.values.length
+    b.body.values.push(value)
+    if value.kind not=? K_CONST and value.kind not=? K_MERGE and value.kind not=? K_PARAM {place(Item[I_VALUE id] @b)}
+    return id
+}
+type_of = (id:addr b:Builder):>addr => value_at(b.body id).type
+# The web a value is a version of, or 0.
+web = (entry:Value):>addr => if entry.kind =? K_MERGE or entry.kind =? K_PARAM entry.b else 0
+# A new version of the web of `previous`.
+version = (previous:addr mark:addr @b:Builder):>addr => {
+    let entry=value_at(b.body previous)
+    let id=b.body.values.length
+    b.body.values.push(Value[K_MERGE entry.type (if mark =? 0 id else mark) web(entry)])
+    return id
+}
+
+# Names assigned anywhere under `root`.
+assigned = (root:addr nodes:array<hir.AST> @names:set<string>):>void => {
+    let pending:array<addr>=[root]
+    loop pending.length >? 0 {
+        let node=hir.node_at(nodes pending.pop)
+        if node is? hir.Assign {
+            let target=hir.node_at(nodes node.target)
+            if target is? hir.ExpressedIdentifier {names.push(target.name)}
+        }
+        hir.push_children(node @pending)
+    }
+}
+
+# A constant's boolean, when it is one: a literal, or a folded test
+# (`b` 1; `a` 1 for false, 2 for true).
+constant_bool = (id:addr nodes:array<hir.AST> b:Builder):>bool|none => {
+    let entry=value_at(b.body id)
+    if entry.kind not=? K_CONST return none
+    if entry.b =? 1 return entry.a =? 2
+    let literal=hir.node_at(nodes entry.node)
+    return if literal is? hir.Bool literal.value else none
+}
+folded = (truth:bool type:addr @b:Builder):>addr => {
+    let id=b.body.values.length
+    b.body.values.push(Value[K_CONST type (if truth 2 else 1) 1])
+    return id
+}
+# A comparison of two integer literals. Ordering is decided only for values
+# that compare alike signed and unsigned.
+constant_compare = (name:string left:addr right:addr nodes:array<hir.AST> b:Builder):>bool|none => {
+    let first=value_at(b.body left)
+    let second=value_at(b.body right)
+    if first.kind not=? K_CONST or second.kind not=? K_CONST or first.b =? 1 or second.b =? 1 return none
+    let one=hir.node_at(nodes first.node)
+    let other=hir.node_at(nodes second.node)
+    if one isnt? hir.Integer or other isnt? hir.Integer return none
+    if name =? '__eq__' return one.value =? other.value
+    if name =? '__ne__' return one.value not=? other.value
+    if one.value <? 0 or other.value <? 0 or one.value >? 9223372036854775807 or other.value >? 9223372036854775807 return none
+    if name =? '__lt__' return one.value <? other.value
+    if name =? '__le__' return one.value <=? other.value
+    if name =? '__gt__' return one.value >? other.value
+    if name =? '__ge__' return one.value >=? other.value
+    return none
+}
+
+# Whether a function can be built in place of calls to it, and how.
+Scan:type = [budget:addr used:addr=0 returns:addr=0 calls:addr=0 bare:bool=false]
+scan = (id:addr symbol:string loops:addr nodes:array<hir.AST> @found:Scan):>bool => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.Bool|hir.Integer|hir.String|hir.Void return true
+    if found.budget =? 0 return false
+    found.budget-=1
+    found.used+=1
+    if node is? hir.ExpressedIdentifier return node.name not=? symbol and node.name not=? '__alloca__' and node.name not=? '__static_alloca__'
+    if node is? hir.Break|hir.Continue return node.label is? none and node.loop_levels =? 0 and loops >? 0
+    if node is? hir.Return {
+        if loops >? 0 return false
+        found.returns+=1
+        if node.item is? none {found.bare=true return true}
+        return scan(node.item symbol loops nodes @found)
+    }
+    if node is? hir.Declare return scan(node.expr symbol loops nodes @found)
+    if node is? hir.Assign return node.op =? '=' and scan(node.target symbol loops nodes @found) and scan(node.value symbol loops nodes @found)
+    if node is? hir.ValueCast|hir.Transmute return scan(node.expr symbol loops nodes @found)
+    if node is? hir.ShortCircuit return (node.op =? 'and' or node.op =? 'or') and scan(node.left symbol loops nodes @found) and scan(node.right symbol loops nodes @found)
+    if node is? hir.IfArm return scan(node.condition symbol loops nodes @found) and scan(node.body symbol loops nodes @found)
+    if node is? hir.LoopArm return scan(node.condition symbol loops nodes @found) and scan(node.body symbol loops+1 nodes @found)
+    if node is? hir.Block {
+        loop item in node.items {if not scan(item symbol loops nodes @found) return false}
+        return true
+    }
+    if node is? hir.Flow {
+        let looping=false
+        loop arm in node.arms {
+            if hir.node_at(nodes arm) is? hir.LoopArm {looping=true}
+            if not scan(arm symbol loops nodes @found) return false
+        }
+        if looping and (node.arms.length >? 1 or node.default isnt? none) return false
+        return node.default is? none or scan(node.default symbol loops nodes @found)
+    }
+    if node is? hir.FunctionCall {
+        if node.kw_args.length >? 0 return false
+        let target=hir.node_at(nodes node.func)
+        if target isnt? hir.ExpressedIdentifier or not (target.name.startswith('__') and target.name.endswith('__')) {found.calls+=1}
+        if not scan(node.func symbol loops nodes @found) return false
+        loop argument in node.pos_args {if not scan(argument symbol loops nodes @found) return false}
+        return true
+    }
+    return false
+}
+# The statements before a body's final return, and that return's value.
+Peeled:type = const [statements:array<addr> result:addr?]
+peel = (body:addr nodes:array<hir.AST>):>Peeled => {
+    let statements:array<addr>=[]
+    let result:addr?=body
+    loop result isnt? none {
+        let node=hir.node_at(nodes result)
+        if node is? hir.Return {
+            result=node.item
+            break
+        }
+        if node isnt? hir.Block or node.items.length =? 0 break
+        loop i in 0.. and i <? node.items.length-1 {statements.push(node.items[i])}
+        result=node.items[end]
+    }
+    return Peeled[statements result]
+}
+candidate = (symbol:string literal:addr valued:bool nodes:array<hir.AST>):>Inline|none => {
+    let function=hir.node_at(nodes literal)
+    if function isnt? hir.FunctionLiteral or function.kw_only_args.length >? 0 or function.rest_args isnt? none or function.proof return none
+    loop parameter in function.pos_or_kw_args {if parameter is? hir.BoundParam return none}
+    let parts=peel(function.body nodes)
+    let found=Scan[INLINE_NODES]
+    loop item in parts.statements {if not scan(item symbol 0 nodes @found) return none}
+    if parts.result isnt? none and not scan(parts.result symbol 0 nodes @found) return none
+    if valued and (found.bare or parts.result is? none or hir.node_at(nodes parts.result) is? hir.Void) return none
+    return Inline[literal found.used found.returns =? 0 valued found.calls =? 0]
+}
+
+# Whether a block's only exit is the `break` that ends it (`top`), or, for a
+# nested region, whether it has no exit of the block at all.
+leaves = (items:array<Item> body:Body top:bool):>bool => {
+    loop i in 0.. and i <? items.length {
+        let item=items[i]
+        if item.kind =? I_BREAK or item.kind =? I_CONTINUE {
+            if not top or i+1 not=? items.length return false
+        } else if item.kind =? I_IF {
+            if not leaves(region_at(body item.b) body false) or not leaves(region_at(body item.c) body false) return false
+        }
+    }
+    return if top items.length >? 0 and items[end].kind =? I_BREAK else true
+}
+
+# Build a callee's body in place of a call. Its names are its own: the
+# caller's variables are saved and restored around it.
+inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
+    let function=hir.node_at(nodes target.literal)
+    $runtime_assert function is? hir.FunctionLiteral
+    let fixed=b.fixed
+    let env=b.env
+    let mutable=b.mutable
+    let was_inlined=b.inlined
+    b.fixed=[]
+    b.env=[]
+    b.mutable=set[]
+    assigned(function.body nodes @b.mutable)
+    loop i in 0.. and i <? function.pos_or_kw_args.length and i <? arguments.length {
+        let parameter=function.pos_or_kw_args[i]
+        let argument=arguments[i]
+        if parameter.name in? b.mutable {
+            let first=b.body.values.length
+            b.body.values.push(Value[K_MERGE parameter.value_type first first])
+            place(Item[I_DECLARE first argument] @b)
+            b.env[parameter.name]=first
+        } else if web(value_at(b.body argument)) not=? 0 {b.fixed[parameter.name]=add(Value[K_MOVE type_of(argument b) argument] @b)}
+        else {b.fixed[parameter.name]=argument}
+    }
+    b.growth+=target.size
+    let result:addr=0
+    if target.plain {
+        b.inlined=false
+        let parts=peel(function.body nodes)
+        loop item in parts.statements {statement(item nodes ctx @b)}
+        if target.valued and parts.result isnt? none {result=value(parts.result nodes ctx @b)}
+        else if parts.result isnt? none {statement(parts.result nodes ctx @b)}
+    } else {
+        # Early returns: the body is a block run once; each return assigns
+        # the result variable and leaves the block.
+        if target.valued {
+            let first=b.body.values.length
+            b.body.values.push(Value[K_MERGE function.rettype first first])
+            place(Item[I_DECLARE first] @b)
+            b.env[RESULT]=first
+        }
+        let frame=Loop[[] [] []]
+        let list=new_declared(@b)
+        let variables:array<string>=[]
+        loop [name current] in b.env {variables.push(name)}
+        loop name in variables {
+            let current=b.env.get(name)
+            if current is? none continue
+            let header=version(current 0 @b)
+            declare_in(list Declared[header current] @b)
+            let exit=version(current 0 @b)
+            declare_in(list Declared[exit] @b)
+            frame.names.push(name)
+            frame.headers.push(header)
+            frame.exits.push(exit)
+        }
+        loop i in 0.. and i <? frame.names.length and i <? frame.headers.length {b.env[frame.names[i]]=frame.headers[i]}
+        let outer=b.region
+        let body=new_region(@b)
+        b.region=body
+        b.loops.push(frame)
+        b.inlined=true
+        statement(function.body nodes ctx @b)
+        if not b.dead {
+            exits(@b)
+            place(Item[I_BREAK] @b)
+        }
+        $runtime_assert b.loops.length >? 0
+        b.loops.pop;
+        b.region=outer
+        b.dead=false
+        let built=region_at(b.body body)
+        if built.length >? 0 and leaves(built b.body true) {
+            # Folding left one path that returns at its end: no block is
+            # needed, and the returned value is the result itself.
+            let owner=if target.valued web(value_at(b.body b.env.get(RESULT 0))) else 0
+            loop i in 0.. and i <? built.length-1 {
+                let item=built[i]
+                if item.kind =? I_COPY and owner not=? 0 and web(value_at(b.body item.a)) =? owner and web(value_at(b.body item.b)) not=? owner {result=item.b}
+                place(item @b)
+            }
+            let cleared:array<Item>=[]
+            $runtime_assert body <? b.body.regions.length
+            b.body.regions[body]=cleared
+        } else {
+            place(Item[I_LOOP body d=list] @b)
+            if target.valued {
+                loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {
+                    if frame.names[i] =? RESULT {result=frame.exits[i]}
+                }
+            }
+        }
+    }
+    b.fixed=fixed
+    b.env=env
+    b.mutable=mutable
+    b.inlined=was_inlined
+    return result
+}
+
+call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
+    if node.kw_args.length >? 0 {b.unsupported=true return 0}
+    let callee=hir.node_at(nodes node.func)
+    if callee is? hir.ExpressedIdentifier and callee.name not in? b.env and callee.name not in? b.fixed {
+        let name=callee.name
+        if name =? '__static_words__' or name =? '__static_alloca__' return add(Value[K_LEAF node.value_type node=id] @b)
+        if node.pos_args.length =? 2 and (name in? emit.binary or name =? '__dewy_raw_lshift__' or name =? '__dewy_raw_rshift__') {
+            let left=value(node.pos_args[0] nodes ctx @b)
+            let right=value(node.pos_args[1] nodes ctx @b)
+            let decided=constant_compare(name left right nodes b)
+            if decided isnt? none return folded(decided node.value_type @b)
+            return add(Value[K_BINARY node.value_type left right node.func] @b)
+        }
+        if node.pos_args.length =? 1 and (name in? emit.prefix or name.startswith('__load_')) {
+            let operand=value(node.pos_args[0] nodes ctx @b)
+            if name =? '__not__' {
+                let truth=constant_bool(operand nodes b)
+                if truth isnt? none return folded(not truth node.value_type @b)
+            }
+            let kind=if name in? emit.prefix K_UNARY else K_LOAD
+            return add(Value[kind node.value_type operand 0 node.func] @b)
+        }
+        let arguments:array<addr>=[]
+        loop argument in node.pos_args {arguments.push(value(argument nodes ctx @b))}
+        let target=ctx.inlines.get(name)
+        if target isnt? none and b.active.length <? INLINE_DEPTH and name not in? b.active and b.growth+target.size <=? CALLER_GROWTH and wanted(target b) {
+            let callee=hir.node_at(nodes target.literal)
+            if callee is? hir.FunctionLiteral and callee.pos_or_kw_args.length =? arguments.length {
+                b.active.push(name)
+                let result=inline(target arguments nodes ctx @b)
+                $runtime_assert b.active.length >? 0
+                b.active.pop;
+                return result
+            }
+        }
+        let first=b.body.operands.length
+        loop argument in arguments {b.body.operands.push(argument)}
+        return add(Value[K_CALL node.value_type first arguments.length node.func] @b)
+    }
+    let arguments:array<addr>=[value(node.func nodes ctx @b)]
+    loop argument in node.pos_args {arguments.push(value(argument nodes ctx @b))}
+    let first=b.body.operands.length
+    loop argument in arguments {b.body.operands.push(argument)}
+    return add(Value[K_CALL_VALUE node.value_type first arguments.length] @b)
+}
+
+# Which calls are built in place: a callee that calls nothing further
+# anywhere; any other small callee only inside a loop, where the saved call
+# repeats.
+wanted = (target:Inline b:Builder):>bool => target.leaf or b.loops.length >? 0
+
+# The value of an expression, evaluated in the current region.
+value = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.Integer|hir.Bool|hir.String return add(Value[K_CONST node.value_type node=id] @b)
+    if node is? hir.ExpressedIdentifier {
+        let current=b.env.get(node.name)
+        if current isnt? none return current
+        let single=b.fixed.get(node.name)
+        if single isnt? none return single
+        if node.name in? ctx.globals return add(Value[K_GLOBAL_GET node.value_type node=id] @b)
+        return add(Value[K_CONST node.value_type node=id] @b)
+    }
+    if node is? hir.FunctionCall return call(id node nodes ctx @b)
+    if node is? hir.ValueCast return value(node.expr nodes ctx @b)
+    if node is? hir.Transmute {
+        let inner=value(node.expr nodes ctx @b)
+        return add(Value[K_TRANSMUTE node.value_type inner] @b)
+    }
+    if node is? hir.BasedString return add(Value[K_LEAF node.value_type node=id] @b)
+    if node is? hir.Block and not node.scoped and node.items.length >? 0 {
+        loop i in 0.. and i <? node.items.length-1 {statement(node.items[i] nodes ctx @b)}
+        return value(node.items[end] nodes ctx @b)
+    }
+    b.unsupported=true
+    return 0
+}
+
+condition = (id:addr lazy:bool nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return condition(node.items[0] lazy nodes ctx @b)
+    if node is? hir.ShortCircuit {
+        if node.op not=? 'and' and node.op not=? 'or' {b.unsupported=true return 0}
+        let left=condition(node.left lazy nodes ctx @b)
+        let right=condition(node.right true nodes ctx @b)
+        let combined=b.body.conds.length
+        b.body.conds.push(Cond[if node.op =? 'and' C_AND else C_OR left right])
+        return combined
+    }
+    if lazy {
+        let outer=b.region
+        let region=new_region(@b)
+        b.region=region
+        let leaf=value(id nodes ctx @b)
+        b.region=outer
+        let lazy_leaf=b.body.conds.length
+        b.body.conds.push(Cond[C_LEAF leaf region])
+        return lazy_leaf
+    }
+    let leaf=value(id nodes ctx @b)
+    let plain=b.body.conds.length
+    b.body.conds.push(Cond[C_LEAF leaf])
+    return plain
+}
+
+# After an `if`: a variable whose versions differ between the two paths gets
+# a new version, with each path's version recorded as its source. When only
+# one path continues, its versions do.
+join = (saved:dict<string addr> then_env:dict<string addr> then_region:addr then_dead:bool else_env:dict<string addr> else_region:addr else_dead:bool mark:addr list:addr @b:Builder):>void => {
+    let result=saved.copy
+    if not (then_dead and else_dead) {
+        loop [name old] in saved {
+            let taken=then_env.get(name old)
+            let skipped=else_env.get(name old)
+            if then_dead {result[name]=skipped continue}
+            if else_dead or taken =? skipped {result[name]=taken continue}
+            let joined=version(old mark @b)
+            declare_in(list Declared[joined] @b)
+            place_in(then_region Item[I_COPY joined taken] @b)
+            place_in(else_region Item[I_COPY joined skipped] @b)
+            result[name]=joined
+        }
+    }
+    b.env=result
+    b.dead=then_dead and else_dead
+}
+
+flow = (node:hir.Flow position:addr nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
+    if position >=? node.arms.length {
+        if node.default isnt? none {statement(node.default nodes ctx @b)}
+        return
+    }
+    let arm=hir.node_at(nodes node.arms[position])
+    if arm is? hir.IfArm {
+        let test=condition(arm.condition false nodes ctx @b)
+        # A decided test builds only the path it selects.
+        let decided=cond_at(b.body test)
+        if decided.kind =? C_LEAF and decided.b =? 0 {
+            let truth=constant_bool(decided.a nodes b)
+            if truth isnt? none {
+                if truth {statement(arm.body nodes ctx @b)} else {flow(node position+1 nodes ctx @b)}
+                return
+            }
+        }
+        let mark=b.body.values.length
+        let saved=b.env.copy
+        let outer=b.region
+        let then_region=new_region(@b)
+        b.region=then_region
+        statement(arm.body nodes ctx @b)
+        let then_env=b.env
+        let then_dead=b.dead
+        let else_region=new_region(@b)
+        b.region=else_region
+        b.dead=false
+        b.env=saved.copy
+        flow(node position+1 nodes ctx @b)
+        let else_env=b.env
+        let else_dead=b.dead
+        b.region=outer
+        let list=new_declared(@b)
+        join(saved then_env then_region then_dead else_env else_region else_dead mark list @b)
+        place(Item[I_IF test then_region else_region list] @b)
+        return
+    }
+    if arm isnt? hir.LoopArm or position+1 <? node.arms.length or node.default isnt? none {
+        # A loop with an else arm keeps the existing route for now.
+        b.unsupported=true
+        return
+    }
+    let changing:set<string>=set[]
+    assigned(node.arms[position] nodes @changing)
+    let frame=Loop[[] [] []]
+    let list=new_declared(@b)
+    loop name in changing {
+        let current=b.env.get(name)
+        if current is? none continue
+        let header=version(current 0 @b)
+        declare_in(list Declared[header current] @b)
+        let exit=version(current 0 @b)
+        declare_in(list Declared[exit] @b)
+        frame.names.push(name)
+        frame.headers.push(header)
+        frame.exits.push(exit)
+        b.env[name]=header
+    }
+    let entry=b.env.copy
+    let outer=b.region
+    let body=new_region(@b)
+    b.region=body
+    b.loops.push(frame)
+    let test=hir.node_at(nodes arm.condition)
+    if test is? hir.Bool and test.value {
+        statement(arm.body nodes ctx @b)
+        if not b.dead {backedge(@b)}
+    } else {
+        let tested=condition(arm.condition false nodes ctx @b)
+        let saved=b.env.copy
+        let inner=new_region(@b)
+        b.region=inner
+        statement(arm.body nodes ctx @b)
+        if not b.dead {backedge(@b)}
+        let leave=new_region(@b)
+        b.region=leave
+        b.env=saved
+        b.dead=false
+        exits(@b)
+        place(Item[I_BREAK] @b)
+        place_in(body Item[I_IF tested inner leave] @b)
+    }
+    $runtime_assert b.loops.length >? 0
+    b.loops.pop;
+    b.region=outer
+    b.dead=false
+    b.env=entry
+    loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {b.env[frame.names[i]]=frame.exits[i]}
+    place(Item[I_LOOP body d=list] @b)
+}
+backedge = (@b:Builder):>void => {
+    $runtime_assert b.loops.length >? 0
+    const frame=@b.loops[end]
+    loop i in 0.. and i <? frame.names.length and i <? frame.headers.length {
+        let current=b.env.get(frame.names[i])
+        if current isnt? none and current not=? frame.headers[i] {place(Item[I_COPY frame.headers[i] current] @b)}
+    }
+}
+exits = (@b:Builder):>void => {
+    $runtime_assert b.loops.length >? 0
+    const frame=@b.loops[end]
+    loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {
+        let current=b.env.get(frame.names[i])
+        if current isnt? none {place(Item[I_COPY frame.exits[i] current] @b)}
+    }
+}
+
+statement = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
+    if b.dead or b.unsupported return
+    let node=hir.node_at(nodes id)
+    if node is? hir.Void return
+    if node is? hir.Block {
+        loop item in node.items {statement(item nodes ctx @b)}
+        return
+    }
+    if node is? hir.Declare {
+        let initial=value(node.expr nodes ctx @b)
+        if node.name in? b.mutable {
+            let first=b.body.values.length
+            b.body.values.push(Value[K_MERGE (if node.annotation is? none type_of(initial b) else node.annotation) first first])
+            place(Item[I_DECLARE first initial] @b)
+            b.env[node.name]=first
+        } else if web(value_at(b.body initial)) not=? 0 {b.fixed[node.name]=add(Value[K_MOVE type_of(initial b) initial] @b)}
+        else {b.fixed[node.name]=initial}
+        return
+    }
+    if node is? hir.Assign {
+        let target=hir.node_at(nodes node.target)
+        if node.op not=? '=' or target isnt? hir.ExpressedIdentifier {b.unsupported=true return}
+        let stored=value(node.value nodes ctx @b)
+        let current=b.env.get(target.name)
+        if current isnt? none {
+            # An assignment's version is never replaced by its source (a
+            # mark of 0): the local must hold the value.
+            let previous=value_at(b.body current)
+            let next=b.body.values.length
+            b.body.values.push(Value[K_MERGE previous.type 0 web(previous)])
+            place(Item[I_COPY next stored] @b)
+            b.env[target.name]=next
+        }
+        else if target.name in? ctx.globals {add(Value[K_GLOBAL_SET node.value_type stored 0 node.target] @b);}
+        else {b.unsupported=true}
+        return
+    }
+    if node is? hir.Return and b.inlined {
+        let item=node.item
+        let current=b.env.get(RESULT)
+        if item isnt? none and current isnt? none and hir.node_at(nodes item) isnt? hir.Void {
+            let stored=value(item nodes ctx @b)
+            let previous=value_at(b.body current)
+            let next=b.body.values.length
+            b.body.values.push(Value[K_MERGE previous.type 0 web(previous)])
+            place(Item[I_COPY next stored] @b)
+            b.env[RESULT]=next
+        } else if item isnt? none {statement(item nodes ctx @b)}
+        if b.loops.length =? 0 {b.unsupported=true return}
+        exits(@b)
+        place(Item[I_BREAK] @b)
+        b.dead=true
+        return
+    }
+    if node is? hir.Return {
+        let item=node.item
+        if item is? none or hir.node_at(nodes item) is? hir.Void {place(Item[I_RETURN] @b)}
+        else {
+            let result=value(item nodes ctx @b)
+            place(Item[I_RETURN result 1] @b)
+        }
+        b.dead=true
+        return
+    }
+    if node is? hir.Break|hir.Continue {
+        if b.loops.length =? 0 or node.label isnt? none or node.loop_levels not=? 0 {b.unsupported=true return}
+        if node is? hir.Break {
+            exits(@b)
+            place(Item[I_BREAK] @b)
+        } else {
+            backedge(@b)
+            place(Item[I_CONTINUE] @b)
+        }
+        b.dead=true
+        return
+    }
+    if node is? hir.Flow {
+        flow(node 0 nodes ctx @b)
+        return
+    }
+    value(id nodes ctx @b);
+}
+
+# A merge whose every copy carries the same value that already existed when
+# its control structure began is that value. One replacement can enable
+# another (an exit merge of a header merge), so repeat until none is found.
+simplify = (@body:Body):>void => {
+    let replaced:array<addr>=[]
+    loop i in 0.. and i <? body.values.length {replaced.push(0)}
+    let changed=true
+    let rounds:addr=0
+    loop changed and rounds <? 8 {
+        changed=false
+        rounds+=1
+        # 0: nothing seen yet; the value's own id: several sources.
+        let single:array<addr>=[]
+        loop i in 0.. and i <? body.values.length {single.push(0)}
+        loop l in 0.. and l <? body.declared.length {
+            loop entry in declared_at(body l) {if entry.init not=? 0 {note(entry.merge entry.init replaced @single)}}
+        }
+        loop r in 0.. and r <? body.regions.length {
+            loop item in region_at(body r) {if item.kind =? I_COPY {note(item.a item.b replaced @single)}}
+        }
+        loop id in 0.. and id <? body.values.length and id <? single.length and id <? replaced.length {
+            let source=single[id]
+            if source =? 0 or source =? id or replaced[id] not=? 0 continue
+            let entry=body.values[id]
+            if entry.kind =? K_MERGE and source <? entry.a {
+                replaced[id]=source
+                changed=true
+            }
+        }
+    }
+    # Rewrite every reference; a copy into a replaced merge disappears.
+    loop id in 0.. and id <? body.values.length {
+        let entry=body.values[id]
+        if entry.kind =? K_UNARY or entry.kind =? K_TRANSMUTE or entry.kind =? K_LOAD or entry.kind =? K_GLOBAL_SET or entry.kind =? K_MOVE {body.values[id]=Value[entry.kind entry.type resolve(entry.a replaced) entry.b entry.node]}
+        else if entry.kind =? K_BINARY {
+            body.values[id]=Value[entry.kind entry.type resolve(entry.a replaced) resolve(entry.b replaced) entry.node]
+        }
+    }
+    loop i in 0.. and i <? body.operands.length {body.operands[i]=resolve(body.operands[i] replaced)}
+    loop i in 0.. and i <? body.conds.length {
+        let test=body.conds[i]
+        if test.kind =? C_LEAF {body.conds[i]=Cond[C_LEAF resolve(test.a replaced) test.b]}
+    }
+    loop r in 0.. and r <? body.regions.length {
+        loop i in 0.. and i <? body.regions[r].length {
+            let item=body.regions[r][i]
+            if item.kind =? I_RETURN and item.b =? 1 {body.regions[r][i]=Item[I_RETURN resolve(item.a replaced) 1]}
+            else if item.kind =? I_COPY {
+                let target=resolve(item.a replaced)
+                let source=resolve(item.b replaced)
+                body.regions[r][i]=if target not=? item.a or target =? source Item[I_NOTHING] else Item[I_COPY target source]
+            } else if item.kind =? I_DECLARE {body.regions[r][i]=Item[I_DECLARE item.a resolve(item.b replaced)]}
+        }
+    }
+    loop l in 0.. and l <? body.declared.length {
+        let kept:array<Declared>=[]
+        loop entry in body.declared[l] {
+            if resolve(entry.merge replaced) not=? entry.merge continue
+            kept.push(Declared[entry.merge resolve(entry.init replaced)])
+        }
+        body.declared[l]=kept
+    }
+}
+resolve = (id:addr replaced:array<addr>):>addr => {
+    let current=id
+    loop current <? replaced.length and replaced[current] not=? 0 {current=replaced[current]}
+    return current
+}
+note = (target:addr source:addr replaced:array<addr> @single:array<addr>):>void => {
+    let merged=resolve(target replaced)
+    if merged not=? target return
+    let value=resolve(source replaced)
+    if value =? merged return
+    $runtime_assert merged <? single.length
+    if single[merged] =? 0 {single[merged]=value}
+    else if single[merged] not=? value {single[merged]=merged}
+}
+
+# The form of one normalized function, or none when it uses a shape this
+# construction does not cover yet (the caller keeps the function as it is).
+build = (symbol:string function:hir.FunctionLiteral nodes:array<hir.AST> ctx:Context):>Body|none => {
+    let first:array<Item>=[]
+    let none_declared:array<Declared>=[]
+    let b=Builder[Body[[Value[0 0]] regions=[first] declared=[none_declared]] active=[symbol]]
+    if function.kw_only_args.length >? 0 or function.rest_args isnt? none return none
+    assigned(function.body nodes @b.mutable)
+    loop parameter in function.pos_or_kw_args {
+        if parameter is? hir.BoundParam return none
+        let id=b.body.values.length
+        let changing=parameter.name in? b.mutable
+        b.body.values.push(Value[K_PARAM parameter.value_type b.body.params.length (if changing id else 0)])
+        b.body.params.push(id)
+        b.body.names.push(parameter.name)
+        if changing {b.env[parameter.name]=id} else {b.fixed[parameter.name]=id}
+    }
+    b.body.root=new_region(@b)
+    b.region=b.body.root
+    statement(function.body nodes ctx @b)
+    if b.unsupported return none
+    simplify(@b.body)
+    return b.body
+}

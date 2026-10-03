@@ -1,0 +1,401 @@
+from reporting import Span
+import p"ssa.dewy" as ssa
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+
+doc"""
+The SSA form written back as normalized HIR, which µDewy emission already
+reads.
+
+**Tree forming.** µDewy (like wasm) wants expression trees, so a value with
+one use moves into that use when nothing between its definition and the use
+can change its meaning:
+- a pure operation crosses anything but a copy into a merge;
+- a memory read also stops at calls, stores and control structures;
+- a call also stops at memory reads.
+
+A use pulls its operands last to first, so operands keep their evaluation
+order. Values that stay behind are bound to a local where they are defined.
+
+**Webs** are locals. Every version of a web reads and writes the web's
+local, so a copy between two versions of one web writes nothing, and joins
+cost nothing. A value that reads a web's local never moves past an
+assignment or a control structure.
+"""
+
+Kinds:type = const [nothing:addr boolean:addr word:addr bottom:addr]
+
+# How far a value may move to reach its single use, in items.
+const REACH:addr=48
+# The root key of values inside a lazy condition leaf: always part of it.
+const LAZY:addr=1
+# The root key of a removed value.
+const SWEPT:addr=2
+
+Writer:type = [
+    kinds:Kinds
+    loc:Span
+    uses:array<addr>=[]
+    # Per web (by its first version): how often any version is read.
+    reads:array<addr>=[]
+    home:array<addr>=[]
+    index:array<addr>=[]
+    # 0: evaluated where it stands; otherwise the root whose tree holds it.
+    root:array<addr>=[]
+    names:array<string>=[]
+    references:array<addr>=[]
+    serial:addr=0
+    next_root:addr=3
+]
+
+# Effect classes for moving a value past an item.
+const PURE:addr=0
+const READ:addr=1
+const EFFECT:addr=2
+effect_class = (kind:addr):>addr => {
+    if kind =? ssa.K_LOAD or kind =? ssa.K_GLOBAL_GET return READ
+    if kind =? ssa.K_CALL or kind =? ssa.K_CALL_VALUE or kind =? ssa.K_GLOBAL_SET return EFFECT
+    return PURE
+}
+removable = (kind:addr):>bool => kind =? ssa.K_UNARY or kind =? ssa.K_BINARY or kind =? ssa.K_TRANSMUTE or kind =? ssa.K_LOAD or kind =? ssa.K_GLOBAL_GET or kind =? ssa.K_LEAF or kind =? ssa.K_MOVE
+single = (kind:addr):>bool => kind =? ssa.K_UNARY or kind =? ssa.K_TRANSMUTE or kind =? ssa.K_LOAD or kind =? ssa.K_GLOBAL_SET or kind =? ssa.K_MOVE
+# Whether a value reads a web's local directly.
+reads_local = (entry:ssa.Value body:ssa.Body):>bool => {
+    if single(entry.kind) return ssa.web(ssa.value_at(body entry.a)) not=? 0
+    if entry.kind =? ssa.K_BINARY return ssa.web(ssa.value_at(body entry.a)) not=? 0 or ssa.web(ssa.value_at(body entry.b)) not=? 0
+    if entry.kind =? ssa.K_CALL or entry.kind =? ssa.K_CALL_VALUE {
+        loop k in 0.. and k <? entry.b {if ssa.web(ssa.value_at(body ssa.operand_at(body entry.a+k))) not=? 0 return true}
+    }
+    return false
+}
+
+bump = (id:addr @uses:array<addr>):>void => {
+    $runtime_assert id <? uses.length
+    uses[id]=uses[id]+1
+}
+unuse = (id:addr @uses:array<addr>):>void => {
+    $runtime_assert id <? uses.length
+    if uses[id] >? 0 {uses[id]=uses[id]-1}
+}
+used = (w:Writer id:addr):>addr => {
+    $runtime_assert id <? w.uses.length
+    return w.uses[id]
+}
+root_of = (w:Writer id:addr):>addr => {
+    $runtime_assert id <? w.root.length
+    return w.root[id]
+}
+
+# Use counts, then removal of unused pure values (latest first, so a removed
+# value's operands can become unused as well).
+count = (body:ssa.Body @w:Writer):>void => {
+    loop i in 0.. and i <? body.values.length {
+        w.uses.push(0) w.reads.push(0) w.home.push(0) w.index.push(0) w.root.push(0) w.names.push('') w.references.push(0)
+    }
+    loop entry in body.values {
+        if single(entry.kind) {bump(entry.a @w.uses)}
+        else if entry.kind =? ssa.K_BINARY {bump(entry.a @w.uses) bump(entry.b @w.uses)}
+        else if entry.kind =? ssa.K_CALL or entry.kind =? ssa.K_CALL_VALUE {
+            loop k in 0.. and k <? entry.b {bump(ssa.operand_at(body entry.a+k) @w.uses)}
+        }
+    }
+    loop test in body.conds {if test.kind =? ssa.C_LEAF {bump(test.a @w.uses)}}
+    loop r in 0.. and r <? body.regions.length {
+        loop i in 0.. and i <? body.regions[r].length {
+            let item=body.regions[r][i]
+            if item.kind =? ssa.I_VALUE {
+                $runtime_assert item.a <? w.home.length and item.a <? w.index.length
+                w.home[item.a]=r
+                w.index[item.a]=i
+            } else if item.kind =? ssa.I_RETURN and item.b =? 1 {bump(item.a @w.uses)}
+            else if (item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE) and item.b not=? 0 and not silent(item body) {bump(item.b @w.uses)}
+        }
+    }
+    sweep(body 0 @w)
+    # A web nobody reads needs no local: its assignments only evaluate their
+    # sources, which may then be unused as well.
+    loop id in 0.. and id <? body.values.length {
+        let entry=body.values[id]
+        let owner=ssa.web(entry)
+        if owner not=? 0 and used(w id) >? 0 {
+            $runtime_assert owner <? w.reads.length
+            w.reads[owner]=w.reads[owner]+used(w id)
+        }
+    }
+    let dropped=false
+    loop r in 0.. and r <? body.regions.length {
+        loop item in ssa.region_at(body r) {
+            if (item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE) and item.b not=? 0 and unread(item body w) {
+                unuse(item.b @w.uses)
+                dropped=true
+            }
+        }
+    }
+    if dropped {sweep(body 1 @w)}
+    # Lazy condition leaves are whole trees by construction.
+    loop test in body.conds {
+        if test.kind not=? ssa.C_LEAF or test.b =? 0 continue
+        loop item in ssa.region_at(body test.b) {
+            if item.kind =? ssa.I_VALUE {
+                $runtime_assert item.a <? w.root.length
+                w.root[item.a]=LAZY
+            }
+        }
+    }
+}
+
+# Removal of unused pure values, latest first. A second sweep only visits
+# values that became unused since the first (`again`).
+sweep = (body:ssa.Body again:addr @w:Writer):>void => {
+    let remaining=body.values.length
+    loop remaining >? 0 {
+        remaining-=1
+        let entry=ssa.value_at(body remaining)
+        $runtime_assert remaining <? w.root.length
+        if used(w remaining) not=? 0 or not removable(entry.kind) or w.root[remaining] =? SWEPT {continue}
+        w.root[remaining]=SWEPT
+        if entry.kind =? ssa.K_BINARY {unuse(entry.a @w.uses) unuse(entry.b @w.uses)}
+        else if entry.kind not=? ssa.K_LEAF and entry.kind not=? ssa.K_GLOBAL_GET {unuse(entry.a @w.uses)}
+    }
+}
+# An assignment to a web that is never read (a copy between versions of one
+# web is not an assignment).
+unread = (item:ssa.Item body:ssa.Body w:Writer):>bool => {
+    if silent(item body) return false
+    let owner=ssa.web(ssa.value_at(body item.a))
+    $runtime_assert owner <? w.reads.length
+    return w.reads[owner] =? 0
+}
+
+# Move `id` into the tree of the root at `at` in its region when it has that
+# one use and nothing between them conflicts; then its own operands.
+pull = (id:addr at:addr key:addr region:addr items:array<ssa.Item> body:ssa.Body @w:Writer):>void => {
+    let entry=ssa.value_at(body id)
+    if entry.kind =? ssa.K_CONST or entry.kind =? ssa.K_PARAM or entry.kind =? ssa.K_MERGE return
+    $runtime_assert id <? w.home.length and id <? w.index.length and id <? w.root.length
+    if used(w id) not=? 1 or w.home[id] not=? region or w.root[id] not=? 0 return
+    let origin=w.index[id]
+    if origin >=? at or at-origin >? REACH return
+    let moving=effect_class(entry.kind)
+    let local=reads_local(entry body)
+    let k=origin
+    loop k+1 <? at and k+1 <? items.length {
+        k+=1
+        let item=items[k]
+        if item.kind =? ssa.I_NOTHING continue
+        if item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE {
+            if local and not silent(item body) and not unread(item body w) return
+            continue
+        }
+        if item.kind not=? ssa.I_VALUE {
+            if moving not=? PURE or local return
+            continue
+        }
+        if root_of(w item.a) =? key continue
+        let other=ssa.value_at(body item.a)
+        if used(w item.a) =? 0 and removable(other.kind) continue
+        let crossed=effect_class(other.kind)
+        if moving =? READ and crossed =? EFFECT return
+        if moving =? EFFECT and crossed not=? PURE return
+    }
+    $runtime_assert id <? w.root.length
+    w.root[id]=key
+    pull_operands(entry at key region items body @w)
+}
+# A copy between two versions of one web writes nothing.
+silent = (item:ssa.Item body:ssa.Body):>bool => item.kind =? ssa.I_COPY and ssa.web(ssa.value_at(body item.a)) =? ssa.web(ssa.value_at(body item.b))
+pull_operands = (entry:ssa.Value at:addr key:addr region:addr items:array<ssa.Item> body:ssa.Body @w:Writer):>void => {
+    if single(entry.kind) {pull(entry.a at key region items body @w)}
+    else if entry.kind =? ssa.K_BINARY {
+        pull(entry.b at key region items body @w)
+        pull(entry.a at key region items body @w)
+    } else if entry.kind =? ssa.K_CALL or entry.kind =? ssa.K_CALL_VALUE {
+        let k=entry.b
+        loop k >? 0 {
+            k-=1
+            pull(ssa.operand_at(body entry.a+k) at key region items body @w)
+        }
+    }
+}
+# The leftmost leaf of a condition: the one evaluated where the test stands.
+first_leaf = (body:ssa.Body test:addr):>addr => {
+    let current=ssa.cond_at(body test)
+    loop current.kind not=? ssa.C_LEAF {current=ssa.cond_at(body current.a)}
+    return current.a
+}
+fresh_root = (@w:Writer):>addr => {
+    w.next_root+=1
+    return w.next_root
+}
+# Decide every value of one region: roots that must be statements first, in
+# order; then the single-use values no root could take.
+decide = (region:addr items:array<ssa.Item> body:ssa.Body @w:Writer):>void => {
+    loop i in 0.. and i <? items.length {
+        let item=items[i]
+        if item.kind =? ssa.I_VALUE {
+            let entry=ssa.value_at(body item.a)
+            let count=used(w item.a)
+            if count =? 1 or root_of(w item.a) not=? 0 continue
+            if count =? 0 and removable(entry.kind) continue
+            pull_operands(entry i fresh_root(@w) region items body @w)
+        } else if item.kind =? ssa.I_RETURN and item.b =? 1 {pull(item.a i fresh_root(@w) region items body @w)}
+        else if item.kind =? ssa.I_DECLARE or item.kind =? ssa.I_COPY and not silent(item body) {
+            if item.b not=? 0 and not unread(item body w) {pull(item.b i fresh_root(@w) region items body @w)}
+        }
+        else if item.kind =? ssa.I_IF {pull(first_leaf(body item.a) i fresh_root(@w) region items body @w)}
+    }
+    # Latest first: a value that has taken operands at its own place must
+    # never move afterwards, and only a later root could take it.
+    let i=items.length
+    loop i >? 0 {
+        i-=1
+        $runtime_assert i <? items.length
+        let item=items[i]
+        if item.kind not=? ssa.I_VALUE or root_of(w item.a) not=? 0 or used(w item.a) not=? 1 {continue}
+        pull_operands(ssa.value_at(body item.a) i fresh_root(@w) region items body @w)
+    }
+}
+
+local_name = (id:addr body:ssa.Body @w:Writer):>string => {
+    $runtime_assert id <? w.names.length
+    if w.names[id] not=? '' return w.names[id]
+    let entry=ssa.value_at(body id)
+    let chosen:string=''
+    if entry.kind =? ssa.K_MERGE and entry.b not=? id {chosen=local_name(entry.b body @w)}
+    else if entry.kind =? ssa.K_PARAM {
+        $runtime_assert entry.a <? body.names.length
+        chosen=body.names[entry.a]
+    } else {
+        w.serial+=1
+        chosen="_v{w.serial}"
+    }
+    $runtime_assert id <? w.names.length
+    w.names[id]=chosen
+    return chosen
+}
+reference = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
+    $runtime_assert id <? w.references.length
+    if w.references[id] not=? 0 return w.references[id]
+    let created=hir.append_node(@nodes hir.ExpressedIdentifier[loc=w.loc value_type=ssa.value_at(body id).type name=local_name(id body @w)])
+    $runtime_assert id <? w.references.length
+    w.references[id]=created
+    return created
+}
+# A value as an operand: its tree when it was pulled into this use, its
+# literal when it is a constant, otherwise its local.
+tree = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
+    let entry=ssa.value_at(body id)
+    if entry.kind =? ssa.K_CONST {
+        if entry.b =? 0 return entry.node
+        return hir.append_node(@nodes hir.Bool[loc=w.loc value_type=entry.type value=entry.a =? 2])
+    }
+    if entry.kind =? ssa.K_PARAM or entry.kind =? ssa.K_MERGE or root_of(w id) =? 0 return reference(id body @nodes @w)
+    return expression(entry body @nodes @w)
+}
+# The expression that computes a value.
+expression = (entry:ssa.Value body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
+    if entry.kind =? ssa.K_LEAF or entry.kind =? ssa.K_GLOBAL_GET return entry.node
+    if entry.kind =? ssa.K_MOVE return tree(entry.a body @nodes @w)
+    if entry.kind =? ssa.K_TRANSMUTE return hir.append_node(@nodes hir.Transmute[loc=w.loc value_type=entry.type expr=tree(entry.a body @nodes @w)])
+    if entry.kind =? ssa.K_UNARY or entry.kind =? ssa.K_LOAD return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=entry.node pos_args=[tree(entry.a body @nodes @w)] kw_args=[]])
+    if entry.kind =? ssa.K_BINARY {
+        let left=tree(entry.a body @nodes @w)
+        let right=tree(entry.b body @nodes @w)
+        return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=entry.node pos_args=[left right] kw_args=[]])
+    }
+    if entry.kind =? ssa.K_GLOBAL_SET return hir.append_node(@nodes hir.Assign[loc=w.loc value_type=w.kinds.nothing target=entry.node op='=' value=tree(entry.a body @nodes @w)])
+    let arguments:array<addr>=[]
+    let function=entry.node
+    loop k in 0.. and k <? entry.b {
+        let operand=tree(ssa.operand_at(body entry.a+k) body @nodes @w)
+        if k =? 0 and entry.kind =? ssa.K_CALL_VALUE {function=operand} else {arguments.push(operand)}
+    }
+    return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=function pos_args=arguments kw_args=[]])
+}
+zero = (type:addr table:types.Table @nodes:array<hir.AST> w:Writer):>addr => {
+    let target=types.node_at(table type)
+    if types.is_primitive(target 'bool') return hir.append_node(@nodes hir.Bool[loc=w.loc value_type=type value=false])
+    if target is? types.FunctionType {
+        let word=hir.append_node(@nodes hir.Integer[loc=w.loc value_type=w.kinds.word prefix='0d' value=0])
+        return hir.append_node(@nodes hir.Transmute[loc=w.loc value_type=type expr=word])
+    }
+    return hir.append_node(@nodes hir.Integer[loc=w.loc value_type=type prefix='0d' value=0])
+}
+tested = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
+    let entry=ssa.cond_at(body id)
+    if entry.kind =? ssa.C_LEAF return tree(entry.a body @nodes @w)
+    let left=tested(entry.a body @nodes @w)
+    let right=tested(entry.b body @nodes @w)
+    return hir.append_node(@nodes hir.ShortCircuit[loc=w.loc value_type=w.kinds.boolean op=(if entry.kind =? ssa.C_AND 'and' else 'or') left=left right=right])
+}
+scoped = (items:array<addr> @nodes:array<hir.AST> w:Writer):>addr => hir.append_node(@nodes hir.Block[loc=w.loc value_type=w.kinds.nothing items=items scoped=true])
+
+# A loop body that is one test whose other path only leaves the loop is
+# `loop test { ... }`.
+looped = (statements:array<addr> @nodes:array<hir.AST> w:Writer):>addr => {
+    if statements.length =? 1 {
+        let only=hir.node_at(nodes statements[0])
+        if only is? hir.Flow and only.arms.length =? 1 and only.default isnt? none {
+            let arm=hir.node_at(nodes only.arms[0])
+            let other=hir.node_at(nodes only.default)
+            if arm is? hir.IfArm and other is? hir.Block and other.items.length =? 1 and hir.node_at(nodes other.items[0]) is? hir.Break {
+                let repeated=hir.append_node(@nodes hir.LoopArm[loc=w.loc value_type=w.kinds.nothing condition=arm.condition body=arm.body])
+                return hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[repeated] default=none])
+            }
+        }
+    }
+    let always=hir.append_node(@nodes hir.Bool[loc=w.loc value_type=w.kinds.boolean value=true])
+    let repeated=hir.append_node(@nodes hir.LoopArm[loc=w.loc value_type=w.kinds.nothing condition=always body=scoped(statements @nodes w)])
+    return hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[repeated] default=none])
+}
+
+# The statements of one region.
+statements = (region:addr body:ssa.Body table:types.Table @nodes:array<hir.AST> @w:Writer):>array<addr> => {
+    let items=ssa.region_at(body region)
+    decide(region items body @w)
+    let output:array<addr>=[]
+    loop i in 0.. and i <? items.length {
+        let item=items[i]
+        if item.kind =? ssa.I_VALUE {
+            if root_of(w item.a) not=? 0 continue
+            let entry=ssa.value_at(body item.a)
+            let count=used(w item.a)
+            if count =? 0 and removable(entry.kind) continue
+            let computed=expression(entry body @nodes @w)
+            if count =? 0 {output.push(computed)}
+            else {output.push(hir.append_node(@nodes hir.Declare[loc=w.loc value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=entry.type expr=computed]))}
+        } else if item.kind =? ssa.I_RETURN {
+            if item.b =? 1 {output.push(hir.append_node(@nodes hir.Return[loc=w.loc value_type=w.kinds.bottom item=tree(item.a body @nodes @w)]))}
+            else {output.push(hir.append_node(@nodes hir.Return[loc=w.loc value_type=w.kinds.bottom]))}
+        } else if item.kind =? ssa.I_BREAK {output.push(hir.append_node(@nodes hir.Break[loc=w.loc value_type=w.kinds.bottom]))}
+        else if item.kind =? ssa.I_CONTINUE {output.push(hir.append_node(@nodes hir.Continue[loc=w.loc value_type=w.kinds.bottom]))}
+        else if item.kind =? ssa.I_COPY {
+            if silent(item body) or unread(item body w) continue
+            output.push(hir.append_node(@nodes hir.Assign[loc=w.loc value_type=w.kinds.nothing target=reference(item.a body @nodes @w) op='=' value=tree(item.b body @nodes @w)]))
+        } else if item.kind =? ssa.I_DECLARE {
+            if unread(item body w) continue
+            let initial=if item.b =? 0 zero(ssa.value_at(body item.a).type table @nodes w) else tree(item.b body @nodes @w)
+            output.push(hir.append_node(@nodes hir.Declare[loc=w.loc value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=ssa.value_at(body item.a).type expr=initial]))
+        } else if item.kind =? ssa.I_IF {
+            let condition=tested(item.a body @nodes @w)
+            let taken=statements(item.b body table @nodes @w)
+            let skipped=statements(item.c body table @nodes @w)
+            let arm=hir.append_node(@nodes hir.IfArm[loc=w.loc value_type=w.kinds.nothing condition=condition body=scoped(taken @nodes w)])
+            let fallback:addr?=none
+            if skipped.length >? 0 {fallback=scoped(skipped @nodes w)}
+            output.push(hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[arm] default=fallback]))
+        } else if item.kind =? ssa.I_LOOP {
+            let inner=statements(item.a body table @nodes @w)
+            output.push(looped(inner @nodes w))
+        }
+    }
+    return output
+}
+# The function with its body rewritten from the form.
+write = (function:hir.FunctionLiteral body:ssa.Body kinds:Kinds table:types.Table @nodes:array<hir.AST>):>addr => {
+    let w=Writer[kinds function.loc]
+    count(body @w)
+    let items=statements(body.root body table @nodes @w)
+    let block=scoped(items @nodes w)
+    return hir.append_node(@nodes hir.FunctionLiteral[loc=function.loc value_type=function.value_type pos_or_kw_args=function.pos_or_kw_args kw_only_args=function.kw_only_args rest_args=function.rest_args rettype=function.rettype body=block object_receiver=function.object_receiver object_fields=function.object_fields object_type=function.object_type source=function.source proof=function.proof lifecycle=function.lifecycle lifecycle_composition=function.lifecycle_composition])
+}

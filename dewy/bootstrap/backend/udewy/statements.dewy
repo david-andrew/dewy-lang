@@ -1,5 +1,8 @@
 import p"emit.dewy" as emit
 import p"program.dewy" as program
+import p"../../timing.dewy" as timing
+import p"ssa.dewy" as ssa
+import p"ssa_udewy.dewy" as ssa_udewy
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 
@@ -13,6 +16,10 @@ Result:type = const [program:program.Program input:emit.Input]
 put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
 node_at = (id:addr state:State):>hir.AST => hir.node_at(state.nodes id)
 void_type = (@state:State):>addr => types.primitive('void' @state.types)
+void_or_never = (type:addr state:State):>bool => {
+    let node=types.node_at(state.types type)
+    return types.is_primitive(node 'void') or types.is_primitive(node 'never')
+}
 boolean = (@state:State):>addr => types.primitive('bool' @state.types)
 append = (@target:array<addr> items:array<addr>):>void => {loop item in items {target.push(item)}}
 fresh = (@state:State):>string => {state.serial+=1 return "_s{state.serial}"}
@@ -559,7 +566,36 @@ inline_block = (id:addr uses:Uses @state:State):>void => {
     state.nodes[id]=node
 }
 
-normalize = (source:program.Program input:emit.Input):>Result => {
+# The optimizing route: each normalized function goes through the SSA form
+# (`ssa.dewy`), where small callees are built in place of their calls, and
+# comes back as trees for µDewy emission. A function the form does not
+# cover yet stays as normalized.
+optimized = (functions:array<program.Function> source:program.Program @state:State):>array<program.Function> => {
+    let globals:set<string>=set[]
+    loop id in source.globals {
+        let global=node_at(id state)
+        if global is? hir.Declare {globals.push(global.name)}
+    }
+    let inlines:dict<string ssa.Inline>=[]
+    loop entry in functions {
+        let function=node_at(entry.literal state)
+        $runtime_assert function is? hir.FunctionLiteral
+        let selected=ssa.candidate(entry.symbol entry.literal (not void_or_never(function.rettype state)) state.nodes)
+        if selected isnt? none {inlines[entry.symbol]=selected}
+    }
+    let ctx=ssa.Context[globals inlines]
+    let kinds=ssa_udewy.Kinds[void_type(@state) boolean(@state) types.primitive('int64' @state.types) types.primitive('never' @state.types)]
+    let result:array<program.Function>=[]
+    loop entry in functions {
+        let function=node_at(entry.literal state)
+        $runtime_assert function is? hir.FunctionLiteral
+        let form=ssa.build(entry.symbol function state.nodes ctx)
+        if form is? none {result.push(entry)}
+        else {result.push(program.Function[entry.symbol ssa_udewy.write(function form kinds state.types @state.nodes)])}
+    }
+    return result
+}
+normalize = (source:program.Program input:emit.Input optimizing:bool=false timings:bool=false):>Result => {
     let state=State[input.nodes input.types]
     let functions:array<program.Function>=[]
     state.in_function=true
@@ -581,6 +617,11 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         let merged:array<hir.Param>=function.pos_or_kw_args.copy
         loop parameter in function.kw_only_args {merged.push(parameter)}
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type merged [] function.rest_args function.rettype lowered source=function.source] @state)])
+    }
+    if optimizing {
+        let started=timing.start(timings)
+        functions=optimized(functions source @state)
+        timing.finish('lowering.optimize' started)
     }
     state.in_function=false
     let startup:array<addr>=[]

@@ -146,6 +146,34 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Optimizing tier: SSA form, tree writer, inlining (2026-10-03)
+
+David's direction (2026-10-03): the optimizer and code generator live in the
+Dewy compiler; µDewy stays the complete bootstrap route; no target is
+special, and wasm is developed alongside x86-64. The design, the
+measurements and the emitter plan are in
+[`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md).
+
+Landed (native only; debug builds keep the existing route):
+- `backend/udewy/ssa.dewy`: the structured SSA form, built from each
+  normalized function, with small callees built in place of their calls and
+  constant tests decided during construction.
+- `backend/udewy/ssa_udewy.dewy`: tree forming and the writer back to
+  normalized HIR for µDewy emission.
+
+Effect: the self-build is unchanged (50.8 s against 50.6 s). The inlined
+compiler runs about 5% faster, which pays for the pass (2.1 s). The gain
+this tier is for needs the register-allocating emitters, which are next.
+
+Evidence:
+- `test_ssa_form`, hosted and native: 12 programs covering snapshots, swaps,
+  loop exits, lazy conditions, global reads around calls, inlined callees
+  with early returns, changed parameters and constant arguments, and the
+  two defects the gate found.
+- Three-generation fixed point; every function of the compiler takes the
+  route.
+- Local gate: 6,398 passed.
+
 ## Transmute limits; optimizing tier approved (2026-10-02)
 
 David's direction:
