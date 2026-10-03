@@ -1,0 +1,92 @@
+{
+  "source_revision": "ded467545a5b4532f1456ebfe5f08b0befe8c1b6",
+  "python_version": "3.14.7 (main, Aug 10 2026, 00:00:00) [GCC 16.1.1 20260515 (Red Hat 16.1.1-2)]",
+  "scope": "acceptance through code generation; generated programs are not executed",
+  "cases": {
+    "refined_index": {
+      "source": "get=(xs:array<int64> i:addr<k => k <? xs.length>):>int64 => xs[i]\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": true
+      },
+      "native": {
+        "accepted": true,
+        "returncode": 0
+      }
+    },
+    "guarded_word_nonzero": {
+      "source": "divide=(d:int64):>int64 => {if d <=? 0 return 0 return 42 // d}\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": true
+      },
+      "native": {
+        "accepted": true,
+        "returncode": 0
+      }
+    },
+    "guarded_bigint_nonzero": {
+      "source": "divide=(d:bigint):>bigint => {if d <=? 0 return 0 return 42 // d}\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": false,
+        "diagnostic": "Error: cannot prove the divisor is nonzero\n\n    ╭─[<probe-output>/guarded_bigint_nonzero.dewy:1:64]\n  1 | divide=(d:bigint):>bigint => {if d <=? 0 return 0 return 42 // d}\n    ·                                                                ┬\n    ·                                                                ╰─ this may be zero\n    ╰───\n  help: guard the division (`if d not=? 0 { … }`), or take the divisor as `d:bigint & ~0`"
+      },
+      "native": {
+        "accepted": false,
+        "returncode": 1,
+        "diagnostic": "Error: cannot prove the divisor is nonzero\n\n    ╭─[<probe-output>/guarded_bigint_nonzero.dewy:1:58]\n  1 | divide=(d:bigint):>bigint => {if d <=? 0 return 0 return 42 // d}\n    ·                                                          ───┬───\n    ·                                                             ╰─ guard the division or take a nonzero divisor\n    ╰───\n"
+      }
+    },
+    "explicit_bigint_nonzero": {
+      "source": "divide=(d:bigint):>bigint => {if d =? 0 return 0 return 42 // d}\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": true
+      },
+      "native": {
+        "accepted": true,
+        "returncode": 0
+      }
+    },
+    "masked_hex_index": {
+      "source": "digit=(h:uint64):>string => {let digits='0123456789abcdef' let i:uint64=h and 15 return digits[i]}\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": false,
+        "diagnostic": "Error: string index is not proven in bounds\n\n    ╭─[<probe-output>/masked_hex_index.dewy:1:96]\n  1 | digit=(h:uint64):>string => {let digits='0123456789abcdef' let i:uint64=h and 15 return digits[i]}\n    ·                                                                                                ┬\n    ·                                                                                                ╰─ the index interval here is `0..18446744073709551615`\n    ╰───\n  help: establish both a nonnegative lower bound and an upper bound below the string length"
+      },
+      "native": {
+        "accepted": false,
+        "returncode": 1,
+        "diagnostic": "Error: string index is not proven in bounds\n\n    ╭─[<probe-output>/masked_hex_index.dewy:1:96]\n  1 | digit=(h:uint64):>string => {let digits='0123456789abcdef' let i:uint64=h and 15 return digits[i]}\n    ·                                                                                                ┬\n    ·                                                                                                ╰─ the index interval here is `0..18446744073709551615`\n    ╰───\n  help: establish both a nonnegative lower bound and an upper bound below the string length\n"
+      }
+    },
+    "modulo_hex_index": {
+      "source": "digit=(h:uint64):>string => {let digits='0123456789abcdef' let i:uint64=h % 16 return digits[i]}\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": true
+      },
+      "native": {
+        "accepted": true,
+        "returncode": 0
+      }
+    },
+    "mutable_parallel_lengths": {
+      "source": "State:type=[xs:array<int64> ys:array<int64 length =? xs.length>]\nget=(s:State i:addr<k => k <? s.xs.length>):>int64 => s.ys[i]\nmain=():>int64 => 42\n",
+      "hosted": {
+        "accepted": false,
+        "diagnostic": "Error: `ys` relates to `xs` in a writable record\n\n    ╭─[<probe-output>/mutable_parallel_lengths.dewy:1:12]\n  1 | State:type=[xs:array<int64> ys:array<int64 length =? xs.length>]\n    ·            ──────────────────────────┬──────────────────────────\n    ·                                      ╰─ `ys` or `xs` could be assigned later, so the relation would not hold\n    ╰───\n  help: make the record immutable: `const [...]` (a value whose contents never change after construction)"
+      },
+      "native": {
+        "accepted": false,
+        "returncode": 1,
+        "diagnostic": "Error: `ys` relates to `xs` in a writable record\n\n    ╭─[<probe-output>/mutable_parallel_lengths.dewy:1:12]\n  1 | State:type=[xs:array<int64> ys:array<int64 length =? xs.length>]\n    ·            ──────────────────────────┬──────────────────────────\n    ·                                      ╰─ the relation would not survive assignment\n    ╰───\n  help: make the record immutable: `const [...]`\n"
+      }
+    }
+  },
+  "native_driver": {
+    "sha256": "2e5311554961bbef3afd35acdfd44f781af93b79d1321c7a2f0ed30842df3c60",
+    "fixture": "tests/fixtures/bootstrap_program.dewy",
+    "cached_build_inputs_digest": "f03680da61d13aadbebfb1b3b60efe882e12be2785c03b49d342f9afa341d493",
+    "build_options": {
+      "debug_locations": false,
+      "debug_info": false
+    }
+  }
+}

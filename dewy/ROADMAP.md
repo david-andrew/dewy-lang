@@ -1288,6 +1288,33 @@ array-length growth. Candidate and derived-row budgets retain unknown on
 exhaustion. Broader shared proof coverage, final scaling and the unsafe-audit
 consumer provenance remain closure work.
 
+#### Native compiler as a fact-system ergonomics benchmark (2026-10-03)
+
+Use the compiler's own `$runtime_assert` sites as a focused evaluation of
+ordinary proof ergonomics. Sample shared arena getters, numeric operations,
+and SSA structures; classify each selected check as missing inference,
+evidence discarded at an interface, a mutable representation invariant, or
+intentional runtime validation. Follow representative cases through callers,
+record storage, helper extraction and mutation. A refined getter compiling
+locally is not enough: measure the source and annotation effort needed to
+establish and preserve its callers' evidence, alongside compilation/runtime
+cost. Retain intentional checks and identify which obligations are actually
+checked versus trusted. This is a bounded audit, not a new Phase 1 gate or a
+requirement to prove every internal compiler invariant before other work.
+
+The [October 3 probe record](audits/2026-10-03/README.md) supplies two concrete
+arithmetic acceptance cases: `uint64 and 15` should establish the bound needed
+for hexadecimal indexing, and rejecting a nonpositive `bigint` should establish
+nonzero for division. Both currently need additional evidence, while the
+corresponding remainder bound and word-integer guard pass. Straightforward
+inference fixes and inexpensive contract improvements can proceed alongside
+current compiler work, with parity checks in both implementations. Persistent
+evidence for stored arena IDs, correlated mutable arrays and validated compiler
+stages belongs with the broader mutation-aware proof-engine work. The record
+distinguishes observed checker gaps from representation/design questions;
+[`semantic/idiomatic_facts.md`](semantic/idiomatic_facts.md) retains the durable
+requirements rather than accumulating transient failures.
+
 ### 1.3 Effects as a real vocabulary
 
 The transitive parameter effect analysis exists
