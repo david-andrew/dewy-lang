@@ -147,11 +147,11 @@ main=():>int64=>if work()=?83 42 else 1''',
     # with division by the same number met only when the program runs.
     '''main=():>int64=>{
     let values:array<int64>=[0 1 (-1) 7 (-7) 1000000007 (-1000000007) 9223372036854775807 (0-9223372036854775807-1) 4611686018427387904 123456789012345 (-123456789012345)]
-    let divisors:array<int64>=[2 3 7 8 10 1000 4096 1000000007 2147483647]
+    let divisors:array<int64>=[2 3 7 8 10 1000 4096 1000000007 2147483647 2147483648 4611686018427387904]
     let bad:int64=0
     loop x in values {
-        let quotients:array<int64>=[x//2 x//3 x//7 x//8 x//10 x//1000 x//4096 x//1000000007 x//2147483647]
-        let remainders:array<int64>=[x%2 x%3 x%7 x%8 x%10 x%1000 x%4096 x%1000000007 x%2147483647]
+        let quotients:array<int64>=[x//2 x//3 x//7 x//8 x//10 x//1000 x//4096 x//1000000007 x//2147483647 x//2147483648 x//4611686018427387904]
+        let remainders:array<int64>=[x%2 x%3 x%7 x%8 x%10 x%1000 x%4096 x%1000000007 x%2147483647 x%2147483648 x%4611686018427387904]
         loop i in 0.. and i <? divisors.length and i <? quotients.length and i <? remainders.length {
             let d=divisors[i]
             if d >? 0 and (x//d not=? quotients[i] or x%d not=? remainders[i]) {bad+=1}

@@ -929,6 +929,18 @@ def _quotient_interval(left: Interval, right: Interval, *, floor: bool) -> Inter
     return Interval(lower, upper)
 
 
+def _mask_interval(left: Interval | None, right: Interval | None) -> Interval | None:
+    """A bitwise `and` with a non-negative operand clears every bit above it."""
+    limit: int | None = None
+    capped = False
+    for operand in (left, right):
+        if operand is None or operand.lower is None or operand.lower < 0 or operand.upper is None:
+            continue
+        if limit is None or operand.upper < limit:
+            limit, capped = operand.upper, operand.capped
+    return None if limit is None else Interval(0, limit, capped)
+
+
 def _remainder_interval(left: Interval, right: Interval, *, floor: bool) -> Interval | None:
     """Modulo follows the divisor for floor division, the dividend for truncation.
 
@@ -3594,6 +3606,11 @@ class _BoundsValidator:
                 bound=self._difference_bound(node, state) if name == '__sub__' else None,
                 floor=node.integer_operation is not None,
             )
+        elif (
+            len(arguments) == 2 and name == '__and__'
+            and isinstance(node.type, str) and ty.fixed_integer_layout(node.type) is not None
+        ):
+            result = _mask_interval(arguments[0], arguments[1])
         # Comparisons produce ordinary boolean values as well as branch
         # predicates. Use the operands observed above, without evaluating
         # them again. A later argument can invalidate the left term's live

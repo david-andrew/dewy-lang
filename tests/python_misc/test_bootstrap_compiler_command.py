@@ -65,7 +65,10 @@ def test_native_compiler_command(tmp_path):
     audit_source.write_text('$no_prelude=true\nmain=():>int64=>42')
     assert invoke('-c', audit_source).returncode == 0
     assert not json.loads(audit_path.read_text())['assumptions']
-    # The µDewy compiler read bytecode (udewy/BYTECODE.md), not µDewy text.
+    # The native route wrote the executable itself. On the µDewy route the
+    # µDewy compiler reads bytecode (udewy/BYTECODE.md), not µDewy text.
+    assert not (tmp_path / cache_artifact(audit_source, '.ubc', cwd=tmp_path)).exists()
+    assert invoke('-c', audit_source, emit='bytecode').returncode == 0
     assert (tmp_path / cache_artifact(audit_source, '.ubc', cwd=tmp_path)).is_file()
     # The same metadata must survive cached imported defaults. The temporary
     # library's empty files isolate this check from the full standard library.
@@ -90,13 +93,16 @@ def test_native_compiler_command(tmp_path):
     assert version.returncode == 0 and version.stdout.startswith('dewy ')
     program = tmp_path / 'program.dewy'
     program.write_text('$no_prelude=true\nlet main=():>int64=>42')
-    timed = invoke('--timings', '-c', program)
-    assert timed.returncode == 0, timed.stdout + timed.stderr
-    phases = [line.split()[2] for line in timed.stderr.splitlines() if line.startswith('dewy timing ')]
     # Sub-phases (parse, check, imports, ...) may interleave; the top-level
-    # phases must each appear once, in order.
+    # phases must each appear once, in order. The native route ends with
+    # lowering, which writes the executable; the µDewy route emits bytecode
+    # and runs its backend.
     top_level = ['frontend', 'validation', 'initialization_and_reachability', 'lowering', 'emission', 'backend']
-    assert [phase for phase in phases if phase in top_level] == top_level
+    for emit, expected in [(None, top_level[:4]), ('bytecode', top_level)]:
+        timed = invoke('--timings', '-c', program, emit=emit)
+        assert timed.returncode == 0, timed.stdout + timed.stderr
+        phases = [line.split()[2] for line in timed.stderr.splitlines() if line.startswith('dewy timing ')]
+        assert [phase for phase in phases if phase in top_level] == expected
     for body in [
         '$no_prelude=true\nlet main=():>int64=>42',
         'let main=():>int64=>{let values:array<int64>=[40 2] return values[0]+values[1]}',
@@ -256,8 +262,9 @@ let _test_summary=(json:bool brief:bool):>int64=>
     result = invoke('test', program)
     assert result.returncode == 102, result.stdout + result.stderr
     # A compile-only build names the backend that failed (an outdated
-    # installed `udewy` rejects newer arguments).
-    result = invoke('-c', program)
+    # installed `udewy` rejects newer arguments). The native route has no
+    # backend process, so the µDewy route is asked for.
+    result = invoke('-c', program, emit='bytecode')
     assert result.returncode != 0, result.stdout + result.stderr
     assert 'the µDewy backend failed' in result.stderr and str(backend_failure) in result.stderr, result.stderr
     program.write_text('$test\nlet bad=(value:int64):>void=>{}')

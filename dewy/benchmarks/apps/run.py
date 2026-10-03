@@ -4,8 +4,8 @@
     run.py COMPILER_DIR [--rounds N] [--only NAME ...]
 
 COMPILER_DIR holds the native `dewy` compiler and its `udewy`. Every workload
-is built three ways -- the default route, the optimizing route (opt-in as
-DEWY_EMIT=native while it grows) and its C counterpart with `cc -O2` -- and
+is built three ways -- the µDewy route (DEWY_EMIT=bytecode), the native
+route (the default on x86-64) and its C counterpart with `cc -O2` -- and
 run at a small and a larger input. A program times its own kernel, so setup
 is not counted; the best and the median of N rounds are reported, with the
 whole run, compile latency and peak memory beside them. The checksums of the three builds must agree.
@@ -44,9 +44,7 @@ def peak(command):
 
 def build_dewy(compiler, name, route, out):
     env = dict(os.environ, DEWY_UDEWY=str(compiler / 'udewy'), DEWY_LIBRARY_ROOT=str(ROOT / 'library'))
-    env.pop('DEWY_EMIT', None)
-    if route == 'optimizing':
-        env['DEWY_EMIT'] = 'native'
+    env['DEWY_EMIT'] = 'bytecode' if route == 'udewy' else 'native'
     cache = ROOT / '__dewycache__' / HERE.relative_to(ROOT)
     for stale in cache.glob(f'{name}*'):
         stale.unlink()
@@ -93,7 +91,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=os.environ.get('DEWY_BENCH_TMP')) as scratch:
         for name in options.only:
             builds = {}
-            for route in ('default', 'optimizing'):
+            for route in ('udewy', 'native'):
                 out = Path(scratch) / f'{name}-{route}'
                 builds[route] = (out, *build_dewy(compiler, name, route, out))
             out = Path(scratch) / f'{name}-c'

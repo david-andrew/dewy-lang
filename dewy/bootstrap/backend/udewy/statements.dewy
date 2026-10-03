@@ -13,8 +13,9 @@ import p"../../semantic/ty.dewy" as types
 # extraction will use the same boundary when its storage rules are added.
 State:type = [nodes:array<hir.AST> types:types.Table serial:addr=0 in_function:bool=false]
 Expression:type = [prefix:array<addr> value:addr]
-# `native`: the program as a finished executable, when that route built it.
-Result:type = const [program:program.Program input:emit.Input native:array<uint8>|none=none]
+# `native`: the program as a finished executable, when that route built it;
+# `refused`: why it did not, when it was asked to.
+Result:type = const [program:program.Program input:emit.Input native:array<uint8>|none=none refused:string='']
 put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
 node_at = (id:addr state:State):>hir.AST => hir.node_at(state.nodes id)
 void_type = (@state:State):>addr => types.primitive('void' @state.types)
@@ -643,14 +644,15 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
         argv_prologue=prologue
     }
     # The native route builds the executable itself. What it cannot build
-    # yet is reported, and the program keeps the µDewy route.
+    # yet keeps the µDewy route, with the reason recorded.
     let executable:array<uint8>|none=none
+    let refused:string=''
     if optimizing and native_code {
         let started=timing.start(timings)
         let kinds=native.Kinds[void_type(@state) types.primitive('int64' @state.types)]
         let built=native.build(normalized source startup argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
         timing.finish('lowering.native' started)
-        if built is? native.Failure {printl("native route: {built.reason}")} else {executable=built}
+        if built is? native.Failure {refused=built.reason} else {executable=built}
     }
     # µDewy emission reads the functions written back from the form; a
     # program the native route built needs none.
@@ -659,5 +661,5 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
         functions=optimized(normalized ctx @state)
         timing.finish('lowering.optimize' started)
     }
-    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types input.source_files] executable]
+    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types input.source_files] executable refused]
 }

@@ -3,7 +3,7 @@
 The suite the roadmap accepted on 2026-10-03
 ([`../../ROADMAP.md`](../../ROADMAP.md#small-cross-language-application-benchmarks-accepted-2026-10-03)):
 application evidence beside the compiler self-build, comparing ordinary Dewy
-source on the default and the optimizing compilation paths with a C
+source on the µDewy route and the native (optimizing) route with a C
 counterpart of the same algorithm.
 
     ./run.py COMPILER_DIR [--rounds N] [--only NAME ...]

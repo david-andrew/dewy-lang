@@ -1,8 +1,9 @@
 # Application benchmark results
 
-Each section is one run of `./run.py` on an otherwise idle machine. `default`
-is the µDewy route, `optimizing` the native x86-64 route (`DEWY_EMIT=native`),
-`C` the counterpart. Kernel times are the best and the median of the rounds;
+Each section is one run of `./run.py` on an otherwise idle machine. `udewy`
+is the µDewy route and `native` the native x86-64 route (the first two
+sections, from before the native route was the default, call them `default`
+and `optimizing`); `C` is the counterpart. Kernel times are the best and the median of the rounds;
 `vs C` compares best kernel times at the same input. Compile times use the
 cached checked prelude; the fresh figure is given with each section.
 
@@ -114,3 +115,47 @@ Open, by workload: `records` needs records stored flat in their array
 out of loops that cannot share; `graph` needs the dictionary's probe
 specialised by key type; `helpers` and `arrays` need bounds checks and
 remaining moves removed; setup needs a cheaper `push`.
+
+## Native route by default; growth test in place; wider power-of-two division (2026-10-03)
+
+`_reserve_array` is split as the sharing tests were, so a `push` with room
+makes no call; division by a power of two up to 2⁶² is a shift (the
+generators' `% 2147483648` was still an `idiv`). Fresh compile: 2.9 s; a
+compile with the prelude cached is 0.45 s on the native route, which starts
+no backend process.
+
+| workload | build | compile s | compile MiB | input | kernel ms | median | vs C | whole run ms | run MiB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| helpers | udewy | 0.54 | 130 | 200000 | 435.9 | 444.1 | 6.61x | 436.4 | 0.4 |
+| helpers | native | 0.44 | 125 | 200000 | 108.0 | 108.8 | 1.64x | 108.5 | 0.4 |
+| helpers | C | 0.07 | 31 | 200000 | 66.0 | 66.8 | 1.00x | 66.9 | 1.6 |
+| helpers | udewy | 0.54 | 130 | 2000000 | 4912.8 | 4936.9 | 6.80x | 4913.4 | 0.4 |
+| helpers | native | 0.44 | 125 | 2000000 | 1213.5 | 1222.6 | 1.68x | 1214.1 | 0.4 |
+| helpers | C | 0.07 | 31 | 2000000 | 722.2 | 727.1 | 1.00x | 723.5 | 1.6 |
+| arrays | udewy | 0.53 | 131 | 1000000 | 53.5 | 54.8 | 3.78x | 91.3 | 23.4 |
+| arrays | native | 0.46 | 126 | 1000000 | 32.5 | 33.8 | 2.29x | 55.0 | 23.4 |
+| arrays | C | 0.08 | 31 | 1000000 | 14.2 | 14.6 | 1.00x | 24.5 | 16.8 |
+| arrays | udewy | 0.53 | 131 | 10000000 | 612.8 | 620.7 | 2.77x | 1020.3 | 280.8 |
+| arrays | native | 0.46 | 126 | 10000000 | 411.7 | 425.1 | 1.86x | 671.1 | 280.8 |
+| arrays | C | 0.08 | 31 | 10000000 | 221.5 | 225.4 | 1.00x | 313.3 | 154.2 |
+| records | udewy | 0.53 | 131 | 100000 | 95.8 | 97.8 | 10.86x | 110.3 | 8.0 |
+| records | native | 0.51 | 126 | 100000 | 53.0 | 56.3 | 6.01x | 61.8 | 8.0 |
+| records | C | 0.08 | 31 | 100000 | 8.8 | 8.9 | 1.00x | 12.0 | 4.7 |
+| records | udewy | 0.53 | 131 | 1000000 | 991.4 | 993.6 | 8.20x | 1123.6 | 76.8 |
+| records | native | 0.51 | 126 | 1000000 | 566.4 | 571.9 | 4.68x | 646.8 | 76.8 |
+| records | C | 0.08 | 31 | 1000000 | 121.0 | 121.8 | 1.00x | 142.8 | 32.2 |
+| text | udewy | 0.55 | 131 | 1000000 | 61.0 | 61.8 | 3.66x | 206.7 | 12.9 |
+| text | native | 0.47 | 126 | 1000000 | 32.8 | 33.1 | 1.97x | 84.3 | 12.9 |
+| text | C | 0.09 | 32 | 1000000 | 16.7 | 16.8 | 1.00x | 34.4 | 6.5 |
+| text | udewy | 0.55 | 131 | 10000000 | 618.7 | 632.1 | 3.81x | 2043.9 | 111.8 |
+| text | native | 0.47 | 126 | 10000000 | 318.1 | 324.4 | 1.96x | 783.3 | 111.8 |
+| text | C | 0.09 | 32 | 10000000 | 162.3 | 168.3 | 1.00x | 324.5 | 49.3 |
+| graph | udewy | 0.54 | 133 | 200000 | 148.7 | 150.8 | 2.86x | 221.6 | 55.3 |
+| graph | native | 0.46 | 127 | 200000 | 133.6 | 134.6 | 2.57x | 192.2 | 55.3 |
+| graph | C | 0.11 | 33 | 200000 | 52.0 | 52.5 | 1.00x | 80.4 | 33.4 |
+| graph | udewy | 0.54 | 133 | 1000000 | 1219.5 | 1233.9 | 4.03x | 1624.8 | 255.5 |
+| graph | native | 0.46 | 127 | 1000000 | 1099.6 | 1105.0 | 3.63x | 1432.4 | 255.6 |
+| graph | C | 0.11 | 33 | 1000000 | 302.5 | 307.6 | 1.00x | 437.8 | 135.9 |
+
+Kernels are as in the previous section; setup moved: `text`'s whole run at
+the larger input went 1236 → 780 ms and `arrays`' 770 → 662 ms.

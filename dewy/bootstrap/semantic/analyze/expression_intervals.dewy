@@ -185,6 +185,9 @@ call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:va
         let bound=if name =? '__sub__' difference(node.pos_args[0] node.pos_args[1] state snapshot) else none
         result=values.binary(name snapshot.numbers.get(node.pos_args[0]) snapshot.numbers.get(node.pos_args[1]) node.value_type env.types bound floor=node.integer_operation isnt? none)
     }
+    else if node.pos_args.length =? 2 and name =? '__and__' and values.result_width(node.value_type env.types) isnt? none {
+        result=ranges.mask(snapshot.numbers.get(node.pos_args[0]) snapshot.numbers.get(node.pos_args[1]))
+    }
     if not arithmetic and node.integer_operation is? none {result=meet(result values.fixed_bounds(node.value_type env.types))}
     let signature=expressions.call_result_type(id env.nodes env.types)
     if signature isnt? none {result=meet(result own_bounds(signature env))}

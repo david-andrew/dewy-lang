@@ -146,6 +146,36 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Native route by default on x86-64; bitmask ranges (2026-10-03)
+
+- **Default route.** Running or compiling a program for x86-64 takes the
+  native route: the compiler writes the executable, with no µDewy process.
+  `DEWY_EMIT=bytecode` (or `=udewy` for text) selects the µDewy route, which
+  also remains the fallback for a program the native route does not cover,
+  the route of `debug` and `test`, and the route of every other target.
+  The unsafe-assumption audit file is written on both routes.
+- **Self-build:** 36.4 s and 2.69 GB by default (49.2 s and 3.2 GB on the
+  µDewy route at the previous revision). The natively built compiler asked
+  for bytecode takes 38.7 s and produces the same compiler executable as a
+  µDewy-built one, so the bootstrap path through µDewy is intact.
+- **Smaller changes:** `_reserve_array` keeps only its capacity test in
+  place (`_grow_array` out of line); division by a power of two up to 2⁶².
+  Benchmarks: [`benchmarks/apps/RESULTS.md`](benchmarks/apps/RESULTS.md).
+- **Bitmask ranges** (the first acceptance case of the
+  [October 3 probe record](audits/2026-10-03/README.md)): a bitwise `and`
+  with a non-negative operand is bounded by that operand, in both
+  compilers, so `digits[h and 15]` is proven for a 16-character table.
+  `tests/python_misc/test_mask_interval.py` holds accepting and rejecting
+  cases. The compiler's own assertion after the mask
+  (`invocation/cache.dewy`) can go once a compiler with the rule is the
+  seed. The nonpositive-`bigint` case is open: it is a narrowing of the
+  `0 | [...]` union by an ordering test, not an interval rule.
+
+Evidence: native fixed point by default; µDewy-route output identical;
+CLI tests adapted where they named µDewy artifacts
+(`test_bootstrap_compiler_command.py` checks both routes). Full local gate:
+6,399 passed.
+
 ## Application benchmarks; division, sharing tests, value numbering (2026-10-03)
 
 The small cross-language application suite the roadmap accepted on

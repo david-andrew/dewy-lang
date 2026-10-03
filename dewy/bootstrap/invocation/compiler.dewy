@@ -33,11 +33,16 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     timing.finish('frontend' started)
     if entry is? Error return entry
     loop warning in engine.session.warnings {warning.warn}
-    # The native route is opt-in while it grows: DEWY_EMIT=native.
-    let native_code=environment('DEWY_EMIT') =? 'native' and request.target =? 'x86_64' and request.command is? 'run'
+    # The native route (../OPTIMIZER.md) builds x86-64 programs unless the
+    # µDewy route is asked for: DEWY_EMIT=bytecode, or =udewy for its text.
+    # A program the native route does not cover takes the µDewy route too;
+    # DEWY_EMIT=native says why.
+    let route=environment('DEWY_EMIT')
+    let native_code=route not=? 'bytecode' and route not=? 'udewy' and request.target =? 'x86_64' and request.command is? 'run'
     let result=graph.compile(entry @engine timings=request.timings native_code=native_code)
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
+    if route =? 'native' and result.lowered.refused not=? '' {printl("native route: {result.lowered.refused}")}
     return result
 }
 # The started backend and the artifact it builds. The compilation is local to
@@ -96,6 +101,9 @@ start = (request:options.Request cwd:string executable:string):>Started|int64|Er
         let listing=cache.artifact(request.source cwd '.ubc')
         let failed=platform.directories(p(listing).parent.path)
         if failed isnt? none return failed
+        let audit_path=cache.artifact(request.source cwd '.unsafe.json')
+        let audited=p(audit_path).write_text(unsafe_audit.render(compiled.analysis.unsafe))
+        if audited isnt? int64 return Error[title='cannot write unsafe assumption audit' message=audit_path]
         let built=cache.artifact(listing cwd)
         let written=p(built).write_bytes(native)
         if written isnt? int64 return Error[title='cannot write the executable' message=built]

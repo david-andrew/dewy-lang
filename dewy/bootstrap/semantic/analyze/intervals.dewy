@@ -235,6 +235,16 @@ remainder=(left:Interval right:Interval floor:bool):>Interval?=>{
     let upper=if left.upper isnt? none and left.upper <=? 0 0 else minimum_upper(left.upper magnitude)
     return Interval[lower upper]
 }
+# A bitwise `and` with a non-negative operand clears every bit above it.
+mask = (left:Interval? right:Interval?):>Interval? => {
+    let limit:Interval?=none
+    if left isnt? none and left.lower isnt? none and left.lower >=? 0 and left.upper isnt? none {limit=left}
+    if right isnt? none and right.lower isnt? none and right.lower >=? 0 and right.upper isnt? none {
+        if limit is? none or limit.upper is? none or right.upper <? limit.upper {limit=right}
+    }
+    if limit is? none return none
+    return Interval[0 limit.upper limit.capped]
+}
 Operation:type = '__add__' | '__sub__' | '__mul__' | '__floordiv__' | '__mod__' | '__lshift__' | '__rshift__'
 binary = (operation:Operation left:Interval? right:Interval? word:Interval?=none bound:Interval?=none floor:bool=false):>Interval? => {
     if left is? none or right is? none return fits(bound word)

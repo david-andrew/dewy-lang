@@ -184,7 +184,7 @@ State:type = [
     none_cell:string?=none
     problem:Error?=none
 ]
-Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[] placements:array<PlacementNote>=[] native:array<uint8>|none=none]
+Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[] placements:array<PlacementNote>=[] native:array<uint8>|none=none refused:string='']
 copy_name = (type:addr @state:State):>string => {
     # Checked type descriptions are immutable during lowering. Render once,
     # even when thousands of sites copy the same arena-node or context type.
@@ -4042,10 +4042,18 @@ array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:S
         let count=fresh('required' @state)
         let pointer=put(hir.ExpressedIdentifier[node.loc word_type source] @state)
         let needed=put(hir.ExpressedIdentifier[node.loc word_type count] @state)
+        # As for `_unique_array`: the test of the capacity is its own small
+        # function, built in place by the optimizing tier; growing stays
+        # out of line.
+        let grow=fresh('grow_array' @state)
         let body=array_reserve_body(pointer needed stride node @state)
         let signature=types.function_type([types.PosOrKwArg[source word_type] types.PosOrKwArg[count word_type]] [] none empty [] @state.type_nodes)
         let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[source word_type] hir.Param[count word_type]] [] none empty body source=state.source_index] @state)
-        state.generated.push(program.Function[generated literal])
+        state.generated.push(program.Function[grow literal])
+        let full=intrinsic_call('__lt__' [read_word(pointer layouts.array_descriptor.capacity node @state) needed] types.primitive('bool' @state.type_nodes) node @state)
+        let test=sequence([conditional(full intrinsic_call(grow [pointer needed] empty node @state) node @state)] node @state)
+        let guard=put(hir.FunctionLiteral[node.loc signature [hir.Param[source word_type] hir.Param[count word_type]] [] none empty test source=state.source_index] @state)
+        state.generated.push(program.Function[generated guard])
     }
     $runtime_assert name isnt? none
     return intrinsic_call(name [descriptor required] empty node @state)
@@ -6195,7 +6203,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             notes=['This module enables `$explicit_copies`; COW sharing does not prove that a logical copy is free.']]
     }
     timing.report('lowering.moves' state.move_time timings)
-    return Result[normalized.program normalized.input state.copy_notes state.placement_notes normalized.native]
+    return Result[normalized.program normalized.input state.copy_notes state.placement_notes normalized.native normalized.refused]
 }
 
 # C argv is process-lifetime byte storage. Describe each validated UTF-8

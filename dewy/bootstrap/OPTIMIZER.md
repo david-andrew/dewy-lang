@@ -229,9 +229,10 @@ Gate: 6,398 passed.
 `backend/native/`: `x86.dewy` (instruction encoding), `image.dewy` (the static
 ELF executable), `x86_64.dewy` (code for one function from its SSA form) and
 `program.dewy` (globals, every function, startup, `main`, the process
-entry). It is opt-in for now: `DEWY_EMIT=native` with the `run` command on
-x86-64. A program it does not cover yet (foreign functions, floating-point
-intrinsics, a loop `else` arm) reports why and takes the µDewy route.
+entry). It began opt-in (`DEWY_EMIT=native`) and is now the default for
+running and compiling on x86-64 (see below). A program it does not cover yet
+(foreign functions, floating-point intrinsics, a loop `else` arm) takes the
+µDewy route.
 
 - **No assembler, no linker, no µDewy process.** The compiler writes the
   executable's bytes itself and resolves every reference when it places
@@ -304,6 +305,19 @@ showed where the first emitter's code lost to C; three changes followed.
 Self-build, same source: 49.2 s on the µDewy route (52.2 s when built by the
 previous compiler) and 36.9 s on the native route (39.8 s), executable
 9.87 MB; both fixed points hold.
+
+**Default on x86-64.** `dewy FILE` and `dewy -c FILE` for x86-64 now take the
+native route. `DEWY_EMIT=bytecode` selects the µDewy route (`=udewy` its
+text); a program the native route does not cover takes the µDewy route as a
+whole, and `DEWY_EMIT=native` says why. `debug`, `test` and every other
+target stay on the µDewy route. The µDewy route is unchanged: the natively
+built compiler, asked for bytecode, produces the same compiler executable as
+the µDewy-built one. The environment variable is interim; the setting
+belongs in the language's build configuration.
+
+Two smaller changes with it: `_reserve_array` is split like the sharing
+tests (the capacity test in place, `_grow_array` out of line), and a divisor
+that is a power of two up to 2⁶² is reduced, not only those below 2³¹.
 
 What the benchmarks point at next: bounds checks and sharing tests that a
 loop repeats without anything able to change their outcome; records stored
