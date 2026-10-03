@@ -1666,6 +1666,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             let target=declarations.resolve(node.right env.lexical @session)
             if target is? Error return target
             if not text_shapes.transmute_compatible(node_at(value session).value_type target session.types) return problem(id 'incompatible transmute representations' 'these types do not share the backend value shape' env session)
+            let refusal=text_shapes.transmute_refusal(node_at(value session).value_type target session.types)
+            if refusal isnt? none return problem(id 'transmute cannot establish a type constraint' refusal env session)
             return put(hir.Transmute[node.loc target value] @session)
         }
         if op =? '.' {

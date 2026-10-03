@@ -43,6 +43,19 @@ transmute_compatible = (source:addr target:addr nodes:types.Table):>bool => {
     if string_type(source nodes) and b is? types.ArrayType or a is? types.ArrayType and string_type(target nodes) return false
     return true
 }
+# Transmute reinterprets one plain representation for low-level code. It
+# cannot establish a refinement (`addr`, `int64<x >? 0>`) or a literal value:
+# the same bits assigned to such a type are proven there instead. A union's
+# representation (a cell, an enum word, a niche) is not its members', so
+# transmute neither reads nor writes one.
+transmute_refusal = (source:addr target:addr nodes:types.Table):>string? => {
+    if union(source nodes) return "`{types.describe(source nodes)}` is a union; transmute reinterprets one plain representation"
+    if union(target nodes) return "`{types.describe(target nodes)}` is a union; transmute reinterprets one plain representation"
+    let constrained=types.node_at(nodes types.unfold(target nodes))
+    if constrained is? types.RefinedType|types.IntegerLiteralType|types.StringLiteralType|types.RationalLiteralType return "`{types.describe(target nodes)}` constrains its values; reinterpreted bits are not proven to satisfy it"
+    return none
+}
+union = (id:addr nodes:types.Table):>bool => types.node_at(nodes types.unfold(id nodes)) is? types.TypeOr
 string_type = (id:addr nodes:types.Table):>bool => {
     let type=types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
     if type is? types.TypeOr {

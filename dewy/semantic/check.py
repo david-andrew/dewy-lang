@@ -12767,6 +12767,14 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
                     ),
                 ),
             )
+        refusal = _transmute_constraint_refusal(item.type, target)
+        if refusal is not None:
+            type_error(
+                ctx.srcfile,
+                'transmute cannot establish a type constraint',
+                Pointer(span=binop.loc, message=refusal),
+                hint='transmute to the plain representation; assigning it to the constrained type proves the constraint',
+            )
         return hir.Transmute(binop.loc, target, item)
 
     if symbol == 'as':
@@ -17320,6 +17328,31 @@ def _static_string_conversion(node: hir.AST, loc: Span, *, ctx: Context) -> hir.
         'unsupported value conversion',
         Pointer(span=loc, message=f'cannot convert `{type_to_dewy(node.type)}` to `string`'),
     )
+
+
+_CONSTRAINED_TRANSMUTE_TYPES = (
+    ty.RefinedType,
+    ty.IntegerLiteralType,
+    ty.StringLiteralType,
+    ty.RationalLiteralType,
+)
+
+
+def _transmute_constraint_refusal(source: ty.Type, target: ty.Type) -> str | None:
+    """Why reinterpreting ``source`` as ``target`` is refused, if it is.
+
+    Transmute reinterprets one plain representation for low-level code. It
+    cannot establish a refinement (`addr`, `int64<x >? 0>`) or a literal value:
+    the same bits assigned to such a type are proven there instead. A union's
+    representation (a cell, an enum word, a niche) is not its members', so
+    transmute neither reads nor writes one."""
+
+    for side in (source, target):
+        if isinstance(ty.unfold(side), ty.TypeOr):
+            return f'`{type_to_dewy(side)}` is a union; transmute reinterprets one plain representation'
+    if isinstance(ty.unfold(target), _CONSTRAINED_TRANSMUTE_TYPES):
+        return f'`{type_to_dewy(target)}` constrains its values; reinterpreted bits are not proven to satisfy it'
+    return None
 
 
 def _transmute_compatible(source: ty.Type, target: ty.Type) -> bool:

@@ -461,7 +461,7 @@ Unannotated integers behave as arbitrary precision. Explicit fixed-width annotat
 - [x] One-word udewy string descriptors over immutable UTF-8 plus byte-offset grapheme boundaries. Literals, calls, returns, globals, objects, optionals, and handle-element arrays use the descriptor ABI.
 - [x] Grapheme `.length`, indexing, static and flow-proven dynamic slicing with all bound forms, iteration, exact byte equality, and supported character ranges.
 - [x] `string as array<uint8>` borrowing with copy-on-write mutation, materialized `array<uint32>` scalar views, string-to-grapheme arrays, and grapheme-array-to-string conversion with UAX #29 re-segmentation.
-- [x] `as` performs representation-changing conversions; `transmute` remains bit-preserving and rejects string/array layout reinterpretation.
+- [x] `as` performs representation-changing conversions; `transmute` remains bit-preserving and rejects string/array layout reinterpretation. Since 2026-10-02 (David: transmute is for low-level code; support only sensible conversions) it also refuses refined and literal targets (`addr`, `nat64`, `-1|1`: the same bits assigned to such a type are proven there) and unions on either side (cells, enum words and niches are not their members' representation), in both compilers.
 - [x] Runtime re-segmentation uses current grapheme-array values, including mutations that cause adjacent clusters to merge.
 - [x] Interpolated strings preserve alternating literal chunks and typechecked expression fields in HIR.
 - [x] `print`/`printl` specialize interpolated strings into streamed writes, avoiding a materialized interpolation container; this includes integer and grapheme fields used by the hero program.

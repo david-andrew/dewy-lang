@@ -146,6 +146,32 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Transmute limits; optimizing tier approved (2026-10-02)
+
+David's direction:
+- **Optimizing tier.** Dewy gets its own optimization layer for the direct
+  route; leaning on a C compiler is a crutch, and the C route is not expanded.
+  The staged plan is in [`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md).
+- **Transmute limits.** `transmute` is for low-level code. Only sensible
+  conversions are supported.
+
+Implemented in both compilers: `transmute` now refuses
+- refined targets (`addr`, `nat64`, `int64<…>`) and literal targets
+  (`-1|1`, `'value'`). Reinterpreted bits are not proven to satisfy them; the
+  same bits assigned to such a type are proven there;
+- unions on either side. A union's representation (a cell, an enum word, a
+  niche) is not its members'.
+
+Plain bit reinterpretation and unit erasure are unchanged. No library or
+compiler source needed a change. This also makes niche layouts sound, such
+as a one-word `addr?` with `-1` as `none`.
+
+Evidence:
+- `test_transmute_constraints`: two accepted and five refused programs, with
+  the same message in both compilers.
+- The 422 tests in files that mention `transmute` pass.
+- Local gate: 6,397 passed.
+
 ## Throughput: token probes and normalization (2026-10-02)
 
 - **First-character checks in the tokenizer.**
