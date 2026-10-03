@@ -200,7 +200,10 @@ for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=bootstrap_gene
     rm -f -- "$DEWY_BOOTSTRAP_BACKEND_ARGS"
     # Generation zero may emit an older bytecode version. Source text is
     # the format bridge; later generations exercise this checkout's stream.
-    bootstrap_emit=${DEWY_EMIT:-}
+    # This script certifies the bootstrap path through µDewy, so the Dewy
+    # compiler is asked for that route; by default it would write an
+    # x86-64 executable itself and hand nothing to the backend.
+    bootstrap_emit=${DEWY_EMIT:-bytecode}
     if [[ $bootstrap_generation == 1 ]]; then bootstrap_emit=udewy; fi
     DEWY_EMIT="$bootstrap_emit" DEWY_LIBRARY_ROOT="$bootstrap_root/library" \
         DEWY_UDEWY="$bootstrap_handoff/udewy" \
