@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import shlex
+import shutil
 from pathlib import Path
 
 from test_bootstrap_lowering import ARENA
@@ -103,6 +104,22 @@ def test_native_compiler_command(tmp_path):
         assert timed.returncode == 0, timed.stdout + timed.stderr
         phases = [line.split()[2] for line in timed.stderr.splitlines() if line.startswith('dewy timing ')]
         assert [phase for phase in phases if phase in top_level] == expected
+    # wasm32 takes the native route too: the compiler writes the module and
+    # `udewy` writes the page around it, as it does on the µDewy route.
+    page = tmp_path / cache_artifact(program, '.html', cwd=tmp_path)
+    module = tmp_path / cache_artifact(program, '.wasm', cwd=tmp_path)
+    listing = tmp_path / cache_artifact(program, '.ubc', cwd=tmp_path)
+    for emit in [None, 'bytecode']:
+        for path in (page, module, listing):
+            path.unlink(missing_ok=True)
+        built = invoke('--target', 'wasm32', '-c', program, emit=emit)
+        assert built.returncode == 0, built.stdout + built.stderr
+        assert page.is_file() and module.is_file() and '@@' not in page.read_text()
+        assert listing.is_file() == (emit == 'bytecode')
+        node = shutil.which('node')
+        if node is not None:
+            ran = subprocess.run([node, ROOT / 'tools/run_wasm.mjs', module], capture_output=True, timeout=60)
+            assert ran.returncode == 42, ran.stdout + ran.stderr
     for body in [
         '$no_prelude=true\nlet main=():>int64=>42',
         'let main=():>int64=>{let values:array<int64>=[40 2] return values[0]+values[1]}',

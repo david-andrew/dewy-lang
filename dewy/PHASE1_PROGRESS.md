@@ -146,6 +146,39 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## One wasm32 page for both routes; the native route publishes the compiler (2026-10-04)
+
+David's direction (2026-10-04): the native wasm32 emitter gets the page too,
+from one source both routes share, and the best native compiler is the one
+published.
+
+- **One harness.** The page and host functions every wasm32 module runs in
+  are templates in `udewy/backend/wasm_harness/` (`host.js`,
+  `embedded.html`, `split.html`, `@@NAME@@` placeholders). µDewy's Python
+  compiler reads them and its native compiler embeds them with
+  `$include_bytes`. Both compilers drop their hand-copied JS/HTML (about
+  3,000 lines net). The two compilers' pages are now
+  byte-identical for the same module, in both modes. Against the previous
+  page, two blank lines moved (the server lifecycle hooks now follow the
+  host functions).
+- **A built module goes to `udewy`.** `udewy --target wasm32 [-c] NAME.wasm`
+  (both µDewy compilers) skips compilation, reads the memory size from the
+  module's import section and writes the page, then opens or serves it as
+  usual. The Dewy compiler's native wasm32 route writes its module and hands
+  it over this way, so `dewy --target wasm32 prog.dewy` behaves the same on
+  either route.
+- **Native route by default on wasm32**, as on x86-64: `DEWY_EMIT=bytecode`
+  or `=udewy` asks for the µDewy route, and a program the emitter refuses
+  falls back to it.
+- **Published compiler.** `tools/bootstrap_native.sh`, after the pair's fixed
+  point, has the certified compiler build the compiler with its native route
+  (`dewy-native1`). That compiler builds itself (`dewy-native2`), and the two
+  must be identical. `dewy-native2` is the published `dewy`. A refusal
+  that would hand the compiler to µDewy fails the build.
+  `tools/check_native.sh` runs on the published pair, and `package_native.sh`
+  requires both native stages in the manifest. The harness templates are
+  hashed with the other build inputs.
+
 ## Strict copies: eight more modules, and what blocks the rest (2026-10-04)
 
 Eight modules whose copies strict mode already accepts now declare

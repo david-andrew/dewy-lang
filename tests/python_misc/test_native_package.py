@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def pair_fixture(path):
     path.mkdir()
-    names = ['dewy-stage0', 'dewy-stage1', 'dewy-stage2', 'dewy',
+    names = ['dewy-stage0', 'dewy-stage1', 'dewy-stage2', 'dewy-native1', 'dewy-native2', 'dewy',
              'udewy-stage0', 'udewy-stage1', 'udewy-stage2', 'udewy']
     for name in names:
         (path / name).write_text('#!/bin/sh\nexit 0\n')
@@ -80,7 +80,7 @@ def test_package_three_generations_after_lowering_change(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize('changed', ['dewy-stage2', 'udewy-stage2', 'dewy', 'udewy'])
+@pytest.mark.parametrize('changed', ['dewy-stage2', 'udewy-stage2', 'dewy-native1', 'dewy-native2', 'dewy', 'udewy'])
 def test_package_rejects_nonmatching_final_pair_with_valid_hashes(tmp_path, changed):
     pair = tmp_path / 'pair'
     pair_fixture(pair)
@@ -102,3 +102,14 @@ def test_package_ignores_unrecorded_later_generation(tmp_path):
     (pair / 'udewy-stage3').write_text('stale output from another build')
     result = subprocess.run([ROOT / 'tools/package_native.sh', pair, tmp_path / 'native.tar.gz'], capture_output=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_package_requires_the_native_route_fixed_point(tmp_path):
+    # The published Dewy compiler is the one its own native route built twice.
+    pair = tmp_path / 'pair'
+    pair_fixture(pair)
+    names = [line.split()[1] for line in (pair / 'SHA256SUMS').read_text().splitlines()]
+    rewrite_manifest(pair, [name for name in names if not name.startswith('dewy-native')])
+    archive = tmp_path / 'native.tar.gz'
+    result = subprocess.run([ROOT / 'tools/package_native.sh', pair, archive], capture_output=True)
+    assert result.returncode != 0 and not archive.exists()

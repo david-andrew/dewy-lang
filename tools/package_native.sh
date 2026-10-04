@@ -28,7 +28,11 @@ sha256sum --check --status "$package_pair/SOURCE_SHA256SUMS"
     package_previous=$((package_last - 1))
     cmp -- "dewy-stage$package_previous" "dewy-stage$package_last"
     cmp -- "udewy-stage$package_previous" "udewy-stage$package_last"
-    cmp -- dewy "dewy-stage$package_last"
+    # The published Dewy compiler is the native route's own fixed point.
+    grep -qE '^[[:xdigit:]]{64}  dewy-native1$' SHA256SUMS
+    grep -qE '^[[:xdigit:]]{64}  dewy-native2$' SHA256SUMS
+    cmp -- dewy-native1 dewy-native2
+    cmp -- dewy dewy-native2
     cmp -- udewy "udewy-stage$package_last"
 )
 mkdir -p -- "$(dirname -- "$package_archive")"

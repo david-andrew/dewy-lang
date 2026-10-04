@@ -45,6 +45,14 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
     # possible raise SyntaxError
     backend = get_backend(options.target)
     backend.debug_info = options.debug_info
+    if Path(input_file).suffix == '.wasm':
+        # A module another compiler built (the Dewy compiler's wasm32
+        # emitter): only its page is written, then it runs like any other.
+        if options.target != 'wasm32':
+            raise RuntimeError(f"{input_file} is a wasm module; it needs --target wasm32")
+        cache_dir, input_name = cache_layout(input_file)
+        output_path = backend.wrap(Path(input_file), input_name, cache_dir, split_wasm=options.split_wasm)
+        return _finish(backend, output_path, input_file, script_args, options, [])
     if Path(input_file).suffix == '.ubc':
         # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
         # calls; no tokenizing or parsing.
@@ -82,7 +90,12 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         imported_sources=imported_sources,
     )
 
-    
+    return _finish(backend, output_path, input_file, script_args, options, link_artifacts)
+
+
+def _finish(backend: Backend, output_path: Path, input_file: Path, script_args: list[str],
+            options: EntryPointOptions, link_artifacts: list[str]) -> int:
+    """Report or run what the backend built."""
     if options.compile_only:
         print(backend.get_compile_message(output_path, split_wasm=options.split_wasm))
         return 0

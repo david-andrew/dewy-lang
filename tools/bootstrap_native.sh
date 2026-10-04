@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Rebuild the Dewy/µDewy compiler pair without Python and verify a fixed point.
-# The seeds must already be native executables. The first Dewy seed may have
-# been compiled by the hosted compiler; no hosted compiler is invoked here.
+# Rebuild the Dewy/µDewy compiler pair without Python and verify a fixed point,
+# then build the published Dewy compiler with its own native route and verify
+# that fixed point too. The seeds must already be native executables. The
+# first Dewy seed may have been compiled by the hosted compiler; no hosted
+# compiler is invoked here.
 set -euo pipefail
 
 bootstrap_target=x86_64
@@ -182,8 +184,8 @@ else
     cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
     cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
     rm -f -- "$bootstrap_output/GENERATION_1_SHA256SUMS" "$bootstrap_output/SHA256SUMS"
-    find dewy/bootstrap udewy/bootstrap udewy/stdlib library \
-        -type f \( -name '*.dewy' -o -name '*.udewy' -o -name '*.bin' \) -print0 |
+    find dewy/bootstrap udewy/bootstrap udewy/stdlib udewy/backend/wasm_harness library \
+        -type f \( -name '*.dewy' -o -name '*.udewy' -o -name '*.bin' -o -name '*.js' -o -name '*.html' \) -print0 |
         sort -z | xargs -0 sha256sum > "$bootstrap_output/SOURCE_SHA256SUMS"
     sha256sum VERSION tools/dewy_test.dewy >> "$bootstrap_output/SOURCE_SHA256SUMS"
 fi
@@ -236,14 +238,38 @@ bootstrap_last=$bootstrap_generations
 bootstrap_before_last=$((bootstrap_generations - 1))
 cmp -- "$bootstrap_output/udewy-stage$bootstrap_before_last" "$bootstrap_output/udewy-stage$bootstrap_last"
 cmp -- "$bootstrap_output/dewy-stage$bootstrap_before_last" "$bootstrap_output/dewy-stage$bootstrap_last"
+
+# The published Dewy compiler is the one the native route builds
+# (dewy/bootstrap/OPTIMIZER.md): the certified compiler builds it, and it
+# builds itself again; the two must be identical. The backend stand-in
+# records any hand-off, so a program the native route refused, which would
+# otherwise take the µDewy route, fails here instead.
+for bootstrap_native in 1 2; do
+    if [[ $bootstrap_native == 1 ]]; then bootstrap_builder="dewy-stage$bootstrap_last"; else bootstrap_builder=dewy-native1; fi
+    echo "Building the native-route compiler $bootstrap_native with $bootstrap_builder"
+    bootstrap_started=$SECONDS
+    rm -f -- "$DEWY_BOOTSTRAP_BACKEND_ARGS" __dewycache__/dewy/bootstrap/main
+    DEWY_EMIT=native DEWY_LIBRARY_ROOT="$bootstrap_root/library" DEWY_UDEWY="$bootstrap_handoff/udewy" \
+        "$bootstrap_output/$bootstrap_builder" --target x86_64 -c dewy/bootstrap/main.dewy
+    if [[ -e $DEWY_BOOTSTRAP_BACKEND_ARGS ]]; then
+        echo 'The native route did not build the compiler' >&2
+        exit 1
+    fi
+    cp -- __dewycache__/dewy/bootstrap/main "$bootstrap_output/dewy-native$bootstrap_native"
+    "$bootstrap_output/dewy-native$bootstrap_native" --version
+    echo "Native-route compiler $bootstrap_native completed in $((SECONDS - bootstrap_started)) seconds"
+done
+sha256sum --check --status "$bootstrap_output/SOURCE_SHA256SUMS"
+cmp -- "$bootstrap_output/dewy-native1" "$bootstrap_output/dewy-native2"
 cp -- "$bootstrap_output/udewy-stage$bootstrap_last" "$bootstrap_output/udewy"
-cp -- "$bootstrap_output/dewy-stage$bootstrap_last" "$bootstrap_output/dewy"
+cp -- "$bootstrap_output/dewy-native2" "$bootstrap_output/dewy"
+bash tools/check_native.sh "$bootstrap_output"
 (
     cd -- "$bootstrap_output"
     bootstrap_stage_files=()
     for ((bootstrap_stage=0; bootstrap_stage<=bootstrap_last; bootstrap_stage++)); do
         bootstrap_stage_files+=("dewy-stage$bootstrap_stage" "udewy-stage$bootstrap_stage")
     done
-    sha256sum BACKEND "${bootstrap_stage_files[@]}" dewy udewy > SHA256SUMS
+    sha256sum BACKEND "${bootstrap_stage_files[@]}" dewy-native1 dewy-native2 dewy udewy > SHA256SUMS
 )
 echo "Verified identical native compiler generations: $bootstrap_output"

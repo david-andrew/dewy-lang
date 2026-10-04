@@ -180,6 +180,14 @@ and C optimization options unchanged. The script verifies its saved generation a
 checksums, repeats the first-generation execution checks, then builds generation
 two. A missing or changed checkpoint requires a fresh build.
 
+Once the pair has reached its fixed point, the certified Dewy compiler
+builds the compiler again with its own native route (`dewy-native1`), and
+that compiler builds itself (`dewy-native2`). The two must be identical, and
+the result is the published `dewy`: the compiler's own code generation,
+whichever route built the seeds (see [OPTIMIZER.md](OPTIMIZER.md)). If the
+native route refuses the compiler and would hand it to µDewy, the build
+fails.
+
 The build script compares compiler binaries and checks that the compiler and
 library sources stayed unchanged. The execution check separately exercises
 both output backends, including µDewy's conditional-only short-circuit rules,

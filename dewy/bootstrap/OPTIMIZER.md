@@ -380,9 +380,17 @@ noted:
 ## The wasm32 emitter (2026-10-03)
 
 `backend/native/wasm.dewy` (binary encoding) and `backend/native/wasm32.dewy`
-(code and module) build a program's wasm32 module from the SSA form, opt-in
-with `DEWY_EMIT=native` and `--target wasm32`. Anything it does not cover
-falls back to the µDewy route, as on x86-64.
+(code and module) build a program's wasm32 module from the SSA form. It
+began opt-in (`DEWY_EMIT=native`) and since 2026-10-04 is the default for
+`--target wasm32`; anything it does not cover falls back to the µDewy route,
+as on x86-64.
+
+- **One page for both routes.** The compiler writes the module and hands it
+  to `udewy` (`udewy --target wasm32 [-c] NAME.wasm`), which wraps it in the
+  page every wasm32 module runs in and opens or serves it exactly as it does
+  its own. The page and host functions are templates in
+  `udewy/backend/wasm_harness/`, which µDewy's Python compiler reads and its
+  native compiler embeds with `$include_bytes`, so there is one copy.
 
 - **Same conventions as µDewy's wasm32 backend**, so the same hosts run the
   module: every value an `i64`, every function returning one, function values

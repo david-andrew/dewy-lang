@@ -10,7 +10,7 @@ import sys
 
 
 USAGE = """\
-Usage: python -m udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy> [args...]
+Usage: python -m udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy|file.ubc|file.wasm> [args...]
   -c              Compile only, don't run
   --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)
   --no-debug-info Omit source/variable debug metadata

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
 def test_pipeline_routes_both_compilers_through_selected_backend(tmp_path, target):
-    for directory in ['tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library', 'bin']:
+    for directory in ['tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library', 'bin']:
         (tmp_path / directory).mkdir(parents=True, exist_ok=True)
     script = tmp_path / 'tools/bootstrap_native.sh'
     shutil.copyfile(ROOT / 'tools/bootstrap_native.sh', script)
@@ -37,6 +37,12 @@ set -euo pipefail
 if [[ ${1:-} == --help || ${1:-} == --version ]]; then exit 0; fi
 [[ $# == 4 && $1 == --target && $3 == -c ]]
 printf '%s %s\\n' "$2" "$4" >> "$BOOTSTRAP_TEST_LOG"
+# The native route writes the executable itself.
+if [[ $4 == *.dewy && ${DEWY_EMIT:-} == native ]]; then
+    mkdir -p __dewycache__/dewy/bootstrap
+    cp "$0" __dewycache__/dewy/bootstrap/main
+    exit
+fi
 if [[ $4 == *.dewy ]]; then
     source="$PWD/__dewycache__/dewy/bootstrap/main.udewy"
     mkdir -p "$(dirname "$source")"
@@ -65,6 +71,11 @@ if [[ $2 == c ]]; then cc -o "$output" "$0"; else cp "$0" "$output"; fi
         'check 1',
         f'{target} udewy/bootstrap/main.udewy', f'{target} dewy/bootstrap/main.dewy',
         f'{target} {tmp_path}/__dewycache__/dewy/bootstrap/main.udewy',
+        # The published compiler: the native route's own fixed point.
+        'x86_64 dewy/bootstrap/main.dewy', 'x86_64 dewy/bootstrap/main.dewy',
+        'check ',
     ]
     assert (output / 'BACKEND').read_text().strip() == target
     assert (output / 'dewy-stage1').read_bytes() == (output / 'dewy-stage2').read_bytes()
+    assert (output / 'dewy').read_bytes() == (output / 'dewy-native2').read_bytes()
+    assert 'dewy-native1' in (output / 'SHA256SUMS').read_text()

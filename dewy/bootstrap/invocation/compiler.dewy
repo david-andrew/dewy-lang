@@ -35,15 +35,14 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     timing.finish('frontend' started)
     if entry is? Error return entry
     loop warning in engine.session.warnings {warning.warn}
-    # The native route (../OPTIMIZER.md) builds x86-64 programs unless the
-    # µDewy route is asked for: DEWY_EMIT=bytecode, or =udewy for its text.
-    # A program the native route does not cover takes the µDewy route too;
-    # DEWY_EMIT=native says why.
+    # The native route (../OPTIMIZER.md) builds x86-64 programs and wasm32
+    # modules unless the µDewy route is asked for: DEWY_EMIT=bytecode, or
+    # =udewy for its text. A program the native route does not cover takes
+    # the µDewy route too; DEWY_EMIT=native says why.
     let route=environment('DEWY_EMIT')
-    let native_code=route not=? 'bytecode' and route not=? 'udewy' and request.target =? 'x86_64' and request.command is? 'run'
-    # wasm32's native route is opt-in while it grows (DEWY_EMIT=native); it
-    # writes the module without running it.
-    let native_wasm=route =? 'native' and request.target =? 'wasm32' and request.command is? 'run'
+    let native_route=route not=? 'bytecode' and route not=? 'udewy' and request.command is? 'run'
+    let native_code=native_route and request.target =? 'x86_64'
+    let native_wasm=native_route and request.target =? 'wasm32'
     let result=graph.compile(entry @engine timings=request.timings native_code=native_code native_wasm=native_wasm)
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
@@ -100,17 +99,20 @@ start = (request:options.Request cwd:string executable:string):>Started|int64|Er
         return 0
     }
     # A program the native route built is already an executable, or for
-    # wasm32 a module.
+    # wasm32 a module, which `udewy` puts in the page every wasm32 module
+    # runs in (udewy/backend/wasm_harness) and opens as it would its own.
     let native=compiled.lowered.native
     if native isnt? none and request.target =? 'wasm32' {
         $runtime_assert request.source isnt? none
         let module_path=cache.artifact(request.source cwd '.wasm')
         let failed=platform.directories(p(module_path).parent.path)
         if failed isnt? none return failed
+        let audit_path=cache.artifact(request.source cwd '.unsafe.json')
+        let audited=p(audit_path).write_text(unsafe_audit.render(compiled.analysis.unsafe))
+        if audited isnt? int64 return Error[title='cannot write unsafe assumption audit' message=audit_path]
         let written=p(module_path).write_bytes(native)
         if written isnt? int64 return Error[title='cannot write the module' message=module_path]
-        printl("Compiled: {module_path}")
-        return 0
+        return hand_over(request cwd executable module_path)
     }
     if native isnt? none {
         $runtime_assert request.source isnt? none
@@ -153,6 +155,11 @@ start = (request:options.Request cwd:string executable:string):>Started|int64|Er
     if audited isnt? int64 return Error[title='cannot write unsafe assumption audit' message=audit_path]
     let written=if emitted is? string p(source).write_text(emitted) else p(source).write_bytes(emitted)
     if written isnt? int64 return Error[title='cannot write generated µDewy' message=source]
+    return hand_over(request cwd executable source)
+}
+# Start `udewy` on what this compiler wrote: µDewy for it to compile, or a
+# wasm32 module for it to wrap.
+hand_over = (request:options.Request cwd:string executable:string source:string):>Started|Error => {
     let backend=platform.udewy(executable cwd)
     if backend is? Error return backend
     let arguments:array<string>=['--target' request.target]

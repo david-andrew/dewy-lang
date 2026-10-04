@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>@@TITLE@@</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        body.dom-mode { max-width: none; margin: 0; padding: 0; }
+        #udewy-dom-root { min-height: 100vh; }
+        body.canvas-mode { max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }
+        #output { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }
+        #output:empty { display: none; }
+        #canvas { display: none; image-rendering: pixelated; }
+        body.canvas-mode #canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <pre id="output"></pre>
+
+    <script id="wasm-module" type="application/wasm-b64">
+@@WASM_B64@@
+    </script>
+@@LINKED_WASM@@
+
+    <script>
+@@HOST_JS@@
+
+function decodeWasmBase64(b64) {
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+async function loadEmbeddedWasm() {
+    const b64 = document.getElementById('wasm-module').textContent.trim();
+    const bytes = decodeWasmBase64(b64);
+    return WebAssembly.instantiate(bytes, imports);
+}
+
+async function loadLinkedWasm(name, imports) {
+    const script = document.querySelector(`script[data-wasm-artifact="${name}"]`);
+    if (script) {
+        return WebAssembly.instantiate(decodeWasmBase64(script.textContent.trim()), imports);
+    }
+    const response = await fetch(name);
+    if (!response.ok) {
+        throw new Error(`Failed to load ${name}: HTTP ${response.status}`);
+    }
+    return WebAssembly.instantiate(await response.arrayBuffer(), imports);
+}
+
+async function run() {
+    outputElement = document.getElementById('output');
+    setupServerLifecycle();
+    try {
+        if (typeof beforeUdewyInstantiate === 'function') {
+            await beforeUdewyInstantiate(imports);
+        }
+        const { instance } = await loadEmbeddedWasm();
+        wasmInstance = instance;
+        const result = instance.exports.main();
+        console.log('Exit code:', result);
+        if (canvasMode || webglMode || gpuMode) {
+            document.body.classList.add('canvas-mode');
+            requestAnimationFrame(animationLoop);
+        } else if (audioStreamMode) {
+            requestAnimationFrame(animationLoop);
+        }
+    } catch (err) {
+        console.error('Error:', err);
+    }
+}
+
+run();
+    </script>
+</body>
+</html>

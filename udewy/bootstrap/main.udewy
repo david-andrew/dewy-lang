@@ -1,6 +1,6 @@
 # udewy bootstrap compiler -- CLI entry point.
 #
-# Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] [-h] <file.udewy> [args...]
+# Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] [-h] <file.udewy|file.ubc|file.wasm> [args...]
 
 import p"./runtime/runtime.udewy"
 import p"./t0.udewy"
@@ -33,13 +33,13 @@ let str_eq_cstr_lit = (cstr:int lit:int):>int => {
 }
 
 let usage_exit = ():>void => {
-    eprintl("Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
+    eprintl("Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy|file.ubc|file.wasm> [args...]")
     host_exit(1)
     return void
 }
 
 let help_exit = ():>void => {
-    printl("Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy> [args...]")
+    printl("Usage: udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy|file.ubc|file.wasm> [args...]")
     printl("  -c              Compile only, don't run")
     printl("  --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)")
     printl("  --no-debug-info Omit source/variable debug metadata
@@ -174,7 +174,16 @@ let main = (argc:int argv:int):>int => {
 
     let asm:int = 0
     let artifacts:int = 0
-    if str_eq(path_suffix(g_input_path) ".ubc") {
+    # A .wasm input is a module another compiler built (the Dewy compiler's
+    # wasm32 emitter): only its page is written.
+    let prebuilt:int = str_eq(path_suffix(g_input_path) ".wasm")
+    if prebuilt {
+        if not str_eq(g_target "wasm32") {
+            eprint("error: a wasm module needs --target wasm32: ")
+            eprintl(g_input_path)
+            return 1
+        }
+    } else if str_eq(path_suffix(g_input_path) ".ubc") {
         # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
         # calls; no tokenizing or parsing.
         artifacts = st_open(src str_len(src) g_target)
@@ -210,7 +219,9 @@ let main = (argc:int argv:int):>int => {
         cache_dir = path_join(cache_dir cache_parent)
     }
     let input_stem:int = path_stem(cache_rel)
-    let exe_path:int = (@be_compile_and_link)(asm input_stem cache_dir opts)
+    let exe_path:int = 0
+    if prebuilt { exe_path = w_wrap(g_input_path input_stem cache_dir opts) }
+    else { exe_path = (@be_compile_and_link)(asm input_stem cache_dir opts) }
 
     if g_compile_only {
         eprint("Compiled: ")

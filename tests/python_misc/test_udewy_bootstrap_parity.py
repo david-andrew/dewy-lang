@@ -1,10 +1,10 @@
 """Drift detection between the Python compiler (udewy/backend/*) and the
 bootstrap compiler (udewy/bootstrap/backend/*).
 
-The host JS / HTML templates in wasm.py and wasm.udewy, and the C helpers /
-wrappers / preludes in c.py and c.udewy, are duplicated by hand. These tests
-compile a tiny program with both compilers and compare the output to catch
-drift.
+The C helpers / wrappers / preludes in c.py and c.udewy are duplicated by
+hand; the wasm32 page comes from shared templates (udewy/backend/wasm_harness)
+that each compiler fills. These tests compile a tiny program with both
+compilers and compare the output to catch drift.
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ def _looks_like_b64(line: str) -> bool:
 
 
 def test_wasm_host_blobs_match_between_compilers(bootstrap_binary, tmp_path) -> None:
-    """Catches drift in JS / HTML strings duplicated across wasm.py and wasm.udewy."""
+    """Both compilers fill the harness templates the same way for a program they compile."""
     if which("wat2wasm") is None:
         pytest.skip("wat2wasm not installed")
 
@@ -190,9 +190,33 @@ def test_wasm_host_blobs_match_between_compilers(bootstrap_binary, tmp_path) -> 
         sample = "\n".join(f"  py: {p!r}\n  bs: {b!r}" for p, b in diffs[:10])
         pytest.fail(
             f"{len(diffs)} non-b64 line(s) differ between Python and bootstrap WASM HTML.\n"
-            f"This usually means the host JS / HTML template embeds in wasm.py and\n"
-            f"udewy/bootstrap/backend/wasm.udewy have drifted. First 10:\n{sample}"
+            f"The template filling in wasm.py and udewy/bootstrap/backend/wasm.udewy\n"
+            f"has drifted. First 10:\n{sample}"
         )
+    assert "@@" not in py_html
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_wasm_pages_for_a_built_module_match(bootstrap_binary, tmp_path, split) -> None:
+    """A module another compiler built (`udewy --target wasm32 m.wasm`) gets the
+    same page from both compilers, byte for byte."""
+    source = tmp_path / "source"
+    source.mkdir()
+    _compile_with(["python", "-m", "udewy"], SMOKE_SRC, "wasm32", source)
+    module = (source / "__dewycache__" / "smoke.wasm").read_bytes()
+    pages = []
+    for name, command in [("py", ["python", "-m", "udewy"]), ("bs", [str(bootstrap_binary)])]:
+        work = tmp_path / name
+        work.mkdir()
+        (work / "m.wasm").write_bytes(module)
+        flags = ["--split-wasm"] if split else []
+        env = {**environ, "PYTHONPATH": str(REPO_ROOT)}
+        subprocess.run(command + ["-c", "--target", "wasm32", *flags, "m.wasm"], cwd=work, check=True, env=env)
+        pages.append((work / "__dewycache__" / "m.html").read_bytes())
+        if split:
+            assert (work / "__dewycache__" / "m.wasm").read_bytes() == module
+    assert pages[0] == pages[1]
+    assert b"@@" not in pages[0]
 
 
 def test_c_helpers_behaviour_matches_between_compilers(bootstrap_binary, tmp_path) -> None:

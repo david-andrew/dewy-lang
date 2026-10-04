@@ -10,7 +10,7 @@ import pytest
 def test_backend_runs_after_dewy_exits_and_failure_stops_build(tmp_path, omit_debug):
     root = Path(__file__).resolve().parents[2]
     work = tmp_path / 'checkout with spaces'
-    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library'):
         (work / name).mkdir(parents=True, exist_ok=True)
     script = work / 'tools/bootstrap_native.sh'
     shutil.copy2(root / 'tools/bootstrap_native.sh', script)
@@ -65,7 +65,7 @@ exit 77
 @pytest.mark.parametrize('no_pre', [False, True])
 def test_lto_launcher_keeps_original_compiler_search_path(tmp_path, no_pre):
     root = Path(__file__).resolve().parents[2]
-    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library'):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     script = tmp_path / 'tools/bootstrap_native.sh'
     shutil.copy2(root / 'tools/bootstrap_native.sh', script)
@@ -118,7 +118,7 @@ exit 99
 
 def test_first_generation_execution_failure_prevents_second_build(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library'):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     for name in ('bootstrap_native.sh', 'check_native.sh'):
         shutil.copy2(root / 'tools' / name, tmp_path / 'tools' / name)
@@ -158,7 +158,7 @@ fi
 
 def test_c_backend_runs_after_micro_compiler_exits(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library', 'bin'):
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library', 'bin'):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     script = tmp_path / 'tools/bootstrap_native.sh'
     shutil.copy2(root / 'tools/bootstrap_native.sh', script)
@@ -198,7 +198,7 @@ exit 77
 def interrupted_pair(tmp_path):
     """A saved generation whose execution check failed before generation two."""
     root = Path(__file__).resolve().parents[2]
-    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'udewy/backend/wasm_harness', 'library'):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     script = tmp_path / 'tools/bootstrap_native.sh'
     shutil.copy2(root / 'tools/bootstrap_native.sh', script)
@@ -210,8 +210,13 @@ def interrupted_pair(tmp_path):
     dewy.write_text('''#!/usr/bin/env bash
 set -eu
 if [[ $1 == --version ]]; then exit 0; fi
-echo dewy >> "$TEST_LOG"
 mkdir -p __dewycache__/dewy/bootstrap
+if [[ ${DEWY_EMIT:-} == native ]]; then
+    echo native >> "$TEST_LOG"
+    cp "$0" __dewycache__/dewy/bootstrap/main
+    exit 0
+fi
+echo dewy >> "$TEST_LOG"
 source="$PWD/__dewycache__/dewy/bootstrap/main.udewy"
 echo 'let main=()=>42' > "$source"
 "$DEWY_UDEWY" --target "$2" -c "$source"
@@ -251,7 +256,7 @@ def test_resume_rechecks_saved_generation_without_rebuilding_it(tmp_path):
     result = subprocess.run(resumed, env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / 'calls').read_text().splitlines() == [
-        'micro', 'dewy', 'check', 'check', 'check', 'micro', 'dewy']
+        'micro', 'dewy', 'check', 'check', 'check', 'micro', 'dewy', 'native', 'native', 'check']
     assert (tmp_path / 'pair/SHA256SUMS').exists()
     assert not list((tmp_path / 'pair').glob('.backend-handoff.*'))
 
