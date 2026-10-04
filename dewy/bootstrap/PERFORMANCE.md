@@ -1054,6 +1054,8 @@ about 0.5%, where wall time varies by a second:
 | globals loaded and stored in place and forwarded, results computed in `rax`, constant stores | 189.0 G | 107.7 G |
 | tiny callees always built in place; leading early-exit tests built at call sites | 188.3 G | 108.0 G |
 | runs of constant tests through jump tables | 185.8 G | 107.2 G |
+| leaf functions without a frame; byte equality returns at the first difference; constants shared, cheap operations recomputed | 182.6 G | |
+| loop searches cached by incoming state in the bounds checker | 169.2 G | |
 
 The first build with a new compiler also checks the prelude, about 17 G
 instructions; comparisons must warm each compiler first.
@@ -1065,3 +1067,19 @@ release, dictionary probes, array growth and copies. A quarter of the
 native build's samples fall in prologues and epilogues (saving and
 restoring callee-saved registers, the frame pointer), which GCC shrinks by
 saving only what a path needs.
+
+## Loop searches in the bounds checker (2026-10-03)
+
+The checker finds a loop's head state by repeated passes over its body
+(widening, then narrowing), and a nested loop is searched again on every
+pass of each loop around it. Traced over a self-build: 6,574 searches of
+2,871 loops; 2,663 of them met an incoming state identical to one an earlier
+search of the same loop had met. The search is a function of that state, of
+the remembered member calls (flow state kept outside the facts), and of the
+two budgets it draws on, so `search_loop_body` keeps each result with what
+it consumed and reuses it when the state and calls match and the budgets
+would not run out; a search that ran out is not kept. The final, validating
+pass over the body still runs as before, so diagnostics and recorded facts
+come from the same evaluation. The compiler built with and without the cache
+produces the identical executable from the same source. Self-build: 7.7%
+fewer instructions.

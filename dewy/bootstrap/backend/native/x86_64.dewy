@@ -1319,8 +1319,12 @@ tag_test = (id:addr body:ssa.Body nodes:array<hir.AST>):>Interval|none => {
     if count is? none or count <? 1 or count >? 4096 or not named(shifted '__sub__' body nodes) return none
     let difference=ssa.value_at(body shifted)
     let low=immediate(difference.b body nodes)
-    if low is? none or low <? 0 or low >? 1000000 or ssa.value_at(body difference.a).kind =? ssa.K_CONST return none
-    return Interval[difference.a low low+count-(if callee.name =? '__unsigned_lt__' 1 else 0)]
+    # `is?` compares the tag as unsigned: `(t transmute uint64) - k`.
+    let tested=difference.a
+    let operand=ssa.value_at(body tested)
+    if operand.kind =? ssa.K_TRANSMUTE {tested=operand.a}
+    if low is? none or low <? 0 or low >? 1000000 or ssa.value_at(body tested).kind =? ssa.K_CONST return none
+    return Interval[tested low low+count-(if callee.name =? '__unsigned_lt__' 1 else 0)]
 }
 # A value only a test computes: a comparison, a difference or an unsigned
 # comparison, which a table makes unnecessary.
@@ -1477,13 +1481,28 @@ dispatch = (items:array<ssa.Item> start:addr body:ssa.Body nodes:array<hir.AST> 
     return next
 }
 
+# Whether a function moves the stack pointer itself (`__alloca__`).
+reserves_stack = (body:ssa.Body nodes:array<hir.AST>):>bool => {
+    loop entry in body.values {
+        if entry.kind not=? ssa.K_CALL continue
+        let callee=hir.node_at(nodes entry.node)
+        if callee is? hir.ExpressedIdentifier and callee.name =? '__alloca__' return true
+    }
+    return false
+}
+
 # One function: prologue, body, epilogue. Its symbol is defined at its start.
 emit_function = (symbol:string body:ssa.Body nodes:array<hir.AST> table:types.Table @program:Program):>void => {
     let g=Gen[]
     assign(body nodes program.symbols @g)
     program.image.functions[symbol]=program.image.code.length
-    x86.push_reg(x86.RBP @program.image.code)
-    x86.mov(x86.RBP x86.RSP @program.image.code)
+    # A function that calls nothing and keeps nothing in the frame needs no
+    # frame: `rsp` stays as the call left it, and `rbp` stays the caller's.
+    let frameless=g.slots =? 0 and g.calls.length =? 0 and body.params.length <=? 6 and not reserves_stack(body nodes)
+    if not frameless {
+        x86.push_reg(x86.RBP @program.image.code)
+        x86.mov(x86.RBP x86.RSP @program.image.code)
+    }
     let frame=((g.slots*8+15)//16)*16
     if frame >? 0 {x86.arith_imm(x86.SUB x86.RSP frame @program.image.code)}
     let pair:addr=0
@@ -1500,8 +1519,10 @@ emit_function = (symbol:string body:ssa.Body nodes:array<hir.AST> table:types.Ta
         x86.load(g.saved[restored] x86.RBP g.saved[restored+1] 64 false @program.image.code)
         restored+=2
     }
-    x86.mov(x86.RSP x86.RBP @program.image.code)
-    x86.pop_reg(x86.RBP @program.image.code)
+    if not frameless {
+        x86.mov(x86.RSP x86.RBP @program.image.code)
+        x86.pop_reg(x86.RBP @program.image.code)
+    }
     x86.ret(@program.image.code)
     loop entry in g.entries {
         $runtime_assert entry.label <? g.labels.length

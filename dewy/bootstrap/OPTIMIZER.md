@@ -362,6 +362,13 @@ noted:
   all one `if c {…}`) has those tests built at each call site, which calls
   only when none exits; the tests must be pure, since the callee repeats
   them.
+- **Frames.** A function that calls nothing and keeps nothing in its frame
+  has no frame: no `rbp` push, move or restore.
+- **Constants and cheap operations.** Integer and boolean constants are one
+  value per function, so operations on equal constants number alike; an
+  addition, comparison or similar cheap operation found again is computed
+  again (it folds into an address or a branch), while the copy stands for
+  the earlier value when loads through it are numbered.
 - **Jump tables.** A run of tests of one value against constants (`t =? k`
   and the range form `(t - k) <u n` that `is?` produces), either as `if`s
   whose arms leave or as an `else if` chain, with at least four tests and a

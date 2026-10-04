@@ -3388,29 +3388,30 @@ bytes_equal_helper = (node:hir.AST @state:State):>string? => {
     state.generated.push(program.Function[generated literal])
     return generated
 }
-# The shared helper's body: equal lengths, then the same storage (interned
-# literals) answers at once; other contents compare a word at a time and
-# finish the tail by bytes. Loads stay within both strings' bytes.
+return_bool = (truth:bool node:hir.AST @state:State):>addr => {
+    let value=put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) truth] @state)
+    return put(hir.Return[node.loc types.primitive('void' @state.type_nodes) value] @state)
+}
+# The shared helper's body: unequal lengths answer at once, then the same
+# storage (interned literals); other contents compare a word at a time and
+# finish the tail by bytes, returning at the first difference. Loads stay
+# within both strings' bytes.
 string_equal_words = (left:addr left_length:addr right:addr right_length:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let boolean=types.primitive('bool' @state.type_nodes)
-    let void_type=types.primitive('void' @state.type_nodes)
     let length=snapshot(left_length @prefix @state)
-    let same=snapshot(intrinsic_call('__eq__' [length right_length] boolean node @state) @prefix @state)
     let a=snapshot(left @prefix @state)
     let b=snapshot(right @prefix @state)
+    prefix.push(conditional(compare('__ne__' length right_length node @state) return_bool(false node @state) node @state))
+    prefix.push(conditional(compare('__eq__' a b node @state) return_bool(true node @state) node @state))
     let cursor=snapshot(word(0 node @state) @prefix @state)
     let word_type=types.primitive('int64' @state.type_nodes)
     let byte_type=types.primitive('uint8' @state.type_nodes)
-    let words_equal=intrinsic_call('__eq__' [intrinsic_call('__load_i64__' [word_op('__add__' a cursor node @state)] word_type node @state) intrinsic_call('__load_i64__' [word_op('__add__' b cursor node @state)] word_type node @state)] boolean node @state)
-    let bytes_equal=intrinsic_call('__eq__' [intrinsic_call('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state) intrinsic_call('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)] boolean node @state)
-    let whole=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__le__' word_op('__add__' cursor word(8 node @state) node @state) length node @state)] @state)
-    let tail=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__lt__' cursor length node @state)] @state)
-    let by_words=while_loop(whole [put(hir.Assign[node.loc void_type same '=' words_equal] @state) set_local(cursor word_op('__add__' cursor word(8 node @state) node @state) node @state)] node @state)
-    let by_bytes=while_loop(tail [put(hir.Assign[node.loc void_type same '=' bytes_equal] @state) set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state)
-    let distinct=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__ne__' a b node @state)] @state)
-    prefix.push(conditional(distinct sequence([by_words by_bytes] node @state) node @state))
-    prefix.push(same)
+    let words_differ=intrinsic_call('__ne__' [intrinsic_call('__load_i64__' [word_op('__add__' a cursor node @state)] word_type node @state) intrinsic_call('__load_i64__' [word_op('__add__' b cursor node @state)] word_type node @state)] boolean node @state)
+    let bytes_differ=intrinsic_call('__ne__' [intrinsic_call('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state) intrinsic_call('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)] boolean node @state)
+    prefix.push(while_loop(compare('__le__' word_op('__add__' cursor word(8 node @state) node @state) length node @state) [conditional(words_differ return_bool(false node @state) node @state) set_local(cursor word_op('__add__' cursor word(8 node @state) node @state) node @state)] node @state))
+    prefix.push(while_loop(compare('__lt__' cursor length node @state) [conditional(bytes_differ return_bool(false node @state) node @state) set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state))
+    prefix.push(put(hir.Bool[node.loc boolean true] @state))
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
 string_equal_bytes_inline = (left:addr left_length:addr right:addr right_length:addr node:hir.AST negated:bool @state:State):>addr => {

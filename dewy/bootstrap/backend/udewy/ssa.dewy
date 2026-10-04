@@ -159,6 +159,13 @@ Builder:type = [
     # while nothing was stored or called since: its value is not below
     # `loads_from`.
     numbered:dict<int64 addr>=[]
+    # One value per integer or boolean constant of a type, so equal
+    # operations on equal constants number alike.
+    constants:dict<string addr>=[]
+    # A cheap operation is computed again where it is needed (an address
+    # folds into its load, a comparison into its branch); the copy stands
+    # for the earlier value when operations on it are numbered.
+    same:dict<addr addr>=[]
     opened:array<int64>=[]
     before:array<addr>=[]
     loads_from:addr=0
@@ -210,17 +217,26 @@ numbered_as = (kind:addr name:string type:addr left:addr right:addr nodes:array<
         if target isnt? hir.ExpressedIdentifier or target.name not=? name or value_at(b.body entry.a).type not=? type return none
         return entry.a
     }
-    if entry.kind not=? kind or entry.a not=? left or entry.b not=? right or entry.type not=? type return none
+    if entry.kind not=? kind or b.same.get(entry.a entry.a) not=? left or b.same.get(entry.b entry.b) not=? right or entry.type not=? type return none
     let callee=hir.node_at(nodes entry.node)
     if callee isnt? hir.ExpressedIdentifier or callee.name not=? name return none
     return id
 }
+const CHEAP:set<string>=set['__add__' '__sub__' '__and__' '__or__' '__xor__' '__lshift__' '__rshift__' '__dewy_raw_lshift__' '__dewy_raw_rshift__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__']
+cheap = (kind:addr name:string):>bool => kind =? K_UNARY or (kind =? K_BINARY and name in? CHEAP)
 # Build an operation, or find the value that already holds it.
 operation = (kind:addr name:string type:addr left:addr right:addr function:addr nodes:array<hir.AST> @b:Builder):>addr => {
-    let earlier=numbered_as(kind name type left right nodes b)
-    if earlier isnt? none return earlier
+    let first=b.same.get(left left)
+    let second=b.same.get(right right)
+    let earlier=numbered_as(kind name type first second nodes b)
+    if earlier isnt? none {
+        if not cheap(kind name) return earlier
+        let copy=add(Value[kind type left right function] @b)
+        b.same[copy]=earlier
+        return copy
+    }
     let id=add(Value[kind type left right function] @b)
-    let key=number_key(kind name left right)
+    let key=number_key(kind name first second)
     b.opened.push(key)
     b.before.push(b.numbered.get(key 0))
     b.numbered[key]=id+1
@@ -647,7 +663,15 @@ wanted = (target:Inline eager:bool b:Builder):>bool => eager or target.leaf or b
 # The value of an expression, evaluated in the current region.
 value = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
     let node=hir.node_at(nodes id)
-    if node is? hir.Integer|hir.Bool|hir.String return add(Value[K_CONST node.value_type node=id] @b)
+    if node is? hir.Integer|hir.Bool {
+        let key=if node is? hir.Integer "{node.value_type}:{node.value}" else "{node.value_type}:{node.value}"
+        let known=b.constants.get(key)
+        if known isnt? none return known
+        let made=add(Value[K_CONST node.value_type node=id] @b)
+        b.constants[key]=made
+        return made
+    }
+    if node is? hir.String return add(Value[K_CONST node.value_type node=id] @b)
     if node is? hir.ExpressedIdentifier {
         let current=b.env.get(node.name)
         if current isnt? none return current

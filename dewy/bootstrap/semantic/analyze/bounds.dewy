@@ -36,6 +36,11 @@ import p"../../timing.dewy" as timing
 Unfit:type = const [interval:ranges.Interval? word:string]
 Exit:type = const [levels:addr state:facts.State]
 Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
+# A search's result and what it consumed: replaying the budgets keeps every
+# later search exactly as it would have been without the cache.
+# The remembered member calls are flow state outside the facts: part of the
+# key, and restored as the search left them.
+Head:type = [incoming:facts.State calls:dict<addr addr> head:facts.State stabilized:bool passes:addr unrolled:bigint calls_after:dict<addr addr>]
 Checker:type = [
     data:predicates.Data srcfile:SrcFile word_type:addr
     child_stack:array<addr>=[]
@@ -69,6 +74,10 @@ Checker:type = [
     loop_linear_qualifiers:dict<addr array<facts.Linear>>=[]
     literal_fields:dict<addr set<addr>>=[]
     container_receivers:set<addr>=set[]
+    # Loop heads the search found, by loop body and incoming state: an inner
+    # loop meets the same incoming state on many passes of the loops around
+    # it (see `search_loop_body`).
+    heads:dict<addr array<Head>>=[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
@@ -1061,6 +1070,14 @@ flow = (id:addr node:hir.Flow state:facts.State @checker:Checker validate:bool):
     return output
 }
 
+same_calls = (left:dict<addr addr> right:dict<addr addr>):>bool => {
+    if left.length not=? right.length return false
+    loop [key value] in left {
+        let other=right.get(key)
+        if other is? none or other not=? value return false
+    }
+    return true
+}
 same_state = (left:facts.State right:facts.State):>bool => {
     if left.values.length not=? right.values.length return false
     loop entry in left.values {
@@ -1297,7 +1314,28 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
     let pass:addr=0
     let stabilized=false
     let single_pass=iterators.length =? 0 and loop_control.single_pass(arm.body checker.data.env.nodes @checker.loop_controls)
-    loop pass <? 11 and not single_pass {
+    # The search is a function of the incoming state while its budgets last.
+    # A search that ran out is not kept; one that would run out now is not
+    # reused.
+    let budget=checker.loop_search_budget
+    let unroll=checker.finite_loop_budget
+    let calls=checker.data.member_calls.copy
+    let cached=false
+    let known=checker.heads.get(arm.body)
+    if known isnt? none and not single_pass {
+        loop entry in known {
+            if entry.passes <? budget and entry.unrolled <=? unroll and same_calls(entry.calls checker.data.member_calls) and same_state(entry.incoming incoming) {
+                head=entry.head.copy
+                stabilized=entry.stabilized
+                checker.data.member_calls=entry.calls_after.copy
+                checker.loop_search_budget=budget-entry.passes
+                checker.finite_loop_budget=unroll-entry.unrolled
+                cached=true
+                break
+            }
+        }
+    }
+    loop pass <? 11 and not single_pass and not cached {
         if checker.loop_search_budget =? 0 {
             if not stabilized {head=facts.State[]}
             break
@@ -1341,6 +1379,12 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         }
         head=next
         pass += 1
+    }
+    if not cached and not single_pass and checker.loop_search_budget >? 0 and budget >=? checker.loop_search_budget {
+        let entry=Head[incoming.copy calls head.copy stabilized budget-checker.loop_search_budget unroll-checker.finite_loop_budget checker.data.member_calls.copy]
+        let list:array<Head>=if known is? none [] else known.copy
+        list.push(entry)
+        checker.heads[arm.body]=list
     }
     checker.data.snapshot=intervals.Snapshot[]
     let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
