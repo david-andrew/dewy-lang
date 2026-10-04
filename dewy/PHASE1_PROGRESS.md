@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 87 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 54 (≈45.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
+| C2 | Strict-source adoption of the compiler | 95 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 46 (≈43.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,38 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: eight more modules, and what blocks the rest (2026-10-04)
+
+Eight modules whose copies strict mode already accepts now declare
+`$explicit_copies`: `invocation/compiler`, `allocator_escapes`,
+`type_display`, `type_queries`, `value_sets`, `backend/udewy/emit`, and the
+analysis modules `slice_checks` and `length_facts`.
+
+Trying the directive on the other small modules found the patterns that
+keep them out. None is a copy the code needs; each is a transfer the
+ownership analysis does not yet recognize, so the fix belongs in the
+analysis (both compilers), not in annotations:
+
+- **Taking a field from a place parameter.** `let saved=b.env` followed by
+  `b.env=[]` (the SSA builder around each inlined body and each `if` arm;
+  `bindings.store_binding` swapping dictionary pages) is a move with an
+  immediate renewal, but only local records get field renewal today.
+- **Last use after a place loan.** A local lent as `@dependencies` to a call
+  and then stored (`proofs`) is reported as possibly used again.
+- **Returning a value narrowed out of a union local.** `let element=…`
+  `if element isnt? T return none` `return element` (`element_facts`) is
+  reported as a copy of `element`.
+- **Hosted only:** passing a place parameter to a by-value parameter counts
+  as a copy where native borrows (the program drivers needed a view), and a
+  defaulted array parameter that flows into a result is rejected
+  (`binding_facts`), and so is choosing between two parameters with an `if`
+  expression (`loop_qualifiers`). These belong to row C3.
+
+Non-strict modules: 46 of 141 (from 54).
+
+Evidence: native fixed point; the hosted compiler builds the test driver.
+Full local gate: 6,400 passed.
 
 ## Strict copies in the optimizing tier's modules (2026-10-04)
 
