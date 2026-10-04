@@ -39,7 +39,10 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     # DEWY_EMIT=native says why.
     let route=environment('DEWY_EMIT')
     let native_code=route not=? 'bytecode' and route not=? 'udewy' and request.target =? 'x86_64' and request.command is? 'run'
-    let result=graph.compile(entry @engine timings=request.timings native_code=native_code)
+    # wasm32's native route is opt-in while it grows (DEWY_EMIT=native); it
+    # writes the module without running it.
+    let native_wasm=route =? 'native' and request.target =? 'wasm32' and request.command is? 'run'
+    let result=graph.compile(entry @engine timings=request.timings native_code=native_code native_wasm=native_wasm)
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
     if route =? 'native' and result.lowered.refused not=? '' {printl("native route: {result.lowered.refused}")}
@@ -94,8 +97,19 @@ start = (request:options.Request cwd:string executable:string):>Started|int64|Er
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0
     }
-    # A program the native route built is already an executable.
+    # A program the native route built is already an executable, or for
+    # wasm32 a module.
     let native=compiled.lowered.native
+    if native isnt? none and request.target =? 'wasm32' {
+        $runtime_assert request.source isnt? none
+        let module_path=cache.artifact(request.source cwd '.wasm')
+        let failed=platform.directories(p(module_path).parent.path)
+        if failed isnt? none return failed
+        let written=p(module_path).write_bytes(native)
+        if written isnt? int64 return Error[title='cannot write the module' message=module_path]
+        printl("Compiled: {module_path}")
+        return 0
+    }
     if native isnt? none {
         $runtime_assert request.source isnt? none
         let listing=cache.artifact(request.source cwd '.ubc')

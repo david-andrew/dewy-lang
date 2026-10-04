@@ -1,11 +1,15 @@
 # Portable printing. The target layer provides `_write_stdout`/`_write_stderr`;
 # everything here is target-independent policy. `$target` is resolved at
 # compile time (udewy's gating, plus `in?` over a target list), so only the
-# matching layer is imported. The native backends and the C backend all run
-# on the Linux syscall layer for now.
+# matching layer is imported. The native backends and the C backend run on
+# the Linux syscall layer; wasm32 on its host's imports.
 if $target in? ["x86_64" "riscv" "arm" "c"] {
     from p"linux/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal _stderr_is_terminal _read_stdin_line _debugger_attached)
-    from p"linux/system.dewy" import (_exit)
+    from p"linux/os.dewy" import (_exit)
+}
+if $target =? "wasm32" {
+    from p"wasm/io.dewy" import (_write_stdout _write_stderr _stdout_is_terminal _stderr_is_terminal _read_stdin_line _debugger_attached)
+    from p"wasm/os.dewy" import (_exit)
 }
 
 # End the process with an exit status. `never` means control cannot continue

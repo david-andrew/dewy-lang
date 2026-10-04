@@ -1,0 +1,30 @@
+# The Linux system calls the portable runtime (`../system.dewy`) builds on:
+# memory, sleeping and process exit. Another target provides the same five
+# bindings (see `../wasm/os.dewy`). `io.dewy` imports `_exit` from here too.
+
+# At least `size` zeroed bytes, readable and writable; negative on failure.
+# mmap(NULL size PROT_READ|PROT_WRITE MAP_PRIVATE|MAP_ANONYMOUS -1 0)
+let _os_map = (size:int64):>int64 => __syscall6__(9 0 size 3 34 (-1) 0)
+
+# At least `size` bytes of address space without access; negative on failure.
+# mmap(NULL size PROT_NONE MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE -1 0)
+let _os_reserve = (size:int64):>int64 => __syscall6__(9 0 size 0 16418 (-1) 0)
+
+# Make `size` reserved bytes at `address` readable and writable (they read
+# as zero). mprotect(address size PROT_READ|PROT_WRITE)
+let _os_commit = (address:int64 size:int64):>int64 => __syscall3__(10 address size 3)
+
+# nanosleep(2) is syscall 35.
+let _os_sleep = (nanoseconds:uint64):>void => {
+    let request:int64 = __alloca__(16)
+    __store_u64__(__unsigned_idiv__(nanoseconds 1000000000) request)
+    __store_u64__(__unsigned_mod__(nanoseconds 1000000000) request + 8)
+    let status:int64 = __syscall2__(35 request 0)
+    return void
+}
+
+# Process exit: exit_group(2) is syscall 231.
+let _exit = (status:int64):>never => {
+    let ignored:int64 = __syscall1__(231 status)
+    __unreachable__()
+}

@@ -1,6 +1,12 @@
-# Transitional: the runtime as a compiler built before 2026-10-03 lists it.
-# Current compilers load `../system.dewy` instead; remove this file once no
-# bootstrap seed needs it.
+# The runtime every target shares: arena allocation, regions, the native
+# string runtime, sleeping and exit. The few operating-system services it
+# needs (memory, sleep, process exit) come from the target's `os.dewy`.
+if $target in? ["x86_64" "riscv" "arm" "c"] {
+    from p"linux/os.dewy" import (_os_map _os_reserve _os_commit _os_sleep _exit)
+}
+if $target =? "wasm32" {
+    from p"wasm/os.dewy" import (_os_map _os_reserve _os_commit _os_sleep _exit)
+}
 
 # Durations are rational seconds at this boundary (the canonical Time scale);
 # the kernel wants whole nanoseconds.
@@ -9,11 +15,7 @@
 let sleep = (duration:(rational<int64> * Time)):>void => {
     let seconds:Rational = duration transmute Rational
     let total_nanoseconds:uint64 = ((seconds.numerator * 1000000000) // seconds.denominator) transmute uint64
-    let request:int64 = __alloca__(16)
-    let request_nanoseconds:int64 = request + 8
-    __store_u64__(__unsigned_idiv__(total_nanoseconds 1000000000) request)
-    __store_u64__(__unsigned_mod__(total_nanoseconds 1000000000) request_nanoseconds)
-    let status:int64 = __syscall2__(35 request 0)
+    _os_sleep(total_nanoseconds)
     return void
 }
 
@@ -67,8 +69,7 @@ let _arena_bump = (size:int64):>int64 => {
     if _arena_cursor + aligned >? _arena_end {
         let chunk:int64 = 1048576
         if aligned >? chunk { chunk = aligned }
-        # mmap(NULL chunk PROT_READ|PROT_WRITE MAP_PRIVATE|MAP_ANONYMOUS fd=-1 0)
-        let base:int64 = __syscall6__(9 0 chunk 3 34 (-1) 0)
+        let base:int64 = _os_map(chunk)
         _arena_cursor = base
         _arena_end = base + chunk
     }
@@ -732,20 +733,19 @@ let _region_set_owner = (chunk:int64 size:int64 owner:int64):>void => {
 }
 # Reserve a range of at least `size` bytes; 0 when the address space is full.
 let _region_reserve = (size:int64):>int64 => {
-    if _region_ranges =? 0 { _region_ranges = __syscall6__(9 0 4096 3 34 (-1) 0) }
+    if _region_ranges =? 0 { _region_ranges = _os_map(4096) }
     if _region_range_count >=? 32 return 0
     let reserved:int64 = 8589934592
     if reserved <? size { reserved = size }
     let base:int64 = -1
     loop base <? 0 and reserved >=? size {
-        # mmap(NULL reserved+64 KB PROT_NONE MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE -1 0)
-        base = __syscall6__(9 0 reserved + 65536 0 16418 (-1) 0)
+        base = _os_reserve(reserved + 65536)
         if base <? 0 {
             if reserved >? size and reserved >? 1048576 { reserved = reserved >> 1 } else { return 0 }
             if reserved <? size { reserved = size }
         }
     }
-    let owners:int64 = __syscall6__(9 0 (((reserved >> 16) * 8 + 4095) >> 12) << 12 3 34 (-1) 0)
+    let owners:int64 = _os_map((((reserved >> 16) * 8 + 4095) >> 12) << 12)
     if owners <? 0 return 0
     let aligned:int64 = ((base + 65536 - 1) >> 16) << 16
     let entry:int64 = _region_ranges + _region_range_count * 32
@@ -767,8 +767,7 @@ let _region_map = (size:int64 owner:int64):>int64 => {
     if entry =? 0 return 0
     let chunk:int64 = __load_i64__(entry + 16)
     __store_i64__(chunk + size entry + 16)
-    # mprotect(chunk size PROT_READ|PROT_WRITE)
-    let status:int64 = __syscall3__(10 chunk size 3)
+    let status:int64 = _os_commit(chunk size)
     _region_set_owner(chunk size owner)
     return chunk
 }
@@ -964,13 +963,6 @@ Arena = type of [
     }
 ]
 
-# Process exit: exit_group(2) is syscall 231. The checker has no
-# never-returning functions yet, so the signature says `void`; callers that
-# need divergence (the `$runtime_assert` failure path) mark it themselves.
-let _exit = (status:int64):>never => {
-    let ignored:int64 = __syscall1__(231 status)
-    __unreachable__()
-}
 
 # The prepared tree of a union member in a cell whose layout the writer does
 # not know (a function's result cell, declared by the caller under a possibly

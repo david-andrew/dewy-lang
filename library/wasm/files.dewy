@@ -1,0 +1,27 @@
+# wasm32 has no file system: the same bindings as `../linux/files.dewy`,
+# where every path is absent and nothing can be created. Loaded before
+# `path.dewy`, like the Linux layer, so `Path`'s methods have something to
+# call.
+let FileNotFound:type = type of error
+let FileAccessDenied:type = type of error
+let IsDirectory:type = type of error
+let FileError:type = type of error
+let InvalidUtf8:type = type of error
+let FileExists:type = type of error
+
+let file_exists = (path:string):>bool => false
+let _read_bytes_at = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileNotFound
+let _read_text_at = (path:string):>string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8 => FileNotFound
+let _write_bytes_at = (path:string bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileAccessDenied
+let _write_text_at = (path:string text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileAccessDenied
+let _file_mode = (path:string):>int64 => 0
+let _file_stamp = (path:string):>array<int64>|none => none
+let is_file = (path:string):>bool => false
+let is_directory = (path:string):>bool => false
+let make_directory = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileAccessDenied
+let remove_directory = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileNotFound
+let remove_file = (path:string):>bool|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileNotFound
+let read_bytes = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _read_bytes_at(path)
+let read_text = (path:string):>string|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8 => _read_text_at(path)
+let write_bytes = (path:string bytes:array<uint8>):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_bytes_at(path bytes)
+let write_text = (path:string text:string):>int64|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => _write_text_at(path text)

@@ -159,3 +159,21 @@ no backend process.
 
 Kernels are as in the previous section; setup moved: `text`'s whole run at
 the larger input went 1236 → 780 ms and `arrays`' 770 → 662 ms.
+
+## wasm32 under node (2026-10-03)
+
+The same programs for wasm32, run by `tools/run_wasm.mjs` on node 26 (V8),
+best of three, small inputs. The host's clock counts milliseconds.
+
+| workload | µDewy route | native route |
+|---|---:|---:|
+| helpers | 586 ms | 459 ms |
+| arrays | 74 ms | 65 ms |
+| records | 62 ms | 39 ms |
+| text | 98 ms | 81 ms |
+| graph | 188 ms | 169 ms |
+
+Checksums agree with x86-64. For comparison, the x86-64 native route runs
+the same kernels in 108, 32, 53, 26 and 132 ms (previous section); where
+the wasm32 time goes has not been measured yet.
+

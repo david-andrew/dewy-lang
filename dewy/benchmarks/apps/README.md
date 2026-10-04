@@ -50,6 +50,13 @@ counters compared against an `int64` size are `int64` variables rather than
 range loops. Nothing is manually tuned; a tuned variant would be recorded
 separately.
 
+## On wasm32
+
+The programs also build for wasm32 (`dewy --target wasm32 -c NAME.dewy`, with
+`DEWY_EMIT=native` for the optimizing tier's emitter) and run under node with
+`tools/run_wasm.mjs`; the host's clock counts milliseconds, so kernel times
+there are coarse. `run.py` measures x86-64 only.
+
 ## Compile latency
 
 The table's compile time is one build with the checked prelude already

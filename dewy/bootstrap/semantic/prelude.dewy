@@ -13,11 +13,12 @@ const portable:array<string>=[
 ]
 files = (root:string target:targets.Target):>array<string> => {
     let paths:array<string>=[]
-    if target not=? 'wasm32' {
-        paths.push("{root}/linux/files.dewy")
-        paths.push("{root}/linux/process.dewy")
-    }
+    # The file system and processes: Linux syscalls, or wasm32's stand-ins.
+    let layer=if target =? 'wasm32' 'wasm' else 'linux'
+    paths.push("{root}/{layer}/files.dewy")
+    paths.push("{root}/{layer}/process.dewy")
     loop name in portable {paths.push("{root}/{name}.dewy")}
-    if target not=? 'wasm32' {paths.push("{root}/linux/system.dewy")}
+    # The shared runtime, which imports the target's `os.dewy`.
+    paths.push("{root}/system.dewy")
     return paths
 }

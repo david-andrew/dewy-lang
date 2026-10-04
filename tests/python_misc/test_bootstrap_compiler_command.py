@@ -40,7 +40,7 @@ def test_native_compiler_command(tmp_path):
         copied = library / path.relative_to(ROOT / 'library')
         copied.parent.mkdir(parents=True, exist_ok=True)
         copied.write_text('')
-    (library / 'linux/system.dewy').write_text(ARENA)
+    (library / 'system.dewy').write_text(ARENA)
     env = dict(os.environ, DEWY_LIBRARY_ROOT=str(library), DEWY_UDEWY=str(micro))
 
     def invoke(*args, emit=None):

@@ -377,6 +377,56 @@ noted:
   test to hold wins, as before. The compiler has 77 of them (GCC makes 99
   from the same C).
 
+## The wasm32 emitter (2026-10-03)
+
+`backend/native/wasm.dewy` (binary encoding) and `backend/native/wasm32.dewy`
+(code and module) build a program's wasm32 module from the SSA form, opt-in
+with `DEWY_EMIT=native` and `--target wasm32`. Anything it does not cover
+falls back to the µDewy route, as on x86-64.
+
+- **Same conventions as µDewy's wasm32 backend**, so the same hosts run the
+  module: every value an `i64`, every function returning one, function values
+  as indices into one table holding every function, data from offset 1024 in
+  an imported memory, a global stack pointer for `__alloca__`, µDewy's host
+  imports from `env` in µDewy's order, and exports `main` and the table.
+- **Code from the tree writer's decisions.** The emitter walks each function
+  as `../udewy/ssa_udewy.dewy` writes µDewy and uses its analysis unchanged:
+  a value with one use is evaluated inside that use, in order; other values
+  and every variable are locals (all `i64`). An `if` is `if`/`else`, a loop a
+  `block` around a `loop`, `break`/`continue` a `br` to the right depth.
+- **Tests as `i32`.** A condition is computed as an `i32` and branched on
+  directly: comparisons without becoming booleans, `and`/`or` as `if` blocks
+  so their right sides stay lazy. A comparison used as a value is a µDewy
+  boolean, -1 or 0.
+- **µDewy's semantics** where wasm's differ: division by zero (-1, or the
+  dividend for a remainder) and the one overflowing signed division (the
+  dividend, or 0) are tested for unless the divisor is a positive constant;
+  narrow integer results are re-extended as on x86-64.
+- **Order kept.** A store's value is evaluated before its address, as µDewy
+  does; it waits in a local unless neither side calls or writes. A called
+  function value is evaluated before the arguments and taken last.
+- **Zeroed static storage** follows the initialized data. Its base is known
+  only at the end, so references to it are five-byte LEB128 numbers patched
+  then.
+
+On the structural corpus (209 programs from the native execution tests),
+the emitter builds every program and 208 run correctly under node (the
+other imports files its test writes). On the application benchmarks under
+node its kernels take 10–37% less time than the µDewy route's modules
+(helpers 459 against 586 ms, arrays 65/74, records 39/62, text 81/98, graph
+169/188). A program reading its command line gets an empty one, as from
+µDewy's wasm32 entry. Making the corpus run at all on wasm32 needed:
+
+- a wasm32 layer for the prelude (`library/wasm/`): output through the
+  host's log, the file system and processes as failing stand-ins, memory
+  from one 64 MiB static reservation; the runtime itself moved to a portable
+  `library/system.dewy` importing each target's `os.dewy`;
+- two fixes in both µDewy wasm32 backends: comparisons produced 1 rather than
+  -1 for true, so `not` of a comparison was always true; and the stack began
+  at 2 MiB whatever the size of the data below it, so a large static
+  reservation overlapped it. The native µDewy backend also took the wrong
+  operand as the function of an indirect call.
+
 ## Inlining measurements before the SSA form (2026-10-03)
 
 Each row is a cold self-build, interleaved, with every compiler building its

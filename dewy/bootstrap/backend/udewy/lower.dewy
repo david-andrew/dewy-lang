@@ -863,7 +863,7 @@ arena_class_helper = (size:addr prefix:string @state:State):>string? => {
     if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 256 return none
     # Only the power-of-two entries: they share the general entries' free
     # lists, so a block may be released either way (see the arena in
-    # library/linux/system.dewy). Identifiers spell `_16` as the subscript
+    # library/system.dewy). Identifiers spell `_16` as the subscript
     # `₁₆`, so the entries are bound as `_arena_alloc₁₆` and so on.
     let value=constant.value
     let name=if prefix =? '_arena_release' {
@@ -6012,7 +6012,7 @@ validate_required_views = (root:addr @state:State):>void => {
     state.view_writes=[] state.mutated_roots=set[]
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false native_wasm:bool=false):>Result|Error => {
     let captures_started=timing.start(timings)
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
@@ -6196,7 +6196,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value]
     if proof_root not=?root {assembled=program.retain_reachable(assembled state.nodes)}
     # Debug builds keep every function and local as written.
-    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files] optimizing=not state.debug_names timings=timings native_code=native_code)
+    let normalized=statements.normalize(assembled emit.Input[state.nodes state.type_nodes input.source_files] optimizing=not state.debug_names timings=timings native_code=native_code native_wasm=native_wasm)
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}

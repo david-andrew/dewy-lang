@@ -4,7 +4,6 @@ $explicit_copies
 # target. CLOCK_MONOTONIC avoids wall-clock adjustments. Failed clock reads
 # disable an observation rather than failing an otherwise valid build.
 from p"../../library/linux/io.dewy" import _write_stderr
-from p"../../library/linux/system.dewy" import _arena_allocated_bytes, _arena_copied_bytes, _arena_live_bytes, _arena_peak_bytes
 
 Stamp:type = const [clock:int64 allocated:int64 copied:int64]
 read_clock = ():>int64 => {

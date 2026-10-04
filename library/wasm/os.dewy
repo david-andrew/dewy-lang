@@ -1,0 +1,27 @@
+# wasm32 has one linear memory, readable and writable from the start, and no
+# operating system. The portable runtime's memory comes from one static
+# reservation, as in the µDewy library's wasm32 layer: requests are handed out
+# from it in order and fail once it is used up. Sleeping does nothing; exit
+# asks the host.
+
+# The reservation is 64 MiB. Allocation may run before this module's
+# initializers (other prelude modules allocate while they initialize), so
+# the size is a literal and the count of bytes used starts as zero memory.
+let _wasm_memory_used:int64 = 0
+
+let _os_map = (size:int64):>int64 => {
+    let rounded:int64 = ((size + 7) // 8) * 8
+    if size <? 0 or rounded >? 67108864 - _wasm_memory_used return -1
+    let base:int64 = __static_alloca__(67108864)
+    let address:int64 = base + _wasm_memory_used
+    _wasm_memory_used += rounded
+    return address
+}
+# Reserved address space is ordinary memory here.
+let _os_reserve = (size:int64):>int64 => _os_map(size)
+let _os_commit = (address:int64 size:int64):>int64 => 0
+let _os_sleep = (nanoseconds:uint64):>void => {return void}
+let _exit = (status:int64):>never => {
+    let ignored:int64 = __host_exit__(status)
+    __unreachable__()
+}

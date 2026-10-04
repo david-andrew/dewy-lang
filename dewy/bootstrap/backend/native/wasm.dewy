@@ -1,0 +1,174 @@
+doc"""
+WebAssembly binary encoding for the native wasm32 emitter (see
+`../../OPTIMIZER.md`): LEB128 numbers, names, sections and the opcodes the
+emitter uses. Every value is an `i64`; addresses become `i32` at memory
+operations.
+"""
+
+# Section ids.
+const TYPE:int64=1
+const IMPORT:int64=2
+const FUNCTION:int64=3
+const TABLE:int64=4
+const GLOBAL:int64=6
+const EXPORT:int64=7
+const ELEMENT:int64=9
+const CODE:int64=10
+const DATA:int64=11
+
+# Value and block types.
+const I32:int64=127
+const I64:int64=126
+const FUNCREF:int64=112
+const EMPTY:int64=64
+
+# Control.
+const UNREACHABLE:int64=0
+const BLOCK:int64=2
+const LOOP:int64=3
+const IF:int64=4
+const ELSE:int64=5
+const END:int64=11
+const BR:int64=12
+const BR_IF:int64=13
+const RETURN:int64=15
+const CALL:int64=16
+const CALL_INDIRECT:int64=17
+const DROP:int64=26
+const SELECT:int64=27
+
+# Variables.
+const LOCAL_GET:int64=32
+const LOCAL_SET:int64=33
+const LOCAL_TEE:int64=34
+const GLOBAL_GET:int64=35
+const GLOBAL_SET:int64=36
+
+# Memory: loads widen to i64, stores narrow from it.
+const I64_LOAD:int64=41
+const I64_LOAD8_S:int64=48
+const I64_LOAD8_U:int64=49
+const I64_LOAD16_S:int64=50
+const I64_LOAD16_U:int64=51
+const I64_LOAD32_S:int64=52
+const I64_LOAD32_U:int64=53
+const I64_STORE:int64=55
+const I64_STORE8:int64=60
+const I64_STORE16:int64=61
+const I64_STORE32:int64=62
+
+# Constants and arithmetic.
+const I32_CONST:int64=65
+const I64_CONST:int64=66
+const I32_EQZ:int64=69
+const I64_EQZ:int64=80
+const I64_EQ:int64=81
+const I64_NE:int64=82
+const I64_LT_S:int64=83
+const I64_LT_U:int64=84
+const I64_GT_S:int64=85
+const I64_GT_U:int64=86
+const I64_LE_S:int64=87
+const I64_LE_U:int64=88
+const I64_GE_S:int64=89
+const I64_GE_U:int64=90
+const I32_ADD:int64=106
+const I32_SUB:int64=107
+const I32_AND:int64=113
+const I64_ADD:int64=124
+const I64_SUB:int64=125
+const I64_MUL:int64=126
+const I64_DIV_S:int64=127
+const I64_DIV_U:int64=128
+const I64_REM_S:int64=129
+const I64_REM_U:int64=130
+const I64_AND:int64=131
+const I64_OR:int64=132
+const I64_XOR:int64=133
+const I64_SHL:int64=134
+const I64_SHR_S:int64=135
+const I64_SHR_U:int64=136
+const I32_WRAP_I64:int64=167
+const I64_EXTEND_I32_S:int64=172
+const I64_EXTEND_I32_U:int64=173
+
+byte = (value:int64 @out:array<uint8>):>void => {out.push((value%256) transmute uint8)}
+# Unsigned LEB128 of a non-negative number.
+uleb = (value:int64 @out:array<uint8>):>void => {
+    let rest=value
+    loop true {
+        let low=rest and 127
+        rest=rest >> 7
+        if rest =? 0 {
+            byte(low @out)
+            return void
+        }
+        byte(low+128 @out)
+    }
+}
+# Signed LEB128.
+sleb = (value:int64 @out:array<uint8>):>void => {
+    let rest=value
+    loop true {
+        let low=rest and 127
+        rest=rest >> 7
+        let sign=low >=? 64
+        if (rest =? 0 and not sign) or (rest =? -1 and sign) {
+            byte(low @out)
+            return void
+        }
+        byte(low+128 @out)
+    }
+}
+# A signed LEB128 in exactly five bytes, for a number below 2^34 in
+# magnitude that is written before it is known (see `patch`).
+padded = (value:int64 @out:array<uint8>):>void => {
+    let rest=value
+    loop i in 0.. and i <? 5 {
+        let low=rest and 127
+        rest=rest >> 7
+        byte(if i <? 4 low+128 else low @out)
+    }
+}
+# Overwrite the five bytes at `at` with `value`, as `padded` writes it.
+patch = (at:addr value:int64 @out:array<uint8>):>void => {
+    let rest=value
+    loop i in 0.. and i <? 5 {
+        let low=rest and 127
+        rest=rest >> 7
+        let index=at+i
+        $runtime_assert index <? out.length
+        out[index]=(if i <? 4 low+128 else low) transmute uint8
+    }
+}
+name = (text:string @out:array<uint8>):>void => {
+    let bytes=text as array<uint8>
+    uleb(bytes.length as int64 @out)
+    loop item in bytes {out.push(item)}
+}
+append = (part:array<uint8> @out:array<uint8>):>void => {loop item in part {out.push(item)}}
+section = (id:int64 content:array<uint8> @out:array<uint8>):>void => {
+    byte(id @out)
+    uleb(content.length as int64 @out)
+    append(content @out)
+}
+op = (code:int64 @out:array<uint8>):>void => {byte(code @out)}
+# An instruction with one index or count.
+indexed = (code:int64 index:int64 @out:array<uint8>):>void => {
+    byte(code @out)
+    uleb(index @out)
+}
+i64_const = (value:int64 @out:array<uint8>):>void => {
+    byte(I64_CONST @out)
+    sleb(value @out)
+}
+i32_const = (value:int64 @out:array<uint8>):>void => {
+    byte(I32_CONST @out)
+    sleb(value @out)
+}
+# A load or store with its alignment (log2 of the width in bytes) and offset.
+memory = (code:int64 align:int64 offset:int64 @out:array<uint8>):>void => {
+    byte(code @out)
+    uleb(align @out)
+    uleb(offset @out)
+}

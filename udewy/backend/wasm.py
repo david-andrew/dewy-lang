@@ -253,7 +253,11 @@ class Wasm32Backend(Backend):
         # the trailing string/data pool, rounded up to 64K pages, with a small
         # extra cushion for the heap/stack and runtime scratch.
         page_size = 65536
-        required = self._data_offset + 2 * page_size
+        # The stack grows down from above all data: 2 MiB, or 1 MiB past the
+        # data when that is higher (a large static reservation must not meet
+        # the stack).
+        stack_top = max(2097152, (self._data_offset + 15) // 16 * 16 + 1048576)
+        required = max(self._data_offset + 2 * page_size, stack_top)
         pages = max(32, (required + page_size - 1) // page_size)
         self._memory_pages = pages
         output.append(f'  (import "env" "memory" (memory {pages}))')
@@ -263,7 +267,7 @@ class Wasm32Backend(Backend):
             output.append(f"  {imp}")
         
         # Global definitions - after imports, before functions
-        output.append('  (global $stack_ptr (mut i32) (i32.const 2097152))')
+        output.append(f'  (global $stack_ptr (mut i32) (i32.const {stack_top}))')
         if self._module_init_name is not None:
             output.append('  (global $__udewy_module_init_done (mut i32) (i32.const 0))')
 
@@ -589,6 +593,13 @@ class Wasm32Backend(Backend):
             self._emit("i64.const -1")
             self._emit("i64.xor")
     
+    def _emit_bool_from_i32(self) -> None:
+        """A wasm comparison's i32 0/1 as a udewy boolean, -1/0 as on the other
+        targets: `not` is bitwise, so true must be all ones."""
+        self._emit("i64.extend_i32_s")
+        self._emit("i64.const -1")
+        self._emit("i64.mul")
+
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Apply binary operator to top two values on stack."""
         if op_kind == t1.Kind.TK_PLUS:
@@ -613,34 +624,22 @@ class Wasm32Backend(Backend):
             self._emit("i64.xor")
         elif op_kind == t1.Kind.TK_EQ:
             self._emit("i64.eq")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
         elif op_kind == t1.Kind.TK_NOT_EQ:
             self._emit("i64.ne")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
         elif op_kind == t1.Kind.TK_GT:
             self._emit("i64.gt_s")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
         elif op_kind == t1.Kind.TK_LT:
             self._emit("i64.lt_s")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
         elif op_kind == t1.Kind.TK_GT_EQ:
             self._emit("i64.ge_s")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
         elif op_kind == t1.Kind.TK_LT_EQ:
             self._emit("i64.le_s")
-            self._emit("i64.extend_i32_s")
-            self._emit("i64.const 0")
-            self._emit("i64.sub")
+            self._emit_bool_from_i32()
     
     # ========================================================================
     # Memory operations
@@ -835,9 +834,7 @@ class Wasm32Backend(Backend):
             self._emit("i64.ge_u")
         elif kind == "lte":
             self._emit("i64.le_u")
-        self._emit("i64.extend_i32_s")
-        self._emit("i64.const 0")
-        self._emit("i64.sub")
+        self._emit_bool_from_i32()
     
     # ========================================================================
     # Calls

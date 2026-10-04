@@ -15,8 +15,10 @@ size_argument = (args:array<string> fallback:int64):>int64 => {
     return value
 }
 
-# CLOCK_MONOTONIC in nanoseconds.
+# CLOCK_MONOTONIC in nanoseconds; on wasm32 the host's clock, which counts
+# milliseconds.
 clock = ():>int64 => {
+    if $target =? "wasm32" {return __host_time__()*1000000}
     let buffer:int64=__alloca__(16)
     if __syscall2__(228 1 buffer) not=? 0 return 0
     return __load_i64__(buffer)*1000000000+__load_i64__(buffer+8)

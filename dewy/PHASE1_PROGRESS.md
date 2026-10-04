@@ -146,6 +146,40 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## wasm32: the prelude runs, and the optimizing tier emits modules (2026-10-03)
+
+David asked on 2026-10-02 that the optimizing work include wasm, not only
+x86-64. Ordinary Dewy programs, prelude included, now run on wasm32, through
+the µDewy route and through a wasm32 emitter in the optimizing tier
+([`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md#the-wasm32-emitter-2026-10-03)):
+
+- **Prelude on wasm32.** `library/wasm/` gives the prelude what the Linux
+  layer gives it: output through the host's log, the file system and
+  processes as failing stand-ins, memory from a 64 MiB static reservation.
+  The runtime moved from `library/linux/system.dewy` to a portable
+  `library/system.dewy`, which imports `_os_map`, `_os_reserve`,
+  `_os_commit`, `_os_sleep` and `_exit` from the target's `os.dewy`; both
+  compilers' prelude lists follow. `library/linux/system.dewy` stays, unread
+  by current compilers, until no bootstrap seed lists it.
+- **µDewy's wasm32 backends** (Python and native) had two faults no test ran:
+  comparisons gave 1 for true where µDewy booleans are -1, so `not` of a
+  comparison was always true; and the stack began at 2 MiB however large the
+  data below it. The native backend also took the wrong operand as the
+  function of an indirect call. All three are fixed.
+- **The emitter** (`backend/native/wasm.dewy`, `backend/native/wasm32.dewy`)
+  is opt-in: `DEWY_EMIT=native` with `--target wasm32`; `-c` writes the
+  module.
+- **Running modules:** `tools/run_wasm.mjs` runs one under node with the host
+  imports a command line can give.
+
+Evidence: of the 209 programs of the native execution tests' structural
+corpus, the emitter builds all and 208 run correctly under node on both
+routes (the other imports files its test writes). The application benchmarks
+give the same checksums on wasm32 as on x86-64, and the emitter's kernels take
+10–37% less time under node than the µDewy route's. `tests/python_misc/test_wasm_route.py` runs the
+SSA-form cases and two printing programs through both routes. Full local gate:
+6,400 passed.
+
 ## Loop searches cached; frameless leaves; byte equality (2026-10-03)
 
 - **Bounds checker:** a loop's fixed-point search is kept with the incoming

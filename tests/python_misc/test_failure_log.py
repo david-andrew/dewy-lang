@@ -35,7 +35,7 @@ def test_failed_compile_is_recorded_with_every_source_it_read(tmp_path: Path) ->
     assert 'expected `int`, got `"nope"`' in text and '\x1b[' not in text
     assert f'### {(tmp_path / "bad.dewy").resolve()}' in text and "x:int = 'nope'" in text
     assert f'### {(tmp_path / "helper.dewy").resolve()}' in text and 'helper_value = 42' in text
-    assert 'library/linux/system.dewy' not in text.split('### library')[0]   # library files are listed, never inlined
+    assert 'library/system.dewy' not in text.split('### library')[0]   # library files are listed, never inlined
 
 
 def test_dewy_test_records_a_module_that_did_not_build(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ import p"../../timing.dewy" as timing
 import p"ssa.dewy" as ssa
 import p"ssa_udewy.dewy" as ssa_udewy
 import p"../native/program.dewy" as native
+import p"../native/wasm32.dewy" as wasm
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 
@@ -606,7 +607,7 @@ optimized = (functions:array<program.Function> ctx:ssa.Context @state:State):>ar
     }
     return result
 }
-normalize = (source:program.Program input:emit.Input optimizing:bool=false timings:bool=false native_code:bool=false):>Result => {
+normalize = (source:program.Program input:emit.Input optimizing:bool=false timings:bool=false native_code:bool=false native_wasm:bool=false):>Result => {
     let state=State[input.nodes input.types]
     let functions:array<program.Function>=[]
     state.in_function=true
@@ -659,6 +660,13 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
         let built=native.build(normalized source startup argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
         timing.finish('lowering.native' started)
         if built is? native.Failure {refused=built.reason} else {executable=built}
+    } else if optimizing and native_wasm {
+        # The same for wasm32: the module's bytes.
+        let started=timing.start(timings)
+        let kinds=wasm.Kinds[void_type(@state) types.primitive('int64' @state.types) ssa_udewy.Kinds[void_type(@state) boolean(@state) types.primitive('int64' @state.types) types.primitive('never' @state.types)]]
+        let built=wasm.build(normalized source startup argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
+        timing.finish('lowering.native' started)
+        if built is? wasm.Failure {refused=built.reason} else {executable=built}
     }
     # µDewy emission reads the functions written back from the form; a
     # program the native route built needs none.

@@ -17,10 +17,15 @@ main=(argv:array<string>):>int64=>{
     let cwd=platform.kernel_path(false)
     if cwd is? Error {cwd.fail}
     let library=paths.absolute(argv[2] cwd)
-    let files=prelude.files(library 'x86_64')
+    # DEWY_TEST_TARGET=wasm32 checks against the wasm32 prelude, and with
+    # DEWY_TEST_NATIVE writes a wasm32 module instead of an executable.
+    let wasm=environment('DEWY_TEST_TARGET') =? 'wasm32'
+    let target=if wasm 'wasm32' else 'x86_64'
+    let files=prelude.files(library target)
     loop index in 4.. and index <? argv.length {files.push(paths.absolute(argv[index] cwd))}
     let engine=modules.Engine[library_roots=[library] prelude_files=files]
-    engine.prelude_cache=cache.Config[paths.absolute(argv[0] cwd) paths.absolute(argv[3] cwd) 'x86_64' [library] files]
+    engine.session.target=target
+    engine.prelude_cache=cache.Config[paths.absolute(argv[0] cwd) paths.absolute(argv[3] cwd) target [library] files]
     let entry=modules.load(paths.absolute(argv[1] cwd) @engine)
     if entry is? Error {entry.fail}
     let expected=environment('DEWY_TEST_PRELUDE_CACHE')
@@ -28,7 +33,7 @@ main=(argv:array<string>):>int64=>{
     # DEWY_TEST_NATIVE names where to write the program as an executable built
     # by the native route (4: the route does not cover this program yet).
     let native_path=environment('DEWY_TEST_NATIVE')
-    let compilation=graph.compile(entry @engine native_code=native_path isnt? none)
+    let compilation=graph.compile(entry @engine native_code=native_path isnt? none and not wasm native_wasm=native_path isnt? none and wasm)
     if compilation is? Error {compilation.fail}
     loop warning in compilation.analysis.warnings {warning.warn}
     if native_path isnt? none {

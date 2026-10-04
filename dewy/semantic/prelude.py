@@ -35,25 +35,28 @@ PORTABLE_LIBRARIES = (
     library / 'doc.dewy',
 )
 
-# Backend name (udewy's `$target`) -> services layer. The native backends and
-# the C backend run on the Linux syscall layer for now.
-_LINUX_SERVICES = (library / 'linux' / 'system.dewy',)
+# Backend name (udewy's `$target`) -> services layer. Every target shares the
+# runtime (`system.dewy`), which imports its operating-system hooks from the
+# target's layer: Linux syscalls for the native backends and C, the host's
+# imports for wasm32.
+_SERVICES = (library / 'system.dewy',)
 TARGET_SERVICES: dict[str, tuple[Path, ...]] = {
-    'x86_64': _LINUX_SERVICES,
-    'arm': _LINUX_SERVICES,
-    'riscv': _LINUX_SERVICES,
-    'c': _LINUX_SERVICES,
-    'wasm32': (),
+    'x86_64': _SERVICES,
+    'arm': _SERVICES,
+    'riscv': _SERVICES,
+    'c': _SERVICES,
+    'wasm32': _SERVICES,
 }
 # Services the portable libraries build on (the file system: `Path`'s
 # methods call it), loaded first.
 _LINUX_FOUNDATIONS = (library / 'linux' / 'files.dewy', library / 'linux' / 'process.dewy')
+_WASM_FOUNDATIONS = (library / 'wasm' / 'files.dewy', library / 'wasm' / 'process.dewy')
 TARGET_FOUNDATIONS: dict[str, tuple[Path, ...]] = {
     'x86_64': _LINUX_FOUNDATIONS,
     'arm': _LINUX_FOUNDATIONS,
     'riscv': _LINUX_FOUNDATIONS,
     'c': _LINUX_FOUNDATIONS,
-    'wasm32': (),
+    'wasm32': _WASM_FOUNDATIONS,
 }
 
 

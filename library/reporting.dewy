@@ -42,6 +42,9 @@
 if $target in? ["x86_64" "riscv" "arm" "c"] {
     from p"linux/io.dewy" import (_write_stderr _stderr_is_terminal)
 }
+if $target =? "wasm32" {
+    from p"wasm/io.dewy" import (_write_stderr _stderr_is_terminal)
+}
 
 # ---- the enumerations of `reporting.py` ----
 let Severity:type = 'error' | 'warning' | 'info' | 'hint'

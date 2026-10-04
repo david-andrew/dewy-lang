@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_native_driver_accepts_mixed_path_spellings(tmp_path):
     driver=build_program_driver(tmp_path)
     entry=tmp_path/'entry.dewy'
-    system=ROOT/'library/linux/system.dewy'
+    system=ROOT/'library/system.dewy'
     entry.write_text(f'from p"{os.path.relpath(system,tmp_path)}" import Arena\nmain=():>int64=>42\n')
     relative=os.path.relpath(entry,ROOT)
     first=None

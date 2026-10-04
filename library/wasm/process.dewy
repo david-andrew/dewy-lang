@@ -1,0 +1,25 @@
+# wasm32 has no processes or environment: the same bindings as
+# `../linux/process.dewy`, where nothing can be started and no variable is
+# set.
+let SpawnError:type = type of error
+
+let environment = (name:string):>string|none => none
+
+let Child:type = [
+    pid:int64
+    wait = ():>int64 => -1
+]
+
+let Output:type = [
+    status:int64
+    stdout:array<uint8>
+    stderr:array<uint8>
+    stdout_text = ():>string|none => stdout as string|none
+    stderr_text = ():>string|none => stderr as string|none
+]
+
+let run = (program:string args:array<string>):>int64|SpawnError => SpawnError
+let run_silent = (program:string args:array<string>):>int64|SpawnError => SpawnError
+let spawn = (program:string args:array<string>):>Child|SpawnError => SpawnError
+let capture = (program:string args:array<string>):>Output|SpawnError => SpawnError
+let list_directory = (path:string):>array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError => FileNotFound

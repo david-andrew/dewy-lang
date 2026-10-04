@@ -1,0 +1,18 @@
+# wasm32 output primitives: the host's `host_log` receives the bytes (the
+# browser console, or a runner's standard output). There is one host log, so
+# stdout and stderr both go to it; there is no terminal, standard input or
+# debugger to ask about.
+let _write_stdout = (bytes:array<uint8>):>int64 => {
+    let data:int64 = __load_i64__(bytes)
+    return __host_log__(data bytes.length)
+}
+
+let _write_stderr = (bytes:array<uint8>):>int64 => {
+    let data:int64 = __load_i64__(bytes)
+    return __host_log__(data bytes.length)
+}
+
+let _stderr_is_terminal = ():>bool => false
+let _stdout_is_terminal = ():>bool => false
+let _read_stdin_line = ():>string|none => none
+let _debugger_attached = ():>bool => false

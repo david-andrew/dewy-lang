@@ -67,9 +67,11 @@ CASES = [
 # Exercise the actual allocator source used by the prelude, through native
 # checking/lowering as well. Selecting its binding is this kernel driver's
 # explicit stand-in for the full module driver's runtime identity lookup.
-SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
+SYSTEM = (ROOT / 'library/system.dewy').read_text()
 # The heap allocator and the regions its entry points route to.
-ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('let _allocator_enter')]
+# The runtime's arena calls the target's memory hooks (library/linux/os.dewy).
+OS_HOOKS = (ROOT / 'library/linux/os.dewy').read_text()
+ARENA = OS_HOOKS + SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('let _allocator_enter')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 # UTF-8 decoding produces Unicode scalars, independently of grapheme boundaries.

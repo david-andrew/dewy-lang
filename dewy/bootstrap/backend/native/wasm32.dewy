@@ -1,0 +1,901 @@
+from reporting import Span
+import p"wasm.dewy" as w
+import p"x86_64.dewy" as code
+import p"../udewy/ssa.dewy" as ssa
+import p"../udewy/ssa_udewy.dewy" as trees
+import p"../udewy/program.dewy" as units
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+
+doc"""
+A whole lowered program as a wasm32 module (see `../../OPTIMIZER.md`), with
+the conventions of µDewy's wasm32 backend, so the same hosts run it: every
+value is an `i64`, every function returns one, function values are indices
+into one table holding every function, data starts at 1024 in an imported
+memory, a global stack pointer serves `__alloca__`, the host functions are
+imported from `env` in µDewy's order, and the module exports `main` and the
+table.
+
+Each function's code comes from its SSA form through the tree writer's
+decisions (`../udewy/ssa_udewy.dewy`): a value with one use is evaluated
+inside that use, in order; other values and every variable are locals.
+Control is structured as the form is: an `if` is `if`/`else`, a loop is a
+`block` around a `loop`. A test is computed as an `i32` and branched on
+directly; a comparison used as a value is a µDewy boolean (-1 or 0).
+"""
+
+const DATA_BASE:int64=1024
+const PAGE:int64=65536
+
+# A host function: the intrinsic that calls it, its import name, its
+# parameter count. The order is µDewy's.
+Host:type = const [called_as:string name:string arity:int64]
+hosts = ():>array<Host> => [
+    Host['__host_log__' 'host_log' 2] Host['__host_exit__' 'host_exit' 1] Host['__host_time__' 'host_time' 0]
+    Host['__host_random__' 'host_random' 0] Host['__host_dom_set_text__' 'host_dom_set_text' 2]
+    Host['__host_dom_append__' 'host_dom_append' 2] Host['__host_dom_clear__' 'host_dom_clear' 0]
+    Host['__host_dom_append_int__' 'host_dom_append_int' 1] Host['__host_log_int__' 'host_log_int' 1]
+    Host['__host_canvas_init__' 'host_canvas_init' 2] Host['__host_canvas_width__' 'host_canvas_width' 0]
+    Host['__host_canvas_height__' 'host_canvas_height' 0] Host['__host_canvas_present__' 'host_canvas_present' 0]
+    Host['__host_canvas_set_aspect_lock__' 'host_canvas_set_aspect_lock' 1] Host['__host_frame_count__' 'host_frame_count' 0]
+    Host['__host_frame_time__' 'host_frame_time' 0] Host['__host_window_width__' 'host_window_width' 0]
+    Host['__host_window_height__' 'host_window_height' 0] Host['__host_pointer_x__' 'host_pointer_x' 0]
+    Host['__host_pointer_y__' 'host_pointer_y' 0] Host['__host_pointer_down__' 'host_pointer_down' 0]
+    Host['__host_pointer_buttons__' 'host_pointer_buttons' 0] Host['__host_pointer_wheel__' 'host_pointer_wheel' 0]
+    Host['__host_key_down__' 'host_key_down' 2] Host['__host_key_pressed__' 'host_key_pressed' 2]
+    Host['__host_key_released__' 'host_key_released' 2] Host['__host_audio_init__' 'host_audio_init' 3]
+    Host['__host_audio_play__' 'host_audio_play' 0] Host['__host_audio_sample_rate__' 'host_audio_sample_rate' 0]
+    Host['__host_audio_stream_init__' 'host_audio_stream_init' 2] Host['__host_audio_stream_write__' 'host_audio_stream_write' 0]
+    Host['__host_audio_stream_needs_samples__' 'host_audio_stream_needs_samples' 0] Host['__host_webgl_init__' 'host_webgl_init' 4]
+    Host['__host_webgl_uniform1i__' 'host_webgl_uniform1i' 3] Host['__host_webgl_uniform2i__' 'host_webgl_uniform2i' 4]
+    Host['__host_webgl_uniform1iv__' 'host_webgl_uniform1iv' 4] Host['__host_webgl_uniform2iv__' 'host_webgl_uniform2iv' 4]
+    Host['__host_webgl_render__' 'host_webgl_render' 0] Host['__host_gpu_init__' 'host_gpu_init' 2]
+    Host['__host_gpu_set_viewport__' 'host_gpu_set_viewport' 2] Host['__host_gpu_clear__' 'host_gpu_clear' 3]
+    Host['__host_gpu_set_perspective_frustum__' 'host_gpu_set_perspective_frustum' 6] Host['__host_gpu_set_view_matrix__' 'host_gpu_set_view_matrix' 1]
+    Host['__host_gpu_set_texture__' 'host_gpu_set_texture' 1] Host['__host_gpu_set_blend__' 'host_gpu_set_blend' 1]
+    Host['__host_gpu_set_depth_test__' 'host_gpu_set_depth_test' 1] Host['__host_gpu_set_depth_write__' 'host_gpu_set_depth_write' 1]
+    Host['__host_gpu_set_line_width__' 'host_gpu_set_line_width' 1] Host['__host_gpu_submit__' 'host_gpu_submit' 3]
+    Host['__host_gpu_overlay_begin__' 'host_gpu_overlay_begin' 2] Host['__host_gpu_overlay_end__' 'host_gpu_overlay_end' 0]
+    Host['__host_gpu_create_texture__' 'host_gpu_create_texture' 5] Host['__host_gpu_present__' 'host_gpu_present' 0]
+    Host['__host_gpu_window_width__' 'host_gpu_window_width' 0] Host['__host_gpu_window_height__' 'host_gpu_window_height' 0]
+    Host['__host_audio_queue_init__' 'host_audio_queue_init' 2] Host['__host_audio_queue_push__' 'host_audio_queue_push' 2]
+    Host['__host_audio_queue_size__' 'host_audio_queue_size' 0] Host['__ud_dom_get_text_len__' 'ud_dom_get_text_len' 1]
+    Host['__ud_dom_get_text__' 'ud_dom_get_text' 3] Host['__ud_dom_get_caret__' 'ud_dom_get_caret' 1]
+    Host['__ud_dom_set_caret__' 'ud_dom_set_caret' 2] Host['__ud_dom_add_event_listener__' 'ud_dom_add_event_listener' 4]
+    Host['__ud_dom_value__' 'ud_dom_value' 3] Host['__ud_dom_focus__' 'ud_dom_focus' 1]
+]
+
+# Where static storage lives: in the initialized data, or in the zeroed
+# storage after it (whose base is known only at the end).
+Place:type = const [zeroed:bool offset:int64]
+# A five-byte address in a function body or a data word, to fill with the
+# address of zeroed storage.
+Patch:type = const [function:addr at:addr offset:int64]
+Fill:type = const [at:addr offset:int64]
+
+Module:type = [
+    data:array<uint8>=[]
+    zeroed:int64=0
+    globals:dict<string int64>=[]
+    strings:dict<string int64>=[]
+    statics:dict<addr Place>=[]
+    hosts:dict<string int64>=[]
+    host_list:array<Host>=[]
+    # Defined functions by symbol: their position in the table, in order.
+    positions:dict<string addr>=[]
+    arities:array<int64>=[]
+    bodies:array<array<uint8>>=[]
+    patches:array<Patch>=[]
+    fills:array<Fill>=[]
+    widest:int64=0
+    problem:string=''
+]
+fail = (reason:string @module:Module):>void => {if module.problem =? '' {module.problem=reason}}
+
+byte_of = (value:int64 shift:int64):>int64 => (((value transmute uint64) >> (shift transmute uint64)) and 255) transmute int64
+
+# Data: words, and bytes after their length (a µDewy string).
+word = (value:int64 @module:Module):>int64 => {
+    let offset=module.data.length as int64
+    loop i in 0.. and i <? 8 {w.byte(byte_of(value (i as int64)*8) @module.data)}
+    return DATA_BASE+offset
+}
+bytes = (content:array<uint8> @module:Module):>int64 => {
+    word(content.length as int64 @module);
+    let offset=module.data.length as int64
+    loop item in content {module.data.push(item)}
+    loop module.data.length%8 not=? 0 {module.data.push(0)}
+    return DATA_BASE+offset
+}
+string_at = (content:string @module:Module):>int64 => {
+    let known=module.strings.get(content)
+    if known isnt? none return known
+    let at=bytes(content as array<uint8> @module)
+    module.strings[content]=at
+    return at
+}
+reserve = (size:int64 @module:Module):>int64 => {
+    let offset=module.zeroed
+    module.zeroed=offset+((size+7)//8)*8
+    return offset
+}
+overwrite = (at:addr value:int64 @module:Module):>void => {
+    loop i in 0.. and i <? 8 {
+        let index=at+i
+        $runtime_assert index <? module.data.length
+        module.data[index]=byte_of(value (i as int64)*8) transmute uint8
+    }
+}
+
+# Static storage named by a HIR node, as `../native/x86_64.dewy` places it.
+static_of = (id:addr nodes:array<hir.AST> @module:Module):>Place => {
+    let known=module.statics.get(id)
+    if known isnt? none return known
+    let node=hir.node_at(nodes id)
+    let result=Place[false 0]
+    if node is? hir.BasedString {result=Place[false bytes(node.content @module)]}
+    else if node is? hir.FunctionCall {
+        let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ExpressedIdentifier and callee.name =? '__static_alloca__' and node.pos_args.length =? 1 {
+            let size=hir.node_at(nodes node.pos_args[0])
+            if size is? hir.Integer {result=Place[true reserve(code.word_of(size.value) @module)]}
+            else {fail('static storage needs a constant size' @module)}
+        } else {
+            let places:array<Place>=[]
+            let values:array<int64>=[]
+            loop argument in node.pos_args {
+                let element=hir.node_at(nodes argument)
+                let inner=argument
+                loop element is? hir.Transmute|hir.ValueCast {
+                    inner=element.expr
+                    element=hir.node_at(nodes inner)
+                }
+                if element is? hir.Integer {places.push(Place[false (-1)]) values.push(code.word_of(element.value))}
+                else if element is? hir.Bool {places.push(Place[false (-1)]) values.push(if element.value (-1) else 0)}
+                else if element is? hir.String {places.push(Place[false (-1)]) values.push(string_at(element.content @module))}
+                else if element is? hir.ExpressedIdentifier {
+                    let position=module.positions.get(element.name)
+                    if position is? none {fail("static words name `{element.name}`, which is no function" @module)}
+                    places.push(Place[false (-1)]) values.push(if position is? none 0 else position as int64)
+                } else if element is? hir.BasedString|hir.FunctionCall {
+                    let nested=static_of(inner nodes @module)
+                    places.push(nested) values.push(if nested.zeroed 0 else nested.offset)
+                } else {
+                    fail('a static word is not a constant' @module)
+                    places.push(Place[false (-1)]) values.push(0)
+                }
+            }
+            let start=DATA_BASE+(module.data.length as int64)
+            loop i in 0.. and i <? places.length and i <? values.length {
+                let at=module.data.length
+                word(values[i] @module);
+                if places[i].zeroed {module.fills.push(Fill[at places[i].offset])}
+            }
+            result=Place[false start]
+        }
+    } else {fail('static storage of an unknown form' @module)}
+    module.statics[id]=result
+    return result
+}
+
+# A global's data word.
+global = (declaration:hir.Declare nodes:array<hir.AST> @module:Module):>void => {
+    let initial=hir.node_at(nodes declaration.expr)
+    loop initial is? hir.Transmute|hir.ValueCast {initial=hir.node_at(nodes initial.expr)}
+    if initial is? hir.Integer {module.globals[declaration.name]=word(code.word_of(initial.value) @module)}
+    else if initial is? hir.Bool {module.globals[declaration.name]=word((if initial.value (-1) else 0) @module)}
+    else {fail("global `{declaration.name}` has an initial value this route does not cover" @module)}
+}
+
+# One function's code.
+Fn:type = [
+    out:array<uint8>=[]
+    position:addr=0
+    params:int64=0
+    # Locals beyond the parameters, all i64.
+    extra:int64=0
+    locals:dict<addr int64>=[]
+    # Open structured blocks; for each open loop, the depth of its `block`.
+    depth:int64=0
+    loops:array<int64>=[]
+    # The local holding the stack pointer at entry, when the function
+    # reserves stack (-1 otherwise).
+    frame:int64=-1
+]
+fresh_local = (@f:Fn):>int64 => {
+    let index=f.params+f.extra
+    f.extra+=1
+    return index
+}
+home = (id:addr body:ssa.Body):>addr => {
+    let owner=ssa.web(ssa.value_at(body id))
+    return if owner =? 0 id else owner
+}
+local_of = (id:addr body:ssa.Body @f:Fn):>int64 => {
+    let at=home(id body)
+    let entry=ssa.value_at(body at)
+    if entry.kind =? ssa.K_PARAM return entry.a as int64
+    let known=f.locals.get(at)
+    if known isnt? none return known
+    let made=fresh_local(@f)
+    f.locals[at]=made
+    return made
+}
+
+constant = (entry:ssa.Value nodes:array<hir.AST> @f:Fn @module:Module):>void => {
+    if entry.b =? 1 {
+        w.i64_const((if entry.a =? 2 (-1) else 0) @f.out)
+        return void
+    }
+    let node=hir.node_at(nodes entry.node)
+    if node is? hir.Integer {w.i64_const(code.word_of(node.value) @f.out)}
+    else if node is? hir.Bool {w.i64_const((if node.value (-1) else 0) @f.out)}
+    else if node is? hir.String {w.i64_const(string_at(node.content @module) @f.out)}
+    else if node is? hir.ExpressedIdentifier {
+        let position=module.positions.get(node.name)
+        if position is? none {fail("a reference to `{node.name}`, which is no function this route defines" @module)}
+        else {w.i64_const(position as int64 @f.out)}
+    } else {fail('a constant of an unknown form' @module)}
+}
+
+# The width of an operation's operands, as the x86-64 emitter reads it.
+wrap = (width:code.Width @f:Fn):>void => {
+    if not width.known or width.bits >=? 64 return void
+    if width.signed {w.op((if width.bits =? 8 194 else if width.bits =? 16 195 else 196) @f.out)}
+    else {
+        w.i64_const((if width.bits =? 8 255 else if width.bits =? 16 65535 else 4294967295) @f.out)
+        w.op(w.I64_AND @f.out)
+    }
+}
+compare_code = (name:string width:code.Width):>int64 => {
+    let unsigned=width.known and not width.signed
+    if name =? '__eq__' return w.I64_EQ
+    if name =? '__ne__' return w.I64_NE
+    if name =? '__lt__' return if unsigned w.I64_LT_U else w.I64_LT_S
+    if name =? '__le__' return if unsigned w.I64_LE_U else w.I64_LE_S
+    if name =? '__gt__' return if unsigned w.I64_GT_U else w.I64_GT_S
+    if name =? '__ge__' return if unsigned w.I64_GE_U else w.I64_GE_S
+    if name =? '__unsigned_lt__' return w.I64_LT_U
+    if name =? '__unsigned_lte__' return w.I64_LE_U
+    if name =? '__unsigned_gt__' return w.I64_GT_U
+    if name =? '__unsigned_gte__' return w.I64_GE_U
+    return 0
+}
+callee_name = (entry:ssa.Value nodes:array<hir.AST>):>string => {
+    let callee=hir.node_at(nodes entry.node)
+    if callee is? hir.ExpressedIdentifier return callee.name
+    let none_name:string=''
+    return none_name
+}
+# A comparison value: a binary comparison, or an unsigned-comparison call.
+comparison = (entry:ssa.Value nodes:array<hir.AST> table:types.Table):>int64 => {
+    let name=callee_name(entry nodes)
+    if entry.kind =? ssa.K_BINARY return compare_code(name code.width_of(entry.node nodes table))
+    if entry.kind =? ssa.K_CALL and entry.b =? 2 and (name.startswith('__unsigned_l') or name.startswith('__unsigned_g')) return compare_code(name code.Width[64 false true])
+    return 0
+}
+
+# µDewy's division: a zero divisor gives -1 (the dividend for a remainder);
+# the one overflowing signed case gives the dividend (0 for a remainder).
+# The operands are in fresh locals.
+divide = (remainder:bool signed:bool constant_divisor:int64|none @f:Fn):>void => {
+    let divisor=fresh_local(@f)
+    let dividend=fresh_local(@f)
+    w.indexed(w.LOCAL_SET divisor @f.out)
+    w.indexed(w.LOCAL_SET dividend @f.out)
+    let plain=if signed (if remainder w.I64_REM_S else w.I64_DIV_S) else (if remainder w.I64_REM_U else w.I64_DIV_U)
+    if constant_divisor isnt? none and constant_divisor >? 0 {
+        w.indexed(w.LOCAL_GET dividend @f.out)
+        w.indexed(w.LOCAL_GET divisor @f.out)
+        w.op(plain @f.out)
+        return void
+    }
+    w.indexed(w.LOCAL_GET divisor @f.out)
+    w.op(w.I64_EQZ @f.out)
+    w.op(w.IF @f.out) w.byte(w.I64 @f.out)
+    if remainder {w.indexed(w.LOCAL_GET dividend @f.out)} else {w.i64_const(-1 @f.out)}
+    w.op(w.ELSE @f.out)
+    if signed {
+        w.indexed(w.LOCAL_GET dividend @f.out)
+        w.i64_const(0-9223372036854775807-1 @f.out)
+        w.op(w.I64_EQ @f.out)
+        w.indexed(w.LOCAL_GET divisor @f.out)
+        w.i64_const(-1 @f.out)
+        w.op(w.I64_EQ @f.out)
+        w.op(w.I32_AND @f.out)
+        w.op(w.IF @f.out) w.byte(w.I64 @f.out)
+        if remainder {w.i64_const(0 @f.out)} else {w.indexed(w.LOCAL_GET dividend @f.out)}
+        w.op(w.ELSE @f.out)
+        w.indexed(w.LOCAL_GET dividend @f.out)
+        w.indexed(w.LOCAL_GET divisor @f.out)
+        w.op(plain @f.out)
+        w.op(w.END @f.out)
+    } else {
+        w.indexed(w.LOCAL_GET dividend @f.out)
+        w.indexed(w.LOCAL_GET divisor @f.out)
+        w.op(plain @f.out)
+    }
+    w.op(w.END @f.out)
+}
+
+# Whether a value's tree, as it will be emitted, calls or writes.
+effects = (id:addr body:ssa.Body t:trees.Writer):>bool => {
+    let entry=ssa.value_at(body id)
+    if entry.kind =? ssa.K_CONST or entry.kind =? ssa.K_PARAM or entry.kind =? ssa.K_MERGE or trees.root_of(t id) =? 0 return false
+    if entry.kind =? ssa.K_CALL or entry.kind =? ssa.K_CALL_VALUE or entry.kind =? ssa.K_GLOBAL_SET return true
+    if trees.single(entry.kind) return effects(entry.a body t)
+    if entry.kind =? ssa.K_BINARY return effects(entry.a body t) or effects(entry.b body t)
+    return false
+}
+
+# A value as an operand: its tree when it was pulled into this use, its
+# constant, otherwise its local.
+tree = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
+    let entry=ssa.value_at(body id)
+    if entry.kind =? ssa.K_CONST {
+        constant(entry nodes @f @module)
+        return void
+    }
+    if entry.kind =? ssa.K_PARAM or entry.kind =? ssa.K_MERGE or trees.root_of(t id) =? 0 {
+        w.indexed(w.LOCAL_GET local_of(id body @f) @f.out)
+        return void
+    }
+    expression(id entry body nodes table @t @f @module)
+}
+# A memory operand's address as an i32 and a constant offset: `base + k`
+# with a pulled sum folds `k` into the access.
+address = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>int64 => {
+    let entry=ssa.value_at(body id)
+    if entry.kind =? ssa.K_BINARY and trees.root_of(t id) not=? 0 and callee_name(entry nodes) =? '__add__' {
+        let right=ssa.value_at(body entry.b)
+        if right.kind =? ssa.K_CONST and right.b =? 0 {
+            let node=hir.node_at(nodes right.node)
+            if node is? hir.Integer {
+                let offset=code.word_of(node.value)
+                if offset >=? 0 and offset <? 2147483648 {
+                    tree(entry.a body nodes table @t @f @module)
+                    w.op(w.I32_WRAP_I64 @f.out)
+                    return offset
+                }
+            }
+        }
+    }
+    tree(id body nodes table @t @f @module)
+    w.op(w.I32_WRAP_I64 @f.out)
+    return 0
+}
+load_code = (name:string):>int64 => {
+    if name.endswith('8__') return if name.startswith('__load_i') w.I64_LOAD8_S else w.I64_LOAD8_U
+    if name.endswith('16__') return if name.startswith('__load_i') w.I64_LOAD16_S else w.I64_LOAD16_U
+    if name.endswith('32__') return if name.startswith('__load_i') w.I64_LOAD32_S else w.I64_LOAD32_U
+    return w.I64_LOAD
+}
+store_code = (name:string):>int64 => if name.endswith('8__') w.I64_STORE8 else if name.endswith('16__') w.I64_STORE16 else if name.endswith('32__') w.I64_STORE32 else w.I64_STORE
+align_of = (code_value:int64):>int64 => {
+    if code_value =? w.I64_LOAD8_S or code_value =? w.I64_LOAD8_U or code_value =? w.I64_STORE8 return 0
+    if code_value =? w.I64_LOAD16_S or code_value =? w.I64_LOAD16_U or code_value =? w.I64_STORE16 return 1
+    if code_value =? w.I64_LOAD32_S or code_value =? w.I64_LOAD32_U or code_value =? w.I64_STORE32 return 2
+    return 3
+}
+
+# The code that computes a value onto the stack.
+expression = (id:addr entry:ssa.Value body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
+    if entry.kind =? ssa.K_MOVE or entry.kind =? ssa.K_TRANSMUTE {
+        tree(entry.a body nodes table @t @f @module)
+        return void
+    }
+    if entry.kind =? ssa.K_LEAF {
+        let storage=static_of(entry.node nodes @module)
+        if storage.zeroed {
+            w.op(w.I64_CONST @f.out)
+            module.patches.push(Patch[f.position f.out.length storage.offset])
+            w.padded(0 @f.out)
+        } else {w.i64_const(storage.offset @f.out)}
+        return void
+    }
+    if entry.kind =? ssa.K_GLOBAL_GET or entry.kind =? ssa.K_GLOBAL_SET {
+        let target=hir.node_at(nodes entry.node)
+        let at=if target is? hir.ExpressedIdentifier module.globals.get(target.name) else none
+        if at is? none {
+            fail('a global without storage' @module)
+            return void
+        }
+        w.i32_const(at @f.out)
+        if entry.kind =? ssa.K_GLOBAL_GET {w.memory(w.I64_LOAD 3 0 @f.out)}
+        else {
+            tree(entry.a body nodes table @t @f @module)
+            w.memory(w.I64_STORE 3 0 @f.out)
+            w.i64_const(0 @f.out)
+        }
+        return void
+    }
+    let name=callee_name(entry nodes)
+    if entry.kind =? ssa.K_LOAD {
+        let operation=load_code(name)
+        let offset=address(entry.a body nodes table @t @f @module)
+        w.memory(operation align_of(operation) offset @f.out)
+        return void
+    }
+    if entry.kind =? ssa.K_UNARY {
+        let width=code.width_of(entry.node nodes table)
+        if name =? '__unary_sub__' {
+            w.i64_const(0 @f.out)
+            tree(entry.a body nodes table @t @f @module)
+            w.op(w.I64_SUB @f.out)
+        } else {
+            tree(entry.a body nodes table @t @f @module)
+            w.i64_const(-1 @f.out)
+            w.op(w.I64_XOR @f.out)
+        }
+        wrap(width @f)
+        return void
+    }
+    if entry.kind =? ssa.K_BINARY {
+        let width=code.width_of(entry.node nodes table)
+        let compared=compare_code(name width)
+        if compared not=? 0 {
+            # A µDewy boolean: 0 - (0 or 1).
+            w.i64_const(0 @f.out)
+            tree(entry.a body nodes table @t @f @module)
+            tree(entry.b body nodes table @t @f @module)
+            w.op(compared @f.out)
+            w.op(w.I64_EXTEND_I32_U @f.out)
+            w.op(w.I64_SUB @f.out)
+            return void
+        }
+        tree(entry.a body nodes table @t @f @module)
+        tree(entry.b body nodes table @t @f @module)
+        let unsigned=width.known and not width.signed
+        if name =? '__add__' {w.op(w.I64_ADD @f.out)}
+        else if name =? '__sub__' {w.op(w.I64_SUB @f.out)}
+        else if name =? '__mul__' {w.op(w.I64_MUL @f.out)}
+        else if name =? '__and__' {w.op(w.I64_AND @f.out)}
+        else if name =? '__or__' {w.op(w.I64_OR @f.out)}
+        else if name =? '__xor__' {w.op(w.I64_XOR @f.out)}
+        else if name =? '__nand__' or name =? '__nor__' or name =? '__xnor__' {
+            w.op((if name =? '__nand__' w.I64_AND else if name =? '__nor__' w.I64_OR else w.I64_XOR) @f.out)
+            w.i64_const(-1 @f.out)
+            w.op(w.I64_XOR @f.out)
+        }
+        else if name =? '__lshift__' or name =? '__dewy_raw_lshift__' {w.op(w.I64_SHL @f.out)}
+        else if name =? '__dewy_raw_rshift__' {w.op(w.I64_SHR_U @f.out)}
+        else if name =? '__rshift__' {
+            if not width.known {fail('a right shift without a selected integer width' @module)}
+            w.op((if width.signed w.I64_SHR_S else w.I64_SHR_U) @f.out)
+        }
+        else if name =? '__floordiv__' or name =? '__mod__' {divide(name =? '__mod__' not unsigned divisor_of(entry.b body nodes) @f)}
+        else {fail("the operation `{name}`" @module)}
+        if name not=? '__lshift__' and name not=? '__dewy_raw_lshift__' and name not=? '__dewy_raw_rshift__' and name not=? '__rshift__' {wrap(width @f)}
+        return void
+    }
+    if entry.kind =? ssa.K_CALL_VALUE {
+        # The function value comes first but is taken last.
+        let held=fresh_local(@f)
+        tree(ssa.operand_at(body entry.a) body nodes table @t @f @module)
+        w.indexed(w.LOCAL_SET held @f.out)
+        loop k in 1.. and k <? entry.b {tree(ssa.operand_at(body entry.a+k) body nodes table @t @f @module)}
+        w.indexed(w.LOCAL_GET held @f.out)
+        w.op(w.I32_WRAP_I64 @f.out)
+        let arity=(entry.b as int64)-1
+        if arity >? module.widest {module.widest=arity}
+        w.indexed(w.CALL_INDIRECT arity @f.out)
+        w.byte(0 @f.out)
+        return void
+    }
+    if entry.kind =? ssa.K_CALL {
+        call(entry name body nodes table @t @f @module)
+        return void
+    }
+    fail('a value of an unknown kind' @module)
+}
+divisor_of = (id:addr body:ssa.Body nodes:array<hir.AST>):>int64|none => {
+    let entry=ssa.value_at(body id)
+    if entry.kind not=? ssa.K_CONST or entry.b =? 1 return none
+    let node=hir.node_at(nodes entry.node)
+    if node isnt? hir.Integer return none
+    let value=code.word_of(node.value)
+    if value <=? 0 return none
+    return value
+}
+
+call = (entry:ssa.Value name:string body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
+    let position=module.positions.get(name)
+    if position isnt? none {
+        loop k in 0.. and k <? entry.b {tree(ssa.operand_at(body entry.a+k) body nodes table @t @f @module)}
+        w.indexed(w.CALL (module.host_list.length+position) as int64 @f.out)
+        return void
+    }
+    let host=module.hosts.get(name)
+    if host isnt? none {
+        loop k in 0.. and k <? entry.b {tree(ssa.operand_at(body entry.a+k) body nodes table @t @f @module)}
+        w.indexed(w.CALL host @f.out)
+        return void
+    }
+    if name.startswith('__store_') and entry.b =? 2 {
+        let value=ssa.operand_at(body entry.a)
+        let target=ssa.operand_at(body entry.a+1)
+        let operation=store_code(name)
+        # The value is evaluated first but stored last: it waits in a local
+        # unless neither side calls or writes.
+        if effects(value body t) or effects(target body t) {
+            let held=fresh_local(@f)
+            tree(value body nodes table @t @f @module)
+            w.indexed(w.LOCAL_SET held @f.out)
+            let offset=address(target body nodes table @t @f @module)
+            w.indexed(w.LOCAL_GET held @f.out)
+            w.memory(operation align_of(operation) offset @f.out)
+        } else {
+            let offset=address(target body nodes table @t @f @module)
+            tree(value body nodes table @t @f @module)
+            w.memory(operation align_of(operation) offset @f.out)
+        }
+        w.i64_const(0 @f.out)
+        return void
+    }
+    if name =? '__alloca__' and entry.b =? 1 {
+        w.indexed(w.GLOBAL_GET 0 @f.out)
+        tree(ssa.operand_at(body entry.a) body nodes table @t @f @module)
+        w.op(w.I32_WRAP_I64 @f.out)
+        w.i32_const(7 @f.out)
+        w.op(w.I32_ADD @f.out)
+        w.i32_const(-8 @f.out)
+        w.op(w.I32_AND @f.out)
+        w.op(w.I32_SUB @f.out)
+        w.indexed(w.GLOBAL_SET 0 @f.out)
+        w.indexed(w.GLOBAL_GET 0 @f.out)
+        w.op(w.I64_EXTEND_I32_U @f.out)
+        return void
+    }
+    if name =? '__breakpoint__' {
+        w.i64_const(0 @f.out)
+        return void
+    }
+    if name =? '__unreachable__' {
+        w.op(w.UNREACHABLE @f.out)
+        return void
+    }
+    if entry.b =? 2 and (name =? '__signed_shr__' or name.startswith('__unsigned_')) {
+        loop k in 0.. and k <? entry.b {tree(ssa.operand_at(body entry.a+k) body nodes table @t @f @module)}
+        if name =? '__signed_shr__' {w.op(w.I64_SHR_S @f.out)}
+        else if name =? '__unsigned_idiv__' or name =? '__unsigned_mod__' {divide(name =? '__unsigned_mod__' false divisor_of(ssa.operand_at(body entry.a+1) body nodes) @f)}
+        else {
+            let compared=compare_code(name code.Width[64 false true])
+            if compared =? 0 {fail("the intrinsic `{name}`" @module)}
+            else {
+                # As a µDewy boolean.
+                w.op(compared @f.out)
+                w.op(w.I64_EXTEND_I32_U @f.out)
+                w.i64_const(-1 @f.out)
+                w.op(w.I64_MUL @f.out)
+            }
+        }
+        return void
+    }
+    fail("a call to `{name}`, which this route does not cover on wasm32" @module)
+}
+
+# A condition as an i32 on the stack: comparisons directly, other values
+# against zero; `and`/`or` as `if` blocks, so the right side stays lazy.
+condition = (test:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
+    let entry=ssa.cond_at(body test)
+    if entry.kind =? ssa.C_LEAF {
+        let leaf=ssa.value_at(body entry.a)
+        let compared=if trees.root_of(t entry.a) not=? 0 comparison(leaf nodes table) else 0
+        if compared not=? 0 {
+            loop k in 0.. and k <? 2 {
+                let operand=if leaf.kind =? ssa.K_BINARY (if k =? 0 leaf.a else leaf.b) else ssa.operand_at(body leaf.a+k)
+                tree(operand body nodes table @t @f @module)
+            }
+            w.op(compared @f.out)
+        } else {
+            tree(entry.a body nodes table @t @f @module)
+            w.i64_const(0 @f.out)
+            w.op(w.I64_NE @f.out)
+        }
+        return void
+    }
+    condition(entry.a body nodes table @t @f @module)
+    w.op(w.IF @f.out) w.byte(w.I32 @f.out)
+    f.depth+=1
+    if entry.kind =? ssa.C_AND {
+        condition(entry.b body nodes table @t @f @module)
+        w.op(w.ELSE @f.out)
+        w.i32_const(0 @f.out)
+    } else {
+        w.i32_const(1 @f.out)
+        w.op(w.ELSE @f.out)
+        condition(entry.b body nodes table @t @f @module)
+    }
+    w.op(w.END @f.out)
+    f.depth-=1
+}
+
+leave = (@f:Fn):>void => {
+    if f.frame >=? 0 {
+        w.indexed(w.LOCAL_GET f.frame @f.out)
+        w.op(w.I32_WRAP_I64 @f.out)
+        w.indexed(w.GLOBAL_SET 0 @f.out)
+    }
+    w.op(w.RETURN @f.out)
+}
+
+# The code of one region, as `trees.statements` writes it.
+statements = (region:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
+    let items=ssa.region_at(body region)
+    trees.decide(region items body @t)
+    loop i in 0.. and i <? items.length {
+        let item=items[i]
+        if item.kind =? ssa.I_VALUE {
+            if trees.root_of(t item.a) not=? 0 {continue}
+            let entry=ssa.value_at(body item.a)
+            let count=trees.used(t item.a)
+            if count =? 0 and trees.removable(entry.kind) {continue}
+            expression(item.a entry body nodes table @t @f @module)
+            if count =? 0 {w.op(w.DROP @f.out)}
+            else {w.indexed(w.LOCAL_SET local_of(item.a body @f) @f.out)}
+        } else if item.kind =? ssa.I_RETURN {
+            if item.b =? 1 {tree(item.a body nodes table @t @f @module)} else {w.i64_const(0 @f.out)}
+            leave(@f)
+        } else if item.kind =? ssa.I_BREAK or item.kind =? ssa.I_CONTINUE {
+            if f.loops.length =? 0 {
+                fail('a loop exit outside a loop' @module)
+                continue
+            }
+            let block=f.loops[end]
+            # The `loop` is one level inside its `block`.
+            let target=if item.kind =? ssa.I_BREAK block else block+1
+            w.indexed(w.BR f.depth-target @f.out)
+        } else if item.kind =? ssa.I_COPY {
+            if trees.silent(item body) or trees.unread(item body t) {continue}
+            tree(item.b body nodes table @t @f @module)
+            w.indexed(w.LOCAL_SET local_of(item.a body @f) @f.out)
+        } else if item.kind =? ssa.I_DECLARE {
+            if trees.unread(item body t) {continue}
+            if item.b =? 0 {w.i64_const(0 @f.out)} else {tree(item.b body nodes table @t @f @module)}
+            w.indexed(w.LOCAL_SET local_of(item.a body @f) @f.out)
+        } else if item.kind =? ssa.I_IF {
+            condition(item.a body nodes table @t @f @module)
+            w.op(w.IF @f.out) w.byte(w.EMPTY @f.out)
+            f.depth+=1
+            statements(item.b body nodes table @t @f @module)
+            if ssa.region_at(body item.c).length >? 0 {
+                w.op(w.ELSE @f.out)
+                statements(item.c body nodes table @t @f @module)
+            }
+            w.op(w.END @f.out)
+            f.depth-=1
+        } else if item.kind =? ssa.I_LOOP {
+            w.op(w.BLOCK @f.out) w.byte(w.EMPTY @f.out)
+            f.depth+=1
+            f.loops.push(f.depth)
+            w.op(w.LOOP @f.out) w.byte(w.EMPTY @f.out)
+            f.depth+=1
+            statements(item.a body nodes table @t @f @module)
+            w.indexed(w.BR 0 @f.out)
+            w.op(w.END @f.out)
+            f.depth-=1
+            $runtime_assert f.loops.length >? 0
+            f.loops.pop;
+            w.op(w.END @f.out)
+            f.depth-=1
+        }
+    }
+}
+
+emit_function = (symbol:string body:ssa.Body kinds:trees.Kinds nodes:array<hir.AST> table:types.Table @module:Module):>void => {
+    let position=module.positions.get(symbol)
+    if position is? none {
+        fail("`{symbol}` has no place in the table" @module)
+        return void
+    }
+    let f=Fn[position=position params=body.params.length as int64]
+    let t=trees.Writer[kinds Span[0 0]]
+    trees.count(body @t)
+    # The stack pointer at entry, restored on return when the function
+    # reserves stack; its local is chosen before the body's.
+    let reserves=code.reserves_stack(body nodes)
+    if reserves {
+        f.frame=fresh_local(@f)
+        w.indexed(w.GLOBAL_GET 0 @f.out)
+        w.op(w.I64_EXTEND_I32_U @f.out)
+        w.indexed(w.LOCAL_SET f.frame @f.out)
+    }
+    statements(body.root body nodes table @t @f @module)
+    # Falling off the end returns 0.
+    w.i64_const(0 @f.out)
+    leave(@f)
+    w.op(w.END @f.out)
+    let entry:array<uint8>=[]
+    if f.extra >? 0 {
+        w.uleb(1 @entry)
+        w.uleb(f.extra @entry)
+        w.byte(w.I64 @entry)
+    } else {w.uleb(0 @entry)}
+    let shift=entry.length
+    w.append(f.out @entry)
+    loop module.bodies.length <=? position {
+        let empty:array<uint8>=[]
+        module.bodies.push(empty)
+        module.arities.push(0)
+    }
+    let at=position
+    $runtime_assert at <? module.bodies.length and at <? module.arities.length
+    # Patches recorded against this function's code move by its header.
+    loop k in 0.. and k <? module.patches.length {
+        let patch=module.patches[k]
+        if patch.function =? at and patch.at <? f.out.length {module.patches[k]=Patch[patch.function patch.at+shift patch.offset]}
+    }
+    module.bodies[at]=entry
+    module.arities[at]=f.params
+    if f.params >? module.widest {module.widest=f.params}
+}
+
+# The module's bytes.
+finish = (main:string @module:Module):>array<uint8> => {
+    let zeroed_base=DATA_BASE+(((module.data.length as int64)+7)//8)*8
+    loop fill in module.fills {overwrite(fill.at zeroed_base+fill.offset @module)}
+    loop patch in module.patches {
+        $runtime_assert patch.function <? module.bodies.length
+        let body=module.bodies[patch.function]
+        w.patch(patch.at zeroed_base+patch.offset @body)
+        module.bodies[patch.function]=body
+    }
+    let data_end=zeroed_base+module.zeroed
+    let stack_top_floor=((data_end+15)//16)*16+1048576
+    let stack_top=if stack_top_floor <? 2097152 2097152 else stack_top_floor
+    let required=if data_end+2*PAGE <? stack_top stack_top else data_end+2*PAGE
+    let pages_needed=(required+PAGE-1)//PAGE
+    let pages=if pages_needed <? 32 32 else pages_needed
+    let widest=module.widest
+    loop host in module.host_list {if host.arity >? widest {widest=host.arity}}
+    let out:array<uint8>=[0 97 115 109 1 0 0 0]
+    # Types: one per parameter count, each returning an i64.
+    let types_section:array<uint8>=[]
+    w.uleb(widest+1 @types_section)
+    let arity:int64=0
+    loop arity <=? widest {
+        w.byte(96 @types_section)
+        w.uleb(arity @types_section)
+        loop k in 0.. and (k as int64) <? arity {w.byte(w.I64 @types_section)}
+        w.uleb(1 @types_section)
+        w.byte(w.I64 @types_section)
+        arity+=1
+    }
+    w.section(w.TYPE types_section @out)
+    let imports:array<uint8>=[]
+    w.uleb((module.host_list.length as int64)+1 @imports)
+    w.name('env' @imports) w.name('memory' @imports) w.byte(2 @imports) w.byte(0 @imports) w.uleb(pages @imports)
+    loop host in module.host_list {
+        w.name('env' @imports) w.name(host.name @imports) w.byte(0 @imports) w.uleb(host.arity @imports)
+    }
+    w.section(w.IMPORT imports @out)
+    let functions:array<uint8>=[]
+    w.uleb(module.arities.length as int64 @functions)
+    loop count in module.arities {w.uleb(count @functions)}
+    w.section(w.FUNCTION functions @out)
+    let tables:array<uint8>=[]
+    w.uleb(1 @tables) w.byte(w.FUNCREF @tables) w.byte(0 @tables) w.uleb(module.arities.length as int64 @tables)
+    w.section(w.TABLE tables @out)
+    let globals:array<uint8>=[]
+    w.uleb(1 @globals) w.byte(w.I32 @globals) w.byte(1 @globals) w.i32_const(stack_top @globals) w.byte(w.END @globals)
+    w.section(w.GLOBAL globals @out)
+    let exports:array<uint8>=[]
+    let entry=module.positions.get(main)
+    w.uleb(2 @exports)
+    w.name('main' @exports) w.byte(0 @exports) w.uleb((module.host_list.length as int64)+(if entry is? none 0 else entry as int64) @exports)
+    w.name('__udewy_fn_table' @exports) w.byte(1 @exports) w.uleb(0 @exports)
+    w.section(w.EXPORT exports @out)
+    let elements:array<uint8>=[]
+    w.uleb(1 @elements) w.uleb(0 @elements) w.i32_const(0 @elements) w.byte(w.END @elements)
+    w.uleb(module.arities.length as int64 @elements)
+    loop k in 0.. and k <? module.arities.length {w.uleb((module.host_list.length as int64)+(k as int64) @elements)}
+    w.section(w.ELEMENT elements @out)
+    let codes:array<uint8>=[]
+    w.uleb(module.bodies.length as int64 @codes)
+    loop k in 0.. and k <? module.bodies.length {
+        let body=module.bodies[k]
+        w.uleb(body.length as int64 @codes)
+        w.append(body @codes)
+    }
+    w.section(w.CODE codes @out)
+    let data:array<uint8>=[]
+    w.uleb(1 @data) w.uleb(0 @data) w.i32_const(DATA_BASE @data) w.byte(w.END @data)
+    w.uleb(module.data.length as int64 @data)
+    w.append(module.data @data)
+    w.section(w.DATA data @out)
+    return out
+}
+
+Kinds:type = const [nothing:addr word:addr tree_kinds:trees.Kinds]
+Failure:type = const [reason:string]
+
+build = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? ctx:ssa.Context kinds:Kinds table:types.Table @nodes:array<hir.AST>):>array<uint8>|Failure => {
+    if not source.needs_startup return Failure['a program without a startup function']
+    let module=Module[]
+    loop host in hosts() {
+        module.hosts[host.called_as]=module.host_list.length as int64
+        module.host_list.push(host)
+    }
+    let none_loc=Span[0 0]
+    loop entry in functions {module.positions[entry.symbol]=module.positions.length}
+    module.positions[source.startup_symbol]=module.positions.length
+    module.positions['main']=module.positions.length
+    # The exported entry: `main` with an empty command line (µDewy's wasm32
+    # entry passes zeros as well).
+    let reads_command_line=prologue isnt? none
+    if reads_command_line {module.positions['__dewy_wasm_entry']=module.positions.length}
+    loop id in source.globals {
+        let declaration=hir.node_at(nodes id)
+        if declaration isnt? hir.Declare return Failure['a global that is no declaration']
+        global(declaration nodes @module)
+    }
+    if module.problem not=? '' return Failure[module.problem]
+    loop entry in functions {
+        let function=hir.node_at(nodes entry.literal)
+        if function isnt? hir.FunctionLiteral return Failure['a function unit that is no function']
+        let form=ssa.build(entry.symbol function nodes ctx)
+        if form is? none return Failure["`{entry.symbol}` uses a form the SSA construction does not cover"]
+        emit_function(entry.symbol form kinds.tree_kinds nodes table @module)
+        if module.problem not=? '' return Failure[module.problem]
+    }
+    let startup_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=startup scoped=true])
+    let startup_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=[] kw_only_args=[] rest_args=none rettype=kinds.nothing body=startup_body]
+    let startup_form=ssa.build(source.startup_symbol startup_function nodes ctx)
+    if startup_form is? none return Failure['startup uses a form the SSA construction does not cover']
+    emit_function(source.startup_symbol startup_form kinds.tree_kinds nodes table @module)
+    # `main`: startup, the command line, then the program's entry function.
+    let items:array<addr>=[]
+    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=source.startup_symbol])
+    items.push(hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=kinds.nothing func=callee pos_args=[] kw_args=[]]))
+    let parameters:array<hir.Param>=[]
+    if prologue isnt? none {
+        parameters.push(hir.Param['__dewy_argc' kinds.word])
+        parameters.push(hir.Param['__dewy_argv' kinds.word])
+        loop item in prologue {items.push(item)}
+    }
+    let zero=hir.append_node(@nodes hir.Integer[loc=none_loc value_type=kinds.word prefix='0d' value=0])
+    let user=source.user_main_symbol
+    if user is? none {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))}
+    else {
+        let valued=false
+        loop entry in functions {
+            if entry.symbol not=? user continue
+            let function=hir.node_at(nodes entry.literal)
+            if function is? hir.FunctionLiteral {valued=function.rettype not=? kinds.nothing}
+        }
+        let target=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=user])
+        let passed:array<addr>=[]
+        if argument isnt? none {passed.push(argument)}
+        let entered=hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=(if valued kinds.word else kinds.nothing) func=target pos_args=passed kw_args=[]])
+        if valued {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=entered]))}
+        else {
+            items.push(entered)
+            items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))
+        }
+    }
+    let main_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=items scoped=true])
+    let main_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=parameters kw_only_args=[] rest_args=none rettype=kinds.word body=main_body]
+    let main_form=ssa.build('main' main_function nodes ctx)
+    if main_form is? none return Failure['the entry uses a form the SSA construction does not cover']
+    emit_function('main' main_form kinds.tree_kinds nodes table @module)
+    if module.problem not=? '' return Failure[module.problem]
+    if not reads_command_line return finish('main' @module)
+    let entry_position=module.positions.get('__dewy_wasm_entry')
+    let main_position=module.positions.get('main')
+    if entry_position is? none or main_position is? none return Failure['the wasm32 entry has no place in the table']
+    let entry:array<uint8>=[]
+    w.uleb(0 @entry)
+    w.i64_const(0 @entry)
+    w.i64_const(0 @entry)
+    w.indexed(w.CALL (module.host_list.length+main_position) as int64 @entry)
+    w.op(w.END @entry)
+    loop module.bodies.length <=? entry_position {
+        let empty:array<uint8>=[]
+        module.bodies.push(empty)
+        module.arities.push(0)
+    }
+    $runtime_assert entry_position <? module.bodies.length and entry_position <? module.arities.length
+    module.bodies[entry_position]=entry
+    module.arities[entry_position]=0
+    return finish('__dewy_wasm_entry' @module)
+}

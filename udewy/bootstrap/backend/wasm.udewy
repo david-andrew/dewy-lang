@@ -531,10 +531,12 @@ let w_unary_op = (op_kind:int):>void => {
     return void
 }
 
+# A wasm comparison's i32 0/1 as a udewy boolean, -1/0 as on the other
+# targets: `not` is bitwise, so true must be all ones (wasm.py does the same).
 let w_emit_cmp_normalize = ():>void => {
     w_emit("i64.extend_i32_s")
-    w_emit("i64.const 0")
-    w_emit("i64.sub")
+    w_emit("i64.const -1")
+    w_emit("i64.mul")
     return void
 }
 
@@ -717,14 +719,49 @@ let w_call_direct = (label_id:int num_args:int):>void => {
     return void
 }
 
+# One value from the top of the operand stack to the memory stack, and back.
+let w_spill_top = ():>void => {
+    w_emit("local.set $swap0")
+    w_emit("global.get $stack_ptr")
+    w_emit("i32.const 8")
+    w_emit("i32.sub")
+    w_emit("local.tee $swap1")
+    w_emit("global.set $stack_ptr")
+    w_emit("local.get $swap1")
+    w_emit("local.get $swap0")
+    w_emit("i64.store")
+    return void
+}
+
+let w_restore_saved = ():>void => {
+    w_emit("global.get $stack_ptr")
+    w_emit("i64.load")
+    w_emit("global.get $stack_ptr")
+    w_emit("i32.const 8")
+    w_emit("i32.add")
+    w_emit("global.set $stack_ptr")
+    return void
+}
+
 let w_call_indirect = (num_args:int):>void => {
     intset_add(w_indirect_arities num_args)
-    # In wasm the arguments are already on the stack, but the fn index is on
-    # top. We need to peel the fn off, then args, then fn back.
-    # Simpler: store fn index in a temp local.
-    w_emit("local.set $swap0")
-    w_emit("local.get $swap0")
+    # The function index is pushed before the arguments, but call_indirect
+    # takes it last: spill the arguments and the index, take the index into
+    # `$swap1`, then reload the arguments in order (as wasm.py does).
+    let spilled:int = 0
+    loop spilled <? num_args + 1 {
+        w_spill_top()
+        spilled = spilled + 1
+    }
+    w_restore_saved()
     w_emit("i32.wrap_i64")
+    w_emit("local.set $swap1")
+    let restored:int = 0
+    loop restored <? num_args {
+        w_restore_saved()
+        restored = restored + 1
+    }
+    w_emit("local.get $swap1")
     let bb:int = bb_new(48)
     bb_push_str(bb "call_indirect (type $type_fn")
     bb_push_int(bb num_args)
@@ -1136,7 +1173,13 @@ let w_finish_module = ():>int => {
     }
 
     let page_size:int = 65536
+    # The stack grows down from above all data: 2 MiB, or 1 MiB past the
+    # data when that is higher (a large static reservation must not meet the
+    # stack). wasm.py computes the same.
+    let stack_top:int = ((w_data_offset + 15) // 16) * 16 + 1048576
+    if stack_top <? 2097152 { stack_top = 2097152 }
     let mem_required:int = w_data_offset + (2 * page_size)
+    if mem_required <? stack_top { mem_required = stack_top }
     let mem_pages:int = (mem_required + page_size - 1) // page_size
     if mem_pages <? 32 { mem_pages = 32 }
     w_memory_pages = mem_pages
@@ -1153,7 +1196,9 @@ let w_finish_module = ():>int => {
         imp_i = imp_i + 1
     }
 
-    bb_push_str(out "  (global $stack_ptr (mut i32) (i32.const 2097152))\n")
+    bb_push_str(out "  (global $stack_ptr (mut i32) (i32.const ")
+    bb_push_int(out stack_top)
+    bb_push_str(out "))\n")
     if w_module_init_name not=? 0 {
         bb_push_str(out "  (global $__udewy_module_init_done (mut i32) (i32.const 0))\n")
     }

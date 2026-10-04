@@ -33,7 +33,7 @@ def test_package_matching_pair_and_library(tmp_path):
         names = set(packed.getnames())
         assert {'./dewy', './udewy', './VERSION', './SHA256SUMS',
                 './library/unicode/grapheme_break.bin',
-                './library/linux/system.dewy', './tools/dewy_gdb.py'} <= names
+                './library/system.dewy', './tools/dewy_gdb.py'} <= names
         assert './dewy/__main__.py' not in names
         assert packed.getmember('./dewy').mode & 0o111
         packed.extractall(tmp_path / 'unpacked', filter='data')
