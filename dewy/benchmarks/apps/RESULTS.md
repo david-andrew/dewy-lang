@@ -160,6 +160,48 @@ no backend process.
 Kernels are as in the previous section; setup moved: `text`'s whole run at
 the larger input went 1236 → 780 ms and `arrays`' 770 → 662 ms.
 
+## After the code-shape work against GCC (2026-10-04, feb820ce)
+
+Native route after the register-allocation, branch, jump-table, inlining
+and value-numbering changes of `bootstrap/OPTIMIZER.md`.
+
+| workload | build | compile s | compile MiB | input | kernel ms | median | vs C | whole run ms | run MiB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| helpers | udewy | 2.23 | 115 | 200000 | 416.0 | 418.2 | 6.34x | 416.5 | 0.4 |
+| helpers | native | 0.56 | 128 | 200000 | 94.4 | 95.5 | 1.44x | 94.9 | 0.4 |
+| helpers | C | 0.07 | 31 | 200000 | 65.6 | 66.7 | 1.00x | 66.9 | 1.5 |
+| helpers | udewy | 2.23 | 115 | 2000000 | 4866.1 | 4895.1 | 6.67x | 4866.6 | 0.4 |
+| helpers | native | 0.56 | 128 | 2000000 | 1063.9 | 1064.8 | 1.46x | 1064.4 | 0.4 |
+| helpers | C | 0.07 | 31 | 2000000 | 730.0 | 744.5 | 1.00x | 731.9 | 1.6 |
+| arrays | udewy | 0.72 | 133 | 1000000 | 54.1 | 56.4 | 3.84x | 91.2 | 23.4 |
+| arrays | native | 0.57 | 129 | 1000000 | 31.8 | 32.9 | 2.26x | 52.1 | 23.4 |
+| arrays | C | 0.08 | 31 | 1000000 | 14.1 | 14.4 | 1.00x | 24.8 | 16.9 |
+| arrays | udewy | 0.72 | 133 | 10000000 | 610.9 | 619.3 | 2.83x | 1018.7 | 280.8 |
+| arrays | native | 0.57 | 129 | 10000000 | 398.5 | 405.9 | 1.85x | 628.1 | 280.6 |
+| arrays | C | 0.08 | 31 | 10000000 | 215.5 | 219.0 | 1.00x | 305.9 | 154.3 |
+| records | udewy | 0.65 | 134 | 100000 | 94.9 | 97.1 | 10.66x | 109.2 | 8.0 |
+| records | native | 0.58 | 129 | 100000 | 51.5 | 53.8 | 5.78x | 59.5 | 8.0 |
+| records | C | 0.08 | 31 | 100000 | 8.9 | 9.0 | 1.00x | 12.1 | 4.7 |
+| records | udewy | 0.65 | 134 | 1000000 | 982.0 | 985.1 | 8.09x | 1114.7 | 76.8 |
+| records | native | 0.58 | 129 | 1000000 | 554.5 | 559.9 | 4.57x | 627.7 | 76.8 |
+| records | C | 0.08 | 31 | 1000000 | 121.4 | 122.0 | 1.00x | 143.5 | 31.9 |
+| text | udewy | 0.68 | 133 | 1000000 | 64.3 | 64.7 | 3.68x | 218.5 | 12.9 |
+| text | native | 0.60 | 129 | 1000000 | 26.7 | 27.4 | 1.53x | 70.2 | 12.8 |
+| text | C | 0.09 | 32 | 1000000 | 17.5 | 17.6 | 1.00x | 35.7 | 6.3 |
+| text | udewy | 0.68 | 133 | 10000000 | 646.5 | 650.7 | 3.96x | 2144.9 | 111.8 |
+| text | native | 0.60 | 129 | 10000000 | 268.8 | 271.7 | 1.65x | 672.8 | 111.6 |
+| text | C | 0.09 | 32 | 10000000 | 163.4 | 164.2 | 1.00x | 324.5 | 49.2 |
+| graph | udewy | 0.67 | 136 | 200000 | 148.1 | 149.6 | 2.86x | 220.4 | 55.3 |
+| graph | native | 0.61 | 131 | 200000 | 116.1 | 135.7 | 2.24x | 168.4 | 55.3 |
+| graph | C | 0.11 | 33 | 200000 | 51.8 | 54.2 | 1.00x | 80.1 | 33.4 |
+| graph | udewy | 0.67 | 136 | 1000000 | 1232.7 | 1235.2 | 4.02x | 1637.0 | 255.6 |
+| graph | native | 0.61 | 131 | 1000000 | 912.4 | 919.6 | 2.98x | 1215.5 | 255.6 |
+| graph | C | 0.11 | 33 | 1000000 | 306.6 | 307.9 | 1.00x | 441.4 | 136.1 |
+
+Against the previous section (native route, larger inputs): helpers 1213 →
+1064 ms (1.67× → 1.46× of C), arrays 406 → 399 ms, records 569 → 555 ms,
+text 318 → 269 ms (1.95× → 1.65×), graph 1099 → 912 ms (3.61× → 2.98×).
+
 ## wasm32 under node (2026-10-03)
 
 The same programs for wasm32, run by `tools/run_wasm.mjs` on node 26 (V8),
