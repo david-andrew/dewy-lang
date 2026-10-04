@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"x86.dewy" as x86
 import p"image.dewy" as images
 import p"../udewy/ssa.dewy" as ssa
@@ -93,7 +95,8 @@ fail = (reason:string @program:Program):>void => {if program.problem =? '' {prog
 
 # An integer literal as a 64-bit word.
 word_of = (value:bigint):>int64 => {
-    let magnitude=if value <? 0 (-value) else value
+    let negative=value <? 0
+    let magnitude=if negative (-value) else value
     let bits:uint64=0
     if magnitude not=? 0 {
         let limbs=magnitude.limbs
@@ -101,7 +104,7 @@ word_of = (value:bigint):>int64 => {
         if limbs.length >? 1 {bits=bits + limbs[1] * 4294967296}
     }
     let word=bits transmute int64
-    return if value <? 0 0-word else word
+    return if negative 0-word else word
 }
 
 # The width a callee's first parameter selects, as µDewy emission reads it.
@@ -134,14 +137,18 @@ bind = (label:addr @g:Gen @program:Program):>void => {
     # A conditional jump here over an unconditional one becomes the
     # opposite jump to that one's target, unless a label marks the jump.
     if g.jumps.length >=? 2 {
-        let over=g.jumps[end]
-        let skip=g.jumps[g.jumps.length-2]
-        let starts=(over.site as int64)-1
-        if skip.site >? 1 and over.always and not skip.always and skip.label =? label and (over.site as int64)+4 =? here and (skip.site as int64)+4 =? starts and (g.ended not=? starts or g.ending.length =? 0) {
-            let opcode=skip.site-1
+        let over_site=g.jumps[end].site
+        let over_label=g.jumps[end].label
+        let over_always=g.jumps[end].always
+        let skip_site=g.jumps[g.jumps.length-2].site
+        let skip_label=g.jumps[g.jumps.length-2].label
+        let skip_always=g.jumps[g.jumps.length-2].always
+        let starts=(over_site as int64)-1
+        if skip_site >? 1 and over_always and not skip_always and skip_label =? label and (over_site as int64)+4 =? here and (skip_site as int64)+4 =? starts and (g.ended not=? starts or g.ending.length =? 0) {
+            let opcode=skip_site-1
             $runtime_assert opcode <? program.image.code.length
             program.image.code[opcode]=program.image.code[opcode] xor 1
-            g.jumps[g.jumps.length-2]=Jump[skip.site over.label]
+            g.jumps[g.jumps.length-2]=Jump[skip_site over_label]
             loop program.image.code.length >? 0 and (program.image.code.length as int64) >? starts {program.image.code.pop;}
             g.jumps.pop;
             # Labels bound after the removed jump move back with the code.
@@ -150,7 +157,8 @@ bind = (label:addr @g:Gen @program:Program):>void => {
                 g.ending=none_yet
             }
             here=starts
-            loop bound in g.ending {
+            loop k in 0.. and k <? g.ending.length {
+                let bound=g.ending[k]
                 $runtime_assert bound <? g.labels.length
                 g.labels[bound]=here
             }
@@ -171,7 +179,8 @@ bind = (label:addr @g:Gen @program:Program):>void => {
                 g.ending=none_yet
             }
             here=start
-            loop bound in g.ending {
+            loop k in 0.. and k <? g.ending.length {
+                let bound=g.ending[k]
                 $runtime_assert bound <? g.labels.length
                 g.labels[bound]=here
             }
@@ -824,7 +833,8 @@ branch = (test:addr target:addr when:bool body:ssa.Body nodes:array<hir.AST> tab
 silent = (item:ssa.Item body:ssa.Body):>bool => item.kind =? ssa.I_COPY and ssa.web(ssa.value_at(body item.a)) =? ssa.web(ssa.value_at(body item.b))
 
 region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @program:Program):>void => {
-    let items=ssa.region_at(body id)
+    $runtime_assert id <? body.regions.length
+    const items=@body.regions[id]
     let index:addr=0
     loop index <? items.length {
         let item=items[index]
@@ -851,7 +861,7 @@ region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @p
             let otherwise=new_label(@g)
             branch(item.a otherwise false body nodes table @g @program)
             region(item.b body nodes table @g @program)
-            if ssa.region_at(body item.c).length =? 0 {bind(otherwise @g @program)}
+            if ssa.region_length(body item.c) =? 0 {bind(otherwise @g @program)}
             else {
                 let done=new_label(@g)
                 jump_to(done @g @program)
@@ -871,8 +881,8 @@ region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @p
             bind(leave @g @program)
         } else if item.kind =? ssa.I_BREAK or item.kind =? ssa.I_CONTINUE {
             if g.loops.length =? 0 {fail('a loop exit outside a loop' @program) continue}
-            let frame=g.loops[end]
-            jump_to((if item.kind =? ssa.I_BREAK frame.leave else frame.top) @g @program)
+            let target=if item.kind =? ssa.I_BREAK g.loops[end].leave else g.loops[end].top
+            jump_to(target @g @program)
         }
     }
 }
@@ -892,7 +902,9 @@ count = (body:ssa.Body @g:Gen):>void => {
     }
     loop test in body.conds {if test.kind =? ssa.C_LEAF {bump(test.a @g)}}
     loop r in 0.. and r <? body.regions.length {
-        loop item in ssa.region_at(body r) {
+        $runtime_assert r <? body.regions.length
+        const region_items=@body.regions[r]
+        loop item in region_items {
             if item.kind =? ssa.I_RETURN and item.b =? 1 {bump(item.a @g)}
             else if (item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE) and item.b not=? 0 {bump(item.b @g)}
         }
@@ -950,15 +962,17 @@ alone = (items:array<ssa.Item> index:addr id:addr g:Gen):>bool => index <? items
 #   load or store that uses it.
 mark = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
     loop test in body.conds {
-        if test.kind not=? ssa.C_LEAF or test.b =? 0 continue
-        let items=ssa.region_at(body test.b)
+        if test.kind not=? ssa.C_LEAF or test.b =? 0 {continue}
+        $runtime_assert test.b <? body.regions.length
+        const items=@body.regions[test.b]
         if items.length >? 0 and alone(items items.length-1 test.a g) and comparison(ssa.value_at(body test.a) nodes) {
             $runtime_assert test.a <? g.fused.length
             g.fused[test.a]=true
         }
     }
     loop r in 0.. and r <? body.regions.length {
-        let items=ssa.region_at(body r)
+        $runtime_assert r <? body.regions.length
+        const items=@body.regions[r]
         loop i in 1.. and i <? items.length {
             let item=items[i]
             let address:addr=0
@@ -998,7 +1012,8 @@ mark = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
 # runs between the two, and no later item reads the variable's old version.
 join = (body:ssa.Body @g:Gen):>void => {
     loop r in 0.. and r <? body.regions.length {
-        let items=ssa.region_at(body r)
+        $runtime_assert r <? body.regions.length
+        const items=@body.regions[r]
         loop i in 1.. and i <? items.length {
             let copy=items[i]
             if (copy.kind not=? ssa.I_COPY and copy.kind not=? ssa.I_DECLARE) or copy.b =? 0 or silent(copy body) continue
@@ -1047,7 +1062,8 @@ clobbers = (entry:ssa.Value nodes:array<hir.AST> symbols:set<string>):>bool => {
     return callee.name in? symbols or callee.name.startswith('__syscall')
 }
 number = (region:addr body:ssa.Body nodes:array<hir.AST> symbols:set<string> @g:Gen):>void => {
-    let items=ssa.region_at(body region)
+    $runtime_assert region <? body.regions.length
+    const items=@body.regions[region]
     loop i in 0.. and i <? items.length {
         let item=items[i]
         g.position+=1
@@ -1119,9 +1135,11 @@ assign = (body:ssa.Body nodes:array<hir.AST> symbols:set<string> @g:Gen):>void =
         before.push(seen)
         p+=1
     }
-    loop entry in g.kept {
-        $runtime_assert entry.place <? g.last.length and entry.span <? g.spans.length
-        if g.spans[entry.span].stop >? g.last[entry.place] {g.last[entry.place]=g.spans[entry.span].stop}
+    loop k in 0.. and k <? g.kept.length {
+        let place=g.kept[k].place
+        let span=g.kept[k].span
+        $runtime_assert place <? g.last.length and span <? g.spans.length
+        if g.spans[span].stop >? g.last[place] {g.last[place]=g.spans[span].stop}
     }
     # Places in order of first position: a chain per position.
     let heads:array<int64>=[]
@@ -1363,7 +1381,11 @@ cases_of = (test:addr arm:addr body:ssa.Body nodes:array<hir.AST> @d:Dispatch):>
     let entry=ssa.cond_at(body test)
     if entry.kind =? ssa.C_OR return cases_of(entry.a arm body nodes @d) and cases_of(entry.b arm body nodes @d)
     if entry.kind not=? ssa.C_LEAF return false
-    if entry.b not=? 0 {loop part in ssa.region_at(body entry.b) {if not test_part(part body nodes) return false}}
+    if entry.b not=? 0 {
+        $runtime_assert entry.b <? body.regions.length
+        const parts=@body.regions[entry.b]
+        loop part in parts {if not test_part(part body nodes) return false}
+    }
     let found=tag_test(entry.a body nodes)
     if found is? none return false
     if d.tests =? 0 {d.tested=found.tested} else if d.tested not=? found.tested return false
@@ -1373,7 +1395,8 @@ cases_of = (test:addr arm:addr body:ssa.Body nodes:array<hir.AST> @d:Dispatch):>
 }
 # Whether a region never reaches its end.
 leaves_region = (id:addr body:ssa.Body):>bool => {
-    let items=ssa.region_at(body id)
+    $runtime_assert id <? body.regions.length
+    const items=@body.regions[id]
     if items.length =? 0 return false
     let last=items[end]
     if last.kind =? ssa.I_RETURN or last.kind =? ssa.I_BREAK or last.kind =? ssa.I_CONTINUE return true
@@ -1391,7 +1414,7 @@ dispatch = (items:array<ssa.Item> start:addr body:ssa.Body nodes:array<hir.AST> 
     let first=items[start]
     let rest:addr=0
     let next=start
-    if ssa.region_at(body first.c).length >? 0 {
+    if ssa.region_length(body first.c) >? 0 {
         # An `else if` chain: each `else` is test parts and one `if`.
         let current=first
         loop true {
@@ -1399,7 +1422,8 @@ dispatch = (items:array<ssa.Item> start:addr body:ssa.Body nodes:array<hir.AST> 
             if not cases_of(current.a arm body nodes @d) return start
             d.arms.push(current.b)
             d.falls.push(not leaves_region(current.b body))
-            let otherwise=ssa.region_at(body current.c)
+            $runtime_assert current.c <? body.regions.length
+            const otherwise=@body.regions[current.c]
             let j:addr=0
             loop j <? otherwise.length and test_part(otherwise[j] body nodes) {j+=1}
             if j <? otherwise.length and j+1 =? otherwise.length and otherwise[j].kind =? ssa.I_IF and only_tests(otherwise 0 j body nodes g) {
@@ -1420,7 +1444,7 @@ dispatch = (items:array<ssa.Item> start:addr body:ssa.Body nodes:array<hir.AST> 
         loop k <? items.length {
             let j=k
             loop j <? items.length and test_part(items[j] body nodes) {j+=1}
-            if j >=? items.length or items[j].kind not=? ssa.I_IF or ssa.region_at(body items[j].c).length >? 0 or not leaves_region(items[j].b body) or not only_tests(items k j body nodes g) break
+            if j >=? items.length or items[j].kind not=? ssa.I_IF or ssa.region_length(body items[j].c) >? 0 or not leaves_region(items[j].b body) or not only_tests(items k j body nodes g) break
             let arm=d.arms.length
             let saved=d.cases.length
             let counted=d.tests

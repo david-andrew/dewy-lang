@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import Span
 import p"x86_64.dewy" as code
 import p"image.dewy" as images
@@ -19,7 +21,7 @@ Kinds:type = const [nothing:addr word:addr]
 Failure:type = const [reason:string]
 
 # A global's data word: a constant, or the address of static data.
-global = (declaration:hir.Declare @nodes:array<hir.AST> @program:code.Program):>void => {
+global = (declaration:hir.Declare nodes:array<hir.AST> @program:code.Program):>void => {
     let initial=hir.node_at(nodes declaration.expr)
     loop initial is? hir.Transmute|hir.ValueCast {initial=hir.node_at(nodes initial.expr)}
     let at=program.image.data.length
@@ -28,68 +30,77 @@ global = (declaration:hir.Declare @nodes:array<hir.AST> @program:code.Program):>
     else {code.fail("global `{declaration.name}` has an initial value this route does not cover" @program)}
 }
 
-build = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? ctx:ssa.Context kinds:Kinds table:types.Table @nodes:array<hir.AST>):>array<uint8>|Failure => {
-    if not source.needs_startup return Failure['a program without a startup function']
-    let program=code.Program[]
-    let none_loc=Span[0 0]
-    loop entry in functions {program.symbols.push(entry.symbol)}
-    program.symbols.push(source.startup_symbol)
-    program.symbols.push('main')
-    loop id in source.globals {
-        let declaration=hir.node_at(nodes id)
-        if declaration isnt? hir.Declare return Failure['a global that is no declaration']
-        global(declaration @nodes @program)
-    }
-    if program.problem not=? '' return Failure[program.problem]
-    loop entry in functions {
-        let function=hir.node_at(nodes entry.literal)
-        if function isnt? hir.FunctionLiteral return Failure['a function unit that is no function']
-        let form=ssa.build(entry.symbol function nodes ctx)
-        if form is? none return Failure["`{entry.symbol}` uses a form the SSA construction does not cover"]
-        code.emit_function(entry.symbol form nodes table @program)
-        if program.problem not=? '' return Failure[program.problem]
-    }
-    # The startup function: the program's module initialization, in order.
-    let startup_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=startup scoped=true])
-    let startup_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=[] kw_only_args=[] rest_args=none rettype=kinds.nothing body=startup_body]
-    let startup_form=ssa.build(source.startup_symbol startup_function nodes ctx)
-    if startup_form is? none return Failure['startup uses a form the SSA construction does not cover']
-    code.emit_function(source.startup_symbol startup_form nodes table @program)
-    # `main`: startup, the command line, then the program's entry function.
+# The startup function and `main` as HIR: startup runs the program's module
+# initialization in order; `main` runs startup, the command line's prologue
+# when there is one (taking `__dewy_argc` and `__dewy_argv`), then the
+# program's entry function, and returns its result or 0.
+Entries:type = const [startup:hir.FunctionLiteral main:hir.FunctionLiteral]
+entries = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? nothing:addr word:addr @nodes:array<hir.AST>):>Entries => {
+    let startup_body=hir.append_node(@nodes hir.Block[loc=Span[0 0] value_type=nothing items=startup scoped=true])
+    let startup_function=hir.FunctionLiteral[loc=Span[0 0] value_type=nothing pos_or_kw_args=[] kw_only_args=[] rest_args=none rettype=nothing body=startup_body]
     let items:array<addr>=[]
-    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=source.startup_symbol])
-    items.push(hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=kinds.nothing func=callee pos_args=[] kw_args=[]]))
+    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc=Span[0 0] value_type=nothing name=source.startup_symbol])
+    items.push(hir.append_node(@nodes hir.FunctionCall[loc=Span[0 0] value_type=nothing func=callee pos_args=[] kw_args=[]]))
     let parameters:array<hir.Param>=[]
     if prologue isnt? none {
-        parameters.push(hir.Param['__dewy_argc' kinds.word])
-        parameters.push(hir.Param['__dewy_argv' kinds.word])
+        parameters.push(hir.Param['__dewy_argc' word])
+        parameters.push(hir.Param['__dewy_argv' word])
         loop item in prologue {items.push(item)}
     }
-    let zero=hir.append_node(@nodes hir.Integer[loc=none_loc value_type=kinds.word prefix='0d' value=0])
+    let zero=hir.append_node(@nodes hir.Integer[loc=Span[0 0] value_type=word prefix='0d' value=0])
     let user=source.user_main_symbol
-    if user is? none {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))}
+    if user is? none {items.push(hir.append_node(@nodes hir.Return[loc=Span[0 0] value_type=nothing item=zero]))}
     else {
         let valued=false
         loop entry in functions {
             if entry.symbol not=? user continue
             let function=hir.node_at(nodes entry.literal)
-            if function is? hir.FunctionLiteral {valued=function.rettype not=? kinds.nothing}
+            if function is? hir.FunctionLiteral {valued=function.rettype not=? nothing}
         }
-        let target=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=user])
+        let target=hir.append_node(@nodes hir.ExpressedIdentifier[loc=Span[0 0] value_type=nothing name=user])
         let passed:array<addr>=[]
         if argument isnt? none {passed.push(argument)}
-        let entered=hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=(if valued kinds.word else kinds.nothing) func=target pos_args=passed kw_args=[]])
-        if valued {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=entered]))}
+        let entered=hir.append_node(@nodes hir.FunctionCall[loc=Span[0 0] value_type=(if valued word else nothing) func=target pos_args=passed kw_args=[]])
+        if valued {items.push(hir.append_node(@nodes hir.Return[loc=Span[0 0] value_type=nothing item=entered]))}
         else {
             items.push(entered)
-            items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))
+            items.push(hir.append_node(@nodes hir.Return[loc=Span[0 0] value_type=nothing item=zero]))
         }
     }
-    let main_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=items scoped=true])
-    let main_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=parameters kw_only_args=[] rest_args=none rettype=kinds.word body=main_body]
-    let main_form=ssa.build('main' main_function nodes ctx)
+    let main_body=hir.append_node(@nodes hir.Block[loc=Span[0 0] value_type=nothing items=items scoped=true])
+    let main_function=hir.FunctionLiteral[loc=Span[0 0] value_type=nothing pos_or_kw_args=parameters kw_only_args=[] rest_args=none rettype=word body=main_body]
+    return Entries[startup_function main_function]
+}
+
+build = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? ctx:ssa.Context kinds:Kinds table:types.Table @nodes:array<hir.AST>):>array<uint8>|Failure => {
+    if not source.needs_startup return Failure['a program without a startup function']
+    # The entries' HIR first: everything after only reads the nodes.
+    let made=entries(functions source startup prologue argument kinds.nothing kinds.word @nodes)
+    const view=@nodes
+    let program=code.Program[]
+    loop entry in functions {program.symbols.push(entry.symbol)}
+    program.symbols.push(source.startup_symbol)
+    program.symbols.push('main')
+    loop id in source.globals {
+        let declaration=hir.node_at(view id)
+        if declaration isnt? hir.Declare return Failure['a global that is no declaration']
+        global(declaration view @program)
+    }
+    if program.problem not=? '' return Failure[program.problem]
+    loop entry in functions {
+        let function=hir.node_at(view entry.literal)
+        if function isnt? hir.FunctionLiteral return Failure['a function unit that is no function']
+        let form=ssa.build(entry.symbol function view ctx)
+        if form is? none return Failure["`{entry.symbol}` uses a form the SSA construction does not cover"]
+        code.emit_function(entry.symbol form view table @program)
+        if program.problem not=? '' return Failure[program.problem]
+    }
+    let startup_form=ssa.build(source.startup_symbol made.startup view ctx)
+    if startup_form is? none return Failure['startup uses a form the SSA construction does not cover']
+    code.emit_function(source.startup_symbol startup_form view table @program)
+    let main_form=ssa.build('main' made.main view ctx)
     if main_form is? none return Failure['the entry uses a form the SSA construction does not cover']
-    code.emit_function('main' main_form nodes table @program)
+    code.emit_function('main' main_form view table @program)
     code.start('main' @program)
     if program.problem not=? '' return Failure[program.problem]
     # A development aid: DEWY_NATIVE_MAP names a file to receive each

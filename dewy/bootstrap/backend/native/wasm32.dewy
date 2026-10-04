@@ -1,6 +1,9 @@
+$explicit_copies
+
 from reporting import Span
 import p"wasm.dewy" as w
 import p"x86_64.dewy" as code
+import p"program.dewy" as drivers
 import p"../udewy/ssa.dewy" as ssa
 import p"../udewy/ssa_udewy.dewy" as trees
 import p"../udewy/program.dewy" as units
@@ -621,7 +624,8 @@ leave = (@f:Fn):>void => {
 
 # The code of one region, as `trees.statements` writes it.
 statements = (region:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @t:trees.Writer @f:Fn @module:Module):>void => {
-    let items=ssa.region_at(body region)
+    $runtime_assert region <? body.regions.length
+    const items=@body.regions[region]
     trees.decide(region items body @t)
     loop i in 0.. and i <? items.length {
         let item=items[i]
@@ -658,7 +662,7 @@ statements = (region:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @
             w.op(w.IF @f.out) w.byte(w.EMPTY @f.out)
             f.depth+=1
             statements(item.b body nodes table @t @f @module)
-            if ssa.region_at(body item.c).length >? 0 {
+            if ssa.region_length(body item.c) >? 0 {
                 w.op(w.ELSE @f.out)
                 statements(item.c body nodes table @t @f @module)
             }
@@ -689,7 +693,7 @@ emit_function = (symbol:string body:ssa.Body kinds:trees.Kinds nodes:array<hir.A
         return void
     }
     let f=Fn[position=position params=body.params.length as int64]
-    let t=trees.Writer[kinds Span[0 0]]
+    let t=trees.Writer[kinds 0 0]
     trees.count(body @t)
     # The stack pointer at entry, restored on return when the function
     # reserves stack; its local is chosen before the body's.
@@ -712,7 +716,8 @@ emit_function = (symbol:string body:ssa.Body kinds:trees.Kinds nodes:array<hir.A
         w.byte(w.I64 @entry)
     } else {w.uleb(0 @entry)}
     let shift=entry.length
-    w.append(f.out @entry)
+    const code=@f.out
+    w.append(code @entry)
     loop module.bodies.length <=? position {
         let empty:array<uint8>=[]
         module.bodies.push(empty)
@@ -733,12 +738,17 @@ emit_function = (symbol:string body:ssa.Body kinds:trees.Kinds nodes:array<hir.A
 # The module's bytes.
 finish = (main:string @module:Module):>array<uint8> => {
     let zeroed_base=DATA_BASE+(((module.data.length as int64)+7)//8)*8
-    loop fill in module.fills {overwrite(fill.at zeroed_base+fill.offset @module)}
-    loop patch in module.patches {
-        $runtime_assert patch.function <? module.bodies.length
-        let body=module.bodies[patch.function]
-        w.patch(patch.at zeroed_base+patch.offset @body)
-        module.bodies[patch.function]=body
+    loop k in 0.. and k <? module.fills.length {
+        let at=module.fills[k].at
+        let offset=module.fills[k].offset
+        overwrite(at zeroed_base+offset @module)
+    }
+    loop k in 0.. and k <? module.patches.length {
+        let function=module.patches[k].function
+        let at=module.patches[k].at
+        let offset=module.patches[k].offset
+        $runtime_assert function <? module.bodies.length
+        w.patch(at zeroed_base+offset @module.bodies[function])
     }
     let data_end=zeroed_base+module.zeroed
     let stack_top_floor=((data_end+15)//16)*16+1048576
@@ -747,7 +757,7 @@ finish = (main:string @module:Module):>array<uint8> => {
     let pages_needed=(required+PAGE-1)//PAGE
     let pages=if pages_needed <? 32 32 else pages_needed
     let widest=module.widest
-    loop host in module.host_list {if host.arity >? widest {widest=host.arity}}
+    loop k in 0.. and k <? module.host_list.length {if module.host_list[k].arity >? widest {widest=module.host_list[k].arity}}
     let out:array<uint8>=[0 97 115 109 1 0 0 0]
     # Types: one per parameter count, each returning an i64.
     let types_section:array<uint8>=[]
@@ -765,13 +775,14 @@ finish = (main:string @module:Module):>array<uint8> => {
     let imports:array<uint8>=[]
     w.uleb((module.host_list.length as int64)+1 @imports)
     w.name('env' @imports) w.name('memory' @imports) w.byte(2 @imports) w.byte(0 @imports) w.uleb(pages @imports)
-    loop host in module.host_list {
+    loop k in 0.. and k <? module.host_list.length {
+        const host=@module.host_list[k]
         w.name('env' @imports) w.name(host.name @imports) w.byte(0 @imports) w.uleb(host.arity @imports)
     }
     w.section(w.IMPORT imports @out)
     let functions:array<uint8>=[]
     w.uleb(module.arities.length as int64 @functions)
-    loop count in module.arities {w.uleb(count @functions)}
+    loop k in 0.. and k <? module.arities.length {w.uleb(module.arities[k] @functions)}
     w.section(w.FUNCTION functions @out)
     let tables:array<uint8>=[]
     w.uleb(1 @tables) w.byte(w.FUNCREF @tables) w.byte(0 @tables) w.uleb(module.arities.length as int64 @tables)
@@ -793,7 +804,7 @@ finish = (main:string @module:Module):>array<uint8> => {
     let codes:array<uint8>=[]
     w.uleb(module.bodies.length as int64 @codes)
     loop k in 0.. and k <? module.bodies.length {
-        let body=module.bodies[k]
+        const body=@module.bodies[k]
         w.uleb(body.length as int64 @codes)
         w.append(body @codes)
     }
@@ -801,7 +812,8 @@ finish = (main:string @module:Module):>array<uint8> => {
     let data:array<uint8>=[]
     w.uleb(1 @data) w.uleb(0 @data) w.i32_const(DATA_BASE @data) w.byte(w.END @data)
     w.uleb(module.data.length as int64 @data)
-    w.append(module.data @data)
+    const bytes=@module.data
+    w.append(bytes @data)
     w.section(w.DATA data @out)
     return out
 }
@@ -811,12 +823,15 @@ Failure:type = const [reason:string]
 
 build = (functions:array<units.Function> source:units.Program startup:array<addr> prologue:array<addr>|none argument:addr? ctx:ssa.Context kinds:Kinds table:types.Table @nodes:array<hir.AST>):>array<uint8>|Failure => {
     if not source.needs_startup return Failure['a program without a startup function']
+    # The entries' HIR first (as for x86-64): everything after only reads
+    # the nodes.
+    let made=drivers.entries(functions source startup prologue argument kinds.nothing kinds.word @nodes)
+    const view=@nodes
     let module=Module[]
     loop host in hosts() {
         module.hosts[host.called_as]=module.host_list.length as int64
         module.host_list.push(host)
     }
-    let none_loc=Span[0 0]
     loop entry in functions {module.positions[entry.symbol]=module.positions.length}
     module.positions[source.startup_symbol]=module.positions.length
     module.positions['main']=module.positions.length
@@ -825,59 +840,25 @@ build = (functions:array<units.Function> source:units.Program startup:array<addr
     let reads_command_line=prologue isnt? none
     if reads_command_line {module.positions['__dewy_wasm_entry']=module.positions.length}
     loop id in source.globals {
-        let declaration=hir.node_at(nodes id)
+        let declaration=hir.node_at(view id)
         if declaration isnt? hir.Declare return Failure['a global that is no declaration']
-        global(declaration nodes @module)
+        global(declaration view @module)
     }
     if module.problem not=? '' return Failure[module.problem]
     loop entry in functions {
-        let function=hir.node_at(nodes entry.literal)
+        let function=hir.node_at(view entry.literal)
         if function isnt? hir.FunctionLiteral return Failure['a function unit that is no function']
-        let form=ssa.build(entry.symbol function nodes ctx)
+        let form=ssa.build(entry.symbol function view ctx)
         if form is? none return Failure["`{entry.symbol}` uses a form the SSA construction does not cover"]
-        emit_function(entry.symbol form kinds.tree_kinds nodes table @module)
+        emit_function(entry.symbol form kinds.tree_kinds view table @module)
         if module.problem not=? '' return Failure[module.problem]
     }
-    let startup_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=startup scoped=true])
-    let startup_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=[] kw_only_args=[] rest_args=none rettype=kinds.nothing body=startup_body]
-    let startup_form=ssa.build(source.startup_symbol startup_function nodes ctx)
+    let startup_form=ssa.build(source.startup_symbol made.startup view ctx)
     if startup_form is? none return Failure['startup uses a form the SSA construction does not cover']
-    emit_function(source.startup_symbol startup_form kinds.tree_kinds nodes table @module)
-    # `main`: startup, the command line, then the program's entry function.
-    let items:array<addr>=[]
-    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=source.startup_symbol])
-    items.push(hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=kinds.nothing func=callee pos_args=[] kw_args=[]]))
-    let parameters:array<hir.Param>=[]
-    if prologue isnt? none {
-        parameters.push(hir.Param['__dewy_argc' kinds.word])
-        parameters.push(hir.Param['__dewy_argv' kinds.word])
-        loop item in prologue {items.push(item)}
-    }
-    let zero=hir.append_node(@nodes hir.Integer[loc=none_loc value_type=kinds.word prefix='0d' value=0])
-    let user=source.user_main_symbol
-    if user is? none {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))}
-    else {
-        let valued=false
-        loop entry in functions {
-            if entry.symbol not=? user continue
-            let function=hir.node_at(nodes entry.literal)
-            if function is? hir.FunctionLiteral {valued=function.rettype not=? kinds.nothing}
-        }
-        let target=hir.append_node(@nodes hir.ExpressedIdentifier[loc=none_loc value_type=kinds.nothing name=user])
-        let passed:array<addr>=[]
-        if argument isnt? none {passed.push(argument)}
-        let entered=hir.append_node(@nodes hir.FunctionCall[loc=none_loc value_type=(if valued kinds.word else kinds.nothing) func=target pos_args=passed kw_args=[]])
-        if valued {items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=entered]))}
-        else {
-            items.push(entered)
-            items.push(hir.append_node(@nodes hir.Return[loc=none_loc value_type=kinds.nothing item=zero]))
-        }
-    }
-    let main_body=hir.append_node(@nodes hir.Block[loc=none_loc value_type=kinds.nothing items=items scoped=true])
-    let main_function=hir.FunctionLiteral[loc=none_loc value_type=kinds.nothing pos_or_kw_args=parameters kw_only_args=[] rest_args=none rettype=kinds.word body=main_body]
-    let main_form=ssa.build('main' main_function nodes ctx)
+    emit_function(source.startup_symbol startup_form kinds.tree_kinds view table @module)
+    let main_form=ssa.build('main' made.main view ctx)
     if main_form is? none return Failure['the entry uses a form the SSA construction does not cover']
-    emit_function('main' main_form kinds.tree_kinds nodes table @module)
+    emit_function('main' main_form kinds.tree_kinds view table @module)
     if module.problem not=? '' return Failure[module.problem]
     if not reads_command_line return finish('main' @module)
     let entry_position=module.positions.get('__dewy_wasm_entry')

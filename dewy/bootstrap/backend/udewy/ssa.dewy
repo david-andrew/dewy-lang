@@ -95,17 +95,13 @@ value_at = (body:Body id:addr):>Value => {
     $runtime_assert id <? body.values.length
     return body.values[id]
 }
-region_at = (body:Body id:addr):>array<Item> => {
+region_length = (body:Body id:addr):>addr => {
     $runtime_assert id <? body.regions.length
-    return body.regions[id]
+    return body.regions[id].length
 }
 cond_at = (body:Body id:addr):>Cond => {
     $runtime_assert id <? body.conds.length
     return body.conds[id]
-}
-declared_at = (body:Body id:addr):>array<Declared> => {
-    $runtime_assert id <? body.declared.length
-    return body.declared[id]
 }
 operand_at = (body:Body index:addr):>addr => {
     $runtime_assert index <? body.operands.length
@@ -452,7 +448,10 @@ leaves = (items:array<Item> body:Body top:bool):>bool => {
         if item.kind =? I_BREAK or item.kind =? I_CONTINUE {
             if not top or i+1 not=? items.length return false
         } else if item.kind =? I_IF {
-            if not leaves(region_at(body item.b) body false) or not leaves(region_at(body item.c) body false) return false
+            $runtime_assert item.b <? body.regions.length and item.c <? body.regions.length
+            const taken=@body.regions[item.b]
+            const skipped=@body.regions[item.c]
+            if not leaves(taken body false) or not leaves(skipped body false) return false
         }
     }
     return if top items.length >? 0 and items[end].kind =? I_BREAK else true
@@ -463,13 +462,14 @@ leaves = (items:array<Item> body:Body top:bool):>bool => {
 inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
     let function=hir.node_at(nodes target.literal)
     $runtime_assert function is? hir.FunctionLiteral
+    # Each environment moves out and is renewed empty for the callee.
     let fixed=b.fixed
-    let env=b.env
-    let mutable=b.mutable
-    let was_inlined=b.inlined
     b.fixed=[]
+    let env=b.env
     b.env=[]
+    let mutable=b.mutable
     b.mutable=set[]
+    let was_inlined=b.inlined
     assigned(function.body nodes @b.mutable)
     loop i in 0.. and i <? function.pos_or_kw_args.length and i <? arguments.length {
         let parameter=function.pos_or_kw_args[i]
@@ -531,7 +531,11 @@ inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @
         b.loops.pop;
         b.region=outer
         b.dead=false
-        let built=region_at(b.body body)
+        # The block's items move out; they move back when the block stays.
+        $runtime_assert body <? b.body.regions.length
+        let built=b.body.regions[body]
+        let cleared:array<Item>=[]
+        b.body.regions[body]=cleared
         if built.length >? 0 and leaves(built b.body true) {
             # Folding left one path that returns at its end: no block is
             # needed, and the returned value is the result itself.
@@ -541,10 +545,9 @@ inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @
                 if item.kind =? I_COPY and owner not=? 0 and web(value_at(b.body item.a)) =? owner and web(value_at(b.body item.b)) not=? owner {result=item.b}
                 place(item @b)
             }
-            let cleared:array<Item>=[]
-            $runtime_assert body <? b.body.regions.length
-            b.body.regions[body]=cleared
         } else {
+            $runtime_assert body <? b.body.regions.length
+            b.body.regions[body]=built
             place(Item[I_LOOP body d=list] @b)
             if target.valued {
                 loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {
@@ -622,10 +625,10 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
 # the next, and the call is innermost.
 guarded_call = (guarded:Guarded callee:hir.FunctionLiteral arguments:array<addr> node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
     let fixed=b.fixed
-    let env=b.env
-    let mutable=b.mutable
     b.fixed=[]
+    let env=b.env
     b.env=[]
+    let mutable=b.mutable
     b.mutable=set[]
     loop i in 0.. and i <? callee.pos_or_kw_args.length and i <? arguments.length {b.fixed[callee.pos_or_kw_args[i].name]=arguments[i]}
     guard_from(0 guarded arguments node nodes ctx @b)
@@ -978,10 +981,12 @@ simplify = (@body:Body):>void => {
         let single:array<addr>=[]
         loop i in 0.. and i <? body.values.length {single.push(0)}
         loop l in 0.. and l <? body.declared.length {
-            loop entry in declared_at(body l) {if entry.init not=? 0 {note(entry.merge entry.init replaced @single)}}
+            const entries=@body.declared[l]
+            loop entry in entries {if entry.init not=? 0 {note(entry.merge entry.init replaced @single)}}
         }
         loop r in 0.. and r <? body.regions.length {
-            loop item in region_at(body r) {if item.kind =? I_COPY {note(item.a item.b replaced @single)}}
+            const items=@body.regions[r]
+            loop item in items {if item.kind =? I_COPY {note(item.a item.b replaced @single)}}
         }
         loop id in 0.. and id <? body.values.length and id <? single.length and id <? replaced.length {
             let source=single[id]

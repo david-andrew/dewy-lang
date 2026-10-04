@@ -1,3 +1,5 @@
+$explicit_copies
+
 from reporting import Span
 import p"ssa.dewy" as ssa
 import p"../../semantic/hir.dewy" as hir
@@ -34,7 +36,9 @@ const SWEPT:addr=2
 
 Writer:type = [
     kinds:Kinds
-    loc:Span
+    # The function's location, which every written node carries.
+    start:addr
+    stop:addr
     uses:array<addr>=[]
     # Per web (by its first version): how often any version is read.
     reads:array<addr>=[]
@@ -47,6 +51,8 @@ Writer:type = [
     serial:addr=0
     next_root:addr=3
 ]
+
+here = (w:Writer):>Span => Span[w.start w.stop]
 
 # Effect classes for moving a value past an item.
 const PURE:addr=0
@@ -124,7 +130,9 @@ count = (body:ssa.Body @w:Writer):>void => {
     }
     let dropped=false
     loop r in 0.. and r <? body.regions.length {
-        loop item in ssa.region_at(body r) {
+        $runtime_assert r <? body.regions.length
+        const region_items=@body.regions[r]
+        loop item in region_items {
             if (item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE) and item.b not=? 0 and unread(item body w) {
                 unuse(item.b @w.uses)
                 dropped=true
@@ -134,8 +142,10 @@ count = (body:ssa.Body @w:Writer):>void => {
     if dropped {sweep(body 1 @w)}
     # Lazy condition leaves are whole trees by construction.
     loop test in body.conds {
-        if test.kind not=? ssa.C_LEAF or test.b =? 0 continue
-        loop item in ssa.region_at(body test.b) {
+        if test.kind not=? ssa.C_LEAF or test.b =? 0 {continue}
+        $runtime_assert test.b <? body.regions.length
+        const region_items=@body.regions[test.b]
+        loop item in region_items {
             if item.kind =? ssa.I_VALUE {
                 $runtime_assert item.a <? w.root.length
                 w.root[item.a]=LAZY
@@ -276,7 +286,7 @@ local_name = (id:addr body:ssa.Body @w:Writer):>string => {
 reference = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
     $runtime_assert id <? w.references.length
     if w.references[id] not=? 0 return w.references[id]
-    let created=hir.append_node(@nodes hir.ExpressedIdentifier[loc=w.loc value_type=ssa.value_at(body id).type name=local_name(id body @w)])
+    let created=hir.append_node(@nodes hir.ExpressedIdentifier[loc=here(w) value_type=ssa.value_at(body id).type name=local_name(id body @w)])
     $runtime_assert id <? w.references.length
     w.references[id]=created
     return created
@@ -287,7 +297,7 @@ tree = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
     let entry=ssa.value_at(body id)
     if entry.kind =? ssa.K_CONST {
         if entry.b =? 0 return entry.node
-        return hir.append_node(@nodes hir.Bool[loc=w.loc value_type=entry.type value=entry.a =? 2])
+        return hir.append_node(@nodes hir.Bool[loc=here(w) value_type=entry.type value=entry.a =? 2])
     }
     if entry.kind =? ssa.K_PARAM or entry.kind =? ssa.K_MERGE or root_of(w id) =? 0 return reference(id body @nodes @w)
     return expression(entry body @nodes @w)
@@ -296,62 +306,67 @@ tree = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
 expression = (entry:ssa.Value body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
     if entry.kind =? ssa.K_LEAF or entry.kind =? ssa.K_GLOBAL_GET return entry.node
     if entry.kind =? ssa.K_MOVE return tree(entry.a body @nodes @w)
-    if entry.kind =? ssa.K_TRANSMUTE return hir.append_node(@nodes hir.Transmute[loc=w.loc value_type=entry.type expr=tree(entry.a body @nodes @w)])
-    if entry.kind =? ssa.K_UNARY or entry.kind =? ssa.K_LOAD return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=entry.node pos_args=[tree(entry.a body @nodes @w)] kw_args=[]])
+    if entry.kind =? ssa.K_TRANSMUTE return hir.append_node(@nodes hir.Transmute[loc=here(w) value_type=entry.type expr=tree(entry.a body @nodes @w)])
+    if entry.kind =? ssa.K_UNARY or entry.kind =? ssa.K_LOAD return hir.append_node(@nodes hir.FunctionCall[loc=here(w) value_type=entry.type func=entry.node pos_args=[tree(entry.a body @nodes @w)] kw_args=[]])
     if entry.kind =? ssa.K_BINARY {
         let left=tree(entry.a body @nodes @w)
         let right=tree(entry.b body @nodes @w)
-        return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=entry.node pos_args=[left right] kw_args=[]])
+        return hir.append_node(@nodes hir.FunctionCall[loc=here(w) value_type=entry.type func=entry.node pos_args=[left right] kw_args=[]])
     }
-    if entry.kind =? ssa.K_GLOBAL_SET return hir.append_node(@nodes hir.Assign[loc=w.loc value_type=w.kinds.nothing target=entry.node op='=' value=tree(entry.a body @nodes @w)])
+    if entry.kind =? ssa.K_GLOBAL_SET return hir.append_node(@nodes hir.Assign[loc=here(w) value_type=w.kinds.nothing target=entry.node op='=' value=tree(entry.a body @nodes @w)])
     let arguments:array<addr>=[]
     let function=entry.node
     loop k in 0.. and k <? entry.b {
         let operand=tree(ssa.operand_at(body entry.a+k) body @nodes @w)
         if k =? 0 and entry.kind =? ssa.K_CALL_VALUE {function=operand} else {arguments.push(operand)}
     }
-    return hir.append_node(@nodes hir.FunctionCall[loc=w.loc value_type=entry.type func=function pos_args=arguments kw_args=[]])
+    return hir.append_node(@nodes hir.FunctionCall[loc=here(w) value_type=entry.type func=function pos_args=arguments kw_args=[]])
 }
 zero = (type:addr table:types.Table @nodes:array<hir.AST> w:Writer):>addr => {
     let target=types.node_at(table type)
-    if types.is_primitive(target 'bool') return hir.append_node(@nodes hir.Bool[loc=w.loc value_type=type value=false])
+    if types.is_primitive(target 'bool') return hir.append_node(@nodes hir.Bool[loc=here(w) value_type=type value=false])
     if target is? types.FunctionType {
-        let word=hir.append_node(@nodes hir.Integer[loc=w.loc value_type=w.kinds.word prefix='0d' value=0])
-        return hir.append_node(@nodes hir.Transmute[loc=w.loc value_type=type expr=word])
+        let word=hir.append_node(@nodes hir.Integer[loc=here(w) value_type=w.kinds.word prefix='0d' value=0])
+        return hir.append_node(@nodes hir.Transmute[loc=here(w) value_type=type expr=word])
     }
-    return hir.append_node(@nodes hir.Integer[loc=w.loc value_type=type prefix='0d' value=0])
+    return hir.append_node(@nodes hir.Integer[loc=here(w) value_type=type prefix='0d' value=0])
 }
 tested = (id:addr body:ssa.Body @nodes:array<hir.AST> @w:Writer):>addr => {
     let entry=ssa.cond_at(body id)
     if entry.kind =? ssa.C_LEAF return tree(entry.a body @nodes @w)
     let left=tested(entry.a body @nodes @w)
     let right=tested(entry.b body @nodes @w)
-    return hir.append_node(@nodes hir.ShortCircuit[loc=w.loc value_type=w.kinds.boolean op=(if entry.kind =? ssa.C_AND 'and' else 'or') left=left right=right])
+    return hir.append_node(@nodes hir.ShortCircuit[loc=here(w) value_type=w.kinds.boolean op=(if entry.kind =? ssa.C_AND 'and' else 'or') left=left right=right])
 }
-scoped = (items:array<addr> @nodes:array<hir.AST> w:Writer):>addr => hir.append_node(@nodes hir.Block[loc=w.loc value_type=w.kinds.nothing items=items scoped=true])
+scoped = (items:array<addr> @nodes:array<hir.AST> w:Writer):>addr => hir.append_node(@nodes hir.Block[loc=here(w) value_type=w.kinds.nothing items=items scoped=true])
 
 # A loop body that is one test whose other path only leaves the loop is
 # `loop test { ... }`.
-looped = (statements:array<addr> @nodes:array<hir.AST> w:Writer):>addr => {
+tested_loop = (statements:array<addr> @nodes:array<hir.AST> w:Writer):>addr? => {
     if statements.length =? 1 {
         let only=hir.node_at(nodes statements[0])
         if only is? hir.Flow and only.arms.length =? 1 and only.default isnt? none {
             let arm=hir.node_at(nodes only.arms[0])
             let other=hir.node_at(nodes only.default)
             if arm is? hir.IfArm and other is? hir.Block and other.items.length =? 1 and hir.node_at(nodes other.items[0]) is? hir.Break {
-                let repeated=hir.append_node(@nodes hir.LoopArm[loc=w.loc value_type=w.kinds.nothing condition=arm.condition body=arm.body])
-                return hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[repeated] default=none])
+                let repeated=hir.append_node(@nodes hir.LoopArm[loc=here(w) value_type=w.kinds.nothing condition=arm.condition body=arm.body])
+                return hir.append_node(@nodes hir.Flow[loc=here(w) value_type=w.kinds.nothing arms=[repeated] default=none])
             }
         }
     }
-    let always=hir.append_node(@nodes hir.Bool[loc=w.loc value_type=w.kinds.boolean value=true])
-    let repeated=hir.append_node(@nodes hir.LoopArm[loc=w.loc value_type=w.kinds.nothing condition=always body=scoped(statements @nodes w)])
-    return hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[repeated] default=none])
+    return none
+}
+# Any other loop body repeats until it leaves.
+endless_loop = (block:addr @nodes:array<hir.AST> w:Writer):>addr => {
+    let always=hir.append_node(@nodes hir.Bool[loc=here(w) value_type=w.kinds.boolean value=true])
+    let repeated=hir.append_node(@nodes hir.LoopArm[loc=here(w) value_type=w.kinds.nothing condition=always body=block])
+    return hir.append_node(@nodes hir.Flow[loc=here(w) value_type=w.kinds.nothing arms=[repeated] default=none])
 }
 
 # The statements of one region.
 statements = (region:addr body:ssa.Body table:types.Table @nodes:array<hir.AST> @w:Writer):>array<addr> => {
-    let items=ssa.region_at(body region)
+    $runtime_assert region <? body.regions.length
+    const items=@body.regions[region]
     decide(region items body @w)
     let output:array<addr>=[]
     loop i in 0.. and i <? items.length {
@@ -363,39 +378,42 @@ statements = (region:addr body:ssa.Body table:types.Table @nodes:array<hir.AST> 
             if count =? 0 and removable(entry.kind) continue
             let computed=expression(entry body @nodes @w)
             if count =? 0 {output.push(computed)}
-            else {output.push(hir.append_node(@nodes hir.Declare[loc=w.loc value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=entry.type expr=computed]))}
+            else {output.push(hir.append_node(@nodes hir.Declare[loc=here(w) value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=entry.type expr=computed]))}
         } else if item.kind =? ssa.I_RETURN {
-            if item.b =? 1 {output.push(hir.append_node(@nodes hir.Return[loc=w.loc value_type=w.kinds.bottom item=tree(item.a body @nodes @w)]))}
-            else {output.push(hir.append_node(@nodes hir.Return[loc=w.loc value_type=w.kinds.bottom]))}
-        } else if item.kind =? ssa.I_BREAK {output.push(hir.append_node(@nodes hir.Break[loc=w.loc value_type=w.kinds.bottom]))}
-        else if item.kind =? ssa.I_CONTINUE {output.push(hir.append_node(@nodes hir.Continue[loc=w.loc value_type=w.kinds.bottom]))}
+            if item.b =? 1 {output.push(hir.append_node(@nodes hir.Return[loc=here(w) value_type=w.kinds.bottom item=tree(item.a body @nodes @w)]))}
+            else {output.push(hir.append_node(@nodes hir.Return[loc=here(w) value_type=w.kinds.bottom]))}
+        } else if item.kind =? ssa.I_BREAK {output.push(hir.append_node(@nodes hir.Break[loc=here(w) value_type=w.kinds.bottom]))}
+        else if item.kind =? ssa.I_CONTINUE {output.push(hir.append_node(@nodes hir.Continue[loc=here(w) value_type=w.kinds.bottom]))}
         else if item.kind =? ssa.I_COPY {
             if silent(item body) or unread(item body w) continue
-            output.push(hir.append_node(@nodes hir.Assign[loc=w.loc value_type=w.kinds.nothing target=reference(item.a body @nodes @w) op='=' value=tree(item.b body @nodes @w)]))
+            output.push(hir.append_node(@nodes hir.Assign[loc=here(w) value_type=w.kinds.nothing target=reference(item.a body @nodes @w) op='=' value=tree(item.b body @nodes @w)]))
         } else if item.kind =? ssa.I_DECLARE {
             if unread(item body w) continue
             let initial=if item.b =? 0 zero(ssa.value_at(body item.a).type table @nodes w) else tree(item.b body @nodes @w)
-            output.push(hir.append_node(@nodes hir.Declare[loc=w.loc value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=ssa.value_at(body item.a).type expr=initial]))
+            output.push(hir.append_node(@nodes hir.Declare[loc=here(w) value_type=w.kinds.nothing decltype='let' name=local_name(item.a body @w) annotation=ssa.value_at(body item.a).type expr=initial]))
         } else if item.kind =? ssa.I_IF {
             let condition=tested(item.a body @nodes @w)
             let taken=statements(item.b body table @nodes @w)
             let skipped=statements(item.c body table @nodes @w)
-            let arm=hir.append_node(@nodes hir.IfArm[loc=w.loc value_type=w.kinds.nothing condition=condition body=scoped(taken @nodes w)])
+            let arm=hir.append_node(@nodes hir.IfArm[loc=here(w) value_type=w.kinds.nothing condition=condition body=scoped(taken @nodes w)])
             let fallback:addr?=none
             if skipped.length >? 0 {fallback=scoped(skipped @nodes w)}
-            output.push(hir.append_node(@nodes hir.Flow[loc=w.loc value_type=w.kinds.nothing arms=[arm] default=fallback]))
+            output.push(hir.append_node(@nodes hir.Flow[loc=here(w) value_type=w.kinds.nothing arms=[arm] default=fallback]))
         } else if item.kind =? ssa.I_LOOP {
             let inner=statements(item.a body table @nodes @w)
-            output.push(looped(inner @nodes w))
+            let simple=tested_loop(inner @nodes w)
+            output.push(if simple isnt? none simple else endless_loop(scoped(inner @nodes w) @nodes w))
         }
     }
     return output
 }
 # The function with its body rewritten from the form.
 write = (function:hir.FunctionLiteral body:ssa.Body kinds:Kinds table:types.Table @nodes:array<hir.AST>):>addr => {
-    let w=Writer[kinds function.loc]
+    let w=Writer[kinds function.loc.start function.loc.stop]
     count(body @w)
     let items=statements(body.root body table @nodes @w)
     let block=scoped(items @nodes w)
-    return hir.append_node(@nodes hir.FunctionLiteral[loc=function.loc value_type=function.value_type pos_or_kw_args=function.pos_or_kw_args kw_only_args=function.kw_only_args rest_args=function.rest_args rettype=function.rettype body=block object_receiver=function.object_receiver object_fields=function.object_fields object_type=function.object_type source=function.source proof=function.proof lifecycle=function.lifecycle lifecycle_composition=function.lifecycle_composition])
+    # A new literal beside the original, which stays in the node arena: its
+    # parameters and fields are copies.
+    return hir.append_node(@nodes hir.FunctionLiteral[loc=here(w) value_type=function.value_type pos_or_kw_args=function.pos_or_kw_args.copy kw_only_args=function.kw_only_args.copy rest_args=function.rest_args.copy rettype=function.rettype body=block object_receiver=function.object_receiver object_fields=function.object_fields.copy object_type=function.object_type source=function.source proof=function.proof lifecycle=function.lifecycle.copy lifecycle_composition=function.lifecycle_composition])
 }

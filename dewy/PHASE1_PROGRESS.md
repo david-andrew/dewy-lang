@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 80 of 133 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 53 (≈43.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
+| C2 | Strict-source adoption of the compiler | 87 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 54 (≈45.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,36 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies in the optimizing tier's modules (2026-10-04)
+
+The optimizing tier's newer modules were written without `$explicit_copies`,
+which grew row C2 by eight modules. Seven now carry it (`ssa_udewy` and the
+six in `backend/native/`), through restructuring rather than annotations:
+
+- the tree writer keeps its function's location as two numbers and gives
+  every written node a fresh span, instead of copying one span into each;
+- region items are read through views (`const items=@body.regions[r]`) or a
+  `region_length` accessor; `region_at`, which returned each region's items
+  as a copy, is gone;
+- the program drivers append their startup and entry HIR first and then
+  read the nodes through one view (the hosted checker counts passing the
+  `@nodes` place to a by-value parameter as a copy, where native borrows);
+- jump and table records are read field by field where their array changes,
+  and arrays held in records are walked by index;
+- a written function literal copies its parameter arrays explicitly: the
+  original stays in the node arena.
+
+`ssa.dewy` stays without the directive: its builder saves and restores its
+environment dictionaries around each inlined body, and moving a field out of
+a place parameter is not a supported transfer. A stack of scopes in the
+builder would remove the save; that is the next step for this module.
+
+`library/linux/system.dewy`, kept for older bootstrap seeds, is removed: the
+seed for this revision lists `library/system.dewy`.
+
+Evidence: native fixed point; the hosted compiler builds the test driver
+from these sources. Full local gate: 6,400 passed.
 
 ## wasm32: the prelude runs, and the optimizing tier emits modules (2026-10-03)
 
