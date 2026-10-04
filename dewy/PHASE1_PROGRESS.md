@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 95 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 46 (≈43.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
+| C2 | Strict-source adoption of the compiler | 103 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 38 (≈41.7k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
 | C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
 
 ### Integration
@@ -145,6 +145,22 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: eight more analysis modules (2026-10-04)
+
+With the moves below in a verified seed (`4b653cdb`), the drop-the-rejected
+loop over every non-strict module (native build, then the hosted driver)
+leaves eight more modules strict in both compilers: `expression_intervals`,
+`intervals`, `linear_facts`, `obligations`, `refinement_facts`,
+`term_facts`, `value_bounds` and `effect_rows`. The first rejection in each
+remaining module is recorded in the loop's log; the common ones are a record
+taken from `dict.get` (an owned optional result), values read again after
+being stored, and returns from containers. The hosted compiler alone also
+rejects `cache_values` (a call result converted to a union counts as a
+borrowed view of its receiver) beside the known `binding_facts` and
+`loop_qualifiers` cases (row C3).
+
+Non-strict modules: 38 of 141 (from 46).
 
 ## Moves: a place parameter's field taken and stored back; dictionary `pop` (2026-10-04)
 
