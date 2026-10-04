@@ -52,6 +52,12 @@ word = (value:int64 @image:Image):>int64 => {
     u64(value @image.data)
     return offset
 }
+# A zero word of data to be filled in later; the result is its offset.
+slot = (@image:Image):>addr => {
+    let offset=image.data.length
+    u64(0 @image.data)
+    return offset
+}
 # Bytes with their length in the word before them, as µDewy lays out a
 # string: the result is the offset of the bytes.
 bytes = (content:array<uint8> @image:Image):>int64 => {

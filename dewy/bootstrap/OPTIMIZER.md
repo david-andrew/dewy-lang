@@ -323,6 +323,53 @@ What the benchmarks point at next: bounds checks and sharing tests that a
 loop repeats without anything able to change their outcome; records stored
 flat in arrays; the dictionary probe by key type; `push`.
 
+## Register allocation and code shape, measured against GCC (2026-10-03)
+
+[`PERFORMANCE.md`](PERFORMANCE.md#generated-code-against-gcc-on-the-same-program-2026-10-03)
+has the method and the numbers; the changes, in the x86-64 emitter unless
+noted:
+
+- **What counts as a call.** Only a call to a function or through a
+  function value, and a system call, overwrites registers a value may live
+  in. Stores, shifts and other intrinsics were counted too, which sent any
+  value live across a store to a callee-saved register.
+- **Parameters** may live in caller-saved registers, preferring the one they
+  arrive in; arrival is one parallel move (frame slots first, then each
+  register no pending move still reads, a cycle broken through `rax`).
+- **`r11`** is allocated (a system call overwrites it, so system calls stay
+  calls). A called function value goes through `rax`; a stored value's
+  scratch register is `rdx`.
+- **Coalescing.** A value computed right before it is copied into a
+  variable, and used by nothing else, is computed in the variable's place:
+  `x = x + 1` is one `add`. A value computed right before it is returned is
+  computed in `rax`.
+- **Dead values.** A value nobody reads, whose computing has no effect, is
+  not computed.
+- **Branches.** The leftmost comparison of a compound test is fused into
+  its branch; a conditional jump over an unconditional one becomes the
+  opposite jump; jumps to unconditional jumps go to their targets; a jump to
+  the next instruction is dropped.
+- **Globals and constants.** A global is loaded into and stored from the
+  register its value uses; a constant that fits 32 bits is stored as an
+  immediate.
+- **In the SSA builder:** a global read after a set, with no call or store
+  between, is the value it was set to; and an `if` arm that ends in a
+  `return`, `break` or `continue` no longer invalidates loads after the
+  `if`.
+- **Inlining.** A callee of at most 12 nodes is built in place whatever
+  the caller's growth budget. A function without a result that is too large
+  to inline but starts with early exits (`if c {return}`, or a body that is
+  all one `if c {…}`) has those tests built at each call site, which calls
+  only when none exits; the tests must be pure, since the callee repeats
+  them.
+- **Jump tables.** A run of tests of one value against constants (`t =? k`
+  and the range form `(t - k) <u n` that `is?` produces), either as `if`s
+  whose arms leave or as an `else if` chain, with at least four tests and a
+  range at most 1024 wide and eight times the number of tests, becomes one
+  bounds check and a jump through a table in the data segment. The first
+  test to hold wins, as before. The compiler has 77 of them (GCC makes 99
+  from the same C).
+
 ## Inlining measurements before the SSA form (2026-10-03)
 
 Each row is a cold self-build, interleaved, with every compiler building its

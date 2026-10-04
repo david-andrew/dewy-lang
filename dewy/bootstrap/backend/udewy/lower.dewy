@@ -6086,9 +6086,12 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     # the debugger; an ordinary build carries the identity alone.
     # Carry the source name of a named function into its symbol so stack
     # traces, profiles and emitted text identify it. Unique ids stay in front.
+    # A profile of a native executable asks for them too (DEWY_NATIVE_MAP,
+    # see `../native/program.dewy`): they change no code there.
+    let spelled=state.debug_names or environment('DEWY_NATIVE_MAP') isnt? none
     loop [binding id] in named {
         let source_name=state.capture_plan.names.get(binding)
-        if source_name isnt? none and state.debug_names {state.code_symbols[id]="_f{id}_{emit.name(source_name)}"}
+        if source_name isnt? none and spelled {state.code_symbols[id]="_f{id}_{emit.name(source_name)}"}
     }
     loop [binding id] in named {
         let name=state.code_symbols.get(id)

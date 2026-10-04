@@ -1002,3 +1002,66 @@ refined to non-negative, so `-1` could encode `none` in one word. But
 is accepted, so a negative `addr` can exist. A niche needs transmutes into
 refined types to be rejected or checked; that is a language decision.
 Narrow integers (32 bits and below) have spare values without it.
+
+## Where a native-route self-build spends its time (2026-10-03)
+
+The natively built compiler compiling itself (36.4 s, 64 thousand lines,
+3.4 MB of source), sampled every 20 ms through the frame chain
+(`DEWY_NATIVE_MAP=FILE` writes each function's address, with source names,
+for an executable that carries no symbols). Shares of all samples,
+inclusive:
+
+| phase | share | of which |
+|---|---:|---|
+| loading sources | 25% | checking a module 12%; parsing 11% (tokenizing 5%, rewriting lists 3%) |
+| validation | 25% | bounds analysis 18% (loop bodies, searched to a fixed point, 16%); rewriting 4% |
+| lowering | 34% | functions 10% (owned values 7%); normalizing and building 12% (SSA form 3%, x86-64 code 3%, statement normalization 5%); borrow details 7%; reachability 2.5% |
+| startup, cache, output | the rest | |
+
+By function the profile is flat. The largest self times are shared
+helpers: dictionary probes 10% together (the largest instance, keyed by
+integers, 7%, called from tree walks all over the compiler), the arena's
+allocation and release entries 11%, growing arrays 2.5% (5.5% with the
+allocation and copy beneath), string comparison 2%, string retain and drop
+3%. No single function in the compiler's own logic exceeds 3%.
+
+What this says about the 30-second mark: no one repair reaches it. The
+candidates, by measured ceiling: tokenizing at 1.8 MB/s (5%) can become a
+dispatch on the first byte; statement normalization (5%) disappears when
+the SSA form is built from lowered HIR directly; `seen` sets over node
+indices (most of the integer-keyed probes) can be bit arrays sized by the
+arena; arrays that grow from empty by pushes pay 5% in growth, where a
+sized reservation is known at many sites.
+
+## Generated code against GCC on the same program (2026-10-03)
+
+µDewy's C target turns the same optimized program into C, so `gcc -O2`
+compiling it gives a reference for the native emitter's code: the same
+source, the same inlining decisions, the same runtime helpers. Built that
+way, the compiler compiles itself in 21.0 s against 35.9 s for the natively
+built one. Counted with hardware counters (user space only, through
+`perf_event_open`), each compiler building the same source tree once its
+prelude cache is warm. Instruction counts are exact; cycle counts vary by
+about 0.5%, where wall time varies by a second:
+
+| compiler | instructions | cycles |
+|---|---:|---:|
+| GCC-built (`-O2`) | 96.1 G | 70.5 G |
+| native, start of this batch | 232.0 G | 125.1 G |
+| parameters in caller-saved registers, dead values skipped, jumps threaded | 221.7 G | 116.9 G |
+| intrinsics no longer counted as calls, copies coalesced, `r11` allocated | 206.8 G | 111.7 G |
+| leftmost comparisons fused, jumps over jumps inverted, loads kept past returning arms | 200.3 G | 109.4 G |
+| globals loaded and stored in place and forwarded, results computed in `rax`, constant stores | 189.0 G | 107.7 G |
+| tiny callees always built in place; leading early-exit tests built at call sites | 188.3 G | 108.0 G |
+| runs of constant tests through jump tables | 185.8 G | 107.2 G |
+
+The first build with a new compiler also checks the prelude, about 17 G
+instructions; comparisons must warm each compiler first.
+
+Sampling both builds and pairing functions by symbol put the remaining gap
+at about 3 s in the compiler's own functions and the rest in runtime
+helpers: the arena's allocation and release entries, string comparison and
+release, dictionary probes, array growth and copies. A quarter of the
+native build's samples fall in prologues and epilogues (saving and
+restoring callee-saved registers, the frame pointer), which GCC shrinks by
+saving only what a path needs.

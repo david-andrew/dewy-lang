@@ -580,13 +580,19 @@ context = (functions:array<program.Function> source:program.Program eager:bool s
         if global is? hir.Declare {globals.push(global.name)}
     }
     let inlines:dict<string ssa.Inline>=[]
+    let guarded:dict<string ssa.Guarded>=[]
     loop entry in functions {
         let function=node_at(entry.literal state)
         $runtime_assert function is? hir.FunctionLiteral
-        let selected=ssa.candidate(entry.symbol entry.literal (not void_or_never(function.rettype state)) state.nodes)
+        let valued=not void_or_never(function.rettype state)
+        let selected=ssa.candidate(entry.symbol entry.literal valued state.nodes)
         if selected isnt? none {inlines[entry.symbol]=selected}
+        else if not valued {
+            let tests=ssa.guards(entry.literal state.nodes)
+            if tests isnt? none {guarded[entry.symbol]=tests}
+        }
     }
-    return ssa.Context[globals inlines eager]
+    return ssa.Context[globals inlines eager guarded]
 }
 optimized = (functions:array<program.Function> ctx:ssa.Context @state:State):>array<program.Function> => {
     let kinds=ssa_udewy.Kinds[void_type(@state) boolean(@state) types.primitive('int64' @state.types) types.primitive('never' @state.types)]

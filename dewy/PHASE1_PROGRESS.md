@@ -146,6 +146,37 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Native code generation measured against GCC (2026-10-03)
+
+The x86-64 emitter's code, compared with `gcc -O2` compiling the same
+optimized program through µDewy's C target, and improved where the
+comparison pointed: register allocation (parameters in caller-saved
+registers, only real calls clobbering, `r11` allocated, copies coalesced,
+results computed in `rax`), branches (fused leftmost comparisons, inverted
+jumps over jumps, threaded jumps, jump tables for runs of constant tests),
+dead values skipped, globals accessed in place and forwarded after a set,
+constant stores, and inlining of tiny callees and of leading early-exit
+tests at call sites. Method, numbers and the full list:
+[`bootstrap/PERFORMANCE.md`](bootstrap/PERFORMANCE.md#generated-code-against-gcc-on-the-same-program-2026-10-03),
+[`bootstrap/OPTIMIZER.md`](bootstrap/OPTIMIZER.md#register-allocation-and-code-shape-measured-against-gcc-2026-10-03).
+
+- **Self-build** (warm prelude cache, hardware counters): 232.0 G
+  instructions and 125.1 G cycles before, 185.8 G and 107.2 G after
+  (GCC-built: 96.1 G and 70.5 G); about 30 s wall.
+- **Tools:** `perf_event_open` counting and instruction sampling replaced
+  wall-clock timing, which varies by a second; `DEWY_NATIVE_MAP` now also
+  names functions by their source names.
+- **Parity notes** found on the way: the hosted checker rejected two forms
+  the native checker accepted (`addr` subtraction then `as int64`, which
+  native types differently; and `j <? n` from `j+1 =? n`, which only native
+  derives). The sources now avoid both; the typing difference stays on the
+  parity inventory.
+
+Evidence: fixed points (µDewy and native routes); a jump-table case in
+`tests/python_misc/test_ssa_form.py` checked by the hosted compiler, the
+µDewy route and the native route; application benchmark checksums agree.
+Full local gate: 6,399 passed.
+
 ## Native route by default on x86-64; bitmask ranges (2026-10-03)
 
 - **Default route.** Running or compiling a program for x86-64 takes the

@@ -36,11 +36,13 @@ retain_reachable=(program:Program nodes:array<hir.AST>):>Program=>{
         live.push(program.user_main_symbol)
         pending.push(functions[program.user_main_symbol])
     }
-    let seen:set<addr>=set[]
+    # The walk covers the program: one flag per node is cheaper than a set.
+    let seen:array<bool>=[]
+    loop seen.length <? nodes.length {seen.push(false)}
     loop pending.length>?0 {
         let id=pending.pop
-        if id in? seen continue
-        seen.push(id)
+        if id >=? seen.length or seen[id] continue
+        seen[id]=true
         let node=hir.node_at(nodes id)
         if node is? hir.ExpressedIdentifier and node.name in? functions and node.name not in? live {
             live.push(node.name)

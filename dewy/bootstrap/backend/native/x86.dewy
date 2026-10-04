@@ -177,6 +177,26 @@ store_prefix = (source:int64 index:int64 base:int64 bits:int64 @out:array<uint8>
     rex(bits =? 64 source index base bits =? 8 @out)
     byte(if bits =? 8 136 else 137 @out)
 }
+# A constant store: 8 or 16 bits of `value`, or 32 sign-extended to the
+# store's width.
+store_constant_prefix = (index:int64 base:int64 bits:int64 @out:array<uint8>):>void => {
+    if bits =? 16 {byte(102 @out)}
+    rex(bits =? 64 0 index base false @out)
+    byte(if bits =? 8 198 else 199 @out)
+}
+store_constant_value = (value:int64 bits:int64 @out:array<uint8>):>void => {
+    if bits =? 8 {imm8(value @out)} else if bits =? 16 {byte(low(value 0) @out) byte(low(value 8) @out)} else {imm32(value @out)}
+}
+store_constant = (value:int64 base:int64 disp:int64 bits:int64 @out:array<uint8>):>void => {
+    store_constant_prefix(0 base bits @out)
+    memory(0 base disp @out)
+    store_constant_value(value bits @out)
+}
+store_constant_indexed = (value:int64 base:int64 index:int64 scale:int64 disp:int64 bits:int64 @out:array<uint8>):>void => {
+    store_constant_prefix(index base bits @out)
+    indexed(0 base index scale disp @out)
+    store_constant_value(value bits @out)
+}
 store = (source:int64 base:int64 disp:int64 bits:int64 @out:array<uint8>):>void => {
     store_prefix(source 0 base bits @out)
     memory(source base disp @out)
@@ -239,6 +259,10 @@ call = (@out:array<uint8>):>addr => {
     let field=out.length
     imm32(0 @out)
     return field
+}
+# `jmp *(base + index * 8)`.
+jump_indexed = (base:int64 index:int64 @out:array<uint8>):>void => {
+    rex(false 0 index base false @out) byte(255 @out) indexed(4 base index 8 0 @out)
 }
 call_register = (reg:int64 @out:array<uint8>):>void => {
     rex(false 0 0 reg false @out) byte(255 @out) modrm(3 2 reg @out)

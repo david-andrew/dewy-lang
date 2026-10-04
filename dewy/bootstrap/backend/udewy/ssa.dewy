@@ -116,12 +116,21 @@ operand_at = (body:Body index:addr):>addr => {
 # only return is its last statement.
 Inline:type = const [literal:addr size:addr plain:bool valued:bool leaf:bool]
 # `eager`: build every small callee in place, wherever it is called.
-Context:type = const [globals:set<string> inlines:dict<string Inline> eager:bool=false]
+# The leading tests of a callee too large to build in place, each of which
+# returns at once when its truth is `fires` (see `guards`).
+Guard:type = const [condition:addr fires:bool]
+Guarded:type = const [literal:addr guards:array<Guard>]
+Context:type = const [globals:set<string> inlines:dict<string Inline> eager:bool=false guarded:dict<string Guarded>=[]]
 
 # Callee size limit, in non-leaf nodes, and what one function may gain.
 const INLINE_NODES:addr=40
 const CALLER_GROWTH:addr=400
 const INLINE_DEPTH:addr=3
+# A callee this small costs no more than its call: it is built in place
+# whatever the caller's growth so far.
+const TINY_NODES:addr=12
+# The tests a call site makes for a callee it does not build in place.
+const GUARD_NODES:addr=16
 # The variable an inlined body's returns assign.
 const RESULT='$result'
 
@@ -194,8 +203,14 @@ numbered_as = (kind:addr name:string type:addr left:addr right:addr nodes:array<
     if found =? 0 return none
     let id=found-1
     let entry=value_at(b.body id)
+    if (kind =? K_LOAD or kind =? K_GLOBAL_GET) and id <? b.loads_from return none
+    # A global's value after it is set is the value it was set to.
+    if kind =? K_GLOBAL_GET and entry.kind =? K_GLOBAL_SET {
+        let target=hir.node_at(nodes entry.node)
+        if target isnt? hir.ExpressedIdentifier or target.name not=? name or value_at(b.body entry.a).type not=? type return none
+        return entry.a
+    }
     if entry.kind not=? kind or entry.a not=? left or entry.b not=? right or entry.type not=? type return none
-    if kind =? K_LOAD and id <? b.loads_from return none
     let callee=hir.node_at(nodes entry.node)
     if callee isnt? hir.ExpressedIdentifier or callee.name not=? name return none
     return id
@@ -351,6 +366,68 @@ candidate = (symbol:string literal:addr valued:bool nodes:array<hir.AST>):>Inlin
     return Inline[literal found.used found.returns =? 0 valued found.calls =? 0]
 }
 
+# A test that may run twice: no call, no store, only reads and arithmetic.
+pure_test = (id:addr nodes:array<hir.AST> @budget:addr):>bool => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.Bool|hir.Integer return true
+    if budget =? 0 return false
+    budget-=1
+    if node is? hir.ExpressedIdentifier return true
+    if node is? hir.ValueCast|hir.Transmute return pure_test(node.expr nodes @budget)
+    if node is? hir.ShortCircuit return (node.op =? 'and' or node.op =? 'or') and pure_test(node.left nodes @budget) and pure_test(node.right nodes @budget)
+    if node is? hir.Block return node.items.length =? 1 and not node.scoped and pure_test(node.items[0] nodes @budget)
+    if node isnt? hir.FunctionCall or node.kw_args.length >? 0 return false
+    let callee=hir.node_at(nodes node.func)
+    if callee isnt? hir.ExpressedIdentifier return false
+    let name=callee.name
+    let reads=name.startswith('__load_') or name in? emit.binary or name in? emit.prefix or name =? '__signed_shr__' or name.startswith('__unsigned_')
+    if not reads return false
+    loop argument in node.pos_args {if not pure_test(argument nodes @budget) return false}
+    return true
+}
+# The statements of a body, its final expression included.
+body_items = (body:addr nodes:array<hir.AST>):>array<addr> => {
+    let parts=peel(body nodes)
+    let items=parts.statements.copy
+    if parts.result isnt? none and hir.node_at(nodes parts.result) isnt? hir.Void {items.push(parts.result)}
+    return items
+}
+# Whether a body does nothing but return without a value.
+returns_at_once = (body:addr nodes:array<hir.AST>):>bool => {
+    let node=hir.node_at(nodes body)
+    if node is? hir.Return return node.item is? none or hir.node_at(nodes node.item) is? hir.Void
+    return node is? hir.Block and node.items.length =? 1 and returns_at_once(node.items[0] nodes)
+}
+# The leading tests of a function without a result that return at once:
+# `if c {return}` fires when `c` holds; a body that is all one `if c {…}`
+# fires when it does not. A call site makes these tests and calls only when
+# none fires; the callee repeats them, so each must be pure.
+guards = (literal:addr nodes:array<hir.AST>):>Guarded|none => {
+    let function=hir.node_at(nodes literal)
+    if function isnt? hir.FunctionLiteral or function.kw_only_args.length >? 0 or function.rest_args isnt? none or function.proof return none
+    loop parameter in function.pos_or_kw_args {if parameter is? hir.BoundParam return none}
+    let found:array<Guard>=[]
+    let budget:addr=GUARD_NODES
+    let items=body_items(function.body nodes)
+    let index:addr=0
+    loop index <? items.length {
+        let node=hir.node_at(nodes items[index])
+        if node isnt? hir.Flow or node.arms.length not=? 1 or node.default isnt? none break
+        let arm=hir.node_at(nodes node.arms[0])
+        if arm isnt? hir.IfArm or not pure_test(arm.condition nodes @budget) break
+        if returns_at_once(arm.body nodes) {
+            found.push(Guard[arm.condition true])
+            index+=1
+        } else if index+1 =? items.length {
+            found.push(Guard[arm.condition false])
+            items=body_items(arm.body nodes)
+            index=0
+        } else {break}
+    }
+    if found.length =? 0 return none
+    return Guarded[literal found]
+}
+
 # Whether a block's only exit is the `break` that ends it (`top`), or, for a
 # nested region, whether it has no exit of the block at all.
 leaves = (items:array<Item> body:Body top:bool):>bool => {
@@ -491,7 +568,7 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
         let arguments:array<addr>=[]
         loop argument in node.pos_args {arguments.push(value(argument nodes ctx @b))}
         let target=ctx.inlines.get(name)
-        if target isnt? none and b.active.length <? INLINE_DEPTH and name not in? b.active and b.growth+target.size <=? CALLER_GROWTH and wanted(target ctx.eager b) {
+        if target isnt? none and b.active.length <? INLINE_DEPTH and name not in? b.active and (target.size <=? TINY_NODES or b.growth+target.size <=? CALLER_GROWTH) and wanted(target ctx.eager b) {
             let callee=hir.node_at(nodes target.literal)
             if callee is? hir.FunctionLiteral and callee.pos_or_kw_args.length =? arguments.length {
                 b.active.push(name)
@@ -499,6 +576,14 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
                 $runtime_assert b.active.length >? 0
                 b.active.pop;
                 return result
+            }
+        }
+        let guarded=ctx.guarded.get(name)
+        if guarded isnt? none and name not in? b.active and wanted(Inline[0 0 false false false] ctx.eager b) {
+            let callee=hir.node_at(nodes guarded.literal)
+            if callee is? hir.FunctionLiteral and callee.pos_or_kw_args.length =? arguments.length {
+                guarded_call(guarded callee arguments node nodes ctx @b)
+                return 0
             }
         }
         let first=b.body.operands.length
@@ -516,6 +601,44 @@ call = (id:addr node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builde
     return called
 }
 
+# A call made only when none of the callee's leading tests fires. The tests
+# read the parameters as the arguments; each one that does not fire nests
+# the next, and the call is innermost.
+guarded_call = (guarded:Guarded callee:hir.FunctionLiteral arguments:array<addr> node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
+    let fixed=b.fixed
+    let env=b.env
+    let mutable=b.mutable
+    b.fixed=[]
+    b.env=[]
+    b.mutable=set[]
+    loop i in 0.. and i <? callee.pos_or_kw_args.length and i <? arguments.length {b.fixed[callee.pos_or_kw_args[i].name]=arguments[i]}
+    guard_from(0 guarded arguments node nodes ctx @b)
+    b.fixed=fixed
+    b.env=env
+    b.mutable=mutable
+}
+guard_from = (index:addr guarded:Guarded arguments:array<addr> node:hir.FunctionCall nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
+    if index >=? guarded.guards.length {
+        let first=b.body.operands.length
+        loop argument in arguments {b.body.operands.push(argument)}
+        add(Value[K_CALL node.value_type first arguments.length node.func] @b);
+        disturb(@b)
+        return
+    }
+    let guard=guarded.guards[index]
+    let test=condition(guard.condition false nodes ctx @b)
+    let outer=b.region
+    let numbers=b.opened.length
+    let then_region=new_region(@b)
+    let else_region=new_region(@b)
+    b.region=if guard.fires else_region else then_region
+    guard_from(index+1 guarded arguments node nodes ctx @b)
+    forget(numbers @b)
+    b.region=outer
+    let list=new_declared(@b)
+    place(Item[I_IF test then_region else_region list] @b)
+}
+
 # Which calls are built in place: a callee that calls nothing further
 # anywhere; any other small callee only inside a loop, where the saved call
 # repeats.
@@ -530,7 +653,7 @@ value = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>addr => {
         if current isnt? none return current
         let single=b.fixed.get(node.name)
         if single isnt? none return single
-        if node.name in? ctx.globals return add(Value[K_GLOBAL_GET node.value_type node=id] @b)
+        if node.name in? ctx.globals return operation(K_GLOBAL_GET node.name node.value_type 0 0 id nodes @b)
         return add(Value[K_CONST node.value_type node=id] @b)
     }
     if node is? hir.FunctionCall return call(id node nodes ctx @b)
@@ -621,11 +744,16 @@ flow = (node:hir.Flow position:addr nodes:array<hir.AST> ctx:Context @b:Builder)
         let outer=b.region
         let then_region=new_region(@b)
         let numbers=b.opened.length
+        # Loads stand after the `if` unless a path that reaches its end
+        # stored or called.
+        let loads=b.loads_from
         b.region=then_region
         statement(arm.body nodes ctx @b)
         forget(numbers @b)
         let then_env=b.env
         let then_dead=b.dead
+        let then_loads=b.loads_from
+        b.loads_from=loads
         let else_region=new_region(@b)
         b.region=else_region
         b.dead=false
@@ -634,6 +762,7 @@ flow = (node:hir.Flow position:addr nodes:array<hir.AST> ctx:Context @b:Builder)
         forget(numbers @b)
         let else_env=b.env
         let else_dead=b.dead
+        if then_dead {} else if else_dead or then_loads >? b.loads_from {b.loads_from=then_loads}
         b.region=outer
         let list=new_declared(@b)
         join(saved then_env then_region then_dead else_env else_region else_dead mark list @b)
@@ -747,7 +876,20 @@ statement = (id:addr nodes:array<hir.AST> ctx:Context @b:Builder):>void => {
             place(Item[I_COPY next stored] @b)
             b.env[target.name]=next
         }
-        else if target.name in? ctx.globals {add(Value[K_GLOBAL_SET node.value_type stored 0 node.target] @b);}
+        else if target.name in? ctx.globals {
+            # Earlier reads of globals stop standing here, and after any
+            # `if` arm that reaches its end through this.
+            disturb(@b)
+            let set=add(Value[K_GLOBAL_SET node.value_type stored 0 node.target] @b)
+            # A variable's version changes when it is assigned: only a value
+            # that is not one stands for the global afterwards.
+            if web(value_at(b.body stored)) =? 0 {
+                let key=number_key(K_GLOBAL_GET target.name 0 0)
+                b.opened.push(key)
+                b.before.push(b.numbered.get(key 0))
+                b.numbered[key]=set+1
+            }
+        }
         else {b.unsupported=true}
         return
     }

@@ -188,6 +188,50 @@ main=():>int64=>{
     return result+a*b
 }
 main=():>int64=>if pick(3 4 true)=?37 and pick(3 4 false)=?26 and pick(20 30 false)=?1802 42 else 1''',
+    # Runs of tests of one value against constants, which the x86-64
+    # emitter turns into a jump through a table: returning arms, an `else
+    # if` chain, `or`ed and overlapping tests (the first wins), values
+    # outside the tested range.
+    '''A:type=[a:int64]
+B:type=[b:int64]
+C:type=[c:int64]
+D:type=[d:int64]
+E:type=[e:int64]
+F:type=[f:int64]
+G:type=[g:int64]
+Shape:type=A|B|C|D|E|F|G
+weigh=(s:Shape):>int64=>{
+    if s is? A return 1
+    if s is? B|C return 2
+    if s is? D return 4
+    if s is? E|F return 8
+    return 16
+}
+classify=(n:int64):>int64=>{
+    if n =? 3 return 30
+    if n =? 4 or n =? 9 return 40
+    if n =? 5 return 50
+    if n =? 7 return 70
+    if n =? 4 return 999
+    return n
+}
+chain=(n:int64):>int64=>{
+    let r:int64=0
+    if n =? 10 {r=1} else if n =? 11 {r=2} else if n =? 13 or n =? 14 {r=3} else if n =? 12 {r=4} else if n =? 11 {r=99} else {r=n*100}
+    return r+1
+}
+main=():>int64=>{
+    let shapes:array<Shape>=[A[1] B[2] C[3] D[4] E[5] F[6] G[7]]
+    let total:int64=0
+    loop s in shapes {total=total*3+weigh(s)}
+    let i:int64=-3
+    loop i <? 20 {
+        total=total*7+classify(i)+chain(i)
+        total=total%1000000007
+        i+=1
+    }
+    return if total =? 240825861 42 else 1
+}''',
 ]
 
 

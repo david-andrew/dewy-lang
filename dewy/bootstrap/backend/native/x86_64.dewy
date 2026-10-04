@@ -34,7 +34,8 @@ const NOWHERE:int64=0
 const REGISTER:int64=1
 const SLOT:int64=2
 
-Jump:type = const [site:addr label:addr]
+# `always`: an unconditional jump, which another jump may be threaded through.
+Jump:type = const [site:addr label:addr always:bool=false]
 Exit:type = const [top:addr leave:addr]
 Gen:type = [
     kind:array<int64>=[]
@@ -61,7 +62,24 @@ Gen:type = [
     saved:array<int64>=[]
     # A test evaluated at its branch: its item writes nothing.
     fused:array<bool>=[]
+    # A value computed right before it is copied into a variable, and used
+    # by nothing else, lives in that variable's place (0: its own).
+    joined:array<addr>=[]
+    # A value computed right before it is returned, and used by nothing
+    # else, is computed in `rax` and has no place.
+    returned:array<bool>=[]
+    # Jump table words to fill in when label positions are final.
+    entries:array<Entry>=[]
+    # The labels bound where the code currently ends.
+    ending:array<addr>=[]
+    ended:int64=-1
 ]
+# A table word holding a label's address, written when the function ends.
+Entry:type = const [at:addr label:addr]
+# A run of tests of one value against constants, as intervals of that value
+# and the arm each selects (the first test to hold wins).
+Case:type = const [low:int64 high:int64 arm:addr]
+Dispatch:type = [tested:addr=0 cases:array<Case>=[] arms:array<addr>=[] falls:array<bool>=[] tests:addr=0]
 # A place that must stay until a loop ends.
 Keep:type = const [place:addr span:addr]
 # A loop's first and last item positions.
@@ -69,7 +87,7 @@ Span:type = [start:int64 stop:int64=0]
 
 # Registers a value may live in. The first set survives calls.
 const KEPT:array<int64>=[3 12 13 14 15]
-const FREE:array<int64>=[6 7 8 9 10]
+const FREE:array<int64>=[6 7 8 9 10 11]
 
 fail = (reason:string @program:Program):>void => {if program.problem =? '' {program.problem=reason}}
 
@@ -110,11 +128,65 @@ new_label = (@g:Gen):>addr => {
     g.labels.push(-1)
     return g.labels.length-1
 }
-bind = (label:addr @g:Gen program:Program):>void => {
+bind = (label:addr @g:Gen @program:Program):>void => {
     $runtime_assert label <? g.labels.length
-    g.labels[label]=program.image.code.length as int64
+    let here:int64=program.image.code.length as int64
+    # A conditional jump here over an unconditional one becomes the
+    # opposite jump to that one's target, unless a label marks the jump.
+    if g.jumps.length >=? 2 {
+        let over=g.jumps[end]
+        let skip=g.jumps[g.jumps.length-2]
+        let starts=(over.site as int64)-1
+        if skip.site >? 1 and over.always and not skip.always and skip.label =? label and (over.site as int64)+4 =? here and (skip.site as int64)+4 =? starts and (g.ended not=? starts or g.ending.length =? 0) {
+            let opcode=skip.site-1
+            $runtime_assert opcode <? program.image.code.length
+            program.image.code[opcode]=program.image.code[opcode] xor 1
+            g.jumps[g.jumps.length-2]=Jump[skip.site over.label]
+            loop program.image.code.length >? 0 and (program.image.code.length as int64) >? starts {program.image.code.pop;}
+            g.jumps.pop;
+            # Labels bound after the removed jump move back with the code.
+            if g.ended not=? here {
+                let none_yet:array<addr>=[]
+                g.ending=none_yet
+            }
+            here=starts
+            loop bound in g.ending {
+                $runtime_assert bound <? g.labels.length
+                g.labels[bound]=here
+            }
+            g.ended=here
+        }
+    }
+    # A jump to the very next instruction is dropped; the labels bound at
+    # its start then mark where it was.
+    if g.jumps.length >? 0 {
+        let last=g.jumps[end]
+        if last.always and last.label =? label and (last.site as int64)+4 =? here {
+            let start=(last.site as int64)-1
+            loop program.image.code.length >? 0 and (program.image.code.length as int64) >? start {program.image.code.pop;}
+            g.jumps.pop;
+            # Labels bound after the jump move back to where it started.
+            if g.ended not=? here {
+                let none_yet:array<addr>=[]
+                g.ending=none_yet
+            }
+            here=start
+            loop bound in g.ending {
+                $runtime_assert bound <? g.labels.length
+                g.labels[bound]=here
+            }
+            g.ended=here
+        }
+    }
+    if g.ended not=? here {
+        let fresh:array<addr>=[]
+        g.ending=fresh
+        g.ended=here
+    }
+    g.ending.push(label)
+    g.labels[label]=here
 }
-jump_to = (label:addr @g:Gen @program:Program):>void => {g.jumps.push(Jump[x86.jump(@program.image.code) label])}
+jump_to = (label:addr @g:Gen @program:Program):>void => {g.jumps.push(Jump[x86.jump(@program.image.code) label true])}
 jump_when = (cc:int64 label:addr @g:Gen @program:Program):>void => {g.jumps.push(Jump[x86.jump_if(cc @program.image.code) label])}
 
 # The value whose place a value uses: a version lives in its web's place.
@@ -122,13 +194,21 @@ home = (id:addr body:ssa.Body):>addr => {
     let owner=ssa.web(ssa.value_at(body id))
     return if owner =? 0 id else owner
 }
+# The same, after joining a value to the variable it is copied into.
+home_in = (id:addr body:ssa.Body g:Gen):>addr => {
+    if id <? g.joined.length {
+        let joined=g.joined[id]
+        if joined not=? 0 return joined
+    }
+    return home(id body)
+}
 place_of = (id:addr body:ssa.Body g:Gen):>int64 => {
-    let at=home(id body)
+    let at=home_in(id body g)
     $runtime_assert at <? g.place.length
     return g.place[at]
 }
 kind_of = (id:addr body:ssa.Body g:Gen):>int64 => {
-    let at=home(id body)
+    let at=home_in(id body g)
     $runtime_assert at <? g.kind.length
     return g.kind[at]
 }
@@ -236,6 +316,10 @@ fetch = (id:addr reg:int64 body:ssa.Body nodes:array<hir.AST> g:Gen @program:Pro
 }
 # Keep `reg` as the value of `id`.
 keep = (id:addr reg:int64 body:ssa.Body g:Gen @program:Program):>void => {
+    if id <? g.returned.length and g.returned[id] {
+        if reg not=? x86.RAX {x86.mov(x86.RAX reg @program.image.code)}
+        return
+    }
     let where=kind_of(id body g)
     if where =? REGISTER {
         let target=place_of(id body g)
@@ -261,7 +345,7 @@ divide = (remainder:bool signed:bool @g:Gen @program:Program):>void => {
         jump_when(x86.CC_NE ordinary @g @program)
         if remainder {x86.constant(x86.RAX 0 @program.image.code)}
         jump_to(done @g @program)
-        bind(ordinary @g program)
+        bind(ordinary @g @program)
         x86.cqo(@program.image.code)
         x86.divide(7 x86.RCX @program.image.code)
     } else {
@@ -270,9 +354,9 @@ divide = (remainder:bool signed:bool @g:Gen @program:Program):>void => {
     }
     if remainder {x86.mov(x86.RAX x86.RDX @program.image.code)}
     jump_to(done @g @program)
-    bind(zero @g program)
+    bind(zero @g @program)
     if not remainder {x86.constant(x86.RAX (-1) @program.image.code)}
-    bind(done @g program)
+    bind(done @g @program)
 }
 wrap = (width:Width @program:Program):>void => {wrap_in(x86.RAX width @program)}
 wrap_in = (reg:int64 width:Width @program:Program):>void => {
@@ -497,7 +581,9 @@ marshal = (entry:ssa.Value first:addr count:addr targets:array<int64> body:ssa.B
 }
 # A call's arguments: beyond six on the stack, the rest in registers. The
 # result is the stack space to release after the call.
-arguments = (entry:ssa.Value first:addr body:ssa.Body nodes:array<hir.AST> g:Gen @program:Program):>int64 => {
+# A called function value goes to `rax` after any pushes: marshalling
+# writes only the argument registers.
+arguments = (entry:ssa.Value first:addr body:ssa.Body nodes:array<hir.AST> g:Gen @program:Program callee:addr=0):>int64 => {
     let count=if entry.b >? first entry.b-first else 0
     let pushed:int64=0
     if count >? 6 {
@@ -513,15 +599,15 @@ arguments = (entry:ssa.Value first:addr body:ssa.Body nodes:array<hir.AST> g:Gen
             pushed+=8
         }
     }
+    if callee not=? 0 {fetch(callee x86.RAX body nodes g @program)}
     marshal(entry first (if count >? 6 6 else count) ARGUMENTS body nodes g @program)
     return pushed
 }
 
 call = (id:addr entry:ssa.Value body:ssa.Body nodes:array<hir.AST> @g:Gen @program:Program):>void => {
     if entry.kind =? ssa.K_CALL_VALUE {
-        fetch(ssa.operand_at(body entry.a) x86.R11 body nodes g @program)
-        let pushed=arguments(entry 1 body nodes g @program)
-        x86.call_register(x86.R11 @program.image.code)
+        let pushed=arguments(entry 1 body nodes g @program callee=ssa.operand_at(body entry.a))
+        x86.call_register(x86.RAX @program.image.code)
         if pushed >? 0 {x86.arith_imm(x86.ADD x86.RSP pushed @program.image.code)}
         keep(id x86.RAX body g @program)
         return
@@ -537,7 +623,14 @@ call = (id:addr entry:ssa.Value body:ssa.Body nodes:array<hir.AST> @g:Gen @progr
         return
     }
     if name.startswith('__store_') and entry.b =? 2 {
-        let stored=operand(ssa.operand_at(body entry.a) x86.R11 body nodes g @program)
+        let constant=immediate(ssa.operand_at(body entry.a) body nodes)
+        if constant isnt? none {
+            let to=address_of(ssa.operand_at(body entry.a+1) body nodes g @program)
+            if to.scale =? 0 {x86.store_constant(constant to.base to.disp memory_bits(name) @program.image.code)}
+            else {x86.store_constant_indexed(constant to.base to.index to.scale to.disp memory_bits(name) @program.image.code)}
+            return
+        }
+        let stored=operand(ssa.operand_at(body entry.a) x86.RDX body nodes g @program)
         let to=address_of(ssa.operand_at(body entry.a+1) body nodes g @program)
         if to.scale =? 0 {x86.store(stored to.base to.disp memory_bits(name) @program.image.code)}
         else {x86.store_indexed(stored to.base to.index to.scale to.disp memory_bits(name) @program.image.code)}
@@ -605,6 +698,8 @@ evaluate = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen 
     let entry=ssa.value_at(body id)
     $runtime_assert id <? g.fused.length
     if g.fused[id] return
+    # A value nobody reads, and whose computing has no effect, is not computed.
+    if used(id g) =? 0 and entry.kind not=? ssa.K_CALL and entry.kind not=? ssa.K_CALL_VALUE and entry.kind not=? ssa.K_GLOBAL_SET return
     if entry.kind =? ssa.K_BINARY {
         let callee=hir.node_at(nodes entry.node)
         if callee isnt? hir.ExpressedIdentifier {fail('an operation without a name' @program) return}
@@ -678,11 +773,12 @@ evaluate = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen 
         let offset=if target is? hir.ExpressedIdentifier program.globals.get(target.name) else none
         if offset is? none {fail('a global without storage' @program) return}
         if entry.kind =? ssa.K_GLOBAL_GET {
-            program.image.sites.push(images.Site[x86.load_relative(x86.RAX @program.image.code) images.DATA offset])
-            keep(id x86.RAX body g @program)
+            let into=if kind_of(id body g) =? REGISTER place_of(id body g) else x86.RAX
+            program.image.sites.push(images.Site[x86.load_relative(into @program.image.code) images.DATA offset])
+            keep(id into body g @program)
         } else {
-            fetch(entry.a x86.RAX body nodes g @program)
-            program.image.sites.push(images.Site[x86.store_relative(x86.RAX @program.image.code) images.DATA offset])
+            let stored=operand(entry.a x86.RAX body nodes g @program)
+            program.image.sites.push(images.Site[x86.store_relative(stored @program.image.code) images.DATA offset])
         }
     } else if entry.kind =? ssa.K_LEAF {
         let storage=static_of(entry.node nodes @program)
@@ -718,7 +814,7 @@ branch = (test:addr target:addr when:bool body:ssa.Body nodes:array<hir.AST> tab
         let skip=new_label(@g)
         branch(entry.a skip (not when) body nodes table @g @program)
         branch(entry.b target when body nodes table @g @program)
-        bind(skip @g program)
+        bind(skip @g @program)
     } else {
         branch(entry.a target when body nodes table @g @program)
         branch(entry.b target when body nodes table @g @program)
@@ -728,13 +824,24 @@ branch = (test:addr target:addr when:bool body:ssa.Body nodes:array<hir.AST> tab
 silent = (item:ssa.Item body:ssa.Body):>bool => item.kind =? ssa.I_COPY and ssa.web(ssa.value_at(body item.a)) =? ssa.web(ssa.value_at(body item.b))
 
 region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @program:Program):>void => {
-    loop item in ssa.region_at(body id) {
+    let items=ssa.region_at(body id)
+    let index:addr=0
+    loop index <? items.length {
+        let item=items[index]
+        index+=1
+        if item.kind =? ssa.I_IF {
+            let after=dispatch(items index-1 body nodes table @g @program)
+            if after >? index-1 {
+                index=after
+                continue
+            }
+        }
         if item.kind =? ssa.I_VALUE {evaluate(item.a body nodes table @g @program)}
         else if item.kind =? ssa.I_RETURN {
-            if item.b =? 1 {fetch(item.a x86.RAX body nodes g @program)}
+            if item.b =? 1 and not (item.a <? g.returned.length and g.returned[item.a]) {fetch(item.a x86.RAX body nodes g @program)}
             jump_to(g.finish @g @program)
         } else if item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE {
-            if silent(item body) continue
+            if silent(item body) or (item.b not=? 0 and home_in(item.a body g) =? home_in(item.b body g)) continue
             if item.b =? 0 {
                 x86.constant(x86.RAX 0 @program.image.code)
                 keep(item.a x86.RAX body g @program)
@@ -744,24 +851,24 @@ region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @p
             let otherwise=new_label(@g)
             branch(item.a otherwise false body nodes table @g @program)
             region(item.b body nodes table @g @program)
-            if ssa.region_at(body item.c).length =? 0 {bind(otherwise @g program)}
+            if ssa.region_at(body item.c).length =? 0 {bind(otherwise @g @program)}
             else {
                 let done=new_label(@g)
                 jump_to(done @g @program)
-                bind(otherwise @g program)
+                bind(otherwise @g @program)
                 region(item.c body nodes table @g @program)
-                bind(done @g program)
+                bind(done @g @program)
             }
         } else if item.kind =? ssa.I_LOOP {
             let top=new_label(@g)
             let leave=new_label(@g)
-            bind(top @g program)
+            bind(top @g @program)
             g.loops.push(Exit[top leave])
             region(item.a body nodes table @g @program)
             $runtime_assert g.loops.length >? 0
             g.loops.pop;
             jump_to(top @g @program)
-            bind(leave @g program)
+            bind(leave @g @program)
         } else if item.kind =? ssa.I_BREAK or item.kind =? ssa.I_CONTINUE {
             if g.loops.length =? 0 {fail('a loop exit outside a loop' @program) continue}
             let frame=g.loops[end]
@@ -774,7 +881,7 @@ region = (id:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @p
 count = (body:ssa.Body @g:Gen):>void => {
     loop i in 0.. and i <? body.values.length {
         g.kind.push(NOWHERE) g.place.push(0) g.uses.push(0)
-        g.first.push(-1) g.last.push(-1) g.reach.push(-1) g.fused.push(false) g.weight.push(0)
+        g.first.push(-1) g.last.push(-1) g.reach.push(-1) g.fused.push(false) g.weight.push(0) g.joined.push(0) g.returned.push(false)
     }
     loop entry in body.values {
         if entry.kind =? ssa.K_UNARY or entry.kind =? ssa.K_TRANSMUTE or entry.kind =? ssa.K_LOAD or entry.kind =? ssa.K_GLOBAL_SET or entry.kind =? ssa.K_MOVE {bump(entry.a @g)}
@@ -796,7 +903,7 @@ count = (body:ssa.Body @g:Gen):>void => {
 # before a loop and touched inside it stays needed until that loop ends.
 touch = (id:addr body:ssa.Body @g:Gen):>void => {
     if id =? 0 or ssa.value_at(body id).kind =? ssa.K_CONST return
-    let at=home(id body)
+    let at=home_in(id body g)
     $runtime_assert at <? g.first.length and at <? g.last.length and at <? g.reach.length
     if g.first[at] <? 0 {g.first[at]=g.position}
     g.last[at]=g.position
@@ -856,8 +963,11 @@ mark = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
             let item=items[i]
             let address:addr=0
             if item.kind =? ssa.I_IF {
+                # The first test a branch makes is its leftmost leaf; one
+                # computed in place (not lazily) runs right before it.
                 let leaf=ssa.cond_at(body item.a)
-                if leaf.kind =? ssa.C_LEAF and leaf.b =? 0 and alone(items i-1 leaf.a g) and comparison(ssa.value_at(body leaf.a) nodes) {
+                loop leaf.kind not=? ssa.C_LEAF {leaf=ssa.cond_at(body leaf.a)}
+                if leaf.b =? 0 and alone(items i-1 leaf.a g) and comparison(ssa.value_at(body leaf.a) nodes) {
                     $runtime_assert leaf.a <? g.fused.length
                     g.fused[leaf.a]=true
                 }
@@ -883,6 +993,31 @@ mark = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
         }
     }
 }
+# Join each value computed right before it is copied into a variable, when
+# the copy is its only use: it is computed in the variable's place. Nothing
+# runs between the two, and no later item reads the variable's old version.
+join = (body:ssa.Body @g:Gen):>void => {
+    loop r in 0.. and r <? body.regions.length {
+        let items=ssa.region_at(body r)
+        loop i in 1.. and i <? items.length {
+            let copy=items[i]
+            if (copy.kind not=? ssa.I_COPY and copy.kind not=? ssa.I_DECLARE) or copy.b =? 0 or silent(copy body) continue
+            let previous=items[i-1]
+            if previous.kind not=? ssa.I_VALUE or previous.a not=? copy.b or used(copy.b g) not=? 1 continue
+            let entry=ssa.value_at(body copy.b)
+            $runtime_assert copy.b <? g.fused.length and copy.b <? g.joined.length
+            if ssa.web(entry) not=? 0 or g.fused[copy.b] {continue}
+            g.joined[copy.b]=home(copy.a body)
+        }
+        loop i in 1.. and i <? items.length {
+            let exit=items[i]
+            let previous=items[i-1]
+            if exit.kind not=? ssa.I_RETURN or exit.b not=? 1 or previous.kind not=? ssa.I_VALUE or previous.a not=? exit.a or used(exit.a g) not=? 1 {continue}
+            $runtime_assert exit.a <? g.fused.length and exit.a <? g.returned.length
+            if ssa.web(ssa.value_at(body exit.a)) =? 0 and not g.fused[exit.a] {g.returned[exit.a]=true}
+        }
+    }
+}
 # Whether a value is a comparison a branch can test directly.
 comparison = (entry:ssa.Value nodes:array<hir.AST>):>bool => {
     if entry.kind not=? ssa.K_BINARY return false
@@ -890,18 +1025,28 @@ comparison = (entry:ssa.Value nodes:array<hir.AST>):>bool => {
     return callee is? hir.ExpressedIdentifier and callee.name in? ['__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__']
 }
 # Number the items in the order they run and record each place's span.
-number_test = (test:addr body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
+number_test = (test:addr body:ssa.Body nodes:array<hir.AST> symbols:set<string> @g:Gen):>void => {
     let entry=ssa.cond_at(body test)
     if entry.kind not=? ssa.C_LEAF {
-        number_test(entry.a body nodes @g)
-        number_test(entry.b body nodes @g)
+        number_test(entry.a body nodes symbols @g)
+        number_test(entry.b body nodes symbols @g)
         return
     }
-    if entry.b not=? 0 {number(entry.b body nodes @g)}
+    if entry.b not=? 0 {number(entry.b body nodes symbols @g)}
     $runtime_assert entry.a <? g.fused.length
     if g.fused[entry.a] {touch_operands(ssa.value_at(body entry.a) body @g)} else {touch(entry.a body @g)}
 }
-number = (region:addr body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
+# Whether a value's evaluation overwrites registers a value may live in: a
+# call (the caller-saved ones) or a system call (`r11`). Stores and other
+# intrinsics overwrite only scratch registers.
+clobbers = (entry:ssa.Value nodes:array<hir.AST> symbols:set<string>):>bool => {
+    if entry.kind =? ssa.K_CALL_VALUE return true
+    if entry.kind not=? ssa.K_CALL return false
+    let callee=hir.node_at(nodes entry.node)
+    if callee isnt? hir.ExpressedIdentifier return true
+    return callee.name in? symbols or callee.name.startswith('__syscall')
+}
+number = (region:addr body:ssa.Body nodes:array<hir.AST> symbols:set<string> @g:Gen):>void => {
     let items=ssa.region_at(body region)
     loop i in 0.. and i <? items.length {
         let item=items[i]
@@ -909,23 +1054,26 @@ number = (region:addr body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
         if item.kind =? ssa.I_VALUE {
             let entry=ssa.value_at(body item.a)
             touch_operands(entry body @g)
-            if entry.kind =? ssa.K_CALL or entry.kind =? ssa.K_CALL_VALUE {g.calls.push(g.position)}
-            $runtime_assert item.a <? g.fused.length
-            if used(item.a g) >? 0 and not g.fused[item.a] {touch(item.a body @g)}
-        } else if item.kind =? ssa.I_RETURN and item.b =? 1 {touch(item.a body @g)}
+            if clobbers(entry nodes symbols) {g.calls.push(g.position)}
+            $runtime_assert item.a <? g.fused.length and item.a <? g.returned.length
+            if used(item.a g) >? 0 and not g.fused[item.a] and not g.returned[item.a] {touch(item.a body @g)}
+        } else if item.kind =? ssa.I_RETURN and item.b =? 1 {
+            $runtime_assert item.a <? g.returned.length
+            if not g.returned[item.a] {touch(item.a body @g)}
+        }
         else if item.kind =? ssa.I_COPY or item.kind =? ssa.I_DECLARE {
             if silent(item body) continue
             touch(item.b body @g)
             touch(item.a body @g)
         } else if item.kind =? ssa.I_IF {
-            number_test(item.a body nodes @g)
-            number(item.b body nodes @g)
-            number(item.c body nodes @g)
+            number_test(item.a body nodes symbols @g)
+            number(item.b body nodes symbols @g)
+            number(item.c body nodes symbols @g)
         } else if item.kind =? ssa.I_LOOP {
             let loop_id=g.spans.length
             g.spans.push(Span[g.position])
             g.open.push(loop_id)
-            number(item.a body nodes @g)
+            number(item.a body nodes symbols @g)
             g.position+=1
             $runtime_assert loop_id <? g.spans.length and g.open.length >? 0
             g.spans[loop_id].stop=g.position
@@ -943,15 +1091,19 @@ calls_before = (before:array<addr> position:int64):>addr => {
 # Places by linear scan over the spans. A span that contains a call needs
 # a register calls preserve. When no register is free, the place used least
 # gives its register up and takes a frame slot.
-assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
+assign = (body:ssa.Body nodes:array<hir.AST> symbols:set<string> @g:Gen):>void => {
     count(body @g)
-    loop parameter in body.params {
+    let arrivals:dict<addr int64>=[]
+    loop i in 0.. and i <? body.params.length {
+        let parameter=body.params[i]
         $runtime_assert parameter <? g.first.length and parameter <? g.last.length
         g.first[parameter]=0
         g.last[parameter]=0
+        if i <? ARGUMENTS.length {arrivals[parameter]=ARGUMENTS[i]}
     }
     mark(body nodes @g)
-    number(body.root body nodes @g)
+    join(body @g)
+    number(body.root body nodes symbols @g)
     g.position+=1
     # Calls before each position, to ask whether a span contains one.
     let before:array<addr>=[]
@@ -992,12 +1144,14 @@ assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
         heads[start]=id as int64
     }
     # When each register is free again.
-    let kept_until:array<int64>=[(-1) (-1) (-1) (-1) (-1)]
-    let free_until:array<int64>=[(-1) (-1) (-1) (-1) (-1)]
-    let kept_used:array<bool>=[false false false false false]
+    let kept_until:array<int64>=[]
+    let kept_used:array<bool>=[]
     # The place in each register (0: none yet).
-    let kept_owner:array<addr>=[0 0 0 0 0]
-    let free_owner:array<addr>=[0 0 0 0 0]
+    let kept_owner:array<addr>=[]
+    loop register in KEPT {kept_until.push(-1) kept_used.push(false) kept_owner.push(0)}
+    let free_until:array<int64>=[]
+    let free_owner:array<addr>=[]
+    loop register in FREE {free_until.push(-1) free_owner.push(0)}
     loop p in 0.. and p <? heads.length {
         let current=heads[p]
         loop current >=? 0 {
@@ -1009,11 +1163,23 @@ assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
             let crosses=false
             if stop >? start+1 {crosses=calls_before(before stop) >? calls_before(before start+1)}
             let parameter=ssa.value_at(body at).kind =? ssa.K_PARAM
-            # A parameter nobody reads has no place: giving it a register
-            # would let its arrival overwrite the parameter sharing it.
+            # A parameter nobody reads has no place.
             if parameter and stop =? 0 {continue}
             let placed=false
-            if not crosses and not parameter {
+            # A parameter stays where it arrives when that register is free.
+            let arrival=arrivals.get(at)
+            if not crosses and arrival isnt? none {
+                loop r in 0.. and r <? free_until.length and r <? FREE.length and r <? free_owner.length {
+                    if FREE[r] =? arrival and free_until[r] <=? start {
+                        free_until[r]=stop
+                        free_owner[r]=at
+                        g.kind[at]=REGISTER
+                        g.place[at]=FREE[r]
+                        placed=true
+                    }
+                }
+            }
+            if not crosses and not placed {
                 loop r in 0.. and r <? free_until.length and r <? FREE.length {
                     if free_until[r] <=? start and r <? free_owner.length {
                         free_until[r]=stop
@@ -1044,8 +1210,8 @@ assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
                 $runtime_assert at <? g.weight.length
                 let least=g.weight[at]
                 let from_free=false
-                let victim:addr=5
-                if not crosses and not parameter {
+                let victim:addr=99
+                if not crosses {
                     loop r in 0.. and r <? free_owner.length {
                         let owner=free_owner[r]
                         $runtime_assert owner <? g.weight.length
@@ -1059,7 +1225,7 @@ assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
                 }
                 g.slots+=1
                 let slot=0-8*g.slots
-                if victim <? 5 and victim <? free_owner.length and victim <? kept_owner.length and victim <? free_until.length and victim <? kept_until.length and victim <? FREE.length and victim <? KEPT.length {
+                if victim <? 99 and victim <? free_owner.length and victim <? kept_owner.length and victim <? free_until.length and victim <? kept_until.length and victim <? FREE.length and victim <? KEPT.length {
                     let evicted=if from_free free_owner[victim] else kept_owner[victim]
                     $runtime_assert evicted <? g.kind.length and evicted <? g.place.length
                     g.kind[evicted]=SLOT
@@ -1090,10 +1256,231 @@ assign = (body:ssa.Body nodes:array<hir.AST> @g:Gen):>void => {
     }
 }
 
+# Parameters from the registers they arrive in to their places, as one
+# parallel move: frame slots first, then each register no pending move
+# still reads; a cycle is broken through `rax`.
+arrive = (body:ssa.Body g:Gen @program:Program):>void => {
+    let sources:array<int64>=[]
+    let targets:array<int64>=[]
+    loop i in 0.. and i <? body.params.length and i <? ARGUMENTS.length {
+        let parameter=body.params[i]
+        let where=kind_of(parameter body g)
+        if where =? SLOT {x86.store(ARGUMENTS[i] x86.RBP place_of(parameter body g) 64 @program.image.code)}
+        else if where =? REGISTER and place_of(parameter body g) not=? ARGUMENTS[i] {
+            sources.push(ARGUMENTS[i])
+            targets.push(place_of(parameter body g))
+        }
+    }
+    loop sources.length >? 0 and targets.length =? sources.length {
+        let chosen=sources.length
+        loop k in 0.. and k <? targets.length {
+            let read=false
+            loop j in 0.. and j <? sources.length {if j not=? k and sources[j] =? targets[k] {read=true}}
+            if not read {
+                chosen=k
+                break
+            }
+        }
+        if chosen <? sources.length and chosen <? targets.length {
+            x86.mov(targets[chosen] sources[chosen] @program.image.code)
+            sources[chosen]=sources[end]
+            targets[chosen]=targets[end]
+            sources.pop;
+            targets.pop;
+        } else {
+            let blocked=targets[0]
+            x86.mov(x86.RAX blocked @program.image.code)
+            loop j in 0.. and j <? sources.length {if sources[j] =? blocked {sources[j]=x86.RAX}}
+        }
+    }
+    loop i in 6.. and i <? body.params.length {
+        x86.load(x86.RAX x86.RBP 16+8*((i as int64)-6) 64 false @program.image.code)
+        keep(body.params[i] x86.RAX body g @program)
+    }
+}
+
+# A test of `tested` against constants: `t =? k`, or `(t - k) <u n` (and
+# `<=u`) as the interval of `t` it accepts.
+Interval:type = const [tested:addr low:int64 high:int64]
+tag_test = (id:addr body:ssa.Body nodes:array<hir.AST>):>Interval|none => {
+    let entry=ssa.value_at(body id)
+    if named(id '__eq__' body nodes) {
+        let right=immediate(entry.b body nodes)
+        if right isnt? none and ssa.value_at(body entry.a).kind not=? ssa.K_CONST return Interval[entry.a right right]
+        let left=immediate(entry.a body nodes)
+        if left isnt? none and ssa.value_at(body entry.b).kind not=? ssa.K_CONST return Interval[entry.b left left]
+        return none
+    }
+    if entry.kind not=? ssa.K_CALL or entry.b not=? 2 return none
+    let callee=hir.node_at(nodes entry.node)
+    if callee isnt? hir.ExpressedIdentifier or (callee.name not=? '__unsigned_lt__' and callee.name not=? '__unsigned_lte__') return none
+    let shifted=ssa.operand_at(body entry.a)
+    let count=immediate(ssa.operand_at(body entry.a+1) body nodes)
+    if count is? none or count <? 1 or count >? 4096 or not named(shifted '__sub__' body nodes) return none
+    let difference=ssa.value_at(body shifted)
+    let low=immediate(difference.b body nodes)
+    if low is? none or low <? 0 or low >? 1000000 or ssa.value_at(body difference.a).kind =? ssa.K_CONST return none
+    return Interval[difference.a low low+count-(if callee.name =? '__unsigned_lt__' 1 else 0)]
+}
+# A value only a test computes: a comparison, a difference or an unsigned
+# comparison, which a table makes unnecessary.
+test_part = (item:ssa.Item body:ssa.Body nodes:array<hir.AST>):>bool => {
+    if item.kind not=? ssa.I_VALUE return false
+    let entry=ssa.value_at(body item.a)
+    if entry.kind =? ssa.K_BINARY return true
+    if entry.kind not=? ssa.K_CALL return false
+    let callee=hir.node_at(nodes entry.node)
+    return callee is? hir.ExpressedIdentifier and (callee.name =? '__unsigned_lt__' or callee.name =? '__unsigned_lte__')
+}
+# Whether a value is consumed by a condition's tests alone: a leaf's
+# comparison, or the difference a range test compares.
+feeds = (id:addr test:addr body:ssa.Body nodes:array<hir.AST>):>bool => {
+    let entry=ssa.cond_at(body test)
+    if entry.kind =? ssa.C_OR or entry.kind =? ssa.C_AND return feeds(id entry.a body nodes) or feeds(id entry.b body nodes)
+    if entry.a =? id return true
+    let leaf=ssa.value_at(body entry.a)
+    return leaf.kind =? ssa.K_CALL and leaf.b =? 2 and ssa.operand_at(body leaf.a) =? id
+}
+# Test parts from `begin` up to the `if` at `to`, each used once and only
+# by that `if`'s condition.
+only_tests = (items:array<ssa.Item> begin:addr to:addr body:ssa.Body nodes:array<hir.AST> g:Gen):>bool => {
+    $runtime_assert to <? items.length
+    let k=begin
+    loop k <? to {
+        let item=items[k]
+        if not test_part(item body nodes) or used(item.a g) not=? 1 or not feeds(item.a items[to].a body nodes) return false
+        k+=1
+    }
+    return true
+}
+# The intervals of an `or` of tests of the dispatch's value, added as cases
+# of `arm`; false when the condition is anything else.
+cases_of = (test:addr arm:addr body:ssa.Body nodes:array<hir.AST> @d:Dispatch):>bool => {
+    let entry=ssa.cond_at(body test)
+    if entry.kind =? ssa.C_OR return cases_of(entry.a arm body nodes @d) and cases_of(entry.b arm body nodes @d)
+    if entry.kind not=? ssa.C_LEAF return false
+    if entry.b not=? 0 {loop part in ssa.region_at(body entry.b) {if not test_part(part body nodes) return false}}
+    let found=tag_test(entry.a body nodes)
+    if found is? none return false
+    if d.tests =? 0 {d.tested=found.tested} else if d.tested not=? found.tested return false
+    d.tests+=1
+    d.cases.push(Case[found.low found.high arm])
+    return true
+}
+# Whether a region never reaches its end.
+leaves_region = (id:addr body:ssa.Body):>bool => {
+    let items=ssa.region_at(body id)
+    if items.length =? 0 return false
+    let last=items[end]
+    if last.kind =? ssa.I_RETURN or last.kind =? ssa.I_BREAK or last.kind =? ssa.I_CONTINUE return true
+    return last.kind =? ssa.I_IF and leaves_region(last.b body) and leaves_region(last.c body)
+}
+# A run of `if`s that test one value against constants, from the `if` at
+# `start`, becomes one jump through a table when it is long and dense
+# enough. Either each arm leaves (then the items after the run are the
+# default), or the run is an `else if` chain (its last `else` is the
+# default). The result is the index of the first item after what it
+# replaced, or `start` when it replaced nothing.
+dispatch = (items:array<ssa.Item> start:addr body:ssa.Body nodes:array<hir.AST> table:types.Table @g:Gen @program:Program):>addr => {
+    let d=Dispatch[]
+    $runtime_assert start <? items.length
+    let first=items[start]
+    let rest:addr=0
+    let next=start
+    if ssa.region_at(body first.c).length >? 0 {
+        # An `else if` chain: each `else` is test parts and one `if`.
+        let current=first
+        loop true {
+            let arm=d.arms.length
+            if not cases_of(current.a arm body nodes @d) return start
+            d.arms.push(current.b)
+            d.falls.push(not leaves_region(current.b body))
+            let otherwise=ssa.region_at(body current.c)
+            let j:addr=0
+            loop j <? otherwise.length and test_part(otherwise[j] body nodes) {j+=1}
+            if j <? otherwise.length and j+1 =? otherwise.length and otherwise[j].kind =? ssa.I_IF and only_tests(otherwise 0 j body nodes g) {
+                let probe=Dispatch[d.tested]
+                probe.tests=d.tests
+                if cases_of(otherwise[j].a 0 body nodes @probe) {
+                    current=otherwise[j]
+                    continue
+                }
+            }
+            rest=current.c
+            break
+        }
+        next=start+1
+    } else {
+        # A run of `if`s whose arms leave, with test parts between them.
+        let k=start
+        loop k <? items.length {
+            let j=k
+            loop j <? items.length and test_part(items[j] body nodes) {j+=1}
+            if j >=? items.length or items[j].kind not=? ssa.I_IF or ssa.region_at(body items[j].c).length >? 0 or not leaves_region(items[j].b body) or not only_tests(items k j body nodes g) break
+            let arm=d.arms.length
+            let saved=d.cases.length
+            let counted=d.tests
+            if not cases_of(items[j].a arm body nodes @d) {
+                loop d.cases.length >? saved {d.cases.pop;}
+                d.tests=counted
+                break
+            }
+            d.arms.push(items[j].b)
+            d.falls.push(false)
+            k=j+1
+        }
+        next=k
+    }
+    if d.tests <? 4 or d.cases.length =? 0 return start
+    let low=d.cases[0].low
+    let high=d.cases[0].high
+    loop case in d.cases {
+        if case.low <? low {low=case.low}
+        if case.high >? high {high=case.high}
+    }
+    let span=high-low+1
+    if span >? 1024 or span >? 8*(d.tests as int64) return start
+    # Every value of the span selects its first case's arm, or the default.
+    let fallback=new_label(@g)
+    let done=new_label(@g)
+    let labels:array<addr>=[]
+    loop arm in d.arms {labels.push(new_label(@g))}
+    let tested=operand(d.tested x86.RAX body nodes g @program)
+    if tested not=? x86.RAX {x86.mov(x86.RAX tested @program.image.code)}
+    if low not=? 0 {x86.arith_imm(x86.SUB x86.RAX low @program.image.code)}
+    x86.arith_imm(x86.CMP x86.RAX span-1 @program.image.code)
+    jump_when(x86.CC_A fallback @g @program)
+    let at=program.image.data.length
+    let v:int64=0
+    loop v <? span {
+        let chosen=fallback
+        loop case in d.cases {
+            if case.low <=? low+v and low+v <=? case.high {
+                $runtime_assert case.arm <? labels.length
+                chosen=labels[case.arm]
+                break
+            }
+        }
+        g.entries.push(Entry[images.slot(@program.image) chosen])
+        v+=1
+    }
+    program.image.sites.push(images.Site[x86.lea_relative(x86.RCX @program.image.code) images.DATA at as int64])
+    x86.jump_indexed(x86.RCX x86.RAX @program.image.code)
+    loop k in 0.. and k <? d.arms.length and k <? labels.length and k <? d.falls.length {
+        bind(labels[k] @g @program)
+        region(d.arms[k] body nodes table @g @program)
+        if d.falls[k] {jump_to(done @g @program)}
+    }
+    bind(fallback @g @program)
+    if rest not=? 0 {region(rest body nodes table @g @program)}
+    bind(done @g @program)
+    return next
+}
+
 # One function: prologue, body, epilogue. Its symbol is defined at its start.
 emit_function = (symbol:string body:ssa.Body nodes:array<hir.AST> table:types.Table @program:Program):>void => {
     let g=Gen[]
-    assign(body nodes @g)
+    assign(body nodes program.symbols @g)
     program.image.functions[symbol]=program.image.code.length
     x86.push_reg(x86.RBP @program.image.code)
     x86.mov(x86.RBP x86.RSP @program.image.code)
@@ -1104,17 +1491,10 @@ emit_function = (symbol:string body:ssa.Body nodes:array<hir.AST> table:types.Ta
         x86.store(g.saved[pair] x86.RBP g.saved[pair+1] 64 @program.image.code)
         pair+=2
     }
-    loop i in 0.. and i <? body.params.length {
-        let parameter=body.params[i]
-        if i <? 6 and i <? ARGUMENTS.length {keep(parameter ARGUMENTS[i] body g @program)}
-        else {
-            x86.load(x86.RAX x86.RBP 16+8*((i as int64)-6) 64 false @program.image.code)
-            keep(parameter x86.RAX body g @program)
-        }
-    }
+    arrive(body g @program)
     g.finish=new_label(@g)
     region(body.root body nodes table @g @program)
-    bind(g.finish @g program)
+    bind(g.finish @g @program)
     let restored:addr=0
     loop restored+1 <? g.saved.length {
         x86.load(g.saved[restored] x86.RBP g.saved[restored+1] 64 false @program.image.code)
@@ -1123,9 +1503,25 @@ emit_function = (symbol:string body:ssa.Body nodes:array<hir.AST> table:types.Ta
     x86.mov(x86.RSP x86.RBP @program.image.code)
     x86.pop_reg(x86.RBP @program.image.code)
     x86.ret(@program.image.code)
+    loop entry in g.entries {
+        $runtime_assert entry.label <? g.labels.length
+        program.image.words.push(images.Word[entry.at images.CODE g.labels[entry.label]])
+    }
+    # A jump to an unconditional jump goes straight to that one's target.
+    let through:dict<int64 addr>=[]
+    loop jump in g.jumps {if jump.always {through[(jump.site as int64)-1]=jump.label}}
     loop jump in g.jumps {
         $runtime_assert jump.label <? g.labels.length
-        x86.patch32(jump.site g.labels[jump.label]-((jump.site as int64)+4) @program.image.code)
+        let target=g.labels[jump.label]
+        let hops:addr=0
+        loop hops <? 8 {
+            let next=through.get(target)
+            if next is? none {break}
+            $runtime_assert next <? g.labels.length
+            target=g.labels[next]
+            hops+=1
+        }
+        x86.patch32(jump.site target-((jump.site as int64)+4) @program.image.code)
     }
 }
 
