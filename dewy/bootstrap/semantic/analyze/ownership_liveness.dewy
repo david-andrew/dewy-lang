@@ -33,6 +33,9 @@ Analysis:type=[
     # component consumptions: the field path below the consumed owner
     paths:dict<addr array<string|int64>>=[]
     declarations:dict<addr addr>=[]
+    # Live on leaving the function: the caller reads each place parameter
+    # whole.
+    exit:Live=[]
 ]
 SelectorLocals:type=[declarations:dict<addr addr>=[] scopes:dict<addr set<addr>>=[]]
 # Once-initialized scalar locals have stable identities only after their
@@ -317,7 +320,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         let continuation=exits[selected]
         return if node is? hir.Break continuation.after else continuation.repeated
     }
-    if node is? hir.Return {return if node.item is? none [] else visit(node.item [] analysis.owners @analysis nodes table exits)}
+    if node is? hir.Return {return if node.item is? none analysis.exit.copy else visit(node.item analysis.exit.copy analysis.owners @analysis nodes table exits)}
     if node is? hir.Flow {
         let following=if node.default is? none live else visit(node.default live.copy enabled @analysis nodes table exits)
         let index=node.arms.length
@@ -423,8 +426,11 @@ renew_siblings=(live:Live target:addr route:Entry nodes:array<hir.AST> table:typ
     }
     return result
 }
-consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[] selector_scopes:dict<addr set<addr>>=[]):>Analysis=>{
+# `outliving` names place parameters among the owners: their components may
+# transfer, and the caller reads each one whole when the function returns.
+consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[] selector_scopes:dict<addr set<addr>>=[] outliving:set<addr>=set[]):>Analysis=>{
     let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places selector_scopes=selector_scopes]
+    loop binding in outliving {add_entry(@analysis.exit Entry[binding])}
     let order:array<addr>=[]
     let pending:array<addr>=[body]
     loop pending.length >? 0 {
@@ -510,6 +516,6 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
             }
         }
     }
-    visit(body [] owners @analysis nodes table);
+    visit(body analysis.exit.copy owners @analysis nodes table);
     return analysis
 }

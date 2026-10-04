@@ -389,11 +389,22 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
     let field_candidates:set<addr>=set[]
     let field_owners:set<addr>=set[]
     let eligible:dict<addr bool>=[]
+    # A place parameter's field may transfer when every path stores it back
+    # before returning: the caller reads the whole value after.
+    let places:set<addr>=set[]
+    loop parameter in function.pos_or_kw_args {
+        if parameter.place and parameter.binding_id isnt? none {places.push(parameter.binding_id)}
+    }
+    loop parameter in function.kw_only_args {
+        if parameter.place and parameter.binding_id isnt? none {places.push(parameter.binding_id)}
+    }
     loop [binding uses] in analysis.uses {
-        if binding not in? analysis.declared or binding in? borrows continue
+        if (binding not in? analysis.declared and binding not in? places) or binding in? borrows continue
         loop use in uses {
             if not use.transfer or use.id in? moves continue
             let field=hir.node_at(nodes use.id)
+            # Only a place parameter's record fields, as the hosted lowering.
+            if field is? hir.Index and binding in? places continue
             if field is? hir.Index {
                 let root=hir.node_at(nodes field.array)
                 let array=types.node_at(table views.structural_base(root.value_type table))
@@ -425,7 +436,9 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
         }
     }
     if field_candidates.length>?0 {
-        let logical=ownership_liveness.consumptions(function.body field_owners nodes table)
+        let outliving:set<addr>=set[]
+        loop binding in field_owners {if binding in? places {outliving.push(binding)}}
+        let logical=ownership_liveness.consumptions(function.body field_owners nodes table outliving=outliving)
         loop site in field_candidates {if site in? logical.consumes {moves.push(site)}}
     }
     return moves

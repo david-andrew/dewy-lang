@@ -146,6 +146,48 @@ its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
 
+## Moves: a place parameter's field taken and stored back; dictionary `pop` (2026-10-04)
+
+Two transfers the ownership analyses did not recognize, both blocking
+strict copies in compiler modules (row C2):
+
+- **Taking a field from a place parameter.** The caller reads a place
+  parameter whole after the call, so leaving the function (its end and every
+  `return`) now counts as a whole read of each place parameter in the
+  field-sensitive liveness both compilers share
+  (`ownership_liveness.consumptions` / `conditional_consumptions`,
+  `outliving`). A store to a fixed field path already renews that field. A
+  field taken out and stored back before every exit is therefore a move:
+  `let saved=b.env` `b.env=[]` … `b.env=saved` and `h.shelf[k]=h.items`
+  `h.items=…`. An exit, a call lending the parameter, or no store back
+  between the take and the store keeps the copy. Only record fields are
+  covered, not elements, as in the hosted lowering (`moves.dewy`,
+  `_compute_moves`). The lowering adopts the field (record roots, array
+  descriptors) as it does for an owned local's field.
+- **Dictionary `pop` moves an array value out.** The array's handle, with
+  its reference, is taken from the removed entry's slot, which keeps nothing
+  to release, so binding, assigning or storing the result is no copy
+  (`_take_dict_value`). Native code shared the value with the tombstoned
+  slot by reference count and reported nothing, while hosted code reported a
+  copy: a C3 difference, now gone for arrays. A default that is not itself
+  fresh still keeps the copy. Record values stay as they were: a record
+  root may be shared, and the hosted lowering's way of taking a record (adopting its
+  fields) would empty it for the other holder (the dictionary compaction
+  and resource `pop` tests caught this), so a record `pop` still differs
+  between the compilers.
+
+Tests: `test_place_field_take_and_renew.py` and `test_dict_pop_moves.py`
+(hosted and native: accepted cases run, observing cases rejected under
+`$explicit_copies`).
+
+What still keeps the SSA builder out of strict mode, found with the hosted
+compiler, which already has these rules: a loop frame read after it is
+pushed (renaming the popped frame fixes it), then an indexed take with
+renewal below a field (`let built=b.body.regions[body]`
+`b.body.regions[body]=cleared`), which neither compiler handles even for
+locals. A compiler module can declare `$explicit_copies` relying on the new
+rules only once a verified seed has them.
+
 ## One wasm32 page for both routes; the native route publishes the compiler (2026-10-04)
 
 David's direction (2026-10-04): the native wasm32 emitter gets the page too,

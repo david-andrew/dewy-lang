@@ -66,6 +66,9 @@ State:type = [
     # Identifier uses that move their local (moves.compute), and the locals
     # they empty, which must be declared `let` for the emptying store.
     moved_uses:set<addr>=set[]
+    # Moved fields of place parameters (`moves.compute`): every path stores
+    # them back, so the caller's record keeps owning the slot.
+    place_moves:set<addr>=set[]
     # Placing storage an immutable record holds into an immutable record:
     # nothing can ever write either, so the copy is a bounded share.
     frozen_placement:bool=false
@@ -1314,7 +1317,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # inline storage remains valid for its enclosing owner's cleanup.
         if valid and inline_record(node.value_type @state) and types.same_type(stored_type(id @state) node.value_type state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
             let binding=owner.binding_id
-            if binding in? state.cleanup_owned and field_movable(binding id state) and storage_borrows.borrowable(owner.value_type state.type_nodes) and record_transferable(node.value_type @state) {
+            if (binding in? state.cleanup_owned or id in? state.place_moves) and field_movable(binding id state) and storage_borrows.borrowable(owner.value_type state.type_nodes) and record_transferable(node.value_type @state) {
                 let prefix:array<addr>=[]
                 let source=snapshot(field_pointer(node @state writable=true) @prefix @state)
                 let result=snapshot(record_allocation(object_layout(node.value_type node @state) node @state) @prefix @state)
@@ -1330,7 +1333,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # layout. Element representation must still match the stored array.
         if valid and array isnt? none and stored isnt? none and types.same_type(array.element stored.element state.type_nodes) and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {
             let binding=owner.binding_id
-            if binding in? state.cleanup_owned and field_movable(binding id state) {
+            if (binding in? state.cleanup_owned or id in? state.place_moves) and field_movable(binding id state) {
                 # Keep the record root for normal cleanup of the untouched
                 # fields. The selected descriptor now has exactly one owner.
                 let prefix:array<addr>=[]
@@ -5863,10 +5866,17 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     timing.accumulate(@state.move_time moves_started)
     note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]
+    state.place_moves=set[]
+    let places:set<addr>=set[]
+    loop argument in parameters(node) {if argument.place and argument.binding_id isnt? none {places.push(argument.binding_id)}}
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
+        let field=moved is? hir.MemberAccess
         loop moved is? hir.MemberAccess|hir.Index {moved=hir.node_at(state.input.nodes if moved is? hir.MemberAccess moved.value else moved.array)}
-        if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.push(moved.binding_id)}
+        if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {
+            if field and moved.binding_id in? places {state.place_moves.push(use)}
+            else {state.moved_bindings.push(moved.binding_id)}
+        }
     }
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
     let frame_start=state.cleanup_frames.length
@@ -7572,14 +7582,24 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
     let removed:array<addr>=[]
     let element=if parts.value is? none parts.key else parts.value
     let field=if parts.value is? none 'keys' else 'values'
-    let value=snapshot(dict_element(dict_field(parts field node @state) probe.position element node @state) @removed @state)
+    # An array value leaves the dictionary with its entry: take its handle,
+    # with its reference, and empty the slot (the hosted
+    # `dict_popped_value_moves`). Others share as before.
+    let array=array_type(element state)
+    let moving=parts.value isnt? none and array isnt? none and array.length is? none
+    let value:addr=0
+    if moving and array isnt? none {
+        let descriptor=dict_array(parts 'values' element node @removed @state)
+        let slot=snapshot(dict_element_pointer(descriptor probe.position element node @state) @removed @state)
+        value=snapshot(take_array_slot(slot array node 'dictionary entry' @state) @removed @state)
+    } else {value=snapshot(dict_element(dict_field(parts field node @state) probe.position element node @state) @removed @state)}
     let hashes=dict_array(parts 'hashes' word_type node @removed @state)
     removed.push(dict_store_element(hashes probe.position word(-1 node @state) word_type node @state))
     let indices=dict_array(parts 'indices' word_type node @removed @state)
     removed.push(dict_store_element(indices probe.slot word(-2 node @state) word_type node @state))
     removed.push(dict_set_field(parts 'live' word_op('__sub__' dict_field(parts 'live' node @state) word(1 node @state) node @state) node @state))
     if fallback isnt? none {removed.push(release_value(fallback node.value_type node @state))}
-    let copied=owned_copy(value element node @state shared=true)
+    let copied=if moving value else owned_copy(value element node @state shared=true)
     if cell_members(element @state) is? none and cell_members(node.value_type @state) isnt? none {
         copied=cell_pack(copied element node.value_type node @state owned=true)
     } else {copied=read_value(copied element node.value_type node @state)}

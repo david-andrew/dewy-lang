@@ -480,6 +480,7 @@ class _Lowerer(
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.moved_payload_uses: set[int] = set()  # last-use narrowed aggregates still stored in owned union cells
+        self.moved_place_fields: set[int] = set()  # moved field uses whose root is a place parameter (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
         self.loop_regions: list[LoopRegion] = []   # the enclosing loops being lowered, innermost last (`_lower_loop_body`)
@@ -3965,6 +3966,11 @@ class _Lowerer(
                            for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
                            if parameter.binding_id in self.owned_cell_parameters}
         element_owners: set[int] = set(owned)
+        # A place parameter's field may transfer when every path stores it
+        # back before returning: the caller reads the whole value after.
+        places: set[int] = {parameter.binding_id
+                            for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
+                            if parameter.place and parameter.binding_id is not None}
         for node in hir.walk(literal.body):
             if not isinstance(node, hir.Declare) or node.binding_id is None:
                 continue
@@ -4049,7 +4055,7 @@ class _Lowerer(
                                  and storage_borrows.borrowable(source.value.type))
                 if (transferable
                         and isinstance(root, hir.ExpressedIdentifier)
-                        and (root.binding_id in element_owners or root.binding_id in cells)
+                        and (root.binding_id in element_owners or root.binding_id in cells or root.binding_id in places)
                         and isinstance(ty.structural_base(root.type), ty.ObjectType)):
                     field_candidates[id(source)] = root.binding_id
                     return {id(root): id(source)}
@@ -4363,12 +4369,14 @@ class _Lowerer(
                 literal.body,
                 [p for p in [*literal.pos_or_kw_args, *literal.kw_only_args]
                  if p.binding_id in owned],
-                ordinary_ownership, component=lambda value: id(value) in pending_fields)
+                ordinary_ownership, component=lambda value: id(value) in pending_fields,
+                outliving={owner for site, owner in field_candidates.items() if site in pending_fields and owner in places})
             moves.update(pending_fields & consumed.keys())
         # A place lent to a call ends when it returns. A use inside a call
         # that also lends its root stays in place: the callee sees the root.
         moves -= self._place_conflicts(literal.body)
         self.moved_payload_uses = moves & payload_candidates
+        self.moved_place_fields = {site for site in moves if field_candidates.get(site) in places}
         return moves - payload_candidates
 
     @staticmethod
@@ -6473,6 +6481,11 @@ class _Lowerer(
             node = self._copy_source_expression(node.items[-1])
         return node
 
+    def _dict_pop_moves(self, node: hir.AST) -> bool:
+        """A dictionary `pop` that moves the removed value out (`_take_dict_value`)."""
+        return (isinstance(node, hir.DictRemove) and node.key is not None and node.values is not None
+                and self.dict_popped_value_moves(node.type))
+
     def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._scoped_block_result(node)
         # A call returning several array-length alternatives owns a union
@@ -6485,6 +6498,9 @@ class _Lowerer(
         # every result arm. A consumer adopts it; a read releases it afterward.
         return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.Flow)) or (
             isinstance(node, hir.DictView) and isinstance(node.type, ty.ArrayType)
+        ) or (
+            self._dict_pop_moves(node)
+            and (node.default is None or self._array_expression_owns_fresh_storage(node.default))
         ) or (
             isinstance(node, hir.RepresentationCast)
             and isinstance(node.type, ty.ArrayType)

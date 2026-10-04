@@ -145,9 +145,15 @@ def conflicts(path, entry_path, kind):
     return True
 
 
-def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset(), selector_inputs=frozenset(), selector_scopes=None, move_only=lambda node: False):
+def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset(), selector_inputs=frozenset(), selector_scopes=None, move_only=lambda node: False, outliving=frozenset()):
+    """Owning inputs whose value is not read again on any path.
+
+    `outliving` names place parameters: their components may transfer, and
+    the caller reads each one whole when the function returns."""
     nodes, owners, aliases, captured, occurrences = [], set(), {}, set(), {}
     owners.update(p.binding_id for p in parameter_owners)
+    owners.update(outliving)
+    exit_live = frozenset((binding, (), 'read') for binding in outliving)
     required_views, view_conflicts = {}, {}
     def storage_route(node):
         path = bindings.access_path(node, dictionaries=True)
@@ -361,7 +367,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             continuation = exits[-1-node.loop_levels]
             return set(continuation[0 if isinstance(node, hir.Break) else 1])
         if isinstance(node, hir.Return):
-            return visit(node.item, set(), owners, exits) if node.item is not None else set()
+            return visit(node.item, set(exit_live), owners, exits) if node.item is not None else set(exit_live)
         if isinstance(node, hir.Flow):
             following = visit(node.default, live, enabled, exits) if node.default is not None else live
             for arm in reversed(node.arms):
@@ -400,5 +406,5 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
         for child in reversed(tuple(hir.children(node))):
             live = visit(child, live, enabled, exits)
         return live
-    visit(body, set(), owners)
+    visit(body, set(exit_live), owners)
     return consumes, declarations, tuple(view_conflicts.values()), obligations

@@ -1043,8 +1043,10 @@ class _ArrayLowering(_ArraySharing):
         # keeps its lifetime promotion instead of assuming an arena owner.
         owned_copy = (isinstance(source, hir.CopyValue) and self._has_arena()
                       and not self._array_expression_owns_fresh_storage(source.value))
+        # A dictionary `pop` that moves its value out hands over an owner too.
         adopt_result = (array_type.length is None and representation != 'stack_data'
-                        and (self._is_named_array_call(node.value) or owned_copy))
+                        and (self._is_named_array_call(node.value) or owned_copy
+                             or self._dict_pop_moves(source) and self._array_expression_owns_fresh_storage(source)))
         adopt_local = (array_type.length is None and representation != 'stack_data'
                        and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses))
 
@@ -2537,8 +2539,10 @@ class _ArrayLowering(_ArraySharing):
                           and root.name in self.owned_aggregate_cells
                           and any(ty.structural_base(member) == ty.structural_base(root.type)
                                   for member in self.owned_aggregate_cells[root.name][0]))
+            # A place parameter's field moves only when every path stores
+            # it back (`_compute_moves`).
             if (isinstance(root, hir.ExpressedIdentifier)
-                    and (local_binding_key(root) in self.owned_objects or owned_cell)
+                    and (local_binding_key(root) in self.owned_objects or owned_cell or id(source) in self.moved_place_fields)
                     and not self.borrowed_fields.get(local_binding_key(root))
                     and field is not None and ty.structural_base(field.type) == array_type):
                 before, receiver = self._extract_object_pointer(source.value)

@@ -718,19 +718,42 @@ class _DictLowering:
             ], popped
         values = self._dict_descriptor(parts, 'values', loc)
         removed = self._name('dict_removed', loc, parts.value_type)
+        taking, taken = self._take_dict_value(values, position, parts.value_type, loc)
         if node.default is None:
             # proven present: the probe succeeds
             return [
-                *prelude, *key_prelude, *ensure, *probe,
-                self._declare(removed, self._dict_element(values, position, parts.value_type, loc), loc, parts.value_type),
+                *prelude, *key_prelude, *ensure, *probe, *taking,
+                self._declare(removed, taken, loc, parts.value_type),
                 *tombstone,
             ], removed
         default_prelude, default = self._extract_expression(node.default)
         return [
             *prelude, *key_prelude, *default_prelude, *ensure, *probe,
             self._declare(removed, default, loc, parts.value_type),
-            self._if(found, [self._assign(removed, self._dict_element(values, position, parts.value_type, loc), loc), *tombstone], loc),
+            self._if(found, [*taking, self._assign(removed, taken, loc), *tombstone], loc),
         ], removed
+
+    def _take_dict_value(self, values: hir.AST, position: hir.AST, value_type: ty.TypeExpr, loc: Span) -> tuple[list[hir.AST], hir.AST]:
+        """A removed entry's value, taken out of its tombstoned slot.
+
+        An array value leaves the dictionary: its handle, with the reference
+        it holds, moves to the result and the slot keeps nothing to release,
+        so `pop` hands over the value rather than a view of storage the
+        dictionary still holds (`dict_popped_value_moves`). Other values are
+        read as before."""
+        if self.dict_popped_value_moves(value_type):
+            stored = ty.structural_base(value_type)
+            assert isinstance(stored, ty.ArrayType)
+            slot = self._array_element_address(values, position, value_type, loc)
+            return self._transfer_array_slot(slot, hir.Void(loc, ty.VOID_TYPE), stored,
+                                             site='removed from a dictionary', origin='dictionary entry')
+        return [], self._dict_element(values, position, value_type, loc)
+
+    def dict_popped_value_moves(self, value_type: ty.TypeExpr | None) -> bool:
+        """Whether `pop` moves a value of this type out of its dictionary:
+        a runtime-length array. Records may be shared, so they keep reading."""
+        stored = ty.structural_base(value_type) if value_type is not None else None
+        return isinstance(stored, ty.ArrayType) and stored.length is None
 
     def _extract_dict_entries(self, node: hir.DictEntries, shared: list[tuple[hir.AST, _DictParts]] | None = None) -> tuple[list[hir.AST], hir.AST]:
         """The entry array for iteration, compacted first if removals left tombstones."""

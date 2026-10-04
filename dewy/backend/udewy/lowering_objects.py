@@ -653,8 +653,11 @@ class _ObjectLowering:
             root = root.value
         if isinstance(source, hir.Index):
             root = source.array
+        # A place parameter's field moves only when every path stores it
+        # back (`_compute_moves`); the caller's record keeps owning the slot.
         owned = isinstance(root, hir.ExpressedIdentifier) and (
             local_binding_key(root) in self.owned_objects
+            or id(source) in self.moved_place_fields
             or root.name in self.owned_aggregate_cells and any(
                 ty.structural_base(member) == ty.structural_base(root.type)
                 for member in self.owned_aggregate_cells[root.name][0]))
