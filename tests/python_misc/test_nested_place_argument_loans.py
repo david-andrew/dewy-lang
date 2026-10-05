@@ -1,4 +1,10 @@
-"""An isolated later calculation cannot overwrite an earlier place projection."""
+"""An isolated later calculation cannot overwrite an earlier place projection.
+
+`tick` also writes an array global: a scalar global has no storage that
+could alias the projection, so writing only one would need no isolation.
+`main` ticks once first: native code gives the static empty array owned
+storage on its first `clear`.
+"""
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -7,7 +13,8 @@ from test_scalar_projection import execute
 
 SOURCE = '''$explicit_copies
 let ticks:int64=0
-tick=():>void=>{ticks+=1}
+let log:array<int64>=[]
+tick=():>void=>{ticks+=1 log.clear()}
 Box:type=[items:array<int64>]
 index=(items:array<int64>):>int64=>{
     let cursor:int64=0
@@ -21,9 +28,10 @@ forward=(@box:Box):>int64=>{
 }
 main=():>int64=>{
     let box=Box[[20 42]]
+    tick()
     let before:int64=_arena_allocated_bytes
     loop i in [0..1000) {if forward(@box) not=?42 return 1}
-    return if _arena_allocated_bytes=?before and ticks=?1000 42 else 2
+    return if _arena_allocated_bytes=?before and ticks=?1001 42 else 2
 }
 '''
 CASES = [SOURCE,

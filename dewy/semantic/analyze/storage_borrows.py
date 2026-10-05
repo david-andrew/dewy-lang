@@ -22,10 +22,14 @@ OPERATORS = frozenset({
 })
 # Raw loads read memory and write nothing. They still expose the address of
 # what they read (a later raw store may write through it), but do not block
-# the proof for their callers. Raw stores and syscalls stay unknown.
-RAW_LOADS = frozenset({'__load__', '__load_i64__', '__load_u64__', '__load_i32__', '__load_u32__',
-                       '__load_i16__', '__load_u16__', '__load_i8__', '__load_u8__'})
-PRIMITIVES = OPERATORS | RAW_LOADS
+# the proof for their callers. Neither do operations that write no existing
+# storage: frame allocation, `__unreachable__`, and `lend_write`, a `$lend`
+# block's reservation on its named owner (exposed as before). Raw stores and
+# syscalls stay unknown: an address can outlive the exposure that made it,
+# for instance in a scalar global (`test_constant_global_views`).
+RAW_MEMORY = frozenset({'__load__', '__unreachable__', '__alloca__', '__static_alloca__',
+                        *(f'__load_{sign}{width}__' for sign in 'iu' for width in (8, 16, 32, 64))})
+PRIMITIVES = OPERATORS | RAW_MEMORY
 ARRAY_METHODS = frozenset({'push', 'pop', 'clear', 'reserve', 'insert',
                            'truncate', 'set_length', 'join'})
 
@@ -318,10 +322,17 @@ def record_loan_fields(node, sizes, constants):
     return borrowed
 
 
+def route_of(path) -> tuple:
+    """The effect route of an access path's steps."""
+    return tuple(INDEX_STEP if isinstance(step, hir.Index) else
+                 step.field if isinstance(step, hir.ForwardingAccess) else step.name
+                 for step in path.steps)
+
+
 def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     bodies, edges, blocked = {}, {}, set()
     seeds, ambient_writes = {}, {}
-    stable_locals = {}
+    stable_locals, call_locals = {}, {}
     writes, captured = {}, set()
     eligible = {}
     loan_sizes = {}
@@ -342,14 +353,17 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         return eligible[key]
 
     def mutable_state(binding):
-        """Outside state a write or exposure can change: not a `const`
-        binding, a string or a binary literal, which are immutable."""
+        """Outside storage a write or exposure can change: not a `const`
+        binding, a string or a binary literal, which are immutable, and not
+        a scalar, which has no storage an argument could share."""
         node = analysis.declares.get(binding)
         if node is None:
             return True
         type_ = node.annotation or node.expr.type
+        shape = ty.structural_base(type_)
         return (node.decltype != 'const' and not ty.string_valued(type_)
-                and not isinstance(ty.strip_refinement(type_), ty.BinaryLiteralType))
+                and not isinstance(ty.strip_refinement(type_), ty.BinaryLiteralType)
+                and shape not in ('bool', 'true', 'false') and ty.fixed_integer_layout(type_) is None)
 
     def modeled_call(node):
         func = _unwrap(node.func)
@@ -360,6 +374,27 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # Hooks and sort callbacks need their ordinary call-graph evidence.
         return (isinstance(func, hir.ArrayMethod) and func.name in ARRAY_METHODS
                 and ordinary(func.array.type))
+
+    def sort_callbacks(node):
+        """A sort changes only its own array, a write target of the calling
+        body, and calls its key (and the key's copy). With those resolved,
+        the callbacks are ordinary call-graph edges; None when a key is
+        unknown."""
+        func = _unwrap(node.func)
+        if not isinstance(func, hir.ArrayMethod) or func.name != 'sort' or not ordinary(func.array.type):
+            return None
+        targets = []
+        if 'key' in node.kw_args:
+            found = analysis._value_targets(node.kw_args['key'])
+            if found is None:
+                return None
+            targets.extend(found)
+            if func.key_copy is not None:
+                copied = analysis._value_targets(func.key_copy)
+                if copied is None:
+                    return None
+                targets.extend(copied)
+        return targets
 
     for literal in analysis.literals:
         key = id(literal)
@@ -395,6 +430,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # Private fresh owners cannot alias ambient state. Keep only owners
         # whose storage never crosses an unmodelled/raw boundary in this body;
         # ordinary resolved value calls manage their own independent argument.
+        exposed_roots = set()
         for node in body:
             exposed = []
             if isinstance(node, (hir.Transmute, hir.RepresentationCast)):
@@ -404,7 +440,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     exposed.append(node.expr)
             elif isinstance(node, hir.FunctionCall) and analysis._direct_targets(node) is None:
                 func = _unwrap(node.func)
-                if not modeled_call(node):
+                if not modeled_call(node) and sort_callbacks(node) is None:
                     exposed.extend([*node.pos_args, *node.kw_args.values()])
                     if isinstance(func, hir.ArrayMethod):
                         exposed.append(func.array)
@@ -412,6 +448,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 path = bindings.access_path(value, unwrap=bindings._unwrap_fact_route)
                 if isinstance(path.root, hir.ExpressedIdentifier):
                     written.add(path.root.binding_id)
+                    exposed_roots.add(path.root.binding_id)
         writes[key] = written
         # Only a write or raw exposure can change storage an argument may
         # share with module state; reading that state cannot. A function that
@@ -426,6 +463,21 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                              # graph check below still excludes unknown/raw
                              # effects and writes/captures of these locals.
                              and private_origin(node.expr)}
+        # A written local still owns private storage when it starts from a
+        # fresh value and every replacement is fresh too. Its storage holds
+        # for one call that cannot write it (`call_keeps`).
+        replaced, iterated = {}, set()
+        for node in body:
+            if isinstance(node, hir.Assign) and isinstance(node.target, hir.ExpressedIdentifier):
+                binding = node.target.binding_id
+                replaced[binding] = replaced.get(binding, True) and node.op == '=' and private_origin(node.value)
+            elif isinstance(node, hir.IteratorExpression):
+                iterated.add(node.target.binding_id)
+        call_locals[key] = {node.binding_id: node.expr.type for node in body
+                            if isinstance(node, hir.Declare) and node.binding_id is not None and not node.view
+                            and node.binding_id in written and node.binding_id not in exposed_roots
+                            and node.binding_id not in iterated and replaced.get(node.binding_id, True)
+                            and private_origin(node.expr)}
         for node in body:
             # A typed conversion may retain its source (excluded above and
             # by parameter escape summaries), but it cannot expose unrelated
@@ -446,8 +498,12 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 targets = analysis._direct_targets(node)
                 if targets is None:
                     func = _unwrap(node.func)
-                    raw_load = isinstance(func, hir.ExpressedIdentifier) and func.binding_id is None and func.name in RAW_LOADS
-                    if not modeled_call(node) and not raw_load:
+                    raw = (isinstance(func, hir.ExpressedIdentifier) and func.binding_id is None and func.name in RAW_MEMORY
+                           or isinstance(func, hir.ArrayMethod) and func.name == 'lend_write')
+                    callbacks = sort_callbacks(node)
+                    for target in callbacks or ():
+                        edges.setdefault(id(target), set()).add(key)
+                    if callbacks is None and not modeled_call(node) and not raw:
                         blocked.add(key)
                         seeds.setdefault(key, f'unmodelled call {getattr(_unwrap(node.func), "name", type(node.func).__name__)}')
                 else:
@@ -514,6 +570,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     # called directly here. It cannot enter the private-owner proof.
     stable_locals = {key: {binding: type_ for binding, type_ in owners.items() if binding not in captured}
                      for key, owners in stable_locals.items()}
+    call_locals = {key: {binding: type_ for binding, type_ in owners.items() if binding not in captured}
+                   for key, owners in call_locals.items()}
     result, local_views, literal_arguments = {}, set(), {}
     flow_views, flow_literals, flow_sources = set(), set(), set()
     for literal in analysis.literals:
@@ -575,7 +633,58 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 continue
             local_views.add(node.binding_id)
             pending_views.extend(waiting_views.pop(node.binding_id, ()))
-        def stable_value(value, selections=()):
+        def call_keeps(binding, route, call):
+            """Nothing evaluated for `call`, nor the call itself, writes the
+            parameter `binding` at `route`. Its argument expressions write
+            no overlapping route and pass none to a nested call; the call
+            passes one only to a read-only parameter, never to a place. The
+            callee cannot reach the parameter another way: it is not
+            captured, and a callee writing outside state blocks this
+            function."""
+            def overlaps(value):
+                path = bindings.access_path(value, unwrap=bindings._unwrap_fact_route)
+                if not isinstance(path.root, hir.ExpressedIdentifier) or path.root.binding_id != binding:
+                    return False
+                other = route_of(path)
+                return route[:len(other)] == other or other[:len(route)] == route
+            for target in analysis._direct_targets(call) or ():
+                for argument, parameter in analysis._pair_arguments(call, target) or ():
+                    outgoing = summaries.for_param_binding(parameter.binding_id) if parameter is not None else None
+                    if overlaps(argument) and (parameter is None or parameter.place
+                                               or outgoing is None or not outgoing.read_only):
+                        return False
+            for argument in [*call.pos_args, *call.kw_args.values()]:
+                for node in hir.walk(argument):
+                    if isinstance(node, hir.FunctionLiteral):
+                        return False
+                    target = predicate_effects.write_target(node)
+                    if target is not None and overlaps(target):
+                        return False
+                    if isinstance(node, hir.FunctionCall) and any(
+                            overlaps(value) for value in [*node.pos_args, *node.kw_args.values()]):
+                        return False
+            return True
+
+        def held_for_call(binding, path, call):
+            """A parameter or private local written elsewhere in the body
+            still keeps its storage for one call that cannot write it, which
+            is all a call-scoped loan needs. Nothing may retain it."""
+            if binding in captured:
+                return False
+            route = route_of(path)
+            own = parameters.get(binding)
+            if own is not None:
+                incoming = summaries.for_param_binding(own.binding_id)
+                if (not ordinary(own.type) or incoming is None
+                        or any(route[:len(other)] == other or other[:len(route)] == route for other in incoming.escapes)):
+                    return False
+            else:
+                local = call_locals[id(literal)].get(binding)
+                if local is None or not ordinary(local):
+                    return False
+            return call_keeps(binding, route, call)
+
+        def stable_value(value, selections=(), call=None):
             # Widening a finite string union keeps its descriptor handle.
             # Other representation conversions still need their own storage.
             while (isinstance(value, (hir.ValueCast, hir.RepresentationCast))
@@ -590,9 +699,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             local = stable_locals[id(literal)].get(source.binding_id, constant_owners.get(source.binding_id))
             stable = source.binding_id in local_views or source.binding_id in selections or (local is not None and ordinary(local)) or (
                 own is not None and ordinary(own.type) and incoming is not None
-                and incoming.read_only_at(tuple(INDEX_STEP if isinstance(step, hir.Index) else
-                                                step.field if isinstance(step, hir.ForwardingAccess) else step.name
-                                                for step in path.steps)))
+                and incoming.read_only_at(route_of(path))) or (call is not None and held_for_call(source.binding_id, path, call))
             # A narrowed field/element may still live in a tagged cell or a
             # different layout. Do not reinterpret that storage as a handle.
             for step in path.steps:
@@ -705,10 +812,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     stable = (isinstance(source, hir.ExpressedIdentifier)
                               and source.binding_id in local_views) or (local is not None and ordinary(local)) or (
                         own is not None and ordinary(own.type) and incoming is not None
-                        and (incoming.read_only or incoming.read_only_at(tuple(
-                            INDEX_STEP if isinstance(step, hir.Index) else
-                            step.field if isinstance(step, hir.ForwardingAccess) else step.name
-                            for step in path.steps))))
+                        and (incoming.read_only or incoming.read_only_at(route_of(path)))) or (
+                        isinstance(source, hir.ExpressedIdentifier) and held_for_call(source.binding_id, path, node))
                     same_storage = argument.type == expected or (
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)
@@ -716,7 +821,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     fields = record_loan_fields(argument, loan_sizes, constants)
                     if (fields is not None and argument.type == expected
                             and parameter is not None and parameter.binding_id not in unprojected_reads
-                            and all(stable_value(field) for field in fields)):
+                            and all(stable_value(field, call=node) for field in fields)):
                         stable = True
                     if (stable and parameter is not None and ordinary(argument.type)
                             and same_storage and not parameter.place

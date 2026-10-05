@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 103 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 38 (≈41.7k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
+| C2 | Strict-source adoption of the compiler | 103 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 38 (≈41.7k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,52 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: call-scoped loans, rebinding moves, fewer blocked functions (2026-10-05)
+
+Row C2. Proofs both compilers gained, each with hosted and native tests:
+
+- **Call-scoped loans of written storage** (`held_for_call`). A loan that
+  lasts one call needs its storage for that call only. A parameter, or a
+  local that starts fresh and is only ever replaced by fresh values, keeps
+  its storage for a call that cannot write it, though the function writes
+  it elsewhere. The call's argument expressions must not write it or pass
+  it to a nested call; the call passes it only to read-only parameters,
+  never as a place; it is not captured. This covers direct arguments
+  (`clauses=distribute(clauses …)`) and fields of a record literal built
+  for the call (`promote_type(… System[session.links …] @session.types)`).
+- **Rebinding moves.** In `x = f(x)` the old value is not read after the
+  call, so the read is a last use when nothing else reads `x` before the
+  store, inside a loop too (`_compute_moves`, `moves.dewy`).
+- **Conditional-return donation.** A parameter's final read inside a
+  conditional `return` runs at most once and ends its path, so the input is
+  still donated (paths that skip it release it); inside a loop it keeps the
+  copy. A length or scalar read through a field chain
+  (`items.values.length`) inspects its root, and storing the parameter in a
+  field, element or dictionary entry is a consuming endpoint.
+- **In-place changes inspect a donated input.** A parameter changed in
+  place (`xs.push(n)`, `b.total+=n`) and then returned or stored is still an
+  owning input: the change keeps no alias (`consuming_inputs`,
+  `consumed_parameters`).
+- **Flow results take last-use records.** `let base=if c right else left`
+  moves the selected local's record handle (hosted; native already did).
+- **Fewer functions outside the storage proof.** A `sort` with a resolved
+  key calls that key like an ordinary callee. Frame allocation,
+  `__unreachable__` and a `$lend` reservation write no existing storage. A
+  scalar global has no storage an argument could share, so writing one
+  blocks nothing. Raw stores and syscalls still block: an address can
+  outlive the exposure that made it (stored in a scalar global, as in
+  `test_constant_global_views`), so "every exposure is charged" does not
+  hold for writes. That is now the largest remaining cause.
+
+Compiler sources: `ty.intern` stores the key before the node, so the node
+parameter is donated; `substitute_function` copies its binding maps only
+when a type parameter shadows one. `node_at` keeps its implicit return: with
+`.copy()` the getter loan no longer applies to the abstract `Type` (its
+query fixture allocates per call), to be fixed before `ty` adopts.
+
+Hosted count of would-be strict violations: 580 → 567 in 37 modules.
+Tests whose ambient writer was a scalar global now write an array global.
 
 ## The unsafe audit lists the checks each assumption serves (2026-10-05)
 

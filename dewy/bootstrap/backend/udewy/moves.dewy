@@ -242,7 +242,24 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> donations:dict<addr 
     }
     if node is? hir.Assign {
         # The target is written, not read.
+        let first=analysis.transfers.length
         walk_transfer(node.value depth nested false nodes donations @analysis)
+        # `x = f(x)` replaces x once the value is computed, so its read
+        # there is the last of the old value when nothing else reads x
+        # before the store. A loop's next iteration, and any later text,
+        # read the replacement.
+        let target=hir.node_at(nodes node.target)
+        if not nested and target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            let index=first
+            loop index <? analysis.transfers.length {
+                let transfer=analysis.transfers[index]
+                index+=1
+                if transfer.binding not=? target.binding_id or transfer.depth not=? depth continue
+                if transfer.binding not in? analysis.candidates {analysis.candidates[transfer.binding]=[]}
+                let candidates=@analysis.candidates[transfer.binding]
+                candidates.push(Candidate[transfer.id transfer.sequence analysis.counter])
+            }
+        }
         return
     }
     if node is? hir.FunctionCall and id in? donations {

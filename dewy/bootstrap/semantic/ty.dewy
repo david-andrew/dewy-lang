@@ -196,8 +196,8 @@ intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
     if found is? none {nodes.shape_positions[shape]=structural}
     value.shape_id=structural
     let id=nodes.entries.length
-    nodes.entries.push(value)
     nodes.positions[value.key]=id
+    nodes.entries.push(value)
     return id
 }
 
@@ -314,7 +314,7 @@ dimension = (powers:array<DimensionPower> @nodes:Table):>addr => {
 dimension_at = (id:addr nodes:Table):>DimensionType => {
     let node = node_at(nodes id)
     $runtime_assert node is? DimensionType
-    return node
+    return node.copy()
 }
 multiply_dimensions = (left:addr right:addr @nodes:Table):>addr => {
     let powers = dimension_at(left nodes).powers
@@ -368,10 +368,11 @@ combine_uncached = (items:array<addr> conjunction:bool @nodes:Table):>addr => {
         let node = node_at(nodes id)
         if is_primitive(node identity) continue
         if is_primitive(node annihilator) return primitive(annihilator @nodes)
-        let children:array<addr> = [id]
-        if conjunction and node is? TypeAnd { children = node.items }
-        if not conjunction and node is? TypeOr { children = node.items }
-        loop child in children { if not contains_type(flat child nodes) { flat.push(child) } }
+        if conjunction and node is? TypeAnd {
+            loop child in node.items { if not contains_type(flat child nodes) { flat.push(child) } }
+        } else if not conjunction and node is? TypeOr {
+            loop child in node.items { if not contains_type(flat child nodes) { flat.push(child) } }
+        } else if not contains_type(flat id nodes) { flat.push(id) }
     }
     if flat.length =? 0 return primitive(identity @nodes)
     if flat.length =? 1 return flat[0]
@@ -608,7 +609,8 @@ named_type = (name:string alias_id:addr @nodes:Table):>addr => {
 }
 resolve_alias = (id:addr target:addr @nodes:Table):>void => {
     $runtime_assert id <? nodes.entries.length
-    let node = nodes.entries[id]
+    # The entry is replaced below, so read the old one from a snapshot.
+    let node = nodes.entries[id].copy()
     $runtime_assert node is? NamedType
     # Resolution changes the target, not the recursive reference's identity.
     nodes.entries[id] = NamedType[key=node.key shape_id=node.shape_id name=node.name alias_id=node.alias_id target=target]
@@ -701,20 +703,28 @@ substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<strin
 }
 
 substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table effects:dict<string effect_rows.Contract>=[]):>addr => {
-    let inner = bindings
-    let params = node.type_params.copy
-    if instantiate { params = [] }
-    else {
-        loop param in params {
-            if param.name in? inner {inner.pop(param.name);}
-            if param.kind =? 'effect' and param.identity in? effects {effects.pop(param.identity);}
-        }
+    if instantiate return substitute_signature(node bindings [] @nodes effects=effects)
+    # A type parameter of this signature shadows an outer binding of the same
+    # name. Only then does the substitution need maps of its own.
+    let shadows=false
+    loop param in node.type_params {
+        if param.name in? bindings or param.kind =? 'effect' and param.identity in? effects {shadows=true}
     }
+    if not shadows return substitute_signature(node bindings node.type_params.copy @nodes effects=effects)
+    let inner=bindings.copy()
+    let outer=effects.copy()
+    loop param in node.type_params {
+        if param.name in? inner {inner.pop(param.name);}
+        if param.kind =? 'effect' and param.identity in? outer {outer.pop(param.identity);}
+    }
+    return substitute_signature(node inner node.type_params.copy @nodes effects=outer)
+}
+substitute_signature = (node:FunctionType bindings:dict<string addr> params:array<GenericParam> @nodes:Table effects:dict<string effect_rows.Contract>):>addr => {
     let pos:array<PosOrKwArg> = []
     let kw:array<KwOnlyArg> = []
-    loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
-    loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
-    let ret = substitute(node.ret inner @nodes effects=effects)
+    loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type bindings @nodes effects=effects) p.required p.place]) }
+    loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type bindings @nodes effects=effects) p.required p.place]) }
+    let ret = substitute(node.ret bindings @nodes effects=effects)
     return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_contracts(node.effects effects) inferred_effect=node.inferred_effect)
 }
 
@@ -817,7 +827,7 @@ dnf = (id:addr nodes:Table):>array<Clause> => {
     if node is? TypeNot return [Clause[literals=[SignedAtom[false node.item]]]]
     if node is? TypeOr {
         let clauses:array<Clause> = []
-        loop child in node.items { loop clause in dnf(child nodes) { clauses.push(clause) } }
+        loop child in node.items { loop clause in dnf(child nodes) { clauses.push(clause.copy()) } }
         return clauses
     }
     if node is? TypeAnd {

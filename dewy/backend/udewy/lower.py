@@ -4211,7 +4211,16 @@ class _Lowerer(
                 # boundary as initializing it. The union writer still checks
                 # payload layout and clears only a last-use owner's payload.
                 walk(node.target, depth, nested, {})
+                first = len(transfers)
                 walk(node.value, depth, nested, transfer(node.value))
+                # `x = f(x)` replaces x once the value is computed, so its
+                # read there is the last of the old value when nothing else
+                # reads x before the store. A loop's next iteration, and any
+                # later text, read the replacement.
+                if not nested and isinstance(node.target, hir.ExpressedIdentifier) and node.target.binding_id is not None:
+                    for binding, site, sequence, use_depth in transfers[first:]:
+                        if binding == node.target.binding_id and use_depth == depth:
+                            candidates.setdefault(binding, []).append((site, sequence, counter))
                 return
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})

@@ -3,6 +3,7 @@ import p"../../semantic/bindings.dewy" as bindings
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/analyze/effects.dewy" as effects
 import p"../../semantic/analyze/storage_borrows.dewy" as storage_borrows
+import p"../../semantic/analyze/predicate_effects.dewy" as local_effects
 import p"captures.dewy" as captures
 import p"emit.dewy" as emit
 import p"callbacks.dewy" as callbacks
@@ -622,10 +623,10 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
 # that are exclusively called directly qualify, so every caller and the
 # callee agree on the transfer.
 Consumed:type = [parameters:set<addr>=set[] uses:set<addr>=set[] owned:set<addr>=set[]]
-ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool observed:bool returning:addr?=none]
+ReadSite:type = const [id:addr parent:addr guarded:bool after_exit:bool observed:bool returning:addr?=none looped:bool=false]
 # `bare` maps an input to the fewest reads preceding an exit that does not
 # read it: a donation on that path is simply released.
-ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false bare:dict<addr addr>=[]]
+ReadScan:type = [reads:dict<addr array<ReadSite>>=[] exited:bool=false bare:dict<addr addr>=[] mutated:set<addr>=set[]]
 # One pre-order walk per function records every read of its candidate
 # parameters: where it is, whether it may run never/many times, and whether
 # an earlier return could skip it.
@@ -720,9 +721,9 @@ observes_argument = (call:hir.FunctionCall read:addr plan:captures.Plan summarie
     return false
 }
 read_count = (scan:ReadScan binding:addr):>addr => if binding in? scan.reads scan.reads[binding].length else 0
-scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false returning:addr?=none lent:bool=false):>void => {
+scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects @scan:ReadScan exposed:bool=false returning:addr?=none lent:bool=false looped:bool=false observing:bool=false):>void => {
     let source=consuming_value_source(id nodes type_nodes)
-    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed returning=returning lent=lent) return}
+    if source not=?id {scan_reads(source parent guarded candidates nodes type_nodes plan summaries @scan exposed=exposed returning=returning lent=lent looped=looped observing=observing) return}
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
@@ -737,7 +738,11 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
             # A place lent to a call ends when the call returns: the callee
             # may change the input, never keep an alias of it.
             if lent and owner is? hir.Place {observed=true}
-            sites.push(ReadSite[id parent guarded scan.exited observed returning])
+            # A field chain read only for a length or a scalar
+            # (`items.values.length`) is an inspection as well.
+            if observing and not exposed {observed=true}
+            if id in? scan.mutated {observed=true}
+            sites.push(ReadSite[id parent guarded scan.exited observed returning looped])
             scan.reads[node.binding_id]=sites
         }
         return void
@@ -760,7 +765,18 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     if node is? hir.Return {loop binding in candidates {counts[binding]=read_count(scan binding)}}
     let enclosing=if node is? hir.Return id else returning
     let lends=node is? hir.Place and hir.node_at(nodes parent) is? hir.FunctionCall
-    loop child in hir.children(node) {scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes returning=enclosing lent=lends)}
+    # A loop body or a nested function may run a read many times.
+    let looping=looped or node is? hir.LoopArm|hir.FunctionLiteral|hir.GenericFunction
+    # Field chains under a length or a scalar read inspect their root.
+    let inspecting=node is? hir.ArrayLength|hir.StringLength
+    if node is? hir.MemberAccess {
+        let shape=types.node_at(type_nodes views.structural_base(node.value_type type_nodes))
+        inspecting=observing or (shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(node.value_type type_nodes) isnt? none
+    }
+    loop child in hir.children(node) {
+        let below=hir.node_at(nodes child)
+        scan_reads(child id nested candidates nodes type_nodes plan summaries @scan exposed=escapes returning=enclosing lent=lends looped=looping observing=inspecting and below is? hir.MemberAccess|hir.ExpressedIdentifier)
+    }
     loop [binding count] in counts {
         if read_count(scan binding) =? count and count <? scan.bare.get(binding default=count+1) {scan.bare[binding]=count}
     }
@@ -786,6 +802,22 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
         if wanted.length=?0 continue
         let needed_locals=owning_locals(literal.body nodes type_nodes)
         let scan=ReadScan[]
+        # The route of an in-place change (`xs.push(v)`, `b.total+=n`) keeps
+        # no alias of its root. The callee owns a donated input, so changing
+        # it before the final consuming read only inspects it.
+        let pending:array<addr>=[literal.body]
+        loop pending.length>?0 {
+            let item=pending.pop
+            let node=hir.node_at(nodes item)
+            hir.push_children(node @pending)
+            if node is? hir.Assign|hir.Place continue
+            let route=local_effects.write_target(node nodes)
+            loop route isnt? none {
+                scan.mutated.push(route)
+                let step=hir.node_at(nodes route)
+                route=if step is? hir.MemberAccess step.value else if step is? hir.Index step.array else none
+            }
+        }
         # A lazy default may also read a donating argument. Its conditional
         # execution cannot be ignored when establishing a single use.
         loop parameter in effects.literal_params(literal) {
@@ -797,10 +829,13 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
             const sites=@scan.reads[binding]
             if sites.length=?0 continue
             let site=sites[sites.length-1]
-            if site.guarded continue
+            # A final read inside a conditional `return` still runs at most
+            # once and ends its path; other paths release the input, so it
+            # needs the owned protocol below.
+            if site.guarded and (site.returning is? none or site.looped) continue
             let parent=hir.node_at(nodes site.parent)
             if parent is? hir.Declare and (parent.binding_id is? none or parent.binding_id not in? needed_locals) continue
-            if sites.length=?1 and not site.after_exit and hir.node_at(nodes site.parent) isnt? hir.Declare {candidates[binding]=site continue}
+            if sites.length=?1 and not site.guarded and not site.after_exit and hir.node_at(nodes site.parent) isnt? hir.Declare {candidates[binding]=site continue}
             if not owned_protocol or id in? retaining or binding in? excluded or not storage_borrows.borrowable(hir.node_at(nodes site.id).value_type type_nodes) continue
             # Earlier scalar inspections create no alias. An early exit owns
             # cleanup; ordinary last-use analysis chooses the final transfer.
@@ -830,7 +865,11 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
         # does not consume the source parameter or make it an owning input.
         if parent is? hir.ObjectLiteral and site.parent in? borrowed_literals continue
         if parent is? hir.Declare and (parent.view or (parent.binding_id isnt? none and parent.binding_id in? borrowed_bindings)) continue
-        if parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral|hir.Declare or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
+        # A field, element or dictionary store keeps the value it stores.
+        let stored=false
+        if parent is? hir.MemberAssign|hir.IndexAssign {stored=consuming_value_source(parent.value nodes type_nodes)=?site.id}
+        if parent is? hir.DictStore and parent.value isnt? none {stored=consuming_value_source(parent.value nodes type_nodes)=?site.id}
+        if stored or parent is? hir.Return|hir.ObjectLiteral|hir.ArrayLiteral|hir.Declare or (parent is? hir.FunctionLiteral and consuming_value_source(parent.body nodes type_nodes)=?site.id) {
             # Prepared fixed-array call storage retains its existing protocol.
             let shape=types.node_at(type_nodes types.unfold(types.strip_refinement(hir.node_at(nodes site.id).value_type type_nodes) type_nodes))
             if shape isnt? types.ArrayType or shape.length is? none {pending.push(binding)}

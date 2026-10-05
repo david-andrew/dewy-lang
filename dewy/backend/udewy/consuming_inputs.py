@@ -9,6 +9,7 @@ from collections import defaultdict, deque
 
 from ...semantic import hir, ty, bindings
 from ...semantic.analyze.effects import _literal_params
+from ...semantic.analyze.predicate_effects import write_target
 from ...semantic.analyze.storage_borrows import borrowable
 from .borrowing import write_targets
 
@@ -121,14 +122,24 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
         if not wanted:
             continue
         needed_locals = owning_locals(literal)
+        # The route of an in-place change (`xs.push(v)`, `b.total+=n`) keeps
+        # no alias of its root. The callee owns a donated input, so changing
+        # it before the final consuming read only inspects it.
+        mutated = set()
+        for node in hir.walk(literal.body):
+            route = None if isinstance(node, (hir.Assign, hir.Place)) else write_target(node)
+            while route is not None:
+                mutated.add(id(route))
+                route = (route.value if isinstance(route, hir.MemberAccess)
+                         else route.array if isinstance(route, hir.Index) else None)
         reads = defaultdict(list)
         # Per input: the fewest reads preceding an exit that reads it not at
         # all. A donation on such a path is simply released.
         bare_exits = {}
-        def visit(node, parent=None, guarded=False, exposed=False, returning=None, lent=False):
+        def visit(node, parent=None, guarded=False, exposed=False, returning=None, lent=False, looped=False, observing=False):
             value = value_source(node)
             if value is not node:
-                visit(value, parent, guarded, exposed, returning, lent)
+                visit(value, parent, guarded, exposed, returning, lent, looped, observing)
                 return
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id in wanted:
@@ -142,7 +153,10 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                     # A place lent to a call ends when the call returns: the
                     # callee may change the input, never keep an alias of it.
                     observed = observed or lent and isinstance(parent, hir.Place)
-                    reads[node.binding_id].append((node, parent, guarded, observed, returning))
+                    # A field chain read only for a length or a scalar
+                    # (`items.values.length`) is an inspection as well.
+                    observed = observed or observing and not exposed or id(node) in mutated
+                    reads[node.binding_id].append((node, parent, guarded, observed, returning, looped))
                 return
             terminal = node
             if guarded:
@@ -161,8 +175,15 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
             if isinstance(node, hir.Return):
                 returning = id(node)
             lends = isinstance(node, hir.Place) and isinstance(parent, hir.FunctionCall)
+            # A loop body or a nested function may run a read many times.
+            looping = looped or isinstance(node, (hir.LoopArm, hir.FunctionLiteral, hir.GenericFunction))
+            # Field chains under a length or a scalar read inspect their root.
+            inspecting = (isinstance(node, (hir.ArrayLength, hir.StringLength))
+                          or isinstance(node, hir.MemberAccess) and (observing or ty.structural_base(node.type) in ('bool', 'true', 'false')
+                                                                    or ty.fixed_integer_layout(node.type) is not None))
             for child in hir.children(node):
-                visit(child, node, nested, exposed, returning, lends)
+                visit(child, node, nested, exposed, returning, lends, looping,
+                      inspecting and isinstance(child, (hir.MemberAccess, hir.ExpressedIdentifier)))
             if counts is not None:
                 for binding, count in counts.items():
                     if len(reads.get(binding, ())) == count:
@@ -184,7 +205,10 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
             final = sites[-1][4]
             returning_only = all(site[3] or site[4] is not None and site[4] != final for site in sites[:-1])
             inspected = all(site[3] for site in sites[:-1])
-            if not sites[-1][2] and (inspected or returning_only and bare_exits.get(binding, len(sites)) >= len(sites)):
+            # A final read inside a conditional `return` still runs at most
+            # once and ends its path; other paths release the input.
+            once = not sites[-1][2] or final is not None and not sites[-1][5]
+            if once and (inspected or returning_only and bare_exits.get(binding, len(sites)) >= len(sites)):
                 parent = sites[-1][1]
                 if not isinstance(parent, hir.Declare) or parent.binding_id in needed_locals:
                     candidates[binding] = sites[-1][:2]
@@ -198,7 +222,10 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
             continue
         if isinstance(parent, hir.Declare) and (parent.view or parent.binding_id in borrowed_bindings):
             continue  # a local loan is not an ownership boundary
-        if isinstance(parent, (hir.Return, hir.ObjectLiteral, hir.ArrayLiteral, hir.Declare)) or (
+        # A field, element or dictionary store keeps the value it stores.
+        stored = (isinstance(parent, (hir.MemberAssign, hir.IndexAssign)) and value_source(parent.value) is read
+                  or isinstance(parent, hir.DictStore) and parent.value is not None and value_source(parent.value) is read)
+        if stored or isinstance(parent, (hir.Return, hir.ObjectLiteral, hir.ArrayLiteral, hir.Declare)) or (
                 isinstance(parent, hir.FunctionLiteral) and value_source(parent.body) is read):
             shape = ty.structural_base(read.type)
             # Fixed-array calls can use prepared/raw storage, whose ownership

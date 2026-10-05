@@ -82,10 +82,12 @@ let main = ():>int64 => {
     let list:Node|none = none
     list = [value=1 next=list]
     let copy:Node|none = list
-    if copy is? Node { return copy.value }
+    if copy is? Node { if list is? Node { return copy.value+list.value } }
     return 0
 }
 '''))
+    # `list` stays live after `copy`, so binding `copy` needs the copy function
+    # (building the node itself moves `list` in: its old value is not read again).
     assert '__dewy_copy_Node' in emitted
     assert '_arena_alloc' in emitted
 

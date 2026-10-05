@@ -17,10 +17,18 @@ import p"../subtyping.dewy" as subtyping
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 # Raw loads read memory and write nothing. They still expose the address of
 # what they read (a later raw store may write through it), but do not block
-# the proof for their callers. Raw stores and syscalls stay unknown.
-const RAW_LOADS:set<string>=set['__load__' '__load_i64__' '__load_u64__' '__load_i32__' '__load_u32__' '__load_i16__' '__load_u16__' '__load_i8__' '__load_u8__']
-raw_load=(node:hir.AST registry:bindings.Registry):>bool=>{
-    if node isnt? hir.ExpressedIdentifier or node.name not in? RAW_LOADS return false
+# the proof for their callers. Neither do operations that write no existing
+# storage: frame allocation, `__unreachable__`, and `lend_write`, a `$lend`
+# block's reservation on its named owner (exposed as before). Raw stores and
+# syscalls stay unknown: an address can outlive the exposure that made it,
+# for instance in a scalar global (`test_constant_global_views`).
+const RAW_MEMORY:set<string>=set[
+    '__load__' '__load_i64__' '__load_u64__' '__load_i32__' '__load_u32__' '__load_i16__' '__load_u16__' '__load_i8__' '__load_u8__'
+    '__unreachable__' '__alloca__' '__static_alloca__'
+]
+raw_memory=(node:hir.AST registry:bindings.Registry):>bool=>{
+    if node is? hir.ArrayMethod return node.name =? 'lend_write'
+    if node isnt? hir.ExpressedIdentifier or node.name not in? RAW_MEMORY return false
     if node.binding_id is? none return true
     let binding=bindings.find_binding(registry node.binding_id)
     return binding isnt? none and binding.builtin
@@ -69,8 +77,7 @@ modeled_call=(node:hir.FunctionCall registry:bindings.Registry nodes:array<hir.A
     # the ordinary call-graph proof.
     return func is? hir.ArrayMethod and func.name in? ARRAY_METHODS and ordinary(hir.node_at(nodes func.array).value_type table @known)
 }
-stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nodes:array<hir.AST>):>bool=>{
-    if effects.read_only(summary) return true
+route_of=(path:bindings.AccessPath nodes:array<hir.AST>):>effects.Route=>{
     let steps:array<string>=[]
     loop step_id in path.steps {
         let step=hir.node_at(nodes step_id)
@@ -78,7 +85,30 @@ stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nod
         else if step is? hir.ForwardingAccess {steps.push(step.field)}
         else {steps.push('[]')}
     }
-    return effects.read_only_at(summary effects.Route[steps])
+    return effects.Route[steps]
+}
+# A sort changes only its own array, a write target of the calling body, and
+# calls its key (and the key's copy). With those resolved, the callbacks are
+# ordinary call-graph edges; none when a key is unknown.
+sort_callbacks=(node:hir.FunctionCall analysis:effects.Analysis nodes:array<hir.AST> table:types.Table @known:dict<addr bool>):>array<addr>|none=>{
+    let func=hir.node_at(nodes effects.unwrap(node.func nodes))
+    if func isnt? hir.ArrayMethod or func.name not=? 'sort' or not ordinary(hir.node_at(nodes func.array).value_type table @known) return none
+    let targets:array<addr>=[]
+    if 'key' in? node.kw_args {
+        let found=effects.value_targets(node.kw_args['key'] none analysis nodes)
+        if found is? none return none
+        loop target in found {targets.push(target)}
+        if func.key_copy isnt? none {
+            let copied=effects.value_targets(func.key_copy none analysis nodes)
+            if copied is? none return none
+            loop target in copied {targets.push(target)}
+        }
+    }
+    return targets
+}
+stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nodes:array<hir.AST>):>bool=>{
+    if effects.read_only(summary) return true
+    return effects.read_only_at(summary route_of(path nodes))
 }
 # Contextual boxing of a closed literal/default cannot expose existing
 # caller storage. Discharged obligations leave literal-only blocks; inspect
@@ -251,15 +281,19 @@ record_loan_fields=(node:hir.AST nodes:array<hir.AST> table:types.Table families
     }
     return arrays
 }
-stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> constants:dict<addr addr> allow_constants:bool summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
-    # A finite-string widening changes the logical type, not its descriptor.
-    # Do not strip conversions involving an optional or a non-string value.
+# A finite-string widening changes the logical type, not its descriptor.
+# Do not strip conversions involving an optional or a non-string value.
+widened_source=(value:addr nodes:array<hir.AST> table:types.Table):>addr=>{
     loop true {
         let node=hir.node_at(nodes value)
         if node isnt? hir.ValueCast|hir.RepresentationCast break
         if not views.string_valued(node.value_type table) or not views.string_valued(hir.node_at(nodes node.expr).value_type table) break
         value=node.expr
     }
+    return value
+}
+stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr> local_views:set<addr> constants:dict<addr addr> allow_constants:bool summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool> selections:set<addr>=set[]):>bool=>{
+    value=widened_source(value nodes table)
     let path=bindings.access_path(value nodes forwarding=common_array_field(hir.node_at(nodes value) nodes table))
     let source=hir.node_at(nodes path.root)
     if source isnt? hir.ExpressedIdentifier or source.binding_id is? none return false
@@ -272,6 +306,11 @@ stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr>
         stable=stable_projection(incoming path nodes)
     }
     if not stable return false
+    return stored_layouts(path nodes table)
+}
+# A narrowed field/element may still live in a tagged cell or a different
+# layout. Do not reinterpret that storage as a handle.
+stored_layouts=(path:bindings.AccessPath nodes:array<hir.AST> table:types.Table):>bool=>{
     loop id in path.steps {
         let step=hir.node_at(nodes id)
         if common_array_field(step nodes table) continue
@@ -292,6 +331,74 @@ stable_value=(value:addr parameters:dict<addr addr> local_owners:dict<addr addr>
         if not types.same_type(views.structural_base(stored table) views.structural_base(step.value_type table) table) and not (views.string_valued(stored table) and views.string_valued(step.value_type table)) return false
     }
     return true
+}
+overlaps_route=(value:addr binding:addr route:effects.Route nodes:array<hir.AST>):>bool=>{
+    let path=bindings.access_path(value nodes facts=true)
+    let root=hir.node_at(nodes path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id not=? binding return false
+    return not effects.disjoint_routes([route_of(path nodes)] route)
+}
+# A parameter or private local written elsewhere in the body still keeps its
+# storage for one call that cannot write it, which is all a call-scoped loan
+# needs. Nothing may retain it. The call's argument expressions write no
+# overlapping route and pass none to a nested call; the call passes one only
+# to a read-only parameter, never to a place. The callee cannot reach the
+# binding another way: it is not captured, and a callee writing outside
+# state blocks this function.
+held_for_call=(binding:addr path:bindings.AccessPath call:hir.FunctionCall parameters:dict<addr addr> call_owners:dict<addr addr> captured:set<addr> summaries:effects.ProgramEffects analysis:effects.Analysis nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool>):>bool=>{
+    if binding in? captured return false
+    let route=route_of(path nodes)
+    let own=parameters.get(binding)
+    if own isnt? none {
+        if binding not in? summaries.by_param_binding or not ordinary(own table @eligible) return false
+        const incoming=@summaries.by_param_binding[binding]
+        if not effects.disjoint_routes(incoming.escapes route) return false
+    } else {
+        let local=call_owners.get(binding)
+        if local is? none or not ordinary(local table @eligible) return false
+    }
+    let targets=effects.direct_targets(call analysis nodes)
+    if targets is? none return false
+    loop target in targets {
+        let callee=hir.node_at(nodes target)
+        $runtime_assert callee is? hir.FunctionLiteral
+        let places:set<addr>=set[]
+        loop param in effects.literal_params(callee) {if param.place and param.binding_id isnt? none {places.push(param.binding_id)}}
+        let pairs=effects.pair_arguments(call callee)
+        if pairs is? none return false
+        loop pair in pairs {
+            if not overlaps_route(pair.argument binding route nodes) continue
+            if pair.parameter is? none or pair.parameter in? places or pair.parameter not in? summaries.by_param_binding return false
+            const outgoing=@summaries.by_param_binding[pair.parameter]
+            if not effects.read_only(outgoing) return false
+        }
+    }
+    let arguments:array<addr>=[]
+    loop argument in call.pos_args {arguments.push(argument)}
+    loop argument in call.kw_args.values {arguments.push(argument)}
+    loop argument in arguments {
+        let pending:array<addr>=[argument]
+        loop pending.length>?0 {
+            let id=pending.pop
+            let node=hir.node_at(nodes id)
+            if node is? hir.FunctionLiteral return false
+            let target=local_effects.write_target(node nodes)
+            if target isnt? none and overlaps_route(target binding route nodes) return false
+            if node is? hir.FunctionCall {
+                loop value in node.pos_args {if overlaps_route(value binding route nodes) return false}
+                loop value in node.kw_args.values {if overlaps_route(value binding route nodes) return false}
+            }
+            hir.push_children(node @pending)
+        }
+    }
+    return true
+}
+field_held_for_call=(field:addr call:hir.FunctionCall parameters:dict<addr addr> call_owners:dict<addr addr> captured:set<addr> summaries:effects.ProgramEffects analysis:effects.Analysis nodes:array<hir.AST> table:types.Table @eligible:dict<addr bool>):>bool=>{
+    let value=widened_source(field nodes table)
+    let path=bindings.access_path(value nodes forwarding=common_array_field(hir.node_at(nodes value) nodes table))
+    let source=hir.node_at(nodes path.root)
+    if source isnt? hir.ExpressedIdentifier or source.binding_id is? none or not stored_layouts(path nodes table) return false
+    return held_for_call(source.binding_id path call parameters call_owners captured summaries analysis nodes table @eligible)
 }
 # Branch leaves share a descriptor without owning the selected source. Only
 # bounded scalar literals add storage; the caller proves every source stable.
@@ -376,8 +483,8 @@ owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects
     return owning
 }
 Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[] flow_literals:set<addr>=set[] flow_sources:set<addr>=set[] constants:set<addr>=set[]]
-# Outside state a write or exposure can change: not a `const` binding, a
-# string or a binary literal, which are immutable.
+# Outside storage a write or exposure can change: not a `const` binding, a
+# string or a binary literal, which are immutable, and not a scalar.
 mutable_state=(binding:addr analysis:effects.Analysis nodes:array<hir.AST> table:types.Table):>bool=>{
     let declared=analysis.declares.get(binding)
     if declared is? none return true
@@ -386,6 +493,10 @@ mutable_state=(binding:addr analysis:effects.Analysis nodes:array<hir.AST> table
     if node.decltype =? 'const' return false
     let type=if node.annotation is? none hir.node_at(nodes node.expr).value_type else node.annotation
     if types.node_at(table types.strip_refinement(type table)) is? types.BinaryLiteralType return false
+    # A scalar has no storage an argument could share.
+    let shape=types.node_at(table views.structural_base(type table))
+    if shape is? types.Primitive and shape.name in? ['bool' 'true' 'false'] return false
+    if views.fixed_integer_layout(type table) isnt? none return false
     return not views.string_valued(type table)
 }
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
@@ -401,6 +512,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
     let stable_locals:dict<addr dict<addr addr>>=[]
+    let call_locals:dict<addr dict<addr addr>>=[]
     let writes:dict<addr set<addr>>=[]
     let captured:set<addr>=set[]
     let edges:dict<addr set<addr>>=[]
@@ -453,6 +565,9 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         # Reuse the unique body inventory, including defaults. A local owner
         # must not be written or exposed through a place anywhere in this scope.
         let written:set<addr>=set[]
+        let exposed_roots:set<addr>=set[]
+        let replaced:dict<addr bool>=[]
+        let iterated:set<addr>=set[]
         let candidates:dict<addr addr>=[]
         loop item in body {
             let node=hir.node_at(nodes item)
@@ -473,7 +588,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 if union_loan_source(item nodes table) is? none and converted isnt? types.Primitive {exposed.push(node.expr)}
             } else if node is? hir.FunctionCall and effects.direct_targets(node analysis nodes) is? none {
                 let func=hir.node_at(nodes effects.unwrap(node.func nodes))
-                if not modeled_call(node registry nodes table @eligible) {
+                if not modeled_call(node registry nodes table @eligible) and sort_callbacks(node analysis nodes table @eligible) is? none {
                     loop arg in node.pos_args {exposed.push(arg)}
                     loop arg in node.kw_args.values {exposed.push(arg)}
                     if func is? hir.ArrayMethod {exposed.push(func.array)}
@@ -482,7 +597,16 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             loop value in exposed {
                 let path=bindings.access_path(value nodes facts=true)
                 let root=hir.node_at(nodes path.root)
-                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.push(root.binding_id)}
+                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.push(root.binding_id) exposed_roots.push(root.binding_id)}
+            }
+            if node is? hir.Assign {
+                let target=hir.node_at(nodes node.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+                    replaced[target.binding_id]=replaced.get(target.binding_id default=true) and node.op =? '=' and private_origin(node.value nodes)
+                }
+            } else if node is? hir.IteratorExpression {
+                let target=hir.node_at(nodes node.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {iterated.push(target.binding_id)}
             }
             if node is? hir.Declare and node.binding_id isnt? none and not node.view {
                 let value=hir.node_at(nodes node.expr)
@@ -491,8 +615,17 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 if private_origin(node.expr nodes) {candidates[node.binding_id]=value.value_type}
             }
         }
-        loop binding in written {candidates.pop(binding default=0);}
+        # A written local still owns private storage when it starts from a
+        # fresh value and every replacement is fresh too. Its storage holds
+        # for one call that cannot write it (`held_for_call`).
+        let written_owners:dict<addr addr>=[]
+        loop binding in written {
+            let owner=candidates.get(binding)
+            if owner isnt? none and binding not in? exposed_roots and binding not in? iterated and replaced.get(binding default=true) {written_owners[binding]=owner}
+            candidates.pop(binding default=0);
+        }
         stable_locals[id]=candidates
+        call_locals[id]=written_owners
         # Only a write or raw exposure can change storage an argument may
         # share with outside state; reading that state cannot. A function
         # that writes it blocks itself and, through the call graph, its
@@ -507,7 +640,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
-                let operation=primitive(node registry) or raw_load(node registry)
+                let operation=primitive(node registry) or raw_memory(node registry)
                 if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {
                     if node.binding_id is? none {blocked.push(id)}
                 }
@@ -515,7 +648,13 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 let targets=effects.direct_targets(node analysis nodes)
                 if targets is? none {
                     let func=hir.node_at(nodes effects.unwrap(node.func nodes))
-                    if not modeled_call(node registry nodes table @eligible) and not raw_load(func registry) {blocked.push(id)}
+                    let callbacks=sort_callbacks(node analysis nodes table @eligible)
+                    if callbacks isnt? none {
+                        loop target in callbacks {
+                            if target in? edges {let callers=@edges[target] callers.push(id)}
+                            else {edges[target]=set[id]}
+                        }
+                    } else if not modeled_call(node registry nodes table @eligible) and not raw_memory(func registry) {blocked.push(id)}
                 } else {
                     loop target in targets {
                         # Extend the live adjacency set, rather than copying
@@ -612,6 +751,8 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         let parameters:dict<addr addr>=[]
         let local_owners:dict<addr addr>=[]
         loop [binding type] in stable_locals[id] {if binding not in? captured {local_owners[binding]=type}}
+        let call_owners:dict<addr addr>=[]
+        if id in? call_locals {loop [binding type] in call_locals[id] {if binding not in? captured {call_owners[binding]=type}}}
         # Keep the whole-call-graph alias guard for incoming storage. Private
         # fresh owners cannot be reached through another caller/global name.
         # A single place has no second place formal that could alias it.
@@ -801,6 +942,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                                 const incoming=@summaries.by_param_binding[source.binding_id]
                                 stable=stable_projection(incoming path nodes)
                             }
+                            if not stable {stable=held_for_call(source.binding_id path node parameters call_owners captured summaries analysis nodes table @eligible)}
                             let same=false
                             if expected isnt? none {
                                 same=arg.value_type =? expected or loan isnt? none
@@ -818,7 +960,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                             if fields isnt? none {
                                 const outgoing=@summaries.by_param_binding[pair.parameter]
                                 safe=effects.read_only(outgoing)
-                                loop field in fields {if not stable_value(field parameters local_owners local_views constants (id not in? blocked) summaries nodes table @eligible) {safe=false}}
+                                loop field in fields {if not stable_value(field parameters local_owners local_views constants (id not in? blocked) summaries nodes table @eligible) and not field_held_for_call(field node parameters call_owners captured summaries analysis nodes table @eligible) {safe=false}}
                             }
                         }
                         if safe {current.push(pair.argument)} else {rejected.push(pair.argument)}

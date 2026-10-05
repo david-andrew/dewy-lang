@@ -18,6 +18,7 @@ from .lowering_shared import (
     FIXED_INTEGER_WIDTHS,
     SIGNED_FIXED_INTS,
     LoopRegion,
+    MoveNote,
     local_binding_key,
 )
 
@@ -982,6 +983,18 @@ class _FlowLowering:
                 # or receives a donated owner. The parameter's ABI selects
                 # conditional or unconditional cleanup for those cases.
                 return self._extract_object_pointer(item)
+            if (isinstance(item, hir.ExpressedIdentifier) and id(item) in self.moved_uses
+                    and ty.unfold(item_type) == target_type
+                    and local_binding_key(item) in self.owned_objects):
+                # A last-use local hands its record handle to the join, as
+                # `let t = x` does. The emptied binding releases nothing.
+                prelude, pointer = self._extract_object_pointer(item)
+                taken = hir.ExpressedIdentifier(item.loc, 'int64', self._new_optional_name('flow_moved'))
+                self.moved_record_bindings.add(local_binding_key(item))
+                self.move_notes.append(MoveNote(self.srcfile, item.loc,
+                    f'`{item.name}` is moved when kept as a flow result: this is its last use, so its record storage is transferred', True))
+                return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', taken.name, 'int64', pointer),
+                        hir.Assign(item.loc, ty.VOID_TYPE, replace(item, type='int64'), '=', self._int64_literal(item.loc, 0))], taken
             # An inferred join can widen a child union into its parent record.
             # Extract its payload and copy into the joined layout; the cell's
             # address is not itself a record pointer.

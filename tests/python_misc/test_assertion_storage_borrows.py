@@ -36,7 +36,8 @@ forward=(@source:array<int64>):>int64=>_assertion_report(source)
 main=():>int64=>forward(@values)''',
 ]
 # A temporary record with a runtime-sized field needs the shared storage proof,
-# not just the lowerer's direct projected-argument loan.
+# not just the lowerer's direct projected-argument loan. The message writes an
+# array global: a scalar global has no storage the loan could share.
 from test_place_projection_argument_loans import SOURCE as PROJECTION_SOURCE
 SHARED = (PROJECTION_SOURCE.replace(' & no_effects', '')
           .replace(' & reads<box> & mutates<box.counter> & no allocates', '')
@@ -48,7 +49,7 @@ CASES += [SHARED,
 ]
 
 ERRORS = [SHARED.replace('Box:type=',
-    "let calls:int64=0\nmessage=():>string=>{calls+=1 return 'empty'}\nBox:type=")
+    "let calls:array<int64>=[]\nmessage=():>string=>{calls.clear() return 'empty'}\nBox:type=")
     .replace('$runtime_assert pair.items.length>?0', '$runtime_assert pair.items.length>?0, message()')]
 
 
