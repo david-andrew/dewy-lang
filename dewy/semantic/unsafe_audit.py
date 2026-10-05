@@ -1,10 +1,11 @@
 """Persistent source inventory for explicit unchecked assumptions.
 
-The initial report deliberately over-approximates consumers: it lists the
-checked operations in each assumption-bearing function, and its direct call
-sites. These are review candidates, not a claim that each check logically
-needs every assumption. Value facts still use the normal mutation-aware
-solver. Collect before reachability/erasure, including cached modules.
+Each assumption lists its demonstrated consumers: the checks that become
+undecided when the bounds checker validates the program again without it
+(`bounds.assumption_consumers`). The checked operations of its function stay
+listed as review candidates. Value facts still use the normal mutation-aware
+solver. Collect before reachability/erasure, including cached modules; an
+assumption in the prelude, whose checks are cached, has no consumer list.
 """
 from dataclasses import dataclass
 import json
@@ -27,6 +28,7 @@ class Entry:
     message: str | None
     scope: str
     checks: tuple[Check, ...]
+    consumers: tuple[Check, ...] | None = None
 
 
 last_entries: list[Entry] = []
@@ -48,7 +50,7 @@ def check_kind(node: hir.AST) -> str | None:
     return None
 
 
-def collect(root: hir.AST, source: SrcFile, scope: str = '<module>') -> list[Entry]:
+def collect(root: hir.AST, source: SrcFile, scope: str = '<module>', *, consumers: dict | None = None) -> list[Entry]:
     entries: list[Entry] = []
     sites: list[hir.Assert] = []
     checks: list[Check] = []
@@ -63,10 +65,10 @@ def collect(root: hir.AST, source: SrcFile, scope: str = '<module>') -> list[Ent
             continue
         seen.add(id(node))
         if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
-            entries.extend(collect(node.expr, node.expr.source or source, node.name))
+            entries.extend(collect(node.expr, node.expr.source or source, node.name, consumers=consumers))
             continue
         if isinstance(node, hir.FunctionLiteral):
-            entries.extend(collect(node, node.source or source, '<anonymous>'))
+            entries.extend(collect(node, node.source or source, '<anonymous>', consumers=consumers))
             continue
         if isinstance(node, hir.Assert) and node.unsafe:
             sites.append(node)
@@ -76,7 +78,13 @@ def collect(root: hir.AST, source: SrcFile, scope: str = '<module>') -> list[Ent
         pending.extend(reversed(list(hir.children(node))))
     unique = {(c.loc.start, c.loc.stop, c.kind): c for c in checks}
     candidates = tuple(unique[key] for key in sorted(unique))
-    entries.extend(Entry(source, node.loc, node.source, node.message, scope, candidates) for node in sites)
+    def demonstrated(node: hir.Assert) -> tuple[Check, ...] | None:
+        found = (consumers or {}).get(id(node))
+        if found is None:
+            return None
+        unique = {(site.loc.start, site.loc.stop, check_kind(site) or 'check'): Check(site.loc, check_kind(site) or 'check') for site in found}
+        return tuple(unique[key] for key in sorted(unique))
+    entries.extend(Entry(source, node.loc, node.source, node.message, scope, candidates, demonstrated(node)) for node in sites)
     return entries
 
 
@@ -87,11 +95,12 @@ def render(entries: list[Entry]) -> str:
         return dict(path=str(source.path) if source.path is not None else None,
                     start=span.start, stop=span.stop, line=row + 1, column=column + 1)
     return json.dumps({
-        'version': 1,
-        'consumer_precision': 'conservative function scope, not minimal proof dependencies',
+        'version': 2,
+        'consumer_precision': 'consumers: checks undecided without this assumption; candidate_checks: the checked operations of its function',
         'assumptions': [dict(
             **location(entry.source, entry.loc), condition=entry.condition,
             message=entry.message, scope=entry.scope,
             candidate_checks=[dict(**location(entry.source, check.loc), kind=check.kind) for check in entry.checks],
+            consumers=None if entry.consumers is None else [dict(**location(entry.source, check.loc), kind=check.kind) for check in entry.consumers],
         ) for entry in entries],
     }, ensure_ascii=False, indent=2) + '\n'

@@ -258,6 +258,20 @@ def _call_function_type(node: hir.AST) -> ty.FunctionType | None:
     return None
 
 
+# Operations the interval and linear facts do not relate between two
+# unknown operands, and how a report spells them.
+_UNTRACKED_OPERATORS = {'__mul__': '*', '__div__': '/', '__floordiv__': '//', '__mod__': '%',
+                        '__and__': 'and', '__or__': 'or', '__xor__': 'xor',
+                        '__lshift__': '<<', '__rshift__': '>>'}
+
+
+def _refined_result(type_: ty.Type) -> bool:
+    """A call result the checker can use: refined, or a union with a refined member."""
+    if isinstance(type_, ty.RefinedType):
+        return True
+    return isinstance(type_, ty.TypeOr) and any(isinstance(item, ty.RefinedType) for item in type_.items)
+
+
 def _call_result_refinement(node: hir.AST) -> ty.RefinedType | None:
     """The refined return type of a call (`f():>int64<i => i >=? 1>`), if any."""
     function_type = _call_function_type(node)
@@ -989,6 +1003,13 @@ class _BoundsValidator:
         # Bound finite-loop exploration across nested loops. Exhausting the
         # budget falls back to widening, never to an assumed proof.
         self.finite_loop_budget = 64
+        # Whether a search budget ran out in the function being checked, for
+        # the reason an unknown proof gives (`_why_unknown`).
+        self.exhausted_budget = False
+        # `assumption_consumers`: undecided sites are recorded here instead
+        # of reported, with these unsafe assumptions left out.
+        self.survey: list[hir.AST] | None = None
+        self.disabled_assumptions: frozenset[int] = frozenset()
         self.loop_controls = {}
         self.loop_depth = 0
         self.loop_search_budget = 0
@@ -1004,6 +1025,12 @@ class _BoundsValidator:
         self.array_routes: dict[int, tuple[hir.AST, int | None]] = {}
         assigned = _assigned_binding_ids(root)
         self.assigned = assigned
+        # Initializers of bindings never reassigned: an unknown proof follows
+        # a name to where its value came from (`_why_unknown`).
+        self.initializers: dict[int, hir.AST] = {
+            node.binding_id: node.expr for node in hir.walk(root)
+            if isinstance(node, hir.Declare) and node.binding_id is not None and node.binding_id not in assigned
+            and not isinstance(node.expr, hir.FunctionLiteral)}
         # Element intervals of arrays and dictionaries initialized from a
         # literal of constants and never mutated: iterating them bounds the
         # loop variable (`loop [k v] in [3 -> 'Fizz' 5 -> 'Buzz']` gives k in [3, 5]).
@@ -1266,7 +1293,7 @@ class _BoundsValidator:
             self._eval(node.condition, current, validate=validate)
             if validate:
                 self._validate_assert(node, current)
-            if node.runtime:
+            if node.runtime or id(node) in self.disabled_assumptions:
                 return current  # the flow it guards refines the continuation
             held = self._refine(current, node.condition, truth=True)
             return current if held is None else held
@@ -1368,7 +1395,7 @@ class _BoundsValidator:
             srcfile=self.srcfile,
             title='cannot prove the array keeps its declared length',
             pointer_messages=[Pointer(span=node.loc, message=f'`{method}` may leave {" or ".join(failures)}; the storage is declared `{type_to_dewy(contract)}`')],
-            notes=[f'the length afterwards {self._describe_interval(after, array=True)}'],
+            notes=[f'the length afterwards {self._describe_interval(after, array=True)}', self._why_unknown(node)],
             hint='guard the operation to prove the resulting length stays within the contract, or declare storage without that length fact',
         ))
 
@@ -1377,11 +1404,11 @@ class _BoundsValidator:
         if self._nonzero_proven(divisor, interval, state):
             return
         source = ' '.join(self.srcfile.body[divisor.loc.start:divisor.loc.stop].split())
-        user_error(
+        self._undecided(divisor,
             self.srcfile,
             'cannot prove the divisor is nonzero',
             Pointer(span=divisor.loc, message='this may be zero'),
-            notes=[f'`{source}` {self._describe_interval(interval, array=False)}'],
+            notes=[f'`{source}` {self._describe_interval(interval, array=False)}', self._why_unknown(divisor)],
             hint='guard the division (`if d not=? 0 { … }`), refine the parameter (`d:int64<i => i not=? 0>`), or check it with `$runtime_assert d not=? 0`',
         )
 
@@ -1401,6 +1428,7 @@ class _BoundsValidator:
                     srcfile=self.srcfile,
                     title='refinement refuted' if verdict is False else 'cannot prove fact',
                     pointer_messages=[Pointer(span=node.value.loc, message=f'`{_describe_proposition_text(proposition)}` is promised when this is `{str(proposition.when).lower()}`, and nothing here establishes it')],
+                    notes=[] if verdict is False else [self._why_unknown(node.value)],
                     hint='return under a guard that establishes the fact (`if prefix.length >? src.length return false` before `return true`)',
                 ))
                 return
@@ -1424,7 +1452,8 @@ class _BoundsValidator:
                     span=node.value.loc,
                     message=f'`{requirement}` is required here' if verdict is False else f'no fact establishes `{requirement}` (neither proven nor refuted)',
                 )],
-                notes=[f'`{source}` {self._describe_interval(subject_interval, array=proposition.subject == "length")}'],
+                notes=[f'`{source}` {self._describe_interval(subject_interval, array=proposition.subject == "length")}',
+                       *([] if verdict is False else [self._why_unknown(node.value)])],
                 hint=None if verdict is False else 'establish it with a guard (`if … { }`), or check it with `$runtime_assert`',
             ))
             return
@@ -1950,13 +1979,15 @@ class _BoundsValidator:
             detail = 'this condition is false for every value the analysis admits'
         else:
             detail = 'no compile-time fact establishes this condition (neither proven nor refuted)'
-        user_error(
+        self._undecided(
+            node.condition,
             self.srcfile,
             'assertion refuted' if refuted else 'cannot prove assertion',
             Pointer(span=node.condition.loc, message=detail),
-            notes=self._explain_condition(node.condition, state),
+            notes=[*self._explain_condition(node.condition, state), *([] if refuted else [self._why_unknown(node.condition)])],
             dimmed=[node.dimmed] if node.dimmed is not None else None,
             hint=None if refuted else 'check it at runtime with `$runtime_assert`, or establish the fact with a guard',
+            refuted=refuted,
         )
 
     def _explain_condition(self, condition: hir.AST, state: State) -> list[str]:
@@ -2026,6 +2057,21 @@ class _BoundsValidator:
         return f'is at most {interval.upper}'
 
     def _analyze_function(
+        self,
+        function: hir.FunctionLiteral,
+        *,
+        validate: bool,
+        enclosing: State | None = None,
+    ) -> None:
+        # Budget exhaustion belongs to the function whose search ran out.
+        outer = self.exhausted_budget
+        self.exhausted_budget = False
+        try:
+            self._analyze_function_body(function, validate=validate, enclosing=enclosing)
+        finally:
+            self.exhausted_budget = outer
+
+    def _analyze_function_body(
         self,
         function: hir.FunctionLiteral,
         *,
@@ -2195,6 +2241,7 @@ class _BoundsValidator:
         # search budget across this entire loop nest; final validation is
         # never skipped, and an unstable head falls back to unknown.
         if self.loop_search_budget == 0:
+            self.exhausted_budget = True
             return False
         self.loop_search_budget -= 1
         return True
@@ -2264,6 +2311,8 @@ class _BoundsValidator:
                 else:
                     budget = [128]
                     shapes = tuple(self._linear_qualifier_form(arg, budget) for arg in node.pos_args)
+                    if budget[0] == 0:
+                        self.exhausted_budget = True
                     choices = tuple(None if shape is None else tuple(shape[1]) for shape in shapes)
                     if all(shape is not None for shape in shapes):
                         weights = _linear_key([*shapes[0][1].items(),
@@ -2435,6 +2484,8 @@ class _BoundsValidator:
             return _LoopTransfer(dict(state), {}, {})
         if count is not None and 0 < count <= 8 and count <= self.finite_loop_budget:
             return self._finite_iterator_loop(iterator, body, state, enter, target_ids, count, validate=validate)
+        if count is not None and 0 < count <= 8:
+            self.exhausted_budget = True   # widened instead of explored
         return self._iterate_loop(body, state, enter, target_ids, validate=validate, iterators=(iterator,))
 
     def _finite_iterator_loop(self, iterator, body, state, enter, target_ids, count, *, validate):
@@ -2646,10 +2697,58 @@ class _BoundsValidator:
     def _proof_failure(self, node: hir.AST, kind: str, report: Error) -> None:
         """An unproven obligation: a compile error, or in `$prototype` a
         recorded site that becomes a runtime check panicking with this report."""
+        if self.survey is not None:
+            self.survey.append(node)
+            return
         if self.prototype_sites is not None:
             self.prototype_sites[id(node)] = (kind, report)
             return
         raise UserError(report)
+
+    def _undecided(self, node: hir.AST, *report, refuted: bool = False, **details) -> None:
+        """An obligation the checker could not decide: a compile error, or
+        while surveying (`assumption_consumers`) a recorded site."""
+        if self.survey is not None and not refuted:
+            self.survey.append(node)
+            return
+        user_error(*report, **details)
+
+    def _why_unknown(self, node: hir.AST) -> str:
+        """Why an obligation about `node` stayed unknown (closure row P4), in
+        the priority the native checker uses too: an exhausted search budget,
+        a value other code changes, a call with no result refinement, an
+        operation the checker does not track, or simply no fact."""
+        if self.exhausted_budget:
+            return 'why unknown: a search budget ran out in this function, so the checker stopped instead of assuming the fact'
+        changed = self.mutable_globals | self.mutable_captures
+        invalidated = missing = unsupported = None
+        pending, followed = [node], set()
+        while pending:
+            current = pending.pop()
+            if isinstance(current, hir.FunctionLiteral):
+                continue
+            if isinstance(current, hir.ExpressedIdentifier):
+                if current.binding_id in changed and invalidated is None:
+                    invalidated = current.name
+                origin = self.initializers.get(current.binding_id)
+                if origin is not None and current.binding_id not in followed:
+                    followed.add(current.binding_id)
+                    pending.append(origin)
+            if isinstance(current, hir.FunctionCall) and isinstance(current.func, hir.ExpressedIdentifier):
+                func = current.func
+                if func.binding_id is not None and missing is None and not _refined_result(current.type):
+                    missing = func.name
+                elif (func.binding_id is None and func.name in _UNTRACKED_OPERATORS and unsupported is None
+                      and len(current.pos_args) == 2 and not any(isinstance(_strip_casts(arg), hir.Integer) for arg in current.pos_args)):
+                    unsupported = _UNTRACKED_OPERATORS[func.name]
+            pending.extend(reversed(list(hir.children(current))))
+        if invalidated is not None:
+            return f'why unknown: `{invalidated}` is changed by other code (a module-level or captured variable), so facts about it do not survive calls'
+        if missing is not None:
+            return f'why unknown: `{missing}` returns a value with no refinement the checker could use'
+        if unsupported is not None:
+            return f'why unknown: the checker does not track `{unsupported}` between two unknown values'
+        return 'why unknown: no fact on this path establishes it'
 
     def _length_default(self) -> Interval:
         """An unknown length: `[0, cap]` by the address-space axiom (a capped interval)."""
@@ -3057,6 +3156,7 @@ class _BoundsValidator:
                 srcfile=self.srcfile,
                 title=f'cannot prove this integer fits `{node.type}`',
                 pointer_messages=[Pointer(span=node.loc, message=f'the value is a `{ty.strip_refinement(node.expr.type)}`, whose range is not proven inside `{node.type}`')],
+                notes=[self._why_unknown(node.expr)],
                 hint='narrow the value with a comparison to prove it',
             ))
             return fitted
@@ -3448,8 +3548,9 @@ class _BoundsValidator:
                 key = _length_key(array_id)
                 current = state.get(key, self._length_default())
                 if validate and name == 'pop' and index_arg is None and (current.lower is None or current.lower < 1):
-                    user_error(self.srcfile, 'cannot prove the array is non-empty',
+                    self._undecided(node, self.srcfile, 'cannot prove the array is non-empty',
                                Pointer(span=node.loc, message='`pop` needs a proven positive length on every reachable iteration'),
+                               notes=[self._why_unknown(node)],
                                hint='guard the call with a positive-length test or establish a checked length fact')
                 if validate and index_arg is not None and name in {'pop', 'insert'}:
                     self._validate_method_index(
@@ -3473,6 +3574,7 @@ class _BoundsValidator:
                         srcfile=self.srcfile,
                         title='truncate length is not proven nonnegative',
                         pointer_messages=[Pointer(span=index_arg.loc, message='the count may be negative')],
+                        notes=[self._why_unknown(index_arg)],
                         hint='prove the count with a guard such as `if count >=? 0 { xs.truncate(count) }`',
                     ))
                 if name in {'push', 'insert'}:
@@ -3930,10 +4032,11 @@ class _BoundsValidator:
             lower = '-∞' if interval.lower is None else str(interval.lower)
             upper = '∞' if interval.upper is None else str(interval.upper)
             known = f'the value is only known to lie in [{lower}, {upper}]'
-        user_error(
+        self._undecided(node,
             self.srcfile,
             f'cannot prove this integer fits `{word}`',
             Pointer(span=node.loc, message=f'{known}, so it may not fit 64 bits (neither proven nor refuted)'),
+            notes=[self._why_unknown(node)],
             hint=(
                 'unannotated integers are arbitrary precision and only lower to 64-bit words when '
                 'the bounds analysis proves they fit: annotate a fixed width such as `int64`, or '
@@ -5261,10 +5364,11 @@ class _BoundsValidator:
             else f'{interval.lower if interval.lower is not None else "-∞"}'
             f'..{interval.upper if interval.upper is not None else "∞"}'
         )
-        user_error(
+        self._undecided(index,
             self.srcfile,
             f'`{node.func.name}` index is not proven in bounds',
             Pointer(span=index.loc, message=f'the index interval here is `{known}`'),
+            notes=[self._why_unknown(index)],
             hint=(
                 'establish a nonnegative lower bound and an upper bound '
                 + ('at or below' if allow_end else 'below')
@@ -5345,6 +5449,7 @@ class _BoundsValidator:
         notes = []
         if length is None:
             notes.append(f'nothing establishes the {kind}\'s length here, so even a small index may be past the end')
+        notes.append(self._why_unknown(index))
         self._proof_failure(node, 'index', Error(
             srcfile=self.srcfile,
             title=f'{kind} index is not proven in bounds',
@@ -5463,7 +5568,7 @@ class _BoundsValidator:
 
         known_first = describe(first)
         known_last = describe(last)
-        user_error(
+        self._undecided(node,
             self.srcfile,
             'string slice is not proven in bounds',
             Pointer(
@@ -5473,6 +5578,7 @@ class _BoundsValidator:
                     f'`{known_last}`'
                 ),
             ),
+            notes=[self._why_unknown(node.range)],
             hint='establish that both endpoints stay within the string boundaries',
         )
 
@@ -6029,6 +6135,58 @@ def _union_intervals(intervals: list[Interval]) -> Interval:
     result = intervals[0]
     for interval in intervals[1:]:
         result = result.union(interval)
+    return result
+
+
+@ty.runtime_query_scope()
+def assumption_consumers(
+    root: hir.Block,
+    registry: sb.BindingRegistry,
+    srcfile: SrcFile,
+    *,
+    target: str = 'x86_64',
+    effect_context: hir.AST | None = None,
+) -> dict[int, list[hir.AST]]:
+    """The checks each `$unsafe_assume` in `root` demonstrably serves.
+
+    Closure row P3: validate again with one assumption left out, recording
+    undecided sites instead of reporting them; the sites that become
+    undecided, and were decided with every assumption, are its consumers.
+    Callers rely on declared contracts, not on a callee's internal facts, so
+    the search covers the program as checked. Decisions validation records
+    on HIR (iterator guards, constant indices) are restored afterwards. An
+    assumption whose survey cannot finish is left out of the result.
+    """
+    assumptions = [node for node in hir.walk(root) if isinstance(node, hir.Assert) and node.unsafe]
+    if not assumptions or len(assumptions) > 64:
+        return {}
+    guards = [(node, node.guarded) for node in hir.walk(root) if isinstance(node, hir.IteratorExpression)]
+    indices = [(node, node.constant_index) for node in hir.walk(root) if isinstance(node, (hir.Index, hir.StringIndex))]
+
+    def survey(disabled: frozenset[int]) -> dict[int, hir.AST] | None:
+        validator = _BoundsValidator(registry, srcfile, root, target=target)
+        validator.unfit = {}
+        validator.survey = []
+        validator.disabled_assumptions = disabled
+        try:
+            validator.validate(root, effect_context=effect_context)
+        except UserError:
+            return None
+        finally:
+            for node, guarded in guards:
+                node.guarded = guarded
+            for node, constant in indices:
+                node.constant_index = constant
+        return {id(node): node for node in validator.survey}
+
+    baseline = survey(frozenset())
+    if baseline is None:
+        return {}
+    result = {}
+    for assumption in assumptions:
+        found = survey(frozenset({id(assumption)}))
+        if found is not None:
+            result[id(assumption)] = [node for key, node in found.items() if key not in baseline]
     return result
 
 

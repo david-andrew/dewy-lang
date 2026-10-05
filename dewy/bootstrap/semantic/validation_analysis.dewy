@@ -50,6 +50,47 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     return proofs.Decision[unfit checker.constant_indices checker.warnings checker.deferred_sites checker.word_iterators]
 }
 
+# The checks each `$unsafe_assume` of a validated module demonstrably serves
+# (closure row P3): validate again with one assumption left out, recording
+# undecided sites instead of reporting them; the sites that become undecided,
+# and were decided with every assumption, are its consumers. The hosted
+# `bounds.assumption_consumers` searches the same way. A survey that cannot
+# finish leaves its assumption out.
+consumers_of = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr session:contexts.Session read_only:set<addr> | none @found:dict<addr array<addr>>):>void => {
+    let assumptions:array<addr>=[]
+    let pending:array<addr>=[module.root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id)
+        let node=hir.node_at(env.nodes id)
+        if node is? hir.Assert and node.unsafe {assumptions.push(id)}
+        hir.push_children(node @pending)
+    }
+    if assumptions.length =? 0 or assumptions.length >? 64 return
+    let source=sources.srcfile(module.context session)
+    let baseline=survey(module source source_files env prepared word session read_only set[])
+    if baseline is? none return
+    loop assumption in assumptions {
+        let sites=survey(module source source_files env prepared word session read_only set[assumption])
+        if sites is? none continue
+        let consumers:array<addr>=[]
+        loop site in sites {if site not in? baseline and site not in? consumers {consumers.push(site)}}
+        found[assumption]=consumers
+    }
+}
+survey = (module:modules.Module source:SrcFile source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr session:contexts.Session read_only:set<addr> | none disabled:set<addr>):>array<addr> | none => {
+    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry links=session.links.copy]
+    let checker=bounds.Checker[data source word source_files=source_files]
+    bounds.configure(@checker prepared)
+    checker.surveying=true
+    checker.disabled=disabled
+    bounds.validate(module.root @checker read_only=read_only)
+    if checker.problem isnt? none return none
+    return checker.surveyed
+}
+
 reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.Session):>bool => {
     if saved.roots.length =? 0 or saved.roots.length not=? saved.decisions.length return false
     if saved.roots.length >? loaded.length return false
@@ -69,7 +110,9 @@ reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.S
     return true
 }
 
-Result:type = const [decisions:array<proofs.Decision> warnings:array<Warning>]
+# `consumers`: unsafe assumption -> the checks it demonstrably serves, for
+# the modules validated here (not those reused from a saved prelude).
+Result:type = const [decisions:array<proofs.Decision> warnings:array<Warning> consumers:dict<addr array<addr>>=[]]
 
 analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none timings:bool=false):>Result|Error => {
     let cached=saved
@@ -93,6 +136,7 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     let read_only=effects.read_only_places_in(ids session.hir session.types)
     timing.finish('validation.prepare' prepare_started)
     let decisions:array<proofs.Decision>=[]
+    let consumers:dict<addr array<addr>>=[]
     loop index in 0.. and index <? loaded.length {
         if cached isnt? none and index <? cached.decisions.length {
             decisions.push(cached.decisions[index])
@@ -101,6 +145,8 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
         let checked=validate_module(loaded[index] source_files env prepared word prelude session read_only=read_only timings=timings)
         if checked is? Error return checked
         decisions.push(checked)
+        # Prelude checks are cached: a warm build must report the same audit.
+        if not loaded[index].prelude and session.unsafe_assertions.length >? 0 {consumers_of(loaded[index] source_files env prepared word session read_only @consumers)}
     }
     # Infer direct-call effects across the complete loaded graph, including
     # imported helpers and unused source functions. Only checked advancing
@@ -115,5 +161,5 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
         if effect_error isnt? none return effect_error
     }
     # Whole-program warnings are recomputed, never cached as module proofs.
-    return Result[decisions warnings]
+    return Result[decisions warnings consumers]
 }

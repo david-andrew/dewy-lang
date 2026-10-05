@@ -85,8 +85,8 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | --- | --- | --- | --- |
 | P1 | Facts survive transfer; mutation and aliasing invalidate | T/test_mutable_selector_facts.py, T/test_readonly_call_facts.py, T/test_consuming_input_aliases.py, F/unsafe_after_resize.dewy (M) | done |
 | P2 | Exhausted search budgets stay unknown | T/test_loop_convergence_budget.py, T/test_nested_loop_search_budget.py, T/test_weighted_fact_budget.py | done |
-| P3 | Unsafe audit lists **actual** assumption consumers | both `unsafe_audit` modules report every check in the assumption's function scope (`conservative function scope`) | **open**: carry assumption origins on facts through transfer, joins, invalidation and contracts, and report demonstrated consumers |
-| P4 | Unknown proofs explain their reason (unsupported fragment, invalidated identity, missing contract, exhausted budget) | verdicts are `bool | None`; no reason is kept | **open**: record reasons and query counts in both checkers |
+| P3 | Unsafe audit lists **actual** assumption consumers | both audits list each assumption's `consumers`: the checks undecided when bounds validation runs again without it; the function-scope list stays as `candidate_checks` (audit version 2); T/test_unsafe_assertions.py, T/test_bootstrap_compiler_command.py | **done** (prelude assumptions, whose checks are cached, list no consumers) |
+| P4 | Unknown proofs explain their reason (unsupported fragment, invalidated identity, missing contract, exhausted budget) | both checkers add a `why unknown:` note to every undecided report, in the same priority; T/test_unknown_proof_reasons.py (hosted and native, identical text) | **done** for reasons; per-proof query counts are not reported (see 2026-10-05 entry) |
 
 ### Compiler source and inventory
 
@@ -145,6 +145,49 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## The unsafe audit lists the checks each assumption serves (2026-10-05)
+
+Row P3. An `$unsafe_assume`'s consumers are now demonstrated, not guessed:
+after bounds validation succeeds, both compilers validate each module that
+has assumptions again once per assumption, with that assumption left out
+and undecided sites recorded instead of reported. The sites undecided
+without it (and decided with every assumption) are its consumers. This
+needs no provenance on facts through transfers and joins: the checker itself
+answers whether the fact was needed. Callers rely on declared contracts, not
+on a callee's internal facts, so rechecking the module covers every use.
+Decisions validation writes on HIR (iterator guards, constant indices) are
+restored after each survey.
+
+The audit (`.unsafe.json`, version 2) keeps the function-scope list as
+`candidate_checks` and adds `consumers`. In `read_at`, `$unsafe_assume
+0<=?i and i<?xs.length` lists both `xs[0]` and `xs[i]` (the range also
+proves the array non-empty), and an unrelated assumption lists none.
+Assumptions in the prelude list no consumers (`null`): its checks are
+cached, and a warm build reports the same audit as a cold one. More than 64
+assumptions in one module also skip the search.
+
+## Unknown proofs say why (2026-10-05)
+
+Row P4. A report the bounds checker cannot decide (an index, divisor,
+refinement, assertion, cast, `pop`, `truncate` or slice) now carries one
+`why unknown:` note, chosen in the same priority by both checkers:
+
+1. a search budget ran out in the function (the loop search, finite-loop
+   exploration or loop-qualifier discovery), so the checker stopped instead
+   of assuming the fact;
+2. a value it depends on is changed by other code (a module-level or
+   captured variable), so facts about it do not survive calls;
+3. it depends on a call whose result carries no refinement;
+4. it uses an operation the checker does not track between two unknown
+   values (`*`, `/`, `//`, `%`, bitwise operators, shifts);
+5. otherwise, no fact on the path establishes it.
+
+A name is followed to its initializer when it is never reassigned, so
+`let a=weight(1)` then `xs[a]` names `weight`. Refuted facts get no note.
+Per-proof query counts are not reported: most obligations are one interval
+or fact lookup, and the searches that do spend budgets are per loop nest,
+which the first reason already reports.
 
 ## Borrow shortcuts inventoried; four moved into the shared proof (2026-10-05)
 

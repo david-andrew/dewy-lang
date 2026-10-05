@@ -148,3 +148,26 @@ def test_default_argument_assumptions_survive_reachability_and_overrides(main):
 def test_proven_false_unused_default_assumption_is_rejected():
     with pytest.raises(UserError, match='assertion refuted'):
         codegen(SrcFile(None, DEFAULT_SOURCE.replace('$unsafe_assume true', '$unsafe_assume false')))
+
+
+TWO = '''read_at=(xs:array<int64> i:int64 j:int64):>int64=>{
+    $unsafe_assume 0<=?i and i<?xs.length, 'validated by the producer'
+    $unsafe_assume j =? 0, 'unused'
+    let first=xs[0]
+    return xs[i]
+}
+main=():>int64=>read_at([42] 0 0)
+'''
+
+
+def test_audit_lists_demonstrated_consumers():
+    # Each assumption lists the checks undecided without it: both indices
+    # need the first (`0<=?i<?xs.length` also proves the array non-empty);
+    # the second serves nothing. Function-scope candidates stay listed.
+    codegen(SrcFile(None, TWO))
+    report = json.loads(unsafe_audit.render(unsafe_audit.last_entries))
+    assert report['version'] == 2
+    used, unused = report['assumptions']
+    assert [(check['line'], check['kind']) for check in used['consumers']] == [(4, 'index'), (5, 'index')]
+    assert unused['consumers'] == []
+    assert len(unused['candidate_checks']) == 2

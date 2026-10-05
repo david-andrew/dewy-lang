@@ -69,7 +69,10 @@ def test_native_index_checks_match_hosted(tmp_path):
 
     def diagnostic(error):
         report = error.report
-        return f'error|{report.title}|{report.pointer_messages[0].message}|{report.hint}|{";".join(report.notes)}'
+        # The native index module reports the obligation; the checker that
+        # calls it adds the `why unknown:` reason (row P4) afterwards.
+        notes = [note for note in report.notes if not note.startswith('why unknown:')]
+        return f'error|{report.title}|{report.pointer_messages[0].message}|{report.hint}|{";".join(notes)}'
 
     expected, checks = [], []
     for state_index, state in enumerate(states):

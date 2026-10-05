@@ -109,7 +109,7 @@ validate = (@engine:modules.Engine):>Result|Error => {
     loop index in 0.. and index <? loaded.length {
         let module=loaded[index]
         let checked=decisions[index]
-        loop entry in unsafe_audit.collect(module.root sources.srcfile(module.context engine.session) engine.session) {result.unsafe.push(entry)}
+        loop entry in unsafe_audit.collect(module.root sources.srcfile(module.context engine.session) engine.session consumers=analyzed.consumers) {result.unsafe.push(entry)}
         loop warning in checked.warnings {result.warnings.push(warning)}
         if checked.deferred.length >? 0 {
             # `$prototype`: each unproven site becomes a runtime check that

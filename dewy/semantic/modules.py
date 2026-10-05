@@ -165,6 +165,8 @@ class ModuleCompiler:
         self.prelude_loaded = False
         self.prelude_paths: set[Path] = set()
         self.representation_notes: list[representation.RepresentationNote] = []
+        # Unsafe assumption node id -> the checks it demonstrably serves.
+        self.assumption_consumers: dict[int, list[hir.AST]] = {}
         self.finished_roots: dict[int, hir.Block] = {}
         self.lifecycle_hooks: dict[int, tuple[hir.Declare, SrcFile]] | None = None
 
@@ -721,9 +723,12 @@ class ModuleCompiler:
             prototype_sites = {}
         if prelude_module or no_prelude or 'BigInt' not in self.prelude_bindings:
             bounds.validate_bounds(root, self.registry, srcfile, target=self.target, effect_context=effect_context)
+            if not prelude_module:
+                self._find_assumption_consumers(root, srcfile, effect_context)
             return
         unfit: dict = {}
         bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target, prototype_sites=prototype_sites, effect_context=effect_context)
+        self._find_assumption_consumers(root, srcfile, effect_context)
         if prototype_sites:
             assert ctx is not None
             unhandled = check.insert_prototype_checks(root, prototype_sites, ctx=ctx)
@@ -743,6 +748,15 @@ class ModuleCompiler:
                 )
         notes = representation.select_representations(root, self.registry, srcfile, self.prelude_bindings, unfit)
         self.representation_notes.extend(notes)
+
+    def _find_assumption_consumers(self, root: hir.Block, srcfile: SrcFile, effect_context: hir.AST) -> None:
+        """The checks each unsafe assumption of a validated source module
+        demonstrably serves, for the audit (closure row P3). Prelude modules
+        are left out: their checks are cached, and a warm build must report
+        the same audit as a cold one."""
+        if '$unsafe_assume' in srcfile.body:
+            self.assumption_consumers.update(bounds.assumption_consumers(
+                root, self.registry, srcfile, target=self.target, effect_context=effect_context))
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
         from . import check, unsafe_audit
@@ -767,7 +781,8 @@ class ModuleCompiler:
         # Snapshot source assumptions before pruning unused imports or
         # lowering. Warm prelude records carry the same checked HIR.
         if any('$unsafe_assume' in record.srcfile.body for record in self.order):
-            unsafe_audit.last_entries[:] = [entry for record in self.order for entry in unsafe_audit.collect(record.root, record.srcfile)]
+            unsafe_audit.last_entries[:] = [entry for record in self.order
+                                            for entry in unsafe_audit.collect(record.root, record.srcfile, consumers=self.assumption_consumers)]
         check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)
         needed = self._needed_runtime_binding_ids(entry)

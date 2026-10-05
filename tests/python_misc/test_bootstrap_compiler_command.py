@@ -66,6 +66,20 @@ def test_native_compiler_command(tmp_path):
     audit_source.write_text('$no_prelude=true\nmain=():>int64=>42')
     assert invoke('-c', audit_source).returncode == 0
     assert not json.loads(audit_path.read_text())['assumptions']
+    # Each assumption lists the checks undecided without it (row P3).
+    audit_source.write_text('''$no_prelude=true
+ratio=(d:int64 j:int64):>int64=>{
+    $unsafe_assume d not=? 0, 'validated by the producer'
+    $unsafe_assume j =? 0, 'unused'
+    return 84 // d
+}
+main=():>int64=>ratio(2 0)
+''')
+    compiled = invoke('-c', audit_source)
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    used, unused = json.loads(audit_path.read_text())['assumptions']
+    assert [check['line'] for check in used['consumers']] == [5]
+    assert unused['consumers'] == []
     # The native route wrote the executable itself. On the µDewy route the
     # µDewy compiler reads bytecode (udewy/BYTECODE.md), not µDewy text.
     assert not (tmp_path / cache_artifact(audit_source, '.ubc', cwd=tmp_path)).exists()
