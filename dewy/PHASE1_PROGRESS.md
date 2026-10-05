@@ -94,7 +94,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
 | C2 | Strict-source adoption of the compiler | 103 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 38 (≈41.7k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578) |
-| C3 | Hosted/native report parity | spot checks only (T/test_bootstrap_compiler_command.py, T/test_escape_copies.py) | **open**: a whole-inventory comparison that classifies every difference |
+| C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
 
@@ -145,6 +145,37 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Hosted/native copy inventories compared and classified (2026-10-05)
+
+Row C3. The hosted and native copy reports for the compiler's own sources
+(`dewy/bootstrap/main.dewy`, `tools/copy_report.py --json`) are compared
+note by note with `tools/copy_parity.py`, which now also pairs notes on the
+same row filed under different kinds (a hosted tag cell against the native
+record it holds) and never pairs a string escape with anything else. Every
+difference falls in a recorded class
+(`tests/fixtures/copy_parity_classes.json`), and the integration checkpoint
+fails on any new, unclassified one.
+
+At `5227b3c9`: hosted 6,371 copy notes, native 4,209; 1,938 identical and
+4,797 differences:
+
+| class | differences | what differs |
+|---|---:|---|
+| string representation | 1,969 | hosted escapes stored strings into the arena; native strings are immutable shares (neither counts them under the copy policy) |
+| both copy | 1,907 | both compilers copy on the row, naming the boundary, kind or reason differently |
+| union representation | 394 | hosted unions keep payloads inline and retag by copying when widened or stored; native cells share one handle under program-wide tags |
+| container borrows | 170 | one compiler proves a read-only view of an element or field |
+| last-use proofs | 167 | one compiler proves a last-use move |
+| bounded adoption | 93 | a policy-exempt adoption recorded as a copy note on one side |
+| temporary reads | 36 | native reads through a temporary or a selected union field |
+| argument borrows | 30 | callee summaries differ in precision |
+| optional get results | 21 | `get` results: native shares headed blocks, hosted copies |
+| foreign storage | 10 | one compiler borrows from storage that belongs to something else |
+
+The policy-relevant ones are the proof-precision classes (367) and the
+hosted union representation (394, the source of the hosted-only
+`cache_values` rejection). The vocabulary in `both copy` could converge too.
 
 ## Strict copies: eight more analysis modules (2026-10-04)
 

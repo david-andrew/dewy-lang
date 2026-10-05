@@ -12,7 +12,8 @@ compared after collapsing quoted names. Every difference is one of:
 - `hosted-only`: the hosted compiler copies where native does not;
 - `native-only`: native copies where hosted does not;
 - `reason`: both copy at the same boundary, for differently stated reasons;
-- `paired`: both copy on that row, at differently named boundaries.
+- `paired`: both copy on that row, at differently named boundaries or under
+  different kinds (the kind then reads `hosted => native`).
 
 Differences are grouped by kind, site and normalized reason. `--classes` names
 a JSON list of `{"class", "explanation", "side", "kind", "site", "reason"}`
@@ -68,6 +69,7 @@ def differences(hosted: Counter, native: Counter) -> list[dict]:
         for (file, row, kind, site, reason), count in notes.items():
             rows.setdefault((file, row, kind), {'h': [], 'n': []})[side].extend([(site, reason)] * count)
     result = []
+    leftover: dict = {}
     for (file, row, kind), sides in sorted(rows.items()):
         lefts, rights = sorted(sides['h']), sorted(sides['n'])
         while lefts and rights:
@@ -75,9 +77,23 @@ def differences(hosted: Counter, native: Counter) -> list[dict]:
             side = 'reason' if hs == ns else 'paired'
             site = hs if hs == ns else f'{hs} => {ns}'
             result.append(dict(side=side, file=file, row=row, kind=kind, site=site, reason=f'{hr} => {nr}'))
-        for site, reason in lefts:
+        spare = leftover.setdefault((file, row), {'h': [], 'n': []})
+        spare['h'].extend((kind, site, reason) for site, reason in lefts)
+        spare['n'].extend((kind, site, reason) for site, reason in rights)
+    # Both compilers copy on the row, but file the value under different
+    # kinds (a tag cell against the record it holds): still a pair.
+    for (file, row), sides in sorted(leftover.items()):
+        # String escapes are a representation of their own; never pair them.
+        strings = [item for item in sides['h'] if item[0] == 'string'], [item for item in sides['n'] if item[0] == 'string']
+        lefts = [item for item in sides['h'] if item[0] != 'string']
+        rights = [item for item in sides['n'] if item[0] != 'string']
+        while lefts and rights:
+            (hk, hs, hr), (nk, ns, nr) = lefts.pop(), rights.pop()
+            result.append(dict(side='paired', file=file, row=row, kind=f'{hk} => {nk}',
+                               site=hs if hs == ns else f'{hs} => {ns}', reason=f'{hr} => {nr}'))
+        for kind, site, reason in lefts + strings[0]:
             result.append(dict(side='hosted-only', file=file, row=row, kind=kind, site=site, reason=reason))
-        for site, reason in rights:
+        for kind, site, reason in rights + strings[1]:
             result.append(dict(side='native-only', file=file, row=row, kind=kind, site=site, reason=reason))
     return result
 

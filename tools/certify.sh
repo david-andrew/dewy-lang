@@ -9,7 +9,8 @@
 #   certify.sh integration OUTPUT_DIRECTORY [COMMIT]
 #       A frozen integration checkpoint for one commit (default HEAD): an
 #       independent hosted-built seed, a three-generation native fixed point,
-#       native execution checks, the complete paired hosted/native manifest and
+#       native execution checks, the complete paired hosted/native manifest, the
+#       classified hosted/native copy-inventory comparison (row C3) and
 #       the full pytest suite with independently built drivers, all for the same
 #       source snapshot. Every step records its log and status in OUTPUT; the
 #       summary names the commit it certifies. Steps continue after a failure so
@@ -68,6 +69,11 @@ integration)
     step paired-manifest "$python" tools/check_compiler_parity.py --native-executable "$output/native/dewy" \
         --udewy-executable "$output/native/udewy" --cases tests/fixtures/phase1_parity_cases.json \
         --output "$output/parity" --shared-prelude-cache
+    # Row C3: every hosted/native difference in the compiler's own copy
+    # inventory belongs to a recorded class.
+    step copy-parity bash -c "$python tools/copy_report.py --json dewy/bootstrap/main.dewy > '$output/copies-hosted.json' &&
+        $python tools/copy_report.py --json --compiler '$output/native/dewy' dewy/bootstrap/main.dewy > '$output/copies-native.json' &&
+        $python tools/copy_parity.py '$output/copies-hosted.json' '$output/copies-native.json' --classes tests/fixtures/copy_parity_classes.json --list 40"
     step full-pytest env DEWY_TEST_DRIVER_CACHE=0 "$python" -m pytest tests -q -p no:cacheprovider -n 8 \
         --dist loadfile -o faulthandler_timeout=900 --basetemp "$output/pytest-tmp"
     git -C "$root" worktree remove --force "$source" > /dev/null 2>&1 || true

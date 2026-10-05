@@ -138,6 +138,11 @@ class Proofs:
     flow_literals: set[int] = field(default_factory=set)
     flow_sources: set[int] = field(default_factory=set)
     constants: frozenset[int] = frozenset()
+    # Why arguments stay unproved (tools/borrow_shortcuts.py): functions
+    # whose callers reach unmodelled or ambient effects, and parameters some
+    # use reads whole rather than through a field projection.
+    blocked: frozenset[int] = frozenset()
+    unprojected: frozenset[int] = frozenset()
 
 
 def array_selection(node):
@@ -693,4 +698,5 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if loans:
                     literal_arguments[id(node)] = loans
                 result[id(node)] = allowed
-    return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources, frozenset(constants))
+    return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources, frozenset(constants),
+                  frozenset(blocked), frozenset(unprojected_reads))
