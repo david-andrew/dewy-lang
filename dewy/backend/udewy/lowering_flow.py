@@ -1000,9 +1000,15 @@ class _FlowLowering:
             # address is not itself a record pointer.
             size, _offsets = self._object_layout(target_type, item)
             cell = hir.ExpressedIdentifier(item.loc, 'int64', self._new_optional_name('flow_object'))
+            allocation = hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size))
+            # A last-use narrowed payload, component or owned local hands its
+            # fields to the result, as a binding does.
+            adopted = self._adopt_object_fields(item, target_type, arena=False, site='kept as a flow result', destination=cell)
+            if adopted is not None:
+                return [allocation, *adopted[0]], cell
             prelude, source = self._extract_object_pointer(item)
             self._note_copy('record', target_type, 'kept as a flow result', self._copy_reason(item), item.loc)
-            return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, target_type, item.loc)], cell
+            return [*prelude, allocation, *self._object_copy(cell, source, target_type, item.loc)], cell
         if self._is_string_valued(item.type):
             # A flow result has one ownership convention across every arm.
             # Otherwise a temporary consumer cannot distinguish a borrowed

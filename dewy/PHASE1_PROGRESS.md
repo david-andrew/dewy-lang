@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 103 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 38 (≈41.7k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 104 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 37 (≈41.6k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,31 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `loop_qualifiers` adopts; flow results adopt fields (2026-10-05)
+
+Row C2: 104 of 141 compiler modules are strict. Retrying adoption with the
+verified compiler carrying the call-scoped loans, native accepted
+`loop_qualifiers` and `cache_values`; both were hosted-only rejections.
+
+- **Flow results adopt fields** (hosted). An arm of `let base=if c right
+  else left` whose value is a last-use narrowed payload, owned component or
+  owned local now hands its fields to the result through the same adoption
+  as a binding (`_adopt_object_fields`). This covers narrowed optional
+  locals (`left`, `right` after `if left is? none … return`), so
+  `loop_qualifiers` adopts in both compilers.
+- **`cache_values` stays non-strict.** Widening a decoder's call result into
+  a wider union copies in the hosted lowering: a family member is laid out
+  in its parent's tree, and the callee builds its record in a tree the
+  caller prepared in its own frame. Taking that record root would outlive
+  the frame; a move that copies the structure into the destination's own
+  tree is sound, but the decoders' destinations have no tree slots. Tried
+  and withdrawn: the root-taking version passed cold builds and crashed
+  every warm prelude-cache load.
+
+Evidence: hosted and native `test_flow_result_record_moves` (narrowed
+optional arms, live-byte check); hosted strict build of the compiler
+accepted; local gate 6,443 passed.
 
 ## Strict copies: call-scoped loans, rebinding moves, fewer blocked functions (2026-10-05)
 

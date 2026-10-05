@@ -3,7 +3,8 @@
 `let base = if c right else left` keeps the selected record. When neither
 local is read again on that path, the selected arm hands over its handle,
 as `let t = x` does; the emptied local releases nothing at scope exit. A
-local read again later keeps the copy.
+narrowed optional local hands over its present record's fields. A local
+read again later keeps the copy.
 """
 import pytest
 from dewy.backend.udewy import codegen
@@ -40,7 +41,35 @@ READ_AGAIN = PRELUDE + '''pick=(n:int64):>int64=>{
 }
 main=():>int64=>pick(3)+3
 '''
-CASES = [MOVED, READ_AGAIN]
+# Narrowed optional locals: their present records move out of the cells.
+NARROWED = '''$explicit_copies
+Shape:type=[constant:int64 items:array<int64>]
+make=(n:int64):>Shape?=>{
+    if n <? 0 return none
+    let items:array<int64>=[]
+    let i:int64=0
+    loop i <? n {items.push(i) i+=1}
+    return Shape[n items]
+}
+f=(n:int64 mul:bool):>int64=>{
+    let left=make(n)
+    let right=make(n+1)
+    if left is? none or right is? none return 0
+    if mul {
+        let base=if left.items.length=?0 right else left
+        let t:int64=0
+        loop item in base.items {t+=item}
+        return t
+    }
+    return left.constant+right.constant
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    let r=f(0 true)+f(3 true)+f(4 false)+30
+    return if _arena_live_bytes=?before r else 1
+}
+'''
+CASES = [MOVED, READ_AGAIN, NARROWED]
 ERRORS = ['$explicit_copies\n' + READ_AGAIN]
 
 
