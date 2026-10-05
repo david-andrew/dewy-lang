@@ -165,7 +165,10 @@ verified compiler carrying the call-scoped loans, native accepted
   the frame; a move that copies the structure into the destination's own
   tree is sound, but the decoders' destinations have no tree slots. Tried
   and withdrawn: the root-taking version passed cold builds and crashed
-  every warm prelude-cache load.
+  every warm prelude-cache load. `cache_values` exists only for the prelude
+  cache, and compilation is to run without caches (no incremental builds),
+  so this is left as is and counted as pressure to remove the compile cache
+  rather than fixed.
 
 Evidence: hosted and native `test_flow_result_record_moves` (narrowed
 optional arms, live-byte check); hosted strict build of the compiler
