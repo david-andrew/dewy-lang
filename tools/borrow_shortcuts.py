@@ -71,6 +71,8 @@ def main(argv: list[str]) -> int:
             if literal is None:
                 return 'module startup'
             if id(literal) in proofs.blocked:
+                seed = proofs.blocked_origin.get(id(literal))
+                record_seed[0] = f'{names.get(seed, "?")}: {proofs.blocked_seeds.get(seed, "?")}'
                 return 'caller reaches unmodelled or ambient effects'
             targets = analysis._direct_targets(call)
             if not targets:
@@ -97,6 +99,11 @@ def main(argv: list[str]) -> int:
             return 'a read-only parameter whose type differs from the callee parameter type'
 
         records = []
+        record_seed = [None]
+        names = {}
+        for node in hir.walk(root):
+            if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
+                names[id(node.expr)] = node.name
 
         def visit(node, srcfile, literal):
             if isinstance(node, hir.FunctionLiteral):
@@ -110,9 +117,11 @@ def main(argv: list[str]) -> int:
                         continue
                     where = f'{getattr(srcfile, "path", None)}:{srcfile.offset_to_row_col(argument.loc.start)[0] + 1}'
                     proved = id(argument) in borrowed
+                    record_seed[0] = None
+                    reason = None if proved else cause(literal, node, argument)
                     records.append(dict(spot=key(srcfile, argument.loc), where=where, callee=callee(node),
                                         type=str(ty.strip_refinement(argument.type))[:90], proved=proved,
-                                        cause=None if proved else cause(literal, node, argument)))
+                                        cause=reason, seed=record_seed[0]))
             for child in hir.children(node):
                 visit(child, srcfile, literal)
 
@@ -153,7 +162,10 @@ def main(argv: list[str]) -> int:
             if record['spot'] in copied:
                 donated.append(record)
             continue
-        kind = 'copied' if record['spot'] in copied else 'moved' if record['spot'] in moved else 'shortcut'
+        # Contracts count no storage for passing a string (an immutable
+        # share), so a string argument outside the proof is no shortcut.
+        kind = ('copied' if record['spot'] in copied else 'moved' if record['spot'] in moved
+                else 'string (no storage in contracts)' if record['cause'].startswith('a string') else 'shortcut')
         classes[kind] += 1
         if kind == 'shortcut':
             shortcuts.append(record)
@@ -162,7 +174,7 @@ def main(argv: list[str]) -> int:
 
     print(f'aggregate arguments: {len(records)}; proved by the shared proof: {sum(r["proved"] for r in records)}')
     print(f'outside the shared proof: {sum(classes.values())}')
-    for kind in ('copied', 'moved', 'shortcut'):
+    for kind in ('copied', 'moved', 'string (no storage in contracts)', 'shortcut'):
         print(f'  {kind}: {classes[kind]}')
     print(f'proved, yet copied at the call (donated; counted in the callee): {len(donated)}')
     print('shortcuts by cause:')
@@ -170,6 +182,11 @@ def main(argv: list[str]) -> int:
         print(f'  {count:6d} {name}')
         for record in examples[name][:args.examples]:
             print(f'           {record["where"]} {record["callee"]} {record["type"]}')
+    seeds = Counter(r['seed'] for r in shortcuts if r['seed'])
+    if seeds:
+        print('blocked shortcuts by the directly blocked function they inherit from:')
+        for name, count in seeds.most_common(args.list):
+            print(f'  {count:6d} {name}')
     field = {'file': lambda r: r['where'].rsplit(':', 1)[0], 'callee': lambda r: r['callee'], 'type': lambda r: r['type']}[args.by]
     print(f'shortcuts by {args.by}:')
     for name, count in Counter(field(r) for r in shortcuts).most_common(args.list):

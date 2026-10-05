@@ -77,7 +77,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | S2 | Runtime report boundary shares the storage proof | T/test_assertion_storage_borrows.py; F/shared_report_storage_loans_0.dewy..2 (M) | done |
 | S3 | Copy policy agrees with borrowing | F/strict_copy_rejected.dewy, F/strict_copy_argument.dewy, F/strict_copy_shared_strings.dewy (M); T/test_strict_copy_policy.py | done |
 | S4 | Hook effects survive physical elision | T/test_lifecycle_implicit_copies.py, T/test_lifecycle_component_copies.py; F/lifecycle_copy_effect_rejected.dewy (M) | done |
-| S5 | Lowering-only borrow shortcuts are consumed by the policy | both `storage_borrows` modules still note that lowering "may have more precise borrow proofs" | **open**: inventory the shortcuts; move each into the shared proof or record it as cost-only |
+| S5 | Lowering-only borrow shortcuts are consumed by the policy | `tools/borrow_shortcuts.py` inventories every aggregate call argument outside the shared proof by cause (compiler at `720a1f19`+: 35,093 arguments, 13,702 proved, 19,527 shortcuts, 7,800 string arguments now exempt); T/test_string_argument_effects.py, T/test_storage_proof_outside_state.py | **done**: strings, reads of module state, raw loads, scalar conversions and binary literals moved into the shared proof or contracts; the remaining causes are recorded as cost-only (below) |
 
 ### Proof and unsafe boundary
 
@@ -145,6 +145,43 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Borrow shortcuts inventoried; four moved into the shared proof (2026-10-05)
+
+Row S5. Allocation contracts (`public_effects`) count a storage effect for
+every aggregate call argument outside `storage_borrows.prove`; lowering
+forwards those arguments and borrows many more. `tools/borrow_shortcuts.py`
+lists, for the compiler's own sources, each argument lowering passes
+without copying or moving although the proof leaves it out, with the reason
+the proof gives up. Arguments the proof admits but lowering copies (an
+owning parameter, donated at the call) are not unsound: the contract counts
+that copy in the callee's body instead.
+
+Moved into the shared analyses, in both compilers:
+
+- **String arguments** are no storage in contracts: strings are immutable
+  shares, neither compiler copies one at a call (both inventories record
+  string copies only where stored), and a callee that stores its string
+  parameter counts that store itself.
+- **Reading module state** no longer blocks the proof for a function and its
+  callers; only writing or exposing mutable outside state does. `const`
+  bindings, strings and binary literals are immutable and never count.
+- **Raw loads** (`__load_*`) no longer block their callers. They still expose
+  the address they read, so a raw store elsewhere cannot write a borrowed
+  value unnoticed.
+- **Converting a scalar** (an element read, a word) exposes no storage.
+
+Proved arguments rose from 13,088 to 13,702 and blocked ones fell from 5,421
+to 4,332. The shortcuts that remain are cost-only (a contract may report
+storage work that never happens, never the reverse):
+
+| cause | shortcuts | why it stays |
+|---|---:|---|
+| caller reaches a syscall, raw store or `sort` callback below it | 4,332 | true unknown boundaries; modelling `sort` with a statically resolved callback is a possible next step |
+| caller writes the parameter elsewhere in the function | 2,385 | the shared proof is flow-insensitive; lowering knows nothing writes while the call runs |
+| not a named owner (a call result, literal or conversion) | 2,215 | the temporary's own effects are already counted |
+| local owner not proved stable | 1,834 | per-site precision |
+| others (type shapes, unresolved callees, place parameters) | 961 | per-site precision |
 
 ## Hosted/native copy inventories compared and classified (2026-10-05)
 

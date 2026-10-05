@@ -325,7 +325,11 @@ def inventory(root, registry, allocator_scopes=None):
                         loan = (storage_borrows.union_loan_source(argument)
                                 if id(argument) in borrowed_arguments.get(id(node), ()) else None)
                         visit(argument if loan is None else loan)
+                        # Passing a string never copies it (strings are
+                        # immutable shares); a callee that stores it counts
+                        # the store in its own body.
                         if (not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType))
+                                and not ty.string_valued(argument.type)
                                 and id(argument) not in borrowed_arguments.get(id(node), ())):
                             storage()  # logical aggregate transfer not proved
                 return

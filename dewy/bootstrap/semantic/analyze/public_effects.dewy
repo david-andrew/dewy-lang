@@ -288,7 +288,9 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                 }
                 let loan=if arg in? input.borrowed_arguments.get(id set[]) storage_borrows.union_loan_source(arg input.nodes input.types) else none
                 visit(if loan is? none arg else loan input @scan)
-                if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType and arg not in? input.borrowed_arguments.get(id set[]) {storage(@scan)}
+                # Passing a string never copies it (strings are immutable
+                # shares); a callee that stores it counts the store itself.
+                if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType and not views.string_valued(value.value_type input.types) and arg not in? input.borrowed_arguments.get(id set[]) {storage(@scan)}
             }
         }
         return

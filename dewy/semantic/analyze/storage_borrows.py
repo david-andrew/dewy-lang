@@ -20,6 +20,12 @@ OPERATORS = frozenset({
     '__gt__', '__ge__', '__and__', '__or__', '__xor__', '__nand__', '__nor__',
     '__xnor__', '__lshift__', '__rshift__',
 })
+# Raw loads read memory and write nothing. They still expose the address of
+# what they read (a later raw store may write through it), but do not block
+# the proof for their callers. Raw stores and syscalls stay unknown.
+RAW_LOADS = frozenset({'__load__', '__load_i64__', '__load_u64__', '__load_i32__', '__load_u32__',
+                       '__load_i16__', '__load_u16__', '__load_i8__', '__load_u8__'})
+PRIMITIVES = OPERATORS | RAW_LOADS
 ARRAY_METHODS = frozenset({'push', 'pop', 'clear', 'reserve', 'insert',
                            'truncate', 'set_length', 'join'})
 
@@ -143,6 +149,10 @@ class Proofs:
     # use reads whole rather than through a field projection.
     blocked: frozenset[int] = frozenset()
     unprojected: frozenset[int] = frozenset()
+    # For each blocked function, the directly blocked function it inherits
+    # from, and why each of those is blocked.
+    blocked_origin: dict = field(default_factory=dict)
+    blocked_seeds: dict = field(default_factory=dict)
 
 
 def array_selection(node):
@@ -310,6 +320,7 @@ def record_loan_fields(node, sizes, constants):
 
 def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     bodies, edges, blocked = {}, {}, set()
+    seeds, ambient_writes = {}, {}
     stable_locals = {}
     writes, captured = {}, set()
     eligible = {}
@@ -329,6 +340,16 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         if key not in eligible:
             eligible[key] = borrowable(type_)
         return eligible[key]
+
+    def mutable_state(binding):
+        """Outside state a write or exposure can change: not a `const`
+        binding, a string or a binary literal, which are immutable."""
+        node = analysis.declares.get(binding)
+        if node is None:
+            return True
+        type_ = node.annotation or node.expr.type
+        return (node.decltype != 'const' and not ty.string_valued(type_)
+                and not isinstance(ty.strip_refinement(type_), ty.BinaryLiteralType))
 
     def modeled_call(node):
         func = _unwrap(node.func)
@@ -377,7 +398,9 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         for node in body:
             exposed = []
             if isinstance(node, (hir.Transmute, hir.RepresentationCast)):
-                if union_loan_source(node) is None:
+                # A converted scalar (an element read, a word) has no storage
+                # to expose.
+                if union_loan_source(node) is None and not isinstance(ty.strip_refinement(node.expr.type), str):
                     exposed.append(node.expr)
             elif isinstance(node, hir.FunctionCall) and analysis._direct_targets(node) is None:
                 func = _unwrap(node.func)
@@ -390,6 +413,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 if isinstance(path.root, hir.ExpressedIdentifier):
                     written.add(path.root.binding_id)
         writes[key] = written
+        # Only a write or raw exposure can change storage an argument may
+        # share with module state; reading that state cannot. A function that
+        # writes it blocks itself and, through the call graph, its callers.
+        ambient_writes[key] = {binding for binding in written if binding is not None and binding not in local and mutable_state(binding)}
         captured.update(node.binding_id for node in body if isinstance(node, hir.ExpressedIdentifier)
                         and node.binding_id is not None and node.binding_id not in local)
         stable_locals[key] = {node.binding_id: node.expr.type for node in body
@@ -406,7 +433,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             # call/raw restrictions; no allocation permission is removed.
             if isinstance(node, hir.ExpressedIdentifier):
                 if (node.binding_id not in local
-                        and not (node.binding_id is None and node.name in OPERATORS)
+                        and not (node.binding_id is None and node.name in PRIMITIVES)
                         and analysis._flatten_callable(node, frozenset()) is None):
                     ambient_reads.setdefault(key, set()).add(node.binding_id)
             elif isinstance(node, hir.FunctionCall):
@@ -418,17 +445,31 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     continue
                 targets = analysis._direct_targets(node)
                 if targets is None:
-                    if not modeled_call(node):
+                    func = _unwrap(node.func)
+                    raw_load = isinstance(func, hir.ExpressedIdentifier) and func.binding_id is None and func.name in RAW_LOADS
+                    if not modeled_call(node) and not raw_load:
                         blocked.add(key)
+                        seeds.setdefault(key, f'unmodelled call {getattr(_unwrap(node.func), "name", type(node.func).__name__)}')
                 else:
                     for target in targets:
                         edges.setdefault(id(target), set()).add(key)
-    blocked.update(key for key, reads in ambient_reads.items() if not reads <= constants.keys())
+    for key, reads in ambient_reads.items():
+        if None in reads:
+            blocked.add(key)
+            seeds.setdefault(key, 'reads an unresolved name')
+    for key, changed in ambient_writes.items():
+        if changed:
+            blocked.add(key)
+            names = sorted(str(analysis.declares[b].name) if b in analysis.declares else str(b) for b in changed)
+            seeds.setdefault(key, f'writes or exposes outside state {", ".join(names[:3])}')
+    origin = {key: key for key in blocked}
     pending = deque(blocked)
     while pending:
-        for caller in edges.get(pending.popleft(), ()):
+        callee = pending.popleft()
+        for caller in edges.get(callee, ()):
             if caller not in blocked:
                 blocked.add(caller)
+                origin[caller] = origin[callee]
                 pending.append(caller)
     # Call roots may pass through known read-only helpers, provided every
     # path ends in projections. An owning use rejects its parameter and all
@@ -699,4 +740,4 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                     literal_arguments[id(node)] = loans
                 result[id(node)] = allowed
     return Proofs(result, local_views, literal_arguments, flow_views, flow_literals, flow_sources, frozenset(constants),
-                  frozenset(blocked), frozenset(unprojected_reads))
+                  frozenset(blocked), frozenset(unprojected_reads), origin, seeds)

@@ -15,6 +15,16 @@ import p"../subtyping.dewy" as subtyping
 # proof permits outer array-length widening and exact union-member boxing.
 # More precise lowerer proofs may still borrow other expressions.
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
+# Raw loads read memory and write nothing. They still expose the address of
+# what they read (a later raw store may write through it), but do not block
+# the proof for their callers. Raw stores and syscalls stay unknown.
+const RAW_LOADS:set<string>=set['__load__' '__load_i64__' '__load_u64__' '__load_i32__' '__load_u32__' '__load_i16__' '__load_u16__' '__load_i8__' '__load_u8__']
+raw_load=(node:hir.AST registry:bindings.Registry):>bool=>{
+    if node isnt? hir.ExpressedIdentifier or node.name not in? RAW_LOADS return false
+    if node.binding_id is? none return true
+    let binding=bindings.find_binding(registry node.binding_id)
+    return binding isnt? none and binding.builtin
+}
 const ARRAY_METHODS:set<string>=set['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'set_length' 'join']
 # Native builtins carry stable identities. A source function with the same
 # spelling must still contribute its ordinary call-graph effects.
@@ -366,6 +376,18 @@ owning_array_reads=(body:array<addr> analysis:effects.Analysis summaries:effects
     return owning
 }
 Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr> literal_arguments:dict<addr set<addr>>=[] flow_views:set<addr>=set[] flow_literals:set<addr>=set[] flow_sources:set<addr>=set[] constants:set<addr>=set[]]
+# Outside state a write or exposure can change: not a `const` binding, a
+# string or a binary literal, which are immutable.
+mutable_state=(binding:addr analysis:effects.Analysis nodes:array<hir.AST> table:types.Table):>bool=>{
+    let declared=analysis.declares.get(binding)
+    if declared is? none return true
+    let node=hir.node_at(nodes declared)
+    if node isnt? hir.Declare return true
+    if node.decltype =? 'const' return false
+    let type=if node.annotation is? none hir.node_at(nodes node.expr).value_type else node.annotation
+    if types.node_at(table types.strip_refinement(type table)) is? types.BinaryLiteralType return false
+    return not views.string_valued(type table)
+}
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let loan_sizes:dict<addr addr?>=[]
     let families:array<addr>=[]
@@ -384,7 +406,6 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
     let constants:dict<addr addr>=[]
-    let ambient_reads:dict<addr set<addr>>=[]
     # Immutable startup owners include ordinary factory results and explicit
     # copies: their value boundary separates them from initializer inputs.
     # Later raw/unknown calls still block the ambient-storage loan proof.
@@ -446,7 +467,10 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             # resolved value calls supply their own independent argument.
             let exposed:array<addr>=[]
             if node is? hir.Transmute|hir.RepresentationCast {
-                if union_loan_source(item nodes table) is? none {exposed.push(node.expr)}
+                # A converted scalar (an element read, a word) has no storage
+                # to expose.
+                let converted=types.node_at(table types.strip_refinement(hir.node_at(nodes node.expr).value_type table))
+                if union_loan_source(item nodes table) is? none and converted isnt? types.Primitive {exposed.push(node.expr)}
             } else if node is? hir.FunctionCall and effects.direct_targets(node analysis nodes) is? none {
                 let func=hir.node_at(nodes effects.unwrap(node.func nodes))
                 if not modeled_call(node registry nodes table @eligible) {
@@ -469,6 +493,11 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         }
         loop binding in written {candidates.pop(binding default=0);}
         stable_locals[id]=candidates
+        # Only a write or raw exposure can change storage an argument may
+        # share with outside state; reading that state cannot. A function
+        # that writes it blocks itself and, through the call graph, its
+        # callers.
+        loop binding in written {if binding not in? locals and mutable_state(binding analysis nodes table) {blocked.push(id) break}}
         writes[id]=written
         loop item in body {
             let node=hir.node_at(nodes item)
@@ -478,16 +507,15 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
-                let operation=primitive(node registry)
+                let operation=primitive(node registry) or raw_load(node registry)
                 if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {
                     if node.binding_id is? none {blocked.push(id)}
-                    else if id in? ambient_reads {let reads=@ambient_reads[id] reads.push(node.binding_id)}
-                    else {ambient_reads[id]=set[node.binding_id]}
                 }
             } else if node is? hir.FunctionCall {
                 let targets=effects.direct_targets(node analysis nodes)
                 if targets is? none {
-                    if not modeled_call(node registry nodes table @eligible) {blocked.push(id)}
+                    let func=hir.node_at(nodes effects.unwrap(node.func nodes))
+                    if not modeled_call(node registry nodes table @eligible) and not raw_load(func registry) {blocked.push(id)}
                 } else {
                     loop target in targets {
                         # Extend the live adjacency set, rather than copying
@@ -500,9 +528,6 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         }
         # Retain the inventory only after its final local read, allowing a move.
         bodies[id]=body
-    }
-    loop [id reads] in ambient_reads {
-        loop binding in reads {if binding not in? constants {blocked.push(id) break}}
     }
     let pending:array<addr>=[]
     loop id in blocked {pending.push(id)}
