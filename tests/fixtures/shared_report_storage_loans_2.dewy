@@ -1,6 +1,6 @@
 $explicit_copies
-let calls:int64=0
-message=():>string=>{calls+=1 return 'empty'}
+let calls:array<int64>=[]
+message=():>string=>{calls.clear() return 'empty'}
 Box:type=[items:array<int64> counter:int64]
 Pair:type=[items:array<int64> offset:int64]
 read=(pair:Pair):>int64=>{ $runtime_assert pair.items.length>?0, message()
