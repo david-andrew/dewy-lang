@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 128 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 13 (≈31.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 131 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 10 (≈30.0k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,33 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: three more modules; iterating an input inspects it (2026-10-06)
+
+Row C2: 131 of 141 compiler modules are strict (`effects`,
+`initialization`, `bindings`). Hosted would-be violations in the rest:
+421 → 339.
+
+Proof (both compilers): **iterating an input is an inspection.** A loop
+copies or views each element in turn and keeps no alias of the input once
+it ends, so a parameter that is iterated (to build a key, say) and then
+stored is still an owning input. The `ty` constructors (`function_type`,
+`object_type`, …) now take their arrays from callers that are done with
+them; callers that still own their arrays copy them explicitly
+(`subtyping`, `type_terms`).
+
+Copy-free rewrites in `effects`: caller and write-summary sets are extended
+in place, and a parameter's summary is read in place where only its escapes
+or writes matter. Explicit copies: initialization's definite-assignment
+sets at flow boundaries (the running set is also lent as a place, so native
+code assigns it in place and cannot move it), its `Checker` bundle, snapshots
+of target lists, and `bindings`' popped binding page (the hosted lowering
+copies a record popped from a dictionary).
+
+`ty` stays non-strict: its `node_at` getter returns a stored type by an
+implicit copy that can share the record block, while `.copy()` copies deeply
+(the HIR-query allocation budget fails). It needs callers that read entries
+in place, or a spelling for a share.
 
 ## Strict copies: four more modules (2026-10-06)
 
