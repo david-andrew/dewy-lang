@@ -1,3 +1,4 @@
+from reporting import SrcFile
 import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"../../timing.dewy" as timing
@@ -563,9 +564,7 @@ inline_temporaries = (@items:array<addr> uses:Uses @state:State):>void => {
 inline_block = (id:addr uses:Uses @state:State):>void => {
     let node=node_at(id state)
     if node isnt? hir.Block return
-    let items=node.items
-    inline_temporaries(@items uses @state)
-    node.items=items
+    inline_temporaries(@node.items uses @state)
     $runtime_assert id <? state.nodes.length
     state.nodes[id]=node
 }
@@ -607,16 +606,17 @@ optimized = (functions:array<program.Function> ctx:ssa.Context @state:State):>ar
     }
     return result
 }
-normalize = (source:program.Program input:emit.Input optimizing:bool=false timings:bool=false native_code:bool=false native_wasm:bool=false):>Result => {
-    let state=State[input.nodes input.types]
+# The caller's node arena and type table move into the working state.
+normalize = (source:program.Program nodes:array<hir.AST> type_table:types.Table source_files:array<SrcFile> optimizing:bool=false timings:bool=false native_code:bool=false native_wasm:bool=false):>Result => {
+    let state=State[nodes type_table]
     let functions:array<program.Function>=[]
     state.in_function=true
     loop entry in source.functions {
         let function=node_at(entry.literal state)
         $runtime_assert function is? hir.FunctionLiteral
         let body=function.body
-        let result=types.node_at(input.types function.rettype)
-        let tail=types.node_at(input.types node_at(body state).value_type)
+        let result=types.node_at(state.types function.rettype)
+        let tail=types.node_at(state.types node_at(body state).value_type)
         # The body's value type describes its fallthrough path. Earlier
         # returns remain exits when `write` lifts this implicit result.
         if not types.is_primitive(result 'void') and not types.is_primitive(result 'never') and not types.is_primitive(tail 'void') and not types.is_primitive(tail 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
@@ -630,7 +630,7 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
         loop parameter in function.kw_only_args {merged.push(parameter)}
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type merged [] function.rest_args function.rettype lowered source=function.source] @state)])
     }
-    let normalized=functions
+    let normalized=functions.copy()
     let ctx=if optimizing context(functions source false state) else ssa.Context[set[] []]
     state.in_function=false
     let startup:array<addr>=[]
@@ -657,14 +657,14 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
     if optimizing and native_code {
         let started=timing.start(timings)
         let kinds=native.Kinds[void_type(@state) types.primitive('int64' @state.types)]
-        let built=native.build(normalized source startup argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
+        let built=native.build(normalized source startup.copy() argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
         timing.finish('lowering.native' started)
         if built is? native.Failure {refused=built.reason} else {executable=built}
     } else if optimizing and native_wasm {
         # The same for wasm32: the module's bytes.
         let started=timing.start(timings)
         let kinds=wasm.Kinds[void_type(@state) types.primitive('int64' @state.types) ssa_udewy.Kinds[void_type(@state) boolean(@state) types.primitive('int64' @state.types) types.primitive('never' @state.types)]]
-        let built=wasm.build(normalized source startup argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
+        let built=wasm.build(normalized source startup.copy() argv_prologue argv_value context(functions source true state) kinds state.types @state.nodes)
         timing.finish('lowering.native' started)
         if built is? wasm.Failure {refused=built.reason} else {executable=built}
     }
@@ -675,5 +675,5 @@ normalize = (source:program.Program input:emit.Input optimizing:bool=false timin
         functions=optimized(normalized ctx @state)
         timing.finish('lowering.optimize' started)
     }
-    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types input.source_files] executable refused]
+    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types source_files] executable refused]
 }

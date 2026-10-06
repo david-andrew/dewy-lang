@@ -49,8 +49,9 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] p
     loop index in 0.. and index <? rules.length {
         loop name in rules[index].source.variables {
             if name in? solutions {
-                let dependents=users.get(name set[])
-                dependents.push(index) users[name]=dependents
+                if name not in? users {users[name]=set[]}
+                let dependents=@users[name]
+                dependents.push(index)
             }
         }
         work.push(index) queued.push(index)
@@ -116,9 +117,9 @@ projection_candidates=(projections:dict<string Projection> @vocabulary:array<row
     loop [name edge] in projections {
         loop [slot subject] in edge.subjects {
             if subject is? none or subject.kind not=? 'parameter' continue
-            let entries=inverse.get(subject.key [])
+            if subject.key not in? inverse {inverse[subject.key]=[]}
+            let entries=@inverse[subject.key]
             entries.push(Inverse[slot subject.route])
-            inverse[subject.key]=entries
         }
     }
     let cursor:addr=0
@@ -167,7 +168,7 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
     }
     if vocabulary.length >? 0 {projection_candidates(projections @vocabulary @known)}
     let solutions:dict<string rows.Contract>=[]
-    loop [name row] in positive {solutions[name]=rows.Contract[row vocabulary]}
+    loop [name row] in positive {solutions[name]=rows.Contract[row vocabulary.copy()]}
     if vocabulary.length =? 0 return solutions
     let rules:array<GuaranteeRule>=[]
     loop [name body] in definitions {rules.push(GuaranteeRule[name body])}
@@ -189,10 +190,12 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
     let queued:set<addr>=set[]
     loop i in 0.. and i <? rules.length {
         work.push(i) queued.push(i)
-        loop name in admitted(rules[i].source).variables {
+        let source=admitted(rules[i].source)
+        loop name in source.variables {
             if name in? solutions {
-                let list=users.get(name set[])
-                list.push(i) users[name]=list
+                if name not in? users {users[name]=set[]}
+                let list=@users[name]
+                list.push(i)
             }
         }
     }

@@ -154,7 +154,7 @@ read = (route:addr loc:Span type:addr @session:contexts.Session):>hir.AST => {
 }
 
 validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:contexts.Session):>Error? => {
-    let joined=put(hir.Block[Span[0 0] types.primitive('void' @session.types) roots false] @session)
+    let joined=put(hir.Block[Span[0 0] types.primitive('void' @session.types) roots.copy() false] @session)
     let functions=captures.analyze(joined session.hir plan.symbols)
     let captured:set<addr>=set[]
     let written_captures:set<addr>=set[]
@@ -237,19 +237,23 @@ rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
         let route=bindings.route_at(session.registry canonical)
         let root=if route is? none canonical else route.root
         let prefix:array<string>=if route is? none [] else route.path
-        loop old in session.registry.routes_by_root.get(binding []) {
+        # `route_id` extends the registry's routes: walk a snapshot.
+        loop old in session.registry.routes_by_root.get(binding []).copy() {
             let metadata=bindings.binding_at(session.registry old.id)
             $runtime_assert metadata.value_type isnt? none
-            let path=prefix
+            let path=prefix.copy()
             loop field in old.path {path.push(field)}
             let replacement=bindings.route_id(@session.registry root path metadata.value_type metadata.loc)
             mapping.terms[old.id]=replacement
-            let dependencies=session.registry.index_routes
-            loop [index dependent] in dependencies {
-                if canonical in? dependent or old.id in? dependent {
-                    let updated=dependent
-                    updated.push(replacement) session.registry.index_routes[index]=updated
-                }
+            # Find the affected index entries first, then extend each in place.
+            let affected:array<addr>=[]
+            loop [index dependent] in session.registry.index_routes {
+                if canonical in? dependent or old.id in? dependent {affected.push(index)}
+            }
+            loop index in affected {
+                if index not in? session.registry.index_routes continue
+                let updated=@session.registry.index_routes[index]
+                updated.push(replacement)
             }
         }
     }
@@ -297,7 +301,7 @@ rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
         }
         store(id node @session)
     }
-    let roots=symbols
+    let roots=symbols.copy()
     loop root in roots {loop route in session.registry.routes_by_root.get(root []) {symbols.push(route.id)}}
     loop id in symbols {
         let binding=bindings.binding_at(session.registry id)
@@ -315,7 +319,7 @@ rewrite = (roots:array<addr> fallback:SrcFile @session:contexts.Session):>Error?
     if plan.order.length =? 0 return none
     let error=validate_lifetimes(roots fallback plan @session)
     if error isnt? none return error
-    loop binding in plan.order {
+    loop binding in plan.order.copy() {
         $runtime_assert binding in? plan.aliases
         let alias=plan.aliases[binding]
         let declaration=hir.node_at(session.hir alias.declaration)
@@ -342,7 +346,7 @@ rewrite = (roots:array<addr> fallback:SrcFile @session:contexts.Session):>Error?
         }
         if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? plan.routes {
             $runtime_assert node.binding_id in? plan.prefixes
-            store(id hir.Block[node.loc node.value_type plan.prefixes[node.binding_id] false] @session)
+            store(id hir.Block[node.loc node.value_type plan.prefixes[node.binding_id].copy() false] @session)
         }
     }
     loop [id binding] in assigned {

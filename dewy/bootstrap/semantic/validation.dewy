@@ -56,7 +56,7 @@ discharge = (root:addr constants:dict<addr bigint> word_iterators:set<addr> @ses
                 else {node.constant_index=none}
             }
             $runtime_assert id <? session.hir.length
-            session.hir[id]=node
+            session.hir[id]=node.copy()
         }
     }
 }
@@ -103,14 +103,14 @@ validate = (@engine:modules.Engine):>Result|Error => {
     # No rejected, partially prepared graph can reach runtime lowering.
     if ownership_error isnt? none return ownership_error
     let finishing_started=timing.start(engine.timings)
-    let result=Result[warnings=analyzed.warnings]
-    let loaded=engine.modules
+    let result=Result[warnings=analyzed.warnings.copy()]
+    let loaded=engine.modules.copy()
     $runtime_assert decisions.length =? loaded.length
     loop index in 0.. and index <? loaded.length {
         let module=loaded[index]
         let checked=decisions[index]
         loop entry in unsafe_audit.collect(module.root sources.srcfile(module.context engine.session) engine.session consumers=analyzed.consumers) {result.unsafe.push(entry)}
-        loop warning in checked.warnings {result.warnings.push(warning)}
+        loop warning in checked.warnings {result.warnings.push(warning.copy())}
         if checked.deferred.length >? 0 {
             # `$prototype`: each unproven site becomes a runtime check that
             # panics with the deferred report; one with no safe check stays
@@ -122,14 +122,14 @@ validate = (@engine:modules.Engine):>Result|Error => {
                     let report=site.report
                     let notes=report.notes.copy
                     notes.push('deferred to a runtime check by `$prototype`')
-                    result.warnings.push(Warning[srcfile=report.srcfile title="prototype: {report.title}" pointers=report.pointers notes=notes hint=report.hint])
+                    result.warnings.push(Warning[srcfile=report.srcfile title="prototype: {report.title}" pointers=report.pointers.copy() notes=notes hint=report.hint])
                 }
             }
         }
         let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
         if not strict {
             let source=sources.srcfile(module.context engine.session)
-            let selected=representation.select(module.root source engine.prelude_bindings checked.unfit @engine.session)
+            let selected=representation.select(module.root source engine.prelude_bindings checked.unfit.copy() @engine.session)
             if selected is? Error return selected
             loop note in selected {result.notes.push(note)}
         }

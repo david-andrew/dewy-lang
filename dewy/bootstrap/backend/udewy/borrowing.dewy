@@ -982,11 +982,17 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # that this snapshot was not itself exposed beyond the call.
     let retaining=propagate_ambient(ambient.exposes_storage ambient.shared_callers)
     let places:set<addr>=set[]
+    # Only a place some caller may fill with a global (`global_placed`) can
+    # share storage that an ambient write reaches.
+    let aliased_places:set<addr>=set[]
     loop id in plan.functions.keys {
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         loop parameter in effects.literal_params(literal) {
-            if parameter.place and parameter.binding_id isnt? none {places.push(parameter.binding_id)}
+            if parameter.place and parameter.binding_id isnt? none {
+                places.push(parameter.binding_id)
+                if id in? aliased {aliased_places.push(parameter.binding_id)}
+            }
         }
     }
     # A scope borrow needs a longer guarantee than a call-argument borrow.
@@ -1173,11 +1179,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 # require no ambient writes, and arguments must not conflict. This is
                 # separate from retaining a later private argument snapshot.
                 let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes) and not private_lifetime
-                if not raw_blocked and source isnt? none and source.binding not in? exposed and (source.binding not in? places and source.binding not in? captured and source.binding not in? plan.globals or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
+                if not raw_blocked and source isnt? none and source.binding not in? exposed and (source.binding not in? aliased_places and source.binding not in? captured and source.binding not in? plan.globals or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
                 else {
                     rejected.push(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if (source.binding in? places or source.binding in? captured or source.binding in? plan.globals) and direct in? dirty 'ambient writes may reach its storage' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if (source.binding in? aliased_places or source.binding in? captured or source.binding in? plan.globals) and direct in? dirty 'ambient writes may reach its storage' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1

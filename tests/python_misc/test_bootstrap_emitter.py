@@ -263,7 +263,7 @@ let main=():>int64=>{{
 {chr(10).join(type_lines)}
 {chr(10).join(node_lines)}
     let units:array<program.Function>=[{' '.join(f"program.Function['{name}' {names[id(function)]}]" for name, function in functions)}]
-    let lowered=statements.normalize(program.Program[units] emit.Input[nodes type_nodes])
+    let lowered=statements.normalize(program.Program[units] nodes type_nodes [])
     let text=program.render(lowered.program lowered.input)
     if text is? Error {{text.fail}}
     printl(text)

@@ -12,7 +12,9 @@ import p"subtyping.dewy" as subtyping
 # keeps other keys present but drops positions that a resize might move.
 facts = (state:addr session:contexts.Session):>array<keys.Fact> => {
     $runtime_assert state <? session.read_states.length
-    return session.read_states[state].keys
+    # Owning callers get an independent list; stable readers use the
+    # proved getter loan and elide this fallback snapshot.
+    return session.read_states[state].keys.copy()
 }
 # Read states are updated through their element place: copying a state out
 # and back would detach (copy) every array of its dictionaries per change.
@@ -28,11 +30,10 @@ set_facts = (state:addr current:array<keys.Fact> @session:contexts.Session):>voi
 route = (value:addr @session:contexts.Session):>addr? => bindings.array_route_id(value session.hir @session.registry)
 changed = (binding:addr state:addr @session:contexts.Session projection:array<string>=[]):>void => {
     let original=facts(state session)
-    let current = if projection.length =? 0 keys.forget(original changed=binding) else original
-    let owner = binding
-    let prefix:array<string> = projection
+    let current = if projection.length =? 0 keys.forget(original changed=binding) else original.copy()
     let item=bindings.route_at(session.registry binding)
-    if item isnt? none {owner=item.root prefix=item.path}
+    let owner = if item is? none binding else item.root
+    let prefix:array<string> = if item is? none projection else item.path
     let preserved:set<addr>=if session.local_place_roots.length>?0 bindings.local_place_containers(owner session.hir @session.registry) else set[]
     if session.local_place_roots.length >? 0 {
         let selected=session.local_place_roots.get(owner default=owner)
@@ -79,14 +80,15 @@ remember = (container:addr key:addr state:addr @session:contexts.Session positio
 # A contextual storage wrapper may widen away the displayed refinement,
 # while its evaluated input still carries the named value guarantee.
 total_key = (value:addr session:contexts.Session):>addr? => {
-    let node=hir.node_at(session.hir value)
+    let id=value
     loop true {
+        let node=hir.node_at(session.hir id)
         let total=views.total_dict_key(node.value_type session.types)
         if total isnt? none return total
         if node isnt? hir.ValueCast|hir.RepresentationCast return none
         let source=hir.node_at(session.hir node.expr)
         if not types.same_type(views.structural_base(node.value_type session.types) views.structural_base(source.value_type session.types) session.types) return none
-        node=source
+        id=node.expr
     }
 }
 proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fact? => {
@@ -144,7 +146,7 @@ captured = (value:addr session:contexts.Session):>array<keys.Fact> => {
     if node is? hir.Obligation|hir.CopyValue return captured(node.value session)
     if node is? hir.ValueCast|hir.RepresentationCast return captured(node.expr session)
     let result=session.value_keys.get(value)
-    return if result is? none [] else result
+    return if result is? none [] else result.copy()
 }
 let capture = (value:addr state:addr @session:contexts.Session):>void => {
     let node=hir.node_at(session.hir value)
@@ -250,7 +252,7 @@ seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>vo
     loop field in node.fields {
         let declared = types.object_field(shape field.name)
         if declared is? none continue
-        let member_path = path
+        let member_path = path.copy()
         member_path.push(field.name)
         let child = bindings.route_id(@session.registry owner member_path declared.value_type field.loc)
         let field_value = hir.node_at(session.hir field.value)

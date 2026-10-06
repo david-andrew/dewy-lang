@@ -1224,6 +1224,13 @@ class _Lowerer(
                         self.static_default_arms.add((default.name, default.loc.start, default.loc.stop))
                         owner = hir.Bool(literal.loc, 'bool', False)
                     default_owner_conditions[local_binding_key(target)] = owner
+                elif (isinstance(param.type, ty.ArrayType) and param.type.length is None
+                        and summary is not None and summary.read_only and storage_borrows.borrowable(param.type)):
+                    # A read-only array input borrows a supplied argument the
+                    # same way; only the omitted default is released here.
+                    direct_default_inputs.add(incoming_name)
+                    default_owner_conditions[local_binding_key(target)] = self._bool_not(
+                        hir.ExpressedIdentifier(literal.loc, 'bool', present_name))
                 # Select before dereferencing: an omitted aggregate argument
                 # is an ignored zero pointer. The ordinary value-flow path
                 # constructs a default lazily and otherwise borrows a proven
@@ -4499,7 +4506,12 @@ class _Lowerer(
                                        hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
                         released.extend(cleanup)
                     else:
-                        released.extend(self._release_owned_array(local, local.loc, element=self.owned_array_elements.get(local.name)))
+                        cleanup = self._release_owned_array(local, local.loc, element=self.owned_array_elements.get(local.name))
+                        condition = self.default_owner_conditions.get(local_binding_key(local))
+                        if condition is not None:
+                            cleanup = [hir.Flow(local.loc, ty.VOID_TYPE, [hir.IfArm(local.loc, ty.VOID_TYPE, condition,
+                                       hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
+                        released.extend(cleanup)
             return released
 
         def diverges(item: hir.AST) -> bool:

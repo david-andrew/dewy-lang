@@ -72,7 +72,7 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
     }
     let seen:set<addr>=set[]
     let live:set<addr>=set[]
-    let roots=required_bindings
+    let roots=required_bindings.copy()
     if main isnt? none {roots.push(main)}
     loop binding in roots {
         let declaration=functions.get(binding)
@@ -129,7 +129,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry checked_root=prepared.checked_root)
+    return lower.lower(prepared.root emit.Input[engine.session.hir.copy() engine.session.types.copy() sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands.copy() engine.session.error_types.copy()] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry checked_root=prepared.checked_root)
 }
 const helper_names=['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_scan' 'exit' '_arena_release' '_arena_alloc₈' '_arena_alloc₁₆' '_arena_alloc₃₂' '_arena_alloc₆₄' '_arena_alloc₁₂₈' '_arena_alloc₂₅₆' '_arena_release₈' '_arena_release₁₆' '_arena_release₃₂' '_arena_release₆₄' '_arena_release₁₂₈' '_arena_release₂₅₆' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop' '_shareable' '_arena_alloc_for' '_allocator_enter' '_allocator_exit' '_allocator_enter_for']
 # Runtime helpers are the prelude's exports, plus a compiler-private helper
@@ -168,11 +168,14 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false native_code:bool
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    let error=initialization.validate_initialization(prepared.root engine.session.hir engine.session.types engine.session.registry prepared.source entry=prepared.entry source_by_item=prepared.source_by_item source_files=sources.files(engine.session))
+    # Initialization checking and lowering each work on their own copy of
+    # the session's graph, type table and registry (see PHASE1_PROGRESS,
+    # strict copies: bundle records cannot borrow fields yet).
+    let error=initialization.validate_initialization(prepared.root engine.session.hir engine.session.types.copy() engine.session.registry.copy() prepared.source entry=prepared.entry source_by_item=prepared.source_by_item source_files=sources.files(engine.session))
     timing.finish('initialization_and_reachability' preparation_started)
     if error isnt? none return error
     let lowering_started=timing.start(timings)
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings checked_root=prepared.checked_root native_code=native_code native_wasm=native_wasm)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir.copy() engine.session.types.copy() sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands.copy() engine.session.error_types.copy()] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings checked_root=prepared.checked_root native_code=native_code native_wasm=native_wasm)
     timing.finish('lowering' lowering_started)
     if lowered is? Error return lowered
     return Compilation[lowered validated]
