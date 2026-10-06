@@ -145,6 +145,10 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                 if node.binding_id in wanted:
                     observed = not exposed and (
                         isinstance(parent, (hir.TypeTest, hir.ArrayLength))
+                        # A scalar element read (`args[i]`) inspects the array.
+                        or isinstance(parent, hir.Index) and value_source(parent.array) is node and (
+                            ty.structural_base(parent.type) in ('bool', 'true', 'false')
+                            or ty.fixed_integer_layout(parent.type) is not None)
                         or isinstance(parent, hir.FunctionCall) and observes(parent, node)
                         or (isinstance(parent, hir.MemberAccess) or
                             isinstance(parent, hir.ForwardingAccess) and parent.exception_type == ty.BOTTOM_TYPE) and (

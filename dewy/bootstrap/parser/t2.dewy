@@ -57,7 +57,7 @@ is_stop = (node:compound.Token stop:set<string>):>bool => node is? compound.Keyw
 is_directive = (node:compound.Token):>bool => node is? compound.Metatag and node.name in? directives
 is_jux = (node:compound.Token name:string):>bool => node is? Juxtapose and node.options.length =? 1 and node.options[0] =? name
 
-jux_options = (left:compound.Token right:compound.Token previous:compound.Token? nodes:array<compound.Token> srcfile:SrcFile):>array<string> => {
+jux_options = (left:compound.Token right:compound.Token previous:compound.Token? @nodes:array<compound.Token> srcfile:SrcFile):>array<string> => {
     if left is? compound.Semicolon return []
     if right is? compound.Semicolon {
         if not is_jux(left 'SemicolonJuxtapose') return ['SemicolonJuxtapose']
@@ -185,7 +185,7 @@ rewrite_list = (input:array<addr> pass:uint8 srcfile:SrcFile @nodes:array<compou
                 if node.loc.stop =? right.loc.start {
                     let previous:compound.Token? = none
                     if output.length >? 1 { previous = compound.node_at(nodes output[output.length-2]) }
-                    let options = jux_options(node right previous nodes srcfile)
+                    let options = jux_options(node right previous @nodes srcfile)
                     if options.length >? 0 { output.push(compound.append_node(@nodes Juxtapose[loc=Span[node.loc.stop node.loc.stop] options=options])) }
                 }
             }
@@ -476,7 +476,7 @@ collect_allocator = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
         braced=only is? compound.Block and only.delims =? '\{}'
     }
     if not braced {
-        let block=compound.append_node(@nodes compound.Block[loc=body.loc inner=body.items delims='\{}'])
+        let block=compound.append_node(@nodes compound.Block[loc=body.loc inner=body.items.copy() delims='\{}'])
         message=chain([block] @nodes)
     }
     let condition=chain([group_id] @nodes)
@@ -504,10 +504,10 @@ token_payload = (node:compound.Token):>string => {
     return compound.token_payload(node)
 }
 children_of = (node:compound.Token):>array<addr> => {
-    if node is? compound.Block | compound.ParametricEscape return node.inner
-    if node is? compound.IString return node.content
-    if node is? Chain return node.items
-    if node is? KeywordExpr return node.parts
+    if node is? compound.Block | compound.ParametricEscape return node.inner.copy()
+    if node is? compound.IString return node.content.copy()
+    if node is? Chain return node.items.copy()
+    if node is? KeywordExpr return node.parts.copy()
     if node is? Broadcast | CombinedAssignment | OpFn return [node.op]
     let children:array<addr> = []
     if node is? Flow {

@@ -173,7 +173,7 @@ root_binding = (id:addr nodes:array<hir.AST>):>addr? => {
     return none
 }
 analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
-    let result=Plan[source_bindings=symbols]
+    let result=Plan[source_bindings=symbols.copy()]
     let seen:set<addr>=set[]
     discover(root nodes @result @seen)
     let block=hir.node_at(nodes root)
@@ -191,10 +191,12 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
             if node is? hir.Block and not node.scoped {loop item in node.items {pending.push(item)}}
         }
     }
-    let functions=result.functions.keys
+    let functions:array<addr>=[]
+    loop [id function] in result.functions {functions.push(id)}
     loop id in functions {
         $runtime_assert id in? result.functions
-        let function=result.functions[id]
+        # Filled in below, then stored back.
+        let function=result.functions[id].copy()
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters=literal.pos_or_kw_args.copy
@@ -214,16 +216,16 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         if literal.object_receiver {
             loop field in literal.object_fields { function.direct.pop(field.id default=field.id); }
         }
-        function.captures=function.direct
+        function.captures=function.direct.copy()
         result.functions[id]=function
     }
     let callers:dict<addr array<addr>>=[]
     loop id in functions {
         $runtime_assert id in? result.functions
         loop dependency in result.functions[id].dependencies {
-            let users=callers.get(dependency [])
+            if dependency not in? callers {callers[dependency]=[]}
+            let users=@callers[dependency]
             users.push(id)
-            callers[dependency]=users
         }
     }
     # A newly captured binding travels only along reverse dependency edges.
@@ -235,8 +237,9 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
     loop pending.length >? 0 {
         let id=pending.pop
         queued.pop(id default=id);
-        let other=result.functions.get(id)
-        if other is? none continue
+        if id not in? result.functions continue
+        # A caller updated below may be this function itself.
+        let other=result.functions[id].copy()
         loop caller in callers.get(id []) {
             $runtime_assert caller in? result.functions
             let function=result.functions[caller].copy

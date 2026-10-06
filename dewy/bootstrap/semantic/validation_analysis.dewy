@@ -30,7 +30,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     if proof_error isnt? none return proof_error
     let bounds_started=timing.start(timings)
     # The checker owns its view of the module's nominal links.
-    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry links=session.links.copy]
+    let data=predicates.Data[env relations.Context[prepared.copy()] intervals.Snapshot[] env.registry.copy() links=session.links.copy]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)
     checker.prototype=module.options.prototype and not module.prelude
@@ -70,10 +70,10 @@ consumers_of = (module:modules.Module source_files:array<SrcFile> env:values.Env
     }
     if assumptions.length =? 0 or assumptions.length >? 64 return
     let source=sources.srcfile(module.context session)
-    let baseline=survey(module source source_files env prepared word session read_only set[])
+    let baseline=survey(module source source_files.copy() env prepared word session read_only set[])
     if baseline is? none return
     loop assumption in assumptions {
-        let sites=survey(module source source_files env prepared word session read_only set[assumption])
+        let sites=survey(module source source_files.copy() env prepared word session read_only set[assumption])
         if sites is? none continue
         let consumers:array<addr>=[]
         loop site in sites {if site not in? baseline and site not in? consumers {consumers.push(site)}}
@@ -81,7 +81,7 @@ consumers_of = (module:modules.Module source_files:array<SrcFile> env:values.Env
     }
 }
 survey = (module:modules.Module source:SrcFile source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr session:contexts.Session read_only:set<addr> | none disabled:set<addr>):>array<addr> | none => {
-    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry links=session.links.copy]
+    let data=predicates.Data[env relations.Context[prepared.copy()] intervals.Snapshot[] env.registry.copy() links=session.links.copy]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)
     checker.surveying=true
@@ -129,7 +129,7 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     timing.finish('validation.storage_lifetimes' lifetimes_started)
     if lifetime_error isnt? none return lifetime_error
     let prepare_started=timing.start(timings)
-    let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
+    let env=values.Environment[session.hir.copy() session.types.copy() session.registry.copy() targets.max_length(session.target)]
     let prepared=bounds.prepare(env)
     let ids:array<addr>=[]
     loop module in loaded {ids.push(module.root)}
@@ -142,7 +142,7 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
             decisions.push(cached.decisions[index])
             continue
         }
-        let checked=validate_module(loaded[index] source_files env prepared word prelude session read_only=read_only timings=timings)
+        let checked=validate_module(loaded[index] source_files.copy() env prepared word prelude session read_only=read_only timings=timings)
         if checked is? Error return checked
         decisions.push(checked)
         # Prelude checks are cached: a warm build must report the same audit.

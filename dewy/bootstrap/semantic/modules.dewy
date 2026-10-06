@@ -138,7 +138,7 @@ install = (spec:imports.Import module:Module id:addr env:checking.Environment @e
         let names:array<imports.Name> = []
         if spec.names is? none {
             loop [name binding] in module.exports { names.push(imports.Name[name name loc]) }
-        } else { names = spec.names }
+        } else { names = spec.names.copy() }
         loop name in names {
             let binding_id = module.exports.get(name.source)
             if binding_id is? none return contexts.problem(id 'module does not export this name' name.source env.lexical engine.session)
@@ -257,7 +257,8 @@ ensure_prelude = (@engine:Engine):>Error? => {
         }
     }
     engine.prelude_loading=true
-    loop path in engine.prelude_files {
+    # Loading changes the engine: walk a snapshot of the list.
+    loop path in engine.prelude_files.copy() {
         let checked=load(path @engine)
         if checked is? Error {engine.prelude_loading=false return checked}
         let module=module_at(checked engine)
@@ -282,7 +283,7 @@ ensure_prelude = (@engine:Engine):>Error? => {
             let lifecycle_error=lifecycle_runtime.prepare(prelude_roots sources.srcfile(engine.modules[0].context engine.session) @engine.session)
             if lifecycle_error isnt? none return lifecycle_error
         }
-        let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session timings=engine.timings)
+        let decisions=analysis.analyze(word engine.modules.copy() engine.prelude_bindings engine.session timings=engine.timings)
         timing.finish('prelude_analysis' analysis_started)
         if decisions is? Error return decisions
         let roots:array<addr>=[]
@@ -290,7 +291,8 @@ ensure_prelude = (@engine:Engine):>Error? => {
         let saved=proofs.Prelude[roots engine.session.hir.length engine.session.hir_edits.length decisions.decisions]
         engine.prelude_validation=saved
         let store_started=timing.start(engine.timings)
-        cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings saved])
+        # The prelude cache stores a complete snapshot (cache scaffolding).
+        cache.store(cached state.PreludeSnapshot[engine.session.copy() engine.modules.copy() engine.by_path.copy() engine.prelude_bindings.copy() saved])
         timing.finish('prelude_store' store_started)
     }
     return none
@@ -322,10 +324,10 @@ load_source = (path:string @engine:Engine):>addr|Error => {
         if error isnt? none return error
     }
     let statements=directed.statements
-    let filtered_root = parser.Block[loc=root.loc inner=statements delims=root.delims base=root.base]
+    let filtered_root = parser.Block[loc=root.loc inner=statements.copy() delims=root.delims base=root.base]
     let root_id = tokens.append_node(@program.nodes filtered_root)
     let context = contexts.begin(source program.nodes @engine.session)
-    let inherited:dict<string addr>=if prelude or not directed.options.no_prelude engine.prelude_bindings else []
+    let inherited:dict<string addr>=if prelude or not directed.options.no_prelude engine.prelude_bindings.copy() else []
     let env = checking.begin(context @engine.session inherited=inherited)
     let imports_started=timing.start(engine.timings)
     loop statement in statements {

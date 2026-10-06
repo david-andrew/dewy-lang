@@ -735,6 +735,11 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
                 observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
             }
             if not exposed and owner is? hir.FunctionCall {observed=observes_argument(owner id plan summaries nodes type_nodes)}
+            # A scalar element read (`args[i]`) inspects the array.
+            if not exposed and owner is? hir.Index and consuming_value_source(owner.array nodes type_nodes) =? id {
+                let element=types.node_at(type_nodes views.structural_base(owner.value_type type_nodes))
+                observed=(element is? types.Primitive and element.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
+            }
             # A place lent to a call ends when the call returns: the callee
             # may change the input, never keep an alias of it.
             if lent and owner is? hir.Place {observed=true}

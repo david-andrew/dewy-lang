@@ -3,7 +3,9 @@
 `tick` also writes an array global: a scalar global has no storage that
 could alias the projection, so writing only one would need no isolation.
 `main` ticks once first: native code gives the static empty array owned
-storage on its first `clear`.
+storage on its first `clear`. `box` is a global, so the place `forward`
+receives may be reached by those writes; only the isolation proof (not the
+shared storage proof's unaliased-place rule) lets it lend `box.items`.
 """
 import pytest
 
@@ -16,6 +18,7 @@ let ticks:int64=0
 let log:array<int64>=[]
 tick=():>void=>{ticks+=1 log.clear()}
 Box:type=[items:array<int64>]
+let box=Box[[20 42]]
 index=(items:array<int64>):>int64=>{
     let cursor:int64=0
     if items.length>?1 {cursor=1}
@@ -27,7 +30,6 @@ forward=(@box:Box):>int64=>{
     return read(box.items index(box.items))
 }
 main=():>int64=>{
-    let box=Box[[20 42]]
     tick()
     let before:int64=_arena_allocated_bytes
     loop i in [0..1000) {if forward(@box) not=?42 return 1}

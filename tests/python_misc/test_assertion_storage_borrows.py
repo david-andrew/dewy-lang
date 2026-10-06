@@ -50,7 +50,10 @@ CASES += [SHARED,
 
 ERRORS = [SHARED.replace('Box:type=',
     "let calls:array<int64>=[]\nmessage=():>string=>{calls.clear() return 'empty'}\nBox:type=")
-    .replace('$runtime_assert pair.items.length>?0', '$runtime_assert pair.items.length>?0, message()')]
+    .replace('$runtime_assert pair.items.length>?0', '$runtime_assert pair.items.length>?0, message()')
+    # A global box: the message's write can reach a place filled from module state.
+    .replace('main=():>int64=>{let box=Box[[20 22] 0] return work(@box)}',
+             'let box=Box[[20 22] 0]\nmain=():>int64=>work(@box)')]
 
 
 def test_shared_storage_keeps_source_message_effects():

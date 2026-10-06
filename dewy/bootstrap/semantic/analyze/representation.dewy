@@ -27,7 +27,6 @@ State:type = [
     notes:array<Note>=[]
     problem:Error?=none
 ]
-const binary=numeric.bigint_binary
 
 node_at = (id:addr session:contexts.Session):>hir.AST => hir.node_at(session.hir id)
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
@@ -67,7 +66,7 @@ prelude_call = (name:string args:array<addr> loc:Span @state:State @session:cont
     }
     let func=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
     let operation:string?=none
-    loop [op helper] in binary {if helper =? name {operation=op break}}
+    loop [op helper] in numeric.bigint_binary {if helper =? name {operation=op break}}
     if name in? ['_bigint_from_int' '_bigint_from_int_nonzero'] {operation='identity'}
     else if name =? '_bigint_neg' {operation='__unary_sub__'}
     return put(hir.FunctionCall[loc signature.ret func args [] none operation] @session)
@@ -134,8 +133,8 @@ mark = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void =>
 # retain their storage requirements and go through the boundary diagnostic.
 reinstantiate = (call:hir.FunctionCall func:hir.ExpressedIdentifier @state:State @session:contexts.Session):>addr? => {
     if func.binding_id is? none return none
-    let instance=session.registry.generic_instances.get(func.binding_id)
-    if instance is? none return none
+    if func.binding_id not in? session.registry.generic_instances return none
+    let instance=session.registry.generic_instances[func.binding_id].copy()
     let original=bindings.binding_at(session.registry instance.generic)
     if original.function is? none return none
     let generic=node_at(original.function session)
@@ -200,7 +199,7 @@ rewrite_node = (id:addr @state:State @session:contexts.Session):>hir.AST => {
                 node.op='='
             }
         }
-    } else if node is? hir.FunctionCall return rewrite_call(id node @state @session)
+    } else if node is? hir.FunctionCall return rewrite_call(id node.copy() @state @session)
     return node
 }
 rewrite_call = (id:addr node:hir.FunctionCall @state:State @session:contexts.Session):>hir.AST => {
@@ -223,7 +222,7 @@ rewrite_call = (id:addr node:hir.FunctionCall @state:State @session:contexts.Ses
     let flagged=id in? state.unfit
     let big_operand=false
     loop arg in node.pos_args {if is_big(arg state session) {big_operand=true break}}
-    let helper=binary.get(name)
+    let helper=numeric.bigint_binary.get(name)
     let result_type=types.node_at(session.types node.value_type)
     if helper isnt? none and node.pos_args.length =? 2 and (flagged or big_operand) and (abstract_integer(node.value_type session) or types.is_primitive(result_type 'bool')) {
         if id in? state.unfit {
@@ -314,7 +313,7 @@ let run = (root:addr @state:State @session:contexts.Session):>array<Note>|Error 
     loop true {
         let visited:set<addr>=set[]
         rewrite(root @visited @state @session)
-        if state.problem isnt? none return state.problem
+        if state.problem isnt? none return state.problem.copy()
         let before=state.big_bindings.length
         let marked:set<addr>=set[]
         mark(root @marked @state @session)
@@ -331,11 +330,11 @@ let run = (root:addr @state:State @session:contexts.Session):>array<Note>|Error 
         loop item in block.items {items.push(item)}
         block.items=items
         $runtime_assert root <? session.hir.length
-        session.hir[root]=block
+        session.hir[root]=block.copy()
     }
     let visited:set<addr>=set[]
     boundaries(root @visited @state session)
-    if state.problem isnt? none return state.problem
+    if state.problem isnt? none return state.problem.copy()
     let remaining:addr?=none
     loop [id flag] in state.unfit {remaining=id break}
     if remaining isnt? none {
@@ -348,7 +347,7 @@ let run = (root:addr @state:State @session:contexts.Session):>array<Note>|Error 
         let title=if refuted "this integer does not fit `{flag.word}`" else "cannot prove this integer fits `{flag.word}`"
         fail(node title "{describe(interval)}; annotate a fixed width, prove its range, or use `bigint`" @state)
         $runtime_assert state.problem isnt? none
-        return state.problem
+        return state.problem.copy()
     }
     # Stable source order, independent of the order fixed-point propagation
     # discovered the representations. Equal locations keep discovery order.
@@ -362,7 +361,7 @@ let run = (root:addr @state:State @session:contexts.Session):>array<Note>|Error 
         state.notes[j]=current
         i+=1
     }
-    return state.notes
+    return state.notes.copy()
 }
 select = (root:addr srcfile:SrcFile prelude:dict<string addr> unfit:dict<addr Unfit> @session:contexts.Session):>array<Note>|Error => {
     let id=prelude.get('BigInt')
@@ -370,6 +369,6 @@ select = (root:addr srcfile:SrcFile prelude:dict<string addr> unfit:dict<addr Un
     let binding=bindings.binding_at(session.registry id)
     let declared=binding.type_value
     if declared isnt? addr return []
-    let state=State[srcfile prelude declared numeric.object_member(declared session.types) unfit]
+    let state=State[srcfile prelude.copy() declared numeric.object_member(declared session.types) unfit]
     return run(root @state @session)
 }

@@ -4,10 +4,9 @@ A callee that writes module state (here, clearing a log array) cannot change
 storage a place parameter refers to unless some caller passes a global as
 that place (`global_placed`). Native borrowing now lends such a place's
 fields to read-only callees instead of copying them; a function whose place
-may hold a global keeps the copy. The hosted storage proof still excludes
-every parameter of a function an ambient write blocks, so `LOCAL` runs
-without checking copies here; the strict `validation` module relies on the
-native rule in every self-build.
+may hold a global keeps the copy. The hosted storage proof applies the same
+rule (`storage_borrows.global_placed`): a function blocked only by ambient
+writes keeps its single place parameter.
 """
 import pytest
 from dewy.backend.udewy import codegen
@@ -22,7 +21,7 @@ measure=(items:array<int64>):>int64=>{
     return items.length
 }
 '''
-LOCAL = PRELUDE + '''holder=(@box:Box):>int64=>measure(box.items)
+LOCAL = '$explicit_copies\n' + PRELUDE + '''holder=(@box:Box):>int64=>measure(box.items)
 main=():>int64=>{
     let b=Box[[1 2]]
     note()

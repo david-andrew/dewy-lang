@@ -499,6 +499,74 @@ mutable_state=(binding:addr analysis:effects.Analysis nodes:array<hir.AST> table
     if views.fixed_integer_layout(type table) isnt? none return false
     return not views.string_valued(type table)
 }
+# Functions whose place parameter some caller may fill with storage a global
+# names: a place argument rooted outside the caller's own locals (module
+# state, or a capture), or at a place parameter of such a function. A
+# function used as a value, or never bound, has unknown callers.
+global_placed=(analysis:effects.Analysis bodies:dict<addr array<addr>> locals_by:dict<addr set<addr>> nodes:array<hir.AST>):>set<addr>=>{
+    let functions:dict<addr addr>=[]
+    let named:set<addr>=set[]
+    loop [binding declared] in analysis.declares {
+        let node=hir.node_at(nodes declared)
+        if node is? hir.Declare and hir.node_at(nodes node.expr) is? hir.FunctionLiteral {functions[binding]=node.expr named.push(node.expr)}
+    }
+    let aliased:set<addr>=set[]
+    loop id in analysis.literals {if id not in? named {aliased.push(id)}}
+    let places:dict<addr addr>=[]
+    loop id in analysis.literals {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        loop param in effects.literal_params(literal) {if param.place and param.binding_id isnt? none {places[param.binding_id]=id}}
+    }
+    let site_callers:array<addr>=[]
+    let site_roots:array<addr?>=[]
+    let site_targets:array<addr>=[]
+    loop id in analysis.literals {
+        if id not in? bodies continue
+        let called:set<addr>=set[]
+        loop item in bodies[id] {
+            let node=hir.node_at(nodes item)
+            if node isnt? hir.FunctionCall continue
+            let func=effects.unwrap(node.func nodes)
+            if hir.node_at(nodes func) is? hir.ExpressedIdentifier {called.push(func)}
+            let targets=effects.direct_targets(node analysis nodes)
+            if targets is? none continue
+            loop target in targets {
+                let callee=hir.node_at(nodes target)
+                $runtime_assert callee is? hir.FunctionLiteral
+                let pairs=effects.pair_arguments(node callee)
+                if pairs is? none continue
+                loop pair in pairs {
+                    let argument=hir.node_at(nodes pair.argument)
+                    if argument isnt? hir.Place or pair.parameter is? none or pair.parameter not in? places continue
+                    let root=hir.node_at(nodes bindings.access_path(argument.target nodes).root)
+                    site_callers.push(id) site_targets.push(target)
+                    site_roots.push(if root is? hir.ExpressedIdentifier root.binding_id else none)
+                }
+            }
+        }
+        loop item in bodies[id] {
+            let node=hir.node_at(nodes item)
+            if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? functions and item not in? called {aliased.push(functions[node.binding_id])}
+        }
+    }
+    let changed=true
+    loop changed {
+        changed=false
+        let index:addr=0
+        loop index <? site_targets.length and index <? site_callers.length and index <? site_roots.length {
+            let target=site_targets[index]
+            let caller=site_callers[index]
+            let root=site_roots[index]
+            index+=1
+            if target in? aliased continue
+            let outside=root is? none or caller not in? locals_by or root not in? locals_by[caller]
+            let forwarded=root isnt? none and root in? places and places[root] in? aliased
+            if outside or forwarded {aliased.push(target) changed=true}
+        }
+    }
+    return aliased
+}
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let loan_sizes:dict<addr addr?>=[]
     let families:array<addr>=[]
@@ -517,6 +585,8 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
     let captured:set<addr>=set[]
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
+    let opaque:set<addr>=set[]
+    let locals_by:dict<addr set<addr>>=[]
     let constants:dict<addr addr>=[]
     # Immutable startup owners include ordinary factory results and explicit
     # copies: their value boundary separates them from initializer inputs.
@@ -642,7 +712,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
                 let operation=primitive(node registry) or raw_memory(node registry)
                 if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {
-                    if node.binding_id is? none {blocked.push(id)}
+                    if node.binding_id is? none {blocked.push(id) opaque.push(id)}
                 }
             } else if node is? hir.FunctionCall {
                 let targets=effects.direct_targets(node analysis nodes)
@@ -654,7 +724,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                             if target in? edges {let callers=@edges[target] callers.push(id)}
                             else {edges[target]=set[id]}
                         }
-                    } else if not modeled_call(node registry nodes table @eligible) and not raw_memory(func registry) {blocked.push(id)}
+                    } else if not modeled_call(node registry nodes table @eligible) and not raw_memory(func registry) {blocked.push(id) opaque.push(id)}
                 } else {
                     loop target in targets {
                         # Extend the live adjacency set, rather than copying
@@ -665,6 +735,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 }
             }
         }
+        locals_by[id]=locals
         # Retain the inventory only after its final local read, allowing a move.
         bodies[id]=body
     }
@@ -678,6 +749,19 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if caller not in? blocked {blocked.push(caller) pending.push(caller)}
         }
     }
+    # Raw and unmodelled operations can reach any storage; an ambient write
+    # reaches only module state, and through it only a place some caller
+    # fills with a global (`global_placed`).
+    loop id in opaque {pending.push(id)}
+    loop pending.length >? 0 {
+        let target=pending.pop
+        if target not in? edges continue
+        const callers=@edges[target]
+        loop caller in callers {
+            if caller not in? opaque {opaque.push(caller) pending.push(caller)}
+        }
+    }
+    let aliased=global_placed(analysis bodies locals_by nodes)
     let result:dict<addr set<addr>>=[]
     let local_views:set<addr>=set[]
     let flow_views:set<addr>=set[]
@@ -762,6 +846,10 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         loop param in params {if param.place {place_count+=1}}
         if id not in? blocked {loop param in params {
             if (not param.place or place_count=?1) and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
+        }} else if id not in? opaque and id not in? aliased {loop param in params {
+            # Only ambient writes block this function, and no caller fills
+            # its place with a global: those writes cannot reach it.
+            if param.place and place_count=?1 and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
         }}
         const body=@bodies[id]
         # Whole-function local views share the allocation-contract proof.

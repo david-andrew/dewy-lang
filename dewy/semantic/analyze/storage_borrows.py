@@ -329,11 +329,58 @@ def route_of(path) -> tuple:
                  for step in path.steps)
 
 
+def global_placed(analysis, bodies, locals_by_literal) -> set:
+    """Functions whose place parameter some caller may fill with storage a
+    global names: a place argument rooted outside the caller's own locals
+    (module state, or a capture), or at a place parameter of such a function.
+    A function used as a value, or never bound, has unknown callers."""
+    functions = {binding: node.expr for binding, node in analysis.declares.items()
+                 if isinstance(node.expr, hir.FunctionLiteral)}
+    named = {id(literal) for literal in functions.values()}
+    aliased = {id(literal) for literal in analysis.literals if id(literal) not in named}
+    places = {}
+    for literal in analysis.literals:
+        for p in _literal_params(literal):
+            if p.place and p.binding_id is not None:
+                places[p.binding_id] = id(literal)
+    sites = []
+    for caller in analysis.literals:
+        called = set()
+        for node in bodies[id(caller)]:
+            if not isinstance(node, hir.FunctionCall):
+                continue
+            func = _unwrap(node.func)
+            if isinstance(func, hir.ExpressedIdentifier):
+                called.add(id(func))
+            for target in analysis._direct_targets(node) or ():
+                for argument, parameter in analysis._pair_arguments(node, target) or ():
+                    if isinstance(argument, hir.Place) and parameter is not None and parameter.place:
+                        root = bindings.access_path(argument.target, unwrap=_unwrap).root
+                        binding = root.binding_id if isinstance(root, hir.ExpressedIdentifier) else None
+                        sites.append((id(caller), binding, id(target)))
+        for node in bodies[id(caller)]:
+            if (isinstance(node, hir.ExpressedIdentifier) and node.binding_id in functions
+                    and id(node) not in called):
+                aliased.add(id(functions[node.binding_id]))
+    changed = True
+    while changed:
+        changed = False
+        for caller, binding, target in sites:
+            if target in aliased:
+                continue
+            outside = binding is None or binding not in locals_by_literal[caller]
+            if outside or binding in places and places[binding] in aliased:
+                aliased.add(target)
+                changed = True
+    return aliased
+
+
 def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     bodies, edges, blocked = {}, {}, set()
     seeds, ambient_writes = {}, {}
     stable_locals, call_locals = {}, {}
     writes, captured = {}, set()
+    locals_by_literal = {}
     eligible = {}
     loan_sizes = {}
     # Immutable startup owners may be constructed by a factory or an explicit
@@ -419,6 +466,7 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
             pending.extend(hir.children(node))
         local.discard(None)
         bodies[key] = body
+        locals_by_literal[key] = local
         # Initial local-owner proof: no direct writes or exposed places during
         # the function. The call graph below excludes nonlocal/raw mutation.
         # Keep this conservative until statement-interval proofs are shared.
@@ -513,6 +561,10 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         if None in reads:
             blocked.add(key)
             seeds.setdefault(key, 'reads an unresolved name')
+    # Raw and unmodelled operations can reach any storage; an ambient write
+    # reaches only module state, and through it only a place some caller
+    # fills with a global (`aliased` below).
+    opaque = set(blocked)
     for key, changed in ambient_writes.items():
         if changed:
             blocked.add(key)
@@ -527,6 +579,13 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 blocked.add(caller)
                 origin[caller] = origin[callee]
                 pending.append(caller)
+    pending = deque(opaque)
+    while pending:
+        for caller in edges.get(pending.popleft(), ()):
+            if caller not in opaque:
+                opaque.add(caller)
+                pending.append(caller)
+    aliased = global_placed(analysis, bodies, locals_by_literal)
     # Call roots may pass through known read-only helpers, provided every
     # path ends in projections. An owning use rejects its parameter and all
     # forwarders; forwarding cycles with no owning endpoint remain loans.
@@ -586,8 +645,14 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
         # Multiple places may alias at the call, so keep those unknown until
         # their cross-parameter alias relationships are proved as well.
         single_place = sum(bool(p.place) for p in params) == 1
-        parameters = {} if id(literal) in blocked else {
-            p.binding_id: p for p in params if not p.place or single_place}
+        # A function blocked only by ambient writes keeps a place no caller
+        # fills with a global: those writes cannot reach its storage.
+        if id(literal) not in blocked:
+            parameters = {p.binding_id: p for p in params if not p.place or single_place}
+        elif id(literal) not in opaque and id(literal) not in aliased:
+            parameters = {p.binding_id: p for p in params if p.place and single_place}
+        else:
+            parameters = {}
         # An unwritten projection can lend its parameter's existing storage.
         # No retagging, lifecycle operation, capture, or escaping address is
         # admitted by this shared proof. More precise scoped views remain a
