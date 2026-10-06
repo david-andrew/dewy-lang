@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 119 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 22 (≈35.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 124 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 17 (≈34.2k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,46 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: five more modules; ambient writes reach only aliased places (2026-10-06)
+
+Row C2: 124 of 141 compiler modules are strict (`representation`,
+`modules`, `captures`, `t2`, `validation_analysis`). Hosted would-be
+violations in the rest: 465 → 439 before these five adopted.
+
+Proofs (both compilers):
+- **A function blocked only by ambient writes keeps its place parameter**
+  when no caller fills that place with a global. The shared storage proof
+  now tracks raw and unmodelled blocking (`opaque`) apart from ambient
+  writes, and computes `global_placed` like native borrowing: a place
+  argument rooted outside the caller's locals, or at an aliased function's
+  own place, marks the callee; so does use as a value. This removed the
+  hosted copies at `modules.dewy` (prelude analysis) and of the token arena
+  passed to `t2.jux_options`, and matches native borrowing's
+  `aliased_places`.
+- **A scalar element read inspects an input** (`args[i]`), like `.length`,
+  so an array parameter read, changed in place and then stored is still an
+  owning input.
+
+Tried and withdrawn: treating raw memory operations confined to the
+function's own `__alloca__` memory (with frame parameters and
+frame-returning functions such as `_c_path_into`) as non-blocking. It
+unblocked the clock and file-status reads, but the same functions stay
+blocked behind `read_bytes_at` and `print_bytes`: no change in blocked
+functions (273) or native copies.
+
+Tests whose ambient writer was meant to force a copy of a place now place a
+global (`test_nested_place_argument_loans`, the shared-report error case):
+with a local place that copy is no longer needed.
+
+Explicit copies: `validation_analysis` builds its `values.Environment` and
+`predicates.Data` from copies of the session's HIR, type table and registry
+(the bundle pattern), and gives each module survey its own source list; the
+prelude cache snapshot copies the engine's state (cache scaffolding);
+`representation.run` returns copies of its state's problem and notes; `t2`'s
+child lists are returned as copies (readers use the getter loan); two
+narrowed nodes in `representation` are stored or donated as copies (native
+does not yet move a narrowed record union payload).
 
 ## Strict copies: six more modules; the session bundles are explicit (2026-10-06)
 
