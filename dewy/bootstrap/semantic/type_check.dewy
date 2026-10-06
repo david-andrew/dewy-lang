@@ -272,9 +272,10 @@ conditions = (id:addr context:contexts.Context @session:contexts.Session name:st
             let previous = source_views.symbol(preceding.op context session)
             if previous is? facts.Operator {
                 if op =? 'not=?' or previous =? 'not=?' return contexts.problem(node.op 'comparison does not chain' "`{op}` cannot be part of a comparison chain" context session hint='combine the conditions with `and`')
-                let rising = false
-                let falling = false
-                let cursor:tokens.Token = node
+                # `node` itself is the first link: start from its operator.
+                let rising = op =? '<?' or op =? '<=?'
+                let falling = op =? '>?' or op =? '>=?'
+                let cursor:tokens.Token = contexts.node_at(node.left context session)
                 loop cursor is? parser.BinOp {
                     let link = source_views.symbol(cursor.op context session)
                     if link isnt? facts.Operator break
@@ -604,7 +605,7 @@ field = (id:addr context:contexts.Context @session:contexts.Session):>types.Obje
     declared = value_type(declared row.right inner @session)
     if declared is? Error return declared
     let node = types.node_at(session.types declared)
-    if node is? types.RefinedType return types.ObjectField[name node.base mutable default node.propositions]
+    if node is? types.RefinedType return types.ObjectField[name node.base mutable default node.propositions.copy()]
     return types.ObjectField[name declared mutable default]
 }
 
@@ -1298,12 +1299,26 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
     return minted
 }
 
-effect_subject = (id:addr parameters:array<types.PosOrKwArg> context:contexts.Context @session:contexts.Session):>effect_rows.Subject|Error => {
+# A named parameter, positional ones first: its index in that order, whether
+# it is a place, and its type.
+EffectParameter:type = const [index:addr place:bool value_type:addr]
+effect_parameter = (name:string parameters:array<types.PosOrKwArg> keyword_parameters:array<types.KwOnlyArg>):>EffectParameter? => {
+    loop index in 0.. and index <? parameters.length {
+        let parameter=parameters[index]
+        if parameter.name =? name return EffectParameter[index parameter.place parameter.value_type]
+    }
+    loop index in 0.. and index <? keyword_parameters.length {
+        let parameter=keyword_parameters[index]
+        if parameter.name =? name return EffectParameter[parameters.length+index parameter.place parameter.value_type]
+    }
+    return none
+}
+effect_subject = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters:array<types.KwOnlyArg> context:contexts.Context @session:contexts.Session):>effect_rows.Subject|Error => {
     let path=effect_syntax.route(id context session)
     if path isnt? none {
-        loop index in 0.. and index <? parameters.length {
-            let parameter=parameters[index]
-            if parameter.name not=? path.root continue
+        let parameter=effect_parameter(path.root parameters keyword_parameters)
+        if parameter isnt? none {
+            let index=parameter.index
             if not parameter.place return contexts.problem(id 'effect subject is not caller-owned storage' 'use a place parameter or a nominal resource identity' context session)
             let current=parameter.value_type
             loop field in path.fields {
@@ -1323,9 +1338,9 @@ effect_subject = (id:addr parameters:array<types.PosOrKwArg> context:contexts.Co
     return effect_rows.Subject['resource' resource.brand]
 }
 effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters:array<types.KwOnlyArg> context:contexts.Context @session:contexts.Session):>effect_rows.Contract?|Error => {
-    let terms=effect_syntax.split(id context @session).terms
+    let split=effect_syntax.split(id context @session)
+    let terms=split.terms
     if terms.length =? 0 return none
-    loop parameter in keyword_parameters {parameters.push(types.PosOrKwArg[parameter.name parameter.value_type parameter.required parameter.place])}
     let permitted:effect_rows.Row?=none
     let row_terms:array<effect_rows.Contract>=[]
     let excluded:array<effect_rows.Atom>=[]
@@ -1363,7 +1378,7 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
             continue
         }
         loop argument in arguments {
-            let target=effect_subject(argument parameters context @session)
+            let target=effect_subject(argument parameters keyword_parameters context @session)
             if target is? Error return target
             let atom=effect_rows.Atom[family target]
             if negative {excluded.push(atom)}

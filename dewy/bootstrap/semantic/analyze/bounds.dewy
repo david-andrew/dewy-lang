@@ -258,7 +258,7 @@ forget_value = (id:addr @state:facts.State @checker:Checker keep_length:addr?=no
         loop route in checker.data.registry.routes_by_root.get(root.binding_id []) {
             let indexed=false
             loop part in route.path {if part.startswith('[') {indexed=true break}}
-            if indexed {stores.forget(@state route.id @checker.data keep_length=keep_length)}
+            if indexed {stores.forget(@state route.id @checker.data prefix=[] keep_length=keep_length)}
         }
     }
     let ids:array<addr>=[path.root]
@@ -307,7 +307,7 @@ forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
         if node is? hir.Index {
             let array=terms.sequence_id(node.array checker.data.env @checker.data.registry)
             if array isnt? none {
-                loop route in checker.data.registry.routes_by_root.get(array []) {stores.forget(@state route.id @checker.data)}
+                loop route in checker.data.registry.routes_by_root.get(array []) {stores.forget(@state route.id @checker.data prefix=[])}
             }
         }
     }
@@ -316,7 +316,7 @@ forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
         let route=bindings.route_at(checker.data.registry endpoint)
         let root=node_at(access.root checker)
         if route isnt? none and root is? hir.ExpressedIdentifier and root.binding_id isnt? none {stores.forget(@state root.binding_id @checker.data prefix=route.path)}
-        stores.forget(@state endpoint @checker.data)
+        stores.forget(@state endpoint @checker.data prefix=[])
     }
 }
 
@@ -501,7 +501,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     let saved_calls=checker.data.member_calls.copy
     checker.data.snapshot=intervals.Snapshot[]
     let globals=checker.mutable_globals
-    loop global in globals {stores.forget(@enclosing global @checker.data)}
+    loop global in globals {stores.forget(@enclosing global @checker.data prefix=[])}
     # A deferred body reads current captures. Content changes need not erase
     # a proven invariant extent; a replacement/resize does erase it.
     stores.forget_many(@enclosing checker.mutable_captures @checker.data keep_lengths=checker.stable_capture_lengths)
@@ -701,7 +701,7 @@ evaluate_checked = (id:addr @state:facts.State @checker:Checker validate:bool):>
 declare_value = (node:hir.Declare value:addr @current:facts.State @checker:Checker):>void => {
     if node.binding_id is? none return
     # Save the observed value before removing last iteration's slot.
-    stores.forget(@current node.binding_id @checker.data)
+    stores.forget(@current node.binding_id @checker.data prefix=[])
     install(@current node.binding_id value node.annotation node.loc @checker)
     if node.binding_id not in? checker.assigned {values.record_elements(@checker.element_intervals node.binding_id value checker.data.env)}
 }
@@ -746,7 +746,7 @@ assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker
     let shifted=shifted_assignment(rebound subject shift current checker)
     if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
     else if node.op not=? '=' {interval=none}
-    stores.forget(@current subject @checker.data)
+    stores.forget(@current subject @checker.data prefix=[])
     facts.set_value(@current facts.Term[subject] interval)
     loop entry in shifted.values {facts.put(@current entry.fact entry.interval)}
     if node.op =? '=' {
@@ -932,7 +932,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             if place not in? checker.read_only_places {forget_place(argument.target @state @checker)}
         }
         loop global in checker.call_writes.get(id checker.mutable_globals) {
-            stores.forget(@state global @checker.data)
+            stores.forget(@state global @checker.data prefix=[])
         }
         let applied=predicates.apply_call(state id none @checker.data)
         if applied isnt? none {state=applied}
@@ -1049,7 +1049,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                     path.pop;
                     path.push('live')
                     let live=bindings.route_id(@checker.data.registry route.root path field.value_type keys.loc)
-                    stores.forget(@state live @checker.data)
+                    stores.forget(@state live @checker.data prefix=[])
                     if node is? hir.DictRemove and node.key is? none {facts.set_value(@state facts.Term[live] ranges.exact(0))}
                 }
             }
@@ -1224,7 +1224,7 @@ remove_targets = (@state:facts.State iterators:array<addr> @checker:Checker):>vo
         let node=node_at(id checker)
         $runtime_assert node is? hir.IteratorExpression
         let target=node_at(node.target checker)
-        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {stores.forget(@state target.binding_id @checker.data)}
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {stores.forget(@state target.binding_id @checker.data prefix=[])}
     }
 }
 finite_iterator_loop = (arm:hir.LoopArm iterator:hir.IteratorExpression iterators:array<addr> count:bigint state:facts.State @checker:Checker validate:bool):>Transfer => {

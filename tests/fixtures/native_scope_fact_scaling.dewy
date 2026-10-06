@@ -42,7 +42,7 @@ main=():>int64=>{
     data.snapshot.sequences[1]=child
     let slow=state let fast=state let slow_data=data let fast_data=data
     let before=_arena_allocated_bytes
-    loop owner in owners {stores.forget(@slow owner @slow_data)}
+    loop owner in owners {stores.forget(@slow owner @slow_data prefix=[])}
     let slow_bytes=_arena_allocated_bytes-before
     before=_arena_allocated_bytes
     stores.forget_many(@fast owners @fast_data)

@@ -74,6 +74,11 @@ State:type = [
     frozen_placement:bool=false
     # Field uses inside a call that also lends their root as a place.
     place_conflicts:set<addr>=set[]
+    # Locals the current function assigns whole (`x = …`).
+    rebound_locals:set<addr>=set[]
+    # Reads of a binding that appears more than once among one call's
+    # arguments (`shared_arguments`).
+    shared_argument_uses:set<addr>=set[]
     return_borrow_sources:dict<addr addr>=[]
     module_startup:bool=false
     moved_bindings:set<addr>=set[]
@@ -1163,6 +1168,45 @@ immutably_held = (id:addr state:State):>bool => {
 # local moves at its last use unless that use is inside a call that also
 # lends the local: the callee would see the emptied field.
 field_movable = (binding:addr use:addr state:State):>bool => binding not in? state.addressed or use not in? state.place_conflicts
+# Reads of a binding that a call borrows as a direct argument (the binding,
+# a route into it, or a place) and also reads elsewhere among its arguments
+# (`join(remaining refine(remaining n))`). That loan outlives the other
+# arguments' evaluation, so none of those reads is where it may move.
+shared_arguments = (body:addr nodes:array<hir.AST>):>set<addr> => {
+    let result:set<addr>=set[]
+    let pending:array<addr>=[body]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.FunctionCall {
+            let seen:dict<addr array<addr>>=[]
+            let inner=borrowing.arguments(node)
+            let direct:set<addr>=set[]
+            loop argument in inner {
+                let value=hir.node_at(nodes argument)
+                let root=if value is? hir.Place captures.root_binding(value.target nodes) else captures.root_binding(argument nodes)
+                if root isnt? none {direct.push(root)}
+            }
+            loop inner.length >? 0 and direct.length >? 0 {
+                let part=inner.pop
+                let child=hir.node_at(nodes part)
+                if child is? hir.FunctionLiteral continue
+                if child is? hir.ExpressedIdentifier and child.binding_id isnt? none and child.binding_id in? direct {
+                    if child.binding_id not in? seen {seen[child.binding_id]=[]}
+                    let uses=@seen[child.binding_id]
+                    uses.push(part)
+                }
+                hir.push_children(child @inner)
+            }
+            loop [binding uses] in seen {
+                if uses.length >? 1 {loop use in uses {result.push(use)}}
+            }
+        }
+        hir.push_children(node @pending)
+    }
+    return result
+}
 place_conflicts = (body:addr nodes:array<hir.AST>):>set<addr> => {
     let result:set<addr>=set[]
     let pending:array<addr>=[body]
@@ -1462,7 +1506,15 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # place argument outlives: its handle moves and the box is emptied.
         # (A closure capture also boxes, but its nested uses never move.)
         let boxed_place=binding isnt? none and binding in? state.boxed and binding in? state.addressed and not narrowed and not inline_place(stored @state)
-        if movable and binding isnt? none and binding in? state.cleanup_owned and ((binding not in? state.boxed and binding not in? state.addressed) or boxed_place) and releasable(node.value_type @state) {
+        # A record local lent as a place passes its own block, and no place
+        # argument outlives its call: after the last loan its handle moves,
+        # unless this read sits in a call that also lends it (`field_movable`).
+        # An addressed local is assigned in place through its block, so one
+        # that is ever assigned whole keeps its block. Addressed bindings
+        # skip the borrow planner's argument-conflict proof, so a read that
+        # shares a call with another read of the local stays a copy.
+        let lent_record=binding isnt? none and binding in? state.addressed and binding not in? state.boxed and binding not in? state.rebound_locals and not narrowed and inline_record(stored @state) and id not in? state.place_conflicts and id not in? state.shared_argument_uses
+        if movable and binding isnt? none and binding in? state.cleanup_owned and ((binding not in? state.boxed and binding not in? state.addressed) or boxed_place or lent_record) and releasable(node.value_type @state) {
             let prefix:array<addr>=[]
             let taken=snapshot(value @prefix @state)
             let word_type=types.primitive('int64' @state.type_nodes)
@@ -5860,9 +5912,11 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             }
         }
     }
+    state.rebound_locals=rebound
     let moves_started=timing.start(state.timings)
     state.moved_uses=if enabled moves.compute(id state.input.nodes state.type_nodes borrow_dependents donations=state.consumed_arguments parameters=state.owned_parameters) else set[]
     state.place_conflicts=if enabled place_conflicts(node.body state.input.nodes) else set[]
+    state.shared_argument_uses=if enabled shared_arguments(node.body state.input.nodes) else set[]
     timing.accumulate(@state.move_time moves_started)
     note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]

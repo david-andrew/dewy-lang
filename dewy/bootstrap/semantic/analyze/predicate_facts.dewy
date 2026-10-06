@@ -110,10 +110,11 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     return established
 }
 
+# The state is borrowed: a path that leaves it unchanged returns a copy.
 atomic = (state:facts.State condition:addr truth:bool context:paths.Context @data:Data):>facts.State? => {
     let id=expressions.strip_casts(condition context.nodes)
     let node=hir.node_at(context.nodes id)
-    if node is? hir.Bool return if node.value =? truth state else none
+    if node is? hir.Bool return if node.value =? truth state.copy else none
     if node is? hir.TypeTest {
         let current=state.copy
         let tested_id=expressions.strip_casts(node.value data.env.nodes)
@@ -153,16 +154,16 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
         let subject=operand(id state data)
         return comparisons.refine(state '=?' subject comparisons.Operand[interval=ranges.exact(if truth 1 else 0)] true data.relations)
     }
-    if node isnt? hir.FunctionCall return state
+    if node isnt? hir.FunctionCall return state.copy
     let contracts=expressions.call_result_refinements(id context.nodes data.env.types)
-    if contracts.length >? 0 return apply_call(state id truth @data)
+    if contracts.length >? 0 return apply_call(state.copy id truth @data)
     let function=hir.node_at(context.nodes node.func)
-    if function isnt? hir.ExpressedIdentifier return state
-    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(data.registry function.binding_id) return state
+    if function isnt? hir.ExpressedIdentifier return state.copy
+    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(data.registry function.binding_id) return state.copy
     if function.name =? '__not__' and node.pos_args.length =? 1 return refine_with_context(state node.pos_args[0] not truth context @data)
     let name=if node.integer_operation is? none function.name else node.integer_operation
     let op=operators.get(name)
-    if op is? none or node.pos_args.length not=? 2 return state
+    if op is? none or node.pos_args.length not=? 2 return state.copy
     let left=operand(node.pos_args[0] state data)
     let right=operand(node.pos_args[1] state data)
     let decided=ranges.decide(op left.interval right.interval)

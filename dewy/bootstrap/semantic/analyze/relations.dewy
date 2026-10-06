@@ -75,10 +75,12 @@ order_interval = (term:facts.Term state:facts.State context:Context):>ranges.Int
         if term.projection =? 'value' {best_values[term.binding_id]=ranges.Interval[0 none]}
         else {best_lengths[term.binding_id]=ranges.Interval[0 none]}
         let frontier:array<Step>=[Step[term 0]]
+        # Both adjacency tables move here; each step reads one without a copy.
+        let tables:array<Edges>=[values lengths]
         loop round in 0.. and round <? count {
             let following:array<Step>=[]
             loop reached in frontier {
-                let edges=if reached.term.projection =? 'value' values.get(reached.term.binding_id []) else lengths.get(reached.term.binding_id [])
+                let edges=tables[if reached.term.projection =? 'value' 0 else 1].get(reached.term.binding_id [])
                 loop edge in edges {
                     let target=edge.term
                     let candidate=reached.gap+edge.gap
@@ -159,12 +161,14 @@ search = (smaller:facts.Term larger:facts.Term state:facts.State context:Context
     if smaller.projection =? 'value' {best_values[smaller.binding_id]=ranges.Interval[0 none]}
     else {best_lengths[smaller.binding_id]=ranges.Interval[0 none]}
     let frontier:array<Step>=[Step[smaller 0]]
+    # Both adjacency tables move here; each step reads one without a copy.
+    let tables:array<Edges>=[values lengths]
     # At most one edge per round; every simple path fits this bound. A
     # contradictory positive cycle must not make proof search diverge.
     loop round in 0.. and round <? count {
         let following:array<Step>=[]
         loop reached in frontier {
-            let outgoing=if reached.term.projection =? 'value' values.get(reached.term.binding_id []) else lengths.get(reached.term.binding_id [])
+            let outgoing=tables[if reached.term.projection =? 'value' 0 else 1].get(reached.term.binding_id [])
             loop edge in outgoing {
                 let target=edge.term
                 let candidate=reached.gap+edge.gap

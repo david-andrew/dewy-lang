@@ -4198,9 +4198,14 @@ class _Lowerer(
                 for field_ in node.fields:
                     expected = node.type.field(field_.name) if isinstance(node.type, ty.ObjectType) else None
                     field_type = expected.type if expected is not None else field_.value.type
+                    # A union field with a record member adopts a last-use
+                    # record, as a field assignment does.
+                    record_field = isinstance(field_type, ty.ObjectType) or any(
+                        isinstance(ty.structural_base(member), ty.ObjectType)
+                        for member in self._field_union_members(field_type) or ())
                     site = transfer(field_.value,
                                     handle_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None),
-                                    aggregate_element=isinstance(field_type, ty.ObjectType))
+                                    aggregate_element=record_field)
                     walk(field_.value, depth, nested, site)
                 return
             if (isinstance(node, hir.Assign) and node.op == '='
@@ -4362,8 +4367,12 @@ class _Lowerer(
         # descriptors whose sibling fields remain live. Physical lowering
         # still checks the exact stored layout and empties only that slot.
         # Existing views/exposed places stay on the conservative root proof.
+        # A view of the owner blocks a field move only while it is still
+        # used after the take.
+        site_sequences = {transfer: sequence for _binding, transfer, sequence, _depth in transfers}
         pending_fields = {site for site, owner in field_candidates.items() if site not in moves
-                  and owner not in borrow_dependents
+                  and (owner not in borrow_dependents
+                       or site in site_sequences and not borrow_live_after(owner, site_sequences[site]))
                   and owner not in self.borrow_plan.exposed_bindings
                   and owner not in self.borrow_plan.captured_bindings}
         if pending_fields:
@@ -4384,9 +4393,40 @@ class _Lowerer(
         # A place lent to a call ends when it returns. A use inside a call
         # that also lends its root stays in place: the callee sees the root.
         moves -= self._place_conflicts(literal.body)
+        # A direct argument's loan lasts for the whole call: a binding it
+        # borrows moves at no other read among that call's arguments.
+        moves -= self._shared_argument_uses(literal.body)
         self.moved_payload_uses = moves & payload_candidates
         self.moved_place_fields = {site for site in moves if field_candidates.get(site) in places}
         return moves - payload_candidates
+
+    @staticmethod
+    def _shared_argument_uses(body: hir.AST) -> set[int]:
+        """Reads of a binding that a call borrows as a direct argument (the
+        binding, a route into it, or a place) and also reads elsewhere among
+        its arguments. That loan outlives the other arguments' evaluation."""
+        shared: set[int] = set()
+        for call in hir.walk(body):
+            if not isinstance(call, hir.FunctionCall):
+                continue
+            arguments = [*call.pos_args, *call.kw_args.values()]
+            direct = {borrowing.root_binding(argument.target if isinstance(argument, hir.Place) else argument)
+                      for argument in arguments} - {None}
+            if not direct:
+                continue
+            seen: dict[int, list[int]] = {}
+            pending = list(arguments)
+            while pending:
+                node = pending.pop()
+                if isinstance(node, hir.FunctionLiteral):
+                    continue
+                if isinstance(node, hir.ExpressedIdentifier) and node.binding_id in direct:
+                    seen.setdefault(node.binding_id, []).append(id(node))
+                pending.extend(hir.children(node))
+            for uses in seen.values():
+                if len(uses) > 1:
+                    shared.update(uses)
+        return shared
 
     @staticmethod
     def _place_conflicts(body: hir.AST) -> set[int]:

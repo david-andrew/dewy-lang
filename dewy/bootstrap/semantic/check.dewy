@@ -5607,7 +5607,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
             message = literal.content
         }
         if node.name =? 'unsafe_assume' {
-            if not checked_proofs.fact_term(condition checked_proofs.Input[session.hir session.registry session.sources]) return problem(node.condition 'an unsafe assumption needs a pure fact condition' 'the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic' env session)
+            if not checked_proofs.fact_term(condition session) return problem(node.condition 'an unsafe assumption needs a pure fact condition' 'the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic' env session)
             let held=refined(condition true env @session)
             join_reads([held] env @session)
             let assertion=put(hir.Assert[node.loc empty condition text message dimmed=dimmed unsafe=true] @session)

@@ -37,13 +37,13 @@ source loses source relationships without erasing the copy's own promises.
 # Keep this separate from the selector's own relational induction facts.
 forget_selected = (@state:facts.State subject:addr @data:predicates.Data):>void => {
     loop dependent in data.registry.index_routes.get(subject set[]) {
-        forget(@state dependent @data)
+        forget(@state dependent @data prefix=[])
         let route=bindings.route_at(data.registry dependent)
         if route isnt? none {forget(@state route.root @data prefix=route.path)}
     }
 }
 
-forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string>=[] keep_length:addr?=none):>void => {
+forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string> keep_length:addr?=none):>void => {
     if prefix.length =? 0 {
         forget_selected(@state subject @data)
         facts.forget(@state facts.Term[subject])
@@ -55,7 +55,7 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
         if bindings.path_starts_with(route.path prefix) {
             # Element evidence can itself be rooted at a projected sequence.
             # Invalidating its parent must remove that derived evidence too.
-            forget(@state route.id @data keep_length=keep_length)
+            forget(@state route.id @data prefix=[] keep_length=keep_length)
         }
     }
 }

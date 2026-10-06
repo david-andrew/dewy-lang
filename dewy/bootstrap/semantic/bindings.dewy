@@ -330,8 +330,9 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry mutable_select
     let node = hir.node_at(nodes id)
     let result=route_id(@registry root.binding_id fields node.value_type node.loc)
     loop index in indices {
-        let routes=registry.index_routes.get(index set[])
-        if result not in? routes {routes.push(result) registry.index_routes[index]=routes}
+        if index not in? registry.index_routes {registry.index_routes[index]=set[]}
+        let routes=@registry.index_routes[index]
+        routes.push(result)
     }
     return result
 }

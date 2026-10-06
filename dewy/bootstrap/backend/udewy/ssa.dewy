@@ -528,12 +528,13 @@ inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @
             place(Item[I_BREAK] @b)
         }
         $runtime_assert b.loops.length >? 0
-        b.loops.pop;
+        # The frame moved onto the loop stack; read it back as it leaves.
+        let done=b.loops.pop
         b.region=outer
         b.dead=false
         # The block's items move out; they move back when the block stays.
         $runtime_assert body <? b.body.regions.length
-        let built=b.body.regions[body]
+        let built=b.body.regions[body].copy()
         let cleared:array<Item>=[]
         b.body.regions[body]=cleared
         if built.length >? 0 and leaves(built b.body true) {
@@ -550,8 +551,8 @@ inline = (target:Inline arguments:array<addr> nodes:array<hir.AST> ctx:Context @
             b.body.regions[body]=built
             place(Item[I_LOOP body d=list] @b)
             if target.valued {
-                loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {
-                    if frame.names[i] =? RESULT {result=frame.exits[i]}
+                loop i in 0.. and i <? done.names.length and i <? done.exits.length {
+                    if done.names[i] =? RESULT {result=done.exits[i]}
                 }
             }
         }
@@ -777,17 +778,20 @@ flow = (node:hir.Flow position:addr nodes:array<hir.AST> ctx:Context @b:Builder)
         b.region=then_region
         statement(arm.body nodes ctx @b)
         forget(numbers @b)
+        # Each arm's environment moves out as the next one is installed;
+        # `join` installs the merged one.
         let then_env=b.env
+        b.env=saved.copy
         let then_dead=b.dead
         let then_loads=b.loads_from
         b.loads_from=loads
         let else_region=new_region(@b)
         b.region=else_region
         b.dead=false
-        b.env=saved.copy
         flow(node position+1 nodes ctx @b)
         forget(numbers @b)
         let else_env=b.env
+        b.env=[]
         let else_dead=b.dead
         if then_dead {} else if else_dead or then_loads >? b.loads_from {b.loads_from=then_loads}
         b.region=outer
@@ -845,12 +849,13 @@ flow = (node:hir.Flow position:addr nodes:array<hir.AST> ctx:Context @b:Builder)
         place_in(body Item[I_IF tested inner leave] @b)
     }
     $runtime_assert b.loops.length >? 0
-    b.loops.pop;
+    # The frame moved onto the loop stack; read it back as it leaves.
+    let done=b.loops.pop
     forget(numbers @b)
     b.region=outer
     b.dead=false
     b.env=entry
-    loop i in 0.. and i <? frame.names.length and i <? frame.exits.length {b.env[frame.names[i]]=frame.exits[i]}
+    loop i in 0.. and i <? done.names.length and i <? done.exits.length {b.env[done.names[i]]=done.exits[i]}
     place(Item[I_LOOP body d=list] @b)
 }
 backedge = (@b:Builder):>void => {

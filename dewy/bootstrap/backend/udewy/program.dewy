@@ -60,7 +60,7 @@ retain_reachable=(program:Program nodes:array<hir.AST>):>Program=>{
 # No command-line conversion, allocation, or module initialization is hidden
 # in an expression emitter.
 write_entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope input:emit.Input @state:emit.State @out:emit.Writer):>Error? => {
-    let inner=emit.Scope[scope.direct_functions set[] program.source]
+    let inner=emit.Scope[scope.direct_functions.copy() set[] program.source]
     let result:string='void'
     if program.user_main_symbol isnt? none {
         let symbol=program.user_main_symbol
@@ -128,7 +128,7 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
 let stream = (program:Program input:emit.Input debug:bool=false target:string='x86_64'):>array<uint8>|Error => {
     let state=emit.State[]
     let out=emit.Writer[stream=true]
-    let parser=bytecode.Parser[debug=debug intrinsics=emit.intrinsics]
+    let parser=bytecode.Parser[debug=debug intrinsics=emit.intrinsics.copy()]
     let problem=write_program(program input debug @state @out @parser)
     if problem isnt? none return problem
     return bytecode.finish(@parser target)
@@ -141,21 +141,22 @@ let flush = (@state:emit.State @out:emit.Writer @parser:bytecode.Parser):>void =
     state.pending_includes.clear
     bytecode.parse_top(out.tokens @parser)
     bytecode.clear(@out.tokens)
-    if parser.problem isnt? none and state.problem is? none {state.problem=parser.problem}
+    if parser.problem isnt? none and state.problem is? none {state.problem=parser.problem.copy()}
 }
 let write_program = (program:Program input:emit.Input debug_locations:bool @state:emit.State @out:emit.Writer @parser:bytecode.Parser):>Error? => {
     if (program.argv_prologue is? none) not=? (program.argv_value is? none) return Error[title='command-line lowering must supply both a prologue and its argument value' srcfile=program.source]
     let functions:dict<string addr>=[]
+    let direct:set<string>=set[]
     loop function in program.functions {
         if function.symbol in? functions return Error[title="duplicate lowered function `{function.symbol}`" srcfile=program.source]
         functions[function.symbol]=function.literal
+        direct.push(function.symbol)
     }
-    let direct=functions.keys
     if program.needs_startup {
         if 'main' in? functions or program.startup_symbol in? functions return Error[title='startup symbols must be reserved during legalization' srcfile=program.source]
         direct.push('main') direct.push(program.startup_symbol)
     }
-    let scope=emit.Scope[direct set[] program.source debug_locations=debug_locations]
+    let scope=emit.Scope[direct.copy() set[] program.source debug_locations=debug_locations]
     loop id in program.globals {
         let declaration=hir.node_at(input.nodes id)
         if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
@@ -201,5 +202,5 @@ let write_program = (program:Program input:emit.Input debug_locations:bool @stat
         emit.newline(@out)
         flush(@state @out @parser)
     }
-    return state.problem
+    return state.problem.copy()
 }

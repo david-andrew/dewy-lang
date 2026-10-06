@@ -402,7 +402,7 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
     }
     # The logical ownership pass already joins field paths across branches
     # and loop backedges. Reuse it when only siblings remain live; a root
-    # with a dependent view keeps the conservative whole-owner proof.
+    # with a dependent view still used later keeps the whole-owner proof.
     let field_candidates:set<addr>=set[]
     let field_owners:set<addr>=set[]
     let eligible:dict<addr bool>=[]
@@ -416,9 +416,12 @@ compute = (literal:addr nodes:array<hir.AST> table:types.Table borrows:dict<addr
         if parameter.place and parameter.binding_id isnt? none {places.push(parameter.binding_id)}
     }
     loop [binding uses] in analysis.uses {
-        if (binding not in? analysis.declared and binding not in? places) or binding in? borrows continue
+        if binding not in? analysis.declared and binding not in? places continue
         loop use in uses {
             if not use.transfer or use.id in? moves continue
+            # A view of the owner blocks a field move only while it is still
+            # used after the take.
+            if binding in? borrows and borrow_live_after(binding use.sequence use.path borrows analysis) continue
             let field=hir.node_at(nodes use.id)
             # Only a place parameter's record fields, as the hosted lowering.
             if field is? hir.Index and binding in? places continue

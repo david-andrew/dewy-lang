@@ -5,7 +5,8 @@ function every field of a place parameter is live. A store to a fixed field
 path renews it: before the store only the sibling fields stay live. A field
 taken out and stored back before every exit is therefore a move. An exit,
 or a read of the whole parameter, between the take and the store keeps the
-copy, and so does a take that is never stored back."""
+copy, and so does a take that is never stored back. A view of the parameter
+blocks the move only while it is still used after the take."""
 import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import ReportException, SrcFile
@@ -115,8 +116,53 @@ main=():>int64=>{
     return if kept(@h) =? 4 and h.current.values.length =? 3 42 else 1
 }
 '''
-CASES = [MOVED, EARLY_EXIT, WHOLE_READ, NEVER_STORED]
-ERRORS = ['$explicit_copies\n' + source for source in (EARLY_EXIT, WHOLE_READ, NEVER_STORED)]
+# A view of the parameter used only before the take does not block it.
+VIEWED_BEFORE = '''$explicit_copies
+Cond:type=const [kind:int64 a:int64]
+B:type=[env:dict<string int64> conds:array<Cond> dead:bool=false]
+cond_at=(b:B id:int64):>Cond=>{
+    $runtime_assert id >=? 0 and id <? b.conds.length
+    return b.conds[id]
+}
+touch=(@b:B):>void=>{b.env['x']=1}
+branch=(@b:B):>int64=>{
+    let decided=cond_at(b 0)
+    if decided.kind =? 7 return 0
+    let saved=b.env.copy
+    touch(@b)
+    let then_env=b.env
+    b.env=saved
+    return then_env.length+40
+}
+main=():>int64=>{
+    let b=B[[] [Cond[1 40]]]
+    return branch(@b)+b.env.length+1
+}
+'''
+# A view still used after the take keeps the copy.
+VIEWED_AFTER = '''Cond:type=const [kind:int64 a:int64]
+B:type=[env:dict<string int64> conds:array<Cond> dead:bool=false]
+cond_at=(b:B id:int64):>Cond=>{
+    $runtime_assert id >=? 0 and id <? b.conds.length
+    return b.conds[id]
+}
+touch=(@b:B):>void=>{b.env['x']=1}
+branch=(@b:B):>int64=>{
+    let decided=cond_at(b 0)
+    if decided.kind =? 7 return 0
+    let saved=b.env.copy
+    touch(@b)
+    let then_env=b.env
+    b.env=saved
+    return then_env.length+decided.a+cond_at(b 0).a-40
+}
+main=():>int64=>{
+    let b=B[[] [Cond[1 40]]]
+    return branch(@b)+b.env.length+1
+}
+'''
+CASES = [MOVED, EARLY_EXIT, WHOLE_READ, NEVER_STORED, VIEWED_BEFORE, VIEWED_AFTER]
+ERRORS = ['$explicit_copies\n' + source for source in (EARLY_EXIT, WHOLE_READ, NEVER_STORED, VIEWED_AFTER)]
 
 
 @pytest.mark.parametrize('source', CASES)

@@ -142,7 +142,7 @@ checkpoint = (session:Session):>Checkpoint => {
 # transactions and may rewrite their arenas directly.
 replace_hir = (id:addr value:hir.AST @session:Session):>void => {
     $runtime_assert id <? session.hir.length
-    session.hir_edits.push(HirEdit[id session.hir[id]])
+    session.hir_edits.push(HirEdit[id session.hir[id].copy()])
     session.hir[id]=value
 }
 restore = (checkpoint:Checkpoint @session:Session):>void => {

@@ -76,11 +76,11 @@ main=():>int64=>{{
     $runtime_assert not facts.contains(state facts.value(facts.Term[count]))
     $runtime_assert facts.contains(state facts.value(facts.Term[field_text 'length']))
     # Replacing the source preserves the independent copy's index proof.
-    stores.forget(@state 2 @data)
+    stores.forget(@state 2 @data prefix=[])
     $runtime_assert not facts.contains(state facts.index(1 2)) and facts.contains(state facts.index(1 copy))
     bound=facts.lookup(state facts.value(facts.Term[copy 'length']))
     $runtime_assert bound isnt? none and bound.lower =? 5 and bound.upper =? 9
-    stores.forget(@state object @data)
+    stores.forget(@state object @data prefix=[])
     $runtime_assert not facts.contains(state facts.value(facts.Term[field_text 'length']))
     return 0
 }}
