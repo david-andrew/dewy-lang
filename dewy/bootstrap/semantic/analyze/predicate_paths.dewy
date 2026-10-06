@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../hir.dewy" as hir
 import p"fact_state.dewy" as facts
 import p"predicate_effects.dewy" as effects
@@ -18,18 +19,18 @@ merged_writes = (existing:set<addr> expression:addr context:Context):>set<addr> 
     return result
 }
 join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State? => {
-    if left is? none return right
-    if right is? none return left
-    return facts.join([left right] context)
+    if left is? none return right.copy()
+    if right is? none return left.copy()
+    return facts.join([left.copy() right.copy()] context)
 }
 
 # On the path that reaches the right operand, the left one did not decide
 # the chain. A write in the right operand makes the left predicate historical
 # even though it ran first. Forget its evidence before using either proof.
-let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
-    let first=refine(state left not truth merged_writes(invalidated.copy right context) context @data @leaf)
+let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> nodes:array<hir.AST> relation:facts.Context context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
+    let first=refine(state left not truth merged_writes(invalidated.copy right context) nodes relation context @data @leaf)
     if first is? none return none
-    return refine(first right truth invalidated context @data @leaf)
+    return refine(first right truth invalidated nodes relation context @data @leaf)
 }
 conjuncts = (left:addr right:addr nodes:array<hir.AST>):>array<addr> => {
     let pending:array<addr>=[right left]
@@ -42,15 +43,15 @@ conjuncts = (left:addr right:addr nodes:array<hir.AST>):>array<addr> => {
     }
     return result
 }
-let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
-    let parts=conjuncts(left right context.nodes)
+let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<addr> nodes:array<hir.AST> relation:facts.Context context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
+    let parts=conjuncts(left right nodes)
     let later:array<set<addr>>=[]
     let writes=invalidated
     let remaining=parts.length
     loop remaining >? 0 {
         remaining-=1
         $runtime_assert remaining <? parts.length
-        later.push(writes)
+        later.push(writes.copy())
         writes=merged_writes(writes parts[remaining] context)
     }
     let current:facts.State?=state
@@ -63,42 +64,46 @@ let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<
             let reverse=parts.length-index-1
             $runtime_assert reverse <? later.length
             if current is? none return none
-            current=refine(current parts[index] true later[reverse] context @data @leaf)
+            current=refine(current parts[index] true later[reverse] nodes relation context @data @leaf)
             index+=1
         }
     }
     return current
 }
 
-let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
-    let node=hir.node_at(context.nodes condition)
+# The `leaf` callback is not resolved by the storage proofs, so `state` and
+# `context` count as exposed: each step passes or returns its own copy of the
+# state. The node arena and fact context travel separately (`nodes`,
+# `relation`, never given to `leaf`) so that they stay borrowed views.
+let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> nodes:array<hir.AST> relation:facts.Context context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
+    let node=hir.node_at(nodes condition)
     if node is? hir.Block and not node.scoped and node.items.length =? 1 {
-        return refine(state node.items[0] truth invalidated context @data @leaf)
+        return refine(state.copy() node.items[0] truth invalidated nodes relation context @data @leaf)
     }
     if node is? hir.ShortCircuit {
         if node.op =? 'and' or node.op =? 'nand' {
             let effective=if node.op =? 'and' truth else not truth
-            if effective return conjunction(state node.left node.right invalidated context @data @leaf)
-            return join(refine(state node.left false invalidated context @data @leaf) after(state node.left node.right false invalidated context @data @leaf) context.facts)
+            if effective return conjunction(state.copy() node.left node.right invalidated.copy() nodes relation context @data @leaf)
+            return join(refine(state.copy() node.left false invalidated nodes relation context @data @leaf) after(state.copy() node.left node.right false invalidated nodes relation context @data @leaf) relation)
         }
         if node.op =? 'or' or node.op =? 'nor' {
             let effective=if node.op =? 'or' truth else not truth
             if not effective {
-                let first=refine(state node.left false merged_writes(invalidated.copy node.right context) context @data @leaf)
+                let first=refine(state.copy() node.left false merged_writes(invalidated.copy node.right context) nodes relation context @data @leaf)
                 if first is? none return none
-                return refine(first node.right false invalidated context @data @leaf)
+                return refine(first node.right false invalidated nodes relation context @data @leaf)
             }
-            return join(refine(state node.left true invalidated context @data @leaf) after(state node.left node.right true invalidated context @data @leaf) context.facts)
+            return join(refine(state.copy() node.left true invalidated nodes relation context @data @leaf) after(state.copy() node.left node.right true invalidated nodes relation context @data @leaf) relation)
         }
         # XOR/XNOR retain the hosted conservative treatment here. Their
         # evaluation is defined; deriving stronger proof paths is later work.
-        return state
+        return state.copy()
     }
     if invalidated.length >? 0 {
-        loop binding in effects.read_bindings(condition context.nodes) {
-            if binding in? invalidated return state
+        loop binding in effects.read_bindings(condition nodes) {
+            if binding in? invalidated return state.copy()
         }
     }
-    if node is? hir.Bool return if node.value =? truth state else none
-    return leaf(state condition truth context @data)
+    if node is? hir.Bool return if node.value =? truth state.copy() else none
+    return leaf(state.copy() condition truth context @data)
 }

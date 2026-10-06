@@ -179,7 +179,7 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
 # rebuilding it and boxing a copy into an optional at each predicate.
 refine_with_context = (state:facts.State condition:addr truth:bool context:paths.Context @data:Data):>facts.State? => {
     let invalidated:set<addr>=set[]
-    return paths.refine(state condition truth invalidated context @data @atomic)
+    return paths.refine(state condition truth invalidated context.nodes context.facts context @data @atomic)
 }
 refine = (state:facts.State condition:addr truth:bool @data:Data):>facts.State? => {
     let context=paths.Context[data.env.nodes data.relations.facts]

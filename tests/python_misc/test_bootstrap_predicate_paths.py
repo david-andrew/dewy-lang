@@ -49,19 +49,19 @@ main=():>int64=>{{
     let state:facts.State=facts.State[]
     let visited=false
     let invalidated:set<addr>=set[]
-    let result=paths.refine(state chain true invalidated context @visited @leaf)
+    let result=paths.refine(state chain true invalidated context.nodes context.facts context @visited @leaf)
     $runtime_assert visited
     $runtime_assert result isnt? none
     $runtime_assert not facts.contains(result facts.value(facts.Term[1]))
     let second=facts.lookup(result facts.value(facts.Term[2]))
     $runtime_assert second isnt? none and second.lower =? 1 and second.upper =? 1
-    $runtime_assert paths.refine(state impossible true invalidated context @visited @leaf) is? none
+    $runtime_assert paths.refine(state impossible true invalidated context.nodes context.facts context @visited @leaf) is? none
     let operations:array<'and'|'or'|'nand'|'nor'>=['and' 'or' 'nand' 'nor']
     loop op in operations {{
         let id=hir.append_node(@nodes hir.ShortCircuit[span 0 op a b])
         let updated=paths.Context[nodes facts.Context[cap=100]]
         loop truth in [false true] {{
-            let refined=paths.refine(state id truth invalidated updated @visited @leaf)
+            let refined=paths.refine(state id truth invalidated updated.nodes updated.facts updated @visited @leaf)
             $runtime_assert refined isnt? none
             let left=facts.lookup(refined facts.value(facts.Term[1]))
             let right=facts.lookup(refined facts.value(facts.Term[2]))

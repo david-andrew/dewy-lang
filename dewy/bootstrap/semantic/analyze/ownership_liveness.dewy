@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../bindings.dewy" as bindings
 import p"../hir.dewy" as hir
 import p"../lifecycle.dewy" as lifecycle
@@ -43,12 +44,12 @@ SelectorLocals:type=[declarations:dict<addr addr>=[] scopes:dict<addr set<addr>>
 # a different value on each iteration and retains a wildcard identity.
 selector_locals=(body:addr inputs:set<addr> nodes:array<hir.AST> table:types.Table):>SelectorLocals=>{
     let result=SelectorLocals[]
-    visit_selector_locals(body inputs false nodes table @result)
+    visit_selector_locals(body inputs.copy() false nodes table @result)
     return result
 }
 visit_selector_locals=(id:addr visible:set<addr> repeated:bool nodes:array<hir.AST> table:types.Table @result:SelectorLocals):>void=>{
     if id in? result.scopes {result.scopes[id]=result.scopes[id] & visible}
-    else {result.scopes[id]=visible}
+    else {result.scopes[id]=visible.copy()}
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral return
     if node is? hir.Block {
@@ -65,7 +66,7 @@ visit_selector_locals=(id:addr visible:set<addr> repeated:bool nodes:array<hir.A
         }
         return
     }
-    loop child in hir.children(node) {visit_selector_locals(child visible (repeated or node is? hir.LoopArm) nodes table @result)}
+    loop child in hir.children(node) {visit_selector_locals(child visible.copy() (repeated or node is? hir.LoopArm) nodes table @result)}
 }
 entry_key=(entry:Entry):>string=>{
     let key="{entry.binding}{if entry.store '!' else if entry.measure '?' else ':'}"
@@ -212,13 +213,13 @@ LoopExit:type=const [after:Live repeated:Live]
 consume=(id:addr route:Entry saved_path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> table:types.Table):>void=>{
     let clauses:Requirements?=none
     if route.binding in? enabled and id in? analysis.candidates {
-        let available=if analysis.selector_scopes.length=?0 analysis.selectors else analysis.selector_scopes.get(id set[])
+        let available=if analysis.selector_scopes.length=?0 analysis.selectors.copy() else analysis.selector_scopes.get(id set[]).copy()
         clauses=needed(route live analysis.aliases lifecycle.copy_blocker(hir.node_at(nodes id).value_type table) isnt? none available)
     }
     if clauses isnt? none {
         analysis.consumes[id]=route.binding
         analysis.obligations[id]=clauses
-        if saved_path.length >? 0 {analysis.paths[id]=saved_path}
+        if saved_path.length >? 0 {analysis.paths[id]=saved_path.copy()}
         else {analysis.paths.pop(id default=[]);}
     } else {
         analysis.consumes.pop(id default=0);
@@ -303,12 +304,12 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             $runtime_assert region isnt? none
             consume(id route region.path live enabled @analysis nodes table)
             add_entry(@live route)
-            return visit_selectors(id live enabled @analysis nodes exits table)
+            return visit_selectors(id live.copy() enabled @analysis nodes exits table)
         }
     }
     if node is? hir.ArrayLength {
         let route=field_route(node.array nodes wildcards=true selectors=analysis.selectors)
-        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true selectors=route.selectors]) return visit_selectors(node.array live enabled @analysis nodes exits table)}
+        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true selectors=route.selectors]) return visit_selectors(node.array live.copy() enabled @analysis nodes exits table)}
     }
     if node is? hir.FunctionLiteral {
         loop binding in read_roots(id analysis.aliases nodes) {add_entry(@live Entry[binding])}
@@ -318,11 +319,11 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         let selected=exits.length-node.loop_levels-1
         $runtime_assert selected >=? 0 and selected <? exits.length
         let continuation=exits[selected]
-        return if node is? hir.Break continuation.after else continuation.repeated
+        return if node is? hir.Break continuation.after.copy() else continuation.repeated.copy()
     }
-    if node is? hir.Return {return if node.item is? none analysis.exit.copy else visit(node.item analysis.exit.copy analysis.owners @analysis nodes table exits)}
+    if node is? hir.Return {return if node.item is? none analysis.exit.copy else visit(node.item analysis.exit.copy analysis.owners.copy() @analysis nodes table exits)}
     if node is? hir.Flow {
-        let following=if node.default is? none live else visit(node.default live.copy enabled @analysis nodes table exits)
+        let following=if node.default is? none live.copy() else visit(node.default live.copy enabled @analysis nodes table exits)
         let index=node.arms.length
         loop index >? 0 {
             index-=1
@@ -332,10 +333,10 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
                 # Every advancing edge contributes to the condition's live
                 # set. Reassignment supplies a new owner; a skipped assignment
                 # through continue leaves the old one live on that backedge.
-                let head=following
+                let head=following.copy()
                 loop true {
                     let nested=exits.copy
-                    nested.push(LoopExit[live head])
+                    nested.push(LoopExit[live.copy() head.copy()])
                     let entering=visit(arm.body head.copy enabled @analysis nodes table nested)
                     merge(@entering following)
                     let next=visit(arm.condition entering enabled @analysis nodes table nested)
@@ -347,7 +348,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
             } else {
                 let taken=visit(arm.body live.copy enabled @analysis nodes table exits)
                 merge(@following taken)
-                following=visit(arm.condition following enabled @analysis nodes table exits)
+                following=visit(arm.condition following.copy() enabled @analysis nodes table exits)
             }
         }
         return following
@@ -380,7 +381,7 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         live=kept
     }
     let children=hir.children(node)
-    loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes table exits)}
+    loop children.length >? 0 {live=visit(children.pop live.copy() enabled @analysis nodes table exits)}
     return live
 }
 # After a store to a fixed field path, a later whole read of an ancestor
@@ -388,14 +389,15 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
 # the way down, but not the replaced component's old value.
 renew_siblings=(live:Live target:addr route:Entry nodes:array<hir.AST> table:types.Table):>Live=>{
     let inner:array<addr>=[]
-    let current=hir.node_at(nodes target)
-    loop current is? hir.MemberAccess {
-        let value=hir.node_at(nodes current.value)
-        inner.push(value.value_type)
-        current=value
+    let step=target
+    loop true {
+        let current=hir.node_at(nodes step)
+        if current isnt? hir.MemberAccess break
+        inner.push(hir.node_at(nodes current.value).value_type)
+        step=current.value
     }
     # An indexed step keeps the whole read.
-    if inner.length not=? route.path.length return live
+    if inner.length not=? route.path.length return live.copy()
     # Owner types from the root down, matching the path.
     let owners:array<addr>=[]
     let index=inner.length
@@ -429,7 +431,7 @@ renew_siblings=(live:Live target:addr route:Entry nodes:array<hir.AST> table:typ
 # `outliving` names place parameters among the owners: their components may
 # transfer, and the caller reads each one whole when the function returns.
 consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[] selector_scopes:dict<addr set<addr>>=[] outliving:set<addr>=set[]):>Analysis=>{
-    let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places selector_scopes=selector_scopes]
+    let analysis=Analysis[owners.copy() required_views=required_views.copy() call_writes=call_writes.copy() read_only_places=read_only_places.copy() selector_scopes=selector_scopes.copy()]
     loop binding in outliving {add_entry(@analysis.exit Entry[binding])}
     let order:array<addr>=[]
     let pending:array<addr>=[body]
@@ -470,7 +472,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
             if hir.node_at(nodes node.expr) is? hir.ExpressedIdentifier {analysis.declarations[node.expr]=id}
         } else if node is? hir.IfArm {inputs.push(node.body) scope=node.body}
         else if node is? hir.Flow and node.default isnt? none {inputs.push(node.default) scope=node.default}
-        else if node is? hir.Block and not types.is_primitive(types.node_at(table node.value_type) 'void') {inputs=node.items}
+        else if node is? hir.Block and not types.is_primitive(types.node_at(table node.value_type) 'void') {inputs=node.items.copy()}
         if inputs.length =? 0 continue
         let counts:dict<addr addr>=[]
         let reads:array<addr>=[scope]

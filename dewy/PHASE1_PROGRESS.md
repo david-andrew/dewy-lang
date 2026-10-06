@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 131 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 10 (≈30.0k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 133 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 8 (≈29.4k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,35 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `predicate_paths` and `ownership_liveness` (2026-10-06)
+
+Row C2: 133 of 141 compiler modules are strict.
+
+`predicate_paths.refine`, `after` and `conjunction` take a `leaf` callback.
+Neither compiler resolves a call through a function-valued parameter for the
+storage proofs, so every argument also given to `leaf` counts as exposed:
+the fact state, and the `context` holding the node arena and fact context,
+were copied on every recursive step. The node arena and fact context now
+travel as separate parameters (`nodes`, `relation`) that `leaf` never sees,
+so both stay borrowed views; the state is still copied per step, now
+explicitly. Native code already resolves callback targets
+(`callbacks.analyze`); using them in native `exposed_roots` would remove the
+state copies too (measured: 4,218 → 4,197 native copies, 0.5% fewer
+self-build instructions). It is left out until the hosted compiler can
+resolve callbacks as well, to keep the two compilers' copies alike.
+
+`ownership_liveness` passes live sets along every path, so its copies are
+snapshots: entry and merge sets, loop exits, the analysis inputs. The running
+`live` set is lent as a place and reassigned, so native code keeps it in
+place and copies at each hand-off; these are now spelled out.
+`renew_siblings` walks member accesses by id instead of copying each node.
+
+Measured (cold prelude cache, self-build of 812cf742): 184.3 G instructions
+with every strict directive, 181.5 G without (strict checking costs 1.5%);
+177.1 G with a warm prelude cache. With codegen and workload fixed, the
+compilers from 215e37cd to cbc7f157 differ by 0.75% (177.1 → 178.4 G): the
+explicit copies added in this campaign cost almost nothing at run time.
 
 ## Strict copies: three more modules; iterating an input inspects it (2026-10-06)
 
