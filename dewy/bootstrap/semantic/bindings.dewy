@@ -98,7 +98,8 @@ store_binding = (@registry:Registry id:addr binding:Binding):>void => {
     let current=registry.current_page
     if current is? none or current not=? page_id {
         if current isnt? none {registry.binding_pages[current]=registry.current_bindings}
-        registry.current_bindings=registry.binding_pages.pop(page_id default=[])
+        # The hosted compiler copies a record popped from a dictionary.
+        registry.current_bindings=registry.binding_pages.pop(page_id default=[]).copy()
         registry.current_page=page_id
     }
     registry.current_bindings[id]=binding
@@ -133,7 +134,7 @@ path_starts_with = (path:array<string> prefix:array<string>):>bool => {
 }
 
 route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:Span):>addr => {
-    let routes=registry.routes_by_root.get(root [])
+    let routes=registry.routes_by_root.get(root []).copy()
     loop route in routes {
         if route.path.length =? path.length and path_starts_with(route.path path) return route.id
     }

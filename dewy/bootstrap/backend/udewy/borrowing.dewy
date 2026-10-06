@@ -735,6 +735,9 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
                 observed=(shape is? types.Primitive and shape.name in? ['bool' 'true' 'false']) or views.fixed_integer_layout(owner.value_type type_nodes) isnt? none
             }
             if not exposed and owner is? hir.FunctionCall {observed=observes_argument(owner id plan summaries nodes type_nodes)}
+            # Iterating copies or views each element in turn; the loop keeps
+            # no alias of the input itself.
+            if not exposed and owner is? hir.IteratorExpression and consuming_value_source(owner.iterable nodes type_nodes) =? id {observed=true}
             # A scalar element read (`args[i]`) inspects the array.
             if not exposed and owner is? hir.Index and consuming_value_source(owner.array nodes type_nodes) =? id {
                 let element=types.node_at(type_nodes views.structural_base(owner.value_type type_nodes))

@@ -145,6 +145,9 @@ def parameters(analysis, excluded_literals, borrowed_literals=frozenset(), *,
                 if node.binding_id in wanted:
                     observed = not exposed and (
                         isinstance(parent, (hir.TypeTest, hir.ArrayLength))
+                        # Iterating copies or views each element in turn; the
+                        # loop keeps no alias of the input itself.
+                        or isinstance(parent, hir.IteratorExpression) and value_source(parent.iterable) is node
                         # A scalar element read (`args[i]`) inspects the array.
                         or isinstance(parent, hir.Index) and value_source(parent.array) is node and (
                             ty.structural_base(parent.type) in ('bool', 'true', 'false')

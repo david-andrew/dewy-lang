@@ -1,7 +1,8 @@
-"""Reading scalar elements of an input does not keep it from being donated.
+"""Reading or iterating an input does not keep it from being donated.
 
 `args[i]` copies a word out of the array: like `args.length`, it inspects
-the input without keeping an alias. A parameter that is only inspected and
+the input without keeping an alias. So does a loop over the input: each
+element is copied or viewed in turn, and nothing outlives the loop. A parameter that is only inspected and
 changed in place before its final store is still an owning input, so the
 caller's last use moves into it.
 """
@@ -36,7 +37,32 @@ main=():>int64=>{
     return if sum=?300 and _arena_live_bytes=?before 42 else 1
 }
 '''
-CASES = [SOURCE]
+ITERATED = '''$explicit_copies
+Key:type=const [name:string weight:int64]
+Shape:type=[key:string items:array<Key>]
+shape=(items:array<Key>):>Shape=>{
+    let names:array<string>=[]
+    loop item in items {names.push(item.name)}
+    return Shape[names.join(',') items]
+}
+main=():>int64=>{
+    let warm:array<Key>=[]
+    warm.push(Key['w' 0])
+    let warmed=shape(warm)
+    let before:int64=_arena_live_bytes
+    let total:int64=0
+    let k:int64=0
+    loop k <? 20 {
+        let items:array<Key>=[]
+        items.push(Key['a' 1]) items.push(Key['b' 2])
+        let made=shape(items)
+        total+=made.items.length+made.key.length
+        k+=1
+    }
+    return if total=?100 and _arena_live_bytes=?before and warmed.items.length=?1 42 else 1
+}
+'''
+CASES = [SOURCE, ITERATED]
 
 
 @pytest.mark.parametrize('source', CASES)

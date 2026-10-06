@@ -36,7 +36,7 @@ transform=(id:addr @mapping:Rebinding @table:types.Table):>addr=>{
     if node is? types.ObjectType {
         let fields:array<types.ObjectField>=[]
         loop f in node.fields {fields.push(types.ObjectField[f.name rebind(f.value_type @mapping @table) f.mutable f.default propositions(f.refinement @mapping @table)])}
-        return types.object_type(fields node.brand node.immutable node.methods node.constructors @table minted=node.minted parent=node.parent abstract=node.abstract)
+        return types.object_type(fields node.brand node.immutable node.methods.copy() node.constructors @table minted=node.minted parent=node.parent abstract=node.abstract)
     }
     if node is? types.TypeAnd|types.TypeOr|types.SequenceType|types.OverloadType {
         let original=if node is? types.OverloadType node.methods else node.items

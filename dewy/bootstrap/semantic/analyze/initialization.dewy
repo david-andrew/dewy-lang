@@ -222,7 +222,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
     if node is? hir.ExpressedIdentifier {
         if node.binding_id is? none return []
         let parameter = parameters.get(node.binding_id)
-        if parameter isnt? none return parameter.targets
+        if parameter isnt? none return parameter.targets.copy()
         if node.binding_id in? seen return []
         let binding = bindings.binding_at(checker.registry node.binding_id)
         if binding.builtin return []
@@ -333,7 +333,7 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
             $runtime_assert literal is? hir.FunctionLiteral
             let results = function_results(literal.body checker)
             loop result in results {
-                let field = object_field_value(result name parameters seen seen_nodes checker)
+                let field = object_field_value(result name parameters seen.copy() seen_nodes.copy() checker)
                 if field isnt? none return field
             }
         }
@@ -368,11 +368,13 @@ check_block = (block:hir.Block initialized:dense.Set parameters:dict<addr Callab
         if origin isnt? none {checker.srcfile=hir.source_at(origin checker.source_files)}
         if item is? hir.Declare {
             let expr = hir.node_at(checker.nodes item.expr)
-            if expr is? hir.FunctionLiteral { current = check_defaults(expr current parameters stack @checker) }
-            else { current = check_eager(item.expr current parameters stack @checker) }
+            # `current` is also lent as a place, so native code assigns it in
+            # place: each step takes its own copy.
+            if expr is? hir.FunctionLiteral { current = check_defaults(expr current.copy() parameters stack @checker) }
+            else { current = check_eager(item.expr current.copy() parameters stack @checker) }
             if item.binding_id isnt? none { dense.add(@current item.binding_id) }
         }
-        else { current = check_eager(id current parameters stack @checker) }
+        else { current = check_eager(id current.copy() parameters stack @checker) }
         checker.srcfile=source
     }
     return current
@@ -383,13 +385,13 @@ check_children = (children:array<addr> initialized:dense.Set parameters:dict<add
     return current
 }
 check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>dense.Set => {
-    if checker.problem isnt? none return initialized
+    if checker.problem isnt? none return initialized.copy()
     let node = hir.node_at(checker.nodes id)
-    if node is? hir.ExpressedIdentifier { require_initialized(node initialized @checker) return initialized }
-    if node is? hir.FunctionLiteral return check_defaults(node initialized parameters stack @checker)
+    if node is? hir.ExpressedIdentifier { require_initialized(node initialized @checker) return initialized.copy() }
+    if node is? hir.FunctionLiteral return check_defaults(node initialized.copy() parameters stack @checker)
     if node is? hir.Block {
         let current = check_block(node initialized.copy parameters stack @checker)
-        return if node.scoped initialized else current
+        return if node.scoped initialized.copy() else current
     }
     if node is? hir.Declare {
         let current = check_eager(node.expr initialized parameters stack @checker)
@@ -422,14 +424,14 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
             let condition = hir.node_at(checker.nodes arm.condition)
             if condition is? hir.IteratorExpression | hir.MultiIteratorExpression {
                 let iterators:array<addr> = [arm.condition]
-                if condition is? hir.MultiIteratorExpression { iterators = condition.iterators }
-                let body_initialized = current
+                if condition is? hir.MultiIteratorExpression { iterators = condition.iterators.copy() }
+                let body_initialized = current.copy()
                 loop iterator_id in iterators {
                     let iterator = hir.node_at(checker.nodes iterator_id)
                     $runtime_assert iterator is? hir.IteratorExpression
                     current = check_eager(iterator.iterable current parameters stack @checker)
                 }
-                body_initialized = current
+                body_initialized = current.copy()
                 loop iterator_id in iterators {
                     let iterator = hir.node_at(checker.nodes iterator_id)
                     $runtime_assert iterator is? hir.IteratorExpression
@@ -486,7 +488,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
         loop child in children { if child not in? seen { seen.push(child) unique.push(child) } }
         children = unique
     }
-    return check_children(children initialized parameters stack @checker)
+    return check_children(children initialized.copy() parameters stack @checker)
 }
 
 # Cache keys use binding ids in sorted order, retaining target order. This
@@ -529,7 +531,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
         }
     }
     let key = call_key(id parameter_effects)
-    loop checked in checker.checked.get(key []) {
+    loop checked in checker.checked.get(key []).copy() {
         if dense.includes(initialized checked.required) and subset(checked.assumed_calls stack) {
             record_requirements(checked.required checked.assumed_calls @checker)
             return void
@@ -542,7 +544,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     loop field in function.object_fields { dense.add(@available field.id) }
     loop param in params { if param.binding_id isnt? none { dense.add(@available param.binding_id) } }
     if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { dense.add(@available function.rest_args.binding_id) }
-    checker.frames.push(CheckFrame[id initialized])
+    checker.frames.push(CheckFrame[id initialized.copy()])
     stack.push(id)
     let source=checker.srcfile
     if function.source isnt? none {checker.srcfile=hir.source_at(function.source checker.source_files)}
@@ -556,7 +558,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     if checker.problem is? none {
         let assumed=frame.assumed_calls
         assumed.pop(id default=id);
-        let checked=checker.checked.get(key [])
+        let checked=checker.checked.get(key []).copy()
         checked.push(CheckedCall[frame.required assumed])
         checker.checked[key]=checked
     }
@@ -590,12 +592,12 @@ validate_main = (declaration:hir.Declare @checker:Checker):>void => {
     if not valid { main_error(declaration '`main` must return an integer or `void`' "`main` returns `{types.describe(function.rettype checker.type_nodes)}`" @checker) }
 }
 validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr addr>=[] source_files:array<SrcFile>=[]):>Error? => {
-    let checker = Checker[nodes type_nodes registry srcfile source_by_item=source_by_item source_files=source_files]
+    let checker = Checker[nodes.copy() type_nodes registry srcfile source_by_item=source_by_item.copy() source_files=source_files.copy()]
     collect(root @checker)
     let block = hir.node_at(nodes root)
     $runtime_assert block is? hir.Block
     let initialized = check_block(block dense.Set[] [] set[] @checker)
-    if checker.problem isnt? none return checker.problem
+    if checker.problem isnt? none return checker.problem.copy()
     loop id in block.items {
         let declaration = hir.node_at(nodes id)
         if declaration isnt? hir.Declare or entry is? none continue
@@ -608,5 +610,5 @@ validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:types.Table
         if checker.problem is? none { check_function(declaration.expr initialized [] [] [] set[] @checker) }
         break
     }
-    return checker.problem
+    return checker.problem.copy()
 }

@@ -503,14 +503,14 @@ join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
         let candidate=types.node_at(nodes member)
         let combined=false
         if candidate is? types.FunctionType {
-            let shape=types.function_type(candidate.pos_or_kw candidate.kw_only candidate.rest candidate.ret candidate.type_params @nodes)
+            let shape=types.function_type(candidate.pos_or_kw.copy() candidate.kw_only.copy() candidate.rest candidate.ret candidate.type_params.copy() @nodes)
             loop i in 0.. and i <? merged.length {
                 let other=types.node_at(nodes merged[i])
                 if other isnt? types.FunctionType continue
-                let other_shape=types.function_type(other.pos_or_kw other.kw_only other.rest other.ret other.type_params @nodes)
+                let other_shape=types.function_type(other.pos_or_kw.copy() other.kw_only.copy() other.rest other.ret other.type_params.copy() @nodes)
                 if not types.same_type(shape other_shape nodes) continue
                 let effects=effect_rows.join(if candidate.effects is? none effect_rows.Contract[] else candidate.effects if other.effects is? none effect_rows.Contract[] else other.effects)
-                merged[i]=types.function_type(candidate.pos_or_kw candidate.kw_only candidate.rest candidate.ret candidate.type_params @nodes effects=effects)
+                merged[i]=types.function_type(candidate.pos_or_kw.copy() candidate.kw_only.copy() candidate.rest candidate.ret candidate.type_params.copy() @nodes effects=effects)
                 combined=true
                 break
             }

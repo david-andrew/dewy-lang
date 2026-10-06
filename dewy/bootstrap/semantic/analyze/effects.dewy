@@ -260,7 +260,7 @@ select_targets = (targets:array<addr> selected:addr?):>array<addr> | none => {
         if selected >=? targets.length return none
         return [targets[selected]]
     }
-    return if targets.length >? 0 targets else none
+    return if targets.length >? 0 targets.copy() else none
 }
 TargetVisit:type = const [id:addr leaving:bool=false]
 value_targets = (id:addr selected:addr? analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
@@ -315,7 +315,7 @@ value_targets = (id:addr selected:addr? analysis:Analysis nodes:array<hir.AST>):
 }
 direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
     let callback=analysis.callback_targets.get(call.func)
-    if callback isnt? none return callback
+    if callback isnt? none return callback.copy()
     return value_targets(call.func call.selected_method_index analysis nodes)
 }
 pair_arguments = (call:hir.FunctionCall literal:hir.FunctionLiteral):>array<ArgumentPair> | none => {
@@ -570,7 +570,7 @@ analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callbac
     return analyze_collected(collect(root nodes) nodes type_nodes callback_targets=callback_targets value_casts_escape=value_casts_escape)
 }
 analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
-    analysis.callback_targets=callback_targets
+    analysis.callback_targets=callback_targets.copy()
     analysis.value_casts_escape=value_casts_escape
     # Local scanning needs only this function's parameters. Syntax/call
     # discovery stays separate from the single table owning solved effects.
@@ -591,7 +591,7 @@ analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Tab
         # tree served no consumer and duplicated every route collection.
         loop parameter in declared {
             let binding=parameter.binding_id
-            if binding isnt? none and binding in? params {by_param[binding]=params.pop(binding)}
+            if binding isnt? none and binding in? params {by_param[binding]=params[binding].copy() params.pop(binding);}
         }
     }
     # Equations connect parameter identities, so revisiting an unrelated
@@ -658,8 +658,9 @@ place_loans = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST> t
                 loop pair in pairs {
                     if pair.argument not in? places continue
                     paired.push(pair.argument)
-                    let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-                    if summary isnt? none and summary.escapes.length =? 0 {
+                    if pair.parameter is? none or pair.parameter not in? summaries.by_param_binding continue
+                    const summary=@summaries.by_param_binding[pair.parameter]
+                    if summary.escapes.length =? 0 {
                         safe.push(pair.argument)
                         if preserves_storage(summary hir.node_at(nodes pair.argument).value_type table) {fixed.push(pair.argument)}
                         else {changed.push(pair.argument)}
@@ -685,7 +686,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
     if globals.length =? 0 return result
     let analysis=collect_roots(roots.copy nodes)
     let targets:dict<addr array<addr>>=[]
-    let pending=roots
+    let pending=roots.copy()
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let id=pending.pop
@@ -717,7 +718,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
                 }
             }
             if resolved isnt? none {targets[id]=resolved}
-            else {result[id]=globals}
+            else {result[id]=globals.copy()}
         }
         hir.push_children(node @pending)
     }
@@ -755,12 +756,12 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
                     if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.push(target.binding_id)}
                 }
                 if node is? hir.FunctionCall {
-                    if child not in? targets {writes=globals}
+                    if child not in? targets {writes=globals.copy()}
                     else {
                         loop callee in targets[child] {
-                            let parents=callers.get(callee set[])
+                            if callee not in? callers {callers[callee]=set[]}
+                            let parents=@callers[callee]
                             parents.push(id)
-                            callers[callee]=parents
                         }
                     }
                 }
@@ -780,24 +781,24 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
         let callee=pending.pop
         queued.pop(callee default=callee);
         if callee not in? summaries continue
-        let incoming=summaries[callee]
+        # A caller updated below may be the callee itself.
+        let incoming=summaries[callee].copy()
         loop caller in callers.get(callee set[]) {
             if caller not in? summaries continue
-            let writes=summaries[caller]
+            let writes=@summaries[caller]
             let changed=false
             loop binding in incoming {
                 if caller in? private and binding in? private[caller] continue
                 if binding not in? writes {writes.push(binding) changed=true}
             }
             if not changed continue
-            summaries[caller]=writes
             if caller not in? queued {queued.push(caller) pending.push(caller)}
         }
     }
     loop [call resolved] in targets {
         let writes:set<addr>=set[]
         loop callee in resolved {
-            if callee not in? summaries {writes=globals break}
+            if callee not in? summaries {writes=globals.copy() break}
             loop binding in summaries[callee] {writes.push(binding)}
         }
         result[call]=writes
@@ -833,7 +834,7 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
     let safe:set<addr>=set[]
     if calls.length =? 0 return safe
     let unsafe:set<addr>=set[]
-    let analysis=collect_roots(roots nodes)
+    let analysis=collect_roots(roots.copy() nodes)
     let summaries=analyze_collected(analysis.copy nodes type_nodes)
     loop id in calls {
         let call=hir.node_at(nodes id)
@@ -851,8 +852,9 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
                     let pairs=pair_arguments(call literal)
                     let parameter:addr?=none
                     if pairs isnt? none {loop pair in pairs {if pair.argument =? arg {parameter=pair.parameter}}}
-                    let summary=if parameter is? none none else summaries.by_param_binding.get(parameter)
-                    if summary is? none or not read_only(summary) {readonly=false break}
+                    if parameter is? none or parameter not in? summaries.by_param_binding {readonly=false break}
+                    const summary=@summaries.by_param_binding[parameter]
+                    if not read_only(summary) {readonly=false break}
                 }
             }
             if readonly {safe.push(arg)} else {unsafe.push(arg)}
