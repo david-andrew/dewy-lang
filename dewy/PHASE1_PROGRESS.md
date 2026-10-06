@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 113 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 28 (≈37.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 119 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 22 (≈35.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,45 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: six more modules; the session bundles are explicit (2026-10-06)
+
+Row C2: 119 of 141 compiler modules are strict (`statements`, `validation`,
+`container_state`, `effect_inference`, `graph`, `local_places`). Hosted
+would-be violations in the rest: 514 → 465.
+
+Proofs:
+- **Read-only defaulted arrays borrow a supplied argument** (hosted, as for
+  records). The local releases its storage only on the omitted-default path
+  (`default_owner_conditions` now guard array releases too).
+- **Ambient writes reach only places a global can fill** (native). A
+  callee that writes module state no longer forces a copy of a place
+  parameter's storage when no caller passes a global as that place
+  (`aliased_places`, from `global_placed`). This removed native copies of
+  the whole `Engine` at `validation.analyze_modules` and
+  `modules.dewy:179`. The hosted storage proof still excludes all
+  parameters of a function an ambient write blocks.
+
+Source changes: get-modify-store of dictionary entries becomes in-place
+pushes (`effect_inference` users and inverse projections, `local_places`
+index routes, where a whole-dictionary snapshot per route also went);
+`normalize` takes the node arena and type table directly instead of an
+`emit.Input` bundle built for it; `container_state.total_key` walks ids
+instead of copying nodes; `inline_block` lends `node.items` in place.
+
+Explicit copies (genuine, or the bundle pattern below): the session's node
+arena, type table, registry, brands and error types given to
+initialization checking and to lowering (`graph`); per-compile snapshots
+(`required_bindings`, loaded modules, warnings, the startup list and
+function list kept for the µDewy fallback); read-state key lists returned to
+owning callers (with the getter loan for readers); routes walked while
+`route_id` extends them.
+
+The bundle copies are the largest remaining cost of this kind:
+`validate_initialization` and `lower.lower` each receive their own copy of
+the HIR and type table, because a record literal cannot yet borrow fields
+of a long-lived structure beyond one call. This is recorded for the
+throughput campaign.
 
 ## Strict copies: nine more modules (2026-10-05)
 
