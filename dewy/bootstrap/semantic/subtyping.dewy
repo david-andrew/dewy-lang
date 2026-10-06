@@ -1,3 +1,4 @@
+$explicit_copies
 import p"effect_rows.dewy" as effect_rows
 import p"effect_inference.dewy" as effect_inference
 import p"ty.dewy" as types
@@ -22,13 +23,13 @@ Graph:type = [edges:array<Link>=[] ancestors:dict<string set<string>>=[]]
 add_link = (@graph:Graph link:Link):>void => {
     graph.edges.push(link)
     if link.parent not in? graph.ancestors {graph.ancestors[link.parent]=set[]}
-    let inherited=graph.ancestors.get(link.parent default=set[])
+    let inherited=graph.ancestors.get(link.parent default=set[]).copy()
     inherited.push(link.parent)
-    let previous=graph.ancestors.get(link.child default=set[])
+    let previous=graph.ancestors.get(link.child default=set[]).copy()
     if link.parent in? previous return
     # A new edge adds exactly ancestors(parent) to descendants(child).
     # Iterate the old map snapshot: even a cycle needs just this one update.
-    let before=graph.ancestors
+    let before=graph.ancestors.copy()
     loop [name ancestors] in before {
         if link.child in? ancestors {graph.ancestors[name]=ancestors | inherited}
     }
@@ -129,11 +130,11 @@ same_fields = (a:types.ObjectType b:types.ObjectType nodes:types.Table):>bool =>
 }
 brand_carries = (child:types.ObjectType structure:types.ObjectType nodes:types.Table):>bool => {
     if not child.minted or structure.brand isnt? none return false
-    let root = child
+    let root = child.copy()
     loop root.parent isnt? none {
         let parent = types.node_at(nodes root.parent)
         if parent isnt? types.ObjectType or not parent.minted break
-        root = parent
+        root = parent.copy()
     }
     # The whole root structure is carried, not arbitrary structural width
     # subtyping. The brand word follows that root's fields in the layout.
@@ -255,8 +256,8 @@ atom_implies = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>bool => {
     let b_head:addr = b_id
     let a_args:array<addr> = []
     let b_args:array<addr> = []
-    if a is? types.TypeParameterize { a_head = a.head a_args = a.args }
-    if b is? types.TypeParameterize { b_head = b.head b_args = b.args }
+    if a is? types.TypeParameterize { a_head = a.head a_args = a.args.copy() }
+    if b is? types.TypeParameterize { b_head = b.head b_args = b.args.copy() }
     let ah = types.node_at(nodes a_head)
     let bh = types.node_at(nodes b_head)
     if ah isnt? types.Primitive or bh isnt? types.Primitive return false
@@ -496,7 +497,7 @@ join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
     let combined = types.union(items @nodes)
     let node = types.node_at(nodes combined)
     let members:array<addr> = [combined]
-    if node is? types.TypeOr { members = node.items }
+    if node is? types.TypeOr { members = node.items.copy() }
     let merged:array<addr>=[]
     loop member in members {
         let candidate=types.node_at(nodes member)
@@ -577,20 +578,20 @@ function_subtype = (f:types.FunctionType g:types.FunctionType links:Graph @nodes
 callable_subtype = (f:types.CallableType g:types.CallableType links:Graph @nodes:types.Table):>bool => {
     let fs:array<types.FunctionType> = []
     let gs:array<types.FunctionType> = []
-    if f is? types.FunctionType { fs.push(f) }
+    if f is? types.FunctionType { fs.push(f.copy()) }
     else {
         loop id in f.methods {
             let method = types.node_at(nodes id)
             $runtime_assert method is? types.FunctionType
-            fs.push(method)
+            fs.push(method.copy())
         }
     }
-    if g is? types.FunctionType { gs.push(g) }
+    if g is? types.FunctionType { gs.push(g.copy()) }
     else {
         loop id in g.methods {
             let method = types.node_at(nodes id)
             $runtime_assert method is? types.FunctionType
-            gs.push(method)
+            gs.push(method.copy())
         }
     }
     # Every required alternative must be covered by some provided method.

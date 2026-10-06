@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import SrcFile, Span, Pointer, Warning
 import p"t1.dewy" as compound
 import p"t2.dewy" as post
@@ -90,8 +91,7 @@ build_precedence_powers = ():>dict<string Power> => {
         else if row.assoc =? 'postfix' {r = -1}
         else {l += 1}
         loop label in row.operators {
-            let entry=result.get(label)
-            if entry is? none {entry=Power[[] [] []]}
+            let entry=if label in? result result[label].copy() else Power[[] [] []]
             if l >=? 0 and l not in? entry.left {entry.left.push(l)}
             if r >=? 0 and r not in? entry.right {entry.right.push(r)}
             if row.assoc not in? entry.assocs {entry.assocs.push(row.assoc)}
@@ -115,10 +115,19 @@ operator_equal = (a:compound.Token b:compound.Token nodes:array<compound.Token>)
     if a is? post.CombinedAssignment and b is? post.CombinedAssignment return operator_equal(compound.node_at(nodes a.op) compound.node_at(nodes b.op) nodes)
     return operator_label(a nodes) =? operator_label(b nodes)
 }
+# One side of an operator's binding powers, moved out of its record.
+left_powers = (op:compound.Token nodes:array<compound.Token>):>array<int64> => {
+    let found=powers(op nodes)
+    return found.left
+}
+right_powers = (op:compound.Token nodes:array<compound.Token>):>array<int64> => {
+    let found=powers(op nodes)
+    return found.right
+}
 powers = (op:compound.Token nodes:array<compound.Token>):>Power => {
     let labels:array<string> = []
     labels.push(operator_label(op nodes))
-    if op is? post.Juxtapose { labels = op.options }
+    if op is? post.Juxtapose { labels = op.options.copy() }
     let left:array<int64> = []
     let right:array<int64> = []
     let assocs:array<Associativity> = []
@@ -178,8 +187,8 @@ shift_options = (items:array<addr> position:addr @nodes:array<compound.Token>):>
         if left is? none return [Shift[0]]
         if not post.is_jux(compound.node_at(nodes left) 'SemicolonJuxtapose') return [Shift[0]]
     }
-    let l:array<int64> = if left is? none [-1] else powers(compound.node_at(nodes left) nodes).right
-    let r:array<int64> = if right is? none [-1] else powers(compound.node_at(nodes right) nodes).left
+    let l:array<int64> = if left is? none [-1] else right_powers(compound.node_at(nodes left) nodes)
+    let r:array<int64> = if right is? none [-1] else left_powers(compound.node_at(nodes right) nodes)
     if strictly_greater(l r) return [Shift[-1]]
     if strictly_greater(r l) return [Shift[1]]
     if left is? none or right is? none return [Shift[0]]
@@ -346,7 +355,7 @@ reduce_chain = (initial:array<addr> srcfile:SrcFile @nodes:array<compound.Token>
         loop alternative in alternatives {
             let zeros:array<int8> = [loop item in alternative.items 0 as int8]
             let branches:array<Work> = []
-            branches.push(Work[alternative.items zeros])
+            branches.push(Work[alternative.items.copy() zeros])
             loop position in 0.. and position <? alternative.items.length {
                 let node = compound.node_at(nodes alternative.items[position])
                 if node isnt? AST continue
@@ -415,7 +424,7 @@ parse_node = (id:addr srcfile:SrcFile @nodes:array<compound.Token>):>addr | comp
         return reduce_chain(items srcfile @nodes)
     }
     let children:array<addr> = []
-    if node is? compound.Block | compound.ParametricEscape { children = node.inner }
+    if node is? compound.Block | compound.ParametricEscape { children = node.inner.copy() }
     else if node is? compound.IString { children = node.content.copy }
     else if node is? post.KeywordExpr { children = node.parts.copy }
     else if node is? post.Flow { children = node.arms.copy }
@@ -490,10 +499,10 @@ children_of = (node:compound.Token):>array<addr> => {
         loop id in node.items { children.push(id) }
         return children
     }
-    if node is? Ambiguous return node.candidates
-    if node is? Block | ParametricEscape return node.inner
-    if node is? IString return node.content
-    if node is? KeywordExpr return node.parts
+    if node is? Ambiguous return node.candidates.copy()
+    if node is? Block | ParametricEscape return node.inner.copy()
+    if node is? IString return node.content.copy()
+    if node is? KeywordExpr return node.parts.copy()
     let children:array<addr> = []
     if node is? Flow {
         children = node.arms.copy

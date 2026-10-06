@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import SrcFile, Error, Pointer, Warning
 import p"../context.dewy" as contexts
 import p"../hir.dewy" as hir
@@ -179,7 +180,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         scan.calls=[]
         if not scalar(node.value_type input.types) {storage(@scan)}
         loop child in node.items {visit(child input @scan)}
-        scan.scopes.push(Scope[id scan.summary scan.calls])
+        scan.scopes.push(Scope[id scan.summary.copy() scan.calls.copy()])
         scan.summary=rows.join(enclosing scan.summary)
         loop call in calls {scan.calls.push(call)}
         # Entry may create a region and mutate the handle. Keep that
@@ -261,14 +262,26 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                             let target_node=hir.node_at(input.nodes target_id)
                             $runtime_assert target_node is? hir.FunctionLiteral
                             let pairs=access.pair_arguments(node target_node)
-                            let summary:access.ParameterEffects?=none
+                            # Only whether the matched parameter's summary is known and
+                            # keeps nothing matters; read it in place.
+                            let known=false
+                            let escapes=false
+                            let changes=false
                             if pairs isnt? none {
                                 loop pair in pairs {
-                                    if pair.argument =? arg and pair.parameter isnt? none {summary=input.storage_effects.by_param_binding.get(pair.parameter)}
+                                    if pair.argument =? arg and pair.parameter isnt? none {
+                                        known=pair.parameter in? input.storage_effects.by_param_binding
+                                        escapes=false changes=false
+                                        if pair.parameter in? input.storage_effects.by_param_binding {
+                                            const summary=@input.storage_effects.by_param_binding[pair.parameter]
+                                            escapes=summary.escapes.length >? 0
+                                            changes=access.writes(summary)
+                                        }
+                                    }
                                 }
                             }
-                            if summary is? none or summary.escapes.length >? 0 {safe=false}
-                            if summary isnt? none and access.writes(summary) {writes=true}
+                            if not known or escapes {safe=false}
+                            if known and changes {writes=true}
                         }
                     }
                     if not safe or (writes and projected_storage(value.target input scan)) {storage(@scan)}
@@ -387,14 +400,16 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let storage_proofs=storage_borrows.prove(analysis access_summaries session.hir session.types session.registry)
     let borrowed=storage_proofs.arguments
-    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed storage_proofs.local_views storage_proofs.literal_arguments storage_proofs.flow_views storage_proofs.constants]
+    # Contract checking works on its own copy of the session's graph, types
+    # and registry (the bundle pattern; see PHASE1_PROGRESS).
+    let input=Input[session.hir.copy() session.types.copy() session.registry.copy() analysis.copy() access_summaries word_iterators.copy() borrowed.copy() storage_proofs.local_views storage_proofs.literal_arguments storage_proofs.flow_views storage_proofs.constants]
     let local:dict<addr rows.Contract>=[]
     let projections:dict<string inference.Projection>=[]
     let scopes:array<ScopeContract>=[]
     loop id in analysis.literals {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
-        let scan=Scan[frame_literals=storage_proofs.flow_literals]
+        let scan=Scan[frame_literals=storage_proofs.flow_literals.copy()]
         loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places.nonescaping frame_places.fixed_storage borrowed selected_reads=storage_proofs.flow_sources) {
             let declaration=hir.node_at(session.hir declaration_id)
             $runtime_assert declaration is? hir.Declare
@@ -521,7 +536,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:
         if edge.required isnt? none and not rows.implies(none edge.required) and (not inference.pending(edge.required) or edge.required.excluded.length >? 0) {required=true}
     }
     if not written and not required and not requested return none
-    let graph=inventory(roots session word_iterators)
+    let graph=inventory(roots.copy() session word_iterators)
     let summaries=graph.bodies
     loop [id body] in summaries {definitions[body_name(id)]=body}
     loop id in bodies {

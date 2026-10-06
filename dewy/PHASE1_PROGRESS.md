@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 124 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 17 (≈34.2k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 128 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 13 (≈31.9k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,26 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: four more modules (2026-10-06)
+
+Row C2: 128 of 141 compiler modules are strict (`public_effects`,
+`subtyping`, `fact_state`, `p0`). No new proof rules: the remaining sites
+were genuine copies or copy-free rewrites.
+
+Rewrites: `p0` reads one side of an operator's binding powers through
+`left_powers`/`right_powers`, which move the side out of a fresh record
+instead of copying a field of a temporary on every precedence decision;
+`public_effects` checks a callee parameter's summary in place (escapes and
+writes) instead of copying it out of the summary table.
+
+Explicit copies: contract checking's `Input` bundle (the session's HIR,
+type table, registry and the effect analysis), per-scope snapshots of a
+scan's contract and calls, the fact lists collected while a state is
+rewritten (`fact_state.forget`, interval changes) and a single joined
+state, the ancestor sets `subtyping.add_link` combines, function types
+collected for callable subtyping, and the child lists `p0` returns
+(readers use the getter loan).
 
 ## Strict copies: five more modules; ambient writes reach only aliased places (2026-10-06)
 

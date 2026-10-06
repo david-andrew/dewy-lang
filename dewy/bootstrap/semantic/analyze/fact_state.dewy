@@ -1,3 +1,4 @@
+$explicit_copies
 import p"intervals.dewy" as ranges
 import p"../propositions.dewy" as propositions
 
@@ -146,7 +147,7 @@ put = (@state:State fact:Fact interval:ranges.Interval):>void => {
         # a redundant array store would detach every entry in the state.
         # Provenance must still update even when numeric endpoints agree.
         if ranges.same_bounds(state.values[position].interval interval) and state.values[position].interval.capped =? interval.capped return
-        state.values[position]=Entry[fact interval]
+        state.values[position]=Entry[fact.copy() interval]
         return
     }
     # Source candidates are finite, but copying each term into new aliases
@@ -158,7 +159,7 @@ put = (@state:State fact:Fact interval:ranges.Interval):>void => {
     }
     state.next.push(state.heads.get(fact.hash default=(-1)))
     state.heads[fact.hash]=state.values.length
-    state.values.push(Entry[fact interval])
+    state.values.push(Entry[fact.copy() interval])
 }
 # Unlink `position` from its hash chain.
 unlink = (@state:State hash:uint64 position:addr):>void => {
@@ -241,7 +242,7 @@ mentions = (fact:Fact term:Term):>bool => {
 }
 forget = (@state:State term:Term):>void => {
     let removed:array<Fact> = []
-    loop entry in state.values { if mentions(entry.fact term) { removed.push(entry.fact) } }
+    loop entry in state.values { if mentions(entry.fact term) { removed.push(entry.fact.copy()) } }
     loop fact in removed { remove(@state fact) }
 }
 
@@ -277,7 +278,7 @@ mentions_changed=(fact:Fact bindings:set<addr> keep_lengths:set<addr>):>bool=>{
 forget_bindings = (@state:State bindings:set<addr> keep_lengths:set<addr>=set[]):>void => {
     if bindings.length=?0 return
     let removed:array<Fact>=[]
-    loop entry in state.values {if mentions_changed(entry.fact bindings keep_lengths) {removed.push(entry.fact)}}
+    loop entry in state.values {if mentions_changed(entry.fact bindings keep_lengths) {removed.push(entry.fact.copy())}}
     loop fact in removed {remove(@state fact)}
 }
 
@@ -295,20 +296,20 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
         let fact = entry.fact
         if fact is? Index and fact.sequence =? sequence {
             if change.lower is? none or change.lower <? 0 {
-                removed.push(fact)
+                removed.push(entry.fact.copy())
             }
             continue
         }
         if fact is? Distinct and mentions(fact term) {
-            if change.lower not=?0 or change.upper not=?0 {removed.push(fact)}
+            if change.lower not=?0 or change.upper not=?0 {removed.push(entry.fact.copy())}
             continue
         }
         if fact is? Linear {
             loop item in fact.coefficients {
                 if not same_term(item.term term) continue
                 let endpoint=if item.weight>?0 change.lower else change.upper
-                if entry.interval.lower is? none or endpoint is? none {removed.push(fact)}
-                else {changed.push(Entry[fact ranges.Interval[entry.interval.lower+item.weight*endpoint none entry.interval.capped or change.capped]])}
+                if entry.interval.lower is? none or endpoint is? none {removed.push(entry.fact.copy())}
+                else {changed.push(Entry[entry.fact.copy() ranges.Interval[entry.interval.lower+item.weight*endpoint none entry.interval.capped or change.capped]])}
             }
             continue
         }
@@ -325,8 +326,8 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
         else if change.upper isnt? none { adjustment = -change.upper }
         let lower = entry.interval.lower
         if lower is? none or adjustment is? none {
-            removed.push(fact)
-        } else { changed.push(Entry[fact ranges.Interval[lower+adjustment none entry.interval.capped or change.capped]]) }
+            removed.push(entry.fact.copy())
+        } else { changed.push(Entry[entry.fact.copy() ranges.Interval[lower+adjustment none entry.interval.capped or change.capped]]) }
     }
     loop fact in removed {remove(@state fact)}
     loop entry in changed {put(@state entry.fact entry.interval)}
@@ -422,9 +423,9 @@ join = (states:array<State> context:Context):>State => {
     # A single reachable path already carries exactly the joined evidence.
     # Returning its value preserves snapshot independence on later mutation.
     if states.length =? 0 return State[]
-    if states.length =? 1 return states[0]
+    if states.length =? 1 return states[0].copy()
     # Paths that changed no evidence share it instead of rebuilding it.
-    if same_evidence(states) return states[0]
+    if same_evidence(states) return states[0].copy()
     # Every fact of any state is a candidate, first occurrence first. A fact
     # an earlier state holds was already considered: a lookup, where
     # collecting candidates into a state of their own allocated per fact.
