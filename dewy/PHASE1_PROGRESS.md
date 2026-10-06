@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 104 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 37 (≈41.6k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 113 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 28 (≈37.8k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,70 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: nine more modules (2026-10-05)
+
+Row C2: 113 of 141 compiler modules are strict. Hosted would-be violations in
+the rest: 565 → 511.
+
+Proofs:
+- **Literal fields of union type take last-use records** (hosted). A field
+  whose type is a union with a record member (`Applied[state]` into
+  `state:State?`) is a transfer site, as a field assignment already was.
+- **A view of a place parameter blocks its field moves only while used**
+  (both). A field taken from an owner with a dependent view still moves
+  when no dependent is read after the take (`borrow_live_after`).
+- **A record local lent as a place moves after its last loan** (native;
+  hosted already did). The block a place lends never outlives the call. An
+  addressed local that is ever assigned whole keeps its block, because
+  native code assigns such a local in place through it (`rebound_locals`);
+  a read inside a call that also lends the local stays in place, and so
+  does a read that shares a call with a direct argument borrowing the local
+  (below). Without these rules the compiler miscompiled itself (first
+  self-build; the record-union pair check).
+- **Fixed a hosted miscompile: a direct argument's loan lasts the whole
+  call.** `measure(current wrap(current))` moved `current` into `wrap`
+  while `measure`'s first argument still borrowed it (result 41, not 42;
+  present on master). A binding that a call borrows as a direct argument
+  (itself, a route into it, or a place) now moves at no other read among
+  that call's arguments, in both compilers (`_shared_argument_uses`,
+  `shared_arguments`). Scalar reads such as `limbs.length` beside `limbs`
+  finish before the call and are unaffected.
+
+Source changes (no new copies; several copies removed):
+- `relations`: the two adjacency tables move into one local array; each
+  step reads the selected table with one `get` view, instead of a flow
+  that copied the chosen list.
+- `ssa`: each arm's environment is taken as the next is installed
+  (`b.env=saved.copy` / `b.env=[]` right after the take), and loop frames
+  are read back from `b.loops.pop` instead of after being pushed.
+- `type_check`: `effect_contract` no longer appends keyword parameters into
+  its positional argument; `effect_subject` searches both lists in order.
+  The comparison-chain cursor starts at the left operand; `split(...).terms`
+  is bound first.
+- `bindings`: index-route sets are extended in place through a place view.
+  The same rewrite of `route_id` (route lists) made the hosted-built
+  compiler fail binding lookups although small reproductions agree, so it
+  is withdrawn and left for when `bindings` adopts.
+- `proofs`: the pass borrows the session instead of copying its node arena,
+  registry, sources and type table into a bundle; `check.dewy`'s unsafe
+  assumption check does the same.
+- `program`: the direct-function set is built while indexing functions.
+- `binding_facts.forget` takes its prefix explicitly (callers pass `[]`).
+
+Genuine copies now spelled `.copy`: the hir edit log's saved node
+(`context.replace_hir`), a folded SSA region (`b.body.regions[body]`), the
+unchanged state returned by `predicate_facts.atomic`, a refined field's
+propositions, and per-program scopes in `program`. The first two are an
+element take-and-renew that no analysis models yet.
+
+Not adopted: `bindings` (its page swap pops a record from a dictionary; the
+hosted record `pop` move is still missing).
+
+Evidence: hosted strict build of the compiler accepted; native gen1 (built
+by the verified seed without the new directives) accepts all of them, and
+gen2 = gen3; new tests `test_optional_field_literal_moves`,
+`test_lent_record_moves` (with the shared-argument case), viewed cases in `test_place_field_take_and_renew`.
 
 ## Strict copies: `loop_qualifiers` adopts; flow results adopt fields (2026-10-05)
 
