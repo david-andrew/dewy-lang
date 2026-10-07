@@ -237,13 +237,10 @@ function decodeI64Array(ptr, count) {
     return values;
 }
 
-// Printed text goes to the page and, a whole line at a time, to the console
-// (a program prints a line in pieces).
+// Printed text goes to the console a whole line at a time (a program prints
+// a line in pieces).
 let consoleLine = '';
 function appendOutput(text) {
-    if (outputElement) {
-        outputElement.textContent += text;
-    }
     const lines = (consoleLine + text).split('\n');
     consoleLine = lines.pop();
     for (const line of lines) console.log(line);
@@ -254,8 +251,8 @@ function flushConsole() {
     consoleLine = '';
 }
 
-// The program has ended badly: show the output, over the canvas if one has
-// the page.
+// The program has ended badly: show why on the page, over the canvas if one
+// has it.
 function reportFailure(message) {
     flushConsole();
     console.error(message);

@@ -1670,12 +1670,12 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__host_log__(ptr len)` | 2 | Output text to the page and the browser console |
+| `__host_log__(ptr len)` | 2 | Output text to the browser console |
 | `__host_exit__(code)` | 1 | End the program (does not return) |
 | `__host_time__()` | 0 | Current timestamp in milliseconds |
 | `__host_random__()` | 0 | Random non-negative integer (below 2^53) |
 
-`__host_exit__` unwinds the module back to the page, which stops calling `main`. A nonzero code, or a trap, shows the output so far and the reason over the page, canvas included.
+`__host_exit__` unwinds the module back to the page, which stops calling `main`. A nonzero code, or a trap, shows the reason on the page, over a canvas if there is one.
 
 > These are subject to change
 
