@@ -251,19 +251,6 @@ function flushConsole() {
     consoleLine = '';
 }
 
-// The program has ended badly: show why on the page, over the canvas if one
-// has it.
-function reportFailure(message) {
-    flushConsole();
-    console.error(message);
-    if (!outputElement) return;
-    outputElement.textContent += `${outputElement.textContent && !outputElement.textContent.endsWith('\n') ? '\n' : ''}${message}\n`;
-    outputElement.style.display = 'block';
-    if (canvasMode || webglMode || gpuMode) {
-        outputElement.style.cssText = 'display:block; position:fixed; left:0; right:0; bottom:0; max-height:40vh; overflow:auto; margin:0; border-radius:0; z-index:10000;';
-    }
-}
-
 // `host_exit` ends the program: this unwinds the module back to the page,
 // which stops calling `main`.
 class UdewyExit extends Error {
@@ -273,15 +260,17 @@ class UdewyExit extends Error {
     }
 }
 
+// The program has ended, by an exit or a failure. As with an uncaught
+// exception in a script, the page is left as it is and the console says why.
 function endProgram(err) {
-    if (err instanceof UdewyExit) {
-        flushConsole();
-        console.log(`Exit code: ${err.code}`);
-        if (err.code !== 0n) reportFailure(`Exit code: ${err.code}`);
-        return;
+    flushConsole();
+    if (!(err instanceof UdewyExit)) {
+        console.error(err);
+    } else if (err.code === 0n) {
+        console.log('Exit code: 0');
+    } else {
+        console.error(`Exit code: ${err.code}`);
     }
-    console.error(err);
-    reportFailure(`Error: ${err && err.message ? err.message : err}`);
 }
 
 // The first call to `main`. A program that set up a canvas, WebGL, the GPU

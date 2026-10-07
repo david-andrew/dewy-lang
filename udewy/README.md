@@ -1675,7 +1675,7 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 | `__host_time__()` | 0 | Current timestamp in milliseconds |
 | `__host_random__()` | 0 | Random non-negative integer (below 2^53) |
 
-`__host_exit__` unwinds the module back to the page, which stops calling `main`. A nonzero code, or a trap, shows the reason on the page, over a canvas if there is one.
+`__host_exit__` unwinds the module back to the page, which stops calling `main`. As with an uncaught exception in a script, an exit or a trap leaves the page as it is; the exit code or the error goes to the console.
 
 > These are subject to change
 
