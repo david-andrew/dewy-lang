@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Span
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
@@ -187,7 +188,7 @@ declared_refinement = (array:addr type_nodes:types.Table registry:bindings.Regis
     if declared isnt? types.ArrayType return none
     let element = types.node_at(type_nodes declared.element)
     if element isnt? types.RefinedType return none
-    return element
+    return element.copy
 }
 read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @registry:bindings.Registry):>void => {
     loop item in routes(array registry) {

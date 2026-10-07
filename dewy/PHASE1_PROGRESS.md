@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 135 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 6 (≈26.5k lines: `lower`, `check`, `cache_values`, `lifecycle_runtime`, `ty`, `element_facts`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 137 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 4 (≈23.6k lines: `lower`, `check`, `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,22 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `element_facts` and `lifecycle_runtime` (2026-10-07)
+
+Row C2: 137 of 141 compiler modules are strict.
+
+`lifecycle_runtime` builds cleanup HIR, so most of its copies are small
+arrays of node ids and route paths taken from the plan's per-binding tables
+(`extractions`, `component_flags`, `dynamic_owners`) and then extended. They
+are spelled `.get(k []).copy`; the native compiler copies once for that
+form (measured equal to `if k in? d d[k].copy else []`). `drop_value` no
+longer clears its `additional` parameter (a parameter rebound in the body
+is copied on entry); a local flag selects an empty route list instead. A
+block statement stored its rewritten node twice in a row; the first store
+is gone and the second moves the node. Two narrowed nodes that were copied
+and then widened back into a node are read from the arena again instead,
+which copies once.
 
 ## Strict copies: `borrowing` and `bounds` (2026-10-06)
 
