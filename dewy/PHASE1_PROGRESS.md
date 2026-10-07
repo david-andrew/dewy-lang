@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 138 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 3 (≈16.3k lines: `lower`, `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 139 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 2 (≈8.1k lines: `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,26 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `lower` (2026-10-07)
+
+Row C2: 139 of 141 compiler modules are strict.
+
+`object_type` passed `state.type_nodes` and `@state` to one call, so the
+hosted compiler copied the whole type table each time. The storage base is
+now computed first and the table read after. Per-key lists of borrow
+dependents and indirect callers change in place. An optional record looked
+up with `get` (frame arrays, indirect-call targets) is read as
+`if k in? d d[k].copy else none`, one explicit copy instead of an implicit
+one. `iterable_entry_view` takes the iterable's id and reads the node
+itself.
+
+The largest copy left is spelled at the top of `lower`: the lowering state
+takes its own mutable copy of the type table, and the caller (`graph`) has
+already copied the session's table into the constant `emit.Input`, so each
+lowering run copies the type table twice, and the HIR once. Handing the
+session's tables to lowering by move is the first item for the throughput
+campaign.
 
 ## Strict copies: `check` (2026-10-07)
 

@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Pointer, Span, SrcFile
 import p"emit.dewy" as emit
 import p"program.dewy" as program
@@ -422,7 +423,7 @@ expression = (id:addr @state:State):>addr => {
         let receiver=hir.node_at(state.input.nodes node.value)
         if receiver is? hir.DictView return dict_view(receiver @state explicit=true)
         if receiver is? hir.ForwardingAccess return forwarding_field(receiver @state explicit=true)
-        let array_frame=state.frame_arrays.get(id)
+        let array_frame:ArrayMemory?=if id in? state.frame_arrays state.frame_arrays[id].copy else none
         if array_frame isnt? none {
             let type=array_type(node.value_type state)
             $runtime_assert type isnt? none and type.length isnt? none
@@ -432,10 +433,10 @@ expression = (id:addr @state:State):>addr => {
             let source=hir.node_at(state.input.nodes source_id)
             loop source is? hir.CopyValue {source_id=source.value source=hir.node_at(state.input.nodes source_id)}
             if source is? hir.ArrayLiteral {
-                let previous=state.frame_arrays.get(source_id)
-                state.frame_arrays[source_id]=array_frame
+                let previous:ArrayMemory?=if source_id in? state.frame_arrays state.frame_arrays[source_id].copy else none
+                state.frame_arrays[source_id]=array_frame.copy
                 let value=array_literal(source_id source @state)
-                if previous is? none {state.frame_arrays.pop(source_id default=array_frame);}
+                if previous is? none {if source_id in? state.frame_arrays {state.frame_arrays.pop(source_id);}}
                 else {state.frame_arrays[source_id]=previous}
                 return value
             }
@@ -1085,7 +1086,7 @@ finish_read = (value:addr receiver:ReadOperand node:hir.AST @prefix:array<addr> 
     }
     if prefix.length =? 0 return value
     prefix.push(value)
-    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix.copy false] @state)
 }
 copy_value = (value:addr type:addr node:hir.AST @state:State shared:bool=false):>addr => {
     if owned_string(type state) return string_runtime('_native_string_copy' [value] node @state)
@@ -1735,7 +1736,7 @@ array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     let spread=false
     loop item in node.items { if hir.node_at(state.input.nodes item) is? hir.Spread { spread=true } }
     if spread return spread_array_literal(node type.element layout.size @state)
-    let frame=state.frame_arrays.get(id)
+    let frame:ArrayMemory?=if id in? state.frame_arrays state.frame_arrays[id].copy else none
     if frame is? none and node.items.length =? 0 and state.allocator isnt? none {
         # An empty literal shares one static descriptor per site instead of
         # allocating one per evaluation. Its owner count starts far above
@@ -1745,7 +1746,7 @@ array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
         let words=[word(0 node @state) word(0 node @state) word(0 node @state) word(layout.size node @state) word(layouts.array_flags.mutable node @state) word(4611686018427387904 node @state)]
         return intrinsic_call('__static_words__' words types.primitive('int64' @state.type_nodes) node @state)
     }
-    let memory=if frame is? none array_memory(word(node.items.length node @state) layout.size node @state) else frame
+    let memory=if frame is? none array_memory(word(node.items.length node @state) layout.size node @state) else frame.copy
     if frame isnt? none {
         memory.prefix=frame_array_header(memory word(node.items.length node @state) layout.size node @state)
     }
@@ -1836,7 +1837,7 @@ finish_copy = (name:string parameter:string body:addr node:hir.AST @state:State)
     # Helpers end in a descriptor/handle value. Statement sequences default
     # to void, so restore that fallthrough type before scalar normalization.
     let block=hir.node_at(state.nodes body)
-    if block is? hir.Block {body=put(hir.Block[block.loc word_type block.items block.scoped] @state)}
+    if block is? hir.Block {body=put(hir.Block[block.loc word_type block.items.copy block.scoped] @state)}
     let type=types.function_type([types.PosOrKwArg[parameter word_type]] [] none word_type [] @state.type_nodes)
     let literal=put(hir.FunctionLiteral[node.loc type [hir.Param[parameter word_type]] [] none word_type body source=state.source_index] @state)
     state.generated.push(program.Function[name literal])
@@ -1954,7 +1955,7 @@ layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>str
         loop field in record.fields {
             let offset=layout.offsets.get(field.name)
             $runtime_assert offset isnt? none
-            parts.push("{offset}:{layout_key_inner(field.value_type node visiting @state)}")
+            parts.push("{offset}:{layout_key_inner(field.value_type node visiting.copy @state)}")
         }
         return "o{layout.size}[{parts.join(' ')}]"
     }
@@ -2385,12 +2386,12 @@ cell_members = (id:addr @state:State):>array<addr>|none => {
     # Most calls ask about a non-cell type. Cache negative answers too, while
     # distinguishing them from a type that has not been queried yet.
     let cached=state.cell_types.get(id)
-    if cached isnt? none return if cached.length =? 0 none else cached
+    if cached isnt? none return if cached.length =? 0 none else cached.copy
     if record_union(id @state) isnt? none {state.cell_types[id]=[] return none}
     let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
     let payload=views.optional_payload(plain @state.type_nodes)
     let result:array<addr>|none=if payload isnt? none [types.primitive('none' @state.type_nodes) payload] else views.runtime_union_members(plain @state.type_nodes)
-    state.cell_types[id]=if result is? none [] else result
+    state.cell_types[id]=if result is? none [] else result.copy
     return result
 }
 member_tag = (type:addr @state:State):>addr => {
@@ -3584,7 +3585,7 @@ byte_descriptor = (data:addr length:addr node:hir.AST @state:State static_storag
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 binary_literal = (node:hir.BasedString @state:State):>addr => {
-    let data=put(hir.BasedString[node.loc types.primitive('int64' @state.type_nodes) node.prefix node.digits node.content node.include_path] @state)
+    let data=put(hir.BasedString[node.loc types.primitive('int64' @state.type_nodes) node.prefix node.digits node.content.copy node.include_path] @state)
     return byte_descriptor(data word(node.content.length node @state) node @state static_storage=true)
 }
 binary_array_view = (node:hir.RepresentationCast state:State):>bool => {
@@ -4329,7 +4330,7 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
             key_function=value
             let signature=types.node_at(state.type_nodes types.strip_refinement(hir.node_at(state.input.nodes argument).value_type state.type_nodes))
             if signature isnt? types.FunctionType return reject(call 'a sort key must be a single function' @state)
-            key_signature=signature key_type=signature.ret
+            key_signature=signature.copy key_type=signature.ret
         }
     }
     if views.fixed_integer_layout(key_type state.type_nodes) is? none return reject(call 'a sort key must return a fixed-width integer' @state)
@@ -4475,8 +4476,9 @@ array_valued = (id:addr state:State):>bool => {
     return state.type_nodes.entries[plain] is? types.ArrayType
 }
 object_type = (id:addr @state:State):>types.ObjectType? => {
-    let type=types.node_at(state.type_nodes storage_base(id @state))
-    return if type is? types.ObjectType type else none
+    let base=storage_base(id @state)
+    let type=types.node_at(state.type_nodes base)
+    return if type is? types.ObjectType type.copy else none
 }
 aggregate = (id:addr @state:State):>bool => {
     let plain=types.node_at(state.type_nodes views.structural_base(id state.type_nodes))
@@ -4650,7 +4652,7 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
     let within:set<addr>=set[]
     let scope=if node.binding_id is? none none else state.view_scopes.get(node.binding_id)
     if scope isnt? none {
-        let pending=if node.binding_id is? none [scope] else state.view_regions.get(node.binding_id [scope])
+        let pending=if node.binding_id is? none [scope] else state.view_regions.get(node.binding_id [scope]).copy
         loop pending.length >? 0 {
             let id=pending.pop
             if id in? within continue
@@ -5429,7 +5431,7 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     if projection isnt? none {function=put(hir.ExpressedIdentifier[node.loc code_type(projection.function node @state result=projection.result) projection.symbol] @state)}
     let borrowed=state.borrowed_arguments.get(id set[])
     let literal_loans=state.literal_arguments.get(id set[])
-    let disposable=state.disposable_arguments.get(id set[])-borrowed
+    let disposable:set<addr>=if id in? state.disposable_arguments state.disposable_arguments[id]-borrowed else set[]
     let reclaimable=state.reclaimable_arguments.get(id set[])
     let temporary:array<OwnedLocal>=[]
     let positional:array<addr>=[]
@@ -5771,7 +5773,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         }
         hir.push_children(current @pending)
     }
-    state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
+    state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated.copy
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[] state.frame_growables=set[]
     loop initializer in selected_literals {
@@ -5891,28 +5893,28 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                     let value=hir.node_at(state.input.nodes leaf)
                     let source=borrowing.route(if value is? hir.ForwardingAccess value.value else leaf state.input.nodes)
                     if source isnt? none {
-                        let dependents=borrow_dependents.get(source.binding set[])
+                        if source.binding not in? borrow_dependents {borrow_dependents[source.binding]=set[]}
+                        let dependents=@borrow_dependents[source.binding]
                         dependents.push(declaration.binding_id)
-                        borrow_dependents[source.binding]=dependents
                     }
                 }
             }
             if borrowed_route_local(declaration @state) {route=borrowing.route(declaration.expr state.input.nodes)}
             else if borrowed_getter_local(declaration @state) isnt? none {route=getter_route(declaration.expr 0 @state)}
             if route isnt? none {
-                let dependents=borrow_dependents.get(route.binding set[])
+                if route.binding not in? borrow_dependents {borrow_dependents[route.binding]=set[]}
+                let dependents=@borrow_dependents[route.binding]
                 dependents.push(declaration.binding_id)
-                borrow_dependents[route.binding]=dependents
                 let source=hir.node_at(state.input.nodes declaration.expr)
                 if source is? hir.MemberAccess and borrowed_route_local(declaration @state) and route.binding not in? excluded and route.binding not in? state.boxed and route.binding not in? state.addressed {
-                    let owner:hir.AST=source
+                    let owner=hir.node_at(state.input.nodes declaration.expr)
                     loop owner is? hir.MemberAccess {owner=hir.node_at(state.input.nodes owner.value)}
                     if owner is? hir.ExpressedIdentifier and storage_borrows.borrowable(owner.value_type state.type_nodes) {state.return_borrow_sources[declaration.binding_id]=declaration.expr}
                 }
             }
         }
     }
-    state.rebound_locals=rebound
+    state.rebound_locals=rebound.copy
     let moves_started=timing.start(state.timings)
     state.moved_uses=if enabled moves.compute(id state.input.nodes state.type_nodes borrow_dependents donations=state.consumed_arguments parameters=state.owned_parameters) else set[]
     state.place_conflicts=if enabled place_conflicts(node.body state.input.nodes) else set[]
@@ -5923,7 +5925,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.place_moves=set[]
     let places:set<addr>=set[]
     loop argument in parameters(node) {if argument.place and argument.binding_id isnt? none {places.push(argument.binding_id)}}
-    loop use in state.moved_uses {
+    loop use in state.moved_uses.copy {
         let moved=hir.node_at(state.input.nodes use)
         let field=moved is? hir.MemberAccess
         loop moved is? hir.MemberAccess|hir.Index {moved=hir.node_at(state.input.nodes if moved is? hir.MemberAccess moved.value else moved.array)}
@@ -6078,7 +6080,7 @@ validate_required_views = (root:addr @state:State):>void => {
 
 lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false native_wasm:bool=false):>Result|Error => {
     let captures_started=timing.start(timings)
-    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
+    let state=State[input source type_nodes=input.types.copy allocator=allocator runtime_helpers=runtime_helpers.copy layout_context=layout_context links=links.copy debug_names=debug_names explicit_copy_sources=explicit_copy_sources.copy]
     # Older seeds and prelude-free kernels retain the six-word allocation
     # ABI. Install retain/drop together with prefix allocation, once per
     # lowering, so every value boundary agrees about descriptor ownership.
@@ -6095,8 +6097,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     let proof_root=if checked_root is? none root else checked_root
     discover(proof_root @state)
-    state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
-    let proof_captures=if proof_root =? root state.capture_plan else captures.analyze(proof_root input.nodes state.symbols.keys)
+    state.capture_plan=captures.analyze(root input.nodes state.symbols.keys.copy)
+    let proof_captures=if proof_root =? root state.capture_plan.copy else captures.analyze(proof_root input.nodes state.symbols.keys.copy)
     # Entrypoints and compiler-emitted runtime calls do not go through source
     # argument preparation. Exclude their ABI from ownership specialization.
     let external:set<addr>=set[]
@@ -6111,7 +6113,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     # Copy-policy checking uses complete strict bodies, including unused
     # functions. They need ordinary capture/call/layout handling while
     # lowering, then disappear from the runtime graph below.
-    state.capture_plan=proof_captures
+    state.capture_plan=proof_captures.copy
     timing.finish('lowering.captures' captures_started)
     let borrowing_started=timing.start(timings)
     let borrowed=borrowing.details(proof_root input.nodes input.types proof_captures state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
@@ -6144,7 +6146,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     # owners in the callee. Their enclosing local still needs normal lexical
     # cleanup. Escaping function values are rejected, and the move analysis
     # separately prevents consuming a binding that a nested function reads.
-    let units=state.capture_plan.functions
+    let units=state.capture_plan.functions.copy
     let named=state.capture_plan.named
     loop [id capture] in units {state.code_symbols[id]="_f{id}"}
     # Source names on symbols are for reading the emitted program and for
@@ -6257,10 +6259,10 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
     let normalize_started=timing.start(timings)
-    let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value]
+    let assembled=program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue.copy argv_value=if argv is? none none else argv.value]
     if proof_root not=?root {assembled=program.retain_reachable(assembled state.nodes)}
     # Debug builds keep every function and local as written.
-    let normalized=statements.normalize(assembled state.nodes state.type_nodes input.source_files optimizing=not state.debug_names timings=timings native_code=native_code native_wasm=native_wasm)
+    let normalized=statements.normalize(assembled state.nodes state.type_nodes input.source_files.copy optimizing=not state.debug_names timings=timings native_code=native_code native_wasm=native_wasm)
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
@@ -6437,13 +6439,14 @@ iterated_view = (id:addr @state:State):>bool => {
 # Reuse a stable owner's live entries instead of constructing the ordinary
 # independent property result. Mutating/captured/exposed roots keep that
 # snapshot. This is the same whole-function proof used by storage borrowing.
-iterable_entry_view = (source:hir.AST @state:State):>hir.AST => {
-    let view=if source is? hir.DictEntries hir.node_at(state.input.nodes source.dictionary) else source
-    if view isnt? hir.DictView return source
+iterable_entry_view = (iterable:addr @state:State):>hir.AST => {
+    let source=hir.node_at(state.input.nodes iterable)
+    let view=hir.node_at(state.input.nodes (if source is? hir.DictEntries source.dictionary else iterable))
+    if view isnt? hir.DictView return source.copy
     let route=borrowing.route(view.dictionary state.input.nodes)
-    if route is? none or not borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return source
+    if route is? none or not borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return source.copy
     let entries=views.container_entry_types(hir.node_at(state.input.nodes view.dictionary).value_type state.type_nodes)
-    if entries is? none return source
+    if entries is? none return source.copy
     let field=if view.name =? 'values' and entries.value isnt? none 'values' else 'keys'
     return hir.DictEntries[source.loc source.value_type view.dictionary field]
 }
@@ -6458,7 +6461,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
     let void_type=types.primitive('void' @state.type_nodes)
-    let source=iterable_entry_view(hir.node_at(state.input.nodes node.iterable) @state)
+    let source=iterable_entry_view(node.iterable @state)
     let target=hir.node_at(state.input.nodes node.target)
     $runtime_assert target is? hir.ExpressedIdentifier
     let target_type=runtime_type(target.value_type target @state)
@@ -6810,7 +6813,7 @@ lower_flow = (node:hir.Flow position:addr @state:State borrowed:bool=false):>add
     if arm is? hir.LoopArm and state.loop_depth >? 0 and state.loop_levels isnt? none {
         let result:addr?=none
         if not types.is_primitive(types.node_at(state.type_nodes type) 'void') and not types.is_primitive(types.node_at(state.type_nodes type) 'never') {
-            let value=put(hir.Block[node.loc type prefix false] @state)
+            let value=put(hir.Block[node.loc type prefix.copy false] @state)
             prefix=[] result=snapshot(value @prefix @state)
         }
         prefix.push(loop_checkpoint(node @state))
@@ -7089,14 +7092,14 @@ finish_forwarding = (receiver:addr source_type:addr result:addr node:hir.Forward
         prefix.push(release_value(receiver source_type node @state))
     }
     prefix.push(result)
-    return put(hir.Block[node.loc output prefix false] @state)
+    return put(hir.Block[node.loc output prefix.copy false] @state)
 }
 # The alternatives of a record union, `none` included.
 record_members = (id:addr @state:State):>array<addr>|none => {
     let plain=views.strip_all_refinements(types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes) @state.type_nodes)
     let node=types.node_at(state.type_nodes plain)
     if node isnt? types.TypeOr return none
-    return node.items
+    return node.items.copy
 }
 SharedField:type = const [offset:addr type:addr]
 # A field every alternative of a non-nullable record union stores at one
@@ -7227,7 +7230,7 @@ finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr>
         prefix.push(release_value(dict_owner(parts) parts.owner_type node @state))
     }
     prefix.push(value)
-    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix.copy false] @state)
 }
 dict_field = (parts:DictParts name:string node:hir.AST @state:State):>addr => {
     let offset=parts.layout.offsets.get(name)
@@ -8054,12 +8057,12 @@ allocator_hazards = (@state:State):>set<addr> => {
             if node is? hir.FunctionCall {
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
                 let target=if direct isnt? none direct else if hir.node_at(nodes node.func) is? hir.FunctionLiteral node.func else sort_key_literal(node @state)
-                let targets:array<addr> | none = if target isnt? none [target] else state.indirect_calls.get(node.func)
+                let targets:array<addr> | none = if target isnt? none [target] else (if node.func in? state.indirect_calls state.indirect_calls[node.func].copy else none)
                 if targets isnt? none {
                     loop callee in targets {
-                        let users=callers.get(callee [])
+                        if callee not in? callers {callers[callee]=[]}
+                        let users=@callers[callee]
                         users.push(id)
-                        callers[callee]=users
                     }
                 } else if unknown_call(node @state) {initial.push(id)}
             }
@@ -8115,7 +8118,7 @@ arena_fallback = (node:hir.AllocatorBlock @state:State):>string? => {
         state.allocator_hazards=allocator_hazards(@state)
         state.allocator_hazards_ready=true
     }
-    let hazards=state.allocator_hazards
+    let hazards=state.allocator_hazards.copy
     let declared:set<addr>=set[]
     let inside:array<addr>=[]
     let pending:array<addr>=[]
@@ -8236,6 +8239,6 @@ cleanup_scoped = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     # A selected arm is a scope even when its source is a single statement
     # or an unscoped desugared group. Its locals do not exist on other paths.
-    if node is? hir.Block return cleanup_block(hir.Block[node.loc node.value_type node.items true] @state)
+    if node is? hir.Block return cleanup_block(hir.Block[node.loc node.value_type node.items.copy true] @state)
     return cleanup_block(hir.Block[node.loc node.value_type [id] true] @state)
 }
