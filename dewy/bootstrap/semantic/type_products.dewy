@@ -26,7 +26,7 @@ number_product = (left:addr right:addr @session:contexts.Session):>addr? => {
     let real=types.primitive('real' @session.types)
     if a is? types.IntegerLiteralType and subtyping.is_subtype(right real session.links @session.types) return right
     if b is? types.IntegerLiteralType and subtyping.is_subtype(left real session.links @session.types) return left
-    return dispatch.promote_type(left right dispatch.System[session.links builtins.promotions] @session.types)
+    return dispatch.promote_type(left right dispatch.System[builtins.promotions] session.links @session.types)
 }
 product = (left:addr right:addr context:contexts.Context @session:contexts.Session):>addr? => {
     let a=types.node_at(session.types left)

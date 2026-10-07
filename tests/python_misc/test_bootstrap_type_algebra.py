@@ -318,13 +318,13 @@ main = ():>int64 => {
     }
 '''])
     lines.extend(['    printl("--dispatch--")',
-                  '    let system = dispatch.System[links=subtyping.default_links promotions=[["int16" "uint16" "int64"]]]'])
+                  '    let system = dispatch.System[promotions=[["int16" "uint16" "int64"]]]'])
     for methods, pos, kw, expected in dispatch_cases():
         methods_text = ' '.join(build(m) for m in methods)
         pos_text = ' '.join(build(p) for p in pos)
         kw_text = ' '.join(f'"{name}" -> {build(p)}' for name, p in kw.items())
         expected_text = 'none' if expected is None else build(expected)
-        lines.append(f'    let choice{counter} = dispatch.match_best_function([{methods_text}] [{pos_text}] [{kw_text}] {expected_text} system @nodes)')
+        lines.append(f'    let choice{counter} = dispatch.match_best_function([{methods_text}] [{pos_text}] [{kw_text}] {expected_text} system subtyping.default_links @nodes)')
         lines.append(f'    printl(render_dispatch(choice{counter} nodes))')
     lines.append('    printl("--joins--")')
     system = ty.TypeSystem()

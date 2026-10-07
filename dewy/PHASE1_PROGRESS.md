@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 137 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 4 (≈23.6k lines: `lower`, `check`, `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 138 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 3 (≈16.3k lines: `lower`, `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,34 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `check` (2026-10-07)
+
+Row C2: 138 of 141 compiler modules are strict.
+
+Making the checker strict exposed copies on hot paths, now removed:
+
+- `dispatch.System` carried `session.links`. Every checked call, and every
+  numeric promotion, copied the subtyping graph into the record. The graph
+  is now a separate read-only parameter of the dispatch functions.
+- Operator callees were recognized by testing membership in the `values` of
+  three constant tables, which materialized each table per test.
+  `operator_function` scans the tables in place.
+- `constructor_overload` (every record constructor call) built a default
+  constructor set and copied the result, only to read its binding ids. It
+  now copies just the ids.
+- The generic-instance cache scan and the unbounded-growth check iterated
+  `session.registry.generic_instances`. The hosted compiler iterates a
+  snapshot of a dict reached through a place parameter (its writes might
+  reach it), so both scans copied the instance table's keys on every
+  generic call. They are now functions of a read-only registry
+  (`cached_instance`, `growing_instance`).
+- `call` no longer rebinds its `order` parameter (copied on entry).
+
+The remaining explicit copies are small: argument and parameter lists of
+nodes being rebuilt, fact snapshots per branch. One hosted gap is left: a
+local passed to `return call(local ...)` is not treated as moved there (the
+native compiler moves it), so three such sites copy.
 
 ## Strict copies: `element_facts` and `lifecycle_runtime` (2026-10-07)
 

@@ -1,3 +1,4 @@
+$explicit_copies
 from reporting import Error, Span, Warning, Pointer, SrcFile
 import p"scoped_storage.dewy" as scoped_storage
 import p"source_names.dewy" as source_names
@@ -147,8 +148,8 @@ is_proof_binding = (id:addr session:contexts.Session):>bool => {
     return bindings.binding_at(session.registry node.binding_id).proof
 }
 collect_proof_annotations = (node:parser.Block env:Environment @session:contexts.Session):>Error? => {
-    let marked=session.proof_literals.get(env.lexical.source set[])
-    let markers=session.proof_markers.get(env.lexical.source set[])
+    let marked=session.proof_literals.get(env.lexical.source set[]).copy
+    let markers=session.proof_markers.get(env.lexical.source set[]).copy
     loop index in 0.. and index <? node.inner.length {
         let id=node.inner[index]
         let item=contexts.node_at(id env.lexical session)
@@ -383,7 +384,7 @@ against_shape = (value:addr expected:addr id:addr env:Environment @session:conte
         # Extracting low bits is authorized only after bounds validation has
         # proved the mathematical value fits. A user call to the same helper
         # does not acquire this compiler-generated proof obligation.
-        let narrowed=put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args called.kw_args called.selected_method_index 'narrow'] @session)
+        let narrowed=put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args.copy called.kw_args.copy called.selected_method_index 'narrow'] @session)
         return if types.same_type(called.value_type expected session.types) narrowed else put(hir.ValueCast[node.loc expected narrowed] @session)
     }
     if numeric_values.is_family(expected 'BigInt' env.lexical session) and not numeric_values.is_family(node.value_type 'BigInt' env.lexical session) {
@@ -414,7 +415,7 @@ against_shape = (value:addr expected:addr id:addr env:Environment @session:conte
             if result is? Error return result
             let call=node_at(result session)
             $runtime_assert call is? hir.FunctionCall
-            return put(hir.FunctionCall[call.loc call.value_type call.func call.pos_args call.kw_args call.selected_method_index 'identity'] @session)
+            return put(hir.FunctionCall[call.loc call.value_type call.func call.pos_args.copy call.kw_args.copy call.selected_method_index 'identity'] @session)
         }
     }
     if not subtyping.is_subtype(node.value_type expected session.links @session.types) {
@@ -440,7 +441,7 @@ against_shape = (value:addr expected:addr id:addr env:Environment @session:conte
         # Preserve the cast for bounds analysis to prove (including signed
         # to unsigned and narrowing conversions); do not transmute the bits.
         if views.fixed_integer_layout(types.strip_refinement(node.value_type session.types) session.types) isnt? none and views.fixed_integer_layout(expected session.types) isnt? none return put(hir.ValueCast[node.loc expected value] @session)
-        let promoted=dispatch.promote_type(types.strip_refinement(node.value_type session.types) expected dispatch.System[session.links builtins.promotions] @session.types)
+        let promoted=dispatch.promote_type(types.strip_refinement(node.value_type session.types) expected dispatch.System[builtins.promotions] session.links @session.types)
         if promoted =? expected return put(hir.ValueCast[node.loc expected value] @session)
         return problem(id 'type mismatch' "`{display.type_to_dewy(node.value_type session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
     }
@@ -591,7 +592,15 @@ include_bytes = (arguments:addr id:addr env:Environment @session:contexts.Sessio
     let loc=contexts.node_at(id env.lexical session).loc
     let included=binary_literals.read_file(path source_views.srcfile(env.lexical session) loc)
     if included is? Error return included
-    return put(hir.BasedString[loc types.binary_literal(included.packed.bytes @session.types) '0x' included.packed.digits included.packed.bytes included.path] @session)
+    return put(hir.BasedString[loc types.binary_literal(included.packed.bytes.copy @session.types) '0x' included.packed.digits included.packed.bytes.copy included.path] @session)
+}
+# The function an operator spelling dispatches to (`__add__`, ...), read from
+# the constant tables without materializing their values.
+operator_function = (name:string):>bool => {
+    loop [symbol function] in builtins.binary_operators {if function =? name return true}
+    loop [symbol function] in builtins.prefix_operators {if function =? name return true}
+    loop [symbol function] in builtins.inverted_comparisons {if function =? name return true}
+    return false
 }
 include_declaration = (name:string value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     # Like the hosted include declaration, this creates a new binding even
@@ -652,7 +661,7 @@ call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment 
     if callee isnt? hir.ExpressedIdentifier or callee.binding_id is? none return expected
     let binding=bindings.binding_at(session.registry callee.binding_id)
     if not binding.builtin return expected
-    if callee.name not in? builtins.binary_operators.values and callee.name not in? builtins.prefix_operators.values and callee.name not in? builtins.inverted_comparisons.values return expected
+    if not operator_function(callee.name) return expected
     if target is? types.TypeOr return none
     let number=if target is? types.QuantityType target.number else expected
     if numeric_values.is_family(number 'Fixed' env.lexical session) or numeric_values.is_family(number 'Rational' env.lexical session) or numeric_values.is_family(number 'BigRational' env.lexical session) return none
@@ -965,7 +974,7 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
     if result is? Error return result
     let called=node_at(result session)
     $runtime_assert called is? hir.FunctionCall
-    return put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args called.kw_args called.selected_method_index name] @session)
+    return put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args.copy called.kw_args.copy called.selected_method_index name] @session)
 }
 
 # Capture an expression once for a conditional conversion or equality.
@@ -1051,10 +1060,10 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
         # Equality selects a payload call, so it shares ordinary call
         # applicability, including prelude numeric materialization. Structural
         # subtyping alone cannot place a literal in BigInt's nonzero record.
-        let system=dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
+        let system=dispatch.System[builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
         let members:array<addr>=[]
         loop member in union.items {
-            if not types.is_primitive(types.node_at(session.types member) 'none') and dispatch.accepts(other_type member system @session.types) {members.push(member)}
+            if not types.is_primitive(types.node_at(session.types member) 'none') and dispatch.accepts(other_type member system session.links @session.types) {members.push(member)}
         }
         if members.length =? 0 continue
         if members.length >? 1 return problem(id 'ambiguous equality against a union' 'narrow the union with `is?` first' env session)
@@ -1110,7 +1119,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
         let binding=bindings.binding_at(session.registry func.binding_id)
         let builtin=binding.builtin
-        if builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+        if builtin and operator_function(func.name) {
             # A finite integer set is not closed under arithmetic. Decode its
             # physical tag before selecting the ordinary numeric operation.
             loop i in 0.. and i <? positional.length {
@@ -1141,7 +1150,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         let specialized=builtin_value(function positional id env @session)
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
-        if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+        if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and operator_function(func.name) {
             if func.name in? ['__eq__' '__ne__'] and positional.length =? 2 {
                 let absent=false
                 loop argument in positional {
@@ -1209,9 +1218,9 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         if order.length >? 0 and func.receiver isnt? none {
             let with_receiver:array<string?>=[none]
             loop name in order {with_receiver.push(name)}
-            order=with_receiver
+            return call(func.function arguments.copy keyword id env @session expected=expected order=with_receiver)
         }
-        return call(func.function arguments keyword id env @session expected=expected order=order)
+        return call(func.function arguments.copy keyword id env @session expected=expected order=order)
     }
     let shape = types.node_at(session.types func.value_type)
     if shape isnt? types.CallableType return problem(id 'value is not callable' display.type_to_dewy(func.value_type session.types) env session)
@@ -1235,9 +1244,9 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let kw_types:dict<string addr> = []
     loop argument in positional { pos_types.push(node_at(argument session).value_type) }
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
-    let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
+    let system = dispatch.System[builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
     let hint=call_hint(expected function positional env session)
-    let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types.copy kw_types.copy hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
+    let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types.copy kw_types.copy hint system session.links @session.types) else dispatch.match_ordered(methods pos_types.copy kw_types order hint system session.links @session.types)
     if matched is? dispatch.DispatchError {
         if keyword.length =? 0 and positional.length =? 2 and func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and func.name in? ['__eq__' '__ne__'] {
             let comparison=stored_union_equality(function positional func.name =? '__ne__' id env @session)
@@ -1371,7 +1380,7 @@ auto_call = (value:addr id:addr env:Environment @session:contexts.Session expect
 library_call = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let function=identifier(name id env @session)
     if function is? Error return function
-    return call(function arguments [] id env @session expected=expected)
+    return call(function arguments.copy [] id env @session expected=expected)
 }
 
 # Every value expression meets its expected type at this boundary. Individual
@@ -1428,7 +1437,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         else if atom is? tokens.BasedString {
             let packed=binary_literals.pack(atom source_views.srcfile(env.lexical session))
             if packed is? Error return packed
-            value=put(hir.BasedString[node.loc types.binary_literal(packed.bytes @session.types) atom.base packed.digits packed.bytes] @session)
+            value=put(hir.BasedString[node.loc types.binary_literal(packed.bytes.copy @session.types) atom.base packed.digits packed.bytes] @session)
         }
         else if atom is? tokens.Real {
             let fraction=numeric_literals.real(atom source_views.srcfile(env.lexical session))
@@ -1540,7 +1549,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
                     if shape is? types.ArrayType {candidates.push(shape)}
                 }
                 if candidates.length not=? 1 return problem(id 'type mismatch' 'the expected type must select one array alternative' env session)
-                target=candidates[0]
+                target=candidates.pop
             }
             let element:addr? = if target is? types.ArrayType target.element else none
             if node.inner.length =? 0 and element is? none return problem(id 'cannot infer empty array element type' 'provide an array annotation' env session)
@@ -1869,7 +1878,7 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
         if next >? 0 {contexts.restore(before @session)}
         next+=1
         let result = expression(candidate env @session expected=expected call_target=call_target allow_place=allow_place)
-        if result is? Error { rejected.push(result) continue }
+        if result is? Error { rejected.push(result.copy) continue }
         if winner isnt? none {
             contexts.restore(before @session)
             return problem(id 'ambiguous expression' 'multiple readings typecheck; add explicit operators or parentheses' env session)
@@ -1882,7 +1891,7 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
     if winner is? none {
         contexts.restore(before @session)
         # Keep implementation gaps visible when no supported reading wins.
-        loop rejection in rejected { if rejection.title =? 'native checker implementation pending' return rejection }
+        loop rejection in rejected { if rejection.title =? 'native checker implementation pending' return rejection.copy }
         if rejected.length >? 0 return rejected[0]
         return problem(id 'no valid interpretation for ambiguous expression' 'no candidate expression typechecks' env session)
     }
@@ -1999,7 +2008,7 @@ unpack_value = (targets_id:addr source:addr id:addr env:Environment @session:con
         let count:bigint?=none
         let source_node=node_at(source session)
         if source_node is? hir.ExpressedIdentifier and source_node.binding_id isnt? none {
-            loop route in session.registry.routes_by_root.get(source_node.binding_id []) {
+            loop route in session.registry.routes_by_root.get(source_node.binding_id []).copy {
                 if route.path.length not=? 1 continue
                 let known=read_type(route.id env session)
                 if known is? none continue
@@ -2282,7 +2291,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if annotation is? none and signature is? types.FunctionType and initial_node isnt? hir.FunctionLiteral|hir.GenericFunction and signature.type_params.length =? 0 and not view {
         let name="{effect_inference.BINDING_PREFIX}{binding_id}"
         let effects=effect_rows.Contract[effect_rows.Row[variables=[name]]]
-        let type=types.function_type(signature.pos_or_kw signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effects)
+        let type=types.function_type(signature.pos_or_kw.copy signature.kw_only.copy signature.rest signature.ret signature.type_params.copy @session.types effects=effects)
         value=put(hir.ValueCast[checked.loc type value effect_target=type] @session)
         checked=node_at(value session)
     }
@@ -2494,7 +2503,7 @@ stored_read_type = (value:addr @session:contexts.Session):>addr => {
 }
 fork = (env:Environment @session:contexts.Session):>Environment => {
     $runtime_assert env.state <? session.read_states.length
-    let copy = session.read_states[env.state]
+    let copy = session.read_states[env.state].copy
     let state = session.read_states.length
     session.read_states.push(copy)
     return Environment[env.lexical state env.return_type env.control env.return_collector loan=env.loan]
@@ -3044,7 +3053,7 @@ flow_inner = (id:addr node:parser.Flow env:Environment @session:contexts.Session
                         $runtime_assert family isnt? none
                         let shape=types.node_at(session.types family)
                         $runtime_assert shape is? types.ObjectType and shape.brand isnt? none
-                        session.pending_brand_matches.push(contexts.PendingBrandMatch[env.lexical arm_id shape.brand member.covered_brands])
+                        session.pending_brand_matches.push(contexts.PendingBrandMatch[env.lexical arm_id shape.brand member.covered_brands.copy])
                     }
                 }
             }
@@ -3089,7 +3098,7 @@ flow_inner = (id:addr node:parser.Flow env:Environment @session:contexts.Session
                 if body is? Error return body
                 let contents=node_at(body session)
                 $runtime_assert contents is? hir.Block
-                return put(hir.Block[contents.loc types.primitive('void' @session.types) contents.items false] @session)
+                return put(hir.Block[contents.loc types.primitive('void' @session.types) contents.items.copy false] @session)
             }
             selected=true
         }
@@ -3137,7 +3146,7 @@ prelude_writer = (id:addr env:Environment @session:contexts.Session):>bool => {
 source_arguments = (id:addr? env:Environment session:contexts.Session):>array<addr> => {
     if id is? none return []
     let arguments=contexts.node_at(id env.lexical session)
-    return if arguments is? parser.Block arguments.inner else [id]
+    return if arguments is? parser.Block arguments.inner.copy else [id]
 }
 call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let items=source_arguments(arguments_id env session)
@@ -3205,7 +3214,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
             bound.push(index)
         }
     }
-    return call(function positional keyword id env @session expected=expected order=if interleaved order else [])
+    return call(function positional.copy keyword id env @session expected=expected order=if interleaved order.copy else [])
 }
 
 # Select the entire receiver path while its membership/bounds facts are live.
@@ -3511,7 +3520,7 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
     if signature isnt? types.FunctionType or signature.pos_or_kw.length =? 0 return problem(id 'string method has no receiver parameter' name env session)
     let parameters:array<types.PosOrKwArg>=[]
     loop i in 1.. and i <? signature.pos_or_kw.length {parameters.push(signature.pos_or_kw[i])}
-    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effect_rows.bind_receiver(signature.effects signature.pos_or_kw.length+signature.kw_only.length))
+    let exposed=types.function_type(parameters signature.kw_only.copy signature.rest signature.ret signature.type_params.copy @session.types effects=effect_rows.bind_receiver(signature.effects signature.pos_or_kw.length+signature.kw_only.length))
     let loc=contexts.node_at(id env.lexical session).loc
     let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding_id] @session)
     return put(hir.BoundMethod[loc exposed function receiver] @session)
@@ -3541,7 +3550,7 @@ receiver_method = (value:addr type:addr id:addr env:Environment @session:context
     let node=node_at(literal session)
     if node is? hir.FunctionLiteral {
         if node.object_receiver return value
-        contexts.replace_hir(literal hir.FunctionLiteral[node.loc node.value_type node.pos_or_kw_args node.kw_only_args node.rest_args node.rettype node.body object_receiver=true object_fields=node.object_fields object_type=node.object_type source=node.source] @session)
+        contexts.replace_hir(literal hir.FunctionLiteral[node.loc node.value_type node.pos_or_kw_args.copy node.kw_only_args.copy node.rest_args node.rettype node.body object_receiver=true object_fields=node.object_fields.copy object_type=node.object_type source=node.source] @session)
         return value
     }
     let signature=types.node_at(session.types types.unfold(types.strip_refinement(type session.types) session.types))
@@ -3717,7 +3726,7 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
             # have the same storage contract. Store its predicates on the
             # field so later member reads retain them after type erasure.
             let declared=types.node_at(session.types type)
-            layout.push(if declared is? types.RefinedType types.ObjectField[name declared.base refinement=declared.propositions] else types.ObjectField[name type])
+            layout.push(if declared is? types.RefinedType types.ObjectField[name declared.base refinement=declared.propositions.copy] else types.ObjectField[name type])
         }
     }
     if wanted is? types.ObjectType {
@@ -3736,7 +3745,7 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
         let literal_id=effect_boundary_value(field.value session)
         let literal = node_at(literal_id session)
         if literal isnt? hir.FunctionLiteral continue
-        contexts.replace_hir(literal_id hir.FunctionLiteral[literal.loc literal.value_type literal.pos_or_kw_args literal.kw_only_args literal.rest_args literal.rettype literal.body object_receiver=true object_fields=field_bindings object_type=type source=literal.source] @session)
+        contexts.replace_hir(literal_id hir.FunctionLiteral[literal.loc literal.value_type literal.pos_or_kw_args.copy literal.kw_only_args.copy literal.rest_args literal.rettype literal.body object_receiver=true object_fields=field_bindings.copy object_type=type source=literal.source] @session)
     }
     let value = put(hir.ObjectLiteral[node.loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)
@@ -3980,7 +3989,7 @@ place_fits = (actual:addr required:addr @session:contexts.Session readonly:bool=
     if readonly {
         # The mint checker established value subtyping; only constness may
         # differ for this compiler-owned read-only borrow of the parent.
-        let parent=types.object_type(r.fields r.brand a.immutable r.methods r.constructors @session.types minted=r.minted parent=r.parent abstract=r.abstract)
+        let parent=types.object_type(r.fields.copy r.brand a.immutable r.methods.copy r.constructors @session.types minted=r.minted parent=r.parent abstract=r.abstract)
         return subtyping.is_subtype(actual parent session.links @session.types)
     }
     return subtyping.is_subtype(actual required session.links @session.types)
@@ -4716,8 +4725,8 @@ join_container_callables = (left:addr right:addr @session:contexts.Session):>add
     let a=types.node_at(session.types left)
     let b=types.node_at(session.types right)
     if a isnt? types.FunctionType or b isnt? types.FunctionType return none
-    let a_shape=types.function_type(a.pos_or_kw a.kw_only a.rest a.ret a.type_params @session.types)
-    let b_shape=types.function_type(b.pos_or_kw b.kw_only b.rest b.ret b.type_params @session.types)
+    let a_shape=types.function_type(a.pos_or_kw.copy a.kw_only.copy a.rest a.ret a.type_params.copy @session.types)
+    let b_shape=types.function_type(b.pos_or_kw.copy b.kw_only.copy b.rest b.ret b.type_params.copy @session.types)
     if not types.same_type(a_shape b_shape session.types) return none
     # Inferred rows are unresolved here. Subtyping alone can accept either
     # direction provisionally; choosing one would lose the other body's effects.
@@ -5051,7 +5060,7 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
     let elements:array<addr> = [entry.key]
     if entry.value isnt? none {
         if target_syntax isnt? parser.Block or target_syntax.delims not=? '[]' or target_syntax.inner.length not=? 2 return problem(id 'dictionary iteration needs two targets' 'write `loop [key value] in dictionary`' env session)
-        targets = target_syntax.inner
+        targets = target_syntax.inner.copy
         fields.push('values') elements.push(entry.value)
     } else if target_syntax is? parser.Block return problem(id 'a set iterator has one target' 'iterate the member directly' env session)
     container_state.forget_positions(iterable env.state @session)
@@ -5303,13 +5312,48 @@ strictly_contains = (outer:addr inner:addr nodes:types.Table):>bool => {
     }
     return false
 }
+# An existing instance of `generic` at these type and effect arguments.
+cached_instance = (registry:bindings.Registry generic:addr? arguments:dict<string addr> effects:dict<string effect_rows.Contract>):>addr? => {
+    loop [binding_id instance] in registry.generic_instances {
+        if instance.generic not=? generic continue
+        let matches = true
+        loop [name actual] in arguments {
+            let prior = instance.type_arguments.get(name)
+            # Type arena identity retains defaults/method source. Structural
+            # equality is sufficient for assignment, not for checking a body.
+            if prior is? none or prior not=? actual { matches = false break }
+        }
+        if matches {
+            loop [key actual] in effects {
+                let prior=instance.effect_arguments.get(key)
+                if prior is? none or effect_rows.identity(prior) not=? effect_rows.identity(actual) {matches=false break}
+            }
+        }
+        if matches return binding_id
+    }
+    return none
+}
+GrowingArgument:type = const [name:string actual:addr prior:addr]
+# A type argument of an instance of `generic` still being checked that these
+# arguments strictly contain: instantiating would never end.
+growing_instance = (registry:bindings.Registry generic:addr? arguments:dict<string addr> nodes:types.Table):>GrowingArgument? => {
+    loop [instance_id instance] in registry.generic_instances {
+        if instance.generic not=? generic continue
+        if bindings.binding_at(registry instance_id).function isnt? none continue
+        loop [name actual] in arguments {
+            let prior = instance.type_arguments.get(name)
+            if prior isnt? none and strictly_contains(actual prior nodes) return GrowingArgument[name actual prior]
+        }
+    }
+    return none
+}
 instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType positional:array<addr> keyword:dict<string addr> expected:addr? id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     if callee.binding_id is? none return none
     let original = bindings.binding_at(session.registry callee.binding_id)
     if original.function is? none return none
     let generic = node_at(original.function session)
     if generic isnt? hir.GenericFunction return none
-    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)] @session.types)
+    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)] session.links @session.types)
     if inference is? none return problem(id 'cannot infer generic type parameters' 'the arguments do not determine every type parameter' env session)
     let arguments:dict<string addr> = []
     loop param in generic.source.params {
@@ -5335,24 +5379,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         # not scalar read facts. Inference retains them; do not erase them here.
         arguments[param.name] = concrete
     }
-    let cached:addr? = none
-    loop [binding_id instance] in session.registry.generic_instances {
-        if instance.generic not=? callee.binding_id continue
-        let matches = true
-        loop [name actual] in arguments {
-            let prior = instance.type_arguments.get(name)
-            # Type arena identity retains defaults/method source. Structural
-            # equality is sufficient for assignment, not for checking a body.
-            if prior is? none or prior not=? actual { matches = false break }
-        }
-        if matches {
-            loop [key actual] in inference.effects {
-                let prior=instance.effect_arguments.get(key)
-                if prior is? none or effect_rows.identity(prior) not=? effect_rows.identity(actual) {matches=false break}
-            }
-        }
-        if matches { cached = binding_id break }
-    }
+    let cached=cached_instance(session.registry callee.binding_id arguments inference.effects)
     if cached isnt? none {
         let binding = bindings.binding_at(session.registry cached)
         $runtime_assert binding.value_type isnt? none
@@ -5361,15 +5388,12 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     # Every instance checks its whole body. An instance still being checked
     # that needs its own generic at a type argument strictly containing its
     # own needs a larger one in turn: that chain never ends.
-    loop [instance_id instance] in session.registry.generic_instances {
-        if instance.generic not=? callee.binding_id continue
-        if bindings.binding_at(session.registry instance_id).function isnt? none continue
-        loop [name actual] in arguments {
-            let prior = instance.type_arguments.get(name)
-            if prior isnt? none and strictly_contains(actual prior session.types) {
-                return contexts.problem(id 'generic instantiation grows without bound' "`{generic.name}` for `{name}` = `{display.type_to_dewy(prior session.types)}` needs `{generic.name}` for `{name}` = `{display.type_to_dewy(actual session.types)}`, and so on" env.lexical session hint='each instance checks its whole body, so this call is instantiated for ever-larger types')
-            }
-        }
+    let growing=growing_instance(session.registry callee.binding_id arguments session.types)
+    if growing isnt? none {
+        let name=growing.name
+        let actual=growing.actual
+        let prior=growing.prior
+        return contexts.problem(id 'generic instantiation grows without bound' "`{generic.name}` for `{name}` = `{display.type_to_dewy(prior session.types)}` needs `{generic.name}` for `{name}` = `{display.type_to_dewy(actual session.types)}`, and so on" env.lexical session hint='each instance checks its whole body, so this call is instantiated for ever-larger types')
     }
     let source = generic.source
     $runtime_assert source.literal <? session.syntax_refs.length
@@ -5569,7 +5593,7 @@ allocator_block = (id:addr node:parser.Directive env:Environment @session:contex
     }
     let block=node_at(body session)
     let loc=contexts.node_at(id env.lexical session).loc
-    let contents:array<addr>=if block is? hir.Block block.items else [body]
+    let contents:array<addr>=if block is? hir.Block block.items.copy else [body]
     return put(hir.AllocatorBlock[loc block.value_type contents true arena] @session)
 }
 directive = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
@@ -5751,7 +5775,7 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
             if not progressed return problem(clause.left 'unreachable match arm' 'earlier arms already cover these values' env session)
             total=complete
         }
-        specs.push(FlowSpec[row clause.right patterns=selected subjects=subjects])
+        specs.push(FlowSpec[row clause.right patterns=selected subjects=subjects.copy])
     }
     return MatchPlan[specs prelude total coverage]
 }
@@ -5835,7 +5859,7 @@ match_test = (subject:addr pattern:patterns.Pattern env:Environment @session:con
         $runtime_assert pattern.test isnt? none
         base=types.strip_refinement(pattern.test session.types)
         let declared=types.node_at(session.types pattern.test)
-        if declared is? types.RefinedType {props=declared.propositions}
+        if declared is? types.RefinedType {props=declared.propositions.copy}
     } else if pattern.kind =? 'object' {
         base=patterns.object_member(node_at(match_read(subject current @session) session).value_type pattern.fields session.types)
         if base is? none return problem(pattern.syntax 'object pattern does not select one member' 'the field names must identify exactly one record alternative' env session)
@@ -6358,7 +6382,7 @@ metatype_equality = (function:addr positional:array<addr> negated:bool id:addr e
         if converted is? Error return converted
         words.push(put(hir.Transmute[node_at(converted session).loc word converted] @session))
     }
-    return call(function words [] id env @session)
+    return call(function words.copy [] id env @session)
 }
 # A member of a `type<Family>` value: `typename`, or a static method (or a
 # function-typed slot) dispatched by the brand through a hidden function.
@@ -6628,7 +6652,7 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
     $runtime_assert checked is? hir.FunctionLiteral and value <? session.hir.length
     checked.lifecycle=lifecycle
     checked.lifecycle_composition=lifecycle_composition
-    session.hir[value]=checked
+    session.hir[value]=checked.copy
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=checked.value_type binding.store_type=checked.value_type binding.function=value
     let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)
@@ -6991,7 +7015,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     if types.node_at(session.types owner) isnt? types.ObjectType return problem(id 'constructor overload needs a record type' 'the left side names a record type' env session)
     let literal=contexts.node_at(literal_id env.lexical session)
     if literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return problem(id 'a constructor overload must be a function literal' 'use `(params):>Type => ...`' env session)
-    let overloads=session.constructors.get(owner contexts.ConstructorSet[])
+    let overloads=session.constructors.get(owner contexts.ConstructorSet[]).copy
     let alias=if constructor.name is? none display.type_to_dewy(owner session.types) else constructor.name
     let name="{alias}__new_{overloads.bindings.length + 1}"
     let checked=function_literal(literal_id literal env @session name=name)
@@ -7013,8 +7037,8 @@ constructor_overload = (constructor:hir.TypeValue arguments_id:addr? id:addr env
     let owner=views.structural_base(constructor.value session.types)
     let type=types.node_at(session.types owner)
     $runtime_assert type is? types.ObjectType
-    let overloads=session.constructors.get(owner contexts.ConstructorSet[type.constructors])
-    if overloads.bindings.length =? 0 return none
+    let overloads:array<addr>=if owner in? session.constructors session.constructors[owner].bindings.copy else type.constructors.copy
+    if overloads.length =? 0 return none
     # Speculative checking rolls back through a checkpoint rather than a
     # copy of the whole session.
     let saved=contexts.checkpoint(session)
@@ -7022,7 +7046,7 @@ constructor_overload = (constructor:hir.TypeValue arguments_id:addr? id:addr env
     loop field in type.fields {parameters.push(types.PosOrKwArg[field.name field.value_type field.default is? none and not implemented_slot(type field session)])}
     let fieldwise=types.function_type(parameters [] none owner [] @session.types)
     let signatures:array<addr>=[fieldwise]
-    loop id in overloads.bindings {
+    loop id in overloads {
         let binding=bindings.binding_at(session.registry id)
         $runtime_assert binding.value_type isnt? none
         signatures.push(binding.value_type)
@@ -7038,11 +7062,11 @@ constructor_overload = (constructor:hir.TypeValue arguments_id:addr? id:addr env
     let selected=call_node.selected_method_index
     if selected =? 0 {contexts.restore(saved @session) return none}
     let position=selected - 1
-    $runtime_assert position >=? 0 and position <? overloads.bindings.length
-    let binding=bindings.binding_at(session.registry overloads.bindings[position])
+    $runtime_assert position >=? 0 and position <? overloads.length
+    let binding=bindings.binding_at(session.registry overloads[position])
     $runtime_assert binding.value_type isnt? none
     let function=put(hir.ExpressedIdentifier[constructor.loc binding.value_type binding.name binding.id] @session)
-    let result=call(function call_node.pos_args call_node.kw_args id env @session expected=expected)
+    let result=call(function call_node.pos_args.copy call_node.kw_args.copy id env @session expected=expected)
     if result is? Error {contexts.restore(saved @session) return result}
     return result
 }

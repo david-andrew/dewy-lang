@@ -12,17 +12,17 @@ main=():>int64=>{
     let boolean=types.primitive('bool' @table)
     let ints=types.function_type([types.PosOrKwArg['left' integer] types.PosOrKwArg['right' integer]] [] none integer [] @table)
     let floats=types.function_type([types.PosOrKwArg['left' floating] types.PosOrKwArg['right' floating]] [] none floating [] @table)
-    let system=dispatch.System[subtyping.default_links [dispatch.Promotion['int' 'float64' 'float64']]]
-    let exact=dispatch.match_ordered([floats ints] [integer] ['right' -> integer] ['right' none] none system @table)
+    let system=dispatch.System[[dispatch.Promotion['int' 'float64' 'float64']]]
+    let exact=dispatch.match_ordered([floats ints] [integer] ['right' -> integer] ['right' none] none system subtyping.default_links @table)
     if exact is? dispatch.DispatchError return 1
     if exact.method_index not=?1 or exact.promote_pos.length not=?2 return 2
     if exact.promote_pos[0] isnt? none return 3
-    let promoted=dispatch.match_ordered([floats] [number floating] [] [none none] none system @table)
+    let promoted=dispatch.match_ordered([floats] [number floating] [] [none none] none system subtyping.default_links @table)
     if promoted is? dispatch.DispatchError return 4
     if promoted.promote_pos.length not=?2 return 5
     if promoted.promote_pos[0] not=?floating or promoted.promote_pos[1] isnt? none return 6
-    let ambiguous=dispatch.match_ordered([ints ints] [integer integer] [] [none none] none system @table)
+    let ambiguous=dispatch.match_ordered([ints ints] [integer integer] [] [none none] none system subtyping.default_links @table)
     if ambiguous isnt? dispatch.DispatchError return 7
-    let missing=dispatch.match_ordered([ints] [boolean boolean] [] [none none] none system @table)
+    let missing=dispatch.match_ordered([ints] [boolean boolean] [] [none none] none system subtyping.default_links @table)
     return if missing is? dispatch.DispatchError 42 else 8
 }
