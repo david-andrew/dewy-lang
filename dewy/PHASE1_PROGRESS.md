@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 133 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 8 (≈29.4k lines, including `lower`, `check`, `borrowing`, `lifecycle_runtime`, `bounds`, `ssa`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 135 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 6 (≈26.5k lines: `lower`, `check`, `cache_values`, `lifecycle_runtime`, `ty`, `element_facts`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,34 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `borrowing` and `bounds` (2026-10-06)
+
+Row C2: 135 of 141 compiler modules are strict.
+
+Both modules built per-key lists and sets by reading an entry with `get`,
+changing the copy and storing it back. They now create a missing entry and
+change it in place (`forwards`, `callers`, `dependents`, scan reads; result
+obligations, loop-head cache entries). Exit states are trimmed in place
+(`let exit=@exits[i]`). Optional records are no longer fetched with `get`
+only to read a field: the parameter-summary checks in `borrowing` index the
+dict once presence is known.
+
+`bounds` is a flow analysis, so most of its 63 explicit copies are fact
+states handed from one transfer to the next (arm entries, loop heads, exits,
+the root state passed to each deferred body). These are the copies the
+module already made implicitly; spelling them makes them the inventory for
+the throughput campaign. The hosted compiler copies a dict element that a
+loop iterates even when nothing writes the dict, so the loop-qualifier and
+loop-head cache scans walk by index; the native compiler borrows both
+forms. A loop-head cache hit now collects its entry's values and applies
+them to the checker after the scan, so the scan never writes the checker it
+reads.
+
+The release workflow had been failing since 88b07a68: its seed, the last
+published pair, still loads `library/linux/system.dewy`. A seed that cannot
+build current sources now falls back to a hosted stage zero (54c8551c), and
+the native generations still certify the pair.
 
 ## Strict copies: `predicate_paths` and `ownership_liveness` (2026-10-06)
 

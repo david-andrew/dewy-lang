@@ -1,3 +1,4 @@
+$explicit_copies
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/bindings.dewy" as bindings
 import p"../../semantic/ty.dewy" as types
@@ -274,9 +275,9 @@ global_placed = (plan:captures.Plan nodes:array<hir.AST> indirect:dict<addr arra
                     }
                     if source is? none or source.binding in? plan.globals {marked.push(direct) continue}
                     if source.binding in? own_places {
-                        let users=forwards.get(id [])
+                        if id not in? forwards {forwards[id]=[]}
+                        let users=@forwards[id]
                         users.push(direct)
-                        forwards[id]=users
                     }
                 }
             }
@@ -325,7 +326,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
-                let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
+                let targets:array<addr> | none = if direct isnt? none [direct] else if node.func in? indirect indirect[node.func].copy else none
                 if targets isnt? none {
                     loop target in targets {
                         called.push(target)
@@ -367,14 +368,14 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
             hir.push_children(node @pending)
         }
         loop target in called {
-            let users=callers.get(target [])
+            if target not in? callers {callers[target]=[]}
+            let users=@callers[target]
             users.push(id)
-            callers[target]=users
         }
         loop target in shared {
-            let users=shared_callers.get(target [])
+            if target not in? shared_callers {shared_callers[target]=[]}
+            let users=@shared_callers[target]
             users.push(id)
-            shared_callers[target]=users
         }
     }
     return AmbientGraph[globals opaque exposes_storage callers shared_callers]
@@ -401,7 +402,8 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
     let graph=ambient_graph(plan nodes type_nodes indirect)
     let initial=if value_boundaries graph.exposes_storage else graph.opaque
     if not opaque_only {loop id in graph.globals {initial.push(id)}}
-    return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
+    if value_boundaries return propagate_ambient(initial graph.shared_callers)
+    return propagate_ambient(initial graph.callers)
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
@@ -455,21 +457,22 @@ prepare_view_scope = (scope:addr nodes:array<hir.AST> type_nodes:types.Table):>V
                 loop read_id in view_nodes(value nodes dependencies=true) {
                     let read=hir.node_at(nodes read_id)
                     if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
-                        let edges=dependents.get(read.binding_id set[])
-                        edges.push(target) dependents[read.binding_id]=edges
+                        if read.binding_id not in? dependents {dependents[read.binding_id]=set[]}
+                        let edges=@dependents[read.binding_id]
+                        edges.push(target)
                     }
                 }
             }
         }
         references.push(reads)
     }
-    return ViewScope[block.items references locals dependents starts ends]
+    return ViewScope[block.items.copy references locals dependents starts ends]
 }
 view_region = (scope:ViewScope declaration:addr excluded:set<addr> nodes:array<hir.AST>):>array<addr> => {
     let declared=hir.node_at(nodes declaration)
     $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
     let start=scope.starts.get(declaration)
-    if start is? none return scope.items
+    if start is? none return scope.items.copy
     let last=scope.ends.get(declaration)
     $runtime_assert last isnt? none
     let stop:addr=last
@@ -481,7 +484,7 @@ view_region = (scope:ViewScope declaration:addr excluded:set<addr> nodes:array<h
             if target not in? live {live.push(target) pending.push(target)}
         }
     }
-    loop binding in live {if binding in? excluded or binding not in? scope.locals return scope.items}
+    loop binding in live {if binding in? excluded or binding not in? scope.locals return scope.items.copy}
     loop index in 0.. and index <? scope.references.length {
         loop binding in scope.references[index] {if binding in? live and index >? stop {stop=index}}
     }
@@ -566,17 +569,19 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
                 if item.id in? unscoped continue
                 unscoped.push(item.id)
             } else {
-                let scopes=seen.get(item.id set[])
+                if item.id not in? seen {seen[item.id]=set[]}
+                let scopes=@seen[item.id]
                 if item.scope in? scopes continue
-                scopes.push(item.scope) seen[item.id]=scopes
+                scopes.push(item.scope)
             }
             let node=hir.node_at(nodes item.id)
             if node is? hir.FunctionLiteral continue
             let scope=item.scope
             if node is? hir.Block and node.scoped {scope=item.id}
             if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? demands and scope isnt? none {
-                let known=candidates.get(item.id set[])
-                known.push(scope) candidates[item.id]=known
+                if item.id not in? candidates {candidates[item.id]=set[]}
+                let known=@candidates[item.id]
+                known.push(scope)
                 result.scopes[node.binding_id]=scope
             }
             loop child in hir.children(node) {pending.push(ScopeItem[child scope])}
@@ -727,7 +732,6 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? candidates {
-            let sites=scan.reads.get(node.binding_id default=[])
             let owner=hir.node_at(nodes parent)
             let observed=not exposed and owner is? hir.TypeTest|hir.ArrayLength
             if not exposed and (owner is? hir.MemberAccess or (owner is? hir.ForwardingAccess and types.is_primitive(types.node_at(type_nodes owner.exception_type) 'never'))) {
@@ -750,8 +754,10 @@ scan_reads = (id:addr parent:addr guarded:bool candidates:set<addr> nodes:array<
             # (`items.values.length`) is an inspection as well.
             if observing and not exposed {observed=true}
             if id in? scan.mutated {observed=true}
-            sites.push(ReadSite[id parent guarded scan.exited observed returning looped])
-            scan.reads[node.binding_id]=sites
+            let site=ReadSite[id parent guarded scan.exited observed returning looped]
+            if node.binding_id not in? scan.reads {scan.reads[node.binding_id]=[]}
+            let sites=@scan.reads[node.binding_id]
+            sites.push(site)
         }
         return void
     }
@@ -962,7 +968,10 @@ stable_elements = (source:Route stable:set<addr> parameters:dict<addr effects.Pa
     if summary is? none return false
     return effects.element_stable_at(summary effects.Route[source.fields])
 }
-analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
+analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => {
+    let found=details(root nodes type_nodes plan)
+    return found.arguments
+}
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false registry:bindings.Registry=bindings.Registry[]):>Plan => {
     let valued=captures.value_functions(root nodes plan)
     let indirect=callbacks.analyze(root nodes type_nodes.copy plan links function_values=valued)
@@ -1037,8 +1046,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             # `remember_place`, receivers included), so each parameter's own
             # summary covers every write that can reach its storage.
             if parameter.place and id in? dirty and id in? aliased continue
-            let summary=summaries.by_param_binding.get(binding)
-            if summary isnt? none {stable_parameters[binding]=summary}
+            if binding in? summaries.by_param_binding {stable_parameters[binding]=summaries.by_param_binding[binding].copy}
         }
     }
     let borrowed_literals:set<addr>=set[]
@@ -1112,7 +1120,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             }
         }
         let direct=captures.resolve(node.func node.selected_method_index plan nodes)
-        let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
+        let targets:array<addr> | none = if direct isnt? none [direct] else if node.func in? indirect indirect[node.func].copy else none
         if targets is? none {targets=effects.direct_targets(node analysis nodes)}
         if targets is? none {
             loop argument in arguments(node) {
@@ -1126,9 +1134,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
         let allowed_all:set<addr>=set[]
         loop argument in arguments(node) {allowed_all.push(argument)}
-        let temporary_all=allowed_all
-        let reclaim_all=allowed_all
-        let consumed_all=allowed_all
+        let temporary_all=allowed_all.copy
+        let reclaim_all=allowed_all.copy
+        let consumed_all=allowed_all.copy
         loop direct in targets {
             let literal=hir.node_at(nodes direct)
             $runtime_assert literal is? hir.FunctionLiteral
@@ -1146,10 +1154,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             }
             loop pair in pairs {
                 if hir.node_at(nodes pair.argument) isnt? hir.Place continue
-                let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-                if summary isnt? none and summary.escapes.length =? 0 {
+                let parameter=pair.parameter
+                if parameter isnt? none and parameter in? summaries.by_param_binding and summaries.by_param_binding[parameter].escapes.length =? 0 {
                     safe_places.push(pair.argument)
-                    if effects.preserves_storage(summary hir.node_at(nodes pair.argument).value_type type_nodes) {fixed_places.push(pair.argument)}
+                    if effects.preserves_storage(summaries.by_param_binding[parameter] hir.node_at(nodes pair.argument).value_type type_nodes) {fixed_places.push(pair.argument)}
                     else {changed_places.push(pair.argument)}
                 } else {unsafe_places.push(pair.argument)}
             }
@@ -1168,7 +1176,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                     continue
                 }
                 let source=route(peel_argument(pair.argument nodes type_nodes) nodes)
-                let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
+                let summary:effects.ParameterEffects?=if pair.parameter isnt? none and pair.parameter in? summaries.by_param_binding summaries.by_param_binding[pair.parameter].copy else none
                 if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.push(pair.argument)}
                 else {retained.push(pair.argument)}
                 # A by-value callee that keeps its parameter keeps its own
@@ -1203,11 +1211,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             reclaim_all=reclaim_all & (reclaim-kept)
             consumed_all=consumed_all & donated
         }
+        if id in? forwarded {allowed_all=allowed_all | forwarded[id]}
         result[id]=allowed_all
         disposable[id]=temporary_all
         reclaimable[id]=reclaim_all
-        let proven=forwarded.get(id set[])
-        if proven.length >? 0 {result[id]=result.get(id set[]) | proven}
         if consumed_all.length >? 0 {consumed_arguments[id]=consumed_all}
     }
     let escaping:set<addr>=set[]
