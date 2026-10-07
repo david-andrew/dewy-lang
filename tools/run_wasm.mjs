@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// run_wasm.mjs MODULE.wasm : run a wasm32 module from the Dewy or µDewy
-// toolchain outside a browser. The host imports a command line can give are
+// run_wasm.mjs MODULE.wasm [CALLS] : run a wasm32 module from the Dewy or
+// µDewy toolchain outside a browser, calling `main` CALLS times (default 1)
+// as the browser harness does once per animation frame. The host imports a command line can give are
 // provided: `host_log` writes the bytes to standard output, `host_log_int`
 // writes a number, `host_exit` ends the process with its status, and
 // `host_time`/`host_random` behave as in the browser harness. Any other
-// import (DOM, canvas, audio) fails when called. The exit status is `main`'s
-// result.
+// import (DOM, canvas, audio) fails when called. The exit status is the last
+// call's result.
 import fs from 'node:fs';
 
 const bytes = fs.readFileSync(process.argv[2]);
@@ -57,5 +58,7 @@ env.host_time = () => BigInt(Date.now());
 env.host_random = () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
 
 const instance = new WebAssembly.Instance(module, { env });
-const status = instance.exports.main();
+const calls = Number(process.argv[3] ?? 1);
+let status = 0;
+for (let call = 0; call < calls; call++) status = instance.exports.main();
 process.exitCode = Number(BigInt.asUintN(8, BigInt(status)));

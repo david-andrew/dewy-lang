@@ -290,6 +290,32 @@ def _prepare_checked(ast: hir.AST, srcfile: SrcFile | None, *, entry_name: str) 
     return PreparedProgram(program, ast)
 
 
+def _startup_done(program: lower.LoweredProgram) -> str:
+    return f'{program.startup_symbol}_done'
+
+
+def module_globals(program: lower.LoweredProgram, ast: hir.Block) -> list[hir.Declare]:
+    """The lowered globals, then the flag that startup has run."""
+    if not program.needs_startup:
+        return program.globals
+    done = hir.Declare(ast.loc, ty.VOID_TYPE, 'let', _startup_done(program), 'bool', hir.Bool(ast.loc, 'bool', False))
+    return [*program.globals, done]
+
+
+def _startup_once(program: lower.LoweredProgram, ast: hir.Block) -> list[hir.AST]:
+    """The entry may run more than once: a wasm32 host calls `main` again on
+    every animation frame. Startup then returns at once, so the module state
+    top-level code set up persists between calls."""
+    name = _startup_done(program)
+    finished = hir.Block(ast.loc, ty.VOID_TYPE, [hir.Return(ast.loc, ty.BOTTOM_TYPE, None)], True)
+    tested = hir.ExpressedIdentifier(ast.loc, 'bool', name)
+    marked = hir.ExpressedIdentifier(ast.loc, 'bool', name)
+    return [
+        hir.Flow(ast.loc, ty.VOID_TYPE, [hir.IfArm(ast.loc, ty.VOID_TYPE, tested, finished)]),
+        hir.Assign(ast.loc, ty.VOID_TYPE, marked, '=', hir.Bool(ast.loc, 'bool', True)),
+    ]
+
+
 def module_functions(program: lower.LoweredProgram, ast: hir.Block) -> dict[str, hir.FunctionLiteral]:
     """Complete lowered function units with the shared startup/entry wrappers."""
     functions: dict[str, hir.FunctionLiteral] = {}
@@ -307,7 +333,8 @@ def module_functions(program: lower.LoweredProgram, ast: hir.Block) -> dict[str,
             body=hir.Block(
                 ast.loc,
                 ty.VOID_TYPE,
-                program.startup_items,
+                # the guard returns early, so the body ends with an explicit return too
+                [*_startup_once(program, ast), *program.startup_items, hir.Return(ast.loc, ty.BOTTOM_TYPE, None)],
                 True,
             ),
         )
@@ -341,8 +368,9 @@ def module_functions(program: lower.LoweredProgram, ast: hir.Block) -> dict[str,
 @timing.phase('emission')
 def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locations: bool) -> str:
     functions = module_functions(program, ast)
+    globals_ = module_globals(program, ast)
     code: list[str] = []
-    global_names = {declaration.name for declaration in program.globals}
+    global_names = {declaration.name for declaration in globals_}
     ctx = EmitContext(
         set(functions) | set(builtins.builtin_types),
         global_names,
@@ -351,7 +379,7 @@ def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locati
         debug_raw_arrays=program.debug_raw_arrays,
     )
     ctx.include_directives = {}
-    for declaration in program.globals:
+    for declaration in globals_:
         code.append(emit_declare(declaration, ctx))
     for name, func in functions.items():
         code.append(emit_function_decl(name, func, ctx))

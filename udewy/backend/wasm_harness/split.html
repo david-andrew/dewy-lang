@@ -29,17 +29,9 @@ async function run() {
             await beforeUdewyInstantiate(imports);
         }
         const { instance } = await WebAssembly.instantiate(bytes, imports);
-        wasmInstance = instance;
-        const result = instance.exports.main();
-        console.log('Exit code:', result);
-        if (canvasMode || webglMode || gpuMode) {
-            document.body.classList.add('canvas-mode');
-            requestAnimationFrame(animationLoop);
-        } else if (audioStreamMode) {
-            requestAnimationFrame(animationLoop);
-        }
+        startUdewy(instance);
     } catch (err) {
-        console.error('Error:', err);
+        endProgram(err);
     }
 }
 

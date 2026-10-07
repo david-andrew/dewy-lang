@@ -1,5 +1,5 @@
 $explicit_copies
-from reporting import SrcFile
+from reporting import SrcFile, Span
 import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"../../timing.dewy" as timing
@@ -608,8 +608,29 @@ optimized = (functions:array<program.Function> ctx:ssa.Context @state:State):>ar
     return result
 }
 # The caller's node arena and type table move into the working state.
-normalize = (source:program.Program nodes:array<hir.AST> type_table:types.Table source_files:array<SrcFile> optimizing:bool=false timings:bool=false native_code:bool=false native_wasm:bool=false):>Result => {
+# The entry may run more than once: a wasm32 host calls `main` again on
+# every animation frame. Startup then returns at once, so the module state
+# top-level code set up persists between calls.
+startup_once = (given:program.Program @state:State):>program.Program => {
+    if not given.needs_startup return given
+    let at=Span[0 0]
+    let flag=boolean(@state)
+    let name="{given.startup_symbol}_done"
+    let globals=given.globals.copy
+    globals.push(put(hir.Declare[at void_type(@state) 'let' name flag put(hir.Bool[at flag false] @state)] @state))
+    let finished=put(hir.Block[at void_type(@state) [put(hir.Return[at void_type(@state)] @state)] true] @state)
+    let tested=put(hir.ExpressedIdentifier[at flag name] @state)
+    let marked=put(hir.ExpressedIdentifier[at flag name] @state)
+    let startup:array<addr>=[
+        put(hir.Flow[at void_type(@state) [put(hir.IfArm[at void_type(@state) tested finished] @state)]] @state)
+        put(hir.Assign[at void_type(@state) marked '=' put(hir.Bool[at flag true] @state)] @state)
+    ]
+    append(@startup given.startup_items)
+    return program.Program[given.functions globals startup given.user_main_symbol given.startup_symbol given.needs_startup given.argv_prologue given.argv_value given.source]
+}
+normalize = (given:program.Program nodes:array<hir.AST> type_table:types.Table source_files:array<SrcFile> optimizing:bool=false timings:bool=false native_code:bool=false native_wasm:bool=false):>Result => {
     let state=State[nodes type_table]
+    let source=startup_once(given @state)
     let functions:array<program.Function>=[]
     state.in_function=true
     loop entry in source.functions {

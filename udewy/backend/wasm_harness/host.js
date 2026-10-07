@@ -10,6 +10,7 @@ let canvas = null;
 let ctx = null;
 let canvasBuffer = null;
 let canvasBufferPtr = 0;
+let canvasBufferBytes = 0;
 let canvasWidth = 0;
 let canvasHeight = 0;
 let frameCount = 0;
@@ -25,6 +26,7 @@ let audioSampleRate = 44100;
 let audioNumSamples = 0;
 let audioChannels = 1;
 let audioBufferPtr = 0;
+let audioBufferBytes = 0;
 let audioPendingPlay = false;
 let audioResumePending = false;
 let audioPromptTimer = null;
@@ -72,16 +74,20 @@ function audioQueueEnsureContext() {
         audioCtx = new AudioContext({ sampleRate: audioQueueRate });
     }
     audioQueueNode = audioCtx.createScriptProcessor(AUDIO_QUEUE_BLOCK, 0, audioQueueChannels);
+    // The ring holds interleaved frames: one sample per channel.
     audioQueueNode.onaudioprocess = (e) => {
-        const ch = e.outputBuffer.getChannelData(0);
+        const channels = [];
+        for (let c = 0; c < audioQueueChannels; c++) channels.push(e.outputBuffer.getChannelData(c));
         for (let i = 0; i < AUDIO_QUEUE_BLOCK; i++) {
-            if (audioQueueCount > 0) {
-                const s = audioQueueRing[audioQueueRead];
-                audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;
-                audioQueueCount--;
-                ch[i] = s / 32768.0;
-            } else {
-                ch[i] = 0;
+            for (let c = 0; c < audioQueueChannels; c++) {
+                if (audioQueueCount > 0) {
+                    const s = audioQueueRing[audioQueueRead];
+                    audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;
+                    audioQueueCount--;
+                    channels[c][i] = s / 32768.0;
+                } else {
+                    channels[c][i] = 0;
+                }
             }
         }
     };
@@ -124,8 +130,22 @@ let audioReadBuffer = 0;
 let audioBuffer0Ready = false;
 let audioBuffer1Ready = false;
 const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling
-const AUDIO_BUFFER_0_OFFSET = 786432;
-const AUDIO_BUFFER_1_OFFSET = 786432 + (AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
+let AUDIO_BUFFER_0_OFFSET = 0;
+let AUDIO_BUFFER_1_OFFSET = 0;
+
+// Buffers the host hands the module (canvas pixels, audio samples) lie past
+// the memory the module asked for: its data, static reservations and stack
+// fill that, so each buffer grows the memory instead.
+let hostMemoryTop = 0;
+function hostAlloc(bytes) {
+    if (hostMemoryTop === 0) hostMemoryTop = memory.buffer.byteLength;
+    const pointer = hostMemoryTop;
+    hostMemoryTop += Math.ceil(bytes / 16) * 16;
+    if (hostMemoryTop > memory.buffer.byteLength) {
+        memory.grow(Math.ceil((hostMemoryTop - memory.buffer.byteLength) / 65536));
+    }
+    return pointer;
+}
 
 const udewyTextEncoder = new TextEncoder();
 const udewyTextDecoder = new TextDecoder();
@@ -217,8 +237,76 @@ function decodeI64Array(ptr, count) {
     return values;
 }
 
+// Printed text goes to the page and, a whole line at a time, to the console
+// (a program prints a line in pieces).
+let consoleLine = '';
 function appendOutput(text) {
-    console.log(text);
+    if (outputElement) {
+        outputElement.textContent += text;
+    }
+    const lines = (consoleLine + text).split('\n');
+    consoleLine = lines.pop();
+    for (const line of lines) console.log(line);
+}
+
+function flushConsole() {
+    if (consoleLine) console.log(consoleLine);
+    consoleLine = '';
+}
+
+// The program has ended badly: show the output, over the canvas if one has
+// the page.
+function reportFailure(message) {
+    flushConsole();
+    console.error(message);
+    if (!outputElement) return;
+    outputElement.textContent += `${outputElement.textContent && !outputElement.textContent.endsWith('\n') ? '\n' : ''}${message}\n`;
+    outputElement.style.display = 'block';
+    if (canvasMode || webglMode || gpuMode) {
+        outputElement.style.cssText = 'display:block; position:fixed; left:0; right:0; bottom:0; max-height:40vh; overflow:auto; margin:0; border-radius:0; z-index:10000;';
+    }
+}
+
+// `host_exit` ends the program: this unwinds the module back to the page,
+// which stops calling `main`.
+class UdewyExit extends Error {
+    constructor(code) {
+        super(`exit ${code}`);
+        this.code = BigInt(code);
+    }
+}
+
+function endProgram(err) {
+    if (err instanceof UdewyExit) {
+        flushConsole();
+        console.log(`Exit code: ${err.code}`);
+        if (err.code !== 0n) reportFailure(`Exit code: ${err.code}`);
+        return;
+    }
+    console.error(err);
+    reportFailure(`Error: ${err && err.message ? err.message : err}`);
+}
+
+// The first call to `main`. A program that set up a canvas, WebGL, the GPU
+// or an audio stream is then called again once per animation frame; module
+// startup runs only on the first call.
+function startUdewy(instance) {
+    wasmInstance = instance;
+    let result;
+    try {
+        result = instance.exports.main();
+    } catch (err) {
+        endProgram(err);
+        return;
+    }
+    flushConsole();
+    console.log(`Exit code: ${result}`);
+    if (canvasMode || webglMode || gpuMode) {
+        document.body.classList.add('canvas-mode');
+        requestAnimationFrame(animationLoop);
+    } else if (audioStreamMode) {
+        requestAnimationFrame(animationLoop);
+    }
 }
 
 function getDisplayCanvas() {
@@ -293,13 +381,11 @@ function unlockCanvasAspect() {
 }
 
 function ensureCanvasMemory(width, height) {
-    const requiredBytes = canvasBufferPtr + (width * height * 4);
-    if (requiredBytes <= memory.buffer.byteLength) {
-        return;
+    const requiredBytes = width * height * 4;
+    if (requiredBytes > canvasBufferBytes) {
+        canvasBufferPtr = hostAlloc(requiredBytes);
+        canvasBufferBytes = requiredBytes;
     }
-    const pageSize = 65536;
-    const pages = Math.ceil((requiredBytes - memory.buffer.byteLength) / pageSize);
-    memory.grow(pages);
 }
 
 function hideAudioPrompt() {
@@ -506,13 +592,26 @@ function releaseAllKeys() {
     clearKeyboardFrameState();
 }
 
+// While a canvas has the page, keys that would scroll it or move focus act
+// only as game input; browser shortcuts (reload, developer tools, any key
+// with Ctrl, Alt or Meta) keep working.
+const GAME_KEYS = new Set([
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'Backspace',
+    'PageUp', 'PageDown', 'Home', 'End', 'Slash', 'Quote',
+]);
+function gameKeyDefault(event) {
+    if (!(canvasMode || webglMode || gpuMode)) return false;
+    if (event.ctrlKey || event.altKey || event.metaKey) return false;
+    return GAME_KEYS.has(event.code);
+}
+
 function ensureKeyboardHandlers() {
     if (keyboardInstalled) return;
     keyboardInstalled = true;
 
     window.addEventListener('keydown', (event) => {
         const code = event.code || event.key;
-        if (canvasMode || webglMode) {
+        if (gameKeyDefault(event)) {
             event.preventDefault();
         }
         if (!keysDown.has(code)) {
@@ -524,7 +623,7 @@ function ensureKeyboardHandlers() {
 
     window.addEventListener('keyup', (event) => {
         const code = event.code || event.key;
-        if (canvasMode || webglMode) {
+        if (gameKeyDefault(event)) {
             event.preventDefault();
         }
         if (keysDown.has(code)) {
@@ -720,13 +819,11 @@ const imports = {
         memory: memory,
         // Direct browser APIs
         host_log: (ptr, len) => {
-            const text = decodeString(ptr, len);
-            console.log(text);
+            appendOutput(decodeString(ptr, len));
             return len;
         },
         host_exit: (code) => {
-            appendOutput(`\nExit code: ${code}\n`);
-            return code;
+            throw new UdewyExit(code);
         },
         host_time: () => BigInt(Date.now()),
         host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
@@ -923,9 +1020,7 @@ const imports = {
                 outputElement.style.display = 'none';
             }
             
-            // Allocate buffer in WASM memory (RGBA: 4 bytes per pixel)
-            // Use a fixed location after the stack (at 256KB)
-            canvasBufferPtr = 262144;
+            // The RGBA pixel buffer (4 bytes per pixel), past the module's memory
             ensureCanvasMemory(canvasWidth, canvasHeight);
             
             return BigInt(canvasBufferPtr);
@@ -980,9 +1075,12 @@ const imports = {
             audioSampleRate = Number(sampleRate);
             audioNumSamples = Number(numSamples);
             audioChannels = Number(channels);
-            // Allocate buffer after canvas buffer (at 768KB)
             // Each sample is i16 (2 bytes), per channel
-            audioBufferPtr = 786432;
+            const bytes = audioNumSamples * audioChannels * 2;
+            if (bytes > audioBufferBytes) {
+                audioBufferPtr = hostAlloc(bytes);
+                audioBufferBytes = bytes;
+            }
             return BigInt(audioBufferPtr);
         },
         host_audio_play: () => {
@@ -1006,6 +1104,10 @@ const imports = {
             audioReadBuffer = 0;
             audioBuffer0Ready = false;
             audioBuffer1Ready = false;
+            if (AUDIO_BUFFER_0_OFFSET === 0) {
+                AUDIO_BUFFER_0_OFFSET = hostAlloc(AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
+                AUDIO_BUFFER_1_OFFSET = hostAlloc(AUDIO_SCRIPT_BUFFER_SIZE * 2);
+            }
             
             if (!audioCtx) {
                 audioCtx = new AudioContext({ sampleRate: audioSampleRate });
@@ -1427,7 +1529,7 @@ ${String(err)}`;
         host_audio_queue_init: (sampleRate, channels) => {
             audioQueueRate = Number(sampleRate);
             audioQueueChannels = Number(channels);
-            audioQueueCapacity = audioQueueRate * 2;  // ~2 s of buffer
+            audioQueueCapacity = audioQueueRate * audioQueueChannels * 2;  // ~2 s of buffer
             audioQueueRing = new Int16Array(audioQueueCapacity);
             audioQueueRead = 0;
             audioQueueWrite = 0;
@@ -1442,6 +1544,9 @@ ${String(err)}`;
         },
         host_audio_queue_push: (ptr, nBytes) => {
             if (!audioQueueRing) return 0n;
+            // Until a gesture unlocks audio nothing plays: samples queued
+            // then would all sound late, at once. They are taken and dropped.
+            if (!audioCtx || audioCtx.state !== 'running') return nBytes;
             const samples = Number(nBytes) >> 1;
             const view = new Int16Array(memory.buffer, Number(ptr), samples);
             for (let i = 0; i < samples; i++) {
@@ -1460,7 +1565,13 @@ function animationLoop() {
     if ((!canvasMode && !audioStreamMode && !webglMode && !gpuMode) || !wasmInstance) return;
 
     frameCount++;
-    wasmInstance.exports.main();
+    try {
+        wasmInstance.exports.main();
+    } catch (err) {
+        endProgram(err);
+        return;
+    }
+    flushConsole();
     clearKeyboardFrameState();
     requestAnimationFrame(animationLoop);
 }

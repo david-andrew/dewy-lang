@@ -1670,10 +1670,12 @@ Instead of syscalls, the WASM backend provides browser-focused host functions:
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `__host_log__(ptr len)` | 2 | Output text to browser console |
-| `__host_exit__(code)` | 1 | Signal program exit |
+| `__host_log__(ptr len)` | 2 | Output text to the page and the browser console |
+| `__host_exit__(code)` | 1 | End the program (does not return) |
 | `__host_time__()` | 0 | Current timestamp in milliseconds |
-| `__host_random__()` | 0 | Random 64-bit integer |
+| `__host_random__()` | 0 | Random non-negative integer (below 2^53) |
+
+`__host_exit__` unwinds the module back to the page, which stops calling `main`. A nonzero code, or a trap, shows the output so far and the reason over the page, canvas included.
 
 > These are subject to change
 
@@ -1711,6 +1713,10 @@ The WASM backend provides intrinsics for canvas-based graphics with animation su
 4. Write RGBA pixels (4 bytes per pixel) to the buffer: `[R, G, B, A, R, G, B, A, ...]`
 5. Call `__canvas_present__()` to display the frame
 6. The runtime automatically calls `main()` each animation frame when canvas mode is active
+
+The pixel buffer lies past the memory the module asked for (its data, static reservations and stack), so it never overlaps program storage. Calling `__canvas_init__` again with a size that fits keeps the buffer; a larger size moves it, so use the returned pointer.
+
+A Dewy program's top-level code runs on the first call to `main` only; later calls (one per animation frame) run just the program's `main` function, so module state persists between frames.
 
 `__canvas_set_aspect_lock__(enabled)` expects a udewy boolean value, normally passed as the `true` or `false` literals. Internally, any non-zero value enables the lock and `0` disables it.
 
@@ -1768,6 +1774,8 @@ The WASM backend also exposes keyboard state using browser `KeyboardEvent.code` 
 
 These intrinsics are intended for animated WASM programs running under canvas or WebGL, where `main()` is called once per frame.
 
+While a canvas, WebGL or GPU surface has the page, keys that would scroll it or move focus (arrows, `Space`, `Tab`, `Backspace`, `PageUp`/`PageDown`, `Home`/`End`, `/`, `'`) act only as program input; other keys, and any key held with Ctrl, Alt or Meta, keep their browser behavior. A key press or a click also unlocks audio (D.10).
+
 ## D.8 WebGL Shader Intrinsics
 
 The WASM backend also provides a minimal WebGL path for fullscreen fragment shader demos driven by udewy strings and integer uniforms:
@@ -1809,6 +1817,26 @@ python -m udewy.p0 --target wasm32 --split-wasm program.udewy
 ```
 
 When served with `--serve-wasm` or `--split-wasm`, the local server exits automatically after the browser tab closes.
+
+## D.10 Audio Intrinsics
+
+Samples are signed 16-bit integers. Browsers keep audio silent until the page receives a key press or a click; until then a small "Click to Enable Audio" button shows.
+
+**Queue (recommended for sound effects and music).** The program pushes samples from its own memory whenever it has them; they play in order.
+
+| Intrinsic | Args | Description |
+|-----------|------|-------------|
+| `__audio_queue_init__(sample_rate channels)` | 2 | Start the queue (about 2 s of capacity); returns 0, or -1 when audio is unavailable |
+| `__audio_queue_push__(ptr n_bytes)` | 2 | Queue `n_bytes` of interleaved samples (one per channel per frame); returns the bytes taken |
+| `__audio_queue_size__()` | 0 | Bytes queued and not yet played |
+
+Samples pushed while audio is still locked are dropped, so they do not all sound at once when it unlocks. A short effect pushed when nothing is queued starts within about 50 ms.
+
+**One shot.** `__audio_init__(sample_rate n_samples channels)` returns a buffer for `n_samples` samples per channel (interleaved); fill it, then `__audio_play__()` plays it once. `__audio_sample_rate__()` returns the rate.
+
+**Stream (mono).** `__audio_stream_init__(sample_rate buffer_size)` returns a buffer of 8192 samples; while `__audio_stream_needs_samples__()` is true, fill the buffer and call `__audio_stream_write__()`, which returns the next buffer to fill. The runtime calls `main()` each animation frame in stream mode.
+
+All of these buffers lie past the module's memory, like the canvas buffer.
 
 ---
 

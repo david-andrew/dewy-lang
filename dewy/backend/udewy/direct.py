@@ -26,10 +26,11 @@ class _DirectEmitter:
             raise ValueError('the HIR backend bridge requires debugger metadata to be disabled')
         self.backend = backend
         self.functions = emit.module_functions(program, root)
+        self.globals = emit.module_globals(program, root)
         self.state = p0.begin_parse(backend)
         self.ctx = emit.EmitContext(
             set(self.functions) | set(builtins.builtin_types),
-            {declaration.name for declaration in program.globals},
+            {declaration.name for declaration in self.globals},
             debug_locations=False,
         )
         self.program = program
@@ -449,7 +450,7 @@ class _DirectEmitter:
     def compile(self):
         # Includes have already been decoded in the lowered HIR. Definitions
         # still follow source order, including references in static words.
-        for declaration in self.program.globals:
+        for declaration in self.globals:
             self.global_declaration(declaration)
         for name, function in self.functions.items():
             self.function(name, function)
