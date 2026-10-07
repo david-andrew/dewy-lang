@@ -29,10 +29,22 @@ jobs:
       - name: Install wabt (wat2wasm for the wasm32 target and playground tests)
         run: sudo apt-get update && sudo apt-get install -y wabt
 
+      # Runs were stopped near the end ("the runner has received a shutdown
+      # signal"), as when the hosted runner exhausts its disk or memory.
+      # Toolchains this suite never uses free about 20 GB of disk.
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Run pytest
         # Native compiler-kernel tests build whole compiler slices. Keep
         # their concurrent working sets within the hosted runner's memory.
-        run: uv run --group dev pytest -q -n 2 --tb=short --junitxml=test-results.xml
+        # A passing test's temporary directory is removed as it finishes;
+        # tools/ci_watch.sh then drops its build cache and logs resources.
+        run: |
+          tools/ci_watch.sh &
+          uv run --group dev pytest -q -n 2 --tb=short --junitxml=test-results.xml -o tmp_path_retention_policy=failed
 
       - name: Preserve structured test results
         if: always()

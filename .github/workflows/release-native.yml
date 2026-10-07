@@ -66,7 +66,7 @@ jobs:
             exit 0
           fi
           if git diff --quiet "$base" "$CERTIFIED_SHA" -- 'dewy/bootstrap/**/*.dewy' 'udewy/bootstrap/**/*.udewy' \
-              'udewy/stdlib/**/*.udewy' 'library/**/*.dewy' 'library/**/*.bin' VERSION tools/bootstrap_native.sh \
+              'udewy/stdlib/**/*.udewy' 'udewy/backend/wasm_harness/*' 'library/**/*.dewy' 'library/**/*.bin' VERSION tools/bootstrap_native.sh \
               tools/bootstrap_hosted_seed.sh tools/check_native.sh tools/package_native.sh tools/dewy_test.dewy \
               tools/dewy_gdb.py tools/dewy_lldb.py .github/workflows/release-native.yml; then
             echo 'needed=false' >> "$GITHUB_OUTPUT"
