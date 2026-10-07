@@ -107,14 +107,29 @@ jobs:
           seed/udewy --help > /dev/null
       - name: Rebuild both native compilers and verify matching generations
         if: steps.relevant.outputs.needed == 'true'
+        id: rebuild
         # This includes both-backend execution checks of generation one.
         # Generation two must then match it byte for byte.
         env:
           DEWY_BOOTSTRAP_LTO_JOBS: 2
+          HOSTED_SEED: ${{ inputs.hosted_seed }}
         # The published seed was built from older sources, so its first
         # generation lowers this source differently; the last two of three
         # generations are both products of this source and must match.
-        run: bash tools/bootstrap_native.sh --target c --generations 3 seed/dewy seed/udewy native-pair
+        # A published seed that can no longer read current sources (a removed
+        # library module, say) falls back to a hosted stage zero; the native
+        # generations still certify the result.
+        run: |
+          if bash tools/bootstrap_native.sh --target c --generations 3 seed/dewy seed/udewy native-pair; then
+            echo "hosted_seed=$([[ "$HOSTED_SEED" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$HOSTED_SEED" == true ]]; then exit 1; fi
+          echo 'The published seed failed on these sources; recovering stage zero with the hosted compiler.' >&2
+          rm -rf native-pair hosted-seed
+          bash tools/bootstrap_hosted_seed.sh hosted-seed
+          bash tools/bootstrap_native.sh --target c --generations 3 hosted-seed/dewy hosted-seed/udewy native-pair
+          echo 'hosted_seed=true' >> "$GITHUB_OUTPUT"
       - name: Certify hosted/native agreement on the complete paired manifest
         if: steps.relevant.outputs.needed == 'true'
         # Acceptance, rejection and execution of every case, with independent
@@ -152,4 +167,4 @@ jobs:
           gh release create "$release_tag" dewy-linux-x86_64.tar.gz dewy-linux-x86_64.tar.gz.sha256 \
             udewy-linux-x86_64 udewy-linux-x86_64.sha256 \
             --latest --target "$CERTIFIED_SHA" --title "Dewy native ${CERTIFIED_SHA::12}" \
-            --notes "Development native Dewy/µDewy pair from ${CERTIFIED_SHA} for Linux x86_64. Certified for this exact revision: the full test suite passed, the complete paired hosted/native manifest passed, and the last two of three native generations match byte-for-byte, with matching runtime library. Stage-zero seed recovery used the hosted compiler: ${{ inputs.hosted_seed == true }}. All verification generations are native. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
+            --notes "Development native Dewy/µDewy pair from ${CERTIFIED_SHA} for Linux x86_64. Certified for this exact revision: the full test suite passed, the complete paired hosted/native manifest passed, and the last two of three native generations match byte-for-byte, with matching runtime library. Stage-zero seed recovery used the hosted compiler: ${{ steps.rebuild.outputs.hosted_seed }}. All verification generations are native. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
