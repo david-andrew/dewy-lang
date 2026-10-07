@@ -166,7 +166,8 @@ def test_the_editor_session_shows_dewy_frames_values_and_breakpoints(tmp_path: P
         session.send('variables', {'variablesReference': locals_scope['variablesReference']})
         shown = {variable['name']: (variable['value'], variable.get('type')) for variable in session.wait(command='variables')['body']['variables']}
         assert shown['hits'] == ('[Hit[length=3 name="a"] Hit[length=10 name="b"]]', 'array<Hit>')
-        assert shown['label'] == ('"run"', 'string') and shown['maybe'] == ('none', 'int64 | none')
+        # `maybe` is not assigned yet on this line: its slot holds no defined value
+        assert shown['label'] == ('"run"', 'string') and shown['maybe'][1] == 'int64 | none'
         assert shown['total'] == ('0', 'int64') and shown['h'] == ('Hit[length=3 name="a"]', 'Hit')
         session.send('evaluate', {'expression': 'h', 'frameId': frames[0]['id'], 'context': 'hover'})   # a hover
         assert session.wait(command='evaluate')['body']['result'] == 'Hit[length=3 name="a"]'
@@ -180,7 +181,14 @@ def test_the_editor_session_shows_dewy_frames_values_and_breakpoints(tmp_path: P
         stop = session.wait(event='stopped')['body']
         assert 'SIGTRAP' in stop.get('description', '') or stop['reason'] == 'exception'
         session.send('stackTrace', {'threadId': thread})
-        assert session.wait(command='stackTrace')['body']['stackFrames'][0]['line'] == 8
+        frames = session.wait(command='stackTrace')['body']['stackFrames']
+        assert frames[0]['line'] == 8
+        session.send('scopes', {'frameId': frames[0]['id']})
+        scopes = session.wait(command='scopes')['body']['scopes']
+        locals_scope = next(scope for scope in scopes if scope['name'] == 'Local')
+        session.send('variables', {'variablesReference': locals_scope['variablesReference']})
+        shown = {variable['name']: (variable['value'], variable.get('type')) for variable in session.wait(command='variables')['body']['variables']}
+        assert shown['maybe'] == ('none', 'int64 | none') and shown['total'] == ('9', 'int64')   # 9 is not above 10
         console = ''.join(session.output)
         assert '── breakpoint at session.dewy:8 ──' in console and 'total = 9' in console                # the snapshot, in the Debug Console
     finally:
