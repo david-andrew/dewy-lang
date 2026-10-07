@@ -45,7 +45,7 @@ product = (left:addr right:addr context:contexts.Context @session:contexts.Sessi
         if number is? none return none
         let empty=types.dimension([] @session.types)
         let dimension=types.multiply_dimensions(if a is? types.QuantityType a.dimension else empty if b is? types.QuantityType b.dimension else empty @session.types)
-        return if types.dimension_at(dimension session.types).powers.length =? 0 number else types.quantity_type(number dimension @session.types)
+        return if types.dimensionless(dimension session.types) number else types.quantity_type(number dimension @session.types)
     }
     return number_product(left right @session)
 }

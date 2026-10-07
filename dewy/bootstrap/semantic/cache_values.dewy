@@ -3304,6 +3304,7 @@ encode_Value176=(value:Value176 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value177(value.entries @out)
     encode_Value92(value.positions @out)
+    encode_Value54(value.shape_ids @out)
     encode_Value32(value.effect_contracts @out)
     encode_Value40(value.normal_forms @out)
     encode_Value92(value.combinations @out)
@@ -3317,11 +3318,11 @@ decode_Value176=(@input:bytes.Reader):>Value176|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value92(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value32(@input)
+    let field_2=decode_Value54(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value40(@input)
+    let field_3=decode_Value32(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value92(@input)
+    let field_4=decode_Value40(@input)
     if field_4 is? CacheMiss return field_4
     let field_5=decode_Value92(@input)
     if field_5 is? CacheMiss return field_5
@@ -3329,7 +3330,9 @@ decode_Value176=(@input:bytes.Reader):>Value176|CacheMiss=>{
     if field_6 is? CacheMiss return field_6
     let field_7=decode_Value92(@input)
     if field_7 is? CacheMiss return field_7
-    return Value176[entries=field_0 positions=field_1 effect_contracts=field_2 normal_forms=field_3 combinations=field_4 positional_functions=field_5 shape_positions=field_6 primitives=field_7]
+    let field_8=decode_Value92(@input)
+    if field_8 is? CacheMiss return field_8
+    return Value176[entries=field_0 positions=field_1 shape_ids=field_2 effect_contracts=field_3 normal_forms=field_4 combinations=field_5 positional_functions=field_6 shape_positions=field_7 primitives=field_8]
 }
 
 encode_Value177=(value:Value177 @out:bytes.Writer):>void=>{
@@ -3410,7 +3413,6 @@ encode_Value179=(value:Value179 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.element @out)
     encode_Value47(value.length @out)
 }
@@ -3422,18 +3424,15 @@ decode_Value179=(@input:bytes.Reader):>Value179|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value13(@input)
+    let field_3=decode_Value47(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value47(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value179[key=field_0 shape=field_1 shape_id=field_2 element=field_3 length=field_4]
+    return Value179[key=field_0 shape=field_1 element=field_2 length=field_3]
 }
 
 encode_Value180=(value:Value180 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value181(value.value @out)
 }
 decode_Value180=(@input:bytes.Reader):>Value180|CacheMiss=>{
@@ -3442,11 +3441,9 @@ decode_Value180=(@input:bytes.Reader):>Value180|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value181(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value181(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value180[key=field_0 shape=field_1 shape_id=field_2 value=field_3]
+    return Value180[key=field_0 shape=field_1 value=field_2]
 }
 
 encode_Value181=(value:Value181 @out:bytes.Writer):>void=>{
@@ -3479,7 +3476,6 @@ encode_Value183=(value:Value183 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value184(value.powers @out)
 }
 decode_Value183=(@input:bytes.Reader):>Value183|CacheMiss=>{
@@ -3488,11 +3484,9 @@ decode_Value183=(@input:bytes.Reader):>Value183|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value184(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value184(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value183[key=field_0 shape=field_1 shape_id=field_2 powers=field_3]
+    return Value183[key=field_0 shape=field_1 powers=field_2]
 }
 
 encode_Value184=(value:Value184 @out:bytes.Writer):>void=>{
@@ -3539,7 +3533,6 @@ encode_Value187=(value:Value187 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value188(value.pos_or_kw @out)
     encode_Value190(value.kw_only @out)
     encode_Value36(value.rest @out)
@@ -3554,23 +3547,21 @@ decode_Value187=(@input:bytes.Reader):>Value187|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value188(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value188(@input)
+    let field_3=decode_Value190(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value190(@input)
+    let field_4=decode_Value36(@input)
     if field_4 is? CacheMiss return field_4
-    let field_5=decode_Value36(@input)
+    let field_5=decode_Value13(@input)
     if field_5 is? CacheMiss return field_5
-    let field_6=decode_Value13(@input)
+    let field_6=decode_Value72(@input)
     if field_6 is? CacheMiss return field_6
-    let field_7=decode_Value72(@input)
+    let field_7=decode_Value76(@input)
     if field_7 is? CacheMiss return field_7
-    let field_8=decode_Value76(@input)
+    let field_8=decode_Value36(@input)
     if field_8 is? CacheMiss return field_8
-    let field_9=decode_Value36(@input)
-    if field_9 is? CacheMiss return field_9
-    return Value187[key=field_0 shape=field_1 shape_id=field_2 pos_or_kw=field_3 kw_only=field_4 rest=field_5 ret=field_6 type_params=field_7 effects=field_8 inferred_effect=field_9]
+    return Value187[key=field_0 shape=field_1 pos_or_kw=field_2 kw_only=field_3 rest=field_4 ret=field_5 type_params=field_6 effects=field_7 inferred_effect=field_8]
 }
 
 encode_Value188=(value:Value188 @out:bytes.Writer):>void=>{
@@ -3651,7 +3642,6 @@ encode_Value192=(value:Value192 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value186(value.value @out)
 }
 decode_Value192=(@input:bytes.Reader):>Value192|CacheMiss=>{
@@ -3660,18 +3650,15 @@ decode_Value192=(@input:bytes.Reader):>Value192|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value186(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value186(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value192[key=field_0 shape=field_1 shape_id=field_2 value=field_3]
+    return Value192[key=field_0 shape=field_1 value=field_2]
 }
 
 encode_Value193=(value:Value193 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.family @out)
 }
 decode_Value193=(@input:bytes.Reader):>Value193|CacheMiss=>{
@@ -3682,16 +3669,13 @@ decode_Value193=(@input:bytes.Reader):>Value193|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value13(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value193[key=field_0 shape=field_1 shape_id=field_2 family=field_3]
+    return Value193[key=field_0 shape=field_1 family=field_2]
 }
 
 encode_Value194=(value:Value194 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value195(value.fields @out)
 }
 decode_Value194=(@input:bytes.Reader):>Value194|CacheMiss=>{
@@ -3700,11 +3684,9 @@ decode_Value194=(@input:bytes.Reader):>Value194|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value195(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value195(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value194[key=field_0 shape=field_1 shape_id=field_2 fields=field_3]
+    return Value194[key=field_0 shape=field_1 fields=field_2]
 }
 
 encode_Value195=(value:Value195 @out:bytes.Writer):>void=>{
@@ -3748,7 +3730,6 @@ encode_Value197=(value:Value197 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value9(value.name @out)
     encode_Value13(value.alias_id @out)
     encode_Value47(value.target @out)
@@ -3759,15 +3740,13 @@ decode_Value197=(@input:bytes.Reader):>Value197|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value9(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value9(@input)
+    let field_3=decode_Value13(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value13(@input)
+    let field_4=decode_Value47(@input)
     if field_4 is? CacheMiss return field_4
-    let field_5=decode_Value47(@input)
-    if field_5 is? CacheMiss return field_5
-    return Value197[key=field_0 shape=field_1 shape_id=field_2 name=field_3 alias_id=field_4 target=field_5]
+    return Value197[key=field_0 shape=field_1 name=field_2 alias_id=field_3 target=field_4]
 }
 
 encode_Value198=(value:Value198 @out:bytes.Writer):>void=>{
@@ -3777,7 +3756,6 @@ encode_Value198=(value:Value198 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value199(value.fields @out)
     encode_Value36(value.brand @out)
     encode_Value215(value.methods @out)
@@ -3798,25 +3776,23 @@ decode_Value198=(@input:bytes.Reader):>Value198|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value199(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value199(@input)
+    let field_3=decode_Value36(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value36(@input)
+    let field_4=decode_Value215(@input)
     if field_4 is? CacheMiss return field_4
-    let field_5=decode_Value215(@input)
+    let field_5=decode_Value54(@input)
     if field_5 is? CacheMiss return field_5
-    let field_6=decode_Value54(@input)
+    let field_6=decode_Value32(@input)
     if field_6 is? CacheMiss return field_6
     let field_7=decode_Value32(@input)
     if field_7 is? CacheMiss return field_7
-    let field_8=decode_Value32(@input)
+    let field_8=decode_Value47(@input)
     if field_8 is? CacheMiss return field_8
-    let field_9=decode_Value47(@input)
+    let field_9=decode_Value32(@input)
     if field_9 is? CacheMiss return field_9
-    let field_10=decode_Value32(@input)
-    if field_10 is? CacheMiss return field_10
-    return Value198[key=field_0 shape=field_1 shape_id=field_2 fields=field_3 brand=field_4 methods=field_5 constructors=field_6 immutable=field_7 minted=field_8 parent=field_9 abstract=field_10]
+    return Value198[key=field_0 shape=field_1 fields=field_2 brand=field_3 methods=field_4 constructors=field_5 immutable=field_6 minted=field_7 parent=field_8 abstract=field_9]
 }
 
 encode_Value199=(value:Value199 @out:bytes.Writer):>void=>{
@@ -4092,7 +4068,6 @@ encode_Value217=(value:Value217 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value199(value.fields @out)
     encode_Value36(value.brand @out)
     encode_Value215(value.methods @out)
@@ -4112,32 +4087,29 @@ decode_Value217=(@input:bytes.Reader):>Value217|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value199(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value199(@input)
+    let field_3=decode_Value36(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value36(@input)
+    let field_4=decode_Value215(@input)
     if field_4 is? CacheMiss return field_4
-    let field_5=decode_Value215(@input)
+    let field_5=decode_Value54(@input)
     if field_5 is? CacheMiss return field_5
-    let field_6=decode_Value54(@input)
+    let field_6=decode_Value32(@input)
     if field_6 is? CacheMiss return field_6
     let field_7=decode_Value32(@input)
     if field_7 is? CacheMiss return field_7
-    let field_8=decode_Value32(@input)
+    let field_8=decode_Value47(@input)
     if field_8 is? CacheMiss return field_8
-    let field_9=decode_Value47(@input)
+    let field_9=decode_Value32(@input)
     if field_9 is? CacheMiss return field_9
-    let field_10=decode_Value32(@input)
-    if field_10 is? CacheMiss return field_10
-    return Value217[key=field_0 shape=field_1 shape_id=field_2 fields=field_3 brand=field_4 methods=field_5 constructors=field_6 immutable=field_7 minted=field_8 parent=field_9 abstract=field_10]
+    return Value217[key=field_0 shape=field_1 fields=field_2 brand=field_3 methods=field_4 constructors=field_5 immutable=field_6 minted=field_7 parent=field_8 abstract=field_9]
 }
 
 encode_Value218=(value:Value218 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value199(value.fields @out)
     encode_Value36(value.brand @out)
     encode_Value215(value.methods @out)
@@ -4154,34 +4126,31 @@ decode_Value218=(@input:bytes.Reader):>Value218|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value199(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value199(@input)
+    let field_3=decode_Value36(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value36(@input)
+    let field_4=decode_Value215(@input)
     if field_4 is? CacheMiss return field_4
-    let field_5=decode_Value215(@input)
+    let field_5=decode_Value54(@input)
     if field_5 is? CacheMiss return field_5
-    let field_6=decode_Value54(@input)
+    let field_6=decode_Value32(@input)
     if field_6 is? CacheMiss return field_6
     let field_7=decode_Value32(@input)
     if field_7 is? CacheMiss return field_7
-    let field_8=decode_Value32(@input)
+    let field_8=decode_Value47(@input)
     if field_8 is? CacheMiss return field_8
-    let field_9=decode_Value47(@input)
+    let field_9=decode_Value32(@input)
     if field_9 is? CacheMiss return field_9
-    let field_10=decode_Value32(@input)
+    let field_10=decode_Value9(@input)
     if field_10 is? CacheMiss return field_10
-    let field_11=decode_Value9(@input)
-    if field_11 is? CacheMiss return field_11
-    return Value218[key=field_0 shape=field_1 shape_id=field_2 fields=field_3 brand=field_4 methods=field_5 constructors=field_6 immutable=field_7 minted=field_8 parent=field_9 abstract=field_10 value=field_11]
+    return Value218[key=field_0 shape=field_1 fields=field_2 brand=field_3 methods=field_4 constructors=field_5 immutable=field_6 minted=field_7 parent=field_8 abstract=field_9 value=field_10]
 }
 
 encode_Value219=(value:Value219 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value54(value.methods @out)
 }
 decode_Value219=(@input:bytes.Reader):>Value219|CacheMiss=>{
@@ -4190,18 +4159,15 @@ decode_Value219=(@input:bytes.Reader):>Value219|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value54(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value54(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value219[key=field_0 shape=field_1 shape_id=field_2 methods=field_3]
+    return Value219[key=field_0 shape=field_1 methods=field_2]
 }
 
 encode_Value220=(value:Value220 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value9(value.name @out)
 }
 decode_Value220=(@input:bytes.Reader):>Value220|CacheMiss=>{
@@ -4210,18 +4176,15 @@ decode_Value220=(@input:bytes.Reader):>Value220|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value9(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value9(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value220[key=field_0 shape=field_1 shape_id=field_2 name=field_3]
+    return Value220[key=field_0 shape=field_1 name=field_2]
 }
 
 encode_Value221=(value:Value221 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.number @out)
     encode_Value13(value.dimension @out)
 }
@@ -4235,16 +4198,13 @@ decode_Value221=(@input:bytes.Reader):>Value221|CacheMiss=>{
     if field_2 is? CacheMiss return field_2
     let field_3=decode_Value13(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value13(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value221[key=field_0 shape=field_1 shape_id=field_2 number=field_3 dimension=field_4]
+    return Value221[key=field_0 shape=field_1 number=field_2 dimension=field_3]
 }
 
 encode_Value222=(value:Value222 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value186(value.numerator @out)
     encode_Value223(value.denominator @out)
 }
@@ -4254,13 +4214,11 @@ decode_Value222=(@input:bytes.Reader):>Value222|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value186(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value186(@input)
+    let field_3=decode_Value223(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value223(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value222[key=field_0 shape=field_1 shape_id=field_2 numerator=field_3 denominator=field_4]
+    return Value222[key=field_0 shape=field_1 numerator=field_2 denominator=field_3]
 }
 
 encode_Value223=(value:Value223 @out:bytes.Writer):>void=>{
@@ -4276,7 +4234,6 @@ encode_Value224=(value:Value224 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.base @out)
     encode_Value201(value.propositions @out)
 }
@@ -4288,18 +4245,15 @@ decode_Value224=(@input:bytes.Reader):>Value224|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value13(@input)
+    let field_3=decode_Value201(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value201(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value224[key=field_0 shape=field_1 shape_id=field_2 base=field_3 propositions=field_4]
+    return Value224[key=field_0 shape=field_1 base=field_2 propositions=field_3]
 }
 
 encode_Value225=(value:Value225 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value54(value.items @out)
 }
 decode_Value225=(@input:bytes.Reader):>Value225|CacheMiss=>{
@@ -4308,18 +4262,15 @@ decode_Value225=(@input:bytes.Reader):>Value225|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value54(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value54(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value225[key=field_0 shape=field_1 shape_id=field_2 items=field_3]
+    return Value225[key=field_0 shape=field_1 items=field_2]
 }
 
 encode_Value226=(value:Value226 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value9(value.value @out)
 }
 decode_Value226=(@input:bytes.Reader):>Value226|CacheMiss=>{
@@ -4328,18 +4279,15 @@ decode_Value226=(@input:bytes.Reader):>Value226|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value9(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value9(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value226[key=field_0 shape=field_1 shape_id=field_2 value=field_3]
+    return Value226[key=field_0 shape=field_1 value=field_2]
 }
 
 encode_Value227=(value:Value227 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value47(value.length @out)
 }
 decode_Value227=(@input:bytes.Reader):>Value227|CacheMiss=>{
@@ -4348,18 +4296,15 @@ decode_Value227=(@input:bytes.Reader):>Value227|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value47(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value47(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value227[key=field_0 shape=field_1 shape_id=field_2 length=field_3]
+    return Value227[key=field_0 shape=field_1 length=field_2]
 }
 
 encode_Value228=(value:Value228 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value54(value.items @out)
 }
 decode_Value228=(@input:bytes.Reader):>Value228|CacheMiss=>{
@@ -4368,18 +4313,15 @@ decode_Value228=(@input:bytes.Reader):>Value228|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value54(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value54(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value228[key=field_0 shape=field_1 shape_id=field_2 items=field_3]
+    return Value228[key=field_0 shape=field_1 items=field_2]
 }
 
 encode_Value229=(value:Value229 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.item @out)
 }
 decode_Value229=(@input:bytes.Reader):>Value229|CacheMiss=>{
@@ -4390,16 +4332,13 @@ decode_Value229=(@input:bytes.Reader):>Value229|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value13(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value229[key=field_0 shape=field_1 shape_id=field_2 item=field_3]
+    return Value229[key=field_0 shape=field_1 item=field_2]
 }
 
 encode_Value230=(value:Value230 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value54(value.items @out)
 }
 decode_Value230=(@input:bytes.Reader):>Value230|CacheMiss=>{
@@ -4408,18 +4347,15 @@ decode_Value230=(@input:bytes.Reader):>Value230|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value54(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value54(@input)
-    if field_3 is? CacheMiss return field_3
-    return Value230[key=field_0 shape=field_1 shape_id=field_2 items=field_3]
+    return Value230[key=field_0 shape=field_1 items=field_2]
 }
 
 encode_Value231=(value:Value231 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value13(value.head @out)
     encode_Value54(value.args @out)
 }
@@ -4431,18 +4367,15 @@ decode_Value231=(@input:bytes.Reader):>Value231|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value13(@input)
+    let field_3=decode_Value54(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value54(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value231[key=field_0 shape=field_1 shape_id=field_2 head=field_3 args=field_4]
+    return Value231[key=field_0 shape=field_1 head=field_2 args=field_3]
 }
 
 encode_Value232=(value:Value232 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
     encode_Value9(value.key @out)
     encode_Value36(value.shape @out)
-    encode_Value13(value.shape_id @out)
     encode_Value9(value.name @out)
     encode_Value13(value.bound @out)
 }
@@ -4452,13 +4385,11 @@ decode_Value232=(@input:bytes.Reader):>Value232|CacheMiss=>{
     if field_0 is? CacheMiss return field_0
     let field_1=decode_Value36(@input)
     if field_1 is? CacheMiss return field_1
-    let field_2=decode_Value13(@input)
+    let field_2=decode_Value9(@input)
     if field_2 is? CacheMiss return field_2
-    let field_3=decode_Value9(@input)
+    let field_3=decode_Value13(@input)
     if field_3 is? CacheMiss return field_3
-    let field_4=decode_Value13(@input)
-    if field_4 is? CacheMiss return field_4
-    return Value232[key=field_0 shape=field_1 shape_id=field_2 name=field_3 bound=field_4]
+    return Value232[key=field_0 shape=field_1 name=field_2 bound=field_3]
 }
 
 encode_Value233=(value:Value233 @out:bytes.Writer):>void=>{

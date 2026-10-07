@@ -1,3 +1,4 @@
+$explicit_copies
 import p"effect_rows.dewy" as effect_rows
 import p"propositions.dewy" as facts
 
@@ -21,30 +22,30 @@ union construction preserves order, while a semantic join may absorb members.
 # Both keys are local to a table: child shapes refer to canonical structural
 # ids, so a shared child graph is not serialized again into every parent.
 # Only intern assigns shape_id; it is not a stored-description index.
-Type = $abstract type of [key:string shape:string?=none shape_id:addr=0]
-Primitive = type of Type & [name:string]
-TypeAnd = type of Type & [items:array<addr>]
-TypeOr = type of Type & [items:array<addr>]
-TypeNot = type of Type & [item:addr]
-TypeParameterize = type of Type & [head:addr args:array<addr>]
-TypeVariable = type of Type & [name:string bound:addr]
-SequenceType = type of Type & [items:array<addr>]
-ArrayType = type of Type & [element:addr length:addr?=none]
-StringType = type of Type & [length:addr?=none]
+Type = $abstract type of const [key:string shape:string?=none]
+Primitive = type of Type & const [name:string]
+TypeAnd = type of Type & const [items:array<addr>]
+TypeOr = type of Type & const [items:array<addr>]
+TypeNot = type of Type & const [item:addr]
+TypeParameterize = type of Type & const [head:addr args:array<addr>]
+TypeVariable = type of Type & const [name:string bound:addr]
+SequenceType = type of Type & const [items:array<addr>]
+ArrayType = type of Type & const [element:addr length:addr?=none]
+StringType = type of Type & const [length:addr?=none]
 # Literal values must span the full language integer domain even while the
 # seed compiler cannot yet choose a bigint representation for an abstract-int
 # object field. This explicit representation does not cap source literals.
-IntegerLiteralType = type of Type & [value:bigint]
-StringLiteralType = type of Type & [value:string]
-BinaryLiteralType = type of Type & [value:array<uint8>]
-RationalLiteralType = type of Type & [numerator:bigint denominator:bigint & ~0]
+IntegerLiteralType = type of Type & const [value:bigint]
+StringLiteralType = type of Type & const [value:string]
+BinaryLiteralType = type of Type & const [value:array<uint8>]
+RationalLiteralType = type of Type & const [numerator:bigint denominator:bigint & ~0]
 
 # Dimensions are compile-time data with no runtime representation. Zero
 # exponents disappear and powers are sorted by name. A quantity keeps the
 # chosen numeric representation separate from its dimension.
 DimensionPower:type = const [name:string exponent:bigint]
-DimensionType = type of Type & [powers:array<DimensionPower>]
-QuantityType = type of Type & [number:addr dimension:addr]
+DimensionType = type of Type & const [powers:array<DimensionPower>]
+QuantityType = type of Type & const [number:addr dimension:addr]
 
 # These slots describe a callable's accepted shape, not the parameters of a
 # checked function body. A missing name means position-only; a default makes
@@ -57,7 +58,7 @@ GenericParam:type = const [name:string bound:addr kind:'type'|'effect'='type' id
 # hierarchy. Its body and bounds refer into the ordinary type arena.
 GenericTypeAlias:type = const [params:array<GenericParam> body:addr]
 TypeAliasValue:type = addr | GenericTypeAlias
-FunctionType = type of Type & [
+FunctionType = type of Type & const [
     pos_or_kw:array<PosOrKwArg>
     kw_only:array<KwOnlyArg>
     rest:string?
@@ -68,7 +69,7 @@ FunctionType = type of Type & [
 ]
 # Alternatives retain declaration order. Dispatch later records which one
 # won, so lowering never has to infer a function's identity from its shape.
-OverloadType = type of Type & [methods:array<addr>]
+OverloadType = type of Type & const [methods:array<addr>]
 CallableType:type = FunctionType | OverloadType
 
 ObjectField:type = const [
@@ -86,7 +87,7 @@ MethodSpec:type = const [
     # Compiler-only lifecycle operation; not an ordinary callable member.
     lifecycle:string?=none
 ]
-ObjectType = type of Type & [
+ObjectType = type of Type & const [
     fields:array<ObjectField> brand:string?=none
     methods:array<MethodSpec>=[] constructors:array<addr>=[]
     # const records preserve sibling-field invariants for their lifetime.
@@ -98,11 +99,11 @@ ObjectType = type of Type & [
 ]
 PathType = type of ObjectType
 PathLiteralType = type of PathType & [value:string]
-RefinedType = type of Type & [base:addr propositions:array<facts.Proposition>]
-NamedType = type of Type & [name:string alias_id:addr target:addr?=none]
-MetaType = type of Type & [family:addr]
+RefinedType = type of Type & const [base:addr propositions:array<facts.Proposition>]
+NamedType = type of Type & const [name:string alias_id:addr target:addr?=none]
+MetaType = type of Type & const [family:addr]
 ModuleField:type = const [name:string value_type:addr binding_id:addr type_value:TypeAliasValue?=none]
-ModuleType = type of Type & [fields:array<ModuleField>]
+ModuleType = type of Type & const [fields:array<ModuleField>]
 
 # A clause is a conjunction of signed atoms; the outer list is a disjunction.
 # No clauses means never. One empty clause means any. Negation stops at atoms:
@@ -117,6 +118,9 @@ Clause:type = [literals:array<SignedAtom>]
 # the key). Description ids remain stable for the retained prefix.
 Table:type = [
     entries:array<Type>=[] positions:dict<string addr>=[]
+    # The interned structural id of each entry (parallel to `entries`).
+    # Descriptions are immutable; the arena assigns their shape ids.
+    shape_ids:array<addr>=[]
     # Skip public-effect validation entirely until a source contract exists.
     effect_contracts:bool=false
     # Completed descriptions are stable: normalize each tree once per arena.
@@ -154,16 +158,16 @@ shape_of = (id:addr nodes:Table):>string => {
 # differ when defaults/method bodies/proof provenance need separate entries.
 same_type = (a:addr b:addr nodes:Table):>bool => {
     if a =? b return true
-    $runtime_assert a <? nodes.entries.length and b <? nodes.entries.length
-    return nodes.entries[a].shape_id =? nodes.entries[b].shape_id
+    $runtime_assert a <? nodes.shape_ids.length and b <? nodes.shape_ids.length
+    return nodes.shape_ids[a] =? nodes.shape_ids[b]
 }
 # A parent encodes each child once as an interned structural reference. Two
 # fields pointing at the same child must not double a recursively serialized
 # description at every level. Delimiters remain unambiguous for literal data.
 component = (value:string):>string => "{value.length}:{value}"
 shape_reference = (id:addr nodes:Table):>string => {
-    $runtime_assert id <? nodes.entries.length
-    return "{nodes.entries[id].shape_id}"
+    $runtime_assert id <? nodes.shape_ids.length
+    return "{nodes.shape_ids[id]}"
 }
 shapes_key = (items:array<addr> nodes:Table):>string => {
     let parts:array<string> = []
@@ -194,10 +198,10 @@ intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
     let found=nodes.shape_positions.get(shape)
     let structural=if found is? none nodes.shape_positions.length else found
     if found is? none {nodes.shape_positions[shape]=structural}
-    value.shape_id=structural
     let id=nodes.entries.length
     nodes.positions[value.key]=id
     nodes.entries.push(value)
+    nodes.shape_ids.push(structural)
     return id
 }
 
@@ -212,6 +216,7 @@ truncate = (@nodes:Table count:addr):>void => {
         i+=1
     }
     nodes.entries.truncate(count)
+    nodes.shape_ids.truncate(count)
     # A retained description's normalized result can be in the discarded
     # suffix. Invalidate before those result ids can be reused. This scalar
     # dictionary releases its buffers without walking type descriptions.
@@ -311,27 +316,31 @@ dimension = (powers:array<DimensionPower> @nodes:Table):>addr => {
     return intern(@nodes DimensionType[key=key powers=normalized])
 }
 
-dimension_at = (id:addr nodes:Table):>DimensionType => {
+# The powers of a dimension description, as an independent array.
+dimension_powers = (id:addr nodes:Table):>array<DimensionPower> => {
     let node = node_at(nodes id)
     $runtime_assert node is? DimensionType
-    return node.copy()
+    return node.powers.copy
+}
+# Whether a dimension description has no powers (a plain number).
+dimensionless = (id:addr nodes:Table):>bool => {
+    let node = node_at(nodes id)
+    $runtime_assert node is? DimensionType
+    return node.powers.length =? 0
 }
 multiply_dimensions = (left:addr right:addr @nodes:Table):>addr => {
-    let powers = dimension_at(left nodes).powers
-    let other = dimension_at(right nodes)
-    loop power in other.powers { powers.push(power) }
+    let powers = dimension_powers(left nodes)
+    loop power in dimension_powers(right nodes) { powers.push(power) }
     return dimension(powers @nodes)
 }
 divide_dimensions = (left:addr right:addr @nodes:Table):>addr => {
-    let powers = dimension_at(left nodes).powers
-    let other = dimension_at(right nodes)
-    loop power in other.powers { powers.push(DimensionPower[power.name (-power.exponent)]) }
+    let powers = dimension_powers(left nodes)
+    loop power in dimension_powers(right nodes) { powers.push(DimensionPower[power.name (-power.exponent)]) }
     return dimension(powers @nodes)
 }
 power_dimension = (base:addr exponent:bigint @nodes:Table):>addr => {
     let powers:array<DimensionPower> = []
-    let original = dimension_at(base nodes)
-    loop power in original.powers { powers.push(DimensionPower[power.name (power.exponent * exponent)]) }
+    loop power in dimension_powers(base nodes) { powers.push(DimensionPower[power.name (power.exponent * exponent)]) }
     return dimension(powers @nodes)
 }
 quantity_type = (number:addr dim:addr @nodes:Table):>addr => {
@@ -420,7 +429,7 @@ parameterize = (head:addr args:array<addr> @nodes:Table):>addr => {
     let key="G{head}:{items_key(args)}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
-    return intern(@nodes TypeParameterize[key=key shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
+    return intern(@nodes TypeParameterize[key=key shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args.copy])
 }
 
 type_variable = (name:string bound:addr @nodes:Table):>addr => {
@@ -477,7 +486,7 @@ overload_type = (methods:array<addr> @nodes:Table):>addr => {
     let key="M{items_key(methods)}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
-    return intern(@nodes OverloadType[key=key shape="M{shapes_key(methods nodes)}" methods=methods])
+    return intern(@nodes OverloadType[key=key shape="M{shapes_key(methods nodes)}" methods=methods.copy])
 }
 
 # Compare a single contract without allocating its serialized key. Resolved
@@ -540,7 +549,7 @@ refined_type = (base:addr propositions:array<facts.Proposition> @nodes:Table):>a
     let known=nodes.positions.get(key)
     if known isnt? none return known
     let shape = "E{shapes_key([base] nodes)}:{propositions_key(propositions true nodes)}"
-    return intern(@nodes RefinedType[key=key shape=shape base=base propositions=propositions])
+    return intern(@nodes RefinedType[key=key shape=shape base=base propositions=propositions.copy])
 }
 strip_refinement = (id:addr nodes:Table):>addr => {
     let node = node_at(nodes id)
@@ -567,7 +576,7 @@ object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:ar
     let shapes:array<string> = []
     loop f in fields { shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.mutable}") }
     let shape = "J{brand_key}:{immutable}:{shapes.join(';')}"
-    return intern(@nodes ObjectType[key=key shape=shape fields=fields brand=brand immutable=immutable methods=methods constructors=constructors minted=minted parent=parent abstract=abstract])
+    return intern(@nodes ObjectType[key=key shape=shape fields=fields brand=brand immutable=immutable methods=methods constructors=constructors.copy minted=minted parent=parent abstract=abstract])
 }
 object_field = (node:ObjectType name:string):>ObjectField? => {
     loop f in node.fields { if f.name =? name return f }
@@ -590,15 +599,15 @@ object_invariants = (node:ObjectType):>array<facts.Proposition> => {
 
 path_type = (value:string? methods:array<MethodSpec> @nodes:Table):>addr => {
     let element = if value is? none string_type(none @nodes) else string_literal(value @nodes)
-    let base = object_type([ObjectField['path' element]] none false methods [] @nodes)
+    let base = object_type([ObjectField['path' element]] none false methods.copy [] @nodes)
     let description = node_at(nodes base)
     $runtime_assert description is? ObjectType
     let key = "K{description.key}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
     let shape = "K{component(shape_reference(base nodes))}"
-    if value is? none return intern(@nodes PathType[key=key shape=shape fields=description.fields methods=methods])
-    return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods value=value])
+    if value is? none return intern(@nodes PathType[key=key shape=shape fields=description.fields methods=methods.copy])
+    return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods.copy value=value])
 }
 
 named_type = (name:string alias_id:addr @nodes:Table):>addr => {
@@ -613,7 +622,7 @@ resolve_alias = (id:addr target:addr @nodes:Table):>void => {
     let node = nodes.entries[id].copy()
     $runtime_assert node is? NamedType
     # Resolution changes the target, not the recursive reference's identity.
-    nodes.entries[id] = NamedType[key=node.key shape_id=node.shape_id name=node.name alias_id=node.alias_id target=target]
+    nodes.entries[id] = NamedType[key=node.key name=node.name alias_id=node.alias_id target=target]
 }
 unfold = (id:addr nodes:Table):>addr => {
     let node = node_at(nodes id)
@@ -679,7 +688,7 @@ substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<strin
     if node is? ObjectType {
         let fields:array<ObjectField> = []
         loop f in node.fields { fields.push(ObjectField[f.name substitute(f.value_type bindings @nodes effects=effects) f.mutable f.default f.refinement]) }
-        return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
+        return object_type(fields node.brand node.immutable node.methods.copy node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
     }
     if node is? ArrayType return array_type(substitute(node.element bindings @nodes effects=effects) node.length @nodes)
     if node is? QuantityType return quantity_type(substitute(node.number bindings @nodes effects=effects) node.dimension @nodes)
@@ -792,7 +801,7 @@ to_nnf_uncached = (id:addr @nodes:Table):>addr => {
             let f=node.fields[i]
             fields.push(ObjectField[f.name values[i] f.mutable f.default f.refinement])
         }
-        return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
+        return object_type(fields node.brand node.immutable node.methods.copy node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
     }
     if node is? TypeParameterize {
         let head = to_nnf(node.head @nodes)

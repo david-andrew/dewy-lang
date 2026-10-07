@@ -719,7 +719,7 @@ pow_operation = (arguments:array<addr> id:addr env:Environment @session:contexts
     let number=numeric_constants.number_type(base session)
     let quantity=types.node_at(session.types base_type)
     let dimension:addr?=if quantity is? types.QuantityType quantity.dimension else none
-    let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+    let dimensioned=dimension isnt? none and not types.dimensionless(dimension session.types)
     if dimensioned and exponent_value is? none return problem(id 'a dimensioned quantity needs a constant exponent' 'the result dimension must be known at compile time' env session)
     if numeric_values.is_family(number 'Fixed' env.lexical session) return pending(id '`^` on fixed-point bases' env session)
     let unsigned_exponent=subtyping.is_subtype(exponent_type types.primitive('uint' @session.types) session.links @session.types)
@@ -846,7 +846,7 @@ fixed_operation = (name:string arguments:array<addr> id:addr env:Environment @se
     let family=numeric_values.family('Fixed' env.lexical session)
     if family is? none return problem(id 'fixed-point values need the numeric prelude' 'Fixed' env session)
     let loc=contexts.node_at(id env.lexical session).loc
-    let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+    let dimensioned=dimension isnt? none and not types.dimensionless(dimension session.types)
     if name =? '__unary_sub__' and arguments.length =? 1 {
         let operand=to_fixed(arguments[0] id env @session)
         if operand is? Error return operand
@@ -2676,14 +2676,14 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         session.retained_read_states.push(env.state)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
-    shape.pos_or_kw=contextual_parameters(literal shape expected_signature env session)
+    let positional_parameters=contextual_parameters(literal shape expected_signature env session)
     let effect_contract=shape.effects
     let inferred_effect=shape.inferred_effect
     let contract=shape.ret
     if expected_signature isnt? none {
         let required=types.node_at(session.types types.strip_refinement(expected_signature session.types))
         if required is? types.FunctionType and required.type_params.length =? 0 {
-            contract=contracts.adopt(contract required shape.pos_or_kw @session.types)
+            contract=contracts.adopt(contract required positional_parameters @session.types)
             if inferred_effect isnt? none and required.effects isnt? none and (required.inferred_effect isnt? none or not effect_inference.pending(required.effects)) {
                 effect_contract=required.effects
                 inferred_effect=required.inferred_effect
@@ -2713,9 +2713,9 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let rows:array<addr> = []
     loop row in source_rows { if not declarations.is_divider(row env.lexical session) { rows.push(row) } }
     let position:addr = 0
-    let positional_count = shape.pos_or_kw.length
+    let positional_count = positional_parameters.length
     let parameter_slots:array<types.PosOrKwArg> = []
-    loop param in shape.pos_or_kw { parameter_slots.push(param) }
+    loop param in positional_parameters { parameter_slots.push(param) }
     loop param in shape.kw_only { parameter_slots.push(types.PosOrKwArg[param.name param.value_type param.required param.place]) }
     loop param in parameter_slots {
         $runtime_assert position <? rows.length
@@ -2824,10 +2824,10 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         # parameter list, including the receiver. Only a written contract
         # still names the source slots and needs their indices shifted.
         if inferred_effect is? none {
-            effect_contract=effect_rows.prepend_parameter(effect_contract shape.pos_or_kw.length+shape.kw_only.length)
+            effect_contract=effect_rows.prepend_parameter(effect_contract positional_parameters.length+shape.kw_only.length)
         }
     }
-    loop slot in shape.pos_or_kw {slots.push(slot)}
+    loop slot in positional_parameters {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract inferred_effect=inferred_effect)
     let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session) lifecycle=if method is? none none else method.lifecycle] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
@@ -5154,7 +5154,7 @@ folded_number = (name:string arguments:array<addr> id:addr env:Environment @sess
         let type=types.rational_literal(folded.numerator folded.denominator @session.types)
         let normalized=types.node_at(session.types type)
         $runtime_assert normalized is? types.RationalLiteralType
-        let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+        let dimensioned=dimension isnt? none and not types.dimensionless(dimension session.types)
         let integers=true
         loop argument in arguments {
             if types.node_at(session.types numeric_constants.number_type(argument session)) isnt? types.IntegerLiteralType {integers=false break}

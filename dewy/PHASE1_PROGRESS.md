@@ -93,7 +93,7 @@ finished, or explicitly reassigned, before Phase 1 closes.
 | # | Item | Evidence | Status |
 | --- | --- | --- | --- |
 | C1 | Copy inventory gate | T/test_bootstrap_compiler_command.py (4,500 sites, 85/KLOC); 4,220 sites at `9df1d08f` | done |
-| C2 | Strict-source adoption of the compiler | 139 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; 2 (≈8.1k lines: `cache_values`, `ty`) do not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
+| C2 | Strict-source adoption of the compiler | 140 of 141 tracked `dewy/bootstrap` modules carry `$explicit_copies`; `cache_values` (≈7.2k generated lines, cache scaffolding) does not | **open**: scope is every compiler module (David, 2026-09-30); adopt it through proofs rather than annotations. Measured 2026-09-30: 1,409 native strict rejections in 59 files; 914 after immutable records and bigints; 814 after the 2026-10-02 proofs (hosted 851); 538 after the second batch (hosted about 620); 508 after the third (hosted 578); hosted 567 after call-scoped loans and rebinding moves (2026-10-05) |
 | C3 | Hosted/native report parity | `tools/copy_parity.py` with `tests/fixtures/copy_parity_classes.json` classifies every difference in the compiler's own inventory (4,797 at `5227b3c9`, ten classes); `certify.sh integration` runs it (step `copy-parity`); T/test_copy_parity_tool.py | **done** for classification; the proof-precision classes (last-use, container and argument borrows: 367 differences) and the hosted union representation (394) remain to shrink |
 
 ### Integration
@@ -145,6 +145,38 @@ exactly the tested commit; a manual dispatch must find a successful run for
 its commit. It also runs the complete paired manifest against the freshly
 built pair before packaging. A changed-input check against the last
 published pair replaces the old push path filter.
+
+## Strict copies: `ty` — type descriptions are immutable (2026-10-07)
+
+Row C2: 140 of 141 compiler modules are strict. `cache_values` stays
+non-strict: it is generated cache scaffolding, and compile caching is meant
+to go (see the cache entry below).
+
+`ty.node_at` returns a description from the type arena, about 700 call
+sites. Its implicit copy was a run-time share: the backend hands back a
+headed block and relies on copy-on-write. Strict mode rightly does not
+accept copy-on-write as proof, and spelling `.copy` there turned every
+lookup into a deep copy (the HIR-query allocation test exceeded its
+budget). The share is now a fact of the types instead: the `Type` family
+and every description are `const` records, so returning one is a proved
+share in both compilers. Nothing mutated a stored description; the arena
+only replaces whole entries. The one mutable field, the interned
+`shape_id`, moved out of the description into a parallel `Table.shape_ids`
+that the arena owns (the cache codecs are regenerated). One caller edited a
+fetched function shape in place and now keeps its own parameter list.
+`dimension_at` returned a whole description where callers needed its
+powers or only whether it has any: `dimension_powers` copies the array
+explicitly, `dimensionless` reads in place.
+
+Measured (instructions, compiling the compiler with the old and the new
+compiler, same source): cold 60.393 G both, warm 53.081 G → 53.080 G. The
+change makes the existing share provable; it does not add copies.
+
+Compile caches: `__dewycache__/__external__` keeps the build of every
+temporary-directory program (about 300 MB each) and nothing deletes it. It
+reached 52 GB in one worktree and 86 GB in another, and is the likely cause
+of the GitHub runner shutdowns near the end of the suite. Another reason to
+compile without caches.
 
 ## Strict copies: `lower` (2026-10-07)
 
