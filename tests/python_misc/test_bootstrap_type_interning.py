@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +17,7 @@ def test_interning_keeps_the_index_with_its_arena(tmp_path):
         f'import p"{ROOT / "dewy/bootstrap/semantic/ty.dewy"}" as types\n'
         + BODY)
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(output, source)
     for target in ('x86_64', 'c'):
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], check=False,

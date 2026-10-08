@@ -10,6 +10,7 @@ from dewy.parser import p0, t1, t2
 from dewy.reporting import SrcFile
 from udewy.cache import cache_layout
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 REPO = Path(__file__).resolve().parents[2]
 PARSER = REPO / 'dewy/bootstrap/parser'
@@ -20,7 +21,7 @@ FIXTURES = sorted((REPO / 'dewy/bootstrap/tests').glob('*.dewy'))
 def t1_binary(tmp_path_factory):
     folder = tmp_path_factory.mktemp('bootstrap-t1')
     path = folder / 'parser.udewy'
-    path.write_text(codegen(SrcFile.from_path(PARSER / 't1.dewy')))
+    isolated_codegen(path, PARSER / 't1.dewy')
     assert entry_point(path, [], EntryPointOptions(compile_only=True)) == 0
     directory, name = cache_layout(path)
     return (directory / name).resolve()
@@ -105,7 +106,7 @@ def test_t1_fixtures(t1_binary, tmp_path, path):
 def pipeline_binary(tmp_path_factory):
     folder = tmp_path_factory.mktemp('bootstrap-parser')
     path = folder / 'parser.udewy'
-    path.write_text(codegen(SrcFile.from_path(PARSER / 'parser.dewy')))
+    isolated_codegen(path, PARSER / 'parser.dewy')
     assert entry_point(path, [], EntryPointOptions(compile_only=True)) == 0
     directory, name = cache_layout(path)
     return (directory / name).resolve()

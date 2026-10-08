@@ -22,7 +22,7 @@ from dewy.reporting import SrcFile
 from udewy import p0, t0, t1
 from udewy.backend import get_backend
 from udewy.cache import cache_artifact
-from driver_artifacts import shared_driver
+from driver_artifacts import shared_driver, isolated_codegen
 from udewy.frontend import EntryPointOptions, entry_point
 from udewy.stream import Stream
 
@@ -89,7 +89,7 @@ def _driver(tmp_path: Path) -> Path:
         source = ROOT / 'tests/fixtures/bootstrap_stream.dewy'
         def build() -> Path:
             output = tmp_path / 'stream-driver.udewy'
-            output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+            isolated_codegen(output, source, debug_locations=False)
             assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
             return cache_artifact(output).resolve()
         _DRIVER = shared_driver('stream', source, {'debug_locations': False, 'debug_info': False}, build)

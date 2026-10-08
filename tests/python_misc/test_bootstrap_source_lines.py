@@ -7,6 +7,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
@@ -70,7 +71,7 @@ def test_indexed_geometry_matches_source_views(tmp_path):
     source = tmp_path / 'geometry.dewy'
     source.write_text(geometry_source())
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True,
                             text=True, timeout=10, check=False)
@@ -80,7 +81,7 @@ def test_indexed_geometry_matches_source_views(tmp_path):
 def test_runtime_report_materialization_keeps_source_geometry(tmp_path):
     source = ROOT / 'tests/fixtures/native_report_geometry.dewy'
     output = tmp_path / 'reports.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True,
                             text=True, timeout=10, check=False)

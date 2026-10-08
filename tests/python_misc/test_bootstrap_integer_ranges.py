@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +48,7 @@ main=():>int64=>{{
 }}
 ''')
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr

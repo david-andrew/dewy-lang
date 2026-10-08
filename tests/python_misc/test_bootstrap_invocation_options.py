@@ -8,6 +8,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,7 +33,7 @@ let main=(argv:array<string>):>int64=>{{
 }}
 ''')
     seed = source.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(source), target=compiler_target))
+    isolated_codegen(seed, source, target=compiler_target)
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     for args, expected in [

@@ -12,6 +12,7 @@ from dewy.semantic import hir, ty
 from udewy.p0 import decode_string_literal
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 LOC = Span(0, 0)
@@ -108,7 +109,7 @@ main = ():>int64 => {{
 }}
 ''')
     seed_output = source.with_suffix('.udewy')
-    seed_output.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(seed_output, source)
     assert entry_point(seed_output, [], EntryPointOptions(compile_only=True)) == 0
     native = subprocess.run([cache_artifact(seed_output).resolve()], capture_output=True, text=True, timeout=60, check=False)
     assert native.returncode == 0, native.stderr + native.stdout
@@ -168,7 +169,7 @@ let main=():>int64=>{{
 }}
 ''')
     seed = source.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(seed, source)
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     native = subprocess.run([cache_artifact(seed).resolve()], capture_output=True, text=True, timeout=30, check=False)
     assert native.returncode == 0, native.stdout + native.stderr
@@ -271,7 +272,7 @@ let main=():>int64=>{{
 }}
 ''')
     seed = source.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(seed, source)
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     emitted = subprocess.run([cache_artifact(seed).resolve()], capture_output=True,
                              text=True, timeout=60, check=False)
@@ -304,7 +305,7 @@ def test_native_emitter_deep_output_is_identical(tmp_path):
     """Large nested bodies retain exact whitespace without subtree re-rendering."""
     source = ROOT / 'tests/fixtures/native_emitter_scaling.dewy'
     seed = tmp_path / 'emitter-scaling.udewy'
-    seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(seed, source, debug_locations=False)
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     executable = cache_artifact(seed).resolve()
     for args, depth, width in [([], 32, 1000), (['deep'], 64, 1000), (['deep', 'wide'], 64, 4000)]:

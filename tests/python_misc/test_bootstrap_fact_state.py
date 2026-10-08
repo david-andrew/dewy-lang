@@ -11,6 +11,7 @@ from dewy.semantic import bindings, hir
 from dewy.semantic.analyze import bounds
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -183,7 +184,7 @@ main = ():>int64 => {{
 }}
 ''')
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(output, source)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=60, check=False)
     assert result.returncode == 0, result.stderr

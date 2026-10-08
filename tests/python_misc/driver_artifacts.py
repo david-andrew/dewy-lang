@@ -24,6 +24,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pickle
 import shutil
 import sys
 import time
@@ -88,21 +89,44 @@ def _isolated(build: Callable[[], Path]) -> Path:
         os.close(read)
         status = 0
         try:
-            message = 'ok\n' + str(build())
-        except BaseException:
-            message = 'error\n' + traceback.format_exc()
+            outcome: object = str(build())
+        except BaseException as error:
             status = 1
-        with os.fdopen(write, 'w') as channel:
-            channel.write(message)
+            try:
+                pickle.dumps(error)
+                outcome = (error, traceback.format_exc())
+            except Exception:
+                outcome = (RuntimeError(str(error)), traceback.format_exc())
+        with os.fdopen(write, 'wb') as channel:
+            pickle.dump(outcome, channel)
         os._exit(status)
     os.close(write)
-    with os.fdopen(read) as channel:
-        message = channel.read()
+    with os.fdopen(read, 'rb') as channel:
+        data = channel.read()
     os.waitpid(pid, 0)
-    kind, _, detail = message.partition('\n')
-    if kind != 'ok':
-        raise RuntimeError(f'driver build failed in its child process:\n{detail}')
-    return Path(detail)
+    if not data:
+        raise RuntimeError('driver build child exited without a result')
+    outcome = pickle.loads(data)
+    if isinstance(outcome, tuple):
+        error, child_traceback = outcome
+        error.add_note(f'raised in the driver build child process:\n{child_traceback}')
+        raise error
+    return Path(outcome)
+
+
+def isolated_codegen(output: Path, source: Path, **options) -> None:
+    """Write the hosted compiler's µDewy for `source` to `output`, compiled in a forked child.
+
+    Tests that build a compiler-sized driver themselves call this instead of
+    `output.write_text(codegen(SrcFile.from_path(source)))`, so the hosted
+    compile's memory is released when it ends (see `_isolated`).
+    """
+    def build() -> Path:
+        from dewy.backend.udewy import codegen
+        from dewy.reporting import SrcFile
+        output.write_text(codegen(SrcFile.from_path(source), **options))
+        return output
+    _isolated(build)
 
 
 def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Path], *, located: bool = True) -> Path:

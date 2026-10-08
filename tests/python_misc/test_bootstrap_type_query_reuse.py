@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 SIGNATURE = 'signature=(args:array<addr> ret:addr @nodes:types.Table):>addr=>types.positional_function(args ret @nodes)'
@@ -66,7 +67,7 @@ def test_type_query_reuse_and_invalidation(tmp_path):
                       f'import p"{ROOT / "dewy/bootstrap/semantic/subtyping.dewy"}" as subtyping\n'
                       + SIGNATURE + '\n' + BODY)
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     for target in ('x86_64', 'c'):
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         run = subprocess.run([cache_artifact(output).resolve()], capture_output=True,

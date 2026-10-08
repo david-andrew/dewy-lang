@@ -18,6 +18,7 @@ from dewy.semantic.hir_display import type_to_dewy
 from dewy.semantic.modules import ModuleCompiler
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 # Source, deferred failure branches, collected warnings.
@@ -148,7 +149,7 @@ main = ():>int64 => {{
 }}
 ''')
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(output, source)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=120, check=False)
     (tmp_path / 'native-output.txt').write_text(result.stdout)

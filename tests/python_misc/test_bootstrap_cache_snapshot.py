@@ -7,6 +7,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_native_snapshot_values(tmp_path):
     source = ROOT / 'tests/fixtures/native_cache_snapshot.dewy'
     output = tmp_path / 'snapshot.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     for target in ['x86_64', 'c']:
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=30)
@@ -66,7 +67,7 @@ def test_effect_contracts_survive_native_snapshot(tmp_path):
     source = tmp_path / 'effect-snapshot.dewy'
     source.write_text(body)
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     for target in ['x86_64', 'c']:
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=30)

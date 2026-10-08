@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 BODY = '''
@@ -33,7 +34,7 @@ def test_dictionary_layout_key(tmp_path):
     source = tmp_path / 'layout-key.dewy'
     source.write_text(f'import p"{ROOT / "dewy/bootstrap/backend/udewy/layouts.dewy"}" as layouts\n' + BODY)
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     for target in ('x86_64', 'c'):
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         run = subprocess.run([cache_artifact(output).resolve()], capture_output=True,

@@ -10,6 +10,7 @@ from dewy.reporting import SrcFile
 from dewy.semantic.analyze.bounds import Interval, _BoundsValidator, _exclude_value
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 OPS = {'<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__', '=?': '__eq__', 'not=?': '__ne__'}
@@ -110,7 +111,7 @@ main = ():>int64 => {{
     expected.extend(spelling(validator._binary_interval(operation, left, right, word, bound=bound, floor=floor))
                     for operation, left, right, word, bound, floor in arithmetic)
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(output, source)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=60, check=False)
     assert result.returncode == 0, result.stderr

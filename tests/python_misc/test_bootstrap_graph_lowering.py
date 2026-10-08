@@ -11,6 +11,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,7 +68,7 @@ main=(argv:array<string>):>int64=>{{
 }}
 ''')
     seed = driver.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(driver)))
+    isolated_codegen(seed, driver)
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [

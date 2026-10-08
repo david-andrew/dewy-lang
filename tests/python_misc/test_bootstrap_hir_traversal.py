@@ -6,6 +6,7 @@ from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_capture_readers_keep_one_symbol_index(tmp_path):
     source = ROOT / 'tests/fixtures/native_capture_readers.dewy'
     output = tmp_path / 'readers.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True,
                             text=True, timeout=10, check=False)
@@ -42,7 +43,7 @@ main=(argv:array<string>):>int64=>{{
 }}
 ''')
     output = source.with_suffix('.udewy')
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(output).resolve()
     result = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)

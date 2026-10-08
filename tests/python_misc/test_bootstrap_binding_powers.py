@@ -8,6 +8,7 @@ from dewy.parser import p0
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,7 +58,7 @@ main=():>int64=>{{
 }}
 ''')
     output = tmp_path / 'powers.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     run = subprocess.run([cache_artifact(output).resolve()], capture_output=True,
                          text=True, timeout=10, check=False)
@@ -73,7 +74,7 @@ main=():>int64=>{{
 def test_binding_power_lookup_allocation(tmp_path):
     source = ROOT / 'tests/fixtures/native_binding_powers.dewy'
     output = tmp_path / 'lookup.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     run = subprocess.run([cache_artifact(output).resolve()], capture_output=True,
                          text=True, timeout=10, check=False)
