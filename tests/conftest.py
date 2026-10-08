@@ -18,3 +18,50 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         name = item.path.name
         return _FRONT.index(name) if name in _FRONT else len(_FRONT)
     items.sort(key=rank)   # a stable sort: the order inside each file is kept
+
+
+# `DEWY_TEST_PROFILE=FILE` appends one line per finished test file: worker,
+# file, seconds, and the worker's resident memory before and after it (MB).
+# The validation-turnaround measurement (ROADMAP, Phase 1) reads these.
+import os
+import time
+
+_profile_path = os.environ.get('DEWY_TEST_PROFILE')
+_profile_file: list = [None, 0.0, 0]   # current file, its start time, rss at start
+
+
+def _rss_mb() -> int:
+    with open('/proc/self/statm') as statm:
+        return int(statm.read().split()[1]) * os.sysconf('SC_PAGE_SIZE') // (1 << 20)
+
+
+def _profile_flush() -> None:
+    name, started, before = _profile_file
+    if name is None:
+        return
+    worker = os.environ.get('PYTEST_XDIST_WORKER', 'main')
+    with open(_profile_path, 'a') as out:
+        out.write(f'{worker}\t{name}\t{time.monotonic() - started:.1f}\t{before}\t{_rss_mb()}\n')
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    global _profile_path
+    # The xdist controller sees every worker's reports; only the process that
+    # runs a test records it.
+    if _profile_path and not hasattr(config, 'workerinput') and (config.getoption('numprocesses', None) or 0) != 0:
+        _profile_path = None
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logstart(nodeid: str, location) -> None:
+    if not _profile_path:
+        return
+    name = nodeid.split('::', 1)[0]
+    if name != _profile_file[0]:
+        _profile_flush()
+        _profile_file[:] = [name, time.monotonic(), _rss_mb()]
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    if _profile_path:
+        _profile_flush()

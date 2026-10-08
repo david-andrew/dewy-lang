@@ -61,7 +61,10 @@ integration)
         return $status
     }
     export DEWY_LIBRARY_ROOT="$source/library"
-    ulimit -v 24000000
+    # A soft cap on the compiler steps' address space. The pytest step lifts it:
+    # V8 reserves large virtual regions for each WebAssembly memory, so node
+    # (the wasm route and playground tests) cannot run under it.
+    ulimit -S -v 24000000
     step hosted-seed env PYTHON="$python" tools/bootstrap_hosted_seed.sh "$output/hosted-seed"
     step fixed-point tools/bootstrap_native.sh --target x86_64 --generations 3 \
         "$output/hosted-seed/dewy" "$output/hosted-seed/udewy" "$output/native"
@@ -74,7 +77,8 @@ integration)
     step copy-parity bash -c "$python tools/copy_report.py --json dewy/bootstrap/main.dewy > '$output/copies-hosted.json' &&
         $python tools/copy_report.py --json --compiler '$output/native/dewy' dewy/bootstrap/main.dewy > '$output/copies-native.json' &&
         $python tools/copy_parity.py '$output/copies-hosted.json' '$output/copies-native.json' --classes tests/fixtures/copy_parity_classes.json --list 40"
-    step full-pytest env DEWY_TEST_DRIVER_CACHE=0 "$python" -m pytest tests -q -p no:cacheprovider -n 8 \
+    step full-pytest bash -c 'ulimit -S -v unlimited && exec env DEWY_TEST_DRIVER_CACHE=0 "$@"' full-pytest \
+        "$python" -m pytest tests -q -p no:cacheprovider -n 8 \
         --dist loadfile -o faulthandler_timeout=900 --basetemp "$output/pytest-tmp"
     git -C "$root" worktree remove --force "$source" > /dev/null 2>&1 || true
     echo "certified=$((1 - failed))" >> "$summary"

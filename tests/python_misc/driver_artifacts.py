@@ -27,6 +27,8 @@ import os
 import shutil
 import sys
 import time
+import traceback
+import warnings
 from pathlib import Path
 from typing import Callable
 
@@ -69,6 +71,40 @@ def _store() -> Path:
     return Path(configured) if configured else Path.home() / '.cache/dewy/test-drivers'
 
 
+def _isolated(build: Callable[[], Path]) -> Path:
+    """Run `build` in a forked child and return the path it produced.
+
+    A driver is a compiler-sized hosted build. In-process, the hosted
+    compiler's resident state from every build stayed in the long-lived xdist
+    worker (one worker grew past 9 GB near the end of the suite, which ran
+    16 GB CI runners out of memory). The child gets the closure without
+    pickling, and its memory goes back to the system when it exits.
+    """
+    read, write = os.pipe()
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', DeprecationWarning)   # fork in a threaded xdist worker
+        pid = os.fork()
+    if pid == 0:
+        os.close(read)
+        status = 0
+        try:
+            message = 'ok\n' + str(build())
+        except BaseException:
+            message = 'error\n' + traceback.format_exc()
+            status = 1
+        with os.fdopen(write, 'w') as channel:
+            channel.write(message)
+        os._exit(status)
+    os.close(write)
+    with os.fdopen(read) as channel:
+        message = channel.read()
+    os.waitpid(pid, 0)
+    kind, _, detail = message.partition('\n')
+    if kind != 'ok':
+        raise RuntimeError(f'driver build failed in its child process:\n{detail}')
+    return Path(detail)
+
+
 def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Path], *, located: bool = True) -> Path:
     """The driver built by `build()` for `source` under `options`, shared by identity.
 
@@ -79,7 +115,7 @@ def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Pa
     across concurrent workers.
     """
     if not enabled():
-        return build()
+        return _isolated(build)
     identity = hashlib.sha256(json.dumps({
         'name': name, 'source': str(source.resolve()) if located else None, 'text': source.read_text(),
         'options': options, 'inputs': _toolchain_digest(),
@@ -96,7 +132,7 @@ def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Pa
             lock = _lock(entry, fcntl.LOCK_EX)
             try:
                 if not executable.is_file():
-                    built = build()
+                    built = _isolated(build)
                     staged = entry / 'driver.partial'
                     shutil.copy2(built, staged)
                     os.replace(staged, executable)

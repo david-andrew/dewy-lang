@@ -873,6 +873,29 @@ improvements should make ordinary value-oriented programs faster as well as the
 compiler. A lower static copy count or broader strict-mode adoption alone does
 not establish either performance goal.
 
+#### Validation turnaround first (accepted 2026-10-07)
+
+Before the throughput campaign's compiler work, the validation loop itself
+gets faster. Every verified slice waited about 1.5 h for the local gate and
+about 40 min for verification; the integration certification takes about
+3 h (2 h of it the full pytest suite) and GitHub's runners about 2.5 h. Almost
+all of that is the hosted Python compiler: driver builds from the compiler's
+own sources, the hosted half of the paired manifest, and in-process hosted
+compiles whose memory grows through a long-lived xdist worker. In order:
+
+1. **Measure.** One suite run with per-test durations and per-worker memory,
+   grouped by file family, names where the time and the late memory growth go.
+2. **Native-built test drivers.** Drivers and other compiler-source programs
+   the tests run are built by the verified native compiler (seconds) instead
+   of the hosted one (minutes), keeping hosted coverage where a test is about
+   the hosted compiler itself. This should shorten the gate, certification and
+   CI together and remove most of the late memory growth.
+3. **Split the gate.** Per slice: focused fast tests plus the paired manifest;
+   the full suite before each push and in certification.
+
+Targets are set from the measurement (step 1); the turnaround is tracked in
+[`PHASE1_PROGRESS.md`](PHASE1_PROGRESS.md) alongside the throughput figures.
+
 ### 1.1 Memory and ownership model
 
 The intended design is recorded in `status.md` ("Ownership and storage
