@@ -30,6 +30,11 @@
 - `editor-checks.json`: five fresh `check` processes per workload, with OS caches
   retained. Medians: particle source 62 ms; paddle game 121 ms. This includes
   checking unused source functions and lowering without emission.
+- `typed-application-build.json`, `typed-application-tests.log`: 101 checks in
+  5.95 seconds. Bracket constructors and `.length` now resolve using actual
+  types, removing the parser adapter's separate list of record names. Imported
+  records (Dewy/Sloppy, qualified/unqualified, named/positional fields) and a
+  record field named `length` are covered.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame

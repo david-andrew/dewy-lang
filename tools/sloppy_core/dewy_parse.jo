@@ -12,7 +12,6 @@ struct DewySyntax:
     children: int[]
 
 dewy_syntax: DewySyntax[]
-dewy_record_names: int[]
 
 dw_child = (id: int, at: int) -> int: dewy_syntax[id].children[at]
 dw_multiplications = (id: int) -> int:
@@ -321,11 +320,7 @@ dw_expr = (id: int) -> int:
             if name == "": return dw_fail(id, "computed member names")
             n = mk(.field, pos)
             nodes[n].a = i32(dw_expr(left))
-            nodes[n].name = i32(intern(if name == "length": "len" else: name))
-            if name == "length":
-                c = mk(.call, pos)
-                nodes[c].a = i32(n)
-                return c
+            nodes[n].name = i32(intern(name))
             return n
         if op == "as":
             n = mk(.cast, pos)
@@ -335,16 +330,10 @@ dw_expr = (id: int) -> int:
         if starts_with(op, "CallJuxtapose") or op == "IndexJuxtapose":
             xs = dewy_syntax[right].children
             bracket = dewy_syntax[right].kind == "Block" and dewy_syntax[right].text == "[]:"
-            if bracket and not (intern(dw_name(left)) in dewy_record_names):
-                if xs.len() != 1: return dw_fail(id, "multidimensional indexing")
-                n = mk(.index, pos)
-                nodes[n].a = i32(dw_expr(left))
-                nodes[n].b = i32(dw_expr(xs[0]))
-                return n
-            n = mk(.call, pos)
+            n = mk(if bracket: NK.index else: NK.call, pos)
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
-            if nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
+            if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             args: int[]
             if dewy_syntax[right].kind != "Block": args.push(dw_expr(right))
             else:
@@ -356,6 +345,7 @@ dw_expr = (id: int) -> int:
                         args.push(a)
                     else: args.push(dw_expr(child))
             set_list(n, args)
+            if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
         n = mk(if op == "and": NK.and_ else if op == "or": NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
@@ -445,7 +435,6 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         fields: int[]
         loop field in dewy_syntax[initial].children: fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
-        dewy_record_names.push(intern(name))
         return n
     n = mk(if constant: NK.const_ else: NK.vardecl, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
@@ -607,7 +596,6 @@ dewy_parse_file = (file: int) -> int[]:
                     fatal(mkpos(file, to_int(fields[1]) ?? 0), payload.as_str() ?? "invalid Dewy syntax")
         fatal(mkpos(file, 0), "Dewy syntax parser failed (exit {status})")
     dewy_syntax = [DewySyntax()]
-    dewy_record_names = []
     stack: int[]
     root = 0
     loop line in split(output, "\n"):
@@ -627,19 +615,6 @@ dewy_parse_file = (file: int) -> int[]:
         else: root = id
         stack.push(id)
     if root == 0: fatal(mkpos(file, 0), "missing syntax root")
-    # Collect local record names before projecting bodies: declarations may
-    # follow the functions that construct them.
-    loop child in dewy_syntax[root].children:
-        declaration = dw_unwrap(child)
-        if dewy_syntax[declaration].kind == "KeywordExpr":
-            word = dewy_syntax[dw_child(declaration, 0)].text
-            if word != "let" and word != "const": continue
-            declaration = dw_unwrap(dw_child(declaration, 1))
-        if dw_op(declaration) != "=": continue
-        lhs = dw_child(declaration, 1)
-        if dw_op(lhs) != ":" or dw_name(dw_child(lhs, 2)) != "type": continue
-        name = dw_name(dw_child(lhs, 1))
-        if name != "": dewy_record_names.push(intern(name))
     decls: int[]
     loop child in dewy_syntax[root].children: decls.push(dw_stmt(child, true))
     dewy_syntax = []

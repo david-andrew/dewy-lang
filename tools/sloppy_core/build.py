@@ -95,6 +95,19 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
     assert text.count(index_anchor) == 1
     text = text.replace(index_anchor, index_anchor + '''        if bk == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
             fatal(nodes[n].pos, "Dewy core experiment does not yet support grapheme string indexing")
+        if bk == .typeval and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            nodes[n].kind = .call
+            nodes[n].b = 0
+            return check_expr(n, expected)
+''')
+    member_anchor = '        if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)\n        bk = types[bt].kind\n'
+    assert text.count(member_anchor) == 1
+    text = text.replace(member_anchor, member_anchor + '''        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt)) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            method = mk(.field, nodes[n].pos)
+            nodes[method].a = nodes[n].a
+            nodes[method].name = i32(intern("len"))
+            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+            return check_expr(n, expected)
 ''')
     arithmetic_anchor = '    if is_lit(a) and is_lit(b) and not is_cmp:\n'
     assert text.count(arithmetic_anchor) == 1

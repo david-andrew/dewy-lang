@@ -57,7 +57,10 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The behavior gate now contains 95 checks and takes about 5.8 seconds on the
+Record construction and collection `.length` are resolved from types, including
+imported/qualified record constructors and records with their own `length` field.
+
+The behavior gate now contains 101 checks and takes about 6 seconds on the
 development machine, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

@@ -21,6 +21,7 @@ main=()=>if twice(21) =? 42 and twice(1.25) =? 2.5 42 else 1''',
 f(); return f()}''',
     'higher-order': 'apply=(f x)=>f(x)\nmain=()=>apply((x:int64)=>x+2 40)',
     'forward-record': 'main=()=>Value[42].x\nValue:type=[x:int64]',
+    'length-field': 'Span:type=[length:int64]\nmain=()=>{let s=Span[40] s.length+=2 return s.length}',
     'growing-loop': '''main=()=>{let xs:array<int64>=[10] let sum:int64=0
 loop i in 0.. and i <? xs.length {sum+=xs[i] if i =? 0 xs.push(32)} return sum}''',
     'captured-array': '''main=()=>{let xs:array<int64>=[40] let original=xs
@@ -43,6 +44,7 @@ let b=a b["a"]=0 return a["a"]+a["b"]}''',
 main=()=>{let a:Values=[] a["answer"]=42 return a["answer"]}''',
     'dictionary-iteration': '''main=()=>{let a:dict<int64 int64>=[1->19 2->20]
 let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
+    'dictionary-length': 'main=()=>{let a=["a"->1 "b"->2] return a.length+40}',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',
@@ -133,6 +135,22 @@ def test_core_imports(compiler, tmp_path, extension, style):
     }
     declaration, expression = forms[style]
     source.write_text(f'{declaration}\nmain=():>int64=>{expression}')
+    binary = tmp_path / 'main'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+def test_core_imported_record_brackets(compiler, tmp_path, extension):
+    dependency = tmp_path / f'helper.{extension}'
+    dependency.write_text('Point:type=[x:int64 y:int64]' if extension == 'dewy'
+                          else 'struct Point:\n    x: int\n    y: int\n')
+    source = tmp_path / 'main.dewy'
+    source.write_text(f'''import p"helper.{extension}" as geometry
+from p"helper.{extension}" import Point
+main=()=>{{let p=geometry.Point[20 22] let q=Point[y=22 x=20] return p.x+q.y}}''')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
