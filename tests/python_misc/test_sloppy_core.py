@@ -11,6 +11,20 @@ import pytest
 CASES = {
     'answer': 'main=():>int64=>42',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
+    'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'generic-function': '''twice=(x)=>x+x
+main=()=>if twice(21) =? 42 and twice(1.25) =? 2.5 42 else 1''',
+    'default-argument': 'add=(x y=2)=>x+y\nmain=()=>add(40)',
+    'default-field': 'Value:type=[x:int64=42]\nmain=()=>Value[].x',
+    'closure': 'main=()=>{let x:int64=40 let f=(n:int64)=>x+n return f(2)}',
+    'closure-state': '''main=()=>{let x:int64=40 let f=()=>{x+=1 return x}
+f(); return f()}''',
+    'higher-order': 'apply=(f x)=>f(x)\nmain=()=>apply((x:int64)=>x+2 40)',
+    'forward-record': 'main=()=>Value[42].x\nValue:type=[x:int64]',
+    'growing-loop': '''main=()=>{let xs:array<int64>=[10] let sum:int64=0
+loop i in 0.. and i <? xs.length {sum+=xs[i] if i =? 0 xs.push(32)} return sum}''',
+    'captured-array': '''main=()=>{let xs:array<int64>=[40] let original=xs
+let bump=()=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}''',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',
@@ -58,11 +72,13 @@ def compiler():
 
 
 @pytest.mark.parametrize('name', CASES)
-def test_core_values(compiler, tmp_path, name):
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_values(compiler, tmp_path, name, release):
     source = tmp_path / f'{name}.dewy'
     source.write_text(CASES[name])
     binary = tmp_path / name
-    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     result = subprocess.run([binary, 'extra'], capture_output=True, text=True, timeout=10, check=False)
@@ -85,12 +101,20 @@ def test_core_rejects(compiler, tmp_path, name):
 
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
-def test_core_imports(compiler, tmp_path, extension):
+@pytest.mark.parametrize('style', ['selected', 'namespace', 'module-alias', 'name-alias'])
+def test_core_imports(compiler, tmp_path, extension, style):
     dependency = tmp_path / f'helper.{extension}'
     dependency.write_text('twice=(x:int64):>int64=>x*2' if extension == 'dewy'
                           else 'twice = (x: int) -> int: x * 2')
     source = tmp_path / 'main.dewy'
-    source.write_text(f'from p"helper.{extension}" import twice\nmain=():>int64=>twice(21)')
+    forms = {
+        'selected': (f'from p"helper.{extension}" import twice', 'twice(21)'),
+        'namespace': (f'import p"helper.{extension}"', 'helper.twice(21)'),
+        'module-alias': (f'import p"helper.{extension}" as other', 'other.twice(21)'),
+        'name-alias': (f'from p"helper.{extension}" import twice as double', 'double(21)'),
+    }
+    declaration, expression = forms[style]
+    source.write_text(f'{declaration}\nmain=():>int64=>{expression}')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -120,7 +144,8 @@ class Scripts(HTMLParser):
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
-def test_core_game_model(compiler, tmp_path, target):
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_game_model(compiler, tmp_path, target, release):
     node = shutil.which('node')
     if target == 'wasm' and node is None:
         pytest.skip('Node is needed to execute the generated web runner')
@@ -149,7 +174,8 @@ main=():>int64=>{
     return 42
 }''')
     binary = tmp_path / 'model_test'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary],
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]

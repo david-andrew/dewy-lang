@@ -9,6 +9,11 @@
 - `game-build.json`, `game-tests.log`: 31 cases, including float division,
   inverted comparisons, model execution on native and wasm, and native software
   rendering. Node executes the compiler's generated web host for model tests.
+- `ergonomics-build.json`, `ergonomics-tests.log`: 77 checks in 4.39 seconds,
+  extending coverage to inferred/generic functions, closures, higher-order calls,
+  defaults, aliases, forward record declarations, and live loop bounds when an
+  array grows. Value cases now run in debug and release; model tests run both
+  modes on both native and wasm targets.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame

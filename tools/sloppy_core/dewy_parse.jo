@@ -84,29 +84,36 @@ dw_param = (id: int, kind: NK) -> int:
     if dw_op(id) == "=":
         initial = dw_child(id, 2)
         id = dw_child(id, 1)
-    if dw_op(id) != ":": return dw_fail(id, "untyped parameters or fields")
-    lhs = dw_child(id, 1)
+    lhs = id
+    annotation = 0
+    if dw_op(id) == ":":
+        lhs = dw_child(id, 1)
+        annotation = dw_child(id, 2)
+    else if kind == .vardecl and initial == 0: return dw_fail(id, "a field without a type or default")
     by_place = dw_op(lhs) == "@"
     if by_place: lhs = dw_child(lhs, 1)
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "destructured parameters")
     n = mk(kind, pos)
     nodes[n].name = i32(intern(name))
-    nodes[n].a = i32(dw_type(dw_child(id, 2)))
+    if annotation != 0: nodes[n].a = i32(dw_type(annotation))
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
     if by_place: add_flag(n, NF_MUT)
     return n
 
 dw_function = (id: int, name: str) -> int:
     signature = dw_child(id, 1)
-    if dw_op(signature) != ":>": return dw_fail(id, "functions without explicit return types")
-    params = dw_child(signature, 1)
+    params = signature
+    result = 0
+    if dw_op(signature) == ":>":
+        params = dw_child(signature, 1)
+        result = dw_child(signature, 2)
     if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
-    result = dw_child(signature, 2)
-    if dw_name(result) == "void": add_flag(n, NF_VOID)
-    else: nodes[n].a = i32(dw_type(result))
+    if result != 0:
+        if dw_name(result) == "void": add_flag(n, NF_VOID)
+        else: nodes[n].a = i32(dw_type(result))
     ps: int[]
     loop p in dewy_syntax[params].children: ps.push(dw_param(p, .param))
     body = dw_block(dw_child(id, 2))
@@ -366,7 +373,13 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         lhs = dw_child(lhs, 1)
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
-    if initial != 0 and dw_op(initial) == "=>": return dw_function(initial, name)
+    if initial != 0 and dw_op(initial) == "=>":
+        if top: return dw_function(initial, name)
+        n = mk(.vardecl, dewy_syntax[id].pos)
+        nodes[n].name = i32(intern(name))
+        nodes[n].b = i32(dw_function(initial, ""))
+        if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+        return n
     if annotation != 0 and dw_name(annotation) == "type":
         if initial == 0 or dewy_syntax[initial].text != "[]:": return dw_fail(id, "this type declaration")
         n = mk(.struct_, dewy_syntax[id].pos)
@@ -386,12 +399,18 @@ dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos
     n = mk(.import_, pos)
     spec = dw_unwrap(dw_child(id, 1))
+    alias = ""
+    if dw_op(spec) == "as":
+        alias = dw_name(dw_child(spec, 2))
+        if alias == "": return dw_fail(spec, "this module alias")
+        spec = dw_unwrap(dw_child(spec, 1))
     if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use p\"file.dewy\" or p\"file.jo\"")
     path = dw_unwrap(dw_child(spec, 2))
     if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral module path")
     value = dewy_syntax[path].text
     nodes[n].sval = i32(intern(value))
     nodes[n].name = i32(intern(strip_ext(file_name(value))))
+    if alias != "": nodes[n].name = i32(intern(alias))
     nodes[n].aux2 = 1
     if dewy_syntax[dw_child(id, 0)].text == "from":
         if dewy_syntax[id].children.len() != 4: return dw_fail(id, "this import")
@@ -399,12 +418,24 @@ dw_import = (id: int) -> int:
         selected = dw_unwrap(dw_child(id, 3))
         imported: int[]
         if dw_op(selected) == ",":
-            loop i in [1..dewy_syntax[selected].children.len()): imported.push(dw_expr(dw_child(selected, i)))
-        else: imported.push(dw_expr(selected))
+            loop i in [1..dewy_syntax[selected].children.len()): imported.push(dw_import_name(dw_child(selected, i)))
+        else: imported.push(dw_import_name(selected))
         loop item in imported:
             if nodes[item].kind != .ident: return dw_fail(selected, "this imported name")
         set_list(n, imported)
     else if dewy_syntax[id].children.len() != 2: return dw_fail(id, "this import alias")
+    return n
+
+dw_import_name = (id: int) -> int:
+    let id = dw_unwrap(id)
+    alias = ""
+    if dw_op(id) == "as":
+        alias = dw_name(dw_child(id, 2))
+        if alias == "": return dw_fail(id, "this imported alias; group each aliased name")
+        id = dw_child(id, 1)
+    if dw_name(id) == "": return dw_fail(id, "this imported name")
+    n = dw_expr(id)
+    if alias != "": nodes[n].aux = i32(intern(alias))
     return n
 
 dw_iterable = (id: int) -> int:
@@ -508,6 +539,19 @@ dewy_parse_file = (file: int) -> int[]:
         else: root = id
         stack.push(id)
     if root == 0: fatal(mkpos(file, 0), "missing syntax root")
+    # Collect local record names before projecting bodies: declarations may
+    # follow the functions that construct them.
+    loop child in dewy_syntax[root].children:
+        declaration = dw_unwrap(child)
+        if dewy_syntax[declaration].kind == "KeywordExpr":
+            word = dewy_syntax[dw_child(declaration, 0)].text
+            if word != "let" and word != "const": continue
+            declaration = dw_unwrap(dw_child(declaration, 1))
+        if dw_op(declaration) != "=": continue
+        lhs = dw_child(declaration, 1)
+        if dw_op(lhs) != ":" or dw_name(dw_child(lhs, 2)) != "type": continue
+        name = dw_name(dw_child(lhs, 1))
+        if name != "": dewy_record_names.push(intern(name))
     decls: int[]
     loop child in dewy_syntax[root].children: decls.push(dw_stmt(child, true))
     dewy_syntax = []

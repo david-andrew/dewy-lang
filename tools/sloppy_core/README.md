@@ -26,11 +26,13 @@ The exported tree includes Sloppy's license. Nothing replaces the installed Dewy
 compiler. The parser currently runs as a subprocess for each Dewy source file;
 this intentionally simple boundary can be replaced after measuring the result.
 
-The first slice supports explicitly typed functions, mutable `@` arguments,
+The current slice supports typed and inferred functions, generic calls, default
+arguments, closures with captured state, higher-order calls, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, floating-point records,
 arrays with value copies, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
-array/range iteration, and combined `and` loop headers. Combined loops reuse
+array/range iteration, import aliases, forward local record declarations, and
+combined `and` loop headers. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
 Native parser diagnostics and
 UTF-8 source locations are retained. A semicolon explicitly discards a result.
@@ -46,9 +48,10 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The behavior gate now contains 31 cases and takes about 2 seconds on the
+The behavior gate now contains 77 checks and takes about 4.4 seconds on the
 development machine, including separate compiler processes and program execution.
-It includes the paddle game model on native and WebAssembly targets, and a
+Value cases run in debug and release modes. It includes the paddle game model
+on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build
 instructions are in `examples/sloppy_core/`.
 Evidence is in `dewy/audits/2026-10-16/source-core/`.
