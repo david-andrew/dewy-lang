@@ -163,6 +163,14 @@ main=():>int64=>{let xs:array<int64>=[42] bump(xs); return xs[0]}''',
     'floor': '''main=():>int64=>if (-7)//3 =? -3 and (-7)%3 =? 2 and 7//(-3) =? -3 and 7%(-3) =? -2 42 else 1''',
     'float': '''Vector:type=[x:float64 y:float64]
 main=():>int64=>{let v=Vector[1.25 2.5] return if v.x*2.0 =? v.y 42 else 1}''',
+    'conversion-int-float': '''main=()=>{let i:int64=42 let u:uint64=18446744073709551615
+return if (i as float64) =? 42.0 and ((-i) as float32) =? -42.0 and (u as float64) >? 1.8e19 42 else 1}''',
+    'conversion-float-width': '''main=()=>{let x:float64=1.25 let narrow=x as float32
+return if (narrow as float64) =? 1.25 and (1.25 as float32) =? narrow 42 else 1}''',
+    'conversion-float-int': '''main=()=>{let a:float64=42.9 let high:float64=300 let low:float64=-200
+return if (a as int64) =? 42 and (high as uint8) =? 255 and (low as int8) =? -128 and (low as uint64) =? 0 42 else 1}''',
+    'conversion-float-limits': '''main=()=>{let zero:float64=0.0 let nan=zero/zero let infinity=1.0/zero
+return if (nan as int64) =? 0 and (nan as uint64) =? 0 and (infinity as int64) =? 9223372036854775807 and (infinity as uint64) =? 18446744073709551615 and ((-infinity) as int64) =? -9223372036854775808 42 else 1}''',
     'float-division': '''divide=(x:float64 y:float64):>float64=>x/y
 main=():>int64=>if divide(84.0 2.0) =? 42.0 42 else 1''',
     'inverted-comparisons': '''main=():>int64=>if 1 not=? 2 and 1 not>? 2 and 2.0 not<? 1.0 42 else 1''',
@@ -301,8 +309,8 @@ def test_core_imports(compiler, tmp_path, extension, style):
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 def test_core_imported_record_brackets(compiler, tmp_path, extension):
     dependency = tmp_path / f'helper.{extension}'
-    dependency.write_text('Point:type=[x:int64 y:int64]' if extension == 'dewy'
-                          else 'struct Point:\n    x: int\n    y: int\n')
+    dependency.write_text('Point:type=[x:int64=20 y:int64=22]' if extension == 'dewy'
+                          else 'struct Point:\n    x: int = 20\n    y: int = 22\n')
     source = tmp_path / 'main.dewy'
     source.write_text(f'''import p"helper.{extension}" as geometry
 from p"helper.{extension}" import Point
@@ -381,16 +389,17 @@ main=():>int64=>{
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-def test_core_game_renderer(compiler, tmp_path):
-    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/paddle.dewy'
-    binary = tmp_path / 'paddle'
+@pytest.mark.parametrize('game', ['paddle', 'physics'])
+def test_core_game_renderer(compiler, tmp_path, game):
+    source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
+    binary = tmp_path / game
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     screenshot = tmp_path / 'frame.png'
     env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
     env.update(SLOPPY_SOFTWARE='1', SLOPPY_SCREENSHOT=str(screenshot), SLOPPY_FRAMES='3',
-               SLOPPY_WINDOW='1280x720', SLOPPY_INPUT='1:mouse=800x620')
+               SLOPPY_WINDOW='1280x720', SLOPPY_INPUT='1:mouse=800x620,2:mouse_right+,3:b+')
     ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=15, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     data = screenshot.read_bytes()
@@ -474,7 +483,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -658,3 +667,86 @@ return if image.width =? 1 and image.height =? 1 and image.pixels.length =? 4 im
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_physics_scene(compiler, tmp_path, target, release):
+    node = shutil.which('node')
+    if target == 'wasm' and node is None:
+        pytest.skip('Node is needed to execute the generated web runner')
+    model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/physics_scene.dewy'
+    shutil.copy2(model, tmp_path)
+    source = tmp_path / 'physics_test.dewy'
+    source.write_text('''import physics as dynamics
+from p"physics_scene.dewy" import fresh, advance, add_ball
+main=()=>{
+    let scene=fresh()
+    if scene.world.bodies().length not=? 57 return 1
+    let original=scene
+    let ball=add_ball(@scene vec2(50 100) 12)
+    loop i in [0..120) {advance(@scene 1.0/120.0)}
+    if scene.world.bodies().length not=? 58 or original.world.bodies().length not=? 57 return 2
+    let fallen=scene.world.pos(ball)
+    if fallen.y <? 400.0 or fallen.y >? 680.0 return 3
+    if original.rope is? dynamics.Joint {
+        let ends=original.world.ends(original.rope)
+        if ends[1].x not=? 640.0 or ends[1].y not=? 160.0 return 4
+    } else return 5
+    let joint=scene.world.drag(ball fallen)
+    scene.world.drag_to(joint vec2(200 200))
+    loop i in [0..120) {advance(@scene 1.0/120.0)}
+    let moved=scene.world.pos(ball)
+    if moved.x <? 100.0 or moved.y >? 400.0 return 6
+    scene.world.remove(joint)
+    scene.world.remove(ball)
+    if scene.world.bodies().length not=? 57 return 7
+    return 42
+}''')
+    binary = tmp_path / 'physics_test'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=15, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('style', ['namespace', 'selected'])
+def test_core_library_import(compiler, tmp_path, style):
+    source = tmp_path / 'import_test.dewy'
+    declaration, name = ('import physics as dynamics', 'dynamics.World') if style == 'namespace' else (
+        'from physics import World as Space', 'Space')
+    source.write_text(f'{declaration}\nmain=()=>{{let world={name}[] return world.iterations+34}}')
+    binary = tmp_path / 'import_test'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize(('expression', 'diagnostic'), [
+    ('pair[0]+pair[1].length', None),
+    ('pair[-1]', 'tuple index out of range'),
+    ('pair[2]', 'tuple index out of range'),
+    ('pair[i]', 'tuple index must be an integer literal'),
+])
+def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
+    (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
+    source = tmp_path / 'tuple.dewy'
+    source.write_text(f'import p"helper.jo"\nmain=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}')
+    binary = tmp_path / 'tuple'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    if diagnostic:
+        assert built.returncode != 0 and diagnostic in built.stderr, built.stdout + built.stderr
+    else:
+        assert built.returncode == 0, built.stdout + built.stderr
+        assert subprocess.run([binary], timeout=10, check=False).returncode == 42

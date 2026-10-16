@@ -299,3 +299,31 @@ fix. A fresh C bootstrap passes all 389 checks in 29.85 seconds
 (`call-order-build.json`, `call-order-tests.log`). Six alternating measured
 release game builds after warm-up gave 323.06 ms before and 324.04 ms after
 (`call-order-perf.json`), effectively unchanged.
+
+## Physics playground and library integration
+
+The new `examples/sloppy_core/physics.dewy` ports the pinned Sloppy physics
+example into Dewy, with scene construction/simulation in `physics_scene.dewy`:
+57 bodies, a box pyramid, pinned bridge, balls, rope and wrecking ball. Mouse
+input drags bodies and adds boxes; B adds balls and R resets. Named library
+imports, numeric value conversions, qualified record construction and literal
+tuple indexing make the existing library usable directly. A nested qualified
+constructor regression is covered without a selected import masking its scope.
+
+Native/software rendering and native/WebAssembly simulation tests cover gravity,
+dragging, removals and independent world copies. The collaborative browser ran
+the actual web game, added a box and ball with mouse/keyboard input, and reported
+no console errors (`physics-browser.png`). A fresh C bootstrap passes 412 checks
+in 32.78 seconds (`physics-build.json`, `physics-tests.log`); four additional
+NaN/infinity conversion boundary checks pass in 0.52 seconds. The gate now has
+416 checks, with both modes and targets covered for numeric conversions.
+
+Seven alternating measured native release runs of 1,200 steps gave medians of
+178.64 ms for the pinned Sloppy scene and 178.32 ms for the Dewy scene, using the
+same owned core/compiler libraries. Every run gave position checksum
+80576.62176513672. Setup and drawing are excluded; this measures frontend/runtime
+parity on this workload, not the whole engine's performance. The harnesses and
+samples are in `physics-reference.jo`, `physics-benchmark.dewy` and
+`physics-benchmark.json`. The captured Dewy harness has the source path from this
+workspace. One-off model build times were 120 ms and 177 ms respectively: syntax
+frontend overhead remains an improvement opportunity.

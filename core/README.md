@@ -20,6 +20,7 @@ python3 -m tools.sloppy_core.build \
 /tmp/dewy-core/bin/dewy-core new /tmp/my-dewy-game
 /tmp/dewy-core/bin/dewy-core watch /tmp/my-dewy-game/main.dewy
 /tmp/dewy-core/bin/dewy-core examples/sloppy_core/paddle.dewy
+/tmp/dewy-core/bin/dewy-core examples/sloppy_core/physics.dewy
 /tmp/dewy-core/bin/dewy-core build examples/sloppy_core/paddle.dewy \
   --target wasm -o /tmp/paddle
 ```
@@ -67,7 +68,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 389-check gate takes about 30 seconds locally. It tests expected Dewy
+the earlier compiler suite. The 416-check gate takes about 33 seconds locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.

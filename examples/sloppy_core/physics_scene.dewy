@@ -1,0 +1,59 @@
+# Adapted from Sloppy's MIT-licensed examples/physics.jo at the pinned revision
+# recorded in core/UPSTREAM.json. Simulation and scene construction are Dewy;
+# the repository-owned physics library provides the rigid-body solver.
+import physics
+
+Scene:type=[world:physics.World fills:dict<int64 vec4> rope:physics.Joint? count:int64]
+
+paint=(@scene:Scene body:physics.Body color:vec4):>void=>{
+    scene.fills[body.id]=color
+}
+
+add_box=(@scene:Scene at:vec2 size:vec2):>physics.Body=>{
+    scene.count+=1
+    let body=scene.world.add_box(at size friction=0.6)
+    paint(@scene body hsv(0.05+0.08*((scene.count%7) as float64) 0.55 0.9))
+    return body
+}
+
+add_ball=(@scene:Scene at:vec2 radius:float64):>physics.Body=>{
+    scene.count+=1
+    let body=scene.world.add_circle(at radius friction=0.4 bounce=0.3)
+    paint(@scene body hsv(0.55+0.06*((scene.count%5) as float64) 0.5 0.95))
+    return body
+}
+
+fresh=():>Scene=>{
+    let scene=Scene[physics.World[] [] none 0]
+    let stone=rgb(0.32 0.34 0.4)
+    let floor=scene.world.add_box(vec2(640 710) vec2(1280 40) kind=physics.BodyKind.fixed)
+    paint(@scene floor stone)
+    let left=scene.world.add_box(vec2(-10 360) vec2(20 720) kind=physics.BodyKind.fixed)
+    paint(@scene left stone)
+    let right=scene.world.add_box(vec2(1290 360) vec2(20 720) kind=physics.BodyKind.fixed)
+    paint(@scene right stone)
+    loop row in [0..8) {
+        loop column in [0..8-row) {
+            add_box(@scene vec2(880+42*(column as float64)+21*(row as float64) 670-40*(row as float64)) vec2(40 40));
+        }
+    }
+    let first=scene.world.add_box(vec2(130 600) vec2(60 180) kind=physics.BodyKind.fixed)
+    paint(@scene first stone)
+    let last=scene.world.add_box(vec2(610 600) vec2(60 180) kind=physics.BodyKind.fixed)
+    paint(@scene last stone)
+    let previous=physics.ground
+    loop i in [0..10) {
+        let plank=scene.world.add_box(vec2(181+42*(i as float64) 512) vec2(42 10) density=0.5)
+        paint(@scene plank rgb(0.62 0.45 0.28))
+        scene.world.pin(previous plank vec2(160+42*(i as float64) 512));
+        previous=plank
+    }
+    scene.world.pin(previous physics.ground vec2(580 512));
+    loop i in [0..5) {add_ball(@scene vec2(250+60*(i as float64) 300) 16+3*((i%3) as float64));}
+    let ball=scene.world.add_circle(vec2(640 160) 40 density=6 friction=0.3)
+    paint(@scene ball rgb(0.2 0.22 0.25))
+    scene.rope=scene.world.rod(physics.ground ball vec2(1000 60) vec2(640 160) rope=true)
+    return scene
+}
+
+advance=(@scene:Scene dt:float64):>void=>{scene.world.step(dt)}

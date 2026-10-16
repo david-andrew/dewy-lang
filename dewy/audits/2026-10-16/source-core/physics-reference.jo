@@ -1,0 +1,65 @@
+# Physics: a pyramid of boxes, a bridge of planks, a wrecking ball on a rope and a pile of balls,
+# with 2D physics (`import physics`: bodies, collisions, pins and ropes). Drag anything with the
+# left mouse button. Right click drops a box, middle click or B a ball; R starts over.
+
+import physics
+
+
+w = physics.World()
+fills: {int: vec4}              # each body's color, by its id
+grab: physics.Joint? = none
+rope: physics.Joint? = none
+count = 0
+
+paint = (b: physics.Body, c: vec4): fills[b.id] = c
+
+add_box = (at: vec2, size: vec2) -> physics.Body:
+    count += 1
+    b = w.add_box(at, size, friction = 0.6)
+    paint(b, hsv(0.05 + 0.08 * f64(count % 7), 0.55, 0.9))
+    b
+
+add_ball = (at: vec2, r: f64) -> physics.Body:
+    count += 1
+    b = w.add_circle(at, r, friction = 0.4, bounce = 0.3)
+    paint(b, hsv(0.55 + 0.06 * f64(count % 5), 0.5, 0.95))
+    b
+
+setup = ():
+    w = physics.World()
+    fills.clear()
+    grab = none
+    stone = rgb(0.32, 0.34, 0.4)
+    paint(w.add_box(vec2(640, 710), vec2(1280, 40), kind = .fixed), stone)
+    paint(w.add_box(vec2(-10, 360), vec2(20, 720), kind = .fixed), stone)
+    paint(w.add_box(vec2(1290, 360), vec2(20, 720), kind = .fixed), stone)
+    # a pyramid
+    loop r in [0..8):
+        loop c in [0..8 - r): add_box(vec2(880 + 42 * f64(c) + 21 * f64(r), 670 - 40 * f64(r)), vec2(40, 40))
+    # a bridge of planks between two pillars, each pinned to the next
+    paint(w.add_box(vec2(130, 600), vec2(60, 180), kind = .fixed), stone)
+    paint(w.add_box(vec2(610, 600), vec2(60, 180), kind = .fixed), stone)
+    prev = physics.ground
+    loop i in [0..10):
+        p = w.add_box(vec2(181 + 42 * f64(i), 512), vec2(42, 10), density = 0.5)
+        paint(p, rgb(0.62, 0.45, 0.28))
+        w.pin(prev, p, vec2(160 + 42 * f64(i), 512))
+        prev = p
+    w.pin(prev, physics.ground, vec2(580, 512))
+    loop i in [0..5): add_ball(vec2(250 + 60 * f64(i), 300), 16 + 3 * f64(i % 3))
+    # a wrecking ball on a rope, pulled aside
+    ball = w.add_circle(vec2(640, 160), 40, density = 6, friction = 0.3)
+    paint(ball, rgb(0.2, 0.22, 0.25))
+    rope = w.rod(physics.ground, ball, vec2(1000, 60), vec2(640, 160), rope = true)
+
+main = ():
+    setup()
+    started = time_ns()
+    loop i in [0..1200): w.step(1.0 / 120.0)
+    elapsed_ns = time_ns() - started
+    total = 0.0
+    loop b in w.bodies():
+        p = w.pos(b)
+        total += f64(p.x) + f64(p.y)
+    print(elapsed_ns)
+    print(total)

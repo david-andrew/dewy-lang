@@ -4,12 +4,20 @@
 code are Dewy. The pinned Sloppy platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.
 
+`physics.dewy` is a larger interactive playground adapted from the pinned Sloppy
+physics example: a 57-body scene with a box pyramid, pinned bridge, rope and
+wrecking ball. Left-drag a body, right-click to add a box, press B or middle-click
+to add a ball, and R to reset. `physics_scene.dewy` contains scene construction
+and simulation; the repository-owned `physics` library supplies collision and
+joint solving. Both programs run natively and in the browser.
+
 After building the compiler as described in `tools/sloppy_core/README.md`:
 
 ```sh
 CORE=/tmp/dewy-core/bin/dewy-core
 # Live editing: save changes and the running game takes the new code.
 $CORE watch examples/sloppy_core/paddle.dewy
+$CORE watch examples/sloppy_core/physics.dewy
 
 $CORE build examples/sloppy_core/paddle.dewy -o /tmp/paddle
 /tmp/paddle
@@ -17,11 +25,14 @@ $CORE build examples/sloppy_core/paddle.dewy -o /tmp/paddle
 # The wasm target emits a self-contained HTML file, including its web runtime.
 $CORE build examples/sloppy_core/paddle.dewy --target wasm -o /tmp/paddle
 # Open /tmp/paddle.html in a browser.
+$CORE build examples/sloppy_core/physics.dewy --release -o /tmp/physics
+$CORE build examples/sloppy_core/physics.dewy --target wasm --release -o /tmp/physics
 ```
 
 Use `--release` for the optimizing compiler. The default development build
 already runs the game. The current example uses a 1280×720 logical playfield.
-It is a small integration example, not a complete port of Sloppy's larger games.
+The physics playground exercises imported library types, named/default arguments,
+mutable receivers, optional handles, tuple results, record copies and rendering.
 
 For display-independent rendering and scripted mouse input:
 
@@ -43,3 +54,13 @@ not repeated build medians. See the restart audit for evidence and limitations.
 For a smaller starting point, run `dewy-core new my-game`, then
 `dewy-core watch my-game/main.dewy`. The generated README includes native and web
 build commands. `dewy-core new my-program program` starts a terminal program.
+
+The physics model gate checks gravity, dragging, joint/body removal and independent
+world copies on both targets and in both modes. The browser was also exercised
+with mouse/keyboard input and no console errors. A 1,200-step native release
+simulation of the 57-body scene took a median 178.32 ms versus 178.64 ms for the
+corresponding pinned Sloppy example, compiled with the same owned core and
+libraries. Seven alternating measured runs agreed on the position checksum;
+setup and drawing were excluded. This demonstrates that the Dewy frontend adds
+no measurable simulation cost for this workload, not a general physics benchmark.
+See the source-core audit for inputs and measurements.

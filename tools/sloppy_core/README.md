@@ -38,7 +38,7 @@ independent value parameters, fixed-width arithmetic, based integer and decimal
 scientific literals, floating-point records,
 arrays and dictionaries with value copies, array slices, grapheme string operations, optional values, type aliases, callable types, union
 narrowing, typed/literal/catch-all `match` arms, nested record mutation, conditionals, while loops,
-interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
+interpolated strings, entry-point arguments, file imports (Dewy and Sloppy), named library imports,
 array/range iteration, import aliases, forward local record declarations, and
 combined `and` loop headers. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
@@ -71,11 +71,19 @@ followed by omitted defaults in parameter order, including record construction.
 Already evaluated scalar and managed values survive changes made by later
 arguments. Named arguments on first-class function values remain unsupported.
 
+Numeric `as` performs value conversion, including integer/float and float-width
+conversions. Float-to-integer conversions truncate toward zero and saturate to
+the destination range (NaN becomes zero), using the same core lowering on native
+and web. `transmute` is still unsupported. Named libraries are available as
+`import physics`, `import physics as dynamics`, or `from physics import World`;
+`p"..."` remains an explicit file path. Tuple results from libraries support
+literal indexing such as `world.ends(joint)[0]`.
+
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 389 checks and takes
-about 30 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 416 checks and takes
+about 33 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

@@ -583,14 +583,16 @@ dw_import = (id: int) -> int:
         alias = dw_name(dw_child(spec, 2))
         if alias == "": return dw_fail(spec, "this module alias")
         spec = dw_unwrap(dw_child(spec, 1))
-    if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use p\"file.dewy\" or p\"file.jo\"")
-    path = dw_unwrap(dw_child(spec, 2))
-    if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral module path")
-    value = dewy_syntax[path].text
+    value = dw_name(spec)
+    if value == "":
+        if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use a library name or p\"file.dewy\"")
+        path = dw_unwrap(dw_child(spec, 2))
+        if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral module path")
+        value = dewy_syntax[path].text
+        nodes[n].aux2 = 1
     nodes[n].sval = i32(intern(value))
     nodes[n].name = i32(intern(strip_ext(file_name(value))))
     if alias != "": nodes[n].name = i32(intern(alias))
-    nodes[n].aux2 = 1
     if dewy_syntax[dw_child(id, 0)].text == "from":
         if dewy_syntax[id].children.len() != 4: return dw_fail(id, "this import")
         nodes[n].aux = 2

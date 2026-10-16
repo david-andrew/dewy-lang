@@ -4457,8 +4457,26 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n] = nodes[call]
             return check_expr(n, expected)
         if bk == .typeval and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            # Checking a qualified type replaces its field node with a resolved
+            # identifier. Use that resolved type rather than looking up its bare
+            # name again in the caller's module.
+            target = prune(telem(bt))
             nodes[n].kind = .call
             nodes[n].b = 0
+            if target != 0 and types[target].kind == .struct_:
+                t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
+                nodes[n].type = i32(t)
+                add_flag(n, NF_CHECKED)
+                last_checked = n
+                return t
+            return check_expr(n, expected)
+        if bk == .tuple and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            if b == 0 or nodes[b].kind != .int_lit: fatal(nodes[n].pos, "a tuple index must be an integer literal")
+            nodes[n].kind = .field
+            nodes[n].aux = -2
+            nodes[n].ival = nodes[b].ival
+            nodes[n].b = 0
+            set_list(n, [])
             return check_expr(n, expected)
         if bk == .typeval: t = mk_typeval(expr_as_type(n))
         else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
@@ -4829,6 +4847,11 @@ check_expr = (n: int, expected: int) -> int:
         fk = types[ft].kind
         tk = types[tt].kind
         if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            if is_numeric(ft) and is_numeric(tt):
+                add_flag(a, NF_CHECKED)
+                t = conversion(n, tt, [a])
+                last_checked = n
+                return t
             helper = ""
             if fk == .array and telem(ft) == T_U8 and tk == .opt and telem(tt) == T_STR: helper = "__dewy_decode_utf8"
             else if fk == .str_ and tk == .array and telem(tt) == T_U8: helper = "bytes"
