@@ -15,6 +15,9 @@ CASES = {
 main=()=>{let x:int64=19 return twice(x)+2(x-17)}''',
     'syntax-coefficient-call': '''value=()=>21
 main=()=>2value()''',
+    'syntax-coefficient-exponent-name': 'main=()=>{let energy:int64=21 return 2energy}',
+    'syntax-coefficient-e': '''main=()=>{let e:float64=2.0
+return if 2e + 1e1 =? 14.0 42 else 1}''',
     'syntax-multiline': '''Choice:type=int64
     | string
 main=()=>if 1 =? 1

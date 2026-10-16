@@ -115,7 +115,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
                     loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
                     fraction = "0d:" + source[first..i)
                     kind = "Real"
-                if prefix == "0d:" and i < stop and (source[i] == 'e' or source[i] == 'E'):
+                if prefix == "0d:" and i + 1 < stop and (source[i] == 'e' or source[i] == 'E') and (is_digit(source[i + 1]) or source[i + 1] == '+' or source[i + 1] == '-'):
                     i += 1
                     sign = "+"
                     if i < stop and (source[i] == '+' or source[i] == '-'):
