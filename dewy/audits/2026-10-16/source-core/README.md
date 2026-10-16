@@ -534,3 +534,22 @@ seconds (`dev-driver-tests.log`). Subsequent `path` and `run` commands reused th
 same cache entry; the executable tour printed the expected six lines. A single
 cached path lookup took 0.13 seconds including Python startup/input hashing;
 compiler latency measurements continue to invoke the executable directly.
+
+
+## Inline record annotations
+
+Parameters, returns and other type positions now accept `[field: Type ...]`.
+Annotations and inferred anonymous literals share one canonical field/type
+interner, so field order and module boundaries do not create distinct types.
+The implementation uses ordinary compact records, constructors and ownership;
+there is no new runtime representation or conversion pass. Named declarations
+remain nominal and supply field defaults. Inline fields require concrete value
+types without defaults.
+
+Checks cover parameters, returns, global/nested records, arrays/maps, optionals,
+function types, mutable places, empty records, match, overloads, argument defaults,
+declaration-site aliases across modules and editor displays. Duplicate/defaulted/
+void/mutable field annotations receive diagnostics. The new cases run in native
+and web debug/release modes. A fresh independent C bootstrap took 17.84
+seconds; all 814 checks pass in 58.14 seconds (`inline-record-build.json`,
+`inline-record-full-tests.log`).

@@ -909,6 +909,18 @@ resolve_type = (tn: int) -> int:
         h = habit_name(name_of(nm))
         if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
         fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
+    if k == .trecord:
+        let fields = kids(tn)
+        seen: {int: bool} = {}
+        loop field in fields:
+            name = int(nodes[field].name)
+            if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
+            seen[name] = true
+            t = resolve_type(int(nodes[field].a))
+            if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
+                fatal(nodes[field].pos, "inline record fields need concrete value types")
+            nodes[field].type = i32(t)
+        return dewy_record_schema(tn, fields)
     if k == .tarray:
         if nodes[tn].b != 0: return mk_fixed_checked(resolve_type(int(nodes[tn].a)), fixed_size(int(nodes[tn].b)), nodes[tn].pos)
         if nodes[tn].aux >= 2: return nd_of(resolve_type(int(nodes[tn].a)), nodes[tn].pos)

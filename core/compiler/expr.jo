@@ -1599,6 +1599,12 @@ dewy_record_type = (n: int) -> int:
         if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
             fatal(nodes[value].pos, "cannot infer record field '{name_of(name)}'; give the record a type annotation")
         add_flag(value, NF_CHECKED)
+        nodes[field].type = i32(t)
+    dewy_record_schema(n, args)
+
+# Type annotations and inferred literals share the same structural identity.
+# Each member carries its resolved type; source values remain separate.
+dewy_record_schema = (n: int, args: int[]) -> int:
     # Small record schemas use insertion sort; source argument storage is separate.
     ordered: int[]
     loop field in args:
@@ -1609,7 +1615,7 @@ dewy_record_type = (n: int) -> int:
             i -= 1
         ordered[i] = field
     key = ""
-    loop field in ordered: key += "{int(nodes[field].name)}:{prune(ntype(int(nodes[field].a)))};"
+    loop field in ordered: key += "{int(nodes[field].name)}:{prune(ntype(field))};"
     if let t = dewy_record_types.get(key): return t
     decl = mk(.struct_, nodes[n].pos)
     nodes[decl].name = i32(intern("<record>"))
@@ -1618,7 +1624,7 @@ dewy_record_type = (n: int) -> int:
     loop field in ordered:
         member = mk(.vardecl, nodes[field].pos)
         nodes[member].name = nodes[field].name
-        nodes[member].a = i32(type_node_of(ntype(int(nodes[field].a)), nodes[field].pos))
+        nodes[member].a = i32(type_node_of(ntype(field), nodes[field].pos))
         members.push(member)
     set_list(decl, members)
     t = get_struct_inst(decl, [])

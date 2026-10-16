@@ -168,6 +168,16 @@ dw_type = (id: int) -> int:
         n = mk(.tname, pos)
         nodes[n].name = i32(intern(name))
         return n
+    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "[]:":
+        n = mk(.trecord, pos)
+        fields: int[]
+        loop child in dewy_syntax[id].children:
+            if dw_op(child) != ":": return dw_fail(child, "an inline record field without a type; use a named record for defaults")
+            field = dw_param(child, .vardecl)
+            if has_flag(field, NF_MUT): return dw_fail(child, "a mutable inline record field; mutability belongs on the parameter")
+            fields.push(field)
+        set_list(n, fields)
+        return n
     if dw_op(id) == "|":
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])

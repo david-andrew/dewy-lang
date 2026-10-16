@@ -143,6 +143,7 @@ def test_vscode_core_client(tmp_path):
     ('', 'let value:array<string>=["answer"] return value.length', 'value', 'array<string>'),
     ('', 'let value:dict<string array<int16>>=[] return value.length', 'value', 'dict<string array<int16>>'),
     ('', 'let value=[y=22 x=20] return value.x+value.y', 'value', '[x: int64 y: int64]'),
+    ('', 'let value:[y:int64 x:int64]=[x=20 y=22] return value.x+value.y', 'value', '[x: int64 y: int64]'),
     ('combine=(a b=a)=>a+b\n', 'let value=combine(21) return value', 'value', 'int64'),
     ('', 'let value=[loop x in [20 22] x] return value[0]+value[1]', 'value', 'array<int64>'),
     ('', 'let value=[loop key in ["a" "b"] key->21] return value["a"]+value["b"]', 'value', 'dict<string int64>'),

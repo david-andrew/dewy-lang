@@ -101,7 +101,21 @@ main=()=>{
 `Point[20 22]` explicitly constructs a named record. `[x=20]` uses the expected
 record type and its defaults. Without an expected type, named fields infer an
 anonymous record. Anonymous record types agree by field names and types, even
-when written in a different order.
+when written in a different order. Their shape can also be written directly in
+an annotation:
+
+```dewy
+sum=(point:[x:int64 y:int64]):>int64=>point.x+point.y
+main=()=>{
+    let point=[y=22 x=20]
+    return sum(point)
+}
+```
+
+Inline shapes work in parameters, returns, nested fields, collections, optional
+values and function types. They share type identity with inferred anonymous
+records. Named records remain distinct types; use a named declaration when fields
+need defaults. Inline fields specify concrete value types.
 
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as

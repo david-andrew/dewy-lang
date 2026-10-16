@@ -221,6 +221,35 @@ b.inner.values[0]=99 return a.inner.values[0]+a.inner.values[1]}''',
 a=b return a.x+a.y}''',
     'record-anonymous-array': '''main=()=>{let values=[[x=20 y=1] [y=2 x=22]]
 return values[0].x+values[1].x}''',
+    'record-inline-parameter': '''sum=(point:[x:int64 y:int64])=>point.x+point.y
+main=()=>{let point=[y=22 x=20] return sum(point)}''',
+    'record-inline-return': '''make=():>[y:int64 x:int64]=>[x=20 y=22]
+main=()=>{let point:[x:int64 y:int64]=make() return point.x+point.y}''',
+    'record-inline-global': '''let point:[x:int64 y:int64]=[y=22 x=20]
+main=()=>point.x+point.y''',
+    'record-inline-nested': '''main=()=>{let first:[inner:[values:array<int64>]]=[inner=[values=[20 22]]]
+let second=first second.inner.values[0]=99 return first.inner.values[0]+first.inner.values[1]}''',
+    'record-inline-array': '''main=()=>{let points:array<[x:int16 y:int16]>=[[y=2 x=20] [x=22 y=3]]
+return (points[0].x+points[1].x) as int64}''',
+    'record-inline-map': '''main=()=>{let points:dict<string [x:int64]>=["answer"->[x=42]]
+return points["answer"].x}''',
+    'record-inline-optional': '''pick=(point:[x:int64]?)=>if point is? none 2 else point.x
+main=()=>pick([x=40])+pick(none)''',
+    'record-inline-function-type': '''Apply:type=(point:[x:int64]):>int64
+main=()=>{let f:Apply=(point:[x:int64])=>point.x return f([x=42])}''',
+    'record-inline-place': '''bump=(@point:[x:int64]):>void=>{point.x+=2}
+main=()=>{let point=[x=40] let original=point bump(@point) return if original.x =? 40 point.x else 1}''',
+    'record-inline-named-field': '''Outer:type=[point:[x:int64 y:int64]]
+main=()=>{let outer:Outer=[point=[y=22 x=20]] return outer.point.x+outer.point.y}''',
+    'record-inline-empty': '''answer=(value:[])=>42
+main=()=>answer([])''',
+    'record-inline-match': '''pick=(value:[answer:int64]?)=>match value {item:[answer:int64]=>item.answer <none>=>0}
+main=()=>pick([answer=42])''',
+    'record-inline-overload': '''read=(value:[answer:int64])=>value.answer
+read=(value:[answer:string])=>value.answer.length
+main=()=>read([answer=39])+read([answer="abc"])''',
+    'record-inline-default': '''read=(value:[answer:int64]=[answer=42])=>value.answer
+main=()=>read()''',
     'record-generic': '''sum=(v)=>v.x+v.y
 main=()=>sum([y=22 x=20])''',
     'record-order': '''let sequence:int64=0
@@ -422,6 +451,10 @@ ERRORS = {
     'record-unknown-field': ('Value:type=[x:int64]\nmain=()=>{let v:Value=[y=42] return 0}', 'unknown'),
     'record-mixed-elements': ('main=()=>{let v=[x=42 2] return 0}', 'record item'),
     'record-untyped-empty-array': ('main=()=>{let v=[items=[]] return 0}', 'type annotation'),
+    'record-inline-duplicate': ('main=()=>{let v:[x:int64 x:int64]=[] return 0}', 'duplicate record field'),
+    'record-inline-default': ('main=()=>{let v:[x:int64=42]=[] return 0}', 'named record for defaults'),
+    'record-inline-void': ('main=()=>{let v:[x:void]=[] return 0}', 'concrete value types'),
+    'record-inline-mutable-field': ('main=()=>{let v:[@x:int64]=[] return 0}', 'mutability belongs on the parameter'),
     'comprehension-mixed': ('main=()=>[loop i in [1 2] if i =? 1 "a"->2 else 3]', 'cannot mix'),
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
@@ -526,6 +559,26 @@ let offset:int64=99
 main=()=>{{let value:int64=20 return combine(value)}}''')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_inline_record_across_modules(compiler, tmp_path, release):
+    (tmp_path / 'helper.dewy').write_text('''Count:type=int64
+make=():>[y:Count x:Count]=>[x=20 y=22]
+sum=(point:[x:Count y:Count])=>point.x+point.y
+''')
+    source = tmp_path / 'main.dewy'
+    source.write_text('''from p"helper.dewy" import make, sum
+Count:type=string
+main=()=>{let point:[x:int64 y:int64]=make()
+return if sum([y=22 x=20]) =? 42 point.x+point.y else 1}
+''')
+    binary = tmp_path / 'main'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     assert subprocess.run([binary], timeout=10, check=False).returncode == 42
