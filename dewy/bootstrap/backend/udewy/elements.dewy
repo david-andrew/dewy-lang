@@ -5,7 +5,7 @@ import p"../../semantic/ty.dewy" as types
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/type_queries.dewy" as views
 
-# The first dense representation is deliberately bounded: flat scalar
+# The first dense representation is deliberately bounded: scalar
 # records with no dynamic brand or lifecycle behavior. The plan is made
 # once, from checked types and HIR, before runtime lowering erases them.
 # Every occurrence of an element type agrees on its physical representation.
@@ -62,8 +62,9 @@ exclude = (id:addr @excluded:set<addr> table:types.Table):>void => {
     excluded.push(views.structural_base(id table))
 }
 
-# A raw-exposed aggregate can contain arrays several fields below its root.
-# Keep their existing ABI until raw dense storage has its own contract.
+# Raw exposure can observe a record directly, or arrays several fields below
+# it. Keep those record types boxed as array elements too: an exposed element
+# address must not silently become an address into a relocatable buffer.
 exclude_arrays = (id:addr @excluded:set<addr> table:types.Table):>void => {
     let pending:array<addr>=[id]
     let visited:set<addr>=set[]
@@ -73,7 +74,7 @@ exclude_arrays = (id:addr @excluded:set<addr> table:types.Table):>void => {
         visited.push(plain)
         let node=types.node_at(table plain)
         if node is? types.ArrayType {exclude(node.element @excluded table) pending.push(node.element)}
-        else if node is? types.ObjectType {loop field in node.fields {pending.push(field.value_type)}}
+        else if node is? types.ObjectType {excluded.push(plain) loop field in node.fields {pending.push(field.value_type)}}
         else if node is? types.TypeOr {loop item in node.items {pending.push(item)}}
     }
 }
@@ -81,6 +82,29 @@ exclude_arrays = (id:addr @excluded:set<addr> table:types.Table):>void => {
 array_element = (id:addr table:types.Table):>addr? => {
     let node=types.node_at(table views.structural_base(id table))
     return if node is? types.ArrayType node.element else none
+}
+
+# Nested scalar records already have inline field layouts. They need no
+# per-element handles, hooks, or release walk either. Check every nested
+# shape: an otherwise plain record can be a storage root for branded children.
+inline_scalars = (id:addr context:layouts.Context excluded:set<addr> @table:types.Table):>bool => {
+    let pending:array<addr>=[id]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let plain=views.structural_base(pending.pop table)
+        if plain in? seen continue
+        seen.push(plain)
+        if plain in? context.nominals return false
+        let node=types.node_at(table plain)
+        if types.is_primitive(node 'bool') or views.fixed_integer_layout(plain table) isnt? none continue
+        if plain in? excluded return false
+        if node isnt? types.ObjectType or node.brand isnt? none or node.fields.length =? 0 return false
+        loop method in node.methods {if method.lifecycle isnt? none return false}
+        let layout=layouts.record(plain context @table)
+        if layout is? layouts.Pending or layouts.brand_field in? layout.offsets return false
+        loop field in node.fields {pending.push(field.value_type)}
+    }
+    return true
 }
 
 select = (nodes:array<hir.AST> context:layouts.Context @table:types.Table):>Plan => {
@@ -126,13 +150,7 @@ select = (nodes:array<hir.AST> context:layouts.Context @table:types.Table):>Plan
         if id in? excluded or id in? context.nominals continue
         let node=types.node_at(table id)
         if node isnt? types.ObjectType or node.brand isnt? none or node.fields.length =? 0 continue
-        let scalar=true
-        loop method in node.methods {if method.lifecycle isnt? none {scalar=false}}
-        loop field in node.fields {
-            let plain=views.structural_base(field.value_type table)
-            if not types.is_primitive(types.node_at(table plain) 'bool') and views.fixed_integer_layout(plain table) is? none {scalar=false}
-        }
-        if not scalar continue
+        if not inline_scalars(id context excluded @table) continue
         let record=layouts.record(id context @table)
         if record is? layouts.Pending or layouts.brand_field in? record.offsets continue
         dense[id]=layouts.Storage[record.size record.alignment]

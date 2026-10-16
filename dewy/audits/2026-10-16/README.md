@@ -370,3 +370,40 @@ pass about 41 / 39 ms: insufficient benefit for an extra scan.
 [Experiment samples](storage-prescan-experiment.json). The useful direction
 is to reuse or selectively compute analysis summaries, not add scans around
 the unchanged whole-program pass.
+
+### Compiler built with dense records
+
+The compiler itself builds with `DEWY_DENSE_RECORDS=1` and passes the direct
+37-test smoke gate in 21.54 s. It then compiles a frozen compiler source
+snapshot successfully; that rebuilt compiler also compiles and executes a
+program returning 42. No output-byte equivalence is required.
+
+The first cold self-build pair is **37.86 s boxed / 37.96 s dense**, with peak
+RSS **2,656,548 / 2,655,736 KiB**. This is a pilot, not a statistical speedup
+claim. Flat scalar arrays help the particle workload but do not address the
+compiler's dominant tagged/nested data. Do not promote this as a compiler
+speed improvement. [Pilot](dense-compiler-pilot.json),
+[smoke gate](dense-compiler-smoke.log).
+
+### Nested scalar records
+
+Dense eligibility now includes nested integer/bool records, such as a
+particle with position and velocity vectors. Existing inline field layouts
+supply the representation; no new source syntax or hand-flattened application
+record is needed. Every nested shape must exclude brands, nominal storage,
+handles, and lifecycle hooks. Raw-exposed record types also exclude enclosing
+records, retaining stable boxed element storage at that boundary.
+
+`records_nested.dewy` runs the same seeded workload and checksums. Two fresh
+builds per mode, three runs per size/build, five sizes: **all 90 results
+match**. Million-particle medians are **713.2 ms boxed, 217.1 ms dense,
+171.6 ms C**. At 100,000 particles they are **68.7, 16.3, 12.5 ms**. Dense
+is about 1.27–1.30 times C at both large inputs, within the 1.5 target for
+this workload. Cold compilation remains about **1.71 s** for both Dewy modes;
+that target remains unmet. [Samples](nested-dense-particles.json).
+
+The focused gate passes **19 tests in 12.01 s**, including native and Sloppy
+execution, nested mutation/copies/growth, and an exposed element address that
+must survive array growth. The native smoke gate passes **39 tests in
+21.05 s**. [Focused log](nested-dense-tests.log),
+[smoke log](nested-dense-smoke.log). Dense storage remains opt-in.

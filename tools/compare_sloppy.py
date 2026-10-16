@@ -66,6 +66,8 @@ def main() -> None:
     parser.add_argument('--dense-records', action='store_true',
                         help='also measure the opt-in dense Dewy representation on each Dewy backend')
     parser.add_argument('--output', type=Path, required=True, help='new JSON result file')
+    parser.add_argument('--dewy-source', type=Path, default=SOURCES / 'records.dewy',
+                        help='Dewy variant implementing the same particle workload/checksums')
     parser.add_argument('--builds', type=int, default=3)
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--sizes', type=int, nargs='+', default=[0, 1, 10, 100_000, 1_000_000])
@@ -76,6 +78,7 @@ def main() -> None:
     if args.output.exists():
         parser.error('use a new output path to preserve earlier results')
     dewy = args.dewy.resolve(strict=True)
+    dewy_source = args.dewy_source.resolve(strict=True)
     udewy = (args.udewy or dewy.with_name('udewy')).resolve(strict=True)
     sloppy_root = args.sloppy_root.resolve(strict=True)
     sloppy = sloppy_root / 'bin/sloppy'
@@ -92,8 +95,8 @@ def main() -> None:
         'dewy_checkout': checkout(ROOT), 'sloppy_checkout': checkout(sloppy_root),
         'tools': {name: file_identity(path) for name, path in
                   [('dewy', dewy), ('udewy', udewy), ('sloppy', sloppy), ('cc', cc)]},
-        'sources': [file_identity(SOURCES / name) for name in
-                    ['records.dewy', 'records.jo', 'records.c', 'harness.dewy', 'harness.h']],
+        'sources': [file_identity(dewy_source), *[file_identity(SOURCES / name) for name in
+                    ['records.jo', 'records.c', 'harness.dewy', 'harness.h']]],
         'builds': {}, 'runs': {},
     }
     modes = ['C', 'sloppy-debug', 'sloppy-release', 'dewy-native']
@@ -133,14 +136,14 @@ def main() -> None:
                 elif backend_mode.startswith('dewy-sloppy'):
                     bridge_work = work / 'bridge'
                     binary = bridge_work / 'program'
-                    command = [sys.executable, '-m', 'tools.sloppy_bridge.run', str(SOURCES / 'records.dewy'),
+                    command = [sys.executable, '-m', 'tools.sloppy_bridge.run', str(dewy_source),
                                '--dewy', str(dewy), '--emitter', str(emitter), '--output', str(bridge_work)]
                     if mode.endswith('release'): command.append('--release')
                 else:
                     # Mirror the CLI's documented artifact layout for an external source.
                     from udewy.cache import cache_artifact
-                    binary = work / cache_artifact(SOURCES / 'records.dewy', cwd=work)
-                    command = [str(dewy), '--timings', '-c', str(SOURCES / 'records.dewy')]
+                    binary = work / cache_artifact(dewy_source, cwd=work)
+                    command = [str(dewy), '--timings', '-c', str(dewy_source)]
                 built = invoke(command, work, mode_env, 180)
                 built['dense_records'] = mode_env['DEWY_DENSE_RECORDS'] == '1'
                 if backend_mode.startswith('dewy-sloppy'):

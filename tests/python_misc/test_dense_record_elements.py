@@ -35,16 +35,23 @@ main=():>int64=>{{
     types.array_type(small none @table);
     let nested=types.object_type([types.ObjectField['values' pairs]] none false [] [] @table)
     types.array_type(nested none @table);
+    let vectors=types.object_type([types.ObjectField['position' pair] types.ObjectField['velocity' pair] types.ObjectField['active' boolean]] none false [] [] @table)
+    types.array_type(vectors none @table);
     let plan=elements.select([] layouts.Context[] @table)
     $runtime_assert pair in? plan.dense and small in? plan.dense
     $runtime_assert plan.dense[pair].size =? 16 and plan.dense[small].size =? 1
     $runtime_assert nested not in? plan.dense
+    $runtime_assert vectors in? plan.dense and plan.dense[vectors].size =? 40
     let loc=Span[0 0]
     let array=hir.ExpressedIdentifier[loc pairs 'items']
     let sorted=elements.select([array hir.ArrayMethod[loc word 0 'sort']] layouts.Context[] @table)
     $runtime_assert pair not in? sorted.dense and small in? sorted.dense
     let raw=elements.select([array hir.Transmute[loc word 0]] layouts.Context[] @table)
     $runtime_assert pair not in? raw.dense
+    # A raw helper can take a vector directly, without seeing its enclosing
+    # array. Its callers must not place that vector in movable dense storage.
+    let exposed=elements.select([hir.ExpressedIdentifier[loc pair 'vector'] hir.Transmute[loc word 0]] layouts.Context[] @table)
+    $runtime_assert pair not in? exposed.dense and vectors not in? exposed.dense
     let narrow=types.object_type([types.ObjectField['x' word]] none false [] [] @table)
     let narrowed=types.array_type(narrow none @table)
     let cast=elements.select([array hir.ValueCast[loc narrowed 0]] layouts.Context[] @table)
@@ -79,6 +86,51 @@ main=():>int64=>{{
 
 
 CASES = {
+    'raw-element-address': '''
+Entry:type=[value:int64]
+let pointer:int64=0
+expose=(@entry:Entry):>void=>{pointer=entry transmute int64}
+main=():>int64=>{
+    let entries:array<Entry>=[Entry[42]]
+    expose(@entries[0])
+    loop i in 0..100 {entries.push(Entry[i])}
+    if __load_i64__(pointer) not=? 42 return 1
+    __store_i64__(99 pointer)
+    $runtime_assert entries.length >? 0
+    return if entries[0].value =? 99 42 else 2
+}
+''',
+    'nested-scalar-vectors': '''
+Vec:type=[x:int64 y:int64]
+Body:type=[position:Vec velocity:Vec active:bool]
+step=(@bodies:array<Body>):>void=>{
+    loop i in 0.. and i <? bodies.length {
+        if bodies[i].active {
+            bodies[i].position.x+=bodies[i].velocity.x
+            bodies[i].position.y+=bodies[i].velocity.y
+        }
+    }
+}
+main=():>int64=>{
+    let bodies:array<Body>=[Body[Vec[10 20] Vec[1 2] true]]
+    let saved=bodies.copy
+    let position=bodies[0].position
+    step(@bodies)
+    $runtime_assert bodies.length >? 0 and saved.length >? 0
+    if bodies[0].position.x not=? 11 or bodies[0].position.y not=? 22 return 1
+    if saved[0].position.x not=? 10 or position.y not=? 20 return 2
+    bodies.insert(Body[Vec[30 40] Vec[3 4] false] 0)
+    let removed=bodies.pop(0)
+    loop i in 0..100 {bodies.push(Body[Vec[i i] Vec[1 1] true])}
+    $runtime_assert bodies.length >? 0
+    bodies[0].position=Vec[7 8]
+    bodies.truncate(1)
+    $runtime_assert bodies.length =? 1
+    if removed.position.x not=? 30 or removed.active return 3
+    if saved[0].position.y not=? 20 or bodies[0].position.x not=? 7 return 4
+    return 42
+}
+''',
     'kernel-entry-detach': '''
 Pair:type=[x:int64 y:int64]
 step=(@xs:array<Pair>):>void=>{

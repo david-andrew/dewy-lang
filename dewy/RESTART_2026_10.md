@@ -271,3 +271,11 @@ before normalization each remove measured work. Snapshot restore allocation
 is down from 205.7 to 138.4 MB. These are useful intermediate gains; the
 frontend still needs a more compact working representation and selective
 analysis to reach the proposed 100 ms small-build budget.
+
+Dense storage now also handles nested scalar records, so particle source can
+use position/velocity vectors directly. The matched nested workload runs in
+217 ms for a million particles versus 713 ms boxed and 172 ms C; it is within
+1.5 times C at both large sizes. The direct CLI smoke gate passes 39 tests in
+21 seconds. Building the compiler with the earlier flat dense representation
+works but did not improve its self-build time; compact compiler metadata is
+the next representation target.

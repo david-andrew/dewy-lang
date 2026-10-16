@@ -1,0 +1,61 @@
+# The same particle workload, with nested position/velocity vector records.
+from p"harness.dewy" import size_argument, clock, mix
+
+Vector:type = [x:int64 y:int64]
+Particle:type = [position:Vector velocity:Vector]
+
+const BOX:int64=4096
+
+populate = (count:int64):>array<Particle> => {
+    let particles:array<Particle>=[]
+    let seed:int64=2024
+    let i:int64=0
+    loop i <? count {
+        seed=(seed*1103515245+12345)%2147483648
+        let x=seed%BOX
+        seed=(seed*1103515245+12345)%2147483648
+        let y=seed%BOX
+        seed=(seed*1103515245+12345)%2147483648
+        particles.push(Particle(position=Vector[x y] velocity=Vector[x=seed%17-8 y=(seed//32)%17-8]))
+        i+=1
+    }
+    return particles
+}
+
+step = (@particles:array<Particle>):>void => {
+    loop i in 0.. and i <? particles.length {
+        let x=particles[i].position.x+particles[i].velocity.x
+        let y=particles[i].position.y+particles[i].velocity.y
+        if x <? 0 or x >=? BOX {
+            particles[i].velocity.x=0-particles[i].velocity.x
+            x=particles[i].position.x
+        }
+        if y <? 0 or y >=? BOX {
+            particles[i].velocity.y=0-particles[i].velocity.y
+            y=particles[i].position.y
+        }
+        particles[i].position.x=x
+        particles[i].position.y=y
+    }
+}
+
+kernel = (@particles:array<Particle> rounds:int64):>int64 => {
+    let round:int64=0
+    loop round <? rounds {
+        step(@particles)
+        round+=1
+    }
+    let hash:int64=3
+    loop particle in particles {hash=mix(mix(hash particle.position.x) particle.position.y)}
+    return hash
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 100000)
+    let particles=populate(count)
+    let started=clock()
+    let result=kernel(@particles 50)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}
