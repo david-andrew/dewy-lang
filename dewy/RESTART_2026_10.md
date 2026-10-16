@@ -206,4 +206,12 @@ including its independent hosted build/run. Four unchanged kernel tests went
 from 40.16 s with hosted driver emission to 14.72 s with native emission.
 The full test suite has not been rerun for these harness changes. The next
 implementation milestone is the bounded compiler-core experiment described
-above; no Sloppy backend or game library has been transplanted yet.
+above.
+
+The first bounded backend experiment is now implemented in
+[`../tools/sloppy_bridge/`](../tools/sloppy_bridge/README.md). It runs the
+unchanged particle source through Dewy's checks and runtime lowering, then
+Sloppy's pinned register IR/optimizer/x86 emitter. Its 22 focused tests pass
+in 10.59 s. This establishes an executable boundary without changing language
+rules; it retains the old boxed layouts and frontend costs. It is opt-in,
+Linux x86-64 only, and does not yet carry debug metadata or every intrinsic.

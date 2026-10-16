@@ -1,0 +1,91 @@
+# Experimental Linux x86-64 codegen service. The build tool places this beside
+# a pristine, pinned Sloppy source snapshot. No Sloppy frontend is invoked at
+# runtime: checked Dewy runtime operations enter its register IR directly.
+use 'compiler/x64.jo'
+use 'compiler/opt.jo'
+use 'compiler/ir.jo'
+use 'compiler/lower.jo'
+use 'compiler/elf.jo'
+
+bridge_bytes: u8[]
+bridge_at = 0
+
+bridge_word = () -> int:
+    if bridge_at + 8 > bridge_bytes.len(): panic("truncated Dewy IR")
+    v = 0
+    loop k in [0..8): v |= int(bridge_bytes[bridge_at + k]) << (k * 8)
+    bridge_at += 8
+    v
+
+bridge_count = () -> int:
+    n = bridge_word()
+    if n < 0 or n > bridge_bytes.len(): panic("invalid Dewy IR count")
+    n
+
+bridge_blob = () -> u8[]:
+    n = bridge_count()
+    if n > bridge_bytes.len() - bridge_at: panic("truncated Dewy IR blob")
+    v = bridge_bytes[bridge_at..bridge_at + n)
+    bridge_at += n
+    v
+
+bridge_ops: Op[] = [.iconst, .mov, .add, .sub, .mul, .divs, .divu, .rems, .remu,
+    .and_, .or_, .xor, .shl, .shrs, .shru, .neg, .not_, .eq, .ne, .lts, .les,
+    .gts, .ges, .ltu, .leu, .gtu, .geu, .load, .store, .slot, .gaddr, .daddr,
+    .faddr, .call, .calli, .syscall, .block, .loop, .if_, .else_, .end, .br,
+    .brif, .ret, .trap, .intr]
+
+main = () -> int:
+    av = args()
+    if av.len() != 4:
+        eprint("usage: dewy-sloppy-emit INPUT OUTPUT debug|release")
+        return 2
+    bridge_bytes = read_bytes(av[1]) ?? panic("cannot read Dewy IR")
+    if bridge_bytes.len() < 8 or str_from_bytes(bridge_bytes[..8)) != "DWYSLP01": panic("invalid Dewy IR header")
+    bridge_at = 8
+    data_size = bridge_count()
+    init = bridge_count()
+    entry_fn = bridge_count()
+    rodata = bridge_blob()
+    count = bridge_count()
+    opt_release = av[3] == "release"
+    if av[3] != "debug" and not opt_release: panic("invalid codegen mode")
+    loop index in [0..count):
+        name = str_from_bytes(bridge_blob())
+        ir_begin(name, index)
+        ir.nparams = bridge_count()
+        ir.ret = VI
+        ir.raw_mem = true     # Dewy's lowered pointers do not carry Sloppy type aliases
+        nregs = bridge_count()
+        if ir.nparams > nregs: panic("invalid parameter count")
+        ir.vtypes = fill(i8(VI), nregs)
+        nslots = bridge_count()
+        loop k in [0..nslots):
+            ir.slot_size.push(i32(bridge_count()))
+            ir.slot_align.push(16)
+        nargs = bridge_count()
+        loop k in [0..nargs): ir.args.push(i32(bridge_word()))
+        ncode = bridge_count()
+        loop k in [0..ncode):
+            op = bridge_count()
+            if op >= bridge_ops.len(): panic("invalid Dewy IR opcode")
+            dst = bridge_word()
+            a = bridge_word()
+            b0 = bridge_word()
+            c = bridge_word()
+            imm = bridge_word()
+            ir.code.push(Ins(bridge_ops[op], i32(VI), i32(dst), i32(a), i32(b0), i32(c), imm))
+        lfuncs.push(LFunc(kind = LK_HELPER, name = name))
+        # Sloppy's ordinary local cleanup; no frontend-dependent inlining or
+        # loop vectorization. Both modes get cleanup; release changes allocation.
+        optimize()
+        x64_function()
+    if bridge_at != bridge_bytes.len(): panic("trailing Dewy IR data")
+    if init >= count or entry_fn >= count: panic("invalid entry function")
+    main_code = true
+    entry = x64_entry([init], entry_fn)
+    text_off, ro_off, data_off = elf_layout(code.len(), rodata.len())
+    x64_resolve(ELF_BASE + text_off, ELF_BASE + ro_off, ELF_BASE + data_off)
+    if not write_elf(av[2], code, entry, rodata, data_size): return 1
+    if not chmod(av[2], 0o755): return 1
+    0
