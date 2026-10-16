@@ -39,7 +39,7 @@ let main=():>int64=>{
     let truncated=codec.Reader[0x"02 00 00 00 00 00 00 00 7f"]
     codec.read_bytes(@truncated);
     if not truncated.failed return 15
-    let invalid=codec.Reader[0x"01 00 00 00 00 00 00 00 ff"]
+    let invalid=codec.Reader[0x"00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 ff"]
     codec.read_text(@invalid);
     if not invalid.failed return 16
     let trailing=codec.Reader[0x"00 00"]
@@ -75,5 +75,20 @@ let main=():>int64=>{
     $runtime_assert extracted.length =? 3 and block.bytes.length =? 11
     extracted[0]=0
     if block.bytes[8] not=?170 return 25
+    let texts=codec.Writer[]
+    codec.write_text('shared é🙂' @texts)
+    let first_length=texts.bytes.length
+    codec.write_text('shared é🙂' @texts)
+    if texts.bytes.length not=? first_length+8 return 26
+    codec.write_text('' @texts)
+    codec.write_text('' @texts)
+    let references=codec.Reader[texts.bytes]
+    if codec.read_text(@references) not=? 'shared é🙂' return 27
+    if codec.read_text(@references) not=? 'shared é🙂' return 28
+    if codec.read_text(@references) not=? '' or codec.read_text(@references) not=? '' return 29
+    if not codec.complete(references) or references.texts.length not=? 2 return 30
+    let forward=codec.Reader[0x"01 00 00 00 00 00 00 00"]
+    codec.read_text(@forward);
+    if not forward.failed return 31
     return 42
 }

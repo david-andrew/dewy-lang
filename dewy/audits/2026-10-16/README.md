@@ -331,3 +331,23 @@ expected result. [Samples and identities](runtime-pruning.json).
 
 The remaining allocator functions in a tiny executable are reachable from
 prelude global initialization; eliminating those needs a separate change.
+
+### Shared strings in checked snapshots
+
+Native cache format 10 stores each distinct string once per stream. Repeated
+names, paths, and literal metadata use a bounded index; restoring them shares
+immutable string storage. Headers and payloads have independent tables. Old
+cache entries are disposable and rebuilt; their binary format is not a
+compatibility target. Invalid and forward references fail the whole restore.
+
+Three alternating warm runs give **388 ms before / 305 ms after**, with
+decoding **152 / 82 ms**. Restore allocation falls from **205.7 / 138.4 MB**
+and peak arena payload from **111.5 / 75.9 MB** (decimal units). Cache files
+shrink from 12,244,282 to 10,748,677 bytes. The single cold comparison is
+1.518 / 1.548 s; more cold samples are needed before claiming a cold change.
+[Measurements](interned-cache-results.json).
+
+Primitive tests and a complete typed snapshot execute on x86 and C. Shared
+cache repair and transitive-input invalidation also pass: **4 tests in
+103.54 s**, including new compiler-sized drivers and the C compilation of
+the full snapshot codec. [Test log](interned-cache-tests.log).

@@ -264,3 +264,10 @@ after one initial check, the tiny-program median drops from **1.662 s to
 0.462 s**. Cold measurement tools still isolate the cache. A combined focused
 gate passes 34 tests in 19.83 s. The remaining frontend cost—particularly the
 allocation-heavy prelude restoration—still needs architectural work.
+
+Warm tiny builds are now around **305 ms** in the latest comparison. Bounded
+cache word reads, shared snapshot strings, and pruning unused runtime helpers
+before normalization each remove measured work. Snapshot restore allocation
+is down from 205.7 to 138.4 MB. These are useful intermediate gains; the
+frontend still needs a more compact working representation and selective
+analysis to reach the proposed 100 ms small-build budget.

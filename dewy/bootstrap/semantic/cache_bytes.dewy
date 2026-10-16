@@ -6,14 +6,15 @@ doc"""
 Primitive binary values for the checked-prelude cache.
 
 This is an internal cache format, not a language serialization contract.
-Words are little-endian; strings carry their UTF-8 byte length. A reader
+Words are little-endian; strings use per-stream back references, with new
+values carrying their UTF-8 byte length. A reader
 records failure and returns a neutral value, so its caller can discard the
 entire decoded snapshot without installing a partially restored session.
 Every allocation length is bounded by the remaining file bytes first.
 """
 
-Writer:type = [bytes:array<uint8>=[] failed:bool=false]
-Reader:type = [bytes:array<uint8> position:addr=0 failed:bool=false]
+Writer:type = [bytes:array<uint8>=[] failed:bool=false texts:dict<string addr>=[]]
+Reader:type = [bytes:array<uint8> position:addr=0 failed:bool=false texts:array<string>=[]]
 
 let write_byte = (value:uint8 @out:Writer):>void => {out.bytes.push(value)}
 let write_word = (value:uint64 @out:Writer):>void => {
@@ -29,7 +30,13 @@ let write_bytes = (value:array<uint8> @out:Writer):>void => {
     write_word(value.length as uint64 @out)
     loop byte in value {write_byte(byte @out)}
 }
-let write_text = (value:string @out:Writer):>void => write_bytes(value as array<uint8> @out)
+let write_text = (value:string @out:Writer):>void => {
+    let previous=out.texts.get(value)
+    if previous isnt? none {write_word((previous+1) as uint64 @out) return}
+    write_word(0 @out)
+    write_bytes(value as array<uint8> @out)
+    out.texts[value]=out.texts.length
+}
 let write_bigint = (value:bigint @out:Writer):>void => {
     write_bool(value not=? 0 @out)
     if value =? 0 return
@@ -95,10 +102,18 @@ let read_bytes = (@input:Reader):>array<uint8> => {
     return result
 }
 let read_text = (@input:Reader):>string => {
+    let reference=read_address(@input)
+    if input.failed return ''
+    if reference >? 0 {
+        let index=reference-1
+        if index >=? input.texts.length {input.failed=true return ''}
+        return input.texts[index]
+    }
     let bytes=read_bytes(@input)
     if input.failed return ''
     let value=bytes as string|none
     if value is? none {input.failed=true return ''}
+    input.texts.push(value)
     return value
 }
 let read_bigint = (@input:Reader):>bigint => {

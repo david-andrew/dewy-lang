@@ -14,7 +14,7 @@ import p"hir.dewy" as hir
 # This is an optional compiler artifact. A failed read, stale input, incomplete
 # write, or incompatible snapshot simply returns control to ordinary checking.
 # The loader installs a restored snapshot only after every check succeeds.
-const FORMAT='dewy-native-prelude-9'
+const FORMAT='dewy-native-prelude-10'
 Config:type = const [
     compiler:string directory:string target:targets.Target
     library_roots:array<string> prelude_files:array<string>
@@ -140,6 +140,8 @@ restore = (entry:Entry timings:bool=false):>state.PreludeSnapshot? => {
     if input.failed or input.position+length not=? input.bytes.length or fingerprint_from(input.bytes input.position) not=? checksum return none
     timing.finish('prelude_restore.checksum' checksum_started)
     let decode_started=timing.start(timings)
+    # The payload is a separate codec stream, with its own string identities.
+    input.texts=[]
     let snapshot=codec.decode_from(@input)
     timing.finish('prelude_restore.decode' decode_started)
     if snapshot is? codec.CacheMiss return none
