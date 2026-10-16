@@ -11,6 +11,24 @@ import pytest
 
 CASES = {
     'answer': 'main=():>int64=>42',
+    'syntax-coefficients': '''twice=(x:int64)=>2x
+main=()=>{let x:int64=19 return twice(x)+2(x-17)}''',
+    'syntax-coefficient-call': '''value=()=>21
+main=()=>2value()''',
+    'syntax-multiline': '''Choice:type=int64
+    | string
+main=()=>if 1 =? 1
+    and 2 =? 2 {
+    let x:int64=40
+        + 2
+    return x
+} else 1''',
+    'syntax-nested-interpolation': '''main=()=>{let café:int64=42
+let text="result {\"{café}\"}"
+return if text =? "result 42" 42 else 1}''',
+    'syntax-separated-negative-elements': '''main=()=>{let xs:array<int64>=[40
+-2
+4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
     'generic-function': '''twice=(x)=>x+x
@@ -244,6 +262,14 @@ ERRORS = {
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
     'effect-contract': ('main=():>int64 & no_effects=>42', 'does not yet support'),
     'missing-name': ('# 🙂\nmain=():>int64=>missing', 'unknown'),
+    'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
+    'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
+    'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
+    'syntax-empty-interpolation': ('main=()=>"{}"', 'expected an expression'),
+    'syntax-missing-member': ('main=()=>value.', 'expected a member name'),
+    'syntax-missing-exponent': ('main=()=>1e+', 'expected exponent digits'),
+    'syntax-deep-expression': ('main=()=>'+ '(' * 300 + '42' + ')' * 300, 'nested too deeply'),
+    'syntax-deep-interpolation': ('main=()=>'+ '"{' * 300 + '42' + '}"' * 300, 'nested too deeply'),
 }
 
 
@@ -253,6 +279,23 @@ def compiler():
     if not value:
         pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
     return Path(value).resolve(strict=True)
+
+
+@pytest.mark.parametrize('mode', [None, 'invalid'])
+def test_core_frontend_selection(compiler, tmp_path, mode):
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>42')
+    env = dict(os.environ)
+    env.pop('DEWY_CORE_FRONTEND', None)
+    env['DEWY_CORE_PARSER'] = str(tmp_path / 'nonexistent-legacy-parser')
+    if mode is not None:
+        env['DEWY_CORE_FRONTEND'] = mode
+    checked = subprocess.run([compiler, 'check', source], env=env, capture_output=True,
+                             text=True, timeout=10, check=False)
+    if mode is None:
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+    else:
+        assert checked.returncode == 1 and 'DEWY_CORE_FRONTEND' in checked.stderr, checked.stderr
 
 
 @pytest.mark.parametrize('name', CASES)

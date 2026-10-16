@@ -109,6 +109,14 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert any(d['severity'] == 1 for d in diagnostics), diagnostics
         diagnostics = client.set_text(uri, good, 4)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        malformed = 'main=()=>{let text="🙂é" return )}'
+        diagnostics = client.set_text(uri, malformed, 5)
+        errors = [d for d in diagnostics if d['severity'] == 1]
+        assert errors, diagnostics
+        expected_column = len(malformed[:malformed.index(')', 8)].encode('utf-16-le')) // 2
+        assert errors[0]['range']['start'] == {'line': 0, 'character': expected_column}, errors
+        diagnostics = client.set_text(uri, good, 6)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
         assert source.read_text() == 'main=()=>42'
     finally:
         client.close()

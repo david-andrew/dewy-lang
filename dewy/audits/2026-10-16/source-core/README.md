@@ -327,3 +327,39 @@ samples are in `physics-reference.jo`, `physics-benchmark.dewy` and
 `physics-benchmark.json`. The captured Dewy harness has the source path from this
 workspace. One-off model build times were 120 ms and 177 ms respectively: syntax
 frontend overhead remains an improvement opportunity.
+
+
+## In-process Dewy frontend
+
+The compact compiler now lexes/parses Dewy directly, sharing its existing AST
+projection. It no longer launches a parser per source or serializes syntax
+through TSV/JSON. The deterministic grammar supports the existing behavior gate,
+multiline infix expressions and literal coefficients (`2x`, `2f(x)`, `2(x+1)`).
+This intentionally avoids rebuilding the earlier semantic ambiguity resolver.
+Malformed strings/delimiters and excessive nesting produce located diagnostics;
+unsaved editor recovery and UTF-16 diagnostic positions are exercised.
+
+The old parser is available only through an explicit `DEWY_CORE_FRONTEND=legacy`
+selection and optional `--legacy-parser` build. Default bootstrap contains no
+parser executable and takes 17.17 seconds across its four build steps, versus
+about 24 seconds previously (`frontend-build.json`). The source parser builds
+through the independent C seed and self-hosts. No AST or executable byte-equality
+gate was added.
+
+Nine sequential alternating measurements after warm-up, with the same compiler
+binary and one emission worker, gave these median whole-process times:
+
+| Workload | Legacy frontend | In-process frontend |
+| --- | ---: | ---: |
+| Physics check | 191.55 ms | 119.31 ms |
+| Physics release build | 412.96 ms | 349.74 ms |
+| Paddle check | 134.10 ms | 107.50 ms |
+| Paddle release build | 335.93 ms | 294.79 ms |
+| Particle check | 68.64 ms | 32.69 ms |
+| Particle release build | 92.90 ms | 53.37 ms |
+
+Every sample and compiler identity is in `frontend-benchmark.json`. Filesystem
+caches were warm; there were no concurrent CPU tests/builds. The fresh bootstrap
+passes 434 checks in 31.09 seconds, followed by three focused checks for default
+selection, invalid selection, and editor diagnostics/recovery. The combined gate
+now has 436 checks (`frontend-tests.log`, `frontend-extra-tests.log`).

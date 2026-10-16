@@ -1,6 +1,6 @@
 # Source-level Dewy core experiment
 
-This branch connects Dewy's actual native syntax parser to the compact AST,
+This branch connects an in-process Dewy syntax frontend to the compact AST,
 checker, code generator, runtime, and libraries from a pinned Sloppy revision.
 It bypasses Dewy's existing semantic IR and backend pipeline. The point is to
 recover fast development while retaining useful Dewy language behavior, rather
@@ -21,16 +21,19 @@ No separate Sloppy checkout is needed. Sources originated at
 `235e19a271bccad3fe72e36d03264807a632dc1b` and are maintained directly in this
 repository, with licenses and original file hashes retained. The old patch-based
 builder has been removed. See `core/README.md` for seeded rebuilds, source layout,
-and the independent C bootstrap route. The syntax parser has its own compressed C seed,
-so a clean bootstrap no longer needs an older Dewy compiler. Regeneration of that
-parser seed remains a maintainer operation using the older compiler pair; see
-`core/bootstrap/README.md`. Hashes record provenance, not a byte-equality gate.
-The complete build steps took about 24 seconds on the development machine.
+and the independent C bootstrap route. Normal builds no longer compile the old
+syntax parser or require an older Dewy compiler. Its optional compressed C seed
+is retained for investigation; see `core/bootstrap/README.md`.
+Hashes record provenance, not a byte-equality gate.
+The complete build steps take about 17 seconds on the development machine.
 
 
-Nothing replaces the installed Dewy compiler. The parser currently runs as a
-subprocess for each Dewy source file; this intentionally simple boundary can be
-replaced after measuring the result.
+Nothing replaces the installed Dewy compiler. Lexing and parsing run inside the
+compiler process and consume its source snapshots directly. Against the same
+compiler with its legacy frontend, nine alternating measurements gave median
+physics-game checks of 119 ms versus 192 ms and release builds of 350 ms versus
+413 ms. Paddle release builds fell from 336 ms to 295 ms. These are local whole
+process times with warm filesystem caches and one emission worker.
 
 The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
@@ -42,8 +45,7 @@ interpolated strings, entry-point arguments, file imports (Dewy and Sloppy), nam
 array/range iteration, import aliases, forward local record declarations, and
 combined `and` loop headers. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
-Native parser diagnostics and
-UTF-8 source locations are retained. A semicolon explicitly discards a result.
+Diagnostics retain UTF-8 source locations. A semicolon explicitly discards a result.
 
 This is an opt-in compiler experiment, not a full language implementation or a
 release-certified replacement. The core supplies runtime bounds checks, not the
@@ -51,10 +53,12 @@ old proof engine. Proof directives, effect contracts, unbounded integer types,
 and unsupported syntax produce diagnostics.
 Signed floor division/modulo currently use the core's int64 helpers. Floating
 point `/` is supported; integer `/` is rejected until its result semantics are
-implemented. Ambiguous syntax
-currently prefers the unique candidate with fewer juxtaposed multiplications;
-ties are rejected. This is a deliberate experimental simplification of the old
-semantic disambiguator, not a claim to support every juxtaposition case.
+implemented. Calls/indexing use adjacent brackets. Literal coefficients such as
+`2x`, `2f(x)` and `2(x + 1)` multiply; separated values remain arguments or block
+elements. Other multiplication uses `*`. Multiline infix expressions are supported;
+`[40\n-2\n4]` remains three elements. This deterministic syntax is an intentional
+subset of the old ambiguity resolver, not a promise to preserve every historical
+juxtaposition case. Unsupported string escapes and excessive nesting are diagnosed.
 
 `match value { name:Type => body <literal> => body _ => fallback }` supports
 exact union member types (including aliases), concrete types, optional payloads,
@@ -82,8 +86,8 @@ literal indexing such as `world.ends(joint)[0]`.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 416 checks and takes
-about 33 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 436 checks and takes
+about 31 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -97,8 +101,8 @@ For the editor protocol gate, include
 and performs lowering checks without code emission. Five-process medians were
 62 ms for the particle benchmark and 121 ms for the paddle game.
 `dewy-core lsp` serves diagnostics, hover types, and definitions for unsaved
-Dewy text. The parser reads the compiler's snapshot through a Linux anonymous
-file; the experimental compiler host currently requires Linux. Syntax errors
+Dewy text. The parser reads the compiler's source snapshot in memory;
+the experimental compiler host currently requires Linux. Syntax errors
 use the core's diagnostic transport, including original file/byte locations.
 Hover text uses Dewy type spellings and function signatures, including for
 imported implementation-language functions. Defaulted parameters are marked `= …`. Formatting Dewy is deliberately

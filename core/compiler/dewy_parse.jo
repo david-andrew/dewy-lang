@@ -781,6 +781,7 @@ dw_block = (id: int) -> int:
 
 dewy_parse_file = (file: int) -> int[]:
     parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
+    if not file_exists(parser): fatal(mkpos(file, 0), "legacy syntax parser is not installed; rebuild with --legacy-parser or use the default frontend")
     # Parse the compiler's source snapshot, including unsaved editor text.
     # A Linux anonymous file avoids named temporary files and argument-size
     # limits. The parent keeps it open until the child has finished reading.

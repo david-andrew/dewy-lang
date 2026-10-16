@@ -1,7 +1,7 @@
 # Dewy compact core
 
 This is the implementation being developed on `restart/sloppy-frontend`. It
-connects Dewy's native syntax parser to the compact compiler, runtime, native/web
+connects an in-process Dewy frontend to the compact compiler, runtime, native/web
 backends and game libraries derived from Sloppy. Edit these sources directly;
 there is no generated patch layer and no separate Sloppy checkout is required.
 
@@ -26,7 +26,7 @@ python3 -m tools.sloppy_core.build \
 ```
 
 No prebuilt Dewy or Sloppy compiler, or separate reference checkout, is needed.
-The complete C-bootstrap build steps took about 24 seconds on the development
+The complete C-bootstrap build steps take about 17 seconds on the development
 machine. The output directory must be new. It contains a standalone `bin/` and `lib/`,
 source snapshots, build logs and a hash manifest. No installed compiler is
 changed. Python is build tooling only; program compilation and execution are
@@ -34,16 +34,16 @@ native. The compiler host currently requires Linux x86-64; native Linux and web
 programs are covered by the development gate. Other inherited targets are not
 certified for this frontend.
 
-Once a core and parser have been built, rebuild into a new toolchain without the
+Once a core has been built, rebuild into a new toolchain without the
 old compiler or C bootstrap:
 
 ```sh
 python3 -m tools.sloppy_core.build \
-  --parser /tmp/dewy-core/bin/dewy-parse --seed /tmp/dewy-core/bin/dewy-core \
+  --seed /tmp/dewy-core/bin/dewy-core \
   --output /tmp/dewy-core-next
 ```
 
-For a quick compiler edit, reuse the existing toolchain's parser and libraries:
+For a quick compiler edit, reuse the existing toolchain's libraries:
 
 ```sh
 /tmp/dewy-core/bin/dewy-core build core/compiler/main.jo \
@@ -68,7 +68,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 416-check gate takes about 33 seconds locally. It tests expected Dewy
+the earlier compiler suite. The 436-check gate takes about 31 seconds locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -99,6 +99,7 @@ native-server integration test in the editor gate above.
 ## Source layout and bootstrap
 
 - `compiler/frontend.jo` dispatches Dewy and implementation-language source.
+- `compiler/dewy_fast.jo` lexes and parses Dewy inside the compiler process.
 - `compiler/dewy_parse.jo` projects the Dewy syntax tree into the compact AST.
 - `compiler/` contains checking, lowering, code generation and tools, currently
   written in the inherited implementation language (`.jo`).
@@ -108,10 +109,15 @@ native-server integration test in the editor gate above.
 - `bootstrap/frontend.jo` selects only the implementation-language parser for
   the initial bootstrap generation. That compiler then builds the complete
   frontend, which builds itself again.
-- `bootstrap/dewy_parse.c.gz` is the standalone C syntax-parser seed. Its
+- `bootstrap/dewy_parse.c.gz` is the optional legacy syntax-parser seed. Its
   [regeneration instructions](bootstrap/README.md) and source provenance are
   included. The parser source still lives in `dewy/bootstrap/parser/`, with
   the driver at `../tools/sloppy_core/parse.dewy`.
+
+The default frontend reads source snapshots directly, including unsaved editor
+text. It does not need a parser executable, temporary files or a syntax transport.
+For investigation, build with `--legacy-parser` (or reuse one with `--parser`),
+then select it with `DEWY_CORE_FRONTEND=legacy`. There is no automatic fallback.
 
 The C bootstrap intentionally implements a smaller language. The frontend seam
 allows the main compiler to evolve without implementing every feature twice.

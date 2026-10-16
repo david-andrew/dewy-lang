@@ -3,11 +3,14 @@ use 'util.jo'
 use 'ast.jo'
 use 'parse.jo'
 use 'dewy_parse.jo'
+use 'dewy_fast.jo'
 
 source_declarations = (file: int) -> int[]:
     if ends_with(files[file].path, ".dewy"):
         first = nodes.len()
-        decls = dewy_parse_file(file)
+        mode = env("DEWY_CORE_FRONTEND") ?? "fast"
+        if mode != "fast" and mode != "legacy": fatal(mkpos(file, 0), "DEWY_CORE_FRONTEND must be 'fast' or 'legacy'")
+        decls = if mode == "legacy": dewy_parse_file(file) else: dewy_fast_file(file)
         i = nodes.len() - 1
         loop i >= first:
             if nodes[i].kind == .loopx:

@@ -25,7 +25,7 @@ def identity(path: Path) -> str:
 
 
 def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
-          seed: Path | None = None, bootstrap: bool = False) -> Path:
+          seed: Path | None = None, bootstrap: bool = False, legacy_parser: bool = False) -> Path:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
@@ -61,7 +61,7 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
         source = HERE / 'parse.dewy'
         run([dewy, '-c', source], 'parser-build.log', cwd=work)
         shutil.copy2(work / cache_artifact(source, cwd=work), native_parser)
-    else:
+    elif legacy_parser:
         source = output / 'bootstrap/dewy_parse.c'
         source.write_bytes(gzip.decompress((output / 'bootstrap/dewy_parse.c.gz').read_bytes()))
         cc = shlex.split(os.environ.get('CC', 'cc'))
@@ -93,7 +93,9 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
     (output / 'build.json').write_text(json.dumps({
         'upstream_revision': PIN, 'seed_sha256': identity(seed),
         'dewy_seed_sha256': identity(dewy) if dewy else None,
-        'parser_sha256': identity(native_parser), 'core_sha256': identity(binary),
+        'default_frontend': 'in-process',
+        'parser_sha256': identity(native_parser) if native_parser.exists() else None,
+        'core_sha256': identity(binary),
         'parser_source_sha256': identity(HERE / 'parse.dewy') if dewy else None,
         'sources_sha256': sources,
         'bootstrap_generations_sha256': bootstrap_hashes,
@@ -105,6 +107,7 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
 if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     parsers = cli.add_mutually_exclusive_group()
+    parsers.add_argument('--legacy-parser', action='store_true', help='also build the optional legacy C syntax parser')
     parsers.add_argument('--dewy', type=Path, help='native Dewy seed used to build the syntax parser')
     parsers.add_argument('--parser', type=Path, help='reuse an already built dewy-parse binary')
     seeds = cli.add_mutually_exclusive_group(required=True)
@@ -112,4 +115,5 @@ if __name__ == '__main__':
     seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
     cli.add_argument('--output', type=Path, required=True, help='new directory for the standalone toolchain')
     args = cli.parse_args()
-    print(build(args.output, dewy=args.dewy, parser=args.parser, seed=args.seed, bootstrap=args.bootstrap))
+    print(build(args.output, dewy=args.dewy, parser=args.parser, seed=args.seed,
+                bootstrap=args.bootstrap, legacy_parser=args.legacy_parser))
