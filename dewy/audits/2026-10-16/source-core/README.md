@@ -440,3 +440,29 @@ match binders as local, and the regression is covered.
 A fresh C bootstrap takes 17.69 seconds and passes all 664 checks in 45.57 seconds
 (`comprehensions-build.json`, `comprehensions-tests.log`). No runtime generator or
 new ownership model was added.
+
+
+## Array, tuple and record destructuring
+
+`let [a b] = source` now declares array/tuple elements by position or record
+fields by name. Records allow subsets and reordered fields. Array/tuple `_`
+targets discard values. Bare assignments support swaps and existing targets;
+when all names are new they declare, following the core's existing assignment
+rule. Simple module-level bindings and all-discard module initializers work too.
+Nested, annotated and const patterns remain explicit gaps.
+
+Dewy unpacking snapshots its input through ordinary owned locals. Arrays check
+exact length once, then read compiler-known in-bounds indices; any positive
+number of targets works. Records select typed fields and reuse tuple assignment
+lowering, which reads values before writing targets. No generated per-arity
+library helpers or proof machinery are needed. The physics example now unpacks
+joint endpoints directly.
+
+Checks cover source evaluation once, array/record copies, fields by name,
+one/five-element patterns, discards, swaps, declarations, globals, diagnostics,
+default-scope shadowing and editor types. Tuple interop and the length guard are
+executed on native/web in both modes. A clean C bootstrap caught an inline-if
+syntax form outside the small seed's grammar; using an ordinary assignment
+resolved that without changing the language. The final bootstrap takes 17.61
+seconds and all 729 checks pass in 49.81 seconds (`unpack-build.json`,
+`unpack-tests.log`), including the updated physics renderer.

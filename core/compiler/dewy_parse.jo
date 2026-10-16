@@ -540,12 +540,31 @@ dw_stmt = (id: int, top: bool = false) -> int:
         if top or dw_op(id) == ":": return dw_declare(id, false, top)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
-        nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+        lhs = dw_unwrap(dw_child(id, 1))
+        if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
+            pattern = mk(.tuple, dewy_syntax[lhs].pos)
+            set_list(pattern, dw_bindings(lhs))
+            nodes[n].a = i32(pattern)
+        else: nodes[n].a = i32(dw_expr(lhs))
         nodes[n].b = i32(dw_expr(dw_child(id, 2)))
         return n
     n = mk(.exprstmt, pos)
     nodes[n].a = i32(dw_expr(id))
     return n
+
+dw_bindings = (id: int) -> int[]:
+    bindings: int[]
+    seen: {str: bool} = {}
+    loop child in dewy_syntax[id].children:
+        name = dw_name(child)
+        if name == "": return [dw_fail(child, "nested or annotated unpacking targets; use simple names")]
+        if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
+        seen[name] = true
+        n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
+        nodes[n].name = i32(intern(name))
+        bindings.push(n)
+    if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]
+    bindings
 
 dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
@@ -558,6 +577,12 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if dw_op(lhs) == ":":
         annotation = dw_child(lhs, 2)
         lhs = dw_child(lhs, 1)
+    if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
+        if initial == 0 or annotation != 0 or constant: return dw_fail(lhs, "unpacking without a value, with an annotation, or with const")
+        n = mk(.vardecl, dewy_syntax[id].pos)
+        set_list(n, dw_bindings(lhs))
+        nodes[n].b = i32(dw_expr(initial))
+        return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
     if initial != 0 and dw_op(initial) == "=>":

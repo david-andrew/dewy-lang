@@ -1049,6 +1049,8 @@ default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bo
         loop i in [0..before):
             if nodes[n].name == nodes[kid(decl, i)].name: return true
         return false
+    if nodes[n].kind == .vardecl:
+        return default_uses_params(int(nodes[n].b), decl, before, hidden)
     if nodes[n].kind == .lambda:
         local_hidden = hidden
         loop param in kids(n):
@@ -1059,7 +1061,9 @@ default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bo
         local_hidden = hidden
         loop statement in kids(n):
             if default_uses_params(statement, decl, before, local_hidden): return true
-            if nodes[statement].kind == .vardecl: local_hidden.push(int(nodes[statement].name))
+            if nodes[statement].kind == .vardecl:
+                local_hidden.push(int(nodes[statement].name))
+                loop binding in kids(statement): local_hidden.push(int(nodes[binding].name))
         return false
     if nodes[n].kind == .for_:
         if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
@@ -1080,7 +1084,7 @@ default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bo
         if default_uses_params(child, decl, before, hidden): return true
     false
 
-capture_default_arg = (a: int, pt: int, statements: mut int[]) -> int:
+capture_value = (a: int, pt: int, statements: mut int[]) -> int:
     local = new_local(0, pt, nodes[a].pos)
     locals[local].flags = i32(LF_DECL | LF_QUIET | LF_READ)
     binding = mk(.vardecl, nodes[a].pos)
@@ -1480,7 +1484,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
             loop i in [0..np):
                 if cd.args[i] != a: continue
                 finish_arg(a, fns[f].ptypes[i], false)
-                captured[i] = capture_default_arg(a, fns[f].ptypes[i], statements)
+                captured[i] = capture_value(a, fns[f].ptypes[i], statements)
                 break
     fin: int[]
     loop i in [0..np):
@@ -1489,7 +1493,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         if a == 0:
             earlier = if dewy_call and not capture_defaults: [] else: fin
             a = default_arg(decl, i, fns[f].ptypes[i], earlier, capture_defaults)
-            if capture_defaults: a = capture_default_arg(a, fns[f].ptypes[i], statements)
+            if capture_defaults: a = capture_value(a, fns[f].ptypes[i], statements)
             fin.push(a)
             continue
         if capture_defaults:

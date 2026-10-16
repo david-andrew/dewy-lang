@@ -120,8 +120,17 @@ to the normal loop rules and collected managed values remain independent copies.
 Dictionary comprehensions currently collect pairs and use the core's map builder;
 later entries replace earlier values for the same key.
 
-The combined Dewy/editor/shared-core gate now contains 664 checks and takes
-about 46 seconds on the development machine, including separate compiler
+`let [x y] = value` unpacks an array/tuple by position or a record by field name.
+Record targets can select a subset in any order. Arrays require exactly as many
+elements as targets, checked at runtime; `_` discards an array/tuple element.
+There is no two-to-four-element restriction. `[x y] = [y x]` reads the source
+once before writing either target. Bare targets also declare when all names are
+new; `let` explicitly declares/shadows. Managed values retain independent copies,
+and module-level unpacking is supported. Nested, annotated and `const` targets
+are not implemented yet; omit unwanted record fields instead of using `_`.
+
+The combined Dewy/editor/shared-core gate now contains 729 checks and takes
+about 50 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

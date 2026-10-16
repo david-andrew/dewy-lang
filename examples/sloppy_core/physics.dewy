@@ -31,8 +31,8 @@ update=(dt:float64):>void=>{
 draw=():>void=>{
     clear(rgb(0.1 0.11 0.14))
     if scene.rope is? physics.Joint {
-        let ends=scene.world.ends(scene.rope)
-        line(ends[0] ends[1] 3 rgb(0.6 0.6 0.55))
+        let [anchor endpoint]=scene.world.ends(scene.rope)
+        line(anchor endpoint 3 rgb(0.6 0.6 0.55))
     }
     loop body in scene.world.bodies() {
         let points=scene.world.outline(body)
@@ -42,9 +42,9 @@ draw=():>void=>{
         if scene.world.radius(body) >? 0.0 {line(scene.world.pos(body) points[0] 2 darken(color 0.35))}
     }
     if grab is? physics.Joint {
-        let ends=scene.world.ends(grab)
-        line(ends[0] ends[1] 2 rgb(1.0 0.9 0.5))
-        circle(ends[1] 4 rgb(1.0 0.9 0.5))
+        let [anchor endpoint]=scene.world.ends(grab)
+        line(anchor endpoint 2 rgb(1.0 0.9 0.5))
+        circle(endpoint 4 rgb(1.0 0.9 0.5))
     }
     text("DEWY / PHYSICS" vec2(20 18) 30 rgb(0.9 0.94 1.0))
     text("Drag: left mouse   Box: right click   Ball: middle click or B   Reset: R" vec2(20 58) 20 rgb(0.65 0.72 0.8))

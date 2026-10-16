@@ -240,6 +240,30 @@ main=()=>{let value:Value=[] return value.answer}''',
     'record-empty-argument': '''Value:type=[answer:int64=42]
 get=(value:Value?)=>if value is? Value value.answer else 0
 main=()=>get([])''',
+    'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
+    'unpack-single': 'main=()=>{let [answer]=[42] return answer}',
+    'unpack-many': 'main=()=>{let [a b c d e]=[2 4 6 10 20] return a+b+c+d+e}',
+    'unpack-discard': '''main=()=>{let [first _ last]=["aa" "drop" "bbb"]
+return first.length+last.length+37}''',
+    'unpack-record': '''Point:type=[x:int64 y:int64 z:int64]
+main=()=>{let [y x]=Point[20 22 99] return x+y}''',
+    'unpack-record-copy': '''main=()=>{let original=[values=[20 22]] let [values]=original
+values[0]=99 return original.values[0]+original.values[1]}''',
+    'unpack-swap': '''main=()=>{let x:int64=20 let y:int64=22 [x y]=[y x]
+return if x =? 22 and y =? 20 42 else 1}''',
+    'unpack-record-assign': '''main=()=>{let x:int64=0 let y:int64=0 [y x]=[x=20 y=22]
+return x+y}''',
+    'unpack-implicit': 'main=()=>{[x y]=[20 22] return x+y}',
+    'unpack-once': '''let calls:int64=0
+make=()=>{calls+=1 return [x=20 y=22]}
+main=()=>{let [x y]=make() return if calls =? 1 x+y else 1}''',
+    'unpack-global': 'let [y x]=[x=20 y=22]\nmain=()=>x+y',
+    'unpack-global-discard': '''let calls:int64=0
+make=()=>{calls+=1 return [20 22]}
+let [_ _]=make()
+main=()=>calls+41''',
+    'unpack-default-shadow': '''combine=(@x:int64 b:int64={let [x y]=[20 22] x+y})=>x+b
+main=()=>{let x:int64=0 return combine(@x)}''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',
     'array-slices': '''main=()=>{let xs:array<int64>=[10 20 22 99]
 let a=xs[1..2] let b=xs[1..3) let c=xs[..1] let d=xs[2..] let e=xs[..]
@@ -396,6 +420,10 @@ ERRORS = {
     'record-mixed-elements': ('main=()=>{let v=[x=42 2] return 0}', 'record item'),
     'record-untyped-empty-array': ('main=()=>{let v=[items=[]] return 0}', 'type annotation'),
     'comprehension-mixed': ('main=()=>[loop i in [1 2] if i =? 1 "a"->2 else 3]', 'cannot mix'),
+    'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
+    'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
+    'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
+    'unpack-nested': ('main=()=>{let [[x]]= [[42]] return x}', 'nested or annotated'),
     'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
     'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
@@ -677,7 +705,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -944,3 +972,34 @@ def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
     else:
         assert built.returncode == 0, built.stdout + built.stderr
         assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('mismatch', [False, True])
+def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch):
+    (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
+    source = tmp_path / 'unpack.dewy'
+    source.write_text('''import p"helper.jo"
+main=()=>{let [count text]=helper.pair() return count+text.length}''' if not mismatch else
+                      'main=()=>{let [first second]=[42] return first+second}')
+    binary = tmp_path / 'unpack'
+    node = shutil.which('node')
+    if target == 'wasm' and node is None:
+        pytest.skip('Node is needed for web execution')
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    if mismatch:
+        assert ran.returncode != 0 and 'unpacking requires exactly 2 elements' in ran.stderr, ran.stdout + ran.stderr
+    else:
+        assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
