@@ -8,6 +8,9 @@ After building the compiler as described in `tools/sloppy_core/README.md`:
 
 ```sh
 CORE=/tmp/dewy-core/bin/dewy-core
+# Live editing: save changes and the running game takes the new code.
+$CORE watch examples/sloppy_core/paddle.dewy
+
 $CORE build examples/sloppy_core/paddle.dewy -o /tmp/paddle
 /tmp/paddle
 
@@ -36,3 +39,7 @@ including mouse input and a rendered frame, with no console errors.
 The first native development build reported 150 ms across compiler phases;
 the web build reported 97 ms. These are initial observations for this small game,
 not repeated build medians. See the restart audit for evidence and limitations.
+
+For a smaller starting point, run `dewy-core new my-game`, then
+`dewy-core watch my-game/main.dewy`. The generated README includes native and web
+build commands. `dewy-core new my-program program` starts a terminal program.

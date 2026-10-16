@@ -55,8 +55,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 137 checks and takes
-about 8 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 142 checks and takes
+about 9.5 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -123,3 +123,9 @@ three builds and 300 alternating executions show development runtime improving
 from 624 ms to 396 ms (37%), for a build change from 71 ms to 73 ms. Release was
 203 ms and C 174 ms in that run. All checksums matched, and the combined 131-check
 Dewy/editor/shared-core gate passed in 7.8 seconds.
+
+The default `new` template is a small mouse-controlled Dewy game with a trail;
+`new <directory> program` creates a terminal program. Both include a README.
+`watch` tests exercise imported-function reload, retaining the last working
+version after errors, and preserving game state through record layout changes.
+Include `tests/python_misc/test_sloppy_core_watch.py` for this gate.

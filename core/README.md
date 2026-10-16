@@ -18,6 +18,8 @@ syntax parser, and a C compiler plus `make` for the compact core:
 python3 -m tools.sloppy_core.build \
   --dewy /path/to/native/dewy --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core --version
+/tmp/dewy-core/bin/dewy-core new /tmp/my-dewy-game
+/tmp/dewy-core/bin/dewy-core watch /tmp/my-dewy-game/main.dewy
 /tmp/dewy-core/bin/dewy-core examples/sloppy_core/paddle.dewy
 /tmp/dewy-core/bin/dewy-core build examples/sloppy_core/paddle.dewy \
   --target wasm -o /tmp/paddle
@@ -58,6 +60,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -n0 \
   tests/python_misc/test_sloppy_core.py \
   tests/python_misc/test_sloppy_core_editor.py \
+  tests/python_misc/test_sloppy_core_watch.py \
   tests/python_misc/test_sloppy_core_upstream.py
 ```
 
@@ -65,10 +68,16 @@ The gate tests expected Dewy behavior, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
 
-`check file.dewy` and `lsp` use the same compiler as `build`. Dewy formatting,
-project scaffolding, package editing, an interactive prompt and automatic updates
-are not yet exposed; their inherited Sloppy versions would produce or install
-the wrong language. `watch` is inherited and remains experimental.
+`check file.dewy` and `lsp` use the same compiler as `build`. `new <directory> [game|program]` creates a Dewy starting point with build/run
+instructions. `watch` reruns terminal programs and reloads native game code in
+place. Imported-module edits, recovery from compiler errors, and preserving live
+state through a record layout change are covered by the gate. A changed global
+initializer deliberately resets that global; new record fields take supported
+literal defaults. More complex reload scenarios remain experimental.
+
+Dewy formatting, package editing, an interactive prompt and automatic updates
+are not yet exposed; their inherited versions would produce or install the
+wrong language.
 
 ## Source layout and bootstrap
 

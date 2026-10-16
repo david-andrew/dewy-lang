@@ -269,7 +269,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     assert source.read_text() == text
 
 
-@pytest.mark.parametrize('command', ['update', 'upgrade', 'new', 'repl', 'add'])
+@pytest.mark.parametrize('command', ['update', 'upgrade', 'repl', 'add'])
 def test_core_unavailable_cli(compiler, tmp_path, command):
     result = subprocess.run([compiler, command], cwd=tmp_path, capture_output=True,
                             text=True, timeout=5, check=False)
@@ -285,3 +285,48 @@ def test_core_cli_identity(compiler):
     result = subprocess.run([compiler, '--help'], capture_output=True, text=True,
                             timeout=5, check=False)
     assert result.returncode == 0 and 'file.dewy' in result.stderr
+
+
+@pytest.mark.parametrize('kind', ['game', 'program'])
+def test_core_new_project(compiler, tmp_path, kind):
+    project = tmp_path / 'project with spaces'
+    made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
+                          text=True, timeout=5, check=False)
+    assert made.returncode == 0, made.stdout + made.stderr
+    source = project / 'main.dewy'
+    assert source.is_file() and (project / 'README.md').is_file()
+    assert not list(project.glob('*.jo'))
+    binary = project / 'main'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env.update(SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='3', SLOPPY_SCREENSHOT=str(project / 'frame.png'))
+    ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    if kind == 'program':
+        assert ran.stdout == 'Hello, Dewy!\n'
+    else:
+        assert (project / 'frame.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+        built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', binary],
+                               capture_output=True, text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        assert (project / 'main.html').is_file()
+
+
+def test_core_new_existing_directory(compiler, tmp_path):
+    marker = tmp_path / 'main.dewy'
+    marker.write_text('existing work')
+    made = subprocess.run([compiler, 'new', tmp_path], capture_output=True,
+                          text=True, timeout=5, check=False)
+    assert made.returncode != 0 and 'already exists' in made.stderr
+    assert marker.read_text() == 'existing work'
+    assert list(tmp_path.iterdir()) == [marker]
+
+
+def test_core_new_unknown_template(compiler, tmp_path):
+    project = tmp_path / 'project'
+    made = subprocess.run([compiler, 'new', project, 'unknown'], capture_output=True,
+                          text=True, timeout=5, check=False)
+    assert made.returncode != 0 and 'no template' in made.stderr
+    assert not project.exists()

@@ -1,6 +1,6 @@
-# The program side of `sloppy watch` (compiler/watch.jo): a game built by it applies the patches
+# The program side of `dewy-core watch` (compiler/watch.jo): a game built by it applies the patches
 # the compiler sends (fd 3) between frames, and answers (fd 4) once it has. While it runs under
-# sloppy watch a panic in update or draw does not end it: the game pauses with the message on the
+# dewy-core watch a panic in update or draw does not end it: the game pauses with the message on the
 # screen, and goes on after the next reload.
 #
 # Messages: words [op, a, b], then for op 1 and 4 b bytes
@@ -22,13 +22,13 @@ __watch_jmp: *u8 = null      # set while update and draw run: where a panic goes
 __watch_paused = false
 __watch_note = ""            # shown over the game: a panic, or the compiler's errors
 
-# (tells sloppy watch whether this program can take patches: 0 yes, 1 no)
+# (tells dewy-core watch whether this program can take patches: 0 yes, 1 no)
 __watch_init = ():
     when TARGET != "wasm":
         if __watch_on: return
         ok = false
         when TARGET == "windows":
-            # the pipes' handles, from sloppy watch (else the program was started some other way)
+            # the pipes' handles, from dewy-core watch (else the program was started some other way)
             hs = split(env("SLOPPY_WATCH_PIPES") ?? "", ",")
             if hs.len() != 2: return
             __watch_hin = (to_int(hs[0]) ?? 0) as *u8
@@ -36,7 +36,7 @@ __watch_init = ():
             mbi = fill(0, 6)                                        # MEMORY_BASIC_INFORMATION
             ok = VirtualQuery(__WATCH_REGION as *u8, data(mbi) as *u8, 48) == 48 and (mbi[4] & 0xFFFFFFFF) == 0x1000 and (__WATCH_REGION as *int)[0] == __WATCH_MARK
         else:
-            # fd 3: from sloppy watch (else the program was started some other way: no reloading)
+            # fd 3: from dewy-core watch (else the program was started some other way: no reloading)
             if syscall(72, __WATCH_IN, 1) < 0: return               # fcntl(F_GETFD)
             v: u8[] = [0]
             reg = __WATCH_REGION
@@ -49,14 +49,14 @@ __watch_init = ():
                     __c_jit_write_protect(1)
             ok = syscall(27, reg, 4096, data(v)) == 0 and (reg as *int)[0] == __WATCH_MARK
         if not ok:
-            eprint("sloppy watch: no room for new code in this process; changes restart it")
+            eprint("dewy-core watch: no room for new code in this process; changes restart it")
             __watch_answer(1)
             return
         __watch_answer(0)
         __watch_jbuf = __alloc(192)
         __watch_on = true
 
-# (a word back to sloppy watch)
+# (a word back to dewy-core watch)
 __watch_answer = (v: int):
     w = [v]
     when TARGET == "windows":
@@ -88,7 +88,7 @@ __watch_pending = () -> bool:
         pf = [__WATCH_IN | (1 << 32)]
         return syscall(7, data(pf), 1, 0) > 0                      # poll, no waiting
 
-# between frames: apply what sloppy watch sent
+# between frames: apply what dewy-core watch sent
 __watch_frame = ():
     when TARGET != "wasm":
         if not __watch_on: return
@@ -161,7 +161,7 @@ __watch_frame = ():
             __watch_jmp = null
         # (a build that worked: what was paused goes on)
         if built:
-            if __watch_paused: eprint("sloppy watch: going on")
+            if __watch_paused: eprint("dewy-core watch: going on")
             __watch_paused = false
         __watch_answer(0)
 
@@ -194,7 +194,7 @@ __watch_update_draw = (dt: f64, update: (f64) -> void, draw: () -> void):
             __watch_jmp = null
         else:
             __watch_paused = true
-            eprint("sloppy watch: paused (fix the code and save it to go on)")
+            eprint("dewy-core watch: paused (fix the code and save it to go on)")
     if len(__watch_note) > 0: __watch_draw_note()
 
 __watch_draw_note = ():

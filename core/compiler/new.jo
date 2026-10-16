@@ -1,64 +1,31 @@
-# sloppy new <dir> [kind]: a project to start from, in a new directory: <dir>/<name>.jo made from
-# one of the library's templates (lib/new/<kind>.jo; __NAME__ and __TITLE__ in it become the name
-# and a title made from it), and a .gitignore for what building it writes.
-
+# Small Dewy starting points, using the same native/web runtime as ordinary builds.
 use 'util.jo'
 
-NEW_KINDS = ["game", "arcade", "platformer", "3d", "story", "online", "program"]
-NEW_ABOUT = ["a window, update and draw: the smallest game", "a 2D arcade game: a title menu, scoring, a best score kept, sounds",
-    "a 2D platformer: a level written as text, slopes, platforms to jump through, coins",
-    "a first-person 3D game: mouse look, walking and jumping, shooting",
-    "a story in lines and choices (a visual novel): its script as Ren'Py's, a dialogue box",
-    "two players anywhere, no server: invite a friend by a link, rollback netplay", "a program for the terminal, with a test"]
-
-# "my_game" -> "My Game"
-new_title = (name: str) -> str:
-    words: str[]
-    loop w in name.replace("-", "_").split("_"):
-        if len(w) > 0: words.push(upper(w[..1)) + w[1..))
-    words.join(" ")
-
 new_usage = ():
-    eprint("usage: sloppy new <directory> [kind]   (a project to start from, in a new directory)\nkinds:")
-    loop i in 0.. and k in NEW_KINDS:
-        note = ""
-        if i == 0: note = " (the default)"
-        eprint("  {k:<9} {NEW_ABOUT[i]}{note}")
+    eprint("usage: dewy-core new <directory> [game|program] (game is the default)")
     exit(2)
 
 new_project = (lib: str, a: str[]):
     if a.len() < 3 or a.len() > 4 or starts_with(a[2], "-"): new_usage()
     kind = "game"
     if a.len() == 4: kind = a[3]
-    if NEW_KINDS.index_of(kind) < 0:
-        eprint("error: no template '{kind}'")
+    if kind != "game" and kind != "program":
+        eprint("dewy-core: no template '{kind}'")
         new_usage()
     dir = a[2]
-    loop len(dir) > 1 and (ends_with(dir, "/") or ends_with(dir, "\\")): dir = dir[..len(dir) - 1)
-    name = dir
-    s = max(rfind(name, "/"), rfind(name, "\\"))
-    if s >= 0: name = name[s + 1..)
-    if len(name) == 0 or name == "." or name == "..":
-        eprint("error: give the new directory a name (sloppy new my_game)")
+    if file_exists(dir):
+        eprint("dewy-core: {dir} already exists; choose a new directory")
         exit(1)
-    if file_exists(dir) and list_dir(dir).len() > 0:
-        eprint("error: {dir} is there already, and not empty")
-        exit(1)
-    src = read_file("{lib}/new/{kind}.jo") ?? ""
+    template = "{lib}/new/dewy/{kind}.dewy"
+    src = read_file(template) ?? ""
     if len(src) == 0:
-        eprint("error: cannot read the template {lib}/new/{kind}.jo")
+        eprint("dewy-core: cannot read {template}")
         exit(1)
-    src = src.replace("__NAME__", name).replace("__TITLE__", new_title(name))
+    readme = "# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core main.dewy\ndewy-core check main.dewy\ndewy-core watch main.dewy\ndewy-core build main.dewy -o main\n```\n"
+    if kind == "game":
+        readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build main.dewy --target wasm -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
     make_dirs(dir)
-    path = "{dir}/{name}.jo"
-    if not write_file(path, src) or not write_file("{dir}/.gitignore", "# what sloppy build writes\n/{name}\n/{name}.exe\n/{name}.html\n/{name}.zip\n"):
-        eprint("error: cannot write {path}")
+    if not write_file("{dir}/main.dewy", src) or not write_file("{dir}/README.md", readme) or not write_file("{dir}/.gitignore", "/main\n/main.exe\n/main.html\n/main.zip\n"):
+        eprint("dewy-core: cannot write the project in {dir}")
         exit(1)
-    print("made {path} (from the {kind} template)")
-    if kind == "program":
-        print("  sloppy {path}          run it")
-        print("  sloppy test {path}     run its tests")
-    else:
-        print("  sloppy watch {path}    run it, and reload it each time you save a change")
-        print("  sloppy --web {path}    run it in the browser")
-    print("  sloppy build {path}    make a program to share (--target windows, macos, linux, wasm)")
+    print("Created {dir}/main.dewy. See {dir}/README.md to run, check and build it.")

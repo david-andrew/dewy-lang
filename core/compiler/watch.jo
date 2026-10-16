@@ -1,4 +1,4 @@
-# `sloppy watch file.jo`: run a program and keep it up to date while its files change.
+# `dewy-core watch file.jo`: run a program and keep it up to date while its files change.
 #
 # This process (the driver) never compiles itself: each build is a fresh compile in a copy of it
 # (fork), so builds start clean. The first build is an ordinary executable, run with two pipes
@@ -605,7 +605,7 @@ wp_end = ():
 w_place = (n: int) -> int:
     a = align_up(wm_next, 16)
     wm_next = a + n
-    if wm_next > w_region() + w_region_size(): fatal(0, "sloppy watch: no room left for new code (restart the program: r)")
+    if wm_next > w_region() + w_region_size(): fatal(0, "dewy-core watch: no room left for new code (restart the program: r)")
     a
 
 # (SLOPPY_WATCH_TRACE=file: each function's key, then what its code refers to and its bytes)
@@ -667,7 +667,7 @@ watch_make_patch = () -> bool:
             if al < 16: al = 16
             a = align_up(wm_data_next, al)
             wm_data_next = a + sz
-            if wm_data_next > wm_data_end: fatal(0, "sloppy watch: no room left for new globals (restart the program: r)")
+            if wm_data_next > wm_data_end: fatal(0, "dewy-core watch: no room left for new globals (restart the program: r)")
             moved[k] = true
         gaddr[k] = a
         wd_path = []
@@ -818,10 +818,10 @@ w_out = ""
 w_args: str[]
 
 w_ext = ""      # the main file's extension: other files with it are sources too
-w_cache = "/tmp/sloppy-cache"
+w_cache = "/tmp/dewy-core-cache"
 
 watch_main = (path: str, args: str[]):
-    w_cache = os_path(temp_dir()) + "/sloppy-cache"
+    w_cache = os_path(temp_dir()) + "/dewy-core-cache"
     mkdir(w_cache)
     w_out = "{w_cache}/watch-{w_self_id()}.bin"
     when TARGET == "windows":
@@ -833,7 +833,7 @@ watch_main = (path: str, args: str[]):
         _ino = syscall(294, 0x800 | 0x80000)          # inotify_init1(IN_NONBLOCK | IN_CLOEXEC)
     dirs: {str: bool} = {}
     keys = "{w_r} restarts, q{w_enter} quits"
-    eprint("sloppy watch: {path} (saving a file reloads it; {keys})")
+    eprint("dewy-core watch: {path} (saving a file reloads it; {keys})")
     fresh = true
     loop true:
         if fresh:
@@ -841,7 +841,7 @@ watch_main = (path: str, args: str[]):
             if watch_compile(path, true):
                 watch_run()
                 fresh = false
-            else: eprint("sloppy watch: waiting for changes")
+            else: eprint("dewy-core watch: waiting for changes")
         # (each time: a build may name files it did not before)
         fl = wm_files
         if fl.len() == 0: fl.push(path)
@@ -890,13 +890,13 @@ watch_main = (path: str, args: str[]):
                 w_log("built")
                 if wm_loop != loop0:
                     # (the game loop runs with the update and draw it started with)
-                    eprint("sloppy watch: update or draw was added or removed: starting the program again")
+                    eprint("dewy-core watch: update or draw was added or removed: starting the program again")
                     fresh = true
                     continue
                 watch_send(t0)
-                if wm_top != top0: eprint("sloppy watch: (top-level statements changed: they ran once, at start; {w_r} starts the program again)")
+                if wm_top != top0: eprint("dewy-core watch: (top-level statements changed: they ran once, at start; {w_r} starts the program again)")
             else:
-                eprint("sloppy watch: the program keeps running the last version that compiled")
+                eprint("dewy-core watch: the program keeps running the last version that compiled")
                 # (and shows the errors)
                 w_patch = []
                 wp_put(4, 1, bytes(w_errors))
@@ -905,9 +905,9 @@ watch_main = (path: str, args: str[]):
         else if ev == 2:
             st = watch_reap()
             if st == 0 and wm_game:
-                eprint("sloppy watch: the game was closed")
+                eprint("dewy-core watch: the game was closed")
                 exit(0)
-            if st >= 0: eprint("sloppy watch: the program ended ({watch_status_str(st)}); waiting for changes ({w_r} runs it again)")
+            if st >= 0: eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes ({w_r} runs it again)")
         else if ev == 3: fresh = true
         else if ev == 4:
             watch_stop()
@@ -959,7 +959,7 @@ watch_wait = (ino: int) -> int:
                 line = trim(str_from_bytes(buf[..got)))
                 if line == "r": return 3
                 if line == "q": return 4
-                if len(line) > 0: eprint("sloppy watch: r + enter restarts the program, q + enter quits")
+                if len(line) > 0: eprint("dewy-core watch: r + enter restarts the program, q + enter quits")
         if n == 3 and (pf[2] >> 48) & 0xFFFF != 0:
             # the program: gone, or saying (once its game loop starts) whether it takes patches
             b = [0]
@@ -1178,12 +1178,12 @@ watch_send = (t0: f64):
     if let dp = env("SLOPPY_WATCH_DUMP"): write_bytes(dp, w_patch)
     w_log("sending a patch of {w_patch.len()} bytes")
     if not __write_all(w_to, w_patch):
-        eprint("sloppy watch: the program did not take the new code (writing to it failed: {w_write_err}); r + enter starts it again")
+        eprint("dewy-core watch: the program did not take the new code (writing to it failed: {w_write_err}); r + enter starts it again")
         return
     w_log("sent; waiting for the program")
     if w_read8() < 0:
         st = watch_reap()
-        eprint("sloppy watch: the program ended ({watch_status_str(st)}); waiting for changes")
+        eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes")
         return
     ms = int((time() - t0) * 1000.0)
     what = "no code changed"
@@ -1193,7 +1193,7 @@ watch_send = (t0: f64):
         if shown.len() > 6: shown = shown[..6)
         what = shown.join(", ")
         if w_changed.len() > 6: what += " and {w_changed.len() - 6} more"
-    msg = "sloppy watch: reloaded in {ms} ms: {what}"
+    msg = "dewy-core watch: reloaded in {ms} ms: {what}"
     if w_added.len() > 0: msg += "; new: {w_added.join(", ")}"
     if w_reset.len() > 0: msg += "; set again: {w_reset.join(", ")}"
     if w_kept.len() > 0: msg += "; kept, in their new layout: {w_kept.join(", ")}"
@@ -1203,7 +1203,7 @@ watch_send_note = ():
     if not w_ready or not __write_all(w_to, w_patch): return
     if w_read8() < 0:
         st = watch_reap()
-        eprint("sloppy watch: the program ended ({watch_status_str(st)}); waiting for changes")
+        eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes")
 
 w_write_err = ""           # (why __write_all failed)
 
@@ -1225,7 +1225,7 @@ __write_all = (fd: int, b: u8[]) -> bool:
 
 # (SLOPPY_WATCH_LOG=1: each step of a reload, to standard error)
 w_log = (msg: str):
-    if env("SLOPPY_WATCH_LOG") != none: eprint("sloppy watch log: {msg}")
+    if env("SLOPPY_WATCH_LOG") != none: eprint("dewy-core watch log: {msg}")
 
 # the program's answer (a word); -1: it is gone
 w_read8 = () -> int:
@@ -1258,7 +1258,7 @@ w_self_id = () -> int:
         return syscall(39)
 
 # ---- Windows: what fork, pipes, inotify and poll do on Linux ----
-# Each build runs in a new process (sloppy watch --build) given the link map in a file; the
+# Each build runs in a new process (dewy-core watch --build) given the link map in a file; the
 # program gets its pipes' handles in SLOPPY_WATCH_PIPES; files are watched by when they were
 # last written, checked a few times a second.
 w32_mtimes: {str: int} = {}
@@ -1400,7 +1400,7 @@ w32_run = ():
         if not ok:
             CloseHandle(to_w[0])
             CloseHandle(from_r[0])
-            eprint("sloppy watch: could not start {w_out}")
+            eprint("dewy-core watch: could not start {w_out}")
             return
         CloseHandle(pi[1] as *u8)
         w_pid = pi[0]
@@ -1439,7 +1439,7 @@ w32_compile = (path: str, first: bool) -> bool:
         w_errors = ""
         if not started:
             CloseHandle(er[0])
-            eprint("sloppy watch: could not start the compiler ({exe})")
+            eprint("dewy-core watch: could not start the compiler ({exe})")
             return false
         CloseHandle(pi[1] as *u8)
         buf = fill(u8(0), 4096)
@@ -1461,7 +1461,7 @@ w32_compile = (path: str, first: bool) -> bool:
     else:
         return false
 
-# sloppy watch --build (Windows): one build, from the link map in state; the result in res
+# dewy-core watch --build (Windows): one build, from the link map in state; the result in res
 watch_build_child = (path: str, state: str, res: str, first: bool, out: str):
     watch_first = first
     watch_build = true

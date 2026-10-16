@@ -39,7 +39,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.1.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core lsp\n       dewy-core --version\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|program]\n       dewy-core lsp\n       dewy-core --version\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -526,7 +526,7 @@ main = ():
     if a.len() >= 2 and (a[1] == "update" or a[1] == "upgrade"):
         eprint("dewy-core: update this toolchain by rebuilding from the Dewy repository; see core/README.md")
         exit(2)
-    if a.len() >= 2 and (a[1] == "new" or a[1] == "repl" or a[1] == "add"):
+    if a.len() >= 2 and (a[1] == "repl" or a[1] == "add"):
         eprint("dewy-core: '{a[1]}' is not yet available for Dewy; see core/README.md")
         exit(2)
     if a.len() < 2: usage(0)

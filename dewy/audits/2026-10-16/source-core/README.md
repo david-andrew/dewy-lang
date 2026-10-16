@@ -96,3 +96,14 @@ Sloppy updater is removed. Dewy-inappropriate REPL, package editing and project
 scaffolding commands are explicitly unavailable until adapted; `.jo` remains
 the implementation/library language. The existing installed compiler and the
 user's dirty Sloppy checkout are unchanged.
+
+## Live reload and new projects
+
+`dewy-core new <directory> [game|program]` now creates Dewy sources and local
+instructions. The game template builds natively, renders a headless frame, and
+builds to a self-contained web page. An existing directory is never overwritten.
+Watch messages/cache names identify Dewy. The native watch tests save by atomic
+rename, update an imported function, retain working code across a compiler error,
+and preserve a live counter when a new record field is added with a default.
+Ordinary terminal programs rerun after an edit. All 142 combined checks pass in
+9.53 seconds (`projects-tests.log`, compiler identity in `projects-build.json`).
