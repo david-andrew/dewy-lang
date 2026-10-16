@@ -459,3 +459,24 @@ The direct native smoke gate plus ten cross-module/effect/nominal tests pass:
 writes, unused invalid imported contracts, transitive calls, unknown and pure
 callbacks, nominal-owner replacement, and generic effect guarantees.
 [Test log](shared-effects-tests.log).
+
+### Native temporary-inlining experiment (not retained)
+
+Skipping the tree temporary-inlining pass and letting SSA handle the remaining
+variables passed 53 focused/smoke tests. A single cold self-build pair improved
+only from **37.25 to 36.73 s**; warm small builds did not improve. More
+importantly, the dense nested particle kernel regressed from **216.1 to
+238.0 ms** at a million particles (C: 171.3 ms), across five alternating runs.
+All 75 runtime checksums matched. The inlining pass affects downstream code
+quality even when SSA could represent its input, so the bypass was reverted.
+[Self-build](ssa-temporaries-selfbuild.json), [small builds](ssa-temporaries-tiny.json),
+[particles](ssa-temporaries-particles.json), [test log](ssa-temporaries-tests.log).
+
+A separate redundant step is removed: the text emitter's callee context is
+now constructed only if native emission is unavailable. Successful native
+builds already construct and use their own eager context. Copy-policy errors
+also return before SSA/native generation, with a test asserting that no native
+address map or executable is produced for the rejected source.
+
+With temporary inlining retained, the final selected development gate passes
+**53 tests in 28.57 s**. [Retained-path log](native-emission-retained-tests.log).

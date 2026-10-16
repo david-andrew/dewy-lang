@@ -653,7 +653,6 @@ normalize = (given:program.Program nodes:array<hir.AST> type_table:types.Table s
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type merged [] function.rest_args function.rettype lowered source=function.source] @state)])
     }
     let normalized=functions.copy()
-    let ctx=if optimizing context(functions source false state) else ssa.Context[set[] []]
     state.in_function=false
     let startup:array<addr>=[]
     loop item in source.startup_items {append(@startup statement(item @state))}
@@ -694,7 +693,9 @@ normalize = (given:program.Program nodes:array<hir.AST> type_table:types.Table s
     # program the native route built needs none.
     if optimizing and executable is? none {
         let started=timing.start(timings)
-        functions=optimized(normalized ctx @state)
+        # Native emission uses its own eager context. Build the text-emitter
+        # context only if that path is actually needed.
+        functions=optimized(normalized context(functions source false state) @state)
         timing.finish('lowering.optimize' started)
     }
     return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types source_files] executable refused]
