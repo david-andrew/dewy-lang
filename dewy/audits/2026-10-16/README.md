@@ -351,3 +351,22 @@ Primitive tests and a complete typed snapshot execute on x86 and C. Shared
 cache repair and transitive-input invalidation also pass: **4 tests in
 103.54 s**, including new compiler-sized drivers and the C compilation of
 the full snapshot codec. [Test log](interned-cache-tests.log).
+
+### Native development smoke gate
+
+`tools/certify.sh smoke /path/to/dewy` compiles existing source cases directly
+with the supplied CLI. It covers normal scalar/control/container behavior,
+callbacks, initialization, resource hooks, storage-lifetime rejection, dense
+record values, Unicode argv, and shared cache repair. The pinned Sloppy
+backend remains an optional separate check. No compiler-sized driver is built
+for this gate. **37 tests pass in 20.54 s**; seven bridge variants are explicitly
+excluded. [Run log](native-smoke.log). The changed subsystem still needs its
+focused checks; this is an inner-loop gate, not a full release certification.
+
+A pre-scan intended to skip storage-lifetime analysis was tried and reverted.
+The reporting prelude contains sorts, so it still triggered full analysis
+even for tiny programs. Warm compilation was about 316 / 314 ms and the
+pass about 41 / 39 ms: insufficient benefit for an extra scan.
+[Experiment samples](storage-prescan-experiment.json). The useful direction
+is to reuse or selectively compute analysis summaries, not add scans around
+the unchanged whole-program pass.

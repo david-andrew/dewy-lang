@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Validation tiers (dewy/ROADMAP.md, "Immediate work order", step 2).
 #
+#   certify.sh smoke NATIVE_COMPILER [PYTEST_ARGS...]
+#       Fast CLI development gate: values, containers, callbacks, resources,
+#       storage validation, dense records, argv, and shared-cache recovery.
+#       Uses the supplied compiler directly; no compiler-sized test drivers.
+#
 #   certify.sh focused TEST_PATH_OR_NODE [PYTEST_ARGS...]
 #       Run only the selected tests, serially by default (override with -n).
 #       DEWY_TEST_DRIVER_COMPILER=/path/to/dewy uses native-built compiler drivers;
@@ -30,11 +35,28 @@ python=${PYTHON:-$root/.venv/bin/python}
 [[ -x $python ]] || python=$(command -v python3)
 
 usage() {
-    sed -n '2,26p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,31p' "${BASH_SOURCE[0]}" >&2
     exit 2
 }
 
 case ${1:-} in
+smoke)
+    [[ $# -ge 2 ]] || usage
+    compiler=$(realpath -- "$2") || exit 2
+    [[ -f $compiler && -x $compiler ]] || { echo "Not an executable compiler: $compiler" >&2; exit 2; }
+    shift 2
+    cd -- "$root"
+    export DEWY_TEST_DRIVER_COMPILER="$compiler"
+    export DEWY_DENSE_TEST_COMPILER="$compiler"
+    export DEWY_CACHE_TEST_COMPILER="$compiler"
+    export DEWY_DENSE_RECORDS=0
+    exec "$python" -m pytest -q -p no:cacheprovider -n 0 --durations=5 \
+        tests/python_misc/test_native_validation_smoke.py \
+        tests/python_misc/test_native_runtime_reachability.py \
+        tests/python_misc/test_native_cli_shared_prelude.py \
+        tests/python_misc/test_dense_record_elements.py::test_dense_record_values \
+        -k 'not bridge' "$@"
+    ;;
 focused)
     shift
     [[ $# -ge 1 && $1 != -* ]] || usage

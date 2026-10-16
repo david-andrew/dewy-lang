@@ -13,6 +13,13 @@ build directories. It uses `$XDG_CACHE_HOME/dewy/prelude`, or
 contents are checked before reuse. Program compilation still runs normally.
 Benchmark tools explicitly isolate this cache for cold measurements.
 
+For the development feedback loop, run `tools/certify.sh smoke /path/to/dewy`.
+It compiles and executes representative source programs directly, including
+dense-record kernels, callbacks, resources, Unicode argv, storage rejection
+cases, and cache recovery. It does not build compiler-sized test drivers.
+Use `focused` for the subsystem being changed; the larger integration tier
+remains a separate checkpoint rather than the inner edit/test loop.
+
 ## Implementation progress
 
 - [x] t0: context-sensitive lexical tokens and delimiter pairs
