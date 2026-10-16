@@ -59,6 +59,7 @@ is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
     k = nodes[n].kind
     if k == .float_lit: return T_FLOAT
+    if has_flag(n, NF_U64) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return T_U64
     if k == .unary or k == .conv: return lit_default(int(nodes[n].a))
     if k == .binary:
         if lit_default(int(nodes[n].a)) == T_FLOAT or lit_default(int(nodes[n].b)) == T_FLOAT: return T_FLOAT
@@ -149,7 +150,10 @@ int_fits = (v: int, t: int) -> bool:
 # can integer type t hold literal n? (one above the i64 range fits u64, and the 64-bit signed
 # types as its bits, e.g. hash constants)
 lit_fits = (n: int, t: int) -> bool:
-    if has_flag(n, NF_U64): return int(types[t].bits) >= 64
+    if has_flag(n, NF_U64):
+        if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            return int(types[t].bits) >= 64 and not types[t].sign
+        return int(types[t].bits) >= 64
     int_fits(nodes[n].ival, t)
 
 # coerce node n to `target` (rewrites n in place); returns n
@@ -364,6 +368,7 @@ join_types = (a: int, b: int, pos: int) -> int:
         return ta
     if la and lb:
         t = T_INT
+        if lit_default(a) == T_U64 or lit_default(b) == T_U64: t = T_U64
         if nodes[a].kind == .float_lit or nodes[b].kind == .float_lit: t = T_FLOAT
         coerce(a, t)
         coerce(b, t)
@@ -3614,7 +3619,10 @@ check_binary = (n: int, expected: int) -> int:
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {type_str(ta)} and {type_str(tb)}{why}")
     if op == .slash and is_int(ta) and is_int(tb) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
         fatal(nodes[n].pos, "Dewy core experiment does not yet support integer /; use // or convert to float64")
-    if is_lit(a) and is_lit(b) and not is_cmp:
+    # High unsigned Dewy literals go through typed lowering. The untyped fold
+    # below uses signed division/shifts and would lose their unsigned meaning.
+    wide_unsigned = (has_flag(a, NF_U64) or has_flag(b, NF_U64)) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+    if is_lit(a) and is_lit(b) and not is_cmp and not wide_unsigned:
         # fold literal arithmetic, keeping the result an untyped literal
         if nodes[a].kind == .int_lit and nodes[b].kind == .int_lit:
             x = nodes[a].ival
@@ -4014,7 +4022,9 @@ check_expr = (n: int, expected: int) -> int:
         else if ex != 0 and exk == .opt and is_numeric(int(types[ex].elem)):
             coerce(n, prune(int(types[ex].elem)))
             t = ntype(n)
-        else: t = T_INT
+        else:
+            t = T_INT
+            if has_flag(n, NF_U64) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): t = T_U64
     else if k == .float_lit:
         if ex != 0 and exk == .float_:
             clear_flag(n, NF_LITERAL)
@@ -4438,6 +4448,8 @@ check_expr = (n: int, expected: int) -> int:
                 add_flag(n, NF_LITERAL)
         else if nodes[n].op == i32(int(Tok.tilde)):
             if not is_int(at): fatal(nodes[n].pos, "'~' needs an integer")
+        else if nodes[n].op == i32(int(Tok.plus)):
+            if not is_numeric(at) and not is_vec(at): fatal(nodes[n].pos, "unary '+' needs a number")
         t = at
     else if k == .binary: t = check_binary(n, expected)
     else if k == .and_ or k == .or_:

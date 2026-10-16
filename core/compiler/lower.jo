@@ -2605,6 +2605,7 @@ gen_expr = (e: int) -> Val:
     if k == .fnref: return gen_fnref(e)
     if k == .unary:
         a = int(nodes[e].a)
+        if nodes[e].op == i32(int(Tok.plus)): return gen_expr(a)
         if is_vec(t):
             neg = mk(.binary, nodes[e].pos)
             nodes[neg].op = i32(int(Tok.star))

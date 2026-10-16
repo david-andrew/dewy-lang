@@ -31,7 +31,8 @@ replaced after measuring the result.
 
 The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
-independent value parameters, fixed-width arithmetic, floating-point records,
+independent value parameters, fixed-width arithmetic, based integer and decimal
+scientific literals, floating-point records,
 arrays and dictionaries with value copies, type aliases, callable types, union
 narrowing, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
@@ -55,8 +56,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 142 checks and takes
-about 9.5 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 171 checks and takes
+about 12 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -129,3 +130,13 @@ The default `new` template is a small mouse-controlled Dewy game with a trail;
 `watch` tests exercise imported-function reload, retaining the last working
 version after errors, and preserving game state through record layout changes.
 Include `tests/python_misc/test_sloppy_core_watch.py` for this gate.
+
+Fixed-width literals include binary, octal, hexadecimal and the other Dewy bases
+through 16. All signed/unsigned widths from 8 through 64 bits are available.
+Positive literals above `int64` infer `uint64`; assigning one to a signed type
+requires a representable value. Negative `int64.min` and narrow signed minima
+are accepted, while literals outside the available width are diagnosed.
+Decimal scientific notation uses the core's correctly rounded float parser and
+rejects overflow to infinity. Binary exponents and nondecimal fractions remain
+unsupported. Typed integer arithmetic retains the core's wrapping behavior;
+these additions do not implement Dewy's unbounded `int` or exact real arithmetic.

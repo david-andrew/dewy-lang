@@ -73,6 +73,19 @@ main=():>int64=>{let v=Vector[1.25 2.5] return if v.x*2.0 =? v.y 42 else 1}''',
     'float-division': '''divide=(x:float64 y:float64):>float64=>x/y
 main=():>int64=>if divide(84.0 2.0) =? 42.0 42 else 1''',
     'inverted-comparisons': '''main=():>int64=>if 1 not=? 2 and 1 not>? 2 and 2.0 not<? 1.0 42 else 1''',
+    'based-integers': 'main=()=>if 0x2A =? 42 and 0b101010 =? 42 and 0o52 =? 42 and 0d42 =? 42 42 else 1',
+    'other-bases': 'main=()=>if 0t1120 =? 42 and 0q222 =? 42 and 0s110 =? 42 and 0z36 =? 42 42 else 1',
+    'unsigned-literal': '''main=()=>{let x:uint64=0xffff_ffff_ffff_ffff
+let y=18446744073709551615 return if x =? y and y >? 0 42 else 1}''',
+    'unsigned-constant-math': '''main=()=>{let n=0xffffffffffffffff-1
+return if n >? 0 and (0xffffffffffffffff >> 63) =? 1 and 0xffffffffffffffff >? 0 and 0xffffffffffffffff+1 =? 0 42 else 1}''',
+    'signed-minimum': '''main=()=>{let x:int64=-9223372036854775808
+return if x <? 0 and x+1 =? -9223372036854775807 42 else 1}''',
+    'narrow-integers': '''main=()=>{let a:int8=-128 let b:uint8=0xff
+let c:int16=-32768 let d:uint16=0xffff
+return if (a as int64) =? -128 and (b as int64) =? 255 and (c as int64) =? -32768 and (d as int64) =? 65535 42 else 1}''',
+    'scientific': '''main=()=>if 4.2e1 =? 42.0 and 420e-1 =? 42.0 and 4_200e-2 =? 42.0 and 42e+0 =? 42.0 42 else 1''',
+    'unary-plus': 'positive=(x:int64)=>+x\nmain=()=>positive(42)',
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
@@ -91,6 +104,13 @@ ERRORS = {
     'integer-division': ('main=():>int64=>85/2', 'integer /'),
     'grapheme-length': ('main=():>int64=>"é🙂".length', 'grapheme string length'),
     'grapheme-index': ('main=():>int64=>{let s="é🙂" printl(s[0]) return 42}', 'grapheme string indexing'),
+    'literal-too-large': ('main=()=>18446744073709551616', 'exceeds uint64'),
+    'hex-too-large': ('main=()=>0x10000000000000000', 'exceeds uint64'),
+    'negative-too-large': ('main=()=>-9223372036854775809', 'exceeds int64'),
+    'signed-literal-overflow': ('main=():>int64=>0xffffffffffffffff', 'does not fit'),
+    'narrow-literal-overflow': ('main=()=>{let x:uint8=256 return x}', 'does not fit'),
+    'float-literal-overflow': ('main=()=>1e309', 'exceeds float64'),
+    'unary-plus-text': ('main=()=>+"text"', "needs a number"),
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
     'effect-contract': ('main=():>int64 & no_effects=>42', 'does not yet support'),
     'missing-name': ('# 🙂\nmain=():>int64=>missing', 'unknown'),
@@ -330,3 +350,24 @@ def test_core_new_unknown_template(compiler, tmp_path):
                           text=True, timeout=5, check=False)
     assert made.returncode != 0 and 'no template' in made.stderr
     assert not project.exists()
+
+
+@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_web(compiler, tmp_path, name, release):
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node is needed to execute the generated web runner')
+    source = tmp_path / 'numeric.dewy'
+    source.write_text(CASES[name])
+    binary = tmp_path / 'numeric'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    scripts = Scripts()
+    scripts.feed(binary.with_suffix('.html').read_text())
+    runner = tmp_path / 'runner.cjs'
+    runner.write_text('\n'.join(scripts.parts))
+    ran = subprocess.run([node, runner], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)

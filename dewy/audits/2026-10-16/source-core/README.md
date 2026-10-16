@@ -107,3 +107,18 @@ rename, update an imported function, retain working code across a compiler error
 and preserve a live counter when a new record field is added with a default.
 Ordinary terminal programs rerun after an edit. All 142 combined checks pass in
 9.53 seconds (`projects-tests.log`, compiler identity in `projects-build.json`).
+
+## Practical numeric literals
+
+Based integers, decimal scientific notation, all 8/16/32/64-bit signed and
+unsigned type spellings, signed minima and unsigned 64-bit inference are now
+supported. Numeric parsing checks bounds. High unsigned values pass through
+typed lowering instead of the old signed literal fold, retaining correct shifts
+and comparisons. Unary plus now returns its operand rather than falling through
+to bitwise inversion; nonnumeric operands are rejected.
+
+`numeric-tests.log`: 165 language/editor/watch/shared-core checks pass in 10.75 s.
+`numeric-web-tests.log`: six additional debug/release WebAssembly checks cover
+high unsigned constant arithmetic, narrow types and scientific literals. The
+compiler is identified by `numeric-build.json`. Runtime integer arithmetic is
+still fixed-width/wrapping; this is not an unbounded-number implementation.

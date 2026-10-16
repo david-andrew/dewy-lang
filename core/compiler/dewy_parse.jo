@@ -51,6 +51,36 @@ dw_fail = (id: int, what: str) -> int:
     fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
     0
 
+# The syntax parser has already recognized the digits and base. Accumulate with
+# an explicit limit so neither overflow nor a high unsigned bit changes a value.
+dw_digits = (text: str) -> str:
+    digits = text[3..]
+    if starts_with(lower(digits), text[..2)): digits = digits[2..]
+    digits
+
+dw_unsigned = (text: str, id: int) -> u64:
+    alphabet = ""
+    match text[..3):
+        "0b:": alphabet = "01"
+        "0t:": alphabet = "012"
+        "0q:": alphabet = "0123"
+        "0s:": alphabet = "012345"
+        "0o:": alphabet = "01234567"
+        "0d:": alphabet = "0123456789"
+        "0z:": alphabet = "0123456789xe"
+        "0x:": alphabet = "0123456789abcdef"
+        _: dw_fail(id, "this numeric base")
+    base = u64(len(alphabet))
+    value: u64 = 0
+    loop c in lower(dw_digits(text)):
+        if c == '_': continue
+        digit = find_byte(alphabet, c)
+        if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
+        if value > (0xFFFFFFFFFFFFFFFF - u64(digit)) / base:
+            fatal(dewy_syntax[id].pos, "integer literal exceeds uint64")
+        value = value * base + u64(digit)
+    value
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -60,6 +90,9 @@ dw_type = (id: int) -> int:
         else if name == "uint64": name = "u64"
         else if name == "int32": name = "i32"
         else if name == "uint32": name = "u32"
+        else if name == "int16": name = "i16"
+        else if name == "uint16": name = "u16"
+        else if name == "int8": name = "i8"
         else if name == "uint8": name = "u8"
         else if name == "float64": name = "f64"
         else if name == "float32": name = "f32"
@@ -211,23 +244,26 @@ dw_expr = (id: int) -> int:
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
     if k == "Integer":
-        if not starts_with(text, "0d:"): return dw_fail(id, "nondecimal literals")
         n = mk(.int_lit, pos)
-        parsed = to_int(replace(text[3..], "_", ""))
-        if parsed == none: return dw_fail(id, "an integer literal outside int64")
-        nodes[n].ival = parsed!
+        nodes[n].ival = int(dw_unsigned(text, id))
         add_flag(n, NF_LITERAL)
+        if nodes[n].ival < 0: add_flag(n, NF_U64)
         return n
     if k == "Real":
         parts = split(text, "|")
         if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
-        number = parts[0][3..]
+        number = dw_digits(parts[0])
         if parts[1] != "":
             if not starts_with(parts[1], "0d:"): return dw_fail(id, "nondecimal real fractions")
-            number = number + "." + parts[1][3..]
-        if parts[2] != "": return dw_fail(id, "real literal exponents")
+            number = number + "." + dw_digits(parts[1])
+        if parts[2] != "":
+            exponent = parts[2]
+            if exponent[1] != 'e' or not starts_with(exponent[2..], "0d:"):
+                return dw_fail(id, "nondecimal real exponents")
+            number += "e" + exponent[..1) + dw_digits(exponent[2..])
         value = to_float(replace(number, "_", ""))
         if value == none: return dw_fail(id, "this real literal")
+        if value! - value! != 0.0: fatal(pos, "real literal exceeds float64")
         n = mk(.float_lit, pos)
         nodes[n].fval = value!
         add_flag(n, NF_LITERAL)
@@ -280,6 +316,18 @@ dw_expr = (id: int) -> int:
         e = dw_expr(dw_child(id, 1))
         if op == "@":
             add_flag(e, NF_MUT)
+            return e
+        if op == "-" and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
+            if has_flag(e, NF_U64) and nodes[e].ival != -9223372036854775807 - 1:
+                fatal(pos, "negative integer literal exceeds int64")
+            nodes[e].ival = -nodes[e].ival
+            nodes[e].pos = pos
+            nodes[e].aux2 = 1
+            clear_flag(e, NF_U64)
+            return e
+        if op == "-" and nodes[e].kind == .float_lit:
+            nodes[e].fval = -nodes[e].fval
+            nodes[e].pos = pos
             return e
         n = mk(if op == "not": NK.not_ else: NK.unary, pos)
         if op != "-" and op != "not" and op != "+": return dw_fail(id, "prefix '{op}'")
