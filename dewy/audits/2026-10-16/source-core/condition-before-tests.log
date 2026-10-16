@@ -1,0 +1,30 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+_______________ test_core_values[release-growing-loop-condition] _______________
+
+compiler = PosixPath('/tmp/dewy-source-core/typed-application/bin/dewy-core')
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-75/test_core_values_release_growi0')
+name = 'growing-loop-condition', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(compiler, tmp_path, name, release):
+        source = tmp_path / f'{name}.dewy'
+        source.write_text(CASES[name])
+        binary = tmp_path / name
+        flags = ['--release'] if release else []
+        built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                               text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        result = subprocess.run([binary, 'extra'], capture_output=True, text=True, timeout=10, check=False)
+>       assert result.returncode == 42, (result.returncode, result.stdout, result.stderr)
+E       AssertionError: (101, '', 'panic: growing-loop-condition.dewy:4: index 1 out of bounds (length 1: the last is index 0, as indexes count from 0)
+E             in main (growing-loop-condition.dewy:4)
+E         ')
+E       assert 101 == 42
+E        +  where 101 = CompletedProcess(args=[PosixPath('/tmp/pytest-of-david/pytest-75/test_core_values_release_growi0/growing-loop-conditio...out of bounds (length 1: the last is index 0, as indexes count from 0)\n    in main (growing-loop-condition.dewy:4)\n').returncode
+
+tests/python_misc/test_sloppy_core.py:119: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-growing-loop-condition]
+1 failed, 1 passed, 106 deselected in 0.30s

@@ -1,0 +1,3742 @@
+{
+  "tools": {
+    "before": {
+      "path": "/tmp/dewy-source-core/typed-application/bin/dewy-core",
+      "sha256": "d83de702f4faf487c298a5703b5875ab6042e49ea40a3b0260c0b89d2a6673e6"
+    },
+    "after": {
+      "path": "/tmp/dewy-source-core/cached-length/bin/dewy-core",
+      "sha256": "00b09b40c40d819cb42819785b0c3def1c7660497501c492560371aeac052fd5"
+    }
+  },
+  "source": {
+    "path": "/tmp/dewy-source-core/particles/records_nested.dewy",
+    "sha256": "917ff39a51b2422398a2e763a8124f24b1001a9a97d56f0c77b463ad011fbff5"
+  },
+  "harness": {
+    "path": "/tmp/dewy-source-core/particles/benchmark_harness.jo",
+    "sha256": "8a14056dacf2fc5ee47f2664905d1f1db94724741f7ceb315e385f48862b9b4c"
+  },
+  "builds": [
+    {
+      "command": [
+        "/tmp/dewy-source-core/typed-application/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/before-0"
+      ],
+      "wall_seconds": 0.09354746504686773,
+      "peak_rss_kib": 26916,
+      "stdout": "",
+      "stderr": "check 66.5 ms, lower+codegen 23.9 ms, write 0.6 ms; 170 functions, 94195 nodes, 102230 bytes of code\n",
+      "mode": "before",
+      "sample": 0
+    },
+    {
+      "command": [
+        "/tmp/dewy-source-core/cached-length/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/after-0"
+      ],
+      "wall_seconds": 0.0882309740409255,
+      "peak_rss_kib": 26912,
+      "stdout": "",
+      "stderr": "check 63.7 ms, lower+codegen 21.9 ms, write 0.4 ms; 170 functions, 94195 nodes, 101846 bytes of code\n",
+      "mode": "after",
+      "sample": 0
+    },
+    {
+      "command": [
+        "cc",
+        "-O2",
+        "/var/home/david/dev/dewy-lang/dewy/benchmarks/apps/records.c",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/c"
+      ],
+      "wall_seconds": 0.09222748293541372,
+      "peak_rss_kib": 31640,
+      "stdout": "",
+      "stderr": "",
+      "mode": "C",
+      "sample": 0
+    },
+    {
+      "command": [
+        "/tmp/dewy-source-core/typed-application/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/before-1"
+      ],
+      "wall_seconds": 0.08480372000485659,
+      "peak_rss_kib": 26912,
+      "stdout": "",
+      "stderr": "check 62.0 ms, lower+codegen 19.8 ms, write 0.5 ms; 170 functions, 94195 nodes, 102230 bytes of code\n",
+      "mode": "before",
+      "sample": 1
+    },
+    {
+      "command": [
+        "/tmp/dewy-source-core/cached-length/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/after-1"
+      ],
+      "wall_seconds": 0.08518878510221839,
+      "peak_rss_kib": 26912,
+      "stdout": "",
+      "stderr": "check 61.0 ms, lower+codegen 21.0 ms, write 0.7 ms; 170 functions, 94195 nodes, 101846 bytes of code\n",
+      "mode": "after",
+      "sample": 1
+    },
+    {
+      "command": [
+        "/tmp/dewy-source-core/typed-application/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/before-2"
+      ],
+      "wall_seconds": 0.09079502895474434,
+      "peak_rss_kib": 26908,
+      "stdout": "",
+      "stderr": "check 60.3 ms, lower+codegen 27.1 ms, write 0.5 ms; 170 functions, 94195 nodes, 102230 bytes of code\n",
+      "mode": "before",
+      "sample": 2
+    },
+    {
+      "command": [
+        "/tmp/dewy-source-core/cached-length/bin/dewy-core",
+        "build",
+        "/tmp/dewy-source-core/particles/records_nested.dewy",
+        "--release",
+        "--time",
+        "-o",
+        "/tmp/dewy-core-length-78ysjob0/after-2"
+      ],
+      "wall_seconds": 0.08512353303376585,
+      "peak_rss_kib": 26912,
+      "stdout": "",
+      "stderr": "check 57.6 ms, lower+codegen 24.0 ms, write 0.7 ms; 170 functions, 94195 nodes, 101846 bytes of code\n",
+      "mode": "after",
+      "sample": 2
+    }
+  ],
+  "runs": [
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "0"
+      ],
+      "wall_seconds": 0.0018152339616790414,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1117\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1117,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "0"
+      ],
+      "wall_seconds": 0.001497673918493092,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1116\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1116,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.001505051041021943,
+      "peak_rss_kib": 1616,
+      "stdout": "3 77\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 77,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1"
+      ],
+      "wall_seconds": 0.0014594478998333216,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 9112\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 9112,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1"
+      ],
+      "wall_seconds": 0.0013232029741629958,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1245\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 1245,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002232952043414116,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 164\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 164,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "10"
+      ],
+      "wall_seconds": 0.001782299019396305,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3110\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 3110,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "10"
+      ],
+      "wall_seconds": 0.0016183099942281842,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2331\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 2331,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0020384849049150944,
+      "peak_rss_kib": 1608,
+      "stdout": "926545405 978\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 978,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "100000"
+      ],
+      "wall_seconds": 0.027548681013286114,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 21737785\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 21737785,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "100000"
+      ],
+      "wall_seconds": 0.0203384900232777,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 14381217\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 14381217,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.014959587017074227,
+      "peak_rss_kib": 4808,
+      "stdout": "585799323 10656714\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 10656714,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.30419177503790706,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 273312242\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 273312242,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.22700201603583992,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 194000964\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 194000964,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.19393530895467848,
+      "peak_rss_kib": 32964,
+      "stdout": "995937830 166158829\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 166158829,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0018628970719873905,
+      "peak_rss_kib": 1476,
+      "stdout": "3 79\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 79,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "0"
+      ],
+      "wall_seconds": 0.0020033569307997823,
+      "peak_rss_kib": 2064,
+      "stdout": "3 1391\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 1391,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "0"
+      ],
+      "wall_seconds": 0.0019957709591835737,
+      "peak_rss_kib": 2072,
+      "stdout": "3 2152\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 2152,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0021502880845218897,
+      "peak_rss_kib": 1480,
+      "stdout": "123258 300\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 300,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1"
+      ],
+      "wall_seconds": 0.0019721570424735546,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1692\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1692,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1"
+      ],
+      "wall_seconds": 0.0018149169627577066,
+      "peak_rss_kib": 2064,
+      "stdout": "123258 1375\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1375,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0022032989654690027,
+      "peak_rss_kib": 1600,
+      "stdout": "926545405 1046\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 1046,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "10"
+      ],
+      "wall_seconds": 0.0016616350039839745,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2447\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 2447,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "10"
+      ],
+      "wall_seconds": 0.0016111460281535983,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3199\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 3199,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.024929734063334763,
+      "peak_rss_kib": 4676,
+      "stdout": "585799323 20256381\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 20256381,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "100000"
+      ],
+      "wall_seconds": 0.026851118076592684,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20550777\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 20550777,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "100000"
+      ],
+      "wall_seconds": 0.03184476599562913,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 25097136\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 25097136,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.20150195702444762,
+      "peak_rss_kib": 32708,
+      "stdout": "995937830 172927794\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 172927794,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.23688024806324393,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 201300569\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 201300569,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.2895585409132764,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 248454623\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 248454623,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "0"
+      ],
+      "wall_seconds": 0.001998070045374334,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1095\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1095,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "0"
+      ],
+      "wall_seconds": 0.0015701079973950982,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1055\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1055,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.001872573047876358,
+      "peak_rss_kib": 1612,
+      "stdout": "3 78\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 78,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1"
+      ],
+      "wall_seconds": 0.001422974979504943,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 2803\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 2803,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1"
+      ],
+      "wall_seconds": 0.0019291070057079196,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1302\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 1302,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002276106970384717,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 169\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 169,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "10"
+      ],
+      "wall_seconds": 0.0019708951003849506,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 3120\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 3120,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "10"
+      ],
+      "wall_seconds": 0.002100042998790741,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 3948\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 3948,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0030960780568420887,
+      "peak_rss_kib": 1612,
+      "stdout": "926545405 1460\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 1460,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "100000"
+      ],
+      "wall_seconds": 0.02691883104853332,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 21356123\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 21356123,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "100000"
+      ],
+      "wall_seconds": 0.01997291506268084,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 13979325\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 13979325,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.01658024196512997,
+      "peak_rss_kib": 4800,
+      "stdout": "585799323 12349788\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 12349788,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.28698169894050807,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 254881747\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 254881747,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.2210092709865421,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 187942800\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 187942800,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.19609006098471582,
+      "peak_rss_kib": 32836,
+      "stdout": "995937830 169282522\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 169282522,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.001731588039547205,
+      "peak_rss_kib": 1616,
+      "stdout": "3 71\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 71,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "0"
+      ],
+      "wall_seconds": 0.001387721044011414,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1081\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1081,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "0"
+      ],
+      "wall_seconds": 0.0015865949681028724,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1305\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1305,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002321109059266746,
+      "peak_rss_kib": 1672,
+      "stdout": "123258 180\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 180,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1"
+      ],
+      "wall_seconds": 0.0021605539368465543,
+      "peak_rss_kib": 2064,
+      "stdout": "123258 2524\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 2524,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1"
+      ],
+      "wall_seconds": 0.0018611929845064878,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1411\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 1411,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0022236460354179144,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 1002\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 1002,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "10"
+      ],
+      "wall_seconds": 0.0012437510304152966,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2329\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 2329,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "10"
+      ],
+      "wall_seconds": 0.0013791399542242289,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3410\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 3410,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.018265965045429766,
+      "peak_rss_kib": 4800,
+      "stdout": "585799323 14439940\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 14439940,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "100000"
+      ],
+      "wall_seconds": 0.020787453977391124,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 13153017\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 13153017,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "100000"
+      ],
+      "wall_seconds": 0.02692193805705756,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 20867536\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 20867536,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.20698434801306576,
+      "peak_rss_kib": 32848,
+      "stdout": "995937830 179115512\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 179115512,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.22025371296331286,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 188522688\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 188522688,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.28866897500120103,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 256890181\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 256890181,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "0"
+      ],
+      "wall_seconds": 0.0016090989811345935,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1098\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1098,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "0"
+      ],
+      "wall_seconds": 0.0014568910701200366,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1068\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1068,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.001738646999001503,
+      "peak_rss_kib": 1608,
+      "stdout": "3 80\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 80,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1"
+      ],
+      "wall_seconds": 0.0017543239519000053,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1710\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 1710,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1"
+      ],
+      "wall_seconds": 0.0017855020705610514,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 2113\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 2113,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002125175087712705,
+      "peak_rss_kib": 1608,
+      "stdout": "123258 171\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 171,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "10"
+      ],
+      "wall_seconds": 0.0016223950078710914,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3026\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 3026,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "10"
+      ],
+      "wall_seconds": 0.0019355739932507277,
+      "peak_rss_kib": 2076,
+      "stdout": "926545405 2287\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 2287,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.001978294923901558,
+      "peak_rss_kib": 1672,
+      "stdout": "926545405 975\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 975,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "100000"
+      ],
+      "wall_seconds": 0.029946354101412,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 24589538\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 24589538,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "100000"
+      ],
+      "wall_seconds": 0.021231015911325812,
+      "peak_rss_kib": 6160,
+      "stdout": "585799323 15542020\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 15542020,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.017724747071042657,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 13701089\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 13701089,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.2915228820638731,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 257456281\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 0,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 257456281,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-0",
+        "1000000"
+      ],
+      "wall_seconds": 0.25029302295297384,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 217214848\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 0,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 217214848,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.19679387100040913,
+      "peak_rss_kib": 32708,
+      "stdout": "995937830 169505919\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 0,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 169505919,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "0"
+      ],
+      "wall_seconds": 0.0020001960219815373,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1274\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1274,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "0"
+      ],
+      "wall_seconds": 0.0019652729388326406,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1179\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1179,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0016728449845686555,
+      "peak_rss_kib": 1680,
+      "stdout": "3 78\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 78,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1"
+      ],
+      "wall_seconds": 0.0013249149778857827,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1336\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 1336,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1"
+      ],
+      "wall_seconds": 0.0013927159598097205,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1222\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 1222,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0017695510759949684,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 161\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 161,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "10"
+      ],
+      "wall_seconds": 0.0016847579972818494,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3079\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 3079,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "10"
+      ],
+      "wall_seconds": 0.0017372240545228124,
+      "peak_rss_kib": 2076,
+      "stdout": "926545405 2303\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 2303,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.002161826938390732,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 986\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 986,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "100000"
+      ],
+      "wall_seconds": 0.026065574027597904,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20309128\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 20309128,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "100000"
+      ],
+      "wall_seconds": 0.02046535594854504,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 14595791\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 14595791,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.015230492106638849,
+      "peak_rss_kib": 4676,
+      "stdout": "585799323 10648258\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 10648258,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.30625909089576453,
+      "peak_rss_kib": 34836,
+      "stdout": "995937830 270497393\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 270497393,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.24911933299154043,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 217366978\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 217366978,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.21204063401091844,
+      "peak_rss_kib": 32848,
+      "stdout": "995937830 185495678\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 185495678,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.002436866983771324,
+      "peak_rss_kib": 1600,
+      "stdout": "3 101\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 101,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "0"
+      ],
+      "wall_seconds": 0.0016595859779044986,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1106\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 1106,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "0"
+      ],
+      "wall_seconds": 0.0013857060112059116,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1131\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 1131,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.00161210005171597,
+      "peak_rss_kib": 1600,
+      "stdout": "123258 164\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 164,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1"
+      ],
+      "wall_seconds": 0.001480225007981062,
+      "peak_rss_kib": 2076,
+      "stdout": "123258 1237\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1237,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1"
+      ],
+      "wall_seconds": 0.0014557880349457264,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1348\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1348,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0019878620514646173,
+      "peak_rss_kib": 1612,
+      "stdout": "926545405 993\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 993,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "10"
+      ],
+      "wall_seconds": 0.0018266360275447369,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2314\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 2314,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "10"
+      ],
+      "wall_seconds": 0.0017349319532513618,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 3005\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 3005,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.015134353074245155,
+      "peak_rss_kib": 4800,
+      "stdout": "585799323 10473207\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 10473207,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "100000"
+      ],
+      "wall_seconds": 0.021252545062452555,
+      "peak_rss_kib": 6164,
+      "stdout": "585799323 15211704\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 15211704,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "100000"
+      ],
+      "wall_seconds": 0.026059163035824895,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20541592\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 20541592,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.198035902925767,
+      "peak_rss_kib": 32812,
+      "stdout": "995937830 172800425\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 172800425,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.23938781896140426,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 202083269\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 202083269,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.28962813096586615,
+      "peak_rss_kib": 34836,
+      "stdout": "995937830 256878026\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 256878026,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "0"
+      ],
+      "wall_seconds": 0.001621832954697311,
+      "peak_rss_kib": 2068,
+      "stdout": "3 1078\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1078,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "0"
+      ],
+      "wall_seconds": 0.0013595999917015433,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1314\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1314,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0016720289131626487,
+      "peak_rss_kib": 1616,
+      "stdout": "3 73\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 73,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1"
+      ],
+      "wall_seconds": 0.0014426010893657804,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1328\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 1328,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1"
+      ],
+      "wall_seconds": 0.002174832043237984,
+      "peak_rss_kib": 2060,
+      "stdout": "123258 1453\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 1453,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0019870830001309514,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 159\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 159,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "10"
+      ],
+      "wall_seconds": 0.001843336969614029,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2970\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 2970,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "10"
+      ],
+      "wall_seconds": 0.0015967459185048938,
+      "peak_rss_kib": 2076,
+      "stdout": "926545405 2287\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 2287,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0017700149910524487,
+      "peak_rss_kib": 1480,
+      "stdout": "926545405 945\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 945,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "100000"
+      ],
+      "wall_seconds": 0.02983996702823788,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 24107595\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 24107595,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "100000"
+      ],
+      "wall_seconds": 0.022477418067865074,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 16852726\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 16852726,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.018077088985592127,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 13900477\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 13900477,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.30773068801499903,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 267475623\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 267475623,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.22476886108051986,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 189591911\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 189591911,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.199232685030438,
+      "peak_rss_kib": 32812,
+      "stdout": "995937830 172571327\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 172571327,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.001764422981068492,
+      "peak_rss_kib": 1552,
+      "stdout": "3 79\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 79,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "0"
+      ],
+      "wall_seconds": 0.0014020060189068317,
+      "peak_rss_kib": 2068,
+      "stdout": "3 1096\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1096,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "0"
+      ],
+      "wall_seconds": 0.0016396420542150736,
+      "peak_rss_kib": 2068,
+      "stdout": "3 1380\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1380,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0021148750092834234,
+      "peak_rss_kib": 1600,
+      "stdout": "123258 164\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 164,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1"
+      ],
+      "wall_seconds": 0.0016678040847182274,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1306\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 1306,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1"
+      ],
+      "wall_seconds": 0.0017036129720509052,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1393\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 1393,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.002351618022657931,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 989\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 989,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "10"
+      ],
+      "wall_seconds": 0.0019705030135810375,
+      "peak_rss_kib": 2076,
+      "stdout": "926545405 3549\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 3549,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "10"
+      ],
+      "wall_seconds": 0.0014923670096322894,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3101\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 3101,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.01772073097527027,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 13779873\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 13779873,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "100000"
+      ],
+      "wall_seconds": 0.020193135016597807,
+      "peak_rss_kib": 6164,
+      "stdout": "585799323 13857234\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 13857234,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "100000"
+      ],
+      "wall_seconds": 0.026626387028954923,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20951282\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 20951282,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.20868141599930823,
+      "peak_rss_kib": 32704,
+      "stdout": "995937830 180380477\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 180380477,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.21806513494811952,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 185278410\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 185278410,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.2891482529230416,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 256273717\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 256273717,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "0"
+      ],
+      "wall_seconds": 0.0019308460177853703,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1140\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1140,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "0"
+      ],
+      "wall_seconds": 0.0015517720021307468,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1245\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1245,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0017877040663734078,
+      "peak_rss_kib": 1616,
+      "stdout": "3 86\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 86,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1"
+      ],
+      "wall_seconds": 0.0013541929656639695,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1367\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 1367,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1"
+      ],
+      "wall_seconds": 0.002432462992146611,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1320\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 1320,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0020276139257475734,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 179\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 179,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "10"
+      ],
+      "wall_seconds": 0.001883633085526526,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 3087\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 3087,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "10"
+      ],
+      "wall_seconds": 0.0016410410171374679,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2325\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 2325,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0018211189890280366,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 970\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 970,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "100000"
+      ],
+      "wall_seconds": 0.02853024797514081,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 23254031\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 23254031,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "100000"
+      ],
+      "wall_seconds": 0.0201845079427585,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 14841877\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 14841877,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.016048782039433718,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 11540951\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 11540951,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.2919204339850694,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 259881812\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 1,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 259881812,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-1",
+        "1000000"
+      ],
+      "wall_seconds": 0.2553867689566687,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 209630928\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 1,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 209630928,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.1929601050214842,
+      "peak_rss_kib": 32964,
+      "stdout": "995937830 166649475\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 1,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 166649475,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "0"
+      ],
+      "wall_seconds": 0.0017608950147405267,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1095\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1095,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "0"
+      ],
+      "wall_seconds": 0.0013524129753932357,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1091\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 1091,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0016472359420731664,
+      "peak_rss_kib": 1616,
+      "stdout": "3 88\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 0,
+      "size": 0,
+      "kernel_ns": 88,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1"
+      ],
+      "wall_seconds": 0.0013876690063625574,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1345\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 1345,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1"
+      ],
+      "wall_seconds": 0.001330688945017755,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1599\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 1599,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0019431749824434519,
+      "peak_rss_kib": 1616,
+      "stdout": "123258 261\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 0,
+      "size": 1,
+      "kernel_ns": 261,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "10"
+      ],
+      "wall_seconds": 0.0018646279349923134,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 2994\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 2994,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "10"
+      ],
+      "wall_seconds": 0.001739211962558329,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2314\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 2314,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0018051359802484512,
+      "peak_rss_kib": 1484,
+      "stdout": "926545405 965\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 0,
+      "size": 10,
+      "kernel_ns": 965,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "100000"
+      ],
+      "wall_seconds": 0.026647332939319313,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20659187\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 20659187,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "100000"
+      ],
+      "wall_seconds": 0.025278065935708582,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 17494996\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 17494996,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.015529680997133255,
+      "peak_rss_kib": 4680,
+      "stdout": "585799323 11384128\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 0,
+      "size": 100000,
+      "kernel_ns": 11384128,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.29075870499946177,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 260201437\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 260201437,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.23516835598275065,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 203729972\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 203729972,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.1998677320079878,
+      "peak_rss_kib": 32976,
+      "stdout": "995937830 174226904\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 0,
+      "size": 1000000,
+      "kernel_ns": 174226904,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0021093629766255617,
+      "peak_rss_kib": 1600,
+      "stdout": "3 92\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 92,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "0"
+      ],
+      "wall_seconds": 0.001944715972058475,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1448\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 1448,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "0"
+      ],
+      "wall_seconds": 0.0017401030054315925,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1704\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 1,
+      "size": 0,
+      "kernel_ns": 1704,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002102836035192013,
+      "peak_rss_kib": 1668,
+      "stdout": "123258 226\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 226,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1"
+      ],
+      "wall_seconds": 0.0014515520306304097,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1232\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1232,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1"
+      ],
+      "wall_seconds": 0.0013889920664951205,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1829\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 1,
+      "size": 1,
+      "kernel_ns": 1829,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.00162409502081573,
+      "peak_rss_kib": 1732,
+      "stdout": "926545405 865\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 865,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "10"
+      ],
+      "wall_seconds": 0.001433403929695487,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2372\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 2372,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "10"
+      ],
+      "wall_seconds": 0.001364750089123845,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2979\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 1,
+      "size": 10,
+      "kernel_ns": 2979,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.015251415083184838,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 10227115\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 10227115,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "100000"
+      ],
+      "wall_seconds": 0.023133014095947146,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 16120536\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 16120536,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "100000"
+      ],
+      "wall_seconds": 0.027160060009919107,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 21255382\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 1,
+      "size": 100000,
+      "kernel_ns": 21255382,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.21276907005812973,
+      "peak_rss_kib": 32716,
+      "stdout": "995937830 183836627\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 183836627,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.23597954504657537,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 200706116\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 200706116,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.3093142929719761,
+      "peak_rss_kib": 34844,
+      "stdout": "995937830 276282159\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 1,
+      "size": 1000000,
+      "kernel_ns": 276282159,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "0"
+      ],
+      "wall_seconds": 0.003372232080437243,
+      "peak_rss_kib": 2076,
+      "stdout": "3 1585\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1585,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "0"
+      ],
+      "wall_seconds": 0.001482271938584745,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1362\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 1362,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0017110989429056644,
+      "peak_rss_kib": 1672,
+      "stdout": "3 116\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 2,
+      "size": 0,
+      "kernel_ns": 116,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1"
+      ],
+      "wall_seconds": 0.0017731940606608987,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1371\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 1371,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1"
+      ],
+      "wall_seconds": 0.0021539879962801933,
+      "peak_rss_kib": 2068,
+      "stdout": "123258 1309\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 1309,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.002469391096383333,
+      "peak_rss_kib": 1672,
+      "stdout": "123258 524\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 2,
+      "size": 1,
+      "kernel_ns": 524,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "10"
+      ],
+      "wall_seconds": 0.002170654945075512,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 4345\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 4345,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "10"
+      ],
+      "wall_seconds": 0.0021187450038269162,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 4571\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 4571,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.002489567967131734,
+      "peak_rss_kib": 1484,
+      "stdout": "926545405 1429\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 2,
+      "size": 10,
+      "kernel_ns": 1429,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "100000"
+      ],
+      "wall_seconds": 0.03609597100876272,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 29310236\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 29310236,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "100000"
+      ],
+      "wall_seconds": 0.02864155196584761,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 22479417\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 22479417,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.023375007091090083,
+      "peak_rss_kib": 4872,
+      "stdout": "585799323 17104804\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 2,
+      "size": 100000,
+      "kernel_ns": 17104804,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.3463747058995068,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 302931845\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 302931845,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.2582595180720091,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 216080192\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 216080192,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.20225589291658252,
+      "peak_rss_kib": 32848,
+      "stdout": "995937830 175584103\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 2,
+      "size": 1000000,
+      "kernel_ns": 175584103,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0021071069641038775,
+      "peak_rss_kib": 1472,
+      "stdout": "3 78\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 78,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "0"
+      ],
+      "wall_seconds": 0.0014482439728453755,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1601\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1601,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "0"
+      ],
+      "wall_seconds": 0.0013822100590914488,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1113\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 3,
+      "size": 0,
+      "kernel_ns": 1113,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0018856539390981197,
+      "peak_rss_kib": 1608,
+      "stdout": "123258 176\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 176,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1"
+      ],
+      "wall_seconds": 0.0018685039831325412,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1401\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 1401,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1"
+      ],
+      "wall_seconds": 0.0018743519904091954,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 2319\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 3,
+      "size": 1,
+      "kernel_ns": 2319,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0019044961081817746,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 1004\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 1004,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "10"
+      ],
+      "wall_seconds": 0.001778530073352158,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 4179\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 4179,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "10"
+      ],
+      "wall_seconds": 0.0020590160274878144,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 3054\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 3,
+      "size": 10,
+      "kernel_ns": 3054,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.0196216149488464,
+      "peak_rss_kib": 4808,
+      "stdout": "585799323 15323693\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 15323693,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "100000"
+      ],
+      "wall_seconds": 0.023938132915645838,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 17715986\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 17715986,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "100000"
+      ],
+      "wall_seconds": 0.03160980704706162,
+      "peak_rss_kib": 6172,
+      "stdout": "585799323 24902544\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 3,
+      "size": 100000,
+      "kernel_ns": 24902544,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.23211712704505771,
+      "peak_rss_kib": 32712,
+      "stdout": "995937830 204538967\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 204538967,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.210891769034788,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 180272548\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 180272548,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.27544655406381935,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 244174543\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 3,
+      "size": 1000000,
+      "kernel_ns": 244174543,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "0"
+      ],
+      "wall_seconds": 0.0016643139533698559,
+      "peak_rss_kib": 2068,
+      "stdout": "3 1451\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1451,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "0"
+      ],
+      "wall_seconds": 0.0021760299568995833,
+      "peak_rss_kib": 2072,
+      "stdout": "3 1147\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 1147,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "0"
+      ],
+      "wall_seconds": 0.0017354920273646712,
+      "peak_rss_kib": 1616,
+      "stdout": "3 106\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 4,
+      "size": 0,
+      "kernel_ns": 106,
+      "checksum": 3
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1"
+      ],
+      "wall_seconds": 0.0014037470100447536,
+      "peak_rss_kib": 2072,
+      "stdout": "123258 1373\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 1373,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1"
+      ],
+      "wall_seconds": 0.0017159809358417988,
+      "peak_rss_kib": 2064,
+      "stdout": "123258 1607\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 1607,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1"
+      ],
+      "wall_seconds": 0.0019308539340272546,
+      "peak_rss_kib": 1480,
+      "stdout": "123258 234\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 4,
+      "size": 1,
+      "kernel_ns": 234,
+      "checksum": 123258
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "10"
+      ],
+      "wall_seconds": 0.001932572922669351,
+      "peak_rss_kib": 2068,
+      "stdout": "926545405 3157\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 3157,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "10"
+      ],
+      "wall_seconds": 0.0016551919979974627,
+      "peak_rss_kib": 2072,
+      "stdout": "926545405 2772\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 2772,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "10"
+      ],
+      "wall_seconds": 0.0022038210881873965,
+      "peak_rss_kib": 1616,
+      "stdout": "926545405 975\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 4,
+      "size": 10,
+      "kernel_ns": 975,
+      "checksum": 926545405
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "100000"
+      ],
+      "wall_seconds": 0.02574868407100439,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 20161721\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 20161721,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "100000"
+      ],
+      "wall_seconds": 0.02042442304082215,
+      "peak_rss_kib": 6168,
+      "stdout": "585799323 14512104\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 14512104,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "100000"
+      ],
+      "wall_seconds": 0.015055540017783642,
+      "peak_rss_kib": 4816,
+      "stdout": "585799323 10902480\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 4,
+      "size": 100000,
+      "kernel_ns": 10902480,
+      "checksum": 585799323
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/before-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.2786807909142226,
+      "peak_rss_kib": 34828,
+      "stdout": "995937830 246887106\n",
+      "stderr": "",
+      "mode": "before",
+      "build": 2,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 246887106,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/after-2",
+        "1000000"
+      ],
+      "wall_seconds": 0.21778206701856107,
+      "peak_rss_kib": 34840,
+      "stdout": "995937830 186223716\n",
+      "stderr": "",
+      "mode": "after",
+      "build": 2,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 186223716,
+      "checksum": 995937830
+    },
+    {
+      "command": [
+        "/tmp/dewy-core-length-78ysjob0/c",
+        "1000000"
+      ],
+      "wall_seconds": 0.19033913197927177,
+      "peak_rss_kib": 32700,
+      "stdout": "995937830 164983657\n",
+      "stderr": "",
+      "mode": "C",
+      "build": 2,
+      "repeat": 4,
+      "size": 1000000,
+      "kernel_ns": 164983657,
+      "checksum": 995937830
+    }
+  ],
+  "method": "fresh compiler processes and output paths; alternating execution order; OS caches retained"
+}

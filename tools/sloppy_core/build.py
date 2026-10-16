@@ -142,6 +142,23 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
             exit(2)
 ''')
     formatter.write_text(text)
+    lower = output / 'compiler/lower.jo'
+    text = lower.read_text()
+    length_anchor = '    if id == .len or id == .arrcap:\n        p = gen_borrowed(args[0]).v\n'
+    assert text.count(length_anchor) == 1
+    text = text.replace(length_anchor, '''    if id == .len or id == .arrcap:
+        if id == .len:
+            fixed = fixed_path_of(args[0])
+            if fixed >= 0: return V(fixed_paths[fixed].len, false)
+        p = gen_borrowed(args[0]).v
+''')
+    condition_anchor = '        if not ok: continue\n        at = prune(ntype(base))\n'
+    assert text.count(condition_anchor) == 1
+    text = text.replace(condition_anchor, '''        if fp_calls and nodes[s].kind == .while_ and not calls_leave(int(nodes[s].a), rn, written): ok = false
+        if not ok: continue
+        at = prune(ntype(base))
+''')
+    lower.write_text(text)
     binary = binary_dir / 'dewy-core'
     result = subprocess.run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
                             cwd=output, env=env, capture_output=True, text=True, timeout=180, check=False)
@@ -165,6 +182,7 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
         'parser_source_sha256': identity(source), 'patched_parser_sha256': identity(original),
         'patched_checker_sha256': identity(checker),
         'patched_lsp_sha256': identity(lsp), 'patched_formatter_sha256': identity(formatter),
+        'patched_lowering_sha256': identity(lower),
         'bootstrap_generations_sha256': bootstrap_hashes,
     }, indent=2) + '\n')
     return binary

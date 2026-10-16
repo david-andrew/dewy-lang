@@ -60,7 +60,7 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The behavior gate now contains 101 checks and takes about 6 seconds on the
+The behavior gate now contains 109 checks and takes about 6.5 seconds on the
 development machine, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -100,3 +100,23 @@ does not yet beat the existing opt-in dense runtime. These are workload results,
 not a self-hosting or full-language speedup claim. Reproduce with
 `tools/compare_sloppy.py --source-core /path/to/bin/dewy-core`, selecting
 `--dewy-source dewy/benchmarks/apps/records_nested.dewy` and the desired modes.
+
+Subsequent lowering improvement: collection length now reuses the length already
+cached when the core proves the array fixed during a loop. The proof checks calls
+in the condition as well as the body; otherwise growth/shrinking remains live.
+Three builds and 225 alternating comparative runs give 84 ms compilation and
+197 ms for the million-particle kernel, down from 257 ms, versus C at 173 ms in
+that run. All checksums agree. This brings the unchanged nested-record algorithm
+within about 14% of the C kernel, and ahead of the earlier dense Dewy measurement.
+It is still a single workload, not a claim about all generated programs.
+
+Shared-core optimization changes also run pinned Sloppy regressions:
+
+```sh
+DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core DEWY_SLOPPY_ROOT=/path/to/slop-lang \
+  .venv/bin/python -m pytest -q -n0 tests/python_misc/test_sloppy_core_upstream.py
+```
+
+The 22 array, copy, bounds, and loop cases take about 1.3 seconds. Fixtures come
+from the pinned Git revision, so local changes in the reference checkout do not
+affect the gate.

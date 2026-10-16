@@ -24,6 +24,20 @@ f(); return f()}''',
     'length-field': 'Span:type=[length:int64]\nmain=()=>{let s=Span[40] s.length+=2 return s.length}',
     'growing-loop': '''main=()=>{let xs:array<int64>=[10] let sum:int64=0
 loop i in 0.. and i <? xs.length {sum+=xs[i] if i =? 0 xs.push(32)} return sum}''',
+    'shrinking-loop-call': '''trim=(@xs:array<int64>):>void=>{xs.pop();}
+main=()=>{let xs:array<int64>=[20 22 99] let sum:int64=0
+loop i in 0.. and i <? xs.length {sum+=xs[i] trim(@xs)} return sum}''',
+    'shrinking-global-loop': '''let xs:array<int64>=[20 22 99]
+trim=():>void=>{xs.pop();}
+main=()=>{let sum:int64=0 loop i in 0.. and i <? xs.length {sum+=xs[i] trim()} return sum}''',
+    'shrinking-loop-condition': '''let xs:array<int64>=[10 20 12 99]
+let index:int64=0
+keep=()=>{if xs.length >? 2 {xs.pop();} return index <? xs.length}
+main=()=>{let sum:int64=0 loop keep() {sum+=xs[index]+xs.length index+=1} return sum+7}''',
+    'growing-loop-condition': '''let xs:array<int64>=[20]
+let index:int64=0
+keep=()=>{if index =? 1 {xs.push(22)} return index <? xs.length}
+main=()=>{let sum:int64=0 loop keep() {sum+=xs[index] index+=1} return sum}''',
     'captured-array': '''main=()=>{let xs:array<int64>=[40] let original=xs
 let bump=()=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}''',
     'type-alias': 'Count:type=int64\nmain=()=>{let x:Count=42 return x}',

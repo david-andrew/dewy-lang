@@ -35,6 +35,19 @@
   types, removing the parser adapter's separate list of record names. Imported
   records (Dewy/Sloppy, qualified/unqualified, named/positional fields) and a
   record field named `length` are covered.
+- `cached-length-build.json`, `cached-length-tests.log`: 109 checks in 6.46
+  seconds, including arrays changing size in the body, through mutable arguments,
+  through globals, and through the loop condition. The old fixed-path analysis
+  missed calls in the condition; `condition-before-tests.log` reproduces an
+  incorrect bounds panic in the prior core. The fixed analysis covers both sites.
+- `cached-length-upstream-tests.log`: 22 pinned Sloppy array/copy/bounds/loop
+  regressions, debug and release, pass in 1.33 seconds.
+- `cached-length-initial-particles.json`: preliminary measurement before adding
+  the condition-call safety fix; this prototype is not the retained compiler.
+- `cached-length-particles.json`: retained compiler, three release builds and
+  225 executions, alternating before/after/C within each input and repetition.
+  All checksums agree. Million-particle medians: 257.44 → 197.06 ms, C 172.71 ms.
+  Compile medians: 82.70 → 84.32 ms. The algorithm and live-loop source are unchanged.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame
