@@ -1,6 +1,9 @@
 """Expected user behavior for the experimental source-level core."""
 import os
+import shutil
+import struct
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -19,6 +22,9 @@ main=():>int64=>{let xs:array<int64>=[42] bump(xs); return xs[0]}''',
     'floor': '''main=():>int64=>if (-7)//3 =? -3 and (-7)%3 =? 2 and 7//(-3) =? -3 and 7%(-3) =? -2 42 else 1''',
     'float': '''Vector:type=[x:float64 y:float64]
 main=():>int64=>{let v=Vector[1.25 2.5] return if v.x*2.0 =? v.y 42 else 1}''',
+    'float-division': '''divide=(x:float64 y:float64):>float64=>x/y
+main=():>int64=>if divide(84.0 2.0) =? 42.0 42 else 1''',
+    'inverted-comparisons': '''main=():>int64=>if 1 not=? 2 and 1 not>? 2 and 2.0 not<? 1.0 42 else 1''',
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
@@ -34,6 +40,7 @@ loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 ERRORS = {
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
     'unbounded-int': ('main=():>int=>42', 'unbounded integer'),
+    'integer-division': ('main=():>int64=>85/2', 'integer /'),
     'grapheme-length': ('main=():>int64=>"é🙂".length', 'grapheme string length'),
     'grapheme-index': ('main=():>int64=>{let s="é🙂" printl(s[0]) return 42}', 'grapheme string indexing'),
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
@@ -89,3 +96,85 @@ def test_core_imports(compiler, tmp_path, extension):
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+class Scripts(HTMLParser):
+    """Extract the generated web runner, which also supports Node execution."""
+
+    def __init__(self):
+        super().__init__()
+        self.inside = False
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'script':
+            self.inside = True
+
+    def handle_endtag(self, tag):
+        if tag == 'script':
+            self.inside = False
+
+    def handle_data(self, data):
+        if self.inside:
+            self.parts.append(data)
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_game_model(compiler, tmp_path, target):
+    node = shutil.which('node')
+    if target == 'wasm' and node is None:
+        pytest.skip('Node is needed to execute the generated web runner')
+    model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/paddle_model.dewy'
+    shutil.copy2(model, tmp_path)
+    source = tmp_path / 'model_test.dewy'
+    source.write_text('''from p"paddle_model.dewy" import fresh, advance, Point
+main=():>int64=>{
+    let world=fresh()
+    let original=world
+    advance(@world 0.5 730.0)
+    if world.position.x not=? 730.0 or world.position.y not=? 340.0 return 1
+    if original.position.x not=? 640.0 or original.position.y not=? 220.0 return 2
+    world.position=Point(730.0 610.0)
+    world.velocity=Point(0.0 240.0)
+    advance(@world 0.1 730.0)
+    if world.score not=? 1 or world.velocity.y >=? 0.0 return 3
+    world.position=Point(100.0 750.0)
+    world.velocity=Point(0.0 240.0)
+    advance(@world 0.1 730.0)
+    if world.misses not=? 1 or world.position.y not=? 220.0 return 4
+    advance(@world 0.0 0.0)
+    if world.paddle not=? 80.0 return 5
+    advance(@world 0.0 1280.0)
+    if world.paddle not=? 1200.0 return 6
+    return 42
+}''')
+    binary = tmp_path / 'model_test'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+def test_core_game_renderer(compiler, tmp_path):
+    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/paddle.dewy'
+    binary = tmp_path / 'paddle'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    screenshot = tmp_path / 'frame.png'
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
+    env.update(SLOPPY_SOFTWARE='1', SLOPPY_SCREENSHOT=str(screenshot), SLOPPY_FRAMES='3',
+               SLOPPY_WINDOW='1280x720', SLOPPY_INPUT='1:mouse=800x620')
+    ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=15, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    data = screenshot.read_bytes()
+    assert data[:8] == b'\x89PNG\r\n\x1a\n'
+    assert struct.unpack('>II', data[16:24]) == (1280, 720)

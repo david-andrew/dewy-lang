@@ -141,7 +141,7 @@ dw_binary_token = (op: str, id: int) -> Tok:
         "+": .plus
         "-": .minus
         "*", "MultiplyJuxtapose": .star
-        "//": .slash
+        "/": .slash
         "%": .percent
         "=?": .eq
         "not=?": .ne
@@ -240,6 +240,14 @@ dw_expr = (id: int) -> int:
     if k == "BinOp":
         left = dw_child(id, 1)
         right = dw_child(id, 2)
+        if dewy_syntax[dw_child(id, 0)].kind == "InvertedComparisonOp":
+            comparison = mk(.binary, pos)
+            nodes[comparison].op = i32(int(dw_binary_token(op, id)))
+            nodes[comparison].a = i32(dw_expr(left))
+            nodes[comparison].b = i32(dw_expr(right))
+            n = mk(.not_, pos)
+            nodes[n].a = i32(comparison)
+            return n
         if op == "=>": return dw_function(id, "")
         if op == "//" or op == "%":
             fn = mk(.ident, pos)

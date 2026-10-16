@@ -75,6 +75,11 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
     text = text.replace(index_anchor, index_anchor + '''        if bk == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
             fatal(nodes[n].pos, "Dewy core experiment does not yet support grapheme string indexing")
 ''')
+    arithmetic_anchor = '    if is_lit(a) and is_lit(b) and not is_cmp:\n'
+    assert text.count(arithmetic_anchor) == 1
+    text = text.replace(arithmetic_anchor, '''    if op == .slash and is_int(ta) and is_int(tb) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        fatal(nodes[n].pos, "Dewy core experiment does not yet support integer /; use // or convert to float64")
+''' + arithmetic_anchor)
     checker.write_text(text)
     binary = binary_dir / 'dewy-core'
     env = env | {'SLOPPY_LIB': str(output / 'lib'), 'SLOPPY_EMIT_WORKERS': '1'}

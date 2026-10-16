@@ -39,14 +39,18 @@ This is an opt-in compiler experiment, not a full language implementation or a
 release-certified replacement. The core supplies runtime bounds checks, not the
 old proof engine. Proof directives, effect contracts, unbounded integer types,
 grapheme string length/indexing, and unsupported syntax produce diagnostics.
-Signed floor division/modulo currently use the core's int64 helpers. Integer
-`/` is rejected until its result semantics are implemented. Ambiguous syntax
+Signed floor division/modulo currently use the core's int64 helpers. Floating
+point `/` is supported; integer `/` is rejected until its result semantics are
+implemented. Ambiguous syntax
 currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The behavior gate now contains 25 cases and takes about 1.2 seconds on the
+The behavior gate now contains 31 cases and takes about 2 seconds on the
 development machine, including separate compiler processes and program execution.
+It includes the paddle game model on native and WebAssembly targets, and a
+display-independent render of the actual game. The playable example and build
+instructions are in `examples/sloppy_core/`.
 Evidence is in `dewy/audits/2026-10-16/source-core/`.
 
 The existing nested-record particle benchmark runs unchanged except for its
