@@ -37,7 +37,8 @@ this intentionally simple boundary can be replaced after measuring the result.
 The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, floating-point records,
-arrays with value copies, nested record mutation, conditionals, while loops,
+arrays and dictionaries with value copies, type aliases, callable types, union
+narrowing, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
 array/range iteration, import aliases, forward local record declarations, and
 combined `and` loop headers. Combined loops reuse
@@ -56,7 +57,7 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The behavior gate now contains 77 checks and takes about 4.4 seconds on the
+The behavior gate now contains 93 checks and takes about 5.3 seconds on the
 development machine, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

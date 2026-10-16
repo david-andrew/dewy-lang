@@ -25,6 +25,24 @@ f(); return f()}''',
 loop i in 0.. and i <? xs.length {sum+=xs[i] if i =? 0 xs.push(32)} return sum}''',
     'captured-array': '''main=()=>{let xs:array<int64>=[40] let original=xs
 let bump=()=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}''',
+    'type-alias': 'Count:type=int64\nmain=()=>{let x:Count=42 return x}',
+    'union': '''Choice:type=int64|string
+value=(x:Choice):>int64=>if x is? int64 x else 0
+main=()=>value(42)+value("ignored")''',
+    'union-inverse': '''value=(x:int64|string):>int64=>if x isnt? int64 0 else x
+main=()=>value(42)+value("ignored")''',
+    'function-type': '''Fn:type=(x:int64):>int64
+apply=(f:Fn x:int64):>int64=>f(x)
+main=()=>apply((x:int64)=>x+2 40)''',
+    'mutable-function-type': '''Fn:type=(@x:int64):>void
+apply=(f:Fn @x:int64):>void=>{f(@x)}
+main=()=>{let x:int64=40 apply((@a:int64):>void=>{a+=2} @x) return x}''',
+    'dictionary': '''main=()=>{let a:dict<string int64>=["a"->20 "b"->22]
+let b=a b["a"]=0 return a["a"]+a["b"]}''',
+    'empty-dictionary': '''Values:type=dict<string int64>
+main=()=>{let a:Values=[] a["answer"]=42 return a["answer"]}''',
+    'dictionary-iteration': '''main=()=>{let a:dict<int64 int64>=[1->19 2->20]
+let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',

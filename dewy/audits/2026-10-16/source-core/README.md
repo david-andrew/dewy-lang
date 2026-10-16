@@ -20,6 +20,9 @@
   recorded native Dewy seed. The C bootstrap's smaller accepted syntax could
   not compile the adapter directly; building pristine Sloppy first avoids
   constraining adapter implementation to that bootstrap subset.
+- `collections-build.json`, `collections-tests.log`: 93 checks in 5.34 seconds,
+  adding aliases, callable types (including mutable arguments), union narrowing,
+  dictionary value copies, typed empty dictionaries, and key/value iteration.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame

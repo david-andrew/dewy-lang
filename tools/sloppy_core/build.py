@@ -101,6 +101,14 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
     text = text.replace(arithmetic_anchor, '''    if op == .slash and is_int(ta) and is_int(tb) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
         fatal(nodes[n].pos, "Dewy core experiment does not yet support integer /; use // or convert to float64")
 ''' + arithmetic_anchor)
+    empty_anchor = '    else if k == .array:\n        et = 0\n'
+    assert text.count(empty_anchor) == 1
+    text = text.replace(empty_anchor, '''    else if k == .array:
+        if nkids(n) == 0 and ex != 0 and is_map_type(ex) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            nodes[n].kind = .map_lit
+            return check_expr(n, expected)
+        et = 0
+''')
     checker.write_text(text)
     binary = binary_dir / 'dewy-core'
     result = subprocess.run([seed, 'build', output / 'compiler/main.jo', '-o', binary],

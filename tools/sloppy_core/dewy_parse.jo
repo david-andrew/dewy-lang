@@ -69,11 +69,47 @@ dw_type = (id: int) -> int:
         n = mk(.tname, pos)
         nodes[n].name = i32(intern(name))
         return n
+    if dw_op(id) == "|":
+        n = mk(.tunion, pos)
+        set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
+        return n
+    if dw_op(id) == ":>":
+        params = dw_child(id, 1)
+        if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
+        n = mk(.tfn, pos)
+        types_: int[]
+        loop param in dewy_syntax[params].children:
+            p = dw_param(param, .param)
+            if nodes[p].a == 0: return dw_fail(param, "an untyped parameter in a function type")
+            t = int(nodes[p].a)
+            if has_flag(p, NF_MUT): add_flag(t, NF_MUT)
+            types_.push(t)
+        set_list(n, types_)
+        result = dw_child(id, 2)
+        if dw_name(result) != "void": nodes[n].a = i32(dw_type(result))
+        return n
+    if dw_op(id) == ".":
+        owner = dw_name(dw_child(id, 1))
+        member = dw_name(dw_child(id, 2))
+        if owner == "" or member == "": return dw_fail(id, "this qualified type")
+        n = mk(.tname, pos)
+        nodes[n].sval = i32(intern(owner))
+        nodes[n].name = i32(intern(member))
+        return n
+    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+        return dw_type(dw_child(id, 0))
     if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
         if dewy_syntax[args].children.len() != 1: return dw_fail(id, "array type constraints")
         n = mk(.tarray, pos)
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
+        return n
+    if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "dict":
+        args = dw_child(id, 2)
+        if dewy_syntax[args].children.len() != 2: return dw_fail(id, "dictionary type constraints")
+        n = mk(.tmap, pos)
+        nodes[n].a = i32(dw_type(dw_child(args, 0)))
+        nodes[n].b = i32(dw_type(dw_child(args, 1)))
         return n
     return dw_fail(id, "this type expression")
 
@@ -226,9 +262,17 @@ dw_expr = (id: int) -> int:
         children = dewy_syntax[id].children
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
-            n = mk(.array, pos)
+            is_map = children.len() > 0 and dw_op(children[0]) == "->"
+            n = mk(if is_map: NK.map_lit else: NK.array, pos)
             xs: int[]
-            loop child in children: xs.push(dw_expr(child))
+            loop child in children:
+                if is_map:
+                    if dw_op(child) != "->": return dw_fail(child, "a dictionary item without ->")
+                    pair = mk(.pair, dewy_syntax[child].pos)
+                    nodes[pair].a = i32(dw_expr(dw_child(child, 1)))
+                    nodes[pair].b = i32(dw_expr(dw_child(child, 2)))
+                    xs.push(pair)
+                else: xs.push(dw_expr(child))
             set_list(n, xs)
             return n
         if text == "{{}}:": return dw_block(id)
@@ -247,6 +291,15 @@ dw_expr = (id: int) -> int:
     if k == "BinOp":
         left = dw_child(id, 1)
         right = dw_child(id, 2)
+        if op == "is?" or op == "isnt?":
+            n = mk(.istype, pos)
+            nodes[n].a = i32(dw_expr(left))
+            nodes[n].b = i32(dw_type(right))
+            if op == "isnt?" or dewy_syntax[dw_child(id, 0)].kind == "InvertedComparisonOp":
+                inverted = mk(.not_, pos)
+                nodes[inverted].a = i32(n)
+                return inverted
+            return n
         if dewy_syntax[dw_child(id, 0)].kind == "InvertedComparisonOp":
             comparison = mk(.binary, pos)
             nodes[comparison].op = i32(int(dw_binary_token(op, id)))
@@ -381,7 +434,12 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if annotation != 0: nodes[n].a = i32(dw_type(annotation))
         return n
     if annotation != 0 and dw_name(annotation) == "type":
-        if initial == 0 or dewy_syntax[initial].text != "[]:": return dw_fail(id, "this type declaration")
+        if initial == 0: return dw_fail(id, "a type declaration without a definition")
+        if dewy_syntax[initial].text != "[]:":
+            n = mk(.typealias, dewy_syntax[id].pos)
+            nodes[n].name = i32(intern(name))
+            nodes[n].a = i32(dw_type(initial))
+            return n
         n = mk(.struct_, dewy_syntax[id].pos)
         nodes[n].name = i32(intern(name))
         fields: int[]
@@ -461,9 +519,16 @@ dw_loop_head = (id: int) -> int:
     n = mk(.lhead, dewy_syntax[id].pos)
     if op == "in":
         nodes[n].op = 1
-        binder = dw_child(id, 1)
-        if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
-        set_list(n, [dw_expr(binder)])
+        binder = dw_unwrap(dw_child(id, 1))
+        binders: int[]
+        if dewy_syntax[binder].kind == "Block" and dewy_syntax[binder].text == "[]:":
+            loop element in dewy_syntax[binder].children:
+                if dw_name(element) == "": return dw_fail(element, "this loop binding")
+                binders.push(dw_expr(element))
+        else:
+            if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
+            binders.push(dw_expr(binder))
+        set_list(n, binders)
         nodes[n].a = i32(dw_iterable(dw_child(id, 2)))
     else if op == "and":
         nodes[n].op = 2
