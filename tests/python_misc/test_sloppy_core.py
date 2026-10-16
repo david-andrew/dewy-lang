@@ -159,6 +159,47 @@ let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
     'dictionary-length': 'main=()=>{let a=["a"->1 "b"->2] return a.length+40}',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
+    'record-context': '''Vector:type=[x:int64 y:int64=2]
+main=()=>{let value:Vector=[x=40] return value.x+value.y}''',
+    'record-return': '''Vector:type=[x:int64 y:int64]
+make=():>Vector=>[y=22 x=20]
+main=()=>{let v=make() return v.x+v.y}''',
+    'record-argument': '''Vector:type=[x:int64 y:int64]
+sum=(v:Vector)=>v.x+v.y
+main=()=>sum([y=22 x=20])''',
+    'record-nested': '''Inner:type=[values:array<int64>]
+Outer:type=[inner:Inner]
+main=()=>{let a:Outer=[inner=[values=[20 22]]] let b=a b.inner.values[0]=99
+return a.inner.values[0]+a.inner.values[1]}''',
+    'record-anonymous': '''main=()=>{let a=[x=20 y=22] let b=a b.x=99 return a.x+a.y}''',
+    'record-anonymous-nested': '''main=()=>{let a=[inner=[values=[20 22]]] let b=a
+b.inner.values[0]=99 return a.inner.values[0]+a.inner.values[1]}''',
+    'record-anonymous-shape': '''main=()=>{let a=[x=1 y=2] let b=[y=22 x=20]
+a=b return a.x+a.y}''',
+    'record-anonymous-array': '''main=()=>{let values=[[x=20 y=1] [y=2 x=22]]
+return values[0].x+values[1].x}''',
+    'record-generic': '''sum=(v)=>v.x+v.y
+main=()=>sum([y=22 x=20])''',
+    'record-order': '''let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+main=()=>{let v=[y=next() x=next()] return if v.y*10+v.x =? 12 42 else 1}''',
+    'record-overload': '''Integer:type=[value:int64]
+Text:type=[value:string]
+read=(v:Integer)=>v.value
+read=(v:Text)=>v.value.length
+main=()=>read([value=39])+read([value="abc"])''',
+    'record-context-order': '''Pair:type=[a:int64 b:int64]
+let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+main=()=>{let p:Pair=[b=next() a=next()] return if p.b*10+p.a =? 12 42 else 1}''',
+    'record-optional': '''Value:type=[answer:int64]
+get=(v:Value?)=>if v is? Value v.answer else 0
+main=()=>get([answer=42])''',
+    'record-empty-context': '''Value:type=[answer:int64=42]
+main=()=>{let value:Value=[] return value.answer}''',
+    'record-empty-argument': '''Value:type=[answer:int64=42]
+get=(value:Value?)=>if value is? Value value.answer else 0
+main=()=>get([])''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',
     'array-slices': '''main=()=>{let xs:array<int64>=[10 20 22 99]
 let a=xs[1..2] let b=xs[1..3) let c=xs[..1] let d=xs[2..] let e=xs[..]
@@ -262,6 +303,10 @@ ERRORS = {
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
     'effect-contract': ('main=():>int64 & no_effects=>42', 'does not yet support'),
     'missing-name': ('# 🙂\nmain=():>int64=>missing', 'unknown'),
+    'record-duplicate': ('main=()=>{let value=[x=1 x=2] return 0}', 'duplicate record field'),
+    'record-unknown-field': ('Value:type=[x:int64]\nmain=()=>{let v:Value=[y=42] return 0}', 'unknown'),
+    'record-mixed-elements': ('main=()=>{let v=[x=42 2] return 0}', 'record item'),
+    'record-untyped-empty-array': ('main=()=>{let v=[items=[]] return 0}', 'type annotation'),
     'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
     'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
@@ -526,7 +571,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -561,7 +606,7 @@ def test_core_slice_bounds_panic(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.parametrize('name', ['optional_values', 'include_bytes'])
+@pytest.mark.parametrize('name', ['optional_values', 'include_bytes', 'array_moves', 'object_fields', 'object_nested'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_existing_program(compiler, tmp_path, release, name, target):
     source = Path(__file__).resolve().parents[2] / f'dewy/tests/{name}.dewy'

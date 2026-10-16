@@ -363,3 +363,27 @@ caches were warm; there were no concurrent CPU tests/builds. The fresh bootstrap
 passes 434 checks in 31.09 seconds, followed by three focused checks for default
 selection, invalid selection, and editor diagnostics/recovery. The combined gate
 now has 436 checks (`frontend-tests.log`, `frontend-extra-tests.log`).
+
+
+## Contextual and anonymous record literals
+
+`[field=value ...]` now constructs records using a variable, parameter, return or
+nested-field type. Optional payloads and defaults use the same constructor path;
+empty `[]` also uses a supplied record type. Without context, concrete field
+names/types form an interned anonymous record. Canonical field ordering makes
+reordered schemas agree without reordering value evaluation. Ordinary constructor
+lowering preserves ownership, managed copies and the earlier source-order fix.
+Overload selection considers the supplied field names and types instead of
+choosing an unrelated library record overload. Editor hovers display the shape.
+
+The unchanged `array_moves.dewy`, `object_fields.dewy` and `object_nested.dewy`
+now execute on native and web in both debug and release. Focused cases also cover
+nested managed copies, arrays of records, inferred generic calls, overloads,
+optional arguments, defaults, empty construction and field evaluation order.
+Malformed, duplicate and unknown fields are diagnosed. An otherwise untyped empty
+collection field needs a record annotation; coercions between already constructed
+named and anonymous record values are not added here.
+
+A fresh C bootstrap takes 17.68 seconds and passes all 513 checks in 36.17 seconds
+(`records-build.json`, `records-tests.log`). This adds record representation to
+the existing compact type system; it does not restore the old proof engine.

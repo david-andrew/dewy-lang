@@ -85,9 +85,18 @@ literal indexing such as `world.ends(joint)[0]`.
 
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
+Record literals such as `[x=20 y=22]` use the expected record type in variables,
+returns, arguments and nested fields, including defaults and optional payloads.
+Without an expected type, their field names and inferred types determine an
+anonymous record type; field order does not affect type identity. Values still
+evaluate in source order and retain independent copies. Empty `[]` constructs a
+record when context supplies its type. Inferred fields must have concrete value
+types; annotate the record when a field is an otherwise untyped empty collection.
+Named record types remain distinct, and structural conversions between already
+constructed named and anonymous values are not implemented.
 
-The combined Dewy/editor/shared-core gate now contains 436 checks and takes
-about 31 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 513 checks and takes
+about 36 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

@@ -61,6 +61,7 @@ struct StructInfo:
     name: str
     union_: bool     # A | B: an enum whose variant i holds type argument (member) i
     soa_: bool       # soa T[]: a struct with an array for each field of T (type argument 0)
+    record_: bool    # anonymous Dewy record, interned by field names and concrete types
 
 types: TypeInfo[] = [TypeInfo()]
 type_args: i32[]
@@ -616,6 +617,12 @@ type_str_in = (t0: int, dewy: bool) -> str:
         struct_, enum_:
             si = int(ti.st)
             nm = structs[si].name
+            if structs[si].record_:
+                parts: str[]
+                loop i in [0..int(structs[si].nfields)):
+                    field = fields[int(structs[si].fields) + i]
+                    parts.push("{name_of(int(field.name))}: {type_str(int(field.type), dewy)}")
+                return "[" + join(parts, " ") + "]"
             if dewy and structs[si].union_:
                 parts: str[]
                 loop i in [0..int(structs[si].ntargs)): parts.push(type_str_postfix(struct_targ(si, i), true))

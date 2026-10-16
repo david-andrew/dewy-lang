@@ -372,7 +372,8 @@ dw_expr = (id: int) -> int:
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
             is_map = children.len() > 0 and dw_op(children[0]) == "->"
-            n = mk(if is_map: NK.map_lit else: NK.array, pos)
+            is_record = children.len() > 0 and dw_op(children[0]) == "="
+            n = mk(if is_map: NK.map_lit else if is_record: NK.record_lit else: NK.array, pos)
             xs: int[]
             loop child in children:
                 if is_map:
@@ -381,6 +382,14 @@ dw_expr = (id: int) -> int:
                     nodes[pair].a = i32(dw_expr(dw_child(child, 1)))
                     nodes[pair].b = i32(dw_expr(dw_child(child, 2)))
                     xs.push(pair)
+                else if is_record:
+                    if dw_op(child) != "=": return dw_fail(child, "a record item without a field name and =")
+                    name = dw_name(dw_child(child, 1))
+                    if name == "": return dw_fail(child, "a record field without a simple name")
+                    field = mk(.namedarg, dewy_syntax[child].pos)
+                    nodes[field].name = i32(intern(name))
+                    nodes[field].a = i32(dw_expr(dw_child(child, 2)))
+                    xs.push(field)
                 else: xs.push(dw_expr(child))
             set_list(n, xs)
             return n
