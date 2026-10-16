@@ -1,0 +1,489 @@
+# GPU arrays: numbers kept in GPU memory and computed on by GPU programs.
+#
+#   g = gpu(xs)                       # upload (up to 4 dimensions)
+#   h = g .* 2.0 .+ sin.(g)           # one GPU program, made from the expression at compile time
+#   ys = cpu(h)                       # download: an array of the same shape
+#   total = sum(h)                    # reductions too
+#
+# Values are f32, or i32 for arrays made from integers (gpu(int_array)): integer arithmetic
+# keeps integer semantics (7 / 2 is 3), and mixing with floats gives floats. A dotted expression
+# whose arrays are GPU arrays runs on the GPU as one program (the functions applied with f.(g)
+# are translated like shader functions; numbers in the expression become its parameters).
+# Shapes broadcast as on the CPU. Native programs use Vulkan where they can: an array is a
+# buffer, the program a compute program (compiler/spirv.jo, spirv_kernel), with or without a
+# window. Otherwise they use OpenGL ES (without a window, through a windowless EGL context), and
+# web builds WebGL 2: an array is a float texture holding four values per texel, the program a
+# fragment program drawn over it. Where none of these can (no driver, SLOPPY_SOFTWARE=1, an old
+# browser, node) the same expressions run on the CPU, so programs work everywhere;
+# gpu_available() tells which.
+
+struct GpuArray[T]:
+    n: int
+    w: int
+    h: int
+    tex: int          # the texture holding the values (0: there is no GPU; they are in host)
+    host: T[]
+    token: u8[]       # shared by all copies of this value; see __gpu_alloc
+    shape: int[]
+
+# a GPU array as a GPU program's input (whatever its element type)
+struct __GpuIn:
+    tex: int
+    w: int
+    shape: int[]
+
+# a texture made for GPU arrays, in use or free
+struct __GpuTex:
+    tex: int
+    w: int
+    h: int
+    int_: bool
+    token: u8[]
+
+__gpu_state = 0       # 0: not tried yet, 1: available, 2: not available
+__gpu_fbo = 0
+__gpu_vao = 0
+__gpu_maxw = 4096     # the widest (and tallest) texture the GPU takes
+__gpu_progs: {str: int} = {}
+__gpu_locs: {int: int[]} = {}
+__gpu_live: __GpuTex[]
+
+const __GL_RGBA32F = 0x8814
+const __GL_RGBA32I = 0x8D82
+const __GL_RGBA_INTEGER = 0x8D99
+const __GL_INT = 0x1404
+
+__GPU_VS = "#version 300 es
+void main() \{
+    vec2 v = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    gl_Position = vec4(v * 2.0 - 1.0, 0.0, 1.0);
+}
+"
+
+when TARGET == "wasm":
+    # (lib/web/gfx.js) a WebGL 2 context on the page's canvas; 1 if it renders to float textures
+    extern __web_gpu_init = () -> i32
+
+__gpu_vk = false      # through Vulkan: arrays are buffers, programs compute shaders
+__gvk: __VkBuffer[]   # (when __gpu_vk) by GpuArray.tex
+__gvk_free: int[]
+__gvk_pipelines: {str: int} = {}
+
+# a GPU that GPU arrays can use: Vulkan's (the window's, or one with no window), or else a GL
+# context that can render to float textures
+__gpu_context = () -> bool:
+    when TARGET == "wasm": return __web_gpu_init() != 0
+    else:
+        if (env("SLOPPY_SOFTWARE") ?? "") == "1" or (env("SLOPPY_NO_GPU") ?? "") == "1": return false
+        if __vk or (not __win_open and __vk_wanted() and len(__vk_open("", () -> int: 0)) == 0):
+            __gpu_vk = true
+            return true
+        when TARGET == "windows":
+            # (on Windows only with a window's context)
+            return __win_open and not __soft
+        else when TARGET == "macos":
+            # (no GPU on macOS yet: computed on the CPU)
+            return false
+        else:
+            if __win_open: return not __soft
+            len(__egl_open_surfaceless()) == 0
+
+gpu_available = () -> bool:
+    if __gpu_state == 0:
+        __gpu_state = 2
+        if __gpu_context():
+            when TARGET != "wasm":
+                if __gpu_vk:
+                    __gpu_state = 1
+                    return true
+            __gpu_fbo = gl_create_framebuffer()
+            __gpu_vao = gl_create_vertex_array()
+            __gpu_maxw = clamp(gl_max_texture_size(), 1024, 16384)
+            # rendering to float textures needs EXT_color_buffer_float
+            probe = __gpu_new_texture(1, 1, false)
+            glBindFramebuffer(GL_FRAMEBUFFER, u32(__gpu_fbo))
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(probe), 0)
+            if glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE: __gpu_state = 1
+            gl_delete_texture(probe)
+            __gpu_restore()
+    __gpu_state == 1
+
+# ---------------- moving data ----------------
+gpu = (xs: f32[]) -> GpuArray[f32]: __gpu_upload(xs, [xs.len()])
+gpu = (xs: f64[]) -> GpuArray[f32]: gpu(f32.(xs))
+gpu = (xs: i32[]) -> GpuArray[i32]: __gpu_upload(xs, [xs.len()])
+gpu = (xs: int[]) -> GpuArray[i32]: gpu(i32.(xs))
+gpu = (xs: bool[]) -> GpuArray[f32]: gpu(__to_f32.(xs))
+gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload(m.data, m.shape)
+gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload(f32.(m.data), m.shape)
+gpu = (m: i32[,]) -> GpuArray[i32]: __gpu_upload(m.data, m.shape)
+gpu = (m: int[,]) -> GpuArray[i32]: __gpu_upload(i32.(m.data), m.shape)
+
+__gpu_upload[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
+    if shape.len() > 4: panic("GPU arrays have at most 4 dimensions (this one has shape {__shape_str(shape)})")
+    if not gpu_available(): return GpuArray(n = xs.len(), host = xs, token = fill(u8(0), 1), shape = shape)
+    g = __gpu_alloc(xs, shape)
+    when TARGET != "wasm":
+        if __gpu_vk:
+            if xs.len() > 0: __vg_copy_to_buffer(__gvk[g.tex].buffer, 0, data(xs) as *u8, xs.len() * 4)
+            return g
+    # (four values to a texel: the data as it is, padded to whole rows)
+    buf = xs
+    buf.resize(g.w * g.h * 4)
+    glBindTexture(GL_TEXTURE_2D, u32(g.tex))
+    if __gpu_is_int(xs): gl_tex_sub_image(0, 0, g.w, g.h, __GL_RGBA_INTEGER, __GL_INT, data(buf) as *u8, buf.len() * 4)
+    else: gl_tex_sub_image(0, 0, g.w, g.h, GL_RGBA, GL_FLOAT, data(buf) as *u8, buf.len() * 4)
+    g
+
+__gpu_is_int = (xs: f32[]) -> bool: false
+__gpu_is_int = (xs: i32[]) -> bool: true
+
+# the values (an array of the GPU array's shape)
+cpu[T] = (g: GpuArray[T]) -> T[,]: NDArray(__gpu_values(g), g.shape)
+
+__gpu_values[T] = (g: GpuArray[T]) -> T[]:
+    if g.tex == 0: return g.host
+    out = g.host
+    when TARGET != "wasm":
+        if __gpu_vk:
+            out.resize(g.n)
+            if g.n > 0: __vk_read_buffer(__gvk[g.tex].buffer, g.n * 4, data(out) as *u8)
+            return out
+    out.resize(g.w * g.h * 4)
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(__gpu_fbo))
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(g.tex), 0)
+    if __gpu_is_int(out): gl_read_pixels_i32(0, 0, g.w, g.h, data(out) as *u8)
+    else: gl_read_pixels_f32(0, 0, g.w, g.h, data(out) as *u8)
+    __gpu_restore()
+    out.truncate(g.n)
+    out
+
+len[T] = (g: GpuArray[T]) -> int: g.shape[0]
+__gpu_in[T] = (g: GpuArray[T]) -> __GpuIn: __GpuIn(g.tex, g.w, g.shape)
+
+# ---------------- reductions ----------------
+# Floats are reduced on the GPU (64 values at a time, until few are left), then added up in f64;
+# integers are added up exactly, in 64 bits, on the CPU (their min and max are found on the GPU
+# with Vulkan).
+sum = (g: GpuArray[f32]) -> f64:
+    s = 0.0
+    loop x in __gpu_reduced(g, 0): s += f64(x)
+    s
+sum = (g: GpuArray[i32]) -> int:
+    s = 0
+    loop x in __gpu_values(g): s += int(x)
+    s
+mean = (g: GpuArray[f32]) -> f64: sum(g) / f64(max(g.n, 1))
+mean = (g: GpuArray[i32]) -> f64: f64(sum(g)) / f64(max(g.n, 1))
+min = (g: GpuArray[f32]) -> f32: min(__gpu_reduced(g, 1))
+max = (g: GpuArray[f32]) -> f32: max(__gpu_reduced(g, 2))
+min = (g: GpuArray[i32]) -> i32: min(__gpu_reduced_i(g, 1))
+max = (g: GpuArray[i32]) -> i32: max(__gpu_reduced_i(g, 2))
+
+__GPU_REDUCE = "#version 300 es
+precision highp float;
+precision highp int;
+uniform highp sampler2D t;
+uniform int w;
+uniform int n;
+uniform int ow;
+uniform int op;
+out vec4 o_;
+void main() \{
+    int base = (int(gl_FragCoord.y) * ow + int(gl_FragCoord.x)) * 4;
+    vec4 r = vec4(0.0);
+    for (int c = 0; c < 4; c++) \{
+        int j = (base + c) * 64;
+        float acc = op == 0 ? 0.0 : (op == 1 ? 3.4e38 : -3.4e38);
+        for (int k = 0; k < 16; k++) \{
+            int ti = j / 4 + k;
+            vec4 v = texelFetch(t, ivec2(ti % w, ti / w), 0);
+            for (int q = 0; q < 4; q++) \{
+                if (j + k * 4 + q < n) acc = op == 0 ? acc + v[q] : (op == 1 ? min(acc, v[q]) : max(acc, v[q]));
+            }
+        }
+        r[c] = acc;
+    }
+    o_ = r;
+}
+"
+
+# the values of g reduced by op (0 sum, 1 min, 2 max) to a few (at most 256), for the CPU to finish
+__gpu_reduced = (g: GpuArray[f32], op: int) -> f32[]:
+    if g.tex == 0 or g.n <= 256: return __gpu_values(g)
+    when TARGET != "wasm":
+        if __gpu_vk:
+            # (a compute function, 64 values to an invocation, over a view of the array's buffer)
+            k = compute(__gvk_reduce)
+            src = GpuBuffer[f32](__gvk[g.tex].addr, g.n, 0, null, fill(u8(0), 1))
+            loop src.n > 256:
+                dst: GpuBuffer[f32] = gpu_buffer((src.n + 63) / 64)
+                dispatch(k, dst.n, __GvkRed(src, dst, op))
+                src = dst
+            return cpu(src)
+    cur = g
+    loop cur.n > 256:
+        m = (cur.n + 63) / 64
+        nxt = __gpu_alloc(cur.host, [m])
+        prog = __gpu_program(__GPU_REDUCE)
+        locs = __gpu_locs[prog]
+        __gpu_target(nxt.tex, nxt.w, nxt.h, prog)
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, u32(cur.tex))
+        glUniform1i(i32(locs[0]), 0)
+        glUniform1i(i32(locs[1]), i32(cur.w))
+        glUniform1i(i32(locs[2]), i32(cur.n))
+        glUniform1i(i32(locs[3]), i32(nxt.w))
+        glUniform1i(i32(locs[4]), i32(op))
+        __gpu_draw()
+        cur = nxt
+    __gpu_values(cur)
+
+# the same for integers (min and max; their sums are made exactly on the CPU): on the GPU with
+# Vulkan, else all of the values
+__gpu_reduced_i = (g: GpuArray[i32], op: int) -> i32[]:
+    when TARGET != "wasm":
+        if g.tex != 0 and g.n > 256 and __gpu_vk:
+            k = compute(__gvk_reduce_i)
+            src = GpuBuffer[i32](__gvk[g.tex].addr, g.n, 0, null, fill(u8(0), 1))
+            loop src.n > 256:
+                dst: GpuBuffer[i32] = gpu_buffer((src.n + 63) / 64)
+                dispatch(k, dst.n, __GvkRedI(src, dst, op))
+                src = dst
+            return cpu(src)
+    __gpu_values(g)
+
+struct __GvkRedI:
+    src: GpuBuffer[i32]
+    dst: GpuBuffer[i32]
+    op: int
+__gvk_reduce_i = (id: int, u: __GvkRedI):
+    acc = i32(0x7FFFFFFF)
+    if u.op == 2: acc = i32(-0x80000000)
+    n = len(u.src)
+    loop k in [0..64):
+        i = id * 64 + k
+        if i < n:
+            if u.op == 1: acc = min(acc, u.src[i])
+            else: acc = max(acc, u.src[i])
+    u.dst[id] = acc
+
+# (Vulkan) a step of a reduction: element id of dst combines 64 values of src
+struct __GvkRed:
+    src: GpuBuffer[f32]
+    dst: GpuBuffer[f32]
+    op: int
+__gvk_reduce = (id: int, u: __GvkRed):
+    acc = f32(0)
+    if u.op == 1: acc = f32(3.4e38)
+    if u.op == 2: acc = f32(-3.4e38)
+    n = len(u.src)
+    loop k in [0..64):
+        i = id * 64 + k
+        if i < n:
+            x = u.src[i]
+            if u.op == 0: acc += x
+            else if u.op == 1: acc = min(acc, x)
+            else: acc = max(acc, x)
+    u.dst[id] = acc
+
+# ---------------- the CPU's result as a GPU array (no GPU: see check_dotted) ----------------
+__gpu_from = (m: f32[,]) -> GpuArray[f32]: gpu(m)
+__gpu_from = (m: f64[,]) -> GpuArray[f32]: gpu(m)
+__gpu_from = (m: bool[,]) -> GpuArray[f32]: gpu(ndarray(__to_f32.(m.data), m.shape))
+__gpu_from = (m: i32[,]) -> GpuArray[i32]: gpu(m)
+__gpu_from = (m: int[,]) -> GpuArray[i32]: gpu(m)
+__to_f32 = (x: bool) -> f32:
+    if x: return 1.0
+    0.0
+
+__fmt[T] = (buf: mut u8[], g: GpuArray[T]):
+    __buf_append_str(buf, "gpu")
+    __fmt(buf, cpu(g))
+
+# ---------------- textures ----------------
+__gpu_new_texture = (w: int, h: int, int_: bool) -> int:
+    when TARGET != "wasm":
+        if __gpu_vk:
+            b = __vk_buffer(max(w * h, 1) * 4, u32(0x1 | 0x2 | 0x20 | 0x20000), u32(VK_MEM_DEVICE_LOCAL), 0)
+            if __gvk.len() == 0: __gvk.push(__VkBuffer())
+            if __gvk_free.len() > 0:
+                k = __gvk_free.pop()
+                __gvk[k] = b
+                return k
+            __gvk.push(b)
+            return __gvk.len() - 1
+    t = gl_create_texture()
+    glBindTexture(GL_TEXTURE_2D, u32(t))
+    if int_: gl_tex_image(w, h, __GL_RGBA32I, __GL_RGBA_INTEGER, __GL_INT, null, 0)
+    else: gl_tex_image(w, h, __GL_RGBA32F, GL_RGBA, GL_FLOAT, null, 0)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(GL_NEAREST))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(GL_NEAREST))
+    t
+
+# no copy of the array whose token this is exists any more: only __gpu_live refers to it
+__gpu_unused = (token: u8[]) -> bool: (token as *int)[0] == 1
+
+# a texture for an array of shape `shape` (like xs: f32 or i32 values): one no array uses any
+# more if there is one of the right size (others no array uses are deleted), else a new one
+__gpu_alloc[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
+    n = __nd_size(shape)
+    texels = max((n + 3) / 4, 1)
+    w = min(texels, __gpu_maxw)
+    h = (texels + w - 1) / w
+    if __gpu_vk:
+        # (a buffer of the values themselves)
+        w = max(n, 1)
+        h = 1
+    if h > __gpu_maxw: panic("a GPU array of {n} values does not fit in a texture (at most {__gpu_maxw * __gpu_maxw * 4} here)")
+    int_ = __gpu_is_int(xs)
+    token = fill(u8(0), 1)
+    tex = 0
+    keep: __GpuTex[]
+    loop t in __gpu_live:
+        if __gpu_unused(t.token):
+            if tex == 0 and t.w == w and t.h == h and t.int_ == int_:
+                tex = t.tex
+                continue
+            __gpu_free(t.tex)
+            continue
+        keep.push(t)
+    __gpu_live = keep
+    if tex == 0: tex = __gpu_new_texture(w, h, int_)
+    __gpu_live.push(__GpuTex(tex, w, h, int_, token))
+    GpuArray(n, w, h, tex, [] as T[], token, shape)
+
+__gpu_free = (tex: int):
+    when TARGET != "wasm":
+        if __gpu_vk:
+            __vk_defer_buffer(__gvk[tex])
+            __gvk[tex] = __VkBuffer()
+            __gvk_free.push(tex)
+            return
+    gl_delete_texture(tex)
+
+__gpu_restore = ():
+    if __win_open and __g_init:
+        __bind_current()
+        glEnable(GL_BLEND)
+    else: glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+# ---------------- running programs ----------------
+# a fragment program (compiled once), with the locations of its uniforms: those of src named in
+# its `uniform` lines, in order
+__gpu_program = (src: str) -> int:
+    prog = __gpu_progs.get(src) ?? 0
+    if prog != 0: return prog
+    # (the compiler's program is GLSL, then past a 0 byte SPIR-V: see __gpu_run_vk)
+    glsl = src
+    z = find_byte(src, 0)
+    if z >= 0: glsl = src[..z)
+    prog = gl_create_program(__GPU_VS, glsl)
+    __gpu_progs[src] = prog
+    locs: int[]
+    loop line in lines(src):
+        if starts_with(line, "uniform "):
+            ws = words(line)
+            nm = ws[ws.len() - 1]
+            locs.push(gl_uniform_location(prog, nm[..len(nm) - 1)))
+    __gpu_locs[prog] = locs
+    prog
+
+__gpu_target = (tex: int, w: int, h: int, prog: int):
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(__gpu_fbo))
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(tex), 0)
+    glViewport(0, 0, i32(w), i32(h))
+    glDisable(GL_BLEND)
+    glDisable(GL_DEPTH_TEST)
+    glUseProgram(u32(prog))
+
+__gpu_draw = ():
+    glBindVertexArray(u32(__gpu_vao))
+    glDrawArrays(GL_TRIANGLES, 0, 3)
+    glBindVertexArray(0)
+    glActiveTexture(GL_TEXTURE0)
+    __gpu_restore()
+
+# run a fragment program made by the compiler from a dotted expression (see glsl_kernel), with
+# f32 results (or i32: __gpu_run_i). Uniforms: od the result's shape, ow its texture's width;
+# for each input k: t<k> its texture, st<k> its steps per dimension (0 where it stretches), w<k>
+# its texture's width; then the numbers s<k> (f32 ones first, then i32 ones). Shapes have up to
+# 4 dimensions, padded in front with 1s.
+__gpu_run_f = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[f32]:
+    out = __gpu_alloc([] as f32[], __gpu_out_shape(ins))
+    __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
+    out
+__gpu_run_i = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[i32]:
+    out = __gpu_alloc([] as i32[], __gpu_out_shape(ins))
+    __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
+    out
+
+__gpu_out_shape = (ins: __GpuIn[]) -> int[]:
+    shapes: int[][]
+    loop g in ins: shapes.push(g.shape)
+    __bcast_shape(shapes)
+
+__gpu_run = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], tex: int, w: int, h: int, shp: int[]):
+    when TARGET != "wasm":
+        if __gpu_vk:
+            __gpu_run_vk(src, ins, fs, ints, tex, shp)
+            return
+    prog = __gpu_program(src)
+    locs = __gpu_locs[prog]
+    __gpu_target(tex, w, h, prog)
+    od = __pad4(shp, 1)
+    gl_uniform4i(locs[0], od[0], od[1], od[2], od[3])
+    glUniform1i(i32(locs[1]), i32(w))
+    loop i in 0.. and g in ins:
+        glActiveTexture(GL_TEXTURE0 + u32(i))
+        glBindTexture(GL_TEXTURE_2D, u32(g.tex))
+        glUniform1i(i32(locs[2 + 3 * i]), i32(i))
+        st = __pad4(__bcast_strides(g.shape, shp), 0)
+        gl_uniform4i(locs[3 + 3 * i], st[0], st[1], st[2], st[3])
+        glUniform1i(i32(locs[4 + 3 * i]), i32(g.w))
+    k = 2 + 3 * ins.len()
+    loop s in fs:
+        glUniform1f(i32(locs[k]), s)
+        k += 1
+    loop s in ints:
+        glUniform1i(i32(locs[k]), s)
+        k += 1
+    __gpu_draw()
+
+# a shape (or strides) as 4 numbers, padded in front
+__pad4 = (xs: int[], pad: int) -> int[]:
+    if xs.len() > 4: panic("GPU arrays have at most 4 dimensions")
+    out = fill(pad, 4 - xs.len())
+    out.extend(xs)
+    out
+
+when TARGET != "wasm":
+    # the compute program (compiler/spirv.jo, spirv_kernel) over the result's elements; its
+    # parameters as 32-bit words: the result's address, shape and size, each input's address and
+    # steps, then the numbers
+    __gpu_run_vk = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], tex: int, shp: int[]):
+        pl = __gvk_pipelines.get(src) ?? 0
+        if pl == 0:
+            z = find_byte(src, 0)
+            pl = __vk_compute_pipeline(src[z + 1..len(src)))
+            __gvk_pipelines[src] = pl
+        n = __nd_size(shp)
+        if n == 0: return
+        w: u32[]
+        __gvk_put_addr(w, __gvk[tex].addr)
+        loop d in __pad4(shp, 1): w.push(u32(d))
+        w.push(u32(n))
+        w.push(0)
+        loop g in ins:
+            __gvk_put_addr(w, __gvk[g.tex].addr)
+            loop st in __pad4(__bcast_strides(g.shape, shp), 0): w.push(u32(st & 0xFFFFFFFF))
+        loop x in fs: w.push(f32(x) as u32)
+        loop x in ints: w.push(x as u32)
+        groups = (n + 63) / 64
+        gx = min(groups, 65535)
+        gy = (groups + gx - 1) / gx
+        __vk_dispatch(pl, data(w) as *u8, w.len() * 4, gx, gy)
+
+    __gvk_put_addr = (w: mut u32[], a: int):
+        w.push(u32(a & 0xFFFFFFFF))
+        w.push(u32((a >> 32) & 0xFFFFFFFF))

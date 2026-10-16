@@ -1,0 +1,22 @@
+# requires: sloppy
+# a struct argument that is part of a `mut` argument of the same call (or of a global the callee
+# changes) is the value it was: the callee writing the other does not change it
+struct H:
+    a = 0
+struct P:
+    hs: H[]
+f = (p: mut P, h: H):
+    p.hs[0] = H(99)
+    print("h.a is {h.a} (it was given 1)")
+p = P([H(1), H(2)])
+f(p, p.hs[0])
+g = (xs: mut int[], x: int):
+    xs[0] = 99
+    print("x is {x} (it was given 1)")
+ys = [1, 2]
+g(ys, ys[0])
+gl = P([H(1), H(2)])
+fg = (h: H):
+    gl.hs[0] = H(99)
+    print("h.a is {h.a} (it was given 1)")
+fg(gl.hs[0])

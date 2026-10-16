@@ -1,0 +1,875 @@
+# Shader translation: Sloppy functions -> GLSL ES 3.00 (WebGL2 / OpenGL ES 3).
+#
+#   fn vs(v: Vertex, u: Params) -> Varying     # Varying's first field is the clip position
+#   fn fs(i: Varying, u: Params) -> vec4
+#   sh := shader(vs, fs)
+#
+# Vertex fields become vertex attributes (in declaration order), Params fields become
+# uniforms, Varying fields (after the first) are interpolated between the stages. A GpuBuffer
+# among the uniforms is an integer texture (RGBA32I) holding its bytes (four words to a texel, 1024 texels to
+# a row; see lib/game/gpubuffer.jo) and its length; shaders read its elements from there.
+
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+
+gl_out: str[]
+gl_done_fns: {int: bool} = {}
+gl_done_structs: {int: bool} = {}
+gl_done: {str: bool} = {}   # helper declarations already made (by name)
+gl_decls: str[]          # struct and function definitions, in dependency order
+
+gl_stage = ""            # "vertex" or "fragment": the stage being translated
+
+gl_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+
+# true the first time a helper is asked for (its declarations are then made by the caller)
+gl_first = (name: str) -> bool:
+    if gl_done.get(name) != none: return false
+    gl_done[name] = true
+    true
+
+# GLSL ES has no arrays of arrays: an array that is an element of an array is kept in a struct
+# (SA_n { T v[k]; }), so `a[i]` there is a[i].v
+gl_wrapped = (t: int) -> bool: types[prune(t)].kind == .fixed and types[prune(int(types[prune(t)].elem))].kind == .fixed
+
+gl_elem_type = (t: int, pos: int) -> str:
+    if types[prune(t)].kind != .fixed: return gl_type(t, pos)
+    nm = "SA_{prune(t)}"
+    if gl_first(nm):
+        inner = gl_type(t, pos)
+        gl_decls.push("struct {nm} \{\n    {inner} v;\n};\n")
+    nm
+
+# a value of array type t (an element of an array of arrays) wrapped as gl_elem_type has it
+gl_wrap = (x: str, t: int, pos: int) -> str:
+    if types[prune(t)].kind != .fixed: return x
+    "{gl_elem_type(t, pos)}({x})"
+
+gl_type = (t0: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_: return "float"
+    if k == .int_: return "int"
+    if k == .bool_: return "bool"
+    if k == .vec:
+        if t == T_MAT4: return "mat4"
+        if types[t].sign: return "ivec{types[t].bits}"
+        return "vec{types[t].bits}"
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si): return "sampler2D"
+        if is_gpu_buffer(t):
+            gl_gbuf_decls()
+            return "S_GB"
+        gl_struct(t, pos)
+        return "S_{gl_name(structs[si].name)}_{si}"
+    if k == .void_: return "void"
+    if k == .fixed: return "{gl_elem_type(int(types[t].elem), pos)}[{fixed_len(t)}]"
+    gl_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    ""
+
+gl_struct = (t: int, pos: int):
+    si = int(types[t].st)
+    if gl_done_structs.get(si) != none: return
+    gl_done_structs[si] = true
+    check_struct_fields(si)
+    s = "struct S_{gl_name(structs[si].name)}_{si} \{\n"
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        s += "    {gl_type(int(fields[f].type), pos)} {name_of(int(fields[f].name))}_;\n"
+    gl_decls.push(s + "};\n")
+
+# a name GLSL accepts as part of an identifier: no "__" anywhere (reserved in GLSL ES), and none
+# at the ends (the generated names put "_" around it)
+gl_name = (s: str) -> str:
+    b: u8[]
+    loop c in sanitize(s):
+        if c == '_' and (b.len() == 0 or b[b.len() - 1] == '_'): continue
+        b.push(c)
+    if b.len() > 0 and b[b.len() - 1] == '_': b.pop()
+    if b.len() == 0: return "a"
+    str_from_bytes(b)
+
+gl_local = (l: int) -> str: "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+
+gl_float = (x: f64) -> str:
+    s = "{x}"
+    if find(s, ".") < 0 and find(s, "e") < 0 and find(s, "n") < 0: s += ".0"
+    s
+
+builtin_map: {str: str} = {
+    "sin": "sin", "cos": "cos", "tan": "tan", "asin": "asin", "acos": "acos", "atan": "atan", "atan2": "atan",
+    "exp": "exp", "log": "log", "pow": "pow", "sqrt": "sqrt", "abs": "abs", "floor": "floor", "ceil": "ceil",
+    "fract": "fract", "mod": "mod", "min": "min", "max": "max", "clamp": "clamp", "mix": "mix", "lerp": "mix",
+    "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
+    "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "inverse",
+    "sign": "sign", "sinf": "sin", "cosf": "cos", "sample": "texture", "sample_lod": "textureLod",
+    "exp2": "exp2", "log2": "log2", "fwidth": "fwidth",
+}
+
+gl_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
+
+# translate a function and everything it calls
+gl_function = (f: int):
+    if gl_done_fns.get(f) != none: return
+    gl_done_fns[f] = true
+    decl = int(fns[f].decl)
+    if decl == 0 or (nodes[decl].kind != .fn_ and nodes[decl].kind != .lambda): gl_err(0, "only named functions can be used in shaders")
+    if fns[f].caps.len() > 0: gl_err(nodes[decl].pos, "a function that captures variables cannot run on the GPU")
+    ret = gl_type(int(fns[f].ret), nodes[decl].pos)
+    sig = "{ret} {gl_fn_name(f)}("
+    loop i in 0.. and l in fns[f].params:
+        if i > 0: sig += ", "
+        if int(locals[l].flags) & LF_MUTPARAM != 0: sig += "inout "
+        sig += "{gl_type(int(locals[l].type), locals[l].pos)} {gl_local(l)}"
+    sig += ")"
+    saved = gl_out
+    gl_out = []
+    body = int(fns[f].body)
+    want = tkind(int(fns[f].ret)) != .void_
+    gl_block(body, 1, want)
+    lines_ = gl_out
+    gl_out = saved
+    gl_decls.push("{sig} \{\n{join(lines_, "")}}\n")
+
+ind = (n: int) -> str: repeat("    ", n)
+
+gl_block = (b: int, depth: int, ret_value: bool):
+    n = nkids(b)
+    loop i in [0..n):
+        s = kid(b, i)
+        if i == n - 1 and ret_value and nodes[b].aux != 0:
+            gl_out.push("{ind(depth)}return {gl_expr(int(nodes[s].a))};\n")
+            continue
+        gl_stmt(s, depth)
+
+gl_assign_op = (op: int) -> str:
+    match op as Tok:
+        assign: "="
+        pluseq: "+="
+        minuseq: "-="
+        stareq: "*="
+        slasheq: "/="
+        _: "="
+
+gl_compound_op = (op: Tok) -> Tok:
+    match op:
+        minuseq: .minus
+        stareq: .star
+        slasheq: .slash
+        percenteq: .percent
+        ampeq: .amp
+        pipeeq: .pipe
+        careteq: .caret
+        shleq: .shl
+        shreq: .shr
+        _: .plus
+
+# an assignment's target as GLSL, its indexes computed once beforehand (into temporaries
+# declared at pre) when they are more than a name or a number
+gl_temps = 0
+gl_target = (n: int, pre: str) -> str:
+    k = nodes[n].kind
+    if k == .index:
+        base = gl_target(int(nodes[n].a), pre)
+        ix = int(nodes[n].b)
+        v = ""
+        if gl_wrapped(ntype(int(nodes[n].a))): v = ".v"
+        if nodes[ix].kind == .int_lit: return "{base}[{gl_expr(ix)}]{v}"
+        # (a variable too: the right side may change it)
+        x = gl_expr(ix)
+        gl_temps += 1
+        t = gl_temps
+        gl_out.push("{pre}int sl_t{t} = {x};\n")
+        return "{base}[sl_t{t}]{v}"
+    if k == .field and nodes[n].aux == -4: return "{gl_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}"
+    if k == .field and nodes[n].aux >= 0: return "{gl_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}_"
+    gl_expr(n)
+
+gl_stmt = (s: int, depth: int):
+    k = nodes[s].kind
+    pre = ind(depth)
+    if k == .vardecl:
+        if nodes[s].nlist > 0: gl_err(nodes[s].pos, "tuple destructuring is not supported in shaders")
+        l = int(nodes[s].sym)
+        if is_gpu_buffer(int(locals[l].type)): gl_err(nodes[s].pos, "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")
+        t = gl_type(int(locals[l].type), nodes[s].pos)
+        if nodes[s].b != 0: gl_out.push("{pre}{t} {gl_local(l)} = {gl_expr(int(nodes[s].b))};\n")
+        else: gl_out.push("{pre}{t} {gl_local(l)} = {gl_zero(int(locals[l].type), nodes[s].pos)};\n")
+    else if k == .assign:
+        if nodes[s].aux != 0: gl_err(nodes[s].pos, "unsupported assignment in shader")
+        a = int(nodes[s].a)
+        op = int(nodes[s].op)
+        ta = prune(ntype(a))
+        bop = gl_compound_op(op as Tok)
+        # (integers through gl_arith: their + - * wrap through unsigned numbers)
+        native = (bop == .plus or bop == .minus or bop == .star or bop == .slash) and (types[ta].kind == .float_ or (is_vec(ta) and not types[ta].sign))
+        if op != int(Tok.assign) and not native:
+            # (x op= y as x = x op y, x's indexes computed once: the operators the CPU's way)
+            x = gl_target(a, pre)
+            gl_out.push("{pre}{x} = {gl_arith(bop, x, gl_expr(int(nodes[s].b)), ta, ta, ntype(int(nodes[s].b)))};\n")
+        else: gl_out.push("{pre}{gl_expr(a)} {gl_assign_op(op)} {gl_expr(int(nodes[s].b))};\n")
+    else if k == .exprstmt:
+        e = int(nodes[s].a)
+        if nodes[e].kind == .if_ or nodes[e].kind == .match_:
+            gl_stmt_if(e, depth)
+            return
+        gl_out.push("{pre}{gl_expr(e)};\n")
+    else if k == .if_: gl_stmt_if(s, depth)
+    else if k == .return_:
+        if nodes[s].a != 0: gl_out.push("{pre}return {gl_expr(int(nodes[s].a))};\n")
+        else: gl_out.push("{pre}return;\n")
+    else if k == .while_:
+        gl_out.push("{pre}while ({gl_expr(int(nodes[s].a))}) \{\n")
+        gl_block(int(nodes[s].b), depth + 1, false)
+        gl_out.push("{pre}}\n")
+    else if k == .for_ and (nodes[s].aux == 1 or nodes[s].aux == 2) and tkind(ntype(int(nodes[s].a))) == .fixed:
+        # loop [mut] x in xs (a fixed-size array): an index loop; without `mut`, over a copy
+        ct = prune(ntype(int(nodes[s].a)))
+        iv = gl_local(int(nodes[s].c))
+        el = int(nodes[s].sym)
+        arr = ""
+        if nodes[s].aux == 1:
+            arr = gl_local(int(nodes[s].d))
+            gl_out.push("{pre}{gl_type(ct, nodes[s].pos)} {arr} = {gl_expr(int(nodes[s].a))};\n")
+        gl_out.push("{pre}for (int {iv} = 0; {iv} < {fixed_len(ct)}; {iv}++) \{\n")
+        v = ""
+        if gl_wrapped(ct): v = ".v"
+        if nodes[s].aux == 1: gl_out.push("{pre}    {gl_type(int(types[ct].elem), nodes[s].pos)} {gl_local(el)} = {arr}[{iv}]{v};\n")
+        gl_block(int(nodes[s].b), depth + 1, false)
+        gl_out.push("{pre}}\n")
+    else if k == .for_:
+        if nodes[s].aux != 0: gl_err(nodes[s].pos, "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")
+        l = int(nodes[s].sym)
+        it = int(nodes[s].a)
+        v = gl_local(l)
+        cmp = "<"
+        if has_flag(it, NF_INCLUSIVE): cmp = "<="
+        gl_out.push("{pre}for (int {v} = {gl_expr(int(nodes[it].a))}; {v} {cmp} {gl_expr(int(nodes[it].b))}; {v}++) \{\n")
+        gl_block(int(nodes[s].b), depth + 1, false)
+        gl_out.push("{pre}}\n")
+    else if k == .break_: gl_out.push("{pre}break;\n")
+    else if k == .continue_: gl_out.push("{pre}continue;\n")
+    else if k == .block:
+        loop i in [0..nkids(s)): gl_stmt(kid(s, i), depth)
+    else if k == .const_: pass
+    else: gl_err(nodes[s].pos, "unsupported statement in shader")
+
+gl_stmt_if = (e: int, depth: int):
+    if nodes[e].kind != .if_: gl_err(nodes[e].pos, "match is not supported in shaders")
+    pre = ind(depth)
+    gl_out.push("{pre}if ({gl_expr(int(nodes[e].a))}) \{\n")
+    gl_block(int(nodes[e].b), depth + 1, false)
+    if nodes[e].c != 0:
+        gl_out.push("{pre}} else \{\n")
+        gl_block(int(nodes[e].c), depth + 1, false)
+    gl_out.push("{pre}}\n")
+
+gl_zero = (t0: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_: return "0.0"
+    if k == .int_: return "0"
+    if k == .bool_: return "false"
+    if k == .vec:
+        if t == T_MAT4: return "mat4(0.0)"
+        return "{gl_type(t, pos)}(0)"
+    if k == .struct_:
+        si = int(types[t].st)
+        parts: str[]
+        loop i in [0..int(structs[si].nfields)): parts.push(gl_zero(int(fields[int(structs[si].fields) + i].type), pos))
+        return "{gl_type(t, pos)}({join(parts, ", ")})"
+    if k == .fixed:
+        z = gl_wrap(gl_zero(int(types[t].elem), pos), int(types[t].elem), pos)
+        parts: str[]
+        loop i in [0..fixed_len(t)): parts.push(z)
+        return "{gl_type(t, pos)}({join(parts, ", ")})"
+    gl_err(pos, "cannot zero-initialize {type_str(t)} in a shader")
+    ""
+
+gl_binop = (op: Tok) -> str:
+    match op:
+        plus: "+"
+        minus: "-"
+        star: "*"
+        slash: "/"
+        percent: "%"
+        eq: "=="
+        ne: "!="
+        lt: "<"
+        le: "<="
+        gt: ">"
+        ge: ">="
+        amp: "&"
+        pipe: "|"
+        caret: "^"
+        shl: "<<"
+        shr: ">>"
+        _: "?"
+
+gl_expr = (e: int) -> str:
+    k = nodes[e].kind
+    t = prune(ntype(e))
+    if k == .int_lit:
+        if types[t].kind == .float_: return gl_float(f64(nodes[e].ival))
+        if nodes[e].ival < -2147483648 or nodes[e].ival > 4294967295: gl_err(nodes[e].pos, "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")
+        return "{nodes[e].ival}"
+    if k == .float_lit: return gl_float(nodes[e].fval)
+    if k == .bool_lit:
+        if nodes[e].ival != 0: return "true"
+        return "false"
+    if k == .ident:
+        if nodes[e].aux != i32(int(SK.local)): gl_err(nodes[e].pos, "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return gl_expr(int(locals[l].alias))
+        return gl_local(l)
+    if k == .field:
+        a = int(nodes[e].a)
+        if nodes[e].aux == -4: return "{gl_expr(a)}.{name_of(int(nodes[e].name))}"
+        if nodes[e].aux < 0: gl_err(nodes[e].pos, "unsupported field access in shader")
+        return "{gl_expr(a)}.{name_of(int(nodes[e].name))}_"
+    if k == .index:
+        bt = prune(ntype(int(nodes[e].a)))
+        if types[bt].kind != .vec and types[bt].kind != .fixed: gl_err(nodes[e].pos, "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")
+        if gl_wrapped(bt): return "{gl_expr(int(nodes[e].a))}[{gl_expr(int(nodes[e].b))}].v"
+        return "{gl_expr(int(nodes[e].a))}[{gl_expr(int(nodes[e].b))}]"
+    if k == .binary:
+        a = int(nodes[e].a)
+        b = int(nodes[e].b)
+        op = nodes[e].op as Tok
+        # (% keeps the dividend's sign, as on the CPU: GLSL's mod() takes the divisor's, and its %
+        # is undefined for negative numbers)
+        if op == .percent and (is_float(ntype(a)) or is_vec(ntype(a))):
+            x = gl_expr(a)
+            y = gl_expr(b)
+            return "({x} - {y} * trunc({x} / {y}))"
+        return gl_arith(op, gl_expr(a), gl_expr(b), ntype(a), t, ntype(b))
+    if k == .unary:
+        # (a space: `- -1.5`, not the decrement `--1.5`)
+        if nodes[e].op == i32(int(Tok.minus)):
+            # (integers through unsigned ones, which wrap: see gl_arith)
+            if types[t].kind == .int_: return gl_narrow("int(-uint({gl_expr(int(nodes[e].a))}))", t)
+            if is_vec(t) and types[t].sign: return "ivec{types[t].bits}(-uvec{types[t].bits}({gl_expr(int(nodes[e].a))}))"
+            return gl_narrow("(- {gl_expr(int(nodes[e].a))})", t)
+        return gl_narrow("(~{gl_expr(int(nodes[e].a))})", t)
+    if k == .not_: return "(!{gl_expr(int(nodes[e].a))})"
+    if k == .and_: return "({gl_expr(int(nodes[e].a))} && {gl_expr(int(nodes[e].b))})"
+    if k == .or_: return "({gl_expr(int(nodes[e].a))} || {gl_expr(int(nodes[e].b))})"
+    if k == .conv:
+        cv = nodes[e].aux as CV
+        a = gl_expr(int(nodes[e].a))
+        from_ = prune(ntype(int(nodes[e].a)))
+        if cv == .int2float:
+            if gl_unsigned(from_): return "float(uint({a}))"
+            return "float({a})"
+        if cv == .float2int:
+            if types[t].kind != .int_: return "int({a})"
+            return gl_float_to_int(a, t)
+        if cv == .int_ and types[t].kind == .int_:
+            if types[from_].kind == .bool_: return "int({a})"
+            return gl_narrow(a, t)
+        if cv == .float_ or cv == .none_: return a
+        gl_err(nodes[e].pos, "unsupported conversion in shader")
+    if k == .if_:
+        b = int(nodes[e].b)
+        c = int(nodes[e].c)
+        if nkids(b) != 1 or nkids(c) != 1 or nodes[b].aux == 0 or nodes[c].aux == 0: gl_err(nodes[e].pos, "if expressions in shaders must be single expressions: `if c: a else: b`")
+        return "({gl_expr(int(nodes[e].a))} ? {gl_expr(block_value(b))} : {gl_expr(block_value(c))})"
+    if k == .intrinsic:
+        id = nodes[e].aux as IN
+        if id == .vec_ctor:
+            parts: str[]
+            loop i in [0..nkids(e)):
+                a = kid(e, i)
+                at = prune(ntype(a))
+                if is_vec(at) and at != T_MAT4 and t != T_MAT4 and types[at].sign != types[t].sign:
+                    # (a vector of the other kind: each component converted as a scalar is)
+                    m = int(types[at].bits)
+                    if types[t].sign: parts.push("sl_f2iv{m}({gl_expr(a)})")
+                    else: parts.push("vec{m}({gl_expr(a)})")
+                    if types[t].sign and gl_first("f2iv{m}"):
+                        gl_float_to_int("0.0", T_I32)
+                        sw = ["x", "y", "z", "w"]
+                        cs: str[]
+                        loop j in [0..m): cs.push(gl_float_to_int("v.{sw[j]}", T_I32))
+                        gl_decls.push("ivec{m} sl_f2iv{m}(vec{m} v) \{\n    return ivec{m}({join(cs, ", ")});\n}\n")
+                else: parts.push(gl_expr(a))
+            if t == T_MAT4 and nkids(e) == 0: return "mat4(1.0)"
+            return "{gl_type(t, nodes[e].pos)}({join(parts, ", ")})"
+        if id == .sqrt: return "sqrt({gl_expr(kid(e, 0))})"
+        gl_err(nodes[e].pos, "this operation is not available in shaders")
+    if k == .call:
+        aux = int(nodes[e].aux)
+        if aux == 2:
+            si = int(types[t].st)
+            parts: str[]
+            loop i in [0..int(structs[si].nfields)):
+                a = kid(e, i)
+                if a == 0: parts.push(gl_zero(int(fields[int(structs[si].fields) + i].type), nodes[e].pos))
+                else: parts.push(gl_expr(a))
+            return "{gl_type(t, nodes[e].pos)}({join(parts, ", ")})"
+        if aux != 0: gl_err(nodes[e].pos, "function values cannot be called in shaders")
+        f = int(nodes[e].sym)
+        decl = int(fns[f].decl)
+        nm = name_of(int(nodes[decl].name))
+        args: str[]
+        loop i in [0..nkids(e)): args.push(gl_expr(kid(e, i)))
+        if modules[int(nodes[decl].mod)].is_prelude:
+            if let g = builtin_map.get(nm):
+                # (abs of the smallest integer is itself, as on the CPU: GLSL's is undefined)
+                if nm == "abs" and (types[t].kind == .int_ or (is_vec(t) and types[t].sign)):
+                    tn = gl_type(t, nodes[e].pos)
+                    un = "uint"
+                    if is_vec(t): un = "uvec{types[t].bits}"
+                    if gl_first("abs_{tn}"): gl_decls.push("{tn} sl_abs_{tn}({tn} x) \{\n    return {tn}({sl_abs_body(t, un)});\n}\n")
+                    return gl_narrow("sl_abs_{tn}({args[0]})", t)
+                # (unsigned numbers compared as such; abs(i8(-128)) is -128, as on the CPU)
+                if gl_unsigned(t) and (nm == "min" or nm == "max" or nm == "clamp"):
+                    us: str[]
+                    loop x in args: us.push("uint({x})")
+                    return "int({g}({join(us, ", ")}))"
+                return gl_narrow("{g}({join(args, ", ")})", t)
+            # (lib/game/gpu.jo: what these do on the CPU, for the software renderer)
+            if nm == "discard":
+                if gl_stage != "fragment": gl_err(nodes[e].pos, "discard() can only be used in the fragment shader")
+                return "discard"
+            if nm == "instance_id" or nm == "vertex_id":
+                if gl_stage != "vertex": gl_err(nodes[e].pos, "{nm}() can only be used in the vertex shader")
+                # (sl_ibase: the first instance of an indirect draw, as Vulkan counts them)
+                if nm == "instance_id": return "(gl_InstanceID + sl_ibase)"
+                return "gl_VertexID"
+            if starts_with(nm, "subgroup_"): gl_err(nodes[e].pos, "{nm}() can be used in compute functions only")
+            if nm == "texel": return "texelFetch({args[0]}, {args[1]}, 0)"
+            if nm == "texture_size": return "textureSize({args[0]}, 0)"
+            if nkids(e) > 0 and is_gpu_buffer(ntype(kid(e, 0))):
+                if nm == "len": return "{args[0]}.n_"
+                if nm == "[]": return "{gl_gbuf_reader(gpu_buffer_elem(ntype(kid(e, 0))), nodes[e].pos)}({args[0]}, {args[1]})"
+                if nm == "[]=" or starts_with(nm, "atomic_"): gl_err(nodes[e].pos, "GPU buffers are written by compute programs only")
+            # prelude helpers written in Sloppy (e.g. vector math) are translated like user code
+        gl_function(f)
+        return "{gl_fn_name(f)}({join(args, ", ")})"
+    if k == .array and types[t].kind == .fixed:
+        # [a, b, c], [] or fill(v, N): an array constructor
+        parts: str[]
+        et = int(types[t].elem)
+        if nodes[e].b != 0:
+            v = gl_wrap(gl_expr(kid(e, 0)), et, nodes[e].pos)
+            loop i in [0..fixed_len(t)): parts.push(v)
+        else if nkids(e) == 0: return gl_zero(t, nodes[e].pos)
+        else:
+            loop i in [0..nkids(e)): parts.push(gl_wrap(gl_expr(kid(e, i)), et, nodes[e].pos))
+        return "{gl_type(t, nodes[e].pos)}({join(parts, ", ")})"
+    if k == .array: gl_err(nodes[e].pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    gl_err(nodes[e].pos, "unsupported expression in shader")
+    ""
+
+# x op y for operands of type ta, giving type t: unsigned integers divide, take remainders,
+# shift and compare as unsigned numbers; narrow ones wrap to their range, as on the CPU
+# (Integer + - * go through unsigned numbers, whose overflow wraps by definition: NVIDIA's GLSL
+# compiler assumes signed results do not overflow, and then abs(a * a) - abs(a * a) / 1 need not
+# be 0. tb: the right operand's type, where it may be a scalar beside a vector.)
+gl_arith = (op: Tok, x: str, y: str, ta: int, t: int, tb: int = 0) -> str:
+    if op == .plus or op == .minus or op == .star:
+        if types[prune(ta)].kind == .int_ and types[prune(t)].kind == .int_: return gl_narrow("int(uint({x}) {gl_binop(op)} uint({y}))", t)
+        if is_vec(t) and types[prune(t)].sign:
+            n = int(types[prune(t)].bits)
+            ux = "uint({x})"
+            if is_vec(ta): ux = "uvec{n}({x})"
+            uy = "uint({y})"
+            if tb == 0 or is_vec(tb): uy = "uvec{n}({y})"
+            return "ivec{n}({ux} {gl_binop(op)} {uy})"
+
+    if types[prune(ta)].kind == .bool_:
+        # (both sides, as and= and or= compute them: not && and ||, which may skip the right)
+        if op == .amp: return "bool(int({x}) & int({y}))"
+        if op == .pipe: return "bool(int({x}) | int({y}))"
+        if op == .caret: return "({x} != {y})"
+    if (op == .shl or op == .shr) and types[prune(ta)].kind == .int_:
+        # (as on the CPU: by the count's low 6 bits, and by 32 or more nothing is left)
+        gl_shift_decls()
+        if op == .shl: return gl_narrow("sl_shl({x}, {y})", t)
+        if gl_unsigned(ta): return "sl_shru({x}, {y})"
+        return "sl_shr({x}, {y})"
+    # (% keeps the dividend's sign, as on the CPU: GLSL's mod() takes the divisor's, and its %
+    # is undefined for negative numbers)
+    if op == .percent and (is_float(ta) or is_vec(ta)): return "({x} - {y} * trunc({x} / {y}))"
+    if gl_unsigned(ta):
+        if op == .slash or op == .percent or op == .shr: return gl_narrow("int(uint({x}) {gl_binop(op)} uint({y}))", t)
+        if op == .lt or op == .le or op == .gt or op == .ge: return "(uint({x}) {gl_binop(op)} uint({y}))"
+    if (op == .slash or op == .percent) and (types[prune(ta)].kind == .int_ or (is_vec(ta) and types[prune(ta)].sign)):
+        # (the smallest integer / -1 wraps, as on the CPU; GLSL leaves it undefined)
+        d = gl_sdiv(prune(ta), tb)
+        if op == .slash: return gl_narrow("{d}({x}, {y})", t)
+        return gl_narrow("int(uint({x}) - uint({d}({x}, {y})) * uint({y}))", t)
+    if op == .plus or op == .minus or op == .star or op == .slash or op == .shl: return gl_narrow("({x} {gl_binop(op)} {y})", t)
+    "({x} {gl_binop(op)} {y})"
+
+# the name of a helper dividing signed integers (or integer vectors, by a vector or a number)
+# that by -1 divides by 1 and negates: the smallest integer / -1 is itself, as on the CPU
+gl_sdiv = (ta: int, tb: int) -> str:
+    if gl_first("sdiv"): gl_decls.push("int sl_sdiv(int a, int b) \{\n    int q = a / (b == -1 ? 1 : b);\n    return b == -1 ? int(-uint(a)) : q;\n}\n")
+    if types[ta].kind == .int_: return "sl_sdiv"
+    n = int(types[ta].bits)
+    sc = tb != 0 and not is_vec(tb)
+    nm = "sl_sdiv{n}"
+    bty = "ivec{n}"
+    if sc:
+        nm = "sl_sdiv{n}s"
+        bty = "int"
+    if gl_first(nm):
+        sw = ["x", "y", "z", "w"]
+        cs: str[]
+        loop j in [0..n):
+            if sc: cs.push("sl_sdiv(a.{sw[j]}, b)")
+            else: cs.push("sl_sdiv(a.{sw[j]}, b.{sw[j]})")
+        gl_decls.push("ivec{n} {nm}(ivec{n} a, {bty} b) \{\n    return ivec{n}({join(cs, ", ")});\n}\n")
+    nm
+
+# (the body of sl_abs: x below 0 negated through unsigned numbers, which wrap; by component)
+sl_abs_body = (t: int, un: str) -> str:
+    if not is_vec(t): return "x < 0 ? -uint(x) : uint(x)"
+    sw = ["x", "y", "z", "w"]
+    cs: str[]
+    loop j in [0..int(types[t].bits)): cs.push("x.{sw[j]} < 0 ? -uint(x.{sw[j]}) : uint(x.{sw[j]})")
+    "{un}({join(cs, ", ")})"
+
+gl_unsigned = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .int_ and not types[t].sign
+
+gl_shift_decls = ():
+    if not gl_first("shift"): return
+    gl_decls.push("int sl_shl(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : x << c;\n}\n")
+    gl_decls.push("int sl_shr(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? x >> 31 : x >> c;\n}\n")
+    gl_decls.push("int sl_shru(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : int(uint(x) >> uint(c));\n}\n")
+
+# x (32 bits) wrapped to the range of a narrower integer type t
+gl_narrow = (x: str, t0: int) -> str:
+    t = prune(t0)
+    if types[t].kind != .int_: return x
+    bits = int(types[t].bits)
+    if bits >= 32: return x
+    if not types[t].sign: return "({x} & {(1 << bits) - 1})"
+    "(({x} << {32 - bits}) >> {32 - bits})"
+
+# float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
+# most), NaN to 0
+gl_float_to_int = (x: str, t0: int) -> str:
+    t = prune(t0)
+    bits = int(types[t].bits)
+    if bits > 32: bits = 32
+    sg = types[t].sign
+    lo = 0
+    hi = (1 << bits) - 1
+    if sg:
+        lo = -(1 << (bits - 1))
+        hi = (1 << (bits - 1)) - 1
+    if gl_first("f2i"):
+        # (2^31 - 1 and 2^32 - 1 are not floats: clamped to the largest float below, the top tested apart)
+        gl_decls.push("int sl_f2i(float x, float lo, float top, float hi1, int him) \{\n    if (isnan(x)) return 0;\n    if (x >= hi1) return him;\n    return int(clamp(x, lo, top));\n}\n")
+        gl_decls.push("int sl_f2u(float x, float top) \{\n    if (isnan(x)) return 0;\n    if (x >= 4294967296.0) return -1;\n    return int(uint(clamp(x, 0.0, top)));\n}\n")
+    if bits == 32 and not sg: return "sl_f2u({x}, 4294967040.0)"
+    top = f64(hi)
+    if bits == 32: top = 2147483520.0
+    "sl_f2i({x}, {gl_float(f64(lo))}, {gl_float(top)}, {gl_float(f64(hi) + 1.0)}, {hi})"
+
+# ---------------- GPU buffers ----------------
+gl_gbuf_decls = ():
+    if not gl_first("gbuf"): return
+    gl_decls.push("struct S_GB \{\n    highp isampler2D t_;\n    int n_;\n};\n")
+    gl_decls.push("uint gb_w(highp isampler2D t, int i) \{\n    return uint(texelFetch(t, ivec2((i >> 2) & 1023, i >> 12), 0)[i & 3]);\n}\n")
+    # (bits of the word holding byte a, from bit 8 * (a & 3); sign-extended if sgn)
+    gl_decls.push("int gb_sub(highp isampler2D t, int a, int bits, bool sgn) \{\n    uint w = gb_w(t, a >> 2) >> uint((a & 3) * 8);\n    int sh = 32 - bits;\n    if (sgn) return int(w << uint(sh)) >> sh;\n    return int((w << uint(sh)) >> uint(sh));\n}\n")
+    # (an f64 from its two words, rounded to an f32 as compiler/spirv.jo does)
+    gl_decls.push("float gb_f64(uint lo, uint hi) \{\n    uint e = (hi >> 20) & 0x7FFu;\n    uint m = ((hi & 0xFFFFFu) << 3) | (lo >> 29);\n    uint bits = (((e - 896u) << 23) | m) + ((lo >> 28) & 1u);\n    if (e >= 1151u || bits >= 0x7F800000u) bits = 0x7F800000u;\n    if (e <= 896u) bits = 0u;\n    if (e == 0x7FFu && (m | lo) != 0u) bits = 0x7FC00000u;\n    return uintBitsToFloat(bits | (hi & 0x80000000u));\n}\n")
+
+# the name of a function reading element i of a buffer of t (made once per type and stage); past
+# either end it reads the nearest element, as with Vulkan
+gl_gbuf_reader = (t: int, pos: int) -> str:
+    nm = "gbr_{prune(t)}"
+    if not gl_first(nm): return nm
+    layout(t)
+    ty = gl_type(t, pos)
+    gl_decls.push("{ty} {nm}(S_GB b, int i) \{\n    int o = clamp(i, 0, max(b.n_ - 1, 0)) * {tsize(t)};\n    return {gl_read(t, "o", 0, pos)};\n}\n")
+    nm
+
+# a value of type t at byte o + c of buffer b (laid out as the CPU lays it out)
+gl_read = (t0: int, o: str, c: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    a = "{o} + {c}"
+    w = "gb_w(b.t_, ({a}) >> 2)"
+    if k == .float_:
+        if int(types[t].bits) == 64: return "gb_f64({w}, gb_w(b.t_, ({o} + {c + 4}) >> 2))"
+        return "uintBitsToFloat({w})"
+    if k == .int_:
+        bits = int(types[t].bits)
+        if bits >= 32: return "int({w})"
+        sg = "false"
+        if types[t].sign: sg = "true"
+        return "gb_sub(b.t_, {a}, {bits}, {sg})"
+    if k == .bool_: return "(gb_sub(b.t_, {a}, 8, false) != 0)"
+    parts: str[]
+    if k == .vec:
+        if t == T_MAT4:
+            loop col in [0..4): parts.push(gl_read(T_VEC4, o, c + 16 * col, pos))
+        else:
+            loop i in [0..int(types[t].bits)):
+                wi = "gb_w(b.t_, ({o} + {c + 4 * i}) >> 2)"
+                if types[t].sign: parts.push("int({wi})")
+                else: parts.push("uintBitsToFloat({wi})")
+        return "{gl_type(t, pos)}({join(parts, ", ")})"
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t): gl_err(pos, "a {structs[si].name} cannot be read from a GPU buffer")
+        layout(t)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            parts.push(gl_read(int(fields[f].type), o, c + int(fields[f].offset), pos))
+        return "{gl_type(t, pos)}({join(parts, ", ")})"
+    if k == .fixed:
+        el = int(types[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)): parts.push(gl_wrap(gl_read(el, o, c + i * tsize(el), pos), el, pos))
+        return "{gl_type(t, pos)}({join(parts, ", ")})"
+    gl_err(pos, "type {type_str(t)} cannot be read from a GPU buffer")
+    ""
+
+# ---------------- stage wrappers ----------------
+gl_struct_fields = (t: int) -> (str, int)[]:
+    si = int(types[prune(t)].st)
+    check_struct_fields(si)
+    out: (str, int)[]
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        out.push((name_of(int(fields[f].name)), int(fields[f].type)))
+    out
+
+gl_attrib_comps = (t: int, pos: int) -> int:
+    tt = prune(t)
+    if types[tt].kind == .float_ and int(types[tt].bits) == 32: return 1
+    if types[tt].kind == .vec and tt != T_MAT4 and not types[tt].sign: return int(types[tt].bits)
+    gl_err(pos, "vertex attributes must be f32, vec2, vec3 or vec4 (found {type_str(tt)})")
+    0
+
+uniform_kind = (t0: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_:
+        if int(types[t].bits) == 32: return "f"
+        return "d"
+    if k == .int_: return "i"
+    if k == .bool_: return "b"
+    if k == .vec:
+        if t == T_MAT4: return "m"
+        if types[t].sign: return "I"
+        return "v{types[t].bits}"
+    if k == .struct_ and is_lib_texture(int(types[t].st)): return "t"
+    if is_gpu_buffer(t): return "B"
+    gl_err(pos, "uniform fields must be numbers, vectors, mat4 or Texture, or fixed-size arrays of them (found {type_str(t)})")
+    ""
+
+# the uniforms' layout entries for struct type t at byte offset base: ";name,kind,offset" (an
+# array: ",count,stride" more); a struct inside them by its fields, named "field_.inner"
+gl_udesc = (t: int, prefix: str, base: int, pos: int) -> str:
+    out = ""
+    si = int(types[prune(t)].st)
+    layout(t)
+    loop i in 0.. and f in gl_struct_fields(t):
+        fo = base + int(fields[int(structs[si].fields) + i].offset)
+        ft = prune(f.1)
+        if types[ft].kind == .fixed:
+            # an array: its element kind, then the count and the bytes per element
+            et = int(types[ft].elem)
+            if is_gpu_buffer(et): gl_err(pos, "uniforms cannot hold arrays of GPU buffers")
+            out += ";{prefix}{f.0},{uniform_kind(et, pos)},{fo},{fixed_len(ft)},{tsize(et)}"
+        else if types[ft].kind == .struct_ and not is_lib_texture(int(types[ft].st)) and not is_gpu_buffer(ft):
+            out += gl_udesc(ft, "{prefix}{f.0}_.", fo, pos)
+        else: out += ";{prefix}{f.0},{uniform_kind(f.1, pos)},{fo}"
+    out
+
+# returns (vertex source, fragment source, layout description)
+glsl_build = (vsf: int, fsf: int) -> (str, str, str):
+    gl_decls = []
+    gl_done_fns = {}
+    gl_done_structs = {}
+    gl_done = {}
+    vpos = nodes[int(fns[vsf].decl)].pos
+    vtype_ = int(fns[vsf].ptypes[0])
+    np = fns[vsf].ptypes.len()
+    itype = 0
+    if np == 3: itype = int(fns[vsf].ptypes[1])
+    utype = int(fns[vsf].ptypes[np - 1])
+    otype = int(fns[vsf].ret)
+    gl_stage = "vertex"
+    gl_function(vsf)
+    vdecls = gl_decls
+    gl_decls = []
+    gl_done_fns = {}
+    gl_done_structs = {}
+    gl_done = {}
+    gl_stage = "fragment"
+    gl_function(fsf)
+    fdecls = gl_decls
+    head = "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+    # uniforms
+    gl_struct_fields(utype)
+    layout(utype)
+    udesc = "U{tsize(utype)}"
+    ustruct = gl_type(utype, vpos)
+    udesc += gl_udesc(utype, "", 0, vpos)
+    # vertex attributes
+    vfields = gl_struct_fields(vtype_)
+    vsi = int(types[prune(vtype_)].st)
+    layout(vtype_)
+    adesc = "A{tsize(vtype_)}"
+    vs = head
+    loop i in 0.. and f in vfields:
+        c = gl_attrib_comps(f.1, vpos)
+        ty = "float"
+        if c > 1: ty = "vec{c}"
+        vs += "layout(location={i}) in {ty} a_{f.0};\n"
+        adesc += ";{f.0},{c},{int(fields[int(structs[vsi].fields) + i].offset)}"
+    idesc = ""
+    ifields: (str, int)[]
+    if itype != 0:
+        ifields = gl_struct_fields(itype)
+        isi = int(types[prune(itype)].st)
+        layout(itype)
+        idesc = "|I{tsize(itype)}"
+        loc = vfields.len()
+        loop i in 0.. and f in ifields:
+            off = int(fields[int(structs[isi].fields) + i].offset)
+            if prune(f.1) == T_MAT4:
+                vs += "layout(location={loc}) in mat4 i_{f.0};\n"
+                loop col in [0..4): idesc += ";{f.0},4,{off + 16 * col}"
+                loc += 4
+            else:
+                c = gl_attrib_comps(f.1, vpos)
+                ty = "float"
+                if c > 1: ty = "vec{c}"
+                vs += "layout(location={loc}) in {ty} i_{f.0};\n"
+                idesc += ";{f.0},{c},{off}"
+                loc += 1
+    ofields = gl_struct_fields(otype)
+    if ofields.len() == 0 or prune(ofields[0].1) != T_VEC4: gl_err(vpos, "the vertex shader must return a struct whose first field is the clip position (vec4)")
+    vs += "uniform {ustruct} u;\nuniform int sl_ibase;\n"
+    loop i in 0.. and f in ofields:
+        if i == 0: continue
+        q = ""
+        if types[prune(f.1)].kind == .int_ or (types[prune(f.1)].kind == .vec and types[prune(f.1)].sign): q = "flat "
+        vs += "{q}out {gl_type(f.1, vpos)} v_{f.0};\n"
+    vs += join(vdecls, "")
+    vin: str[]
+    loop f in vfields: vin.push("a_{f.0}")
+    vs += "void main() \{\n    {gl_type(vtype_, vpos)} vin = {gl_type(vtype_, vpos)}({join(vin, ", ")});\n"
+    if itype != 0:
+        iin: str[]
+        loop f in ifields: iin.push("i_{f.0}")
+        vs += "    {gl_type(itype, vpos)} iin = {gl_type(itype, vpos)}({join(iin, ", ")});\n"
+        vs += "    {gl_type(otype, vpos)} o = {gl_fn_name(vsf)}(vin, iin, u);\n    gl_Position = o.{ofields[0].0}_;\n"
+    else:
+        vs += "    {gl_type(otype, vpos)} o = {gl_fn_name(vsf)}(vin, u);\n    gl_Position = o.{ofields[0].0}_;\n"
+    loop i in 0.. and f in ofields:
+        if i > 0: vs += "    v_{f.0} = o.{f.0}_;\n"
+    vs += "}\n"
+    fs = head + "uniform {ustruct} u;\n"
+    loop i in 0.. and f in ofields:
+        if i == 0: continue
+        q = ""
+        if types[prune(f.1)].kind == .int_ or (types[prune(f.1)].kind == .vec and types[prune(f.1)].sign): q = "flat "
+        fs += "{q}in {gl_type(f.1, vpos)} v_{f.0};\n"
+    fs += "out vec4 frag_color;\n"
+    fs += join(fdecls, "")
+    fin: str[] = ["gl_FragCoord"]
+    loop i in 0.. and f in ofields:
+        if i > 0: fin.push("v_{f.0}")
+    fs += "void main() \{\n    {gl_type(otype, vpos)} i = {gl_type(otype, vpos)}({join(fin, ", ")});\n    frag_color = {gl_fn_name(fsf)}(i, u);\n}\n"
+    # the uniform struct definition must precede `uniform S u;` in both stages
+    vs = __hoist_struct(vs, ustruct)
+    fs = __hoist_struct(fs, ustruct)
+    (vs, fs, "{adesc}|{udesc}{idesc}")
+
+# the fragment program of a dotted expression on GPU arrays (see check_dotted): kernel f takes the
+# current element of each array (texture uniforms t0, t1...) and each number (uniforms s0, s1...),
+# in the order desc lists them ('t' or 's'); the result goes to the red channel. Each fragment is
+# one element of the result: its index in the result's shape (od, padded to 4 dimensions) picks
+# each array's element through that array's steps (st0, st1...; 0 where it is stretched).
+# (see __gpu_run in lib/game/gpuarray.jo)
+glsl_kernel = (f: int, desc: str) -> str:
+    gl_decls = []
+    gl_done_fns = {}
+    gl_done_structs = {}
+    gl_done = {}
+    gl_stage = "kernel"
+    gl_function(f)
+    pos = nodes[int(fns[f].decl)].pos
+    src = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform ivec4 od;\nuniform int ow;\n"
+    # desc: one letter per operand: t a float texture, i an integer one, s a float number, n an
+    # integer number. Textures hold 4 values per texel; a fragment computes 4 results.
+    args: str[]
+    fetch = ""
+    fdecl = ""
+    idecl = ""
+    nt = 0
+    nf = 0
+    ni = 0
+    loop c in desc:
+        if c == 't' or c == 'i':
+            sampler = "sampler2D"
+            if c == 'i': sampler = "isampler2D"
+            src += "uniform highp {sampler} t{nt};\nuniform ivec4 st{nt};\nuniform int w{nt};\n"
+            fetch += "        int o{nt} = i0 * st{nt}.x + i1 * st{nt}.y + i2 * st{nt}.z + i3 * st{nt}.w;\n"
+            args.push("texelFetch(t{nt}, ivec2((o{nt} >> 2) % w{nt}, (o{nt} >> 2) / w{nt}), 0)[o{nt} & 3]")
+            nt += 1
+        else if c == 's':
+            fdecl += "uniform float sf{nf};\n"
+            args.push("sf{nf}")
+            nf += 1
+        else:
+            idecl += "uniform int si{ni};\n"
+            args.push("si{ni}")
+            ni += 1
+    rt = gl_type(int(fns[f].ret), pos)
+    int_out = rt == "int"
+    src += fdecl + idecl
+    if int_out: src += "out highp ivec4 o_;\n"
+    else: src += "out vec4 o_;\n"
+    src += join(gl_decls, "")
+    val = "{gl_fn_name(f)}({join(args, ", ")})"
+    if not int_out and rt != "float": val = "float({val})"
+    zero = "vec4(0.0)"
+    if int_out: zero = "ivec4(0)"
+    src += "void main() \{\n    int base = (int(gl_FragCoord.y) * ow + int(gl_FragCoord.x)) * 4;\n"
+    src += "    int total = od.x * od.y * od.z * od.w;\n"
+    if int_out: src += "    ivec4 r = {zero};\n"
+    else: src += "    vec4 r = {zero};\n"
+    src += "    for (int c = 0; c < 4; c++) \{\n        int lin = base + c;\n        if (lin >= total) break;\n"
+    src += "        int i3 = lin % od.w;\n        int q = lin / od.w;\n        int i2 = q % od.z;\n        q /= od.z;\n        int i1 = q % od.y;\n        int i0 = q / od.y;\n"
+    src + fetch + "        r[c] = {val};\n    }\n    o_ = r;\n}\n"
+
+# move every struct definition above the first `uniform` declaration
+__hoist_struct = (src: str, ustruct: str) -> str:
+    parts = split(src, "\n")
+    structs_: str[]
+    rest: str[]
+    in_struct = false
+    loop p in parts:
+        if starts_with(p, "struct "): in_struct = true
+        if in_struct: structs_.push(p)
+        else: rest.push(p)
+        if in_struct and p == "};": in_struct = false
+    out: str[]
+    placed = false
+    loop p in rest:
+        if not placed and (starts_with(p, "uniform ") or starts_with(p, "layout(") or starts_with(p, "out ") or starts_with(p, "in ") or starts_with(p, "flat ")):
+            loop s in structs_: out.push(s)
+            placed = true
+        out.push(p)
+    if not placed:
+        loop s in structs_: out.push(s)
+    join(out, "\n")

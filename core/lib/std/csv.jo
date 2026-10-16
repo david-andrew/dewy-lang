@@ -1,0 +1,194 @@
+# CSV: rows of fields separated by commas (or another separator), as spreadsheets save them. A
+# field in double quotes may hold the separator, line breaks and "" for a quote.
+#
+#   rows = csv_rows(read_file("sales.csv") ?? "")
+#   loop row in rows[1..]: total += to_float(row[2]) ?? 0.0      # (rows[0]: the header)
+#
+# Or each row as a struct, its fields found by the header's names:
+#   struct Sale:
+#       date = ""
+#       region = ""
+#       price = 0.0          # (a number: checked; empty or NA is NaN)
+#       units = 0
+#       discount: f64? = none   # (empty or NA: none)
+#   sales = from_csv[Sale](read_file("sales.csv") ?? "")
+#   if sales is TextError: fail(sales.message)
+
+# the rows of a CSV text, each the list of its fields (a header is the first row, like the others)
+csv_rows = (text: str, sep: u8 = ',') -> str[][]:
+    rows: str[][]
+    i = __csv_start(text)
+    loop i < len(text):
+        row, next = __csv_row(text, sep, i)
+        i = next
+        if row.len() > 0: rows.push(row)
+    rows
+
+# (where the rows start: after a byte order mark, as Excel saves, not part of the first column's
+# name)
+__csv_start = (text: str) -> int:
+    if len(text) >= 3 and text[0] == 0xEF and text[1] == 0xBB and text[2] == 0xBF: return 3
+    0
+
+# the row starting at i, and where the next starts (a blank line: no fields)
+__csv_row = (text: str, sep: u8, start: int) -> (str[], int):
+    row: str[]
+    n = len(text)
+    i = start
+    loop i < n:
+        c = text[i]
+        if c == '"':
+            # a quoted field: "" for a quote, and the separator and line breaks as they are
+            field: u8[]
+            i += 1
+            loop i < n:
+                c = text[i]
+                if c == '"':
+                    if i + 1 < n and text[i + 1] == '"':
+                        field.push('"')
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                field.push(c)
+                i += 1
+            # (what follows the closing quote, up to the separator, is the field's too)
+            loop i < n and text[i] != sep and text[i] != '\n' and text[i] != '\r':
+                field.push(text[i])
+                i += 1
+            row.push(str_from_bytes(field))
+        else:
+            # (a plain field: a slice of the text)
+            a = i
+            loop i < n and text[i] != sep and text[i] != '\n' and text[i] != '\r': i += 1
+            # (a blank line: no row)
+            if i == a and row.len() == 0 and (i >= n or text[i] != sep):
+                if i < n and text[i] == '\r' and i + 1 < n and text[i + 1] == '\n': i += 1
+                return (row, min(i + 1, n))
+            row.push(text[a..i))
+        if i >= n: return (row, n)
+        c = text[i]
+        i += 1
+        if c == sep:
+            # (a separator last in the text: an empty field after it)
+            if i >= n: row.push("")
+            continue
+        if c == '\r' and i < n and text[i] == '\n': i += 1
+        return (row, i)
+    (row, n)
+
+# CSV text of the rows: a field with the separator, a quote or a line break is put in quotes
+to_csv = (rows: str[][], sep: u8 = ',') -> str:
+    out: u8[]
+    loop row in rows:
+        k = 0
+        loop f in row:
+            if k > 0: out.push(sep)
+            k += 1
+            needs = false
+            loop c in f:
+                if c == sep or c == '"' or c == '\n' or c == '\r': needs = true
+            if needs:
+                out.push('"')
+                loop c in f:
+                    if c == '"': out.push('"')
+                    out.push(c)
+                out.push('"')
+            else:
+                loop c in f: out.push(c)            # (not extend: the C bootstrap compiles this)
+        out.push('\n')
+    str_from_bytes(out)
+
+# the rows of a CSV text with a header, each as a T: a column goes to the field of its name
+# ("Unit Price" to unit_price; others are skipped), a field with no column keeps its default.
+# A number is checked (a TextError says the row, after the header, and column where one is not); an empty one, or
+# NA, is NaN in an f64 and none in an optional
+from_csv[T] = (text: str, sep: u8 = ',') -> T[] | TextError:
+    out: T[]
+    i = __csv_start(text)
+    header: str[]
+    loop i < len(text) and header.len() == 0:
+        header, i = __csv_row(text, sep, i)
+    if header.len() == 0: return out
+    x: T
+    __default_init(x)
+    head = to_text(x)
+    p = find(head, "(")
+    if p < 0: return TextError("from_csv: {head} is not a struct", 1, 1)
+    fs = __arg_fields(head)
+    # (each column's field, -1: none)
+    col_field: int[]
+    loop h in header:
+        nm = replace(replace(lower(trim(h)), " ", "_"), "-", "_")
+        k = -1
+        loop j in 0.. and f in fs:
+            if f.name == nm: k = j
+        col_field.push(k)
+    name = head[..p)
+    # (all rows as one text, read at once: [Sale(date="...", ...), ...]; a row at a time)
+    buf: u8[]
+    buf.reserve(len(text) * 2)
+    __buf_append_str(buf, "[")
+    r = 0
+    loop i < len(text):
+        row, next = __csv_row(text, sep, i)
+        i = next
+        if row.len() == 0: continue
+        r += 1
+        if r > 1: __buf_append_str(buf, ", ")
+        __buf_append_str(buf, name)
+        __buf_append_str(buf, "(")
+        first = true
+        loop c in [0..min(row.len(), col_field.len())):
+            k = col_field[c]
+            if k < 0: continue
+            v = __csv_value(fs[k], row[c])
+            if v == "\0": continue
+            if v == "\x01": return TextError("row {r}, column '{trim(header[c])}': '{row[c]}' is not a {__csv_kind(fs[k].kind)}", r + 1, c + 1)
+            if not first: __buf_append_str(buf, ", ")
+            __buf_append_str(buf, fs[k].name)
+            __buf_append_str(buf, "=")
+            __buf_append_str(buf, v)
+            first = false
+        __buf_append_str(buf, ")")
+    __buf_append_str(buf, "]")
+    e = from_text[T[]](str_from_bytes(buf))
+    if e is TextError:
+        # ([12].region: expected a Region -> row 13: region: ...)
+        m = e.message
+        if starts_with(m, "["):
+            q = find(m, "]")
+            if q > 0:
+                if let i = to_int(m[1..q)):
+                    rest = m[q + 1..]
+                    if starts_with(rest, "."): rest = rest[1..]
+                    return TextError("row {i + 1}: {rest}", i + 2, 1, e.path)
+        return TextError(m, 1, 1, e.path)
+    e
+
+__csv_kind = (k: u8) -> str:
+    if k == 'i': return "whole number"
+    if k == 'f': return "number"
+    "value"
+
+# (a field's value as from_text reads it; "\0": left out, keeping the default; "\x01": wrong)
+__csv_value = (f: __ArgField, s0: str) -> str:
+    s = s0
+    if len(s) > 0 and (s[0] == ' ' or s[len(s) - 1] == ' ' or s[0] == '\t'): s = trim(s0)
+    empty = len(s) == 0 or (len(s) <= 4 and (s == "NA" or s == "N/A" or s == "NaN" or s == "nan" or s == "null"))
+    if f.kind == 's': return to_text(s0)
+    if f.kind == 'f':
+        if empty: return "nan"
+        if to_float(s) == none: return "\x01"
+        return s
+    if f.kind == 'i':
+        if len(s) == 0: return "\0"
+        if to_int(s) == none: return "\x01"
+        return s
+    if f.kind == 'b':
+        l = lower(s)
+        if l == "true" or l == "yes" or l == "1": return "true"
+        if l == "false" or l == "no" or l == "0" or len(l) == 0: return "false"
+        return "\x01"
+    if f.default == "none" and empty: return "none"
+    __arg_value(f, s)

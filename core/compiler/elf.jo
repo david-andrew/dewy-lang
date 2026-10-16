@@ -1,0 +1,150 @@
+# Static ELF64 executable writer (Linux on x86-64 and arm64).
+
+use 'util.jo'
+
+const ELF_BASE = 0x400000
+
+put16 = (b: mut u8[], v: int):
+    b.push(u8(v & 255))
+    b.push(u8((v >> 8) & 255))
+put32 = (b: mut u8[], v: int):
+    put16(b, v)
+    put16(b, v >> 16)
+put64 = (b: mut u8[], v: int):
+    put32(b, v)
+    put32(b, v >> 32)
+
+# the machine (x86-64; arm64: 183) and the page size segments are aligned to (arm64: 64 KB,
+# the largest a Linux kernel there uses)
+elf_machine = 62
+elf_page = 0x1000
+
+page_up = (x: int) -> int: (x + elf_page - 1) & ~(elf_page - 1)
+
+# file layout: [headers][pad][text][pad][rodata]; data is pure bss after rodata
+elf_layout = (text_len: int, ro_len: int) -> (int, int, int):
+    text_off = elf_page
+    ro_off = page_up(text_off + text_len)
+    data_off = page_up(ro_off + ro_len)
+    (text_off, ro_off, data_off)
+
+# function symbols for debuggers/profilers: (name, offset in text, size)
+elf_syms: (str, int, int)[]
+# sections not loaded, after .symtab and .strtab: the line table backtraces read
+# (.sloppy_lines: x64_line_table) and the debugging information (.debug_*: dwarf.jo)
+elf_extra: (str, u8[])[]
+
+write_elf = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int) -> bool:
+    text_off, ro_off, data_off = elf_layout(text.len(), ro.len())
+    out: u8[]
+    out.reserve(ro_off + ro.len())
+    # ELF header
+    loop c in [0x7f, 'E', 'L', 'F', 2, 1, 1, 0]: out.push(u8(c))
+    loop i in [0..8): out.push(0)
+    put16(out, 2)              # ET_EXEC
+    put16(out, elf_machine)
+    put32(out, 1)
+    put64(out, ELF_BASE + text_off + entry_off)
+    put64(out, 64)             # phoff
+    shoff_pos = out.len()
+    put64(out, 0)              # shoff (patched below)
+    put32(out, 0)
+    put16(out, 64)             # ehsize
+    put16(out, 56)             # phentsize
+    put16(out, 3)              # phnum
+    put16(out, 64)             # shentsize
+    nsec = 0
+    if elf_syms.len() > 0: nsec = 5 + elf_extra.len()
+    put16(out, nsec)
+    put16(out, nsec - 1)       # shstrndx
+    # text segment (includes headers)
+    put32(out, 1)
+    put32(out, 5)              # R+X
+    put64(out, 0)
+    put64(out, ELF_BASE)
+    put64(out, ELF_BASE)
+    put64(out, text_off + text.len())
+    put64(out, text_off + text.len())
+    put64(out, elf_page)
+    # rodata
+    put32(out, 1)
+    put32(out, 4)              # R
+    put64(out, ro_off)
+    put64(out, ELF_BASE + ro_off)
+    put64(out, ELF_BASE + ro_off)
+    put64(out, ro.len())
+    put64(out, ro.len())
+    put64(out, elf_page)
+    # data (bss)
+    put32(out, 1)
+    put32(out, 6)              # R+W
+    put64(out, data_off)
+    put64(out, ELF_BASE + data_off)
+    put64(out, ELF_BASE + data_off)
+    put64(out, 0)
+    put64(out, data_size + 8)
+    put64(out, elf_page)
+    out.resize(text_off)
+    append_bytes(out, text)
+    out.resize(ro_off)
+    append_bytes(out, ro)
+    if elf_syms.len() > 0:
+        # .symtab / .strtab / .shstrtab for debuggers
+        loop out.len() % 8 != 0: out.push(0)
+        strtab: u8[] = [0]
+        symtab: u8[]
+        loop i in [0..24): symtab.push(0)
+        loop sym in elf_syms:
+            name_off = strtab.len()
+            loop c in sym.0: strtab.push(c)
+            strtab.push(0)
+            put32(symtab, name_off)
+            symtab.push(0x12)       # STB_GLOBAL | STT_FUNC
+            symtab.push(0)
+            put16(symtab, 1)        # section .text
+            put64(symtab, ELF_BASE + text_off + sym.1)
+            put64(symtab, sym.2)
+        symtab_off = out.len()
+        append_bytes(out, symtab)
+        strtab_off = out.len()
+        append_bytes(out, strtab)
+        extra_off: int[]
+        loop x in elf_extra:
+            extra_off.push(out.len())
+            append_bytes(out, x.1)
+        shstr = "\0.text\0.symtab\0.strtab\0.shstrtab\0"
+        extra_name: int[]
+        loop x in elf_extra:
+            extra_name.push(len(shstr))
+            shstr = shstr + x.0 + "\0"
+        shstr_off = out.len()
+        loop c in shstr: out.push(c)
+        loop out.len() % 8 != 0: out.push(0)
+        sh = out.len()
+        loop k in [0..8): out[shoff_pos + k] = u8((sh >> (8 * k)) & 255)
+        # null section
+        loop i in [0..64): out.push(0)
+        # .text
+        sec(out, 1, 1, 6, ELF_BASE + text_off, text_off, text.len(), 0, 0, 16, 0)
+        # .symtab
+        sec(out, 7, 2, 0, 0, symtab_off, symtab.len(), 3, 1, 8, 24)
+        # .strtab
+        sec(out, 15, 3, 0, 0, strtab_off, strtab.len(), 0, 0, 1, 0)
+        loop i in 0.. and x in elf_extra: sec(out, extra_name[i], 1, 0, 0, extra_off[i], x.1.len(), 0, 0, 1, 0)
+        # .shstrtab
+        sec(out, 23, 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)
+    delete_file(path)
+    if not write_bytes(path, out): return false
+    chmod(path, 0x1ED)
+
+sec = (out: mut u8[], name: int, kind: int, flags: int, addr: int, off: int, size: int, link: int, info: int, align: int, entsize: int):
+    put32(out, name)
+    put32(out, kind)
+    put64(out, flags)
+    put64(out, addr)
+    put64(out, off)
+    put64(out, size)
+    put32(out, link)
+    put32(out, info)
+    put64(out, align)
+    put64(out, entsize)

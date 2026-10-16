@@ -1,0 +1,473 @@
+# Loading system shared libraries (GPU drivers) from a fully static executable.
+#
+# The program has no dynamic loader of its own. To call into libEGL/libGL we start the
+# system's ld.so inside our process: we map it, hand it a tiny in-memory "main program"
+# that depends on libc and imports dlopen/dlsym, let it initialize libc, and when it jumps
+# to the helper's entry point the helper calls back into our code, which jumps back to
+# where we started. From then on dlopen/dlsym are ordinary C function pointers.
+# If anything is missing (no ld.so, unusual system) dl_init() returns false and the
+# caller falls back to software rendering.
+
+dl_ready = false
+dl_failed = false
+dl_open_fn: cfn(*u8, int) -> *u8 = null
+dl_sym_fn: cfn(*u8, *u8) -> *u8 = null
+dl_error_fn: cfn() -> *u8 = null
+__dl_ctx: *u8 = null
+__dl_got: *u8 = null
+
+# glibc's dynamic linker on this processor: (its usual path, what its name contains)
+__ldso_of_arch = () -> (str, str):
+    when ARCH == "arm64":
+        return ("/lib/ld-linux-aarch64.so.1", "ld-linux-aarch64")
+    else:
+        return ("/lib64/ld-linux-x86-64.so.2", "ld-linux-x86-64")
+__ldso_path = __ldso_of_arch().0
+__ldso_name = __ldso_of_arch().1
+
+# the system's page size (arm64 kernels use 4, 16 or 64 KB): from the auxiliary vector
+__dl_page = 0
+__page_size = () -> int:
+    if __dl_page == 0:
+        __dl_page = 4096
+        sp0 = __argv() as *int
+        envp = sp0 + 1 + sp0[0] + 1
+        ne = 0
+        loop envp[ne] != 0: ne += 1
+        auxv = envp + ne + 1
+        k = 0
+        loop auxv[k] != 0:
+            if auxv[k] == 6: __dl_page = auxv[k + 1]          # AT_PAGESZ
+            k += 2
+    __dl_page
+
+# the program interpreter named by an ELF executable ("" if none)
+__elf_interp = (path: str) -> str:
+    fd = syscall(2, data(__zstr(path)), 0, 0)
+    if fd < 0: return ""
+    defer syscall(3, fd)
+    b = fill(u8(0), 4096)
+    n = syscall(0, fd, data(b), 4096)
+    if n < 64 or b[0] != 0x7F or b[1] != 'E' or b[4] != 2: return ""
+    phoff = __rd32(b, 32)
+    phent = __rd16(b, 54)
+    loop i in [0..__rd16(b, 56)):
+        p = phoff + i * phent
+        if p + 56 > n: return ""
+        if __rd32(b, p) == 3:                     # PT_INTERP
+            size = __rd32(b, p + 32)
+            if size < 2 or size > 1024: return ""
+            name = fill(u8(0), size)
+            if syscall(17, fd, data(name), size, __rd32(b, p + 8)) != size: return ""      # pread
+            return str_from_bytes(name[..size - 1))
+    ""
+
+# glibc's dynamic linker: the one the system's own programs use (it is not always in /lib64)
+__find_ldso = () -> bool:
+    loop cand in [__elf_interp("/bin/sh"), __elf_interp("/usr/bin/env"), __ldso_path]:
+        if find(cand, __ldso_name) >= 0 and file_exists(cand):
+            __ldso_path = cand
+            return true
+    false
+
+__rd16 = (b: u8[], o: int) -> int: int(b[o]) | (int(b[o + 1]) << 8)
+__rd32 = (b: u8[], o: int) -> int: __rd16(b, o) | (__rd16(b, o + 2) << 16)
+__rd64 = (b: u8[], o: int) -> int: __rd32(b, o) | (__rd32(b, o + 4) << 32)
+__wr64 = (p: *u8, v: int): (p as *int)[0] = v
+
+__mmap = (addr: *u8, len: int, prot: int, flags: int, fd: int, off: int) -> *u8:
+    r = syscall(9, addr, len, prot, flags, fd, off)
+    if r < 0 and r > -4096: return null
+    r as *u8
+
+# map an ELF shared object (ld.so) from disk; returns its load base
+__map_elf = (path: str) -> (*u8, int):
+    pm = __page_size() - 1
+    data = read_bytes(path) ?? []
+    if data.len() < 64 or data[0] != 0x7f or data[1] != 'E': return (null, 0)
+    phoff = __rd64(data, 32)
+    phnum = __rd16(data, 56)
+    entry = __rd64(data, 24)
+    lo = -1
+    hi = 0
+    loop i in [0..phnum):
+        ph = phoff + i * 56
+        if __rd32(data, ph) != 1: continue
+        va = __rd64(data, ph + 16)
+        memsz = __rd64(data, ph + 40)
+        if lo < 0 or va < lo: lo = va
+        if va + memsz > hi: hi = va + memsz
+    lo = lo & ~pm
+    span = ((hi - lo) + pm) & ~pm
+    base = __mmap(null, span, 0, 0x22, -1, 0)
+    if base == null: return (null, 0)
+    fd = syscall(2, data(__zstr(path)), 0, 0)
+    if fd < 0: return (null, 0)
+    loop i in [0..phnum):
+        ph = phoff + i * 56
+        if __rd32(data, ph) != 1: continue
+        flags = __rd32(data, ph + 4)
+        off = __rd64(data, ph + 8)
+        va = __rd64(data, ph + 16)
+        filesz = __rd64(data, ph + 32)
+        memsz = __rd64(data, ph + 40)
+        prot = 0
+        if flags & 4 != 0: prot |= 1
+        if flags & 2 != 0: prot |= 2
+        if flags & 1 != 0: prot |= 4
+        page = va & ~pm
+        delta = va - page
+        seg = base + (page - lo)
+        if filesz > 0:
+            if __mmap(seg, filesz + delta, prot | 2, 0x12, fd, off - delta) == null: return (null, 0)
+        # zero the bss part
+        if memsz > filesz:
+            file_end = seg + delta + filesz
+            page_end = (((file_end as int) + pm) & ~pm) as *u8
+            if page_end > file_end: mem_set(file_end, 0, page_end - file_end)
+            total_end = (((seg + delta + memsz) as int + pm) & ~pm) as *u8
+            if total_end > page_end:
+                if __mmap(page_end, total_end - page_end, prot | 2, 0x32, -1, 0) == null: return (null, 0)
+        syscall(10, seg, ((filesz + delta + pm) & ~pm) + (((memsz - filesz) + pm) & ~pm), prot)
+    syscall(3, fd)
+    (base - lo, entry)
+
+# Build the helper "main program" image in memory. Layout (2 pages):
+#   page 0 (R+X): ELF header, program headers, code
+#   page 1 (RW):  dynamic section, symbols, strings, hash, relocations, GOT
+__build_helper = (callback: *u8) -> *u8:
+    pg = __page_size()
+    img = __mmap(null, 2 * pg, 3, 0x22, -1, 0)
+    if img == null: return null
+    b: u8[]
+    # ---- page 1 contents (offsets relative to 0x1000) ----
+    p1: u8[]
+    strtab: u8[] = [0]
+    fn_names = ["dlopen", "dlsym", "dlerror"]
+    name_off: int[]
+    loop n in fn_names:
+        name_off.push(strtab.len())
+        loop c in n: strtab.push(c)
+        strtab.push(0)
+    libc_off = strtab.len()
+    loop c in "libc.so.6": strtab.push(c)
+    strtab.push(0)
+    libdl_off = strtab.len()
+    loop c in "libdl.so.2": strtab.push(c)
+    strtab.push(0)
+    # dynsym: null + 3 undefined functions
+    dynsym: u8[]
+    loop i in [0..24): dynsym.push(0)
+    loop i in [0..3):
+        __put32(dynsym, name_off[i])
+        dynsym.push(0x12)    # global func
+        dynsym.push(0)
+        __put16(dynsym, 0)   # undefined
+        __put64(dynsym, 0)
+        __put64(dynsym, 0)
+    # hash: 1 bucket, 4 chains, all empty
+    hash: u8[]
+    __put32(hash, 1)
+    __put32(hash, 4)
+    __put32(hash, 0)
+    loop i in [0..4): __put32(hash, 0)
+    # layout of page 1
+    dyn_off = pg
+    dyn_size = 16 * 13
+    sym_off = dyn_off + dyn_size
+    str_off = sym_off + dynsym.len()
+    hash_off = (str_off + strtab.len() + 7) & ~7
+    rela_off = hash_off + hash.len()
+    rela_size = 3 * 24
+    got_off = (rela_off + rela_size + 15) & ~15
+    cb_off = got_off + 3 * 8
+    # dynamic entries (tag, value)
+    dyn: u8[]
+    __put64(dyn, 1)
+    __put64(dyn, libc_off)       # DT_NEEDED libc.so.6
+    __put64(dyn, 1)
+    __put64(dyn, libdl_off)      # DT_NEEDED libdl.so.2
+    __put64(dyn, 4)
+    __put64(dyn, hash_off)       # DT_HASH
+    __put64(dyn, 5)
+    __put64(dyn, str_off)        # DT_STRTAB
+    __put64(dyn, 6)
+    __put64(dyn, sym_off)        # DT_SYMTAB
+    __put64(dyn, 10)
+    __put64(dyn, strtab.len())   # DT_STRSZ
+    __put64(dyn, 11)
+    __put64(dyn, 24)             # DT_SYMENT
+    __put64(dyn, 7)
+    __put64(dyn, rela_off)       # DT_RELA
+    __put64(dyn, 8)
+    __put64(dyn, rela_size)      # DT_RELASZ
+    __put64(dyn, 9)
+    __put64(dyn, 24)             # DT_RELAENT
+    __put64(dyn, 24)
+    __put64(dyn, 0)              # DT_BIND_NOW
+    __put64(dyn, 21)
+    __put64(dyn, 0)              # DT_DEBUG
+    __put64(dyn, 0)
+    __put64(dyn, 0)              # DT_NULL
+    rela: u8[]
+    glob_dat = 6                               # R_X86_64_GLOB_DAT
+    when ARCH == "arm64":
+        glob_dat = 1025                        # R_AARCH64_GLOB_DAT
+    loop i in [0..3):
+        __put64(rela, got_off + 8 * i)
+        __put64(rela, ((i + 1) << 32) | glob_dat)
+        __put64(rela, 0)
+    # ---- page 0: headers + code ----
+    phnum = 5
+    code_off = 64 + phnum * 56
+    interp_off = code_off + 32
+    __put_bytes(b, [0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    __put16(b, 3)                 # ET_DYN
+    when ARCH == "arm64":
+        __put16(b, 183)
+    else:
+        __put16(b, 62)
+    __put32(b, 1)
+    __put64(b, code_off)          # entry
+    __put64(b, 64)                # phoff
+    __put64(b, 0)
+    __put32(b, 0)
+    __put16(b, 64)
+    __put16(b, 56)
+    __put16(b, phnum)
+    __put16(b, 64)
+    __put16(b, 0)
+    __put16(b, 0)
+    # PT_PHDR
+    __ph(b, 6, 4, 64, 64, phnum * 56, phnum * 56)
+    # PT_INTERP
+    __ph(b, 3, 4, interp_off, interp_off, len(__ldso_path) + 1, len(__ldso_path) + 1)
+    # PT_LOAD text
+    __ph(b, 1, 5, 0, 0, pg, pg)
+    # PT_LOAD data
+    __ph(b, 1, 6, pg, pg, pg, pg)
+    # PT_DYNAMIC
+    __ph(b, 2, 6, dyn_off, dyn_off, dyn_size, dyn_size)
+    pc = code_off
+    when ARCH == "arm64":
+        # adr x0, got; ldr x16, cb; blr x16; udf
+        d = got_off - pc
+        __put32(b, 0x10000000 | ((d & 3) << 29) | (((d >> 2) & 0x7FFFF) << 5))
+        __put32(b, 0x58000000 | ((((cb_off - (pc + 4)) >> 2) & 0x7FFFF) << 5) | 16)
+        __put32(b, 0xD63F0200)
+        __put32(b, 0)
+    else:
+        # lea rdi,[rip+got]; mov rax,[rip+cb]; and rsp,-16; call rax; ud2
+        __put_bytes(b, [0x48, 0x8D, 0x3D])
+        __put32(b, got_off - (pc + 7))
+        pc += 7
+        __put_bytes(b, [0x48, 0x8B, 0x05])
+        __put32(b, cb_off - (pc + 7))
+        __put_bytes(b, [0x48, 0x83, 0xE4, 0xF0, 0xFF, 0xD0, 0x0F, 0x0B])
+    loop b.len() < interp_off: b.push(0)
+    loop c in __ldso_path: b.push(c)
+    b.push(0)
+    # copy into image
+    loop i in 0.. and c in b: img[i] = c
+    loop i in 0.. and c in dyn: img[dyn_off + i] = c
+    loop i in 0.. and c in dynsym: img[sym_off + i] = c
+    loop i in 0.. and c in strtab: img[str_off + i] = c
+    loop i in 0.. and c in hash: img[hash_off + i] = c
+    loop i in 0.. and c in rela: img[rela_off + i] = c
+    __wr64(img + cb_off, callback as int)
+    __dl_got = img + got_off
+    syscall(10, img, pg, 5)         # page 0: r-x
+    img
+
+__ph = (b: mut u8[], kind: int, flags: int, off: int, va: int, filesz: int, memsz: int):
+    __put32(b, kind)
+    __put32(b, flags)
+    __put64(b, off)
+    __put64(b, va)
+    __put64(b, va)
+    __put64(b, filesz)
+    __put64(b, memsz)
+    __put64(b, __page_size())
+
+__put_bytes = (b: mut u8[], xs: int[]):
+    loop x in xs: b.push(u8(x))
+__put16 = (b: mut u8[], v: int):
+    b.push(u8(v & 255))
+    b.push(u8((v >> 8) & 255))
+__put32 = (b: mut u8[], v: int):
+    __put16(b, v)
+    __put16(b, v >> 16)
+__put64 = (b: mut u8[], v: int):
+    __put32(b, v)
+    __put32(b, v >> 32)
+
+# called by the helper (C calling convention) once ld.so has finished loading
+@cabi
+__dl_entry = (got: *u8):
+    g = got as *int
+    dl_open_fn = g[0] as cfn(*u8, int) -> *u8
+    dl_sym_fn = g[1] as cfn(*u8, *u8) -> *u8
+    dl_error_fn = g[2] as cfn() -> *u8
+    __longjmp(__dl_ctx, 1)
+
+dl_init = () -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "macos":
+        return true
+    else:
+        if dl_ready: return true
+        if dl_failed: return false
+        dl_failed = true
+        if not __find_ldso(): return false
+        ld_base, ld_entry = __map_elf(__ldso_path)
+        if ld_base == null: return false
+        cb: cfn(*u8) = __dl_entry
+        img = __build_helper(cb as *u8)
+        if img == null: return false
+        # new stack for ld.so: argc, argv, envp, auxv
+        stack_size = 1 << 20
+        stack = __mmap(null, stack_size, 3, 0x20022, -1, 0)
+        if stack == null: return false
+        sp0 = __argv() as *int
+        argc = sp0[0]
+        envp = sp0 + 1 + argc + 1
+        ne = 0
+        loop envp[ne] != 0: ne += 1
+        auxv = envp + ne + 1
+        na = 0
+        loop auxv[2 * na] != 0: na += 1
+        top = stack + stack_size
+        strs = top - 256
+        name = "sloppy-dl\0"
+        loop i in [0..len(name)): strs[i] = name[i]
+        rnd = strs + 64
+        loop i in [0..16): rnd[i] = u8((i * 37 + 11) & 255)
+        words = 1 + 2 + ne + 1 + 2 * (na + 8) + 2
+        sp = (((strs as int) - words * 8) & ~15) as *int
+        k = 0
+        sp[k] = 1
+        sp[k + 1] = strs as int
+        sp[k + 2] = 0
+        k += 3
+        loop i in [0..ne):
+            sp[k] = envp[i]
+            k += 1
+        sp[k] = 0
+        k += 1
+        loop i in [0..na):
+            t = auxv[2 * i]
+            v = auxv[2 * i + 1]
+            if t == 3: v = (img + 64) as int          # AT_PHDR
+            else if t == 4: v = 56                    # AT_PHENT
+            else if t == 5: v = 5                     # AT_PHNUM
+            else if t == 7: v = ld_base as int        # AT_BASE
+            else if t == 9: v = (img + 64 + 5 * 56) as int   # AT_ENTRY
+            else if t == 25: v = rnd as int           # AT_RANDOM
+            else if t == 31: v = strs as int          # AT_EXECFN
+            else if t == 23: v = 0                    # AT_SECURE
+            sp[k] = t
+            sp[k + 1] = v
+            k += 2
+        sp[k] = 0
+        sp[k + 1] = 0
+        __dl_ctx = __alloc(192)
+        if __setjmp(__dl_ctx) == 0:
+            __jump(ld_base + ld_entry, sp as *u8)
+        # back from the helper: libc is initialized and dlopen/dlsym are available
+        dl_ready = dl_open_fn != null and dl_sym_fn != null
+        dl_failed = not dl_ready
+        dl_ready
+
+# open a shared library (RTLD_NOW | RTLD_GLOBAL); null if unavailable
+dl_open = (name: str) -> *u8:
+    when TARGET == "macos":
+        # (gl.jo's OpenGL ES functions: OpenGL's)
+        if name == "libGLESv2.so.2": return __mac_dlopen(data("/System/Library/Frameworks/OpenGL.framework/OpenGL"), i32(0xA))
+        return __mac_dlopen(data(__zstr(name)), i32(0xA))
+    else:
+        if not dl_init(): return null
+        return dl_open_fn(data(__zstr(name)), 0x102)
+
+dl_sym = (lib: *u8, name: str) -> *u8:
+    when TARGET == "macos":
+        if lib == null: return null
+        return __mac_dlsym(lib, data(__zstr(name)))
+    else:
+        if lib == null or not dl_ready: return null
+        return dl_sym_fn(lib, data(__zstr(name)))
+
+dl_error = () -> str:
+    when TARGET == "macos":
+        return __cstr(__mac_dlerror())
+    else:
+        if not dl_ready: return "dynamic loading unavailable"
+        return __cstr(dl_error_fn())
+
+# (macOS: a program is dynamically linked, so dlopen is libSystem's)
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("dlopen")
+    extern __mac_dlopen = (name: *u8, flags: i32) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("dlsym")
+    extern __mac_dlsym = (lib: *u8, name: *u8) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("dlerror")
+    extern __mac_dlerror = () -> *u8
+
+# the program's end: what print collected written out, then what C's stdio holds (printf's
+# output, which C writes out only at its own exit, which a Sloppy program does not go through)
+@noinline
+__end_flush = ():
+    __run_end_fns()
+    __out_flush()
+    when TARGET == "macos":
+        __mac_fflush(null)
+    else when TARGET != "windows" and TARGET != "wasm":
+        if __c_fflush != null: __c_fflush(null)
+
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("fflush")
+    extern __mac_fflush = (f: *u8) -> i32
+
+__c_fflush: cfn(*u8) -> i32 = null
+
+# (what parts of the library do as the program ends, once: net tells its peers it is going, so
+# they know at once, not after some seconds of silence)
+__end_fns: (() -> void)[]
+__end_ran = false
+__at_end = (f: () -> void): __end_fns.push(f)
+__run_end_fns = ():
+    if __end_ran: return
+    __end_ran = true
+    loop f in __end_fns: f()
+
+# resolve a C function for `@lib(...) extern fn` declarations (called on first use)
+# (Windows programs: lib/core/windows.jo)
+when TARGET != "windows":
+    __ffi_resolve = (lib: str, name: str) -> *u8:
+        h = __lib_handle(lib)
+        if h == null: panic("cannot load library {lib} (needed for {name}): {dl_error()}")
+        p = dl_sym(h, name)
+        if p == null: panic("function {name} not found in {lib}")
+        p
+
+    __lib_names: str[]
+    __lib_handles: *u8[]
+    __lib_handle = (lib: str) -> *u8:
+        loop i in 0.. and n in __lib_names:
+            if n == lib: return __lib_handles[i]
+        h = dl_open(lib)
+        __lib_names.push(lib)
+        __lib_handles.push(h)
+        # (C's libraries are in: libc's fflush, for the end)
+        when TARGET != "macos":
+            if h != null and __c_fflush == null:
+                c = dl_open("libc.so.6")
+                if c != null: __c_fflush = dl_sym(c, "fflush") as cfn(*u8) -> i32
+        h
+
+    # true if the library can be loaded on this system
+    lib_available = (lib: str) -> bool: __lib_handle(lib) != null

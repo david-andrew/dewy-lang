@@ -1,0 +1,257 @@
+# Shared compiler utilities: string interning, source files, diagnostics.
+
+use 'ide.jo'
+
+struct SrcFile:
+    path: str
+    dir: str
+    src: str
+
+files: SrcFile[]
+names: str[]
+name_hash: int[]
+name_tab: i32[]          # open addressing over name ids (+1; 0 = empty)
+
+hash_bytes = (p: *u8, n: int) -> int:
+    h = -3750763034362895579                 # FNV-1a
+    loop i in [0..n): h = ((h xor int(p[i]))) * 1099511628211
+    (h xor (h >> 31))
+
+intern = (s: str) -> int: intern_sub(s, 0, len(s))
+
+# intern s[start..start + n] without allocating unless the name is new
+intern_sub = (s: str, start: int, n: int) -> int:
+    if name_tab.len() == 0:
+        name_tab = fill(0, 1 << 14)
+        intern_sub("", 0, 0)             # (name 0 is "": 0 stands for no name)
+    p = data(s) + start
+    h = hash_bytes(p, n)
+    mask = name_tab.len() - 1
+    i = h & mask
+    loop true:
+        e = int(name_tab[i])
+        if e == 0: break
+        id = e - 1
+        if name_hash[id] == h and len(names[id]) == n and __mem_eq(data(names[id]), p, n): return id
+        i = (i + 1) & mask
+    id = names.len()
+    if start == 0 and n == len(s): names.push(s)
+    else: names.push(s[start..start + n))
+    name_hash.push(h)
+    name_tab[i] = i32(id + 1)
+    if names.len() * 2 > name_tab.len():
+        # grow and rehash
+        name_tab = fill(0, name_tab.len() * 2)
+        m2 = name_tab.len() - 1
+        loop k in [0..names.len()):
+            j = name_hash[k] & m2
+            loop name_tab[j] != 0: j = (j + 1) & m2
+            name_tab[j] = i32(k + 1)
+    id
+
+name_of = (id: int) -> str: names[id]
+
+# a file's name without its extension, whatever it is ("dir/game.jo" -> "dir/game"; ".x" stays)
+strip_ext = (path: str) -> str:
+    dot = rfind(path, ".")
+    if dot <= rfind(path, "/") + 1: return path
+    path[..dot)
+
+# a path as the compiler keeps it: parts separated by / (on Windows, \ becomes /, and a drive
+# letter is lower case, as editors write it)
+os_path = (p: str) -> str:
+    when TARGET == "windows":
+        q = replace(p, "\\", "/")
+        if len(q) >= 2 and q[1] == ':' and q[0] >= 'A' and q[0] <= 'Z': q = lower(q[..1)) + q[1..]
+        return q
+    else:
+        return p
+
+# a path that does not start from the current directory ("/x", or "c:/x" on Windows)
+is_abs_path = (p: str) -> bool: starts_with(p, "/") or len(p) >= 3 and p[1] == ':' and p[2] == '/'
+
+# position encoding: file index in the high bits, byte offset in the low 40 bits
+mkpos = (file: int, off: int) -> int: (file << 40) | off
+pos_file = (p: int) -> int: p >> 40
+pos_off = (p: int) -> int: p & 0xFFFFFFFFFF
+
+line_starts: int[][]
+
+# (the line found last: positions often come one after another on a line)
+lc_file = -1
+lc_start = 0
+lc_end = 0
+lc_line = 0
+
+line_col = (p: int) -> (int, int):
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return (0, 0)
+    off0 = pos_off(p)
+    if f == lc_file and off0 >= lc_start and off0 < lc_end: return (lc_line, off0 - lc_start + 1)
+    loop line_starts.len() <= f: line_starts.push([])
+    if line_starts[f].len() == 0:
+        ls = [0]
+        src = files[f].src
+        loop i in 0.. and c in src:
+            if c == '\n': ls.push(i + 1)
+        line_starts[f] = ls
+    off = pos_off(p)
+    # (indexed directly: data() of an element would copy the whole array first)
+    ls = line_starts[f]
+    lo = 0
+    hi = ls.len() - 1
+    loop lo < hi:
+        mid = (lo + hi + 1) / 2
+        if ls[mid] <= off: lo = mid
+        else: hi = mid - 1
+    lc_file = f
+    lc_start = ls[lo]
+    lc_end = 1 << 62
+    if lo + 1 < ls.len(): lc_end = ls[lo + 1]
+    lc_line = lo + 1
+    (lo + 1, off - ls[lo] + 1)
+
+pos_str = (p: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return "<unknown>"
+    l, c = line_col(p)
+    "{files[f].path}:{l}:{c}"
+
+source_line = (p: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    off = pos_off(p)
+    a = off
+    loop a > 0 and src[a - 1] != '\n': a -= 1
+    b = off
+    loop b < len(src) and src[b] != '\n': b += 1
+    src[a..b)
+
+# what is between the parentheses of the call at p, as written (on one line; "" otherwise):
+# assert's message shows the condition that failed
+call_args_text = (p: int) -> str:
+    f = pos_file(p)
+    if p <= 0 or f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    i = pos_off(p)
+    loop i < len(src) and src[i] != '(' and src[i] != '\n': i += 1
+    if i >= len(src) or src[i] != '(': return ""
+    a = i + 1
+    depth = 1
+    i += 1
+    loop i < len(src) and depth > 0:
+        c = src[i]
+        if c == '\n': return ""
+        if c == '"' or c == '\'':
+            q = c
+            i += 1
+            loop i < len(src) and src[i] != q and src[i] != '\n':
+                if src[i] == '\\': i += 1
+                i += 1
+        else if c == '(' or c == '[': depth += 1
+        else if c == ')' or c == ']': depth -= 1
+        i += 1
+    if depth != 0: return ""
+    trim(src[a..i - 1))
+
+# the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
+stop = (code: int):
+    when not BOOTSTRAP:
+        __repl_unwind()
+    exit(code)
+
+quiet_errors = false        # (an error only stops: sloppy fmt in the language server)
+# (sloppy build/run/check/test: after an error in a function, this program again without that
+# function's body, for the next error; errors_only: such a run, which only checks)
+more_errors = false
+errors_only = false
+err_skips: str[]
+shown_warnings: str[]          # (the warnings shown, passed on to the next run: w<place>.<length>)
+
+# p < 0: no source position
+# the calls that made the generic instances being checked (innermost last), and their names: an
+# error in the library's code inside one is reported at the program's call (lib_root: the library)
+err_trail: int[]
+err_trail_names: str[]
+err_trail_fns: int[]
+lib_root = ""
+
+pos_in_lib = (p: int) -> bool:
+    if p <= 0 or len(lib_root) == 0: return false
+    f = pos_file(p)
+    f < files.len() and starts_with(files[f].path, lib_root)
+
+fatal = (p0: int, msg0: str):
+    p = p0
+    msg = msg0
+    k = err_trail.len() - 1
+    if k >= 0 and pos_in_lib(p):
+        loop k >= 0 and (err_trail[k] <= 0 or pos_in_lib(err_trail[k])): k -= 1
+        if k >= 0:
+            at = pos_str(p)
+            if starts_with(at, lib_root): at = "lib" + at[len(lib_root)..]
+            msg = "in this call to {err_trail_names[k]}: {msg} ({at})"
+            p = err_trail[k]
+            k -= 1
+    # (in the program's own generic code: the calls that made it, innermost first, as notes)
+    notes: int[]
+    loop k >= 0 and notes.len() < 4:
+        # (a body checked while another is: its chain is on the trail twice)
+        seen = false
+        loop n in notes: seen = seen or err_trail_fns[n] == err_trail_fns[k]
+        if err_trail[k] > 0 and not pos_in_lib(err_trail[k]) and not seen: notes.push(k)
+        k -= 1
+    if quiet_errors: stop(1)
+    if ide_on:
+        loop n in notes: msg += " (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"
+        ide_fatal(p, msg)
+    if p < 0:
+        eprint("error: {msg}")
+        stop(1)
+    if errors_only: eprint("")                    # (between this error and the one before)
+    eprint("{pos_str(p)}: error: {msg}")
+    show_line(p)
+    loop n in notes:
+        eprint("{pos_str(err_trail[n])}: note: in {trail_sig(n)}, called here")
+        show_line(err_trail[n])
+    if more_errors: next_error_run()
+    stop(1)
+
+# the source line at p, and a caret under p's column
+show_line = (p: int):
+    line = source_line(p)
+    if len(line) > 0:
+        l, c = line_col(p)
+        caret = ""
+        loop i in [0..c - 1):
+            if i < len(line) and line[i] == '\t': caret += "\t"
+            else: caret += " "
+        eprint("    {line}\n    {caret}^")
+
+# (the same warning at the same place once: a generic function checked for each of its types;
+# the editor's checks start over each time, so not there)
+warned: {str: bool} = {}
+warn = (p: int, msg: str):
+    if ide_on:
+        ide_warn(p, msg)
+        return
+    key = "{p} {msg}"
+    if warned.has(key): return
+    warned[key] = true
+    wk = "w{p}.{len(msg)}"
+    if errors_only and shown_warnings.contains(wk): return
+    shown_warnings.push(wk)
+    eprint("{pos_str(p)}: warning: {msg}")
+
+ice = (msg: str):
+    eprint("internal compiler error: {msg}")
+    stop(2)
+
+# append src to out with one copy (compiler code must stay compilable by the C bootstrap,
+# which lacks the `extend` intrinsic)
+append_bytes = (out: mut u8[], src: u8[]):
+    n = out.len()
+    if src.len() == 0: return
+    out.resize(n + src.len())
+    mem_copy(data(out) + n, data(src), src.len())

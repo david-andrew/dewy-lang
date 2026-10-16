@@ -52,8 +52,9 @@ inherited graphics/input/font runtime. The editor checks unsaved Dewy source and
 serves diagnostics, hover and definitions. A C-bootstrap-to-self-build path is
 working for the compact core; the syntax parser still needs a native Dewy seed.
 
-The latest combined language/editor/shared-core gate has 131 checks and takes
-7.8 seconds. The original nested-particle algorithm, changing only its platform
+The compiler sources and libraries now live directly under `core/`, without a
+patch generator or separate Sloppy checkout. The latest combined
+language/editor/shared-core gate has 137 checks and takes 7.7 seconds. The original nested-particle algorithm, changing only its platform
 harness import, builds in about 73 ms by default and 82 ms in release, versus
 1.66 seconds for the earlier Dewy compiler. The latest million-particle kernel
 medians are 396 ms by default and 203 ms in release, versus C at 174 ms in the

@@ -1,0 +1,2929 @@
+# x86-64 backend: IR -> machine code. Calling convention follows SysV for scalars:
+# integer args in rdi, rsi, rdx, rcx, r8, r9; float args in xmm0-7; the rest on the stack.
+
+use 'util.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'check.jo'
+use 'ast.jo'
+use 'elf.jo'
+use 'pe.jo'
+
+const RAX = 0
+const RCX = 1
+const RDX = 2
+const RBX = 3
+const RSP = 4
+const RBP = 5
+const RSI = 6
+const RDI = 7
+const R8 = 8
+const R9 = 9
+const R10 = 10
+const R11 = 11
+
+code: u8[]
+fn_addr: int[]            # lfunc index -> code offset (-1 = not yet)
+call_fix: (int, int)[]    # (position of rel32, lfunc)
+entry_end_lf = -1         # called by the entry after main (the runtime's __out_flush: what print left)
+data_fix: (int, int, int)[]  # (position of rel32, kind 0=rodata 1=data, offset)
+int_arg_regs = [RDI, RSI, RDX, RCX, R8, R9]
+
+b = (x: int): code.push(u8(x & 255))
+b32 = (x: int):
+    b(x)
+    b(x >> 8)
+    b(x >> 16)
+    b(x >> 24)
+b64 = (x: int):
+    b32(x)
+    b32(x >> 32)
+patch32 = (pos: int, v: int):
+    code[pos] = u8(v & 255)
+    code[pos + 1] = u8((v >> 8) & 255)
+    code[pos + 2] = u8((v >> 16) & 255)
+    code[pos + 3] = u8((v >> 24) & 255)
+
+rip_kind = 0
+# index register for the next memory operand ([base + index << scale + disp]); -1: none
+cur_index = -1
+cur_scale = 0
+
+use_index = (ix: int, scale: int):
+    cur_index = ix
+    cur_scale = scale
+
+# an indexed access needs a real base register (rip-relative addressing takes no index)
+indexed_base = (base: int, disp: int, imm: int) -> (int, int):
+    if base != RIPREL: return (base, disp)
+    rel_fixup_lea(RCX, rip_kind, disp - imm)
+    (RCX, imm)
+
+rex = (w: bool, r: int, x: int, bb0: int, force: bool):
+    bb = bb0
+    if bb == RIPREL: bb = 0
+    v = 0x40
+    if w: v |= 8
+    if r & 8 != 0: v |= 4
+    if x & 8 != 0 or (cur_index >= 0 and cur_index & 8 != 0): v |= 2
+    if bb & 8 != 0: v |= 1
+    if v != 0x40 or force: b(v)
+
+# ModRM + optional SIB + displacement for [base + disp]
+mem = (reg: int, base: int, disp: int):
+    r = reg & 7
+    if cur_index >= 0:
+        sib = (cur_scale << 6) | ((cur_index & 7) << 3) | (base & 7)
+        if disp == 0 and base & 7 != 5:
+            b((r << 3) | 4)
+            b(sib)
+        else if disp >= -128 and disp <= 127:
+            b(0x40 | (r << 3) | 4)
+            b(sib)
+            b(disp)
+        else:
+            b(0x80 | (r << 3) | 4)
+            b(sib)
+            b32(disp)
+        return
+    if base == RIPREL:
+        b((r << 3) | 5)
+        b32(0)
+        data_fix.push((code.len() - 4, rip_kind, disp))
+        return
+    bs = base & 7
+    if disp == 0 and bs != 5:
+        b((r << 3) | bs)
+        if bs == 4: b(0x24)
+    else if disp >= -128 and disp <= 127:
+        b(0x40 | (r << 3) | bs)
+        if bs == 4: b(0x24)
+        b(disp)
+    else:
+        b(0x80 | (r << 3) | bs)
+        if bs == 4: b(0x24)
+        b32(disp)
+
+modrr = (reg: int, rm: int): b(0xC0 | ((reg & 7) << 3) | (rm & 7))
+
+# op r64, [base+disp]   (e.g. 0x8B mov, 0x03 add ...)
+op_rm = (opc: int, w: bool, reg: int, base: int, disp: int):
+    rex(w, reg, 0, base, false)
+    b(opc)
+    mem(reg, base, disp)
+
+op_rr = (opc: int, w: bool, reg: int, rm: int):
+    rex(w, reg, 0, rm, false)
+    b(opc)
+    modrr(reg, rm)
+
+mov_rm = (r: int, base: int, disp: int): op_rm(0x8B, true, r, base, disp)     # mov r, [m]
+mov_mr = (base: int, disp: int, r: int): op_rm(0x89, true, r, base, disp)     # mov [m], r
+mov_rr = (d: int, s: int): op_rr(0x89, true, s, d)
+lea = (r: int, base: int, disp: int): op_rm(0x8D, true, r, base, disp)
+
+mov_imm = (r: int, v: int):
+    if v >= 0 and v <= 0xFFFFFFFF:
+        rex(false, 0, 0, r, false)
+        b(0xB8 + (r & 7))
+        b32(v)
+    else if v >= -2147483648 and v <= 2147483647:
+        rex(true, 0, 0, r, false)
+        b(0xC7)
+        modrr(0, r)
+        b32(v)
+    else:
+        rex(true, 0, 0, r, false)
+        b(0xB8 + (r & 7))
+        b64(v)
+
+# sized load from [base+disp] into r (zero/sign extended to 64 bits)
+load_sized = (r: int, base: int, disp: int, size: int, signed: bool):
+    if size == 8: mov_rm(r, base, disp)
+    else if size == 4:
+        if signed: op_rm(0x63, true, r, base, disp)       # movsxd
+        else: op_rm(0x8B, false, r, base, disp)           # mov r32
+    else if size == 2:
+        rex(true, r, 0, base, false)
+        b(0x0F)
+        if signed: b(0xBF)
+        else: b(0xB7)
+        mem(r, base, disp)
+    else:
+        rex(true, r, 0, base, false)
+        b(0x0F)
+        if signed: b(0xBE)
+        else: b(0xB6)
+        mem(r, base, disp)
+
+store_sized = (base: int, disp: int, r: int, size: int):
+    if size == 8: mov_mr(base, disp, r)
+    else if size == 4: op_rm(0x89, false, r, base, disp)
+    else if size == 2:
+        b(0x66)
+        op_rm(0x89, false, r, base, disp)
+    else:
+        rex(false, r, 0, base, r >= 4)
+        b(0x88)
+        mem(r, base, disp)
+
+# SSE: prefix (F2 for sd, F3 for ss, 66 for pd), 0F, opc, modrm mem
+sse_rm = (prefix: int, opc: int, x: int, base: int, disp: int):
+    if prefix != 0: b(prefix)
+    rex(false, x, 0, base, false)
+    b(0x0F)
+    b(opc)
+    mem(x, base, disp)
+sse_rr = (prefix: int, opc: int, x: int, y: int):
+    if prefix != 0: b(prefix)
+    rex(false, x, 0, y, false)
+    b(0x0F)
+    b(opc)
+    modrr(x, y)
+
+# ---- vectors ----
+is_vreg_vec = (ty: int) -> bool: ty == VX or ty == VY
+
+# VEX prefix (3-byte form): map 1 = 0F, 2 = 0F38; pp 0 none, 1 = 66, 2 = F3, 3 = F2; l 1 for
+# 256 bits; reg and vvvv are xmm numbers, rm a register or a memory base (the index is cur_index)
+vex = (reg: int, vvvv: int, rm: int, map: int, pp: int, w: int, l: int):
+    rb = rm
+    if rb == RIPREL: rb = 0
+    x = 0
+    if cur_index >= 0 and cur_index & 8 != 0: x = 1
+    b(0xC4)
+    b(((1 - ((reg >> 3) & 1)) << 7) | ((1 - x) << 6) | ((1 - ((rb >> 3) & 1)) << 5) | map)
+    b((w << 7) | ((15 - (vvvv & 15)) << 3) | (l << 2) | pp)
+
+vmov_rr = (x: int, y: int, ty: int):
+    if x == y: return
+    if ty == VY:
+        vex(x, 0, y, 1, 0, 0, 1)
+        b(0x28)                                         # vmovaps ymm, ymm
+        modrr(x, y)
+    else: sse_rr(0, 0x28, x, y)                         # movaps
+vmov_rm = (x: int, base: int, disp: int, ty: int):
+    if ty == VY:
+        vex(x, 0, base, 1, 0, 0, 1)
+        b(0x10)                                         # vmovups ymm, [m]
+        mem(x, base, disp)
+    else: sse_rm(0, 0x10, x, base, disp)                # movups xmm, [m]
+vmov_mr = (base: int, disp: int, x: int, ty: int):
+    if ty == VY:
+        vex(x, 0, base, 1, 0, 0, 1)
+        b(0x11)                                         # vmovups [m], ymm
+        mem(x, base, disp)
+    else: sse_rm(0, 0x11, x, base, disp)                # movups [m], xmm
+
+vec_esize = (k: int) -> int:
+    if k == 0 or k == 2: return 4
+    8
+
+# the opcode (after 0F) of vector operation op on element kind k (66 prefix for f64 and ints)
+vec_opc = (op: int, k: int) -> int:
+    if k < 2: return [0x58, 0x5C, 0x59, 0x5E, 0x5D, 0x5F, 0x54, 0x56, 0x57][op]
+    if op == 0 and k == 2: return 0xFE                # paddd
+    if op == 0: return 0xD4                           # paddq
+    if op == 1 and k == 2: return 0xFA                # psubd
+    if op == 1: return 0xFB                           # psubq
+    if op == 6: return 0xDB                           # pand
+    if op == 7: return 0xEB                           # por
+    if op == 8: return 0xEF                           # pxor
+    ice("vector operation {op} on element kind {k}")
+    0
+
+# x = x op y (128 bits)
+vop2 = (op: int, k: int, x: int, y: int):
+    if k >= 2 and op == 2:
+        # pmulld (SSE4.1: the vectorizer only uses it in 256-bit code, this is for completeness)
+        b(0x66)
+        rex(false, x, 0, y, false)
+        b(0x0F); b(0x38); b(0x40)
+        modrr(x, y)
+        return
+    pre = 0
+    if k != 0: pre = 0x66
+    sse_rr(pre, vec_opc(op, k), x, y)
+
+# x = a op y (256 bits, AVX2)
+vop3 = (op: int, k: int, x: int, a: int, y: int):
+    if k >= 2 and op == 2:
+        vex(x, a, y, 2, 1, 0, 1)
+        b(0x40)                                         # vpmulld
+        modrr(x, y)
+        return
+    pp = 0
+    if k != 0: pp = 1
+    vex(x, a, y, 1, pp, 0, 1)
+    b(vec_opc(op, k))
+    modrr(x, y)
+
+vec_commutes = (op: int) -> bool: op == 0 or op == 2 or op == 4 or op == 5 or op == 6 or op == 7 or op == 8
+
+jmp32 = () -> int:
+    b(0xE9)
+    b32(0)
+    code.len() - 4
+jcc32 = (cc: int) -> int:
+    b(0x0F)
+    b(0x80 + cc)
+    b32(0)
+    code.len() - 4
+patch_here = (pos: int): patch32(pos, code.len() - (pos + 4))
+jmp_back = (target: int):
+    b(0xE9)
+    b32(target - (code.len() + 4))
+
+const CC_E = 4
+const CC_NE = 5
+const CC_L = 0xC
+const CC_GE = 0xD
+const CC_LE = 0xE
+const CC_G = 0xF
+const CC_B = 2
+const CC_AE = 3
+const CC_BE = 6
+const CC_A = 7
+const CC_P = 0xA
+const CC_NP = 0xB
+
+# n bytes of no-ops, in as few instructions as possible
+const NOPS = [[0x90], [0x66, 0x90], [0x0F, 0x1F, 0x00], [0x0F, 0x1F, 0x40, 0x00], [0x0F, 0x1F, 0x44, 0x00, 0x00], [0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00], [0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00], [0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00], [0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]]
+nop_pad = (n0: int):
+    n = n0
+    loop n > 0:
+        k = min(n, 9)
+        loop x in NOPS[k - 1]: b(x)
+        n -= k
+
+setcc = (cc: int):
+    b(0x0F)
+    b(0x90 + cc)
+    b(0xC0)        # al
+    b(0x0F)
+    b(0xB6)
+    b(0xC0)        # movzx eax, al
+
+
+# ---------------- register allocation ----------------
+# vreg locations: >= 0 register (0-15 general, 16+n = xmm n); or one of:
+const LOC_SPILL = -1
+const LOC_CONST = -2
+const LOC_SLOT = -3
+const LOC_NONE = -4
+const LOC_GLOBAL = -5
+const LOC_FCONST = -6        # a float constant: read from read-only data where used (vcval: its bits)
+const RIPREL = 99            # pseudo base register for rip-relative addressing
+vgkind: int[]
+vgoff: int[]
+const XMM = 16
+const INF_POS = 1 << 60
+
+vloc: int[]
+vspill: int[]
+vcval: int[]
+vslot: int[]
+vsoff: int[]
+slot_off: int[]
+frame_size = 0
+callee_off: int[]          # save offset per register (0 = not used)
+const WATCH_CODE_AT = 0x50000000       # sloppy watch: where later builds' code goes (above where the
+const WATCH_CODE_SIZE = 0x20000000     # heap may start, within 2 GB of the globals)
+
+ra_on = true              # false: spill everything (fast debug codegen)
+ra_prio = true            # (release builds: allocate_release; SLOPPY_RA_LINEAR=1: allocate)
+callee_pool = [RBX, 12, 13, 14, 15]
+is_callee = [false, false, false, true, false, false, false, false, false, false, false, false, true, true, true, true]
+caller_pool = [RSI, RDI, R8, R9, R10, R11]
+
+vsave: bool[]              # in a caller-saved register, saved/restored around calls
+dbg_keep: bool[]           # (sloppy build -g) a variable's: not in a register a call changes
+save_list: int[]
+v_first: int[]
+v_last: int[]
+v_ndef: int[]
+v_nuse: int[]
+v_weight: int[]            # uses and definitions, weighted by loop depth (what spilling costs)
+call_pos: int[]
+call_w: int[]              # per call: its weight by loop depth
+loop_s: int[]
+loop_e: int[]
+use_buf: int[]
+
+# struct copies/clears up to this size are emitted inline
+const INLINE_COPY = 256
+
+call_like = (ins: Ins) -> bool:
+    op = ins.op
+    if op == .intr and ins.imm >= 2: return true
+    if op == .call and ins.c == 1 and not dbg_on: return false      # never returns (a panic: with -g, where its caller's variables must be readable)
+    if op == .call and ins.c >= CALL_IF_SHARED and ins.c <= CALL_RC_DEC and not target_wasm: return false     # (through a stub keeping every register)
+    if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset: return true
+    if op == .copy or op == .zero: return ins.imm > INLINE_COPY
+    false
+
+# fills use_buf with used vregs; returns the defined vreg or -1
+operands = (ins: Ins) -> int:
+    use_buf.clear()
+    op = ins.op
+    a = int(ins.a)
+    bb = int(ins.b)
+    d = int(ins.dst)
+    match op:
+        nop, block, loop, end, else_, br, trap: return -1
+        iconst, fconst, slot, gaddr, daddr, faddr: return d
+        intr:
+            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
+            return d
+        if_, brif, brtable, assume:
+            use_buf.push(a)
+            return -1
+        ret:
+            if a >= 0: use_buf.push(a)
+            return -1
+        store, copy:
+            use_buf.push(a)
+            use_buf.push(bb)
+            if op == .store and int(ins.c) & M_INDEX != 0: use_buf.push(d)
+            return -1
+        vst:
+            use_buf.push(a)
+            use_buf.push(bb)
+            use_buf.push(d)
+            return -1
+        vsplat:
+            use_buf.push(a)
+            return d
+        vzu: return -1
+        zero:
+            use_buf.push(a)
+            return -1
+        memcpy, memset, vop:
+            use_buf.push(a)
+            use_buf.push(bb)
+            use_buf.push(int(ins.c))
+            return -1
+        zeroslots:
+            # defines vreg items (handled by caller via args)
+            return -1
+        call, syscall:
+            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
+            return d
+        calli, callc:
+            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
+            use_buf.push(int(ins.c))
+            return d
+        load:
+            use_buf.push(a)
+            if int(ins.c) & M_INDEX != 0: use_buf.push(bb)
+            return d
+        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
+            use_buf.push(a)
+            return d
+        _:
+            use_buf.push(a)
+            use_buf.push(bb)
+            return d
+
+fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
+
+# a vector operand into xmm x: n f32 lanes from memory, or a scalar repeated in every lane
+vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):
+    if splat:
+        s = xreg_of(v, x, VS)
+        if s != x: sse_rr(0, 0x28, x, s)                                 # movaps
+        sse_rr(0, 0xC6, x, x)                                            # shufps x, x, 0
+        b(0)
+        return
+    base, disp = addr_reg(v, scratch)
+    if n == 4: sse_rm(0, 0x10, x, base, disp)                            # movups
+    else:
+        sse_rm(0xF2, 0x10, x, base, disp)                                # movsd
+        if n == 3:
+            sse_rm(0xF3, 0x10, 15, base, disp + 8)                       # movss
+            sse_rr(0, 0x16, x, 15)                                       # movlhps x, xmm15
+
+analyze = ():
+    nv = ir.vtypes.len()
+    v_first = fill(INF_POS, nv)
+    v_last = fill(-1, nv)
+    v_ndef = fill(0, nv)
+    v_nuse = fill(0, nv)
+    v_weight = fill(0, nv)
+    vloc = fill(LOC_SPILL, nv)
+    vcval = fill(0, nv)
+    vslot = fill(-1, nv)
+    vsoff = fill(0, nv)
+    vgkind = fill(0, nv)
+    vgoff = fill(0, nv)
+    call_pos = []
+    call_w = []
+    loop_s = []
+    loop_e = []
+    kinds: int[]
+    starts: int[]
+    loop p in [0..ir.nparams):
+        v_first[p] = 0
+        v_last[p] = 0
+        v_ndef[p] = 1
+    loop v in [0..ir.kval.len()):
+        if is_kv(v):
+            v_ndef[v] = 1
+            vloc[v] = LOC_CONST
+            vcval[v] = ir.kval[v]
+    depth = 0
+    loop pos in 0.. and ins in ir.code:
+        d = operands(ins)
+        w = 1 << (3 * min(depth, 6))
+        loop u in use_buf:
+            if pos < v_first[u]: v_first[u] = pos
+            if pos > v_last[u]: v_last[u] = pos
+            v_nuse[u] += 1
+            v_weight[u] += w
+        if d >= 0:
+            if pos < v_first[d]: v_first[d] = pos
+            if pos > v_last[d]: v_last[d] = pos
+            v_ndef[d] += 1
+            v_weight[d] += w
+            if v_ndef[d] == 1:
+                op = ins.op
+                if op == .iconst and fits32(ins.imm):
+                    vloc[d] = LOC_CONST
+                    vcval[d] = ins.imm
+                else if op == .fconst:
+                    vloc[d] = LOC_FCONST
+                    vcval[d] = ins.imm
+                else if op == .slot:
+                    vloc[d] = LOC_SLOT
+                    vslot[d] = int(ins.a)
+                else if op == .gaddr or op == .daddr:
+                    vloc[d] = LOC_GLOBAL
+                    vgoff[d] = int(ins.imm)
+                    if op == .gaddr: vgkind[d] = 1
+                else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and v_ndef[int(ins.a)] == 1 and v_ndef[int(ins.b)] == 1:
+                    vloc[d] = LOC_SLOT
+                    vslot[d] = vslot[int(ins.a)]
+                    vsoff[d] = vsoff[int(ins.a)] + vcval[int(ins.b)]
+        if ins.op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(ir.args[int(ins.a) + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if pos < v_first[v]: v_first[v] = pos
+                    if pos > v_last[v]: v_last[v] = pos
+                    v_ndef[v] += 2
+        if call_like(ins):
+            call_pos.push(pos)
+            # (a call on a rarely taken path counts as if outside any loop)
+            if ins.op == .call and ins.c == 2: call_w.push(1)
+            else: call_w.push(w)
+        if ins.op == .block or ins.op == .loop or ins.op == .if_:
+            kinds.push(int(ins.op))
+            starts.push(pos)
+            if ins.op == .loop: depth += 1
+        else if ins.op == .end:
+            k = kinds.pop()
+            s = starts.pop()
+            if k == int(Op.loop):
+                depth -= 1
+                loop_s.push(s)
+                loop_e.push(pos)
+    # (sloppy build -g: each variable lives on to the end of the function, where debuggers can
+    # read it, and not in a register a call changes: dbg_keep)
+    if dbg_on:
+        dbg_keep = fill(false, nv)
+        loop l in ir.dbg_locals:
+            if locals[l].offset >= 0 or int(locals[l].flags) & (LF_CAPTURE | LF_ALIAS) != 0: continue
+            v = int(locals[l].vreg)
+            if v < 0 or v >= nv or v_last[v] < 0: continue
+            dbg_keep[v] = true
+            v_last[v] = ir.code.len()
+            v_nuse[v] += 1
+    # a vreg defined more than once can't stay a constant/address
+    loop v in [0..nv):
+        if v_ndef[v] != 1 and (vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL): vloc[v] = LOC_SPILL
+    # loops in order of their start
+    nl = loop_s.len()
+    order: int[]
+    loop i in [0..nl): order.push(i)
+    order.sort_by((i: int): loop_s[i])
+    ls: int[]
+    le: int[]
+    loop i in order:
+        ls.push(loop_s[i])
+        le.push(loop_e[i])
+    loop_s = ls
+    loop_e = le
+    # extend intervals of values live around loops
+    loop v in [0..nv):
+        if v_last[v] < 0: continue
+        f = live_start(v)
+        # first loop starting after f
+        lo = 0
+        hi = nl
+        loop lo < hi:
+            mid = (lo + hi) / 2
+            if loop_s[mid] <= f: lo = mid + 1
+            else: hi = mid
+        i = lo
+        loop i < nl and loop_s[i] <= v_last[v]:
+            if loop_e[i] > v_last[v]: v_last[v] = loop_e[i]
+            i += 1
+
+hint_op = (op: Op) -> bool:
+    match op:
+        mov, add, sub, mul, and_, or_, xor, shl, shrs, shru, neg, not_, load: true
+        fadd, fsub, fmul, fdiv, fmin, fmax, fneg, fabs: true
+        sext8, sext16, sext32, zext8, zext16, zext32: true
+        _: false
+
+# operand whose register the value defined at pos can reuse (-1: none)
+hint_operand = (v: int, pos: int) -> int:
+    if v < ir.nparams or pos >= ir.code.len(): return -1
+    ins = ir.code[pos]
+    if int(ins.dst) != v or not hint_op(ins.op): return -1
+    a = int(ins.a)
+    if a < 0 or a == v or vloc[a] < 0 or v_last[a] != pos: return -1
+    if (vloc[a] >= XMM) != (vtype(v) != VI): return -1
+    a
+
+# params are live on entry, before the first instruction
+live_start = (v: int) -> int:
+    if v < ir.nparams: return -1
+    v_first[v]
+
+crosses_call = (s: int, e: int) -> bool:
+    lo = 0
+    hi = call_pos.len()
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        if call_pos[mid] <= s: lo = mid + 1
+        else: hi = mid
+    lo < call_pos.len() and call_pos[lo] < e
+
+# is a cheaper to spill than b: fewer weighted uses per instruction it lives (ties: lives longer)
+spills_before = (a: int, b: int) -> bool:
+    la = v_last[a] - live_start(a) + 1
+    lb = v_last[b] - live_start(b) + 1
+    x = v_weight[a] * lb
+    y = v_weight[b] * la
+    x < y or (x == y and v_last[a] > v_last[b])
+
+allocate = ():
+    nv = ir.vtypes.len()
+    callee_off = fill(0, 16)
+    vsave = fill(false, nv)
+    if not ra_on:
+        loop v in [0..nv):
+            if vloc[v] != LOC_CONST and vloc[v] != LOC_FCONST and vloc[v] != LOC_SLOT and vloc[v] != LOC_GLOBAL: vloc[v] = LOC_SPILL
+        return
+    # bucket vregs by interval start
+    n = ir.code.len() + 1
+    head = fill(-1, n)
+    nxt = fill(-1, nv)
+    loop v in [0..nv):
+        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
+        if v_last[v] < 0:
+            vloc[v] = LOC_NONE
+            continue
+        if v_nuse[v] == 0 and v >= ir.nparams:
+            vloc[v] = LOC_NONE
+            continue
+        f = v_first[v]
+        nxt[v] = head[f]
+        head[f] = v
+    free = fill(true, 32)
+    loop r in [RAX, RCX, RDX, RSP, RBP]: free[r] = false
+    free[XMM + 0] = false
+    free[XMM + 1] = false
+    free[XMM + 15] = false
+    active: int[]
+    in_active = fill(false, nv)
+    min_end = INF_POS      # earliest end among active intervals
+    loop pos in [0..n):
+        v = head[pos]
+        if v >= 0 and min_end < pos:
+            # expire old intervals
+            min_end = INF_POS
+            k = 0
+            loop k < active.len():
+                a = active[k]
+                if v_last[a] < pos:
+                    free[vloc[a]] = true
+                    in_active[a] = false
+                    active[k] = active[active.len() - 1]
+                    active.pop()
+                else:
+                    if v_last[a] < min_end: min_end = v_last[a]
+                    k += 1
+        loop v >= 0:
+            crosses = crosses_call(live_start(v), v_last[v])
+            reg = -1
+            # two-operand forms: take over the register of a first operand that dies here
+            h = hint_operand(v, pos)
+            # (not a caller-saved register for a value living across calls: a callee-saved one
+            # costs a move here, not a save and a reload at every call)
+            if h >= 0 and crosses and vloc[h] < XMM and not is_callee[vloc[h]]: h = -1
+            if h >= 0 and crosses and dbg_on and dbg_keep[v] and vloc[h] >= XMM: h = -1
+            if h >= 0 and in_active[h]:
+                reg = vloc[h]
+                active.remove(active.index_of(h))
+                in_active[h] = false
+                vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
+                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
+            else if vtype(v) != VI:
+                # all xmm registers are caller-saved: values living across calls are saved around them
+                # (not a variable of -g: in the frame then)
+                if not (crosses and dbg_on and dbg_keep[v]):
+                    loop x in [2..15):
+                        if free[XMM + x]:
+                            reg = XMM + x
+                            vsave[v] = crosses
+                            break
+            else:
+                if not crosses:
+                    loop r in caller_pool:
+                        if free[r]:
+                            reg = r
+                            break
+                if reg < 0:
+                    loop r in callee_pool:
+                        if free[r]:
+                            reg = r
+                            break
+                if reg < 0 and crosses and not (dbg_on and dbg_keep[v]):
+                    loop r in caller_pool:
+                        if free[r]:
+                            reg = r
+                            vsave[v] = true
+                            break
+            if reg < 0:
+                # steal from the active value that is cheapest to spill for the span it holds
+                # a register (used least, outside loops), if that is cheaper than this one
+                # (a value living across calls may take a caller-saved register: it is then
+                # saved and restored around the calls, which beats reading it from memory at
+                # every use when the calls are rarer than the uses)
+                best = -1
+                loop a in active:
+                    ra = vloc[a]
+                    if (ra >= XMM) != (vtype(v) != VI): continue
+                    if crosses and dbg_on and dbg_keep[v] and (ra >= XMM or not is_callee[ra]): continue
+                    if not spills_before(a, v): continue
+                    if best < 0 or spills_before(a, best): best = a
+                if best >= 0:
+                    reg = vloc[best]
+                    vloc[best] = LOC_SPILL
+                    vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
+                    active.remove(active.index_of(best))
+                    in_active[best] = false
+            if reg >= 0:
+                vloc[v] = reg
+                free[reg] = false
+                active.push(v)
+                in_active[v] = true
+                if v_last[v] < min_end: min_end = v_last[v]
+                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
+            else: vloc[v] = LOC_SPILL
+            v = nxt[v]
+
+# release builds: two passes of linear scan. First the integer values living across calls
+# in loops or several of them (not counting those on rarely taken paths) get the callee-saved
+# registers (where more want one than
+# there are, those used most); then the rest are allocated as by allocate, around them, with a
+# value living across calls given a caller-saved register (saved and reloaded around each call)
+# only when that costs less than spilling it. A bitmap per register marks the instructions pass
+# 1 holds it at.
+ra_occ: int[]
+ra_words = 0
+ra_cw: int[]                # prefix sums of call weights
+ra_dump = ""                # (SLOPPY_RADUMP=f_name: print the allocation of that function)
+ra_only = ""                # (SLOPPY_RA_ONLY=f_name: allocate only that function this way)
+
+# mask of bits lo..hi (0..63) of a word
+ra_mask = (lo: int, hi: int) -> int:
+    m = -1 << lo
+    if hi < 63: m = m & ((1 << (hi + 1)) - 1)
+    m
+
+# is register r free at instructions s..e (shifted by 1: parameters start at -1)?
+ra_free = (r: int, s: int, e: int) -> bool:
+    if s > e: return true
+    base = r * ra_words
+    ws = s >> 6
+    we = e >> 6
+    w = ws
+    loop w <= we:
+        lo = 0
+        hi = 63
+        if w == ws: lo = s & 63
+        if w == we: hi = e & 63
+        if ra_occ[base + w] & ra_mask(lo, hi) != 0: return false
+        w += 1
+    true
+
+ra_take = (r: int, s: int, e: int):
+    base = r * ra_words
+    ws = s >> 6
+    we = e >> 6
+    w = ws
+    loop w <= we:
+        lo = 0
+        hi = 63
+        if w == ws: lo = s & 63
+        if w == we: hi = e & 63
+        ra_occ[base + w] = ra_occ[base + w] | ra_mask(lo, hi)
+        w += 1
+
+# weight of the calls strictly inside s..e
+ra_cross_w = (s: int, e: int) -> int:
+    lo = 0
+    hi = call_pos.len()
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        if call_pos[mid] <= s: lo = mid + 1
+        else: hi = mid
+    a = lo
+    hi = call_pos.len()
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        if call_pos[mid] < e: lo = mid + 1
+        else: hi = mid
+    if lo <= a: return 0
+    ra_cw[lo] - ra_cw[a]
+
+allocate_release = ():
+    nv = ir.vtypes.len()
+    callee_off = fill(0, 16)
+    vsave = fill(false, nv)
+    n = ir.code.len() + 1
+    head = fill(-1, n)
+    nxt = fill(-1, nv)
+    ra_cw = fill(0, call_pos.len() + 1)
+    loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]
+    cross = fill(0, nv)
+    loop v in [0..nv):
+        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
+        if v_last[v] < 0 or (v_nuse[v] == 0 and v >= ir.nparams):
+            vloc[v] = LOC_NONE
+            continue
+        cross[v] = ra_cross_w(live_start(v), v_last[v])
+        f = v_first[v]
+        nxt[v] = head[f]
+        head[f] = v
+    ra_words = (n + 1) / 64 + 1
+    ra_occ = fill(0, 32 * ra_words)
+    # pass 1: integer values living across calls, into callee-saved registers (in order of
+    # start; when there are too many, those used most keep them)
+    placed = fill(false, nv)
+    active: int[]
+    loop pos in [0..n):
+        v = head[pos]
+        if v < 0: continue
+        k = 0
+        loop k < active.len():
+            if v_last[active[k]] < pos:
+                active[k] = active[active.len() - 1]
+                active.pop()
+            else: k += 1
+        loop v >= 0:
+            # (a value crossing just one call outside loops: a caller-saved register saved
+            # around it costs the same when the call is made, and nothing on paths without it,
+            # where a callee-saved one is saved and restored on every path)
+            if cross[v] > 1 and vtype(v) == VI:
+                reg = -1
+                loop r in callee_pool:
+                    used = false
+                    loop a in active:
+                        if vloc[a] == r: used = true
+                    if not used:
+                        reg = r
+                        break
+                if reg < 0:
+                    best = -1
+                    loop a in active:
+                        if v_weight[a] < v_weight[v] and (best < 0 or v_weight[a] < v_weight[best]): best = a
+                    if best >= 0:
+                        reg = vloc[best]
+                        vloc[best] = LOC_SPILL
+                        placed[best] = false
+                        active.remove(active.index_of(best))
+                if reg >= 0:
+                    vloc[v] = reg
+                    placed[v] = true
+                    active.push(v)
+            v = nxt[v]
+    loop v in [0..nv):
+        if placed[v]:
+            ra_take(vloc[v], live_start(v) + 1, v_last[v] + 1)
+            callee_off[vloc[v]] = 1
+    # pass 2: the rest by linear scan, around what pass 1 placed
+    free = fill(true, 32)
+    loop r in [RAX, RCX, RDX, RSP, RBP]: free[r] = false
+    free[XMM + 0] = false
+    free[XMM + 1] = false
+    free[XMM + 15] = false
+    active.clear()
+    in_active = fill(false, nv)
+    min_end = INF_POS
+    loop pos in [0..n):
+        v = head[pos]
+        if v >= 0 and min_end < pos:
+            min_end = INF_POS
+            k = 0
+            loop k < active.len():
+                a = active[k]
+                if v_last[a] < pos:
+                    free[vloc[a]] = true
+                    in_active[a] = false
+                    active[k] = active[active.len() - 1]
+                    active.pop()
+                else:
+                    if v_last[a] < min_end: min_end = v_last[a]
+                    k += 1
+        loop v >= 0:
+            if placed[v]:
+                v = nxt[v]
+                continue
+            s = live_start(v) + 1
+            e = v_last[v] + 1
+            c = cross[v]
+            # a caller-saved register for a value living across calls: only if saving and
+            # reloading it around them costs less than spilling it
+            caller_ok = c == 0 or 4 * c < 2 * v_weight[v]
+            reg = -1
+            h = hint_operand(v, pos)
+            if h >= 0 and in_active[h]:
+                r = vloc[h]
+                ok = ra_free(r, s + 1, e)
+                if r < XMM and not is_callee[r] and not caller_ok: ok = false
+                if r >= XMM and not caller_ok: ok = false
+                if ok:
+                    reg = r
+                    active.remove(active.index_of(h))
+                    in_active[h] = false
+            if reg < 0:
+                if vtype(v) != VI:
+                    if caller_ok:
+                        loop x in [2..15):
+                            if free[XMM + x] and ra_free(XMM + x, s, e):
+                                reg = XMM + x
+                                break
+                else:
+                    # (across calls: a callee-saved register; across just one outside loops,
+                    # one the prologue saves already, else a caller-saved one first)
+                    if c > 0:
+                        loop r in callee_pool:
+                            if free[r] and (c > 1 or callee_off[r] != 0) and ra_free(r, s, e):
+                                reg = r
+                                break
+                    if reg < 0 and caller_ok:
+                        loop r in caller_pool:
+                            if free[r] and ra_free(r, s, e):
+                                reg = r
+                                break
+                    if reg < 0 and c <= 1:
+                        loop r in callee_pool:
+                            if free[r] and ra_free(r, s, e):
+                                reg = r
+                                break
+            if reg < 0 and (c == 0 or caller_ok or vtype(v) == VI):
+                # steal from the active value cheapest to spill for the span it holds a
+                # register, if that is cheaper than this one and the register is free (of
+                # pass 1's values) for all of this one
+                best = -1
+                loop a in active:
+                    ra = vloc[a]
+                    if (ra >= XMM) != (vtype(v) != VI): continue
+                    if not spills_before(a, v): continue
+                    if (ra >= XMM or not is_callee[ra]) and not caller_ok: continue
+                    if not ra_free(ra, s, e): continue
+                    if best < 0 or spills_before(a, best): best = a
+                if best >= 0:
+                    reg = vloc[best]
+                    vloc[best] = LOC_SPILL
+                    vsave[best] = false
+                    active.remove(active.index_of(best))
+                    in_active[best] = false
+            if reg >= 0:
+                vloc[v] = reg
+                vsave[v] = c > 0 and (reg >= XMM or not is_callee[reg])
+                free[reg] = false
+                active.push(v)
+                in_active[v] = true
+                if v_last[v] < min_end: min_end = v_last[v]
+                if reg < XMM and is_callee[reg]: callee_off[reg] = 1
+            else: vloc[v] = LOC_SPILL
+            v = nxt[v]
+    if len(ra_dump) > 0 and ir.name == ra_dump:
+        loop v in [0..nv):
+            if v_last[v] < 0: continue
+            tag = ""
+            if placed[v]: tag = " (pass 1)"
+            eprint("v{v} {live_start(v)}..{v_last[v]} w {v_weight[v]} calls {cross[v]} -> {vloc[v]}{tag}")
+
+layout_frame = ():
+    off = 0
+    loop r in [0..16):
+        if callee_off[r] != 0:
+            off += 8
+            callee_off[r] = -off
+    nv = ir.vtypes.len()
+    vspill = fill(0, nv)
+    save_list = []
+    loop v in [0..nv):
+        if vloc[v] == LOC_SPILL or (vsave[v] and vloc[v] >= 0):
+            off += 8
+            if is_vreg_vec(vtype(v)): off += 24      # (vectors take 32 bytes)
+            vspill[v] = -off
+            if vloc[v] >= 0: save_list.push(v)
+    slot_off = fill(0, ir.slot_size.len())
+    loop s in [0..ir.slot_size.len()):
+        sz = int(ir.slot_size[s])
+        al = int(ir.slot_align[s])
+        off = align_up(off + sz, al)
+        slot_off[s] = -off
+    frame_size = align_up(off, 16)
+
+# ---------------- operand access ----------------
+is_xmm = (r: int) -> bool: r >= XMM
+slot_disp = (v: int) -> int: slot_off[vslot[v]] + vsoff[v]
+
+# value of int vreg v into register r
+ld = (r: int, v: int):
+    l = vloc[v]
+    if l >= 0:
+        if l != r: mov_rr(r, l)
+    else if l == LOC_SPILL: mov_rm(r, RBP, vspill[v])
+    else if l == LOC_CONST or l == LOC_FCONST: mov_imm(r, vcval[v])
+    else if l == LOC_SLOT: lea(r, RBP, slot_disp(v))
+    else if l == LOC_GLOBAL: rel_fixup_lea(r, vgkind[v], vgoff[v])
+    else: mov_imm(r, 0)
+
+# register holding int vreg v (loads into scratch if needed)
+reg_of = (v: int, scratch: int) -> int:
+    l = vloc[v]
+    if l >= 0 and l < XMM: return l
+    ld(scratch, v)
+    scratch
+
+# store register r into vreg v
+st = (v: int, r: int):
+    l = vloc[v]
+    if l >= 0:
+        if l != r: mov_rr(l, r)
+    else if l == LOC_SPILL: mov_mr(RBP, vspill[v], r)
+
+# destination register for v (its own register, or scratch)
+dreg = (v: int, scratch: int) -> int:
+    l = vloc[v]
+    if l >= 0 and l < XMM: return l
+    scratch
+
+# register copies use movaps: movsd/movss would merge into (and wait for) the old destination
+movsd_rr = (x: int, y: int, ty: int):
+    if x == y: return
+    if ty == VY:
+        vmov_rr(x, y, ty)
+        return
+    sse_rr(0, 0x28, x, y)
+
+# break the false dependency of scalar sqrt/convert instructions on their destination
+xzero = (x: int): sse_rr(0, 0x57, x, x)          # xorps x, x
+
+lds = (x: int, v: int, ty: int):
+    l = vloc[v]
+    if l >= XMM: movsd_rr(x, l - XMM, ty)
+    else if l == LOC_SPILL and is_vreg_vec(ty): vmov_rm(x, RBP, vspill[v], ty)
+    else if l == LOC_SPILL:
+        if ty == VS: sse_rm(0xF3, 0x10, x, RBP, vspill[v])
+        else: sse_rm(0xF2, 0x10, x, RBP, vspill[v])
+    else if l == LOC_FCONST:
+        if vcval[v] == 0: xzero(x)
+        else:
+            # (rip_kind may be set for a global the instruction this is for accesses)
+            saved = rip_kind
+            rip_kind = 0
+            sse_rm(fpre(ty), 0x10, x, RIPREL, ro_const(vcval[v]))
+            rip_kind = saved
+    else:
+        ld(RAX, v)
+        movq_xr(x, RAX)
+sts = (v: int, x: int, ty: int):
+    l = vloc[v]
+    if l >= XMM: movsd_rr(l - XMM, x, ty)
+    else if l == LOC_SPILL and is_vreg_vec(ty): vmov_mr(RBP, vspill[v], x, ty)
+    else if l == LOC_SPILL:
+        if ty == VS: sse_rm(0xF3, 0x11, x, RBP, vspill[v])
+        else: sse_rm(0xF2, 0x11, x, RBP, vspill[v])
+xreg_of = (v: int, scratch: int, ty: int) -> int:
+    l = vloc[v]
+    if l >= XMM: return l - XMM
+    lds(scratch, v, ty)
+    scratch
+xdreg = (v: int, scratch: int) -> int:
+    l = vloc[v]
+    if l >= XMM: return l - XMM
+    scratch
+
+movq_xr = (x: int, r: int):
+    b(0x66)
+    rex(true, x, 0, r, false)
+    b(0x0F)
+    b(0x6E)
+    modrr(x, r)
+movq_rx = (r: int, x: int):
+    b(0x66)
+    rex(true, x, 0, r, false)
+    b(0x0F)
+    b(0x7E)
+    modrr(x, r)
+
+# ALU r, operand(v): register / memory / imm32 forms
+# opc_rr: "op r/m64, r64" opcode (e.g. 0x01 add); ext: /digit for 0x81 imm form
+alu_v = (opc_rr: int, ext: int, r: int, v: int):
+    l = vloc[v]
+    if l >= 0 and l < XMM: op_rr(opc_rr, true, l, r)
+    else if l == LOC_CONST:
+        c = vcval[v]
+        rex(true, 0, 0, r, false)
+        if c >= -128 and c <= 127:
+            b(0x83)
+            modrr(ext, r)
+            b(c)
+        else:
+            b(0x81)
+            modrr(ext, r)
+            b32(c)
+    else if l == LOC_SPILL: op_rm(opc_rr + 2, true, r, RBP, vspill[v])
+    else:
+        ld(RCX, v)
+        op_rr(opc_rr, true, RCX, r)
+
+# memory base for an address vreg: returns (base register, displacement)
+addr_of = (v: int, scratch: int) -> (int, int):
+    if vloc[v] == LOC_SLOT: return (RBP, slot_disp(v))
+    if vloc[v] == LOC_GLOBAL:
+        rip_kind = vgkind[v]
+        return (RIPREL, vgoff[v])
+    (reg_of(v, scratch), 0)
+
+# like addr_of, but never rip-relative (for instructions with two memory operands)
+addr_reg = (v: int, scratch: int) -> (int, int):
+    if vloc[v] == LOC_SLOT: return (RBP, slot_disp(v))
+    (reg_of(v, scratch), 0)
+
+# ---------------- parallel moves ----------------
+# moves of values into registers: dst register <- vreg
+struct PMove:
+    dst: int
+    v: int
+
+src_reg = (v: int) -> int:
+    l = vloc[v]
+    if l >= 0: return l
+    -1
+
+emit_parallel = (moves: PMove[]):
+    pending = moves
+    # register to register moves first (with cycle breaking via the stack)
+    loop true:
+        progress = false
+        any_reg = false
+        k = 0
+        loop k < pending.len():
+            m = pending[k]
+            s = src_reg(m.v)
+            if s < 0 or s == m.dst:
+                k += 1
+                continue
+            any_reg = true
+            blocked = false
+            loop o in pending:
+                if src_reg(o.v) == m.dst and o.dst != m.dst: blocked = true
+            if not blocked:
+                if is_xmm(m.dst): movsd_rr(m.dst - XMM, s - XMM, VF)
+                else: mov_rr(m.dst, s)
+                pending.remove(k)
+                progress = true
+            else: k += 1
+        if not any_reg: break
+        if not progress:
+            # cycle: save one source on the stack, redirect its readers
+            loop i in 0.. and m in pending:
+                s = src_reg(m.v)
+                if s >= 0 and s != m.dst:
+                    if is_xmm(s):
+                        movq_rx(RAX, s - XMM)
+                        b(0x50)
+                    else:
+                        rex(false, 0, 0, s, false)
+                        b(0x50 + (s & 7))
+                    # pop into destination after everything else
+                    cyc_dst = m.dst
+                    pending.remove(i)
+                    emit_parallel(pending)
+                    if is_xmm(cyc_dst):
+                        b(0x58)
+                        movq_xr(cyc_dst - XMM, RAX)
+                    else:
+                        rex(false, 0, 0, cyc_dst, false)
+                        b(0x58 + (cyc_dst & 7))
+                    return
+    # remaining: sources in memory, constants, slot addresses (or already in place)
+    loop m in pending:
+        if src_reg(m.v) == m.dst: continue
+        if is_xmm(m.dst): lds(m.dst - XMM, m.v, vtype(m.v))
+        else: ld(m.dst, m.v)
+
+# ---------------- function body ----------------
+struct XCtl:
+    kind: int     # 0 block, 1 loop, 2 if
+    start: int
+    fixups: int[]
+    ifx: int[]    # jumps to the else branch
+
+xctl: XCtl[]
+call_stack_bytes = 0
+
+uw_fo = 0                   # (Windows: the function's rbp is rsp + 16 uw_fo, its unwind codes at uw_at)
+uw_at = 0
+
+emit_prologue = ():
+    b(0x55)                        # push rbp
+    nsave = 0
+    loop r in [0..16):
+        if callee_off[r] != 0: nsave += 1
+    uw_fo = 0
+    if target_windows and nsave > 0: uw_fo = (8 * nsave + 15) / 16
+    if uw_fo > 0:
+        # (Windows: rbp is set as rsp + 16 fo, as its unwind codes can say, so the registers
+        # saved below rbp are above where unwinding starts and the codes can say where: pe.jo)
+        start = fn_addr[ir.fn_index]
+        uw_at = uw_data.len()
+        uw_data.push(frame_size)
+        uw_data.push(uw_fo)
+        rex(true, 0, 0, RSP, false)
+        b(0x83)
+        modrr(5, RSP)
+        b(16 * uw_fo)              # sub rsp, 16 fo
+        uw_data.push(code.len() - start)
+        lea(RBP, RSP, 16 * uw_fo)
+        uw_data.push(code.len() - start)
+        if frame_size > 16 * uw_fo:
+            rex(true, 0, 0, RSP, false)
+            b(0x81)
+            modrr(5, RSP)
+            b32(frame_size - 16 * uw_fo)
+        uw_data.push(code.len() - start)
+        uw_data.push(nsave)
+        loop r in [0..16):
+            if callee_off[r] != 0:
+                mov_mr(RBP, callee_off[r], r)
+                uw_data.push(code.len() - start)
+                uw_data.push(r)
+                uw_data.push(callee_off[r] + 16 * uw_fo)
+    else:
+        mov_rr(RBP, RSP)
+        if frame_size > 0:
+            rex(true, 0, 0, RSP, false)
+            b(0x81)
+            modrr(5, RSP)
+            b32(frame_size)        # sub rsp, frame
+        loop r in [0..16):
+            if callee_off[r] != 0: mov_mr(RBP, callee_off[r], r)
+    # incoming parameters
+    ni = 0
+    nf = 0
+    stack_k = 0
+    moves: PMove[]
+    stack_params: (int, int)[]
+    reg_spills: (int, int)[]
+    loop p in [0..ir.nparams):
+        ty = vtype(p)
+        src = -1
+        if ty == VI:
+            if ni < 6:
+                src = int_arg_regs[ni]
+                ni += 1
+        else:
+            if nf < 8:
+                src = XMM + nf
+                nf += 1
+        if src < 0:
+            stack_params.push((p, 16 + 8 * stack_k))
+            stack_k += 1
+            continue
+        l = vloc[p]
+        if l == LOC_NONE: continue
+        if l == LOC_SPILL: reg_spills.push((p, src))
+        else: moves.push(PMove(l, p))
+        # record the incoming register as the temporary source location
+        pin_src.push((p, src))
+    # spills first (they read incoming registers)
+    loop rs in reg_spills:
+        if is_xmm(rs.1):
+            if vtype(rs.0) == VS: sse_rm(0xF3, 0x11, rs.1 - XMM, RBP, vspill[rs.0])
+            else: sse_rm(0xF2, 0x11, rs.1 - XMM, RBP, vspill[rs.0])
+        else: mov_mr(RBP, vspill[rs.0], rs.1)
+    # register moves: sources are the incoming registers
+    saved = vloc
+    loop ps in pin_src: vloc[ps.0] = ps.1
+    real: PMove[]
+    loop m in moves: real.push(m)
+    emit_parallel(real)
+    vloc = saved
+    pin_src.clear()
+    loop sp in stack_params:
+        p = sp.0
+        l = vloc[p]
+        if l == LOC_NONE: continue
+        if vtype(p) == VI:
+            mov_rm(RAX, RBP, sp.1)
+            st(p, RAX)
+        else:
+            sse_rm(0xF2, 0x10, 0, RBP, sp.1)
+            sts(p, 0, vtype(p))
+
+pin_src: (int, int)[]
+
+emit_epilogue = ():
+    loop r in [0..16):
+        if callee_off[r] != 0: mov_rm(r, RBP, callee_off[r])
+    mov_rr(RSP, RBP)
+    b(0x5D)       # pop rbp
+    if dbg_on: dbg_epis.push(code.len())
+    b(0xC3)       # ret
+
+emit_call_args = (start: int, n: int, extra: int, extra_dst: int):
+    ni = 0
+    nf = 0
+    stack_args: int[]
+    moves: PMove[]
+    loop k in [0..n):
+        v = int(ir.args[start + k])
+        ty = vtype(v)
+        if ty == VI:
+            if ni < 6:
+                moves.push(PMove(int_arg_regs[ni], v))
+                ni += 1
+                continue
+        else:
+            if nf < 8:
+                moves.push(PMove(XMM + nf, v))
+                nf += 1
+                continue
+        stack_args.push(v)
+    if extra >= 0: moves.push(PMove(extra_dst, extra))
+    pad = (stack_args.len() % 2) * 8
+    if pad > 0:
+        rex(true, 0, 0, RSP, false)
+        b(0x83)
+        modrr(5, RSP)
+        b(8)
+    i = stack_args.len() - 1
+    loop i >= 0:
+        v = stack_args[i]
+        if vtype(v) == VI: ld(RAX, v)
+        else:
+            lds(0, v, vtype(v))
+            movq_rx(RAX, 0)
+        b(0x50)
+        i -= 1
+    emit_parallel(moves)
+    call_stack_bytes = pad + stack_args.len() * 8
+
+# a call of a C function on Windows: the first four arguments in rcx, rdx, r8, r9 or xmm0-3 by
+# position, the rest on the stack above 32 bytes the callee may use ("shadow space")
+emit_call_args_win64 = (start: int, n: int, extra: int, extra_dst: int):
+    regs = [RCX, RDX, 8, 9]
+    stack_args: int[]
+    moves: PMove[]
+    loop k in [0..n):
+        v = int(ir.args[start + k])
+        if k < 4:
+            if vtype(v) == VI: moves.push(PMove(regs[k], v))
+            else: moves.push(PMove(XMM + k, v))
+        else: stack_args.push(v)
+    if extra >= 0: moves.push(PMove(extra_dst, extra))
+    pad = (stack_args.len() % 2) * 8
+    if pad > 0:
+        rex(true, 0, 0, RSP, false)
+        b(0x83)
+        modrr(5, RSP)
+        b(8)
+    i = stack_args.len() - 1
+    loop i >= 0:
+        v = stack_args[i]
+        if vtype(v) == VI: ld(RAX, v)
+        else:
+            lds(0, v, vtype(v))
+            movq_rx(RAX, 0)
+        b(0x50)
+        i -= 1
+    rex(true, 0, 0, RSP, false)              # sub rsp, 32
+    b(0x83)
+    modrr(5, RSP)
+    b(32)
+    emit_parallel(moves)
+    # (a float among the first four also goes in the integer register: C functions taking
+    # varargs (printf...) read it from there)
+    loop k in [0..min(n, 4)):
+        if vtype(int(ir.args[start + k])) != VI: movq_rx(regs[k], k)
+    call_stack_bytes = pad + stack_args.len() * 8 + 32
+
+pop_call_stack = ():
+    if call_stack_bytes > 0:
+        rex(true, 0, 0, RSP, false)
+        b(0x81)
+        modrr(0, RSP)
+        b32(call_stack_bytes)
+
+store_result = (ins: Ins):
+    d = int(ins.dst)
+    if d < 0 or vloc[d] == LOC_NONE: return
+    ty = vtype(d)
+    if ty == VI: st(d, RAX)
+    else: sts(d, 0, ty)
+
+fpre = (ty: int) -> int:
+    if ty == VS: return 0xF3
+    0xF2
+
+ro_consts: {int: int} = {}
+ro_new: (int, int)[]        # (offset, bits) of each constant ro_const added (par.jo: the workers')
+
+# offset of an 8-byte constant in read-only data (shared between uses)
+ro_const = (bits: int) -> int:
+    if let o = ro_consts.get(bits): return o
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    o = rodata.len()
+    ro_starts.push(o)
+    loop k in [0..8): rodata.push(u8((bits >> (8 * k)) & 255))
+    ro_consts[bits] = o
+    ro_new.push((o, bits))
+    o
+
+rel_fixup_lea = (r: int, kind: int, off: int):
+    rex(true, r, 0, 0, false)
+    b(0x8D)
+    b(((r & 7) << 3) | 5)
+    b32(0)
+    data_fix.push((code.len() - 4, kind, off))
+
+branch_target_fix = (depth: int):
+    c = xctl.len() - 1 - depth
+    if xctl[c].kind == 1: jmp_back(xctl[c].start)
+    else: xctl[c].fixups.push(jmp32())
+
+branch_target_jcc = (depth: int, cc: int):
+    c = xctl.len() - 1 - depth
+    if xctl[c].kind == 1:
+        target = xctl[c].start
+        b(0x0F)
+        b(0x80 + cc)
+        b32(target - (code.len() + 4))
+    else: xctl[c].fixups.push(jcc32(cc))
+
+# d = a + b (sign -1: a - b, b a constant) into a register other than a's in one instruction:
+# lea d, [a + b]
+lea_add = (d: int, a: int, bb: int, sign: int) -> bool:
+    rd = vloc[d]
+    ra = vloc[a]
+    rb = vloc[bb]
+    if rd < 0 or rd >= XMM or ra < 0 or ra >= XMM or ra == rd: return false
+    if rb == LOC_CONST:
+        k = vcval[bb] * sign
+        if not fits32(k): return false
+        lea(rd, ra, k)
+        return true
+    if rb < 0 or rb >= XMM or sign < 0: return false
+    use_index(rb, 0)
+    lea(rd, ra, 0)
+    cur_index = -1
+    true
+
+int_bin = (opc_rr: int, ext: int, ins: Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    a = int(ins.a)
+    bb = int(ins.b)
+    r = dreg(d, RAX)
+    if vloc[bb] == r and r != vloc[a]: r = RAX
+    ld(r, a)
+    alu_v(opc_rr, ext, r, bb)
+    st(d, r)
+
+cmp_ops = (a: int, bb: int):
+    ra = reg_of(a, RAX)
+    alu_v(0x39, 7, ra, bb)
+
+icc = (op: Op) -> int:
+    match op:
+        eq: CC_E
+        ne: CC_NE
+        lts: CC_L
+        les: CC_LE
+        gts: CC_G
+        ges: CC_GE
+        ltu: CC_B
+        leu: CC_BE
+        gtu: CC_A
+        geu: CC_AE
+        _: -1
+
+is_icmp = (op: Op) -> bool: icc(op) >= 0
+is_fcmp = (op: Op) -> bool: op == .feq or op == .fne or op == .flt or op == .fle or op == .fgt or op == .fge
+
+# emit float compare flags; returns condition code for "true"
+fcmp_flags = (ins: Ins) -> int:
+    ty = int(ins.ty)
+    pre = 0
+    if ty == VF: pre = 0x66
+    a = int(ins.a)
+    bb = int(ins.b)
+    op = ins.op
+    if op == .flt or op == .fle:
+        x = a
+        a = bb
+        bb = x
+    xa = xreg_of(a, 0, ty)
+    xb = xreg_of(bb, 1, ty)
+    if pre != 0: b(pre)
+    rex(false, xa, 0, xb, false)
+    b(0x0F)
+    b(0x2E)
+    modrr(xa, xb)
+    if op == .flt or op == .fgt: return CC_A
+    if op == .fle or op == .fge: return CC_AE
+    if op == .feq: return 100
+    101
+
+is_falu = (op: Op) -> bool: op == .fadd or op == .fsub or op == .fmul or op == .fdiv or op == .fmin or op == .fmax
+
+fold_load = -1             # a load the next instruction reads from memory (see load)
+
+falu = (opc: int, ins: Ins):
+    ty = int(ins.ty)
+    d = int(ins.dst)
+    if fold_load >= 0:
+        ld_ins = ir.code[fold_load]
+        fold_load = -1
+        base, disp = addr_of(int(ld_ins.a), RCX)
+        disp += int(ld_ins.imm)
+        ix = -1
+        if int(ld_ins.c) & M_INDEX != 0:
+            base, disp = indexed_base(base, disp, int(ld_ins.imm))
+            ix = reg_of(int(ld_ins.b), RDX)
+        x = xdreg(d, 0)
+        lds(x, int(ins.a), ty)
+        use_index(ix, mem_scale(ld_ins))
+        sse_rm(fpre(ty), opc, x, base, disp)
+        cur_index = -1
+        sts(d, x, ty)
+        return
+    bv = int(ins.b)
+    if vloc[bv] == LOC_FCONST and vcval[bv] != 0:
+        # op x, [constant]
+        x = xdreg(d, 0)
+        lds(x, int(ins.a), ty)
+        rip_kind = 0
+        sse_rm(fpre(ty), opc, x, RIPREL, ro_const(vcval[bv]))
+        sts(d, x, ty)
+        return
+    x = xdreg(d, 0)
+    xb = xreg_of(int(ins.b), 1, ty)
+    if x == xb and x != 0:
+        # (the result goes where the second operand is)
+        if int(ins.a) == int(ins.b):
+            sse_rr(fpre(ty), opc, x, x)                 # x * x
+            return
+        if opc == 0x58 or opc == 0x59 or opc == 0x5D or opc == 0x5F:
+            xa = xreg_of(int(ins.a), 1, ty)             # commutative: x = x op a
+            sse_rr(fpre(ty), opc, x, xa)
+            return
+        lds(0, int(ins.a), ty)
+        sse_rr(fpre(ty), opc, 0, xb)
+        sts(d, 0, ty)
+        return
+    lds(x, int(ins.a), ty)
+    sse_rr(fpre(ty), opc, x, xb)
+    sts(d, x, ty)
+
+x_unary = (prefix: int, opc: int, ins: Ins, src_ty: int, dst_ty: int):
+    d = int(ins.dst)
+    x = xdreg(d, 0)
+    xa = xreg_of(int(ins.a), 1, src_ty)
+    if x != xa: xzero(x)
+    sse_rr(prefix, opc, x, xa)
+    sts(d, x, dst_ty)
+
+# fused compare + branch: next instruction consumes the flag
+fused_cc = -1
+fuse_skip = -1             # an instruction folded into the branch after it
+
+emit_ins = (pos: int, ins: Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if pos == fuse_skip: return
+    if is_icmp(op) or is_fcmp(op):
+        # fuse with a following if/brif that is the only user
+        if pos + 1 < ir.code.len() and v_nuse[d] == 1:
+            nx = ir.code[pos + 1]
+            if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
+                if is_icmp(op):
+                    cmp_ops(a, bb)
+                    fused_cc = icc(op)
+                else: fused_cc = fcmp_flags(ins)
+                return
+            # a float comparison tested for false (c == 0): branch on the opposite flags
+            if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
+                t = int(nx.dst)
+                n2 = ir.code[pos + 2]
+                if v_nuse[t] == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:
+                    cc = fcmp_flags(ins)
+                    if cc == 100: cc = 101
+                    else if cc == 101: cc = 100
+                    else: cc = cc xor 1
+                    fused_cc = cc
+                    fuse_skip = pos + 1
+                    return
+    match op:
+        nop, assume: pass
+        iconst:
+            if vloc[d] == LOC_CONST or vloc[d] == LOC_NONE: return
+            r = dreg(d, RAX)
+            mov_imm(r, ins.imm)
+            st(d, r)
+        fconst:
+            if vloc[d] == LOC_NONE or vloc[d] == LOC_FCONST: return
+            if vloc[d] >= XMM:
+                x = vloc[d] - XMM
+                if ins.imm == 0: xzero(x)
+                else:
+                    # float constants live in read-only data: one load, no integer register
+                    rip_kind = 0
+                    sse_rm(fpre(int(ins.ty)), 0x10, x, RIPREL, ro_const(ins.imm))
+                return
+            mov_imm(RAX, ins.imm)
+            st(d, RAX)
+        mov:
+            if vloc[d] == LOC_NONE: return
+            if vtype(d) == VI:
+                r = dreg(d, RAX)
+                ld(r, a)
+                st(d, r)
+            else:
+                x = xdreg(d, 0)
+                lds(x, a, vtype(d))
+                sts(d, x, vtype(d))
+        add:
+            if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return
+            if lea_add(d, a, bb, 1): return
+            int_bin(0x01, 0, ins)
+        sub:
+            if vloc[bb] == LOC_CONST and lea_add(d, a, bb, -1): return
+            int_bin(0x29, 5, ins)
+        and_: int_bin(0x21, 4, ins)
+        or_: int_bin(0x09, 1, ins)
+        xor: int_bin(0x31, 6, ins)
+        mul:
+            if vloc[d] == LOC_NONE: return
+            r = dreg(d, RAX)
+            if vloc[bb] == r and r != vloc[a]: r = RAX
+            ld(r, a)
+            l = vloc[bb]
+            if l == LOC_CONST:
+                c = vcval[bb]
+                rex(true, r, 0, r, false)
+                b(0x69)
+                modrr(r, r)
+                b32(c)
+            else:
+                rb = reg_of(bb, RCX)
+                rex(true, r, 0, rb, false)
+                b(0x0F)
+                b(0xAF)
+                modrr(r, rb)
+            st(d, r)
+        mulhs, mulhu:
+            # (one-operand imul, or mul: rdx:rax = rax * b)
+            ld(RAX, a)
+            rb = reg_of(bb, RCX)
+            if rb == RDX:
+                mov_rr(RCX, RDX)
+                rb = RCX
+            rex(true, 0, 0, rb, false)
+            b(0xF7)
+            if op == .mulhu: modrr(4, rb)
+            else: modrr(5, rb)
+            st(d, RDX)
+        divs, rems, divu, remu:
+            ld(RAX, a)
+            rb = reg_of(bb, RCX)
+            if rb == RDX:
+                mov_rr(RCX, RDX)
+                rb = RCX
+            if op == .divs or op == .rems:
+                b(0x48)
+                b(0x99)               # cqo
+            else:
+                b(0x31)
+                b(0xD2)               # xor edx, edx
+            rex(true, 0, 0, rb, false)
+            b(0xF7)
+            if op == .divs or op == .rems: modrr(7, rb)
+            else: modrr(6, rb)
+            if op == .rems or op == .remu: st(d, RDX)
+            else: st(d, RAX)
+        shl, shrs, shru:
+            if vloc[d] == LOC_NONE: return
+            ext = 7
+            if op == .shl: ext = 4
+            else if op == .shru: ext = 5
+            if vloc[bb] == LOC_CONST:
+                r = dreg(d, RAX)
+                ld(r, a)
+                rex(true, 0, 0, r, false)
+                b(0xC1)
+                modrr(ext, r)
+                b(vcval[bb] & 63)
+                st(d, r)
+                return
+            ld(RCX, bb)
+            r = dreg(d, RAX)
+            if r == RCX: r = RAX
+            ld(r, a)
+            rex(true, 0, 0, r, false)
+            b(0xD3)
+            if op == .shl: modrr(4, r)
+            else if op == .shru: modrr(5, r)
+            else: modrr(7, r)
+            st(d, r)
+        neg, not_:
+            r = dreg(d, RAX)
+            ld(r, a)
+            rex(true, 0, 0, r, false)
+            b(0xF7)
+            if op == .neg: modrr(3, r)
+            else: modrr(2, r)
+            st(d, r)
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu:
+            cmp_ops(a, bb)
+            setcc(icc(op))
+            st(d, RAX)
+        fadd: falu(0x58, ins)
+        fsub: falu(0x5C, ins)
+        fmul: falu(0x59, ins)
+        fdiv: falu(0x5E, ins)
+        fmin: falu(0x5D, ins)
+        fmax: falu(0x5F, ins)
+        fsqrt: x_unary(fpre(int(ins.ty)), 0x51, ins, int(ins.ty), int(ins.ty))
+        ffloor, fceil, ftrunc:
+            ty = int(ins.ty)
+            mode = 1
+            if op == .fceil: mode = 2
+            if op == .ftrunc: mode = 3
+            x = xdreg(d, 0)
+            xa = xreg_of(a, 1, ty)
+            b(0x66)
+            rex(false, x, 0, xa, false)
+            b(0x0F)
+            b(0x3A)
+            if ty == VS: b(0x0A)
+            else: b(0x0B)
+            modrr(x, xa)
+            b(mode)
+            sts(d, x, ty)
+        fneg, fabs:
+            ty = int(ins.ty)
+            xa = xreg_of(a, 0, ty)
+            movq_rx(RAX, xa)
+            bit = 63
+            if ty == VS: bit = 31
+            rex(true, 0, 0, RAX, false)
+            b(0x0F)
+            b(0xBA)
+            if op == .fneg: modrr(7, RAX)
+            else: modrr(6, RAX)
+            b(bit)
+            x = xdreg(d, 0)
+            movq_xr(x, RAX)
+            sts(d, x, ty)
+        feq, fne, flt, fle, fgt, fge:
+            cc = fcmp_flags(ins)
+            if cc == 100:
+                b(0x0F); b(0x94); b(0xC0)        # sete al
+                b(0x0F); b(0x9B); b(0xC1)        # setnp cl
+                b(0x20); b(0xC8)                  # and al, cl
+                b(0x0F); b(0xB6); b(0xC0)
+            else if cc == 101:
+                b(0x0F); b(0x95); b(0xC0)        # setne al
+                b(0x0F); b(0x9A); b(0xC1)        # setp cl
+                b(0x08); b(0xC8)                  # or al, cl
+                b(0x0F); b(0xB6); b(0xC0)
+            else: setcc(cc)
+            st(d, RAX)
+        sext8, sext16, sext32, zext8, zext16, zext32:
+            ra = reg_of(a, RAX)
+            r = dreg(d, RAX)
+            if op == .sext32: op_rr(0x63, true, r, ra)      # movsxd r, ra32
+            else if op == .zext32: op_rr(0x8B, false, r, ra) # mov r32, ra32
+            else:
+                w = op == .sext8 or op == .zext8
+                sg = op == .sext8 or op == .sext16
+                rex(true, r, 0, ra, false)
+                b(0x0F)
+                if w:
+                    if sg: b(0xBE)
+                    else: b(0xB6)
+                else:
+                    if sg: b(0xBF)
+                    else: b(0xB7)
+                modrr(r, ra)
+            st(d, r)
+        i2f:
+            ty = int(ins.ty)
+            ra = reg_of(a, RAX)
+            x = xdreg(d, 0)
+            xzero(x)
+            b(fpre(ty))
+            rex(true, x, 0, ra, false)
+            b(0x0F)
+            b(0x2A)
+            modrr(x, ra)
+            sts(d, x, ty)
+        u2f:
+            ty = int(ins.ty)
+            ld(RAX, a)
+            xzero(0)
+            b(0x48); b(0x85); b(0xC0)          # test rax, rax
+            j1 = jcc32(0x8)                     # js
+            b(fpre(ty)); b(0x48); b(0x0F); b(0x2A); b(0xC0)    # cvtsi2sd xmm0, rax
+            j2 = jmp32()
+            patch_here(j1)
+            mov_rr(RCX, RAX)
+            b(0x48); b(0xD1); b(0xE9)          # shr rcx, 1
+            b(0x83); b(0xE0); b(0x01)          # and eax, 1
+            b(0x48); b(0x09); b(0xC1)          # or rcx, rax
+            b(fpre(ty)); b(0x48); b(0x0F); b(0x2A); b(0xC1)    # cvtsi2sd xmm0, rcx
+            b(fpre(ty)); b(0x0F); b(0x58); b(0xC0)             # addsd xmm0, xmm0
+            patch_here(j2)
+            sts(d, 0, ty)
+        f2i:
+            # saturating, like wasm's trunc_sat: NaN -> 0, too large -> max, too small -> min
+            ty = int(ins.ty)
+            xa = xreg_of(a, 0, ty)
+            r = dreg(d, RAX)
+            b(fpre(ty))
+            rex(true, r, 0, xa, false)
+            b(0x0F)
+            b(0x2C)
+            modrr(r, xa)
+            # cvttsd2si gives INT64_MIN when out of range; `cmp r, 1` overflows only for that value
+            rex(true, 0, 0, r, false)
+            b(0x83)
+            modrr(7, r)
+            b(1)
+            done = jcc32(1)                       # jno
+            if ty == VS: sse_rr(0, 0x2E, xa, xa)   # ucomiss
+            else: sse_rr(0x66, 0x2E, xa, xa)       # ucomisd
+            nan = jcc32(CC_P)
+            sse_rr(0, 0x57, XMM + 15, XMM + 15)    # xorps xmm15, xmm15
+            if ty == VS: sse_rr(0, 0x2E, xa, XMM + 15)
+            else: sse_rr(0x66, 0x2E, xa, XMM + 15)
+            neg = jcc32(CC_BE)
+            mov_imm(r, 0x7FFFFFFFFFFFFFFF)
+            done2 = jmp32()
+            patch_here(nan)
+            op_rr(0x31, false, r, r)               # xor r32, r32
+            patch_here(done)
+            patch_here(neg)
+            patch_here(done2)
+            st(d, r)
+        f2f:
+            # ins.ty is the destination type
+            if int(ins.ty) == VF: x_unary(0xF3, 0x5A, ins, VS, VF)
+            else: x_unary(0xF2, 0x5A, ins, VF, VS)
+        bits2f:
+            ra = reg_of(a, RAX)
+            x = xdreg(d, 0)
+            movq_xr(x, ra)
+            sts(d, x, int(ins.ty))
+        f2bits:
+            ty = int(ins.ty)
+            xa = xreg_of(a, 0, ty)
+            r = dreg(d, RAX)
+            movq_rx(r, xa)
+            if ty == VS: op_rr(0x8B, false, r, r)          # zero upper half
+            st(d, r)
+        load:
+            if vloc[d] == LOC_NONE: return
+            mode = int(ins.c)
+            size = mode & 15
+            if mode & M_FLOAT != 0 and v_nuse[d] == 1 and pos + 1 < ir.code.len():
+                # a float load used only as the second operand of the next arithmetic: that
+                # instruction reads the memory itself
+                nx = ir.code[pos + 1]
+                if is_falu(nx.op) and int(nx.b) == d and int(nx.a) != d and int(nx.ty) == vtype(d):
+                    fold_load = pos
+                    return
+            base, disp = addr_of(a, RCX)
+            disp += int(ins.imm)
+            ix = -1
+            if mode & M_INDEX != 0:
+                base, disp = indexed_base(base, disp, int(ins.imm))
+                ix = reg_of(int(ins.b), RDX)
+            if mode & M_FLOAT != 0:
+                x = xdreg(d, 0)
+                use_index(ix, mem_scale(ins))
+                if size == 4: sse_rm(0xF3, 0x10, x, base, disp)
+                else: sse_rm(0xF2, 0x10, x, base, disp)
+                cur_index = -1
+                sts(d, x, vtype(d))
+            else:
+                r = dreg(d, RAX)
+                use_index(ix, mem_scale(ins))
+                load_sized(r, base, disp, size, mode & M_SIGNED != 0)
+                cur_index = -1
+                st(d, r)
+        store:
+            mode = int(ins.c)
+            size = mode & 15
+            base, disp = addr_of(a, RCX)
+            disp += int(ins.imm)
+            ix = -1
+            if mode & M_INDEX != 0:
+                base, disp = indexed_base(base, disp, int(ins.imm))
+                ix = reg_of(int(ins.dst), RDX)
+            if vtype(bb) != VI:
+                xb = xreg_of(bb, 0, vtype(bb))
+                use_index(ix, mem_scale(ins))
+                if size == 4: sse_rm(0xF3, 0x11, xb, base, disp)
+                else: sse_rm(0xF2, 0x11, xb, base, disp)
+            else if vloc[bb] == LOC_CONST and size >= 4 and base != RIPREL:
+                use_index(ix, mem_scale(ins))
+                rex(size == 8, 0, 0, base, false)
+                b(0xC7)
+                mem(0, base, disp)
+                b32(vcval[bb])
+            else:
+                rb = reg_of(bb, RAX)
+                use_index(ix, mem_scale(ins))
+                store_sized(base, disp, rb, size)
+            cur_index = -1
+        slot:
+            if vloc[d] == LOC_SLOT or vloc[d] == LOC_NONE: return
+            r = dreg(d, RAX)
+            lea(r, RBP, slot_off[a])
+            st(d, r)
+        gaddr, daddr:
+            if vloc[d] == LOC_GLOBAL or vloc[d] == LOC_NONE: return
+            r = dreg(d, RAX)
+            kind = 1
+            if op == .daddr: kind = 0
+            rel_fixup_lea(r, kind, int(ins.imm))
+            st(d, r)
+        faddr:
+            r = dreg(d, RAX)
+            rex(true, r, 0, 0, false)
+            b(0x8D)
+            b(((r & 7) << 3) | 5)
+            b32(0)
+            if target_windows and lf_is_cabi(int(ins.imm)): cabi_fix.push((code.len() - 4, int(ins.imm)))
+            else: call_fix.push((code.len() - 4, int(ins.imm)))
+            st(d, r)
+        copy:
+            size = int(ins.imm)
+            if size <= INLINE_COPY:
+                db, dd = addr_reg(a, RDX)
+                sb, sd = addr_reg(bb, RCX)
+                k = 0
+                loop k + 16 <= size:
+                    sse_rm(0xF3, 0x6F, XMM + 15, sb, sd + k)      # movdqu
+                    sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
+                    k += 16
+                loop w in [8, 4, 2, 1]:
+                    if k + w <= size:
+                        load_sized(RAX, sb, sd + k, w, false)
+                        store_sized(db, dd + k, RAX, w)
+                        k += w
+            else:
+                emit_parallel([PMove(RDI, a), PMove(RSI, bb)])
+                mov_imm(RCX, size)
+                b(0xF3); b(0xA4)          # rep movsb
+        zero:
+            size = int(ins.imm)
+            if size <= INLINE_COPY:
+                db, dd = addr_reg(a, RDX)
+                b(0x31); b(0xC0)          # xor eax, eax
+                k = 0
+                if size >= 16: sse_rr(0x66, 0xEF, XMM + 15, XMM + 15)      # pxor
+                loop k + 16 <= size:
+                    sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
+                    k += 16
+                loop w in [8, 4, 2, 1]:
+                    if k + w <= size:
+                        store_sized(db, dd + k, RAX, w)
+                        k += w
+            else:
+                ld(RDI, a)
+                mov_imm(RCX, size)
+                b(0x31); b(0xC0)
+                b(0xF3); b(0xAA)          # rep stosb
+        vld:
+            if vloc[d] == LOC_NONE: return
+            ty = int(ins.ty)
+            base, disp = addr_of(a, RCX)
+            disp += int(ins.imm)
+            base, disp = indexed_base(base, disp, int(ins.imm))
+            ix = reg_of(bb, RDX)
+            x = xdreg(d, 0)
+            sc = 3
+            if vec_esize(int(ins.c)) == 4: sc = 2
+            use_index(ix, sc)
+            vmov_rm(x, base, disp, ty)
+            cur_index = -1
+            sts(d, x, ty)
+        vst:
+            ty = int(ins.ty)
+            base, disp = addr_of(a, RCX)
+            disp += int(ins.imm)
+            base, disp = indexed_base(base, disp, int(ins.imm))
+            ix = reg_of(d, RDX)
+            x = xreg_of(bb, 0, ty)
+            sc = 3
+            if vec_esize(int(ins.c)) == 4: sc = 2
+            use_index(ix, sc)
+            vmov_mr(base, disp, x, ty)
+            cur_index = -1
+        vbin:
+            if vloc[d] == LOC_NONE: return
+            ty = int(ins.ty)
+            vk = int(ins.imm)
+            vo = int(ins.c)
+            x = xdreg(d, 0)
+            xa = xreg_of(a, 1, ty)
+            xb = xreg_of(bb, 15, ty)
+            if ty == VY: vop3(vo, vk, x, xa, xb)
+            else if x == xb and x != xa:
+                if vec_commutes(vo): vop2(vo, vk, x, xa)
+                else:
+                    vmov_rr(1, xa, ty)
+                    vop2(vo, vk, 1, xb)
+                    vmov_rr(x, 1, ty)
+            else:
+                vmov_rr(x, xa, ty)
+                vop2(vo, vk, x, xb)
+            sts(d, x, ty)
+        vsplat:
+            if vloc[d] == LOC_NONE: return
+            ty = int(ins.ty)
+            vk = int(ins.imm)
+            x = xdreg(d, 0)
+            if vk == 0 or vk == 1:
+                sty = VF
+                if vk == 0: sty = VS
+                sx = xreg_of(a, 1, sty)
+                if ty == VY:
+                    vex(x, 0, sx, 2, 1, 0, 1)
+                    if vk == 0: b(0x18)                  # vbroadcastss ymm, xmm
+                    else: b(0x19)                        # vbroadcastsd ymm, xmm
+                    modrr(x, sx)
+                else:
+                    vmov_rr(x, sx, VX)
+                    if vk == 0:
+                        sse_rr(0, 0xC6, x, x)             # shufps x, x, 0
+                        b(0)
+                    else: sse_rr(0x66, 0x14, x, x)       # unpcklpd x, x
+            else:
+                r = reg_of(a, RAX)
+                w = 0
+                if vk == 3: w = 1
+                if ty == VY:
+                    vex(x, 0, r, 1, 1, w, 0)
+                    b(0x6E)                              # vmovd / vmovq xmm, r
+                    modrr(x, r)
+                    vex(x, 0, x, 2, 1, 0, 1)
+                    if vk == 2: b(0x58)                  # vpbroadcastd ymm, xmm
+                    else: b(0x59)                        # vpbroadcastq ymm, xmm
+                    modrr(x, x)
+                else:
+                    b(0x66)
+                    rex(vk == 3, x, 0, r, false)
+                    b(0x0F); b(0x6E)                     # movd / movq xmm, r
+                    modrr(x, r)
+                    if vk == 2:
+                        sse_rr(0x66, 0x70, x, x)          # pshufd x, x, 0
+                        b(0)
+                    else: sse_rr(0x66, 0x6C, x, x)        # punpcklqdq x, x
+            sts(d, x, ty)
+        vzu:
+            b(0xC5); b(0xF8); b(0x77)                    # vzeroupper
+        vop:
+            # packed float vector arithmetic, memory to memory (xmm0, xmm1, xmm15 are scratch)
+            let code = int(ins.imm)
+            n = (code >> 4) & 7
+            vop_operand(0, bb, code & VOP_SPLAT_B != 0, n, RCX)
+            vop_operand(1, int(ins.c), code & VOP_SPLAT_C != 0, n, RAX)
+            sse_rr(0, [0x58, 0x5C, 0x59, 0x5E][code & 3], 0, 1)          # addps subps mulps divps
+            db, dd = addr_reg(a, RDX)
+            if n == 4: sse_rm(0, 0x11, 0, db, dd)                        # movups
+            else:
+                sse_rm(0xF2, 0x11, 0, db, dd)                            # movsd: lanes 0-1
+                if n == 3:
+                    sse_rr(0, 0x12, 15, 0)                               # movhlps xmm15, xmm0
+                    sse_rm(0xF3, 0x11, 15, db, dd + 8)                   # movss: lane 2
+        memcpy:
+            moves = [PMove(RDI, a), PMove(RSI, bb), PMove(RCX, int(ins.c))]
+            emit_parallel(moves)
+            b(0xF3); b(0xA4)
+        memset:
+            moves = [PMove(RDI, a), PMove(RAX, bb), PMove(RCX, int(ins.c))]
+            emit_parallel(moves)
+            b(0xF3); b(0xAA)
+        zeroslots:
+            b(0x31); b(0xC0)
+            loop k in [0..bb):
+                item = int(ir.args[a + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if vloc[v] != LOC_NONE: st(v, RAX)
+                else:
+                    s = item >> 1
+                    size = int(ir.slot_size[s])
+                    off = slot_off[s]
+                    j = 0
+                    loop j < size:
+                        mov_mr(RBP, off + j, RAX)
+                        j += 8
+        call:
+            if ins.c == CALL_IF_SHARED:
+                # x itself, in rax, when it is 0 or its refcount is 1; else f(x) through a stub
+                # that keeps every register (so this is no call to the register allocator)
+                ld(RAX, int(ir.args[a]))
+                b(0x48); b(0x85); b(0xC0)                 # test rax, rax
+                b(0x74); b(0)                             # jz done
+                skip0 = code.len() - 1
+                b(0x48); b(0x83); b(0x38); b(1)           # cmp qword [rax], 1
+                b(0x74); b(0)                             # je done
+                skip1 = code.len() - 1
+                b(0x48); b(0x8D); b(0x0D); b32(0)         # lea rcx, [rip + f]
+                call_fix.push((code.len() - 4, int(ins.imm)))
+                b(0xE8)
+                b32(0)
+                stub_fix.push((code.len() - 4, 12))
+                call_site(ins)
+                code[skip0] = u8(code.len() - skip0 - 1)
+                code[skip1] = u8(code.len() - skip1 - 1)
+            else if ins.c == CALL_RC_INC or ins.c == CALL_RC_DEC:
+                # inline: x's refcount one more, or one less while more than one is left; f(x)
+                # through the stub keeping every register when threads run (atomically there) or
+                # for the last reference (freeing)
+                ld(RAX, int(ir.args[a]))
+                b(0x48); b(0x85); b(0xC0)                 # test rax, rax
+                b(0x74); b(0)                             # jz done
+                done0 = code.len() - 1
+                b(0x48); b(0x83); b(0x38)                 # cmp qword [rax], ...
+                slow0 = -1
+                done1 = -1
+                if ins.c == CALL_RC_INC:
+                    b(0)                                  # ... 0
+                    b(0x7E); b(0)                         # jle done (immortal)
+                    done1 = code.len() - 1
+                else:
+                    b(1)                                  # ... 1
+                    b(0x7C); b(0)                         # jl done (immortal)
+                    done1 = code.len() - 1
+                    b(0x74); b(0)                         # je slow (the last)
+                    slow0 = code.len() - 1
+                rel_fixup_lea(RCX, 1, mt_active_off)      # lea rcx, [rip + __mt_active]
+                b(0x80); b(0x39); b(0)                    # cmp byte [rcx], 0
+                b(0x75); b(0)                             # jne slow
+                slow1 = code.len() - 1
+                b(0x48); b(0xFF)
+                if ins.c == CALL_RC_INC: b(0x00)          # inc qword [rax]
+                else: b(0x08)                             # dec qword [rax]
+                b(0xEB); b(0)                             # jmp done
+                done2 = code.len() - 1
+                if slow0 >= 0: code[slow0] = u8(code.len() - slow0 - 1)
+                code[slow1] = u8(code.len() - slow1 - 1)
+                b(0x48); b(0x8D); b(0x0D); b32(0)         # lea rcx, [rip + f]
+                call_fix.push((code.len() - 4, int(ins.imm)))
+                b(0xE8)
+                b32(0)
+                stub_fix.push((code.len() - 4, 12))
+                call_site(ins)
+                loop j in [done0, done1, done2]: code[j] = u8(code.len() - j - 1)
+            else:
+                emit_call_args(a, bb, -1, 0)
+                b(0xE8)
+                b32(0)
+                call_fix.push((code.len() - 4, int(ins.imm)))
+                call_site(ins)
+                pop_call_stack()
+            store_result(ins)
+        calli, callc:
+            if op == .callc and target_windows: emit_call_args_win64(a, bb, int(ins.c), R11)
+            else: emit_call_args(a, bb, int(ins.c), R11)
+            b(0x41); b(0xFF); b(0xD3)     # call r11
+            call_site(ins)
+            pop_call_stack()
+            store_result(ins)
+        syscall:
+            regs = [RAX, RDI, RSI, RDX, R10, R8, R9]
+            moves: PMove[]
+            loop k in [0..bb): moves.push(PMove(regs[k], int(ir.args[a + k])))
+            emit_parallel(moves)
+            b(0x0F); b(0x05)
+            st(d, RAX)
+        intr:
+            if ins.imm == 1:
+                r = dreg(d, RAX)
+                rel_fixup_lea(r, 1, 0)
+                mov_rm(r, r, 0)
+                st(d, r)
+            else if ins.imm == 10:
+                # the function in entry c of the import address table, below the globals (pe.jo)
+                r = dreg(d, RAX)
+                rel_fixup_lea(r, 1, pe_iat_off(int(ins.c)))
+                mov_rm(r, r, 0)
+                st(d, r)
+            else:
+                # setjmp / longjmp / jump: arguments in rdi, rsi then a call to a machine-code stub
+                emit_call_args(a, bb, -1, 0)
+                b(0xE8)
+                b32(0)
+                stub_fix.push((code.len() - 4, int(ins.imm)))
+                pop_call_stack()
+                if d >= 0 and vloc[d] != LOC_NONE: st(d, RAX)
+        block: xctl.push(XCtl(0, code.len(), [], []))
+        loop:
+            # (loop tops on 16-byte boundaries, like C compilers do: when that takes few bytes)
+            if ra_on:
+                if (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
+                else: nop_pad((8 - code.len() % 8) % 8)
+            xctl.push(XCtl(1, code.len(), [], []))
+        if_:
+            fx: int[]
+            if fused_cc >= 0:
+                cc = fused_cc
+                fused_cc = -1
+                jfalse(cc, fx)
+            else:
+                ra = reg_of(a, RAX)
+                rex(true, ra, 0, ra, false)
+                b(0x85)
+                modrr(ra, ra)                   # test r, r
+                fx.push(jcc32(CC_E))
+            xctl.push(XCtl(2, code.len(), [], fx))
+        else_:
+            c = xctl.len() - 1
+            xctl[c].fixups.push(jmp32())
+            loop f in xctl[c].ifx: patch_here(f)
+            xctl[c].ifx = []
+        end:
+            c = xctl.pop()
+            loop f in c.fixups: patch_here(f)
+            loop f in c.ifx: patch_here(f)
+        br: branch_target_fix(int(ins.imm))
+        brif:
+            if fused_cc >= 0:
+                cc = fused_cc
+                fused_cc = -1
+                if cc == 100:
+                    # equal and ordered: jump only when ZF=1 and PF=0
+                    skip = jcc32(CC_P)
+                    branch_target_jcc(int(ins.imm), CC_E)
+                    patch_here(skip)
+                else if cc == 101:
+                    branch_target_jcc(int(ins.imm), CC_P)
+                    branch_target_jcc(int(ins.imm), CC_NE)
+                else: branch_target_jcc(int(ins.imm), cc)
+            else:
+                ra = reg_of(a, RAX)
+                rex(true, ra, 0, ra, false)
+                b(0x85)
+                modrr(ra, ra)
+                branch_target_jcc(int(ins.imm), CC_NE)
+        brtable:
+            # bounds check, then jump into a table of 5-byte jmp instructions
+            ld(RAX, a)
+            b(0x48); b(0x81); modrr(7, RAX); b32(bb)          # cmp rax, n
+            branch_target_jcc(int(ins.imm), CC_AE)
+            b(0x48); b(0x8D); b(0x0C); b(0x80)                # lea rcx, [rax + rax*4]
+            b(0x48); b(0x8D); b(0x05); b32(5)                 # lea rax, [rip + 5]
+            b(0x48); b(0x01); b(0xC8)                         # add rax, rcx
+            b(0xFF); b(0xE0)                                  # jmp rax
+            loop k in [0..bb): branch_target_fix(int(ir.args[int(ins.c) + k]))
+        ret:
+            if a >= 0:
+                ty = vtype(a)
+                if ty == VI: ld(RAX, a)
+                else: lds(0, a, ty)
+            emit_epilogue()
+        trap: b(0x0F); b(0x0B)
+        select: ice("select not supported")
+
+# jumps taken when condition `cc` is false (fixup positions appended to fx)
+jfalse = (cc: int, fx: mut int[]):
+    if cc == 100:
+        # not (ZF and !PF): jump if PF or !ZF
+        fx.push(jcc32(CC_P))
+        fx.push(jcc32(CC_NE))
+        return
+    if cc == 101:
+        # not (!ZF or PF): jump if ZF and !PF
+        skip = jcc32(CC_P)
+        fx.push(jcc32(CC_E))
+        patch_here(skip)
+        return
+    fx.push(jcc32((cc xor 1)))
+
+# (SLOPPY_RASTAT: what the allocation costs, as loads and stores of spilled values and of values
+# saved around calls, each weighted by loop depth like v_weight)
+ra_stat = false
+ra_spill_cost = 0
+ra_save_cost = 0
+ra_save_x = 0
+ra_total = 0
+ra_verbose = false
+ra_fn_base = 0
+
+fn_len: int[]               # lfunc -> its code's length (sloppy watch)
+
+save_next = 0               # (the caller-saved registers spilled around calls: see below)
+row_pos = -1                # (the line table: line_row)
+row_line = -1
+
+# ---------------- debug information: where each variable is (dwarf.jo writes it) ----------------
+# a variable's place, while its code runs from lo to hi (offsets in .text; lo == hi: nowhere)
+const DL_NONE = 0
+const DL_REG = 1        # in register r
+const DL_MEM = 2        # in memory at register r + off
+const DL_MEMAT = 3      # in memory at the address kept at register r + off
+const DL_CONST = 4      # the value off
+const DL_FCONST = 5     # a float of size r, its bits off
+const DL_ADDR = 6       # the value is the address register r + off
+
+# for each function: its symbol (an index into elf_syms), start, length, frame register (DWARF's
+# number), variable count; then for each variable: its local, kind, r, off, lo, hi
+dbg_raw: int[]
+dbg_pos: int[]          # (while a function is emitted: where IR instruction pos starts)
+# how each function's frame is made, for debuggers to find its caller's registers (.debug_frame):
+# start, length, where its body starts (after the prologue), the callee-saved registers it keeps
+# (count, then DWARF number and offset from the CFA each), and where its epilogues take the
+# frame pointer back (count, then the offset after each: x86-64 pop rbp, arm64 ldp x29, x30)
+dbg_cfi: int[]
+dbg_epis: int[]         # (while a function is emitted: where its epilogues pop rbp)
+
+x64_function = ():
+    loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
+    loop fn_len.len() <= ir.fn_index: fn_len.push(0)
+    loop code.len() % 16 != 0: b(0xCC)
+    fn_addr[ir.fn_index] = code.len()
+    fn_start = code.len()
+    analyze()
+    if opt_release and ra_prio and not dbg_on and (len(ra_only) == 0 or ir.name == ra_only): allocate_release()
+    else: allocate()
+    layout_frame()
+    xctl = []
+    fused_cc = -1
+    fuse_skip = -1
+    fold_load = -1
+    # (the prologue is the declaration's line, the body's first line comes after it: where
+    # debuggers put a breakpoint on the function)
+    row_pos = -1
+    row_line = -1
+    if ir.decl_pos != 0: line_row(ir.decl_pos)
+    else:
+        loop ins in ir.code:
+            if ins.pos != 0:
+                line_row(int(ins.pos))
+                break
+    emit_prologue()
+    body_start = code.len()
+    if dbg_on and dbg_pos.len() < ir.code.len() + 1: dbg_pos = fill(0, ir.code.len() + 64)
+    dbg_epis.clear()
+    ci = 0
+    save_list.sort_by((v: int): live_start(v))
+    save_next = 0
+    save_active.clear()
+    loop pos in 0.. and ins in ir.code:
+        line_row(int(ins.pos))
+        if dbg_on: dbg_pos[pos] = code.len()
+        if ci < call_pos.len() and call_pos[ci] == pos and save_list.len() > 0:
+            # values in caller-saved registers live across this call (a sweep: calls come in order)
+            loop save_next < save_list.len() and live_start(save_list[save_next]) < pos:
+                save_active.push(save_list[save_next])
+                save_next += 1
+            k = 0
+            loop k < save_active.len():
+                if v_last[save_active[k]] <= pos:
+                    save_active[k] = save_active[save_active.len() - 1]
+                    save_active.pop()
+                else: k += 1
+            save_around_call(pos, true, -1)
+            emit_ins(pos, ins)
+            d = -1
+            if ins.op == .call or ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr: d = int(ins.dst)
+            save_around_call(pos, false, d)
+            if ra_stat:
+                loop v in save_active:
+                    if vloc[v] >= XMM: ra_save_x += 2 * call_w[ci]
+                    else: ra_save_cost += 2 * call_w[ci]
+        else: emit_ins(pos, ins)
+        if ci < call_pos.len() and call_pos[ci] == pos: ci += 1
+    if dbg_on:
+        dbg_pos[ir.code.len()] = code.len()
+        dbg_function(fn_start, body_start, X64_DWREG, XMM, 17, 6)
+        dbg_cfi.push(fn_start)
+        dbg_cfi.push(code.len() - fn_start)
+        dbg_cfi.push(body_start - fn_start)
+        n = 0
+        loop r in [0..16):
+            if callee_off[r] != 0: n += 1
+        dbg_cfi.push(n)
+        loop r in [0..16):
+            if callee_off[r] != 0:
+                dbg_cfi.push(X64_DWREG[r])
+                dbg_cfi.push(callee_off[r] - 16)
+        dbg_cfi.push(dbg_epis.len())
+        loop e in dbg_epis: dbg_cfi.push(e - fn_start)
+    elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))
+    fn_len[ir.fn_index] = code.len() - fn_start
+    if target_windows:
+        if uw_fo > 0: unwind_fns.push((fn_start, code.len(), UW_SAVES, uw_at))
+        else: unwind_fns.push((fn_start, code.len(), UW_FRAME, frame_size))
+        if ir.cabi:
+            pts: int[]
+            loop p in [0..ir.nparams): pts.push(vtype(p))
+            a = x64_cabi_adapter(ir.fn_index, pts)
+            unwind_fns.push((a, code.len(), UW_ADAPTER, 160))
+    if ra_stat:
+        if ra_verbose:
+            sp = 0
+            loop v in [0..ir.vtypes.len()):
+                if vloc[v] == LOC_SPILL: sp += v_weight[v]
+            eprint("  {ir.name}: spill {sp}, save {ra_save_cost + ra_save_x - ra_fn_base}\n")
+            ra_fn_base = ra_save_cost + ra_save_x
+        loop v in [0..ir.vtypes.len()):
+            if vloc[v] == LOC_SPILL: ra_spill_cost += v_weight[v]
+            if vloc[v] == LOC_SPILL or vloc[v] >= 0: ra_total += v_weight[v]
+
+# x86-64 registers by encoding, as DWARF numbers them
+X64_DWREG = [0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15]
+
+# the variables of the function just emitted (from start; its body from body): where each is,
+# from the registers the allocator gave and the frame (dwreg: DWARF numbers of the general
+# registers; vector registers from fp_base on are DWARF's fp_dw on; frame: the frame register)
+dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, frame: int):
+    dbg_raw.push(elf_syms.len())
+    dbg_raw.push(start)
+    dbg_raw.push(code.len() - start)
+    dbg_raw.push(frame)
+    count_at = dbg_raw.len()
+    dbg_raw.push(0)
+    n = ir.code.len()
+    end = code.len()
+    nv = 0
+    loop l in ir.dbg_locals:
+        fl = int(locals[l].flags)
+        if fl & (LF_CAPTURE | LF_ALIAS) != 0 or locals[l].name == 0: continue
+        nv += 1
+        kind = DL_NONE
+        r = 0
+        off = 0
+        lo = body
+        hi = end
+        if locals[l].offset >= 0:
+            # (in a slot of the frame, all along)
+            kind = DL_MEM
+            r = frame
+            off = slot_off[int(locals[l].offset)]
+        else:
+            v = int(locals[l].vreg)
+            if v >= 0 and v < vloc.len():
+                # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
+                at = fl & LF_BYREF != 0 or fl & LF_PARAM != 0 and (fl & LF_MUTPARAM != 0 or vc(int(locals[l].type)) == VC_AGG)
+                s0 = live_start(v)
+                e = v_last[v]
+                if s0 >= 0 and s0 < n: lo = dbg_pos[s0]
+                if e >= 0 and e + 1 <= n: hi = dbg_pos[e + 1]
+                loc = vloc[v]
+                if loc >= fp_base:
+                    kind = DL_REG
+                    r = fp_dw + loc - fp_base
+                else if loc >= 0:
+                    kind = DL_REG
+                    r = dwreg[loc]
+                    if at: kind = DL_MEM
+                else if loc == LOC_SPILL:
+                    kind = DL_MEM
+                    if at: kind = DL_MEMAT
+                    r = frame
+                    off = vspill[v]
+                else if loc == LOC_SLOT:
+                    kind = DL_ADDR
+                    if at: kind = DL_MEM
+                    r = frame
+                    off = slot_disp(v)
+                else if loc == LOC_CONST and not at:
+                    kind = DL_CONST
+                    off = vcval[v]
+                else if loc == LOC_FCONST and not at:
+                    kind = DL_FCONST
+                    r = 8
+                    if vtype(v) == VS: r = 4
+                    off = vcval[v]
+                if e < 0: hi = lo
+        if kind == DL_NONE: hi = lo
+        dbg_raw.push(l)
+        dbg_raw.push(kind)
+        dbg_raw.push(r)
+        dbg_raw.push(off)
+        dbg_raw.push(lo)
+        dbg_raw.push(hi)
+    dbg_raw[count_at] = nv
+
+# store (before) or reload (after) caller-saved registers holding values live across the call at pos
+save_active: int[]
+
+save_around_call = (pos: int, before: bool, dst: int):
+    loop v in save_active:
+        if v != dst:
+            r = vloc[v]
+            if r >= XMM and is_vreg_vec(vtype(v)):
+                if before: vmov_mr(RBP, vspill[v], r - XMM, vtype(v))
+                else: vmov_rm(r - XMM, RBP, vspill[v], vtype(v))
+            else if r >= XMM:
+                op = 0x10
+                if before: op = 0x11
+                sse_rm(fpre(vtype(v)), op, r - XMM, RBP, vspill[v])
+            else if before: mov_mr(RBP, vspill[v], r)
+            else: mov_rm(r, RBP, vspill[v])
+
+# entry point: runs module initializers and main
+# a function's name for debuggers and profilers: f_update_12 -> update (instances and
+# overloads share names; the runtime's names start with __)
+sym_name = (n: str) -> str:
+    if not starts_with(n, "f_"): return n
+    s = n[2..]
+    u = rfind(s, "_")
+    if u > 0:
+        loop c in s[u + 1..]:
+            if c < '0' or c > '9': return s
+        return s[..u)
+    s
+
+# the entry point of a Windows program: called with the stack 8 bytes off 16-byte alignment;
+# the initializers and main, then ExitProcess(0) from the import table
+# VirtualAlloc(at, size, kind, read/write/run) through the import table: its result in rax
+win_virtual_alloc = (at: int, size: int, kind: int):
+    mov_imm(RCX, at)
+    mov_imm(RDX, size)
+    mov_imm(8, kind)
+    mov_imm(9, 0x40)
+    rex(true, 0, 0, RSP, false)               # sub rsp, 32 (shadow space)
+    b(0x83)
+    modrr(5, RSP)
+    b(32)
+    b(0xFF); b(0x15); b32(0)                  # call [rip + VirtualAlloc]
+    data_fix.push((code.len() - 4, 1, pe_iat_off(3)))
+    rex(true, 0, 0, RSP, false)               # add rsp, 32
+    b(0x83)
+    modrr(0, RSP)
+    b(32)
+
+x64_entry_win = (inits: int[], main_lf: int) -> int:
+    loop code.len() % 16 != 0: b(0xCC)
+    start = code.len()
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    rex(true, 0, 0, RSP, false)               # sub rsp, 8
+    b(0x83)
+    modrr(5, RSP)
+    b(8)
+    if watch_build:
+        # (sloppy watch: room for the code of later builds, reserved before anything else can be
+        # put there, its pages committed as patches use them; its first word tells
+        # lib/std/watch.jo it is there)
+        win_virtual_alloc(WATCH_CODE_AT, WATCH_CODE_SIZE, 0x2000)          # MEM_RESERVE
+        mov_imm(RCX, WATCH_CODE_AT)
+        b(0x48); b(0x39); b(0xC8)             # cmp rax, rcx
+        b(0x75); b(0)                         # jne over the rest
+        j = code.len()
+        win_virtual_alloc(WATCH_CODE_AT, 4096, 0x1000)                     # MEM_COMMIT
+        b(0x48); b(0x85); b(0xC0)             # test rax, rax
+        b(0x74); b(0)                         # je over the mark
+        k = code.len()
+        mov_imm(RDX, 0x6A6F74776174636B)
+        mov_mr(RAX, 0, RDX)
+        code[k - 1] = u8(code.len() - k)
+        code[j - 1] = u8(code.len() - j)
+    loop f in inits:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, f))
+    b(0x31); b(0xDB)                          # xor ebx, ebx (the exit code)
+    if main_lf >= 0:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, main_lf))
+        if main_code: mov_rr(RBX, RAX)
+    if entry_end_lf >= 0:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, entry_end_lf))
+    mov_rr(RCX, RBX)
+    rex(true, 0, 0, RSP, false)               # sub rsp, 32 (shadow space)
+    b(0x83)
+    modrr(5, RSP)
+    b(32)
+    b(0xFF); b(0x15); b32(0)                  # call [rip + ExitProcess]
+    data_fix.push((code.len() - 4, 1, pe_iat_off(0)))
+    b(0xCC)
+    elf_syms.push(("_start", start, code.len() - start))
+    unwind_fns.push((start, code.len(), UW_ENTRY, 8))
+    start
+
+# Windows calls a @cabi function (a window procedure...) with its own convention: an adapter
+# moves the arguments where Sloppy code expects them and keeps what Windows expects kept
+# (rdi, rsi, xmm6-15). Taking the function's address gives the adapter's (cabi_fix).
+cabi_adapter: {int: int} = {}       # function -> its adapter's offset
+cabi_fix: (int, int)[]
+
+x64_cabi_adapter = (lf: int, ptypes: int[]) -> int:
+    nin = 0
+    loop t in ptypes:
+        if t == VI: nin += 1
+    if nin > 6 or ptypes.len() - nin > 8: fatal(0, "a @cabi function called from C on Windows takes at most 6 integer and 8 float parameters ({lfuncs[lf].name} takes {ptypes.len()})")
+    loop code.len() % 16 != 0: b(0xCC)
+    start = code.len()
+    cabi_adapter[lf] = start
+    b(0x55)                                   # push rbp
+    mov_rr(RBP, RSP)
+    b(0x57)                                   # push rdi
+    b(0x56)                                   # push rsi
+    rex(true, 0, 0, RSP, false)               # sub rsp, 160
+    b(0x81)
+    modrr(5, RSP)
+    b32(160)
+    loop i in [0..10): vmov_mr(RSP, 16 * i, 6 + i, VX)
+    # (in order: no argument is overwritten before it is moved)
+    wregs = [RCX, RDX, 8, 9]
+    ni = 0
+    nf = 0
+    loop k in 0.. and t in ptypes:
+        # (from the fifth on, on the caller's stack: above the return address and 32 bytes of
+        # shadow space)
+        if t == VI:
+            if k < 4: mov_rr(int_arg_regs[ni], wregs[k])
+            else: mov_rm(int_arg_regs[ni], RBP, 48 + 8 * (k - 4))
+            ni += 1
+        else:
+            if k < 4: vmov_rr(nf, k, VX)
+            else: sse_rm(0xF2, 0x10, nf, RBP, 48 + 8 * (k - 4))      # movsd
+            nf += 1
+    b(0xE8)
+    b32(0)
+    call_fix.push((code.len() - 4, lf))
+    loop i in [0..10): vmov_rm(6 + i, RSP, 16 * i, VX)
+    rex(true, 0, 0, RSP, false)               # add rsp, 160
+    b(0x81)
+    modrr(0, RSP)
+    b32(160)
+    b(0x5E)                                   # pop rsi
+    b(0x5F)                                   # pop rdi
+    b(0x5D)                                   # pop rbp
+    b(0xC3)
+    start
+
+x64_entry = (inits: int[], main_lf: int) -> int:
+    loop code.len() % 16 != 0: b(0xCC)
+    start = code.len()
+    # (no source line: line 0)
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    row_line = 0
+    rel_fixup_lea(RAX, 1, 0)
+    mov_mr(RAX, 0, RSP)                       # save initial stack pointer (argc/argv)
+    rex(true, 0, 0, RSP, false)
+    b(0x83)
+    modrr(4, RSP)
+    b(0xF0)                                   # and rsp, -16
+    if watch_build:
+        # (sloppy watch: room for the code of later builds, taken before anything else can be put
+        # there; its first word tells lib/std/watch.jo it is there)
+        mov_imm(RDI, WATCH_CODE_AT)
+        mov_imm(RSI, WATCH_CODE_SIZE)
+        mov_imm(RDX, 7)
+        mov_imm(10, 0x104022)                 # private, anonymous, no reserve, fixed (no replace)
+        mov_imm(8, -1)
+        mov_imm(9, 0)
+        mov_imm(RAX, 9)
+        b(0x0F); b(0x05)                      # mmap
+        mov_imm(RCX, WATCH_CODE_AT)
+        b(0x48); b(0x39); b(0xC8)             # cmp rax, rcx
+        b(0x75); b(0)                         # jne over the mark
+        j = code.len()
+        mov_imm(RDX, 0x6A6F74776174636B)
+        mov_mr(RAX, 0, RDX)
+        code[j - 1] = u8(code.len() - j)
+    loop f in inits:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, f))
+    b(0x31); b(0xDB)                          # xor ebx, ebx (the exit code)
+    if main_lf >= 0:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, main_lf))
+        if main_code: mov_rr(RBX, RAX)
+    if entry_end_lf >= 0:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, entry_end_lf))
+    mov_rr(RDI, RBX)
+    mov_imm(RAX, 231)
+    b(0x0F); b(0x05)                          # exit_group
+    # (the entry point: debuggers stop unwinding here)
+    elf_syms.push(("_start", start, code.len() - start))
+    start
+
+# where each call returns to, and the source position of the call (an index into
+# ir_positions): the line table of backtraces (lib/std/backtrace.jo)
+call_sites: int[]
+# (code offset, position) where the source position changes: the line table of debuggers
+# (dwarf.jo)
+line_rows: int[]
+
+row_file = -1
+
+# (a row where the position changes; dwarf.jo leaves out those on the same line)
+line_row = (pos: int):
+    if pos == 0 or pos == row_pos: return
+    row_pos = pos
+    line_rows.push(code.len())
+    line_rows.push(pos)
+
+call_site = (ins: Ins):
+    if ins.pos == 0: return
+    call_sites.push(code.len())
+    call_sites.push(int(ins.pos))
+
+# the ".sloppy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
+# then u32 count and for each call site in address order: varints of the return address's
+# offset in .text since the previous one, the file and the line
+x64_line_table = () -> u8[]:
+    if call_sites.len() == 0: return []
+    out: u8[] = ['S', 'L', 'N', '1']
+    fidx = fill(-1, files.len())
+    fnames: str[]
+    ents: int[]
+    ents.reserve(call_sites.len() * 3 / 2)
+    k = 0
+    loop k < call_sites.len():
+        f = pos_file(ir_positions[call_sites[k + 1]])
+        if f < 0 or f >= files.len():
+            k += 2
+            continue
+        if fidx[f] < 0:
+            fidx[f] = fnames.len()
+            path = files[f].path
+            s = rfind(path, "/")
+            if s >= 0: path = path[s + 1..]
+            fnames.push(path)
+        ents.push(call_sites[k])
+        ents.push(fidx[f])
+        ents.push(ir_line(call_sites[k + 1]))
+        k += 2
+    put32(out, fnames.len())
+    loop nm in fnames:
+        put32(out, len(nm))
+        loop ch in nm: out.push(ch)
+    put32(out, ents.len() / 3)
+    out.reserve(out.len() + ents.len() * 2)
+    last = 0
+    k = 0
+    loop k < ents.len():
+        put_varint(out, ents[k] - last)
+        last = ents[k]
+        put_varint(out, ents[k + 1])
+        put_varint(out, ents[k + 2])
+        k += 3
+    out
+
+# (Windows programs: their .sloppy section, compiler/pe.jo) "SLS1", the number of functions,
+# each as its offset in .text, size and name; then the line table (x64_line_table)
+pe_backtrace_info = () -> u8[]:
+    out: u8[] = ['S', 'L', 'S', '1']
+    put32(out, elf_syms.len())
+    loop s in elf_syms:
+        put32(out, s.1)
+        put32(out, s.2)
+        put32(out, len(s.0))
+        loop c in s.0: out.push(c)
+    append_bytes(out, x64_line_table())
+    out
+
+put_varint = (out: mut u8[], v0: int):
+    if v0 >= 0 and v0 < 128:
+        out.push(u8(v0))
+        return
+    v = v0
+    loop v >= 128:
+        out.push(u8((v & 127) | 128))
+        v = v >> 7
+    out.push(u8(v))
+
+stub_fix: (int, int)[]
+stub_addr: int[] = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
+
+# machine code stubs for non-local control transfer
+x64_stubs = ():
+    loop code.len() % 16 != 0: b(0xCC)
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    row_line = 0
+    # setjmp(rdi = buf): save callee-saved registers, stack pointer and return address
+    stub_addr[2] = code.len()
+    loop i in 0.. and r in [RBX, RBP, 12, 13, 14, 15]: mov_mr(RDI, 8 * i, r)
+    lea(RAX, RSP, 8)
+    mov_mr(RDI, 48, RAX)
+    mov_rm(RAX, RSP, 0)
+    mov_mr(RDI, 56, RAX)
+    b(0x31); b(0xC0)                     # xor eax, eax
+    b(0xC3)
+    # longjmp(rdi = buf, rsi = value)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[3] = code.len()
+    loop i in 0.. and r in [RBX, RBP, 12, 13, 14, 15]: mov_rm(r, RDI, 8 * i)
+    mov_rm(RSP, RDI, 48)
+    mov_rr(RAX, RSI)
+    rex(false, 0, 0, RDI, false)
+    b(0xFF)
+    mem(4, RDI, 56)                       # jmp [rdi+56]
+    # jump(rdi = entry, rsi = stack): switch stacks and jump (rdx = 0 for ld.so)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[4] = code.len()
+    mov_rr(RSP, RSI)
+    b(0x31); b(0xD2)                     # xor edx, edx
+    rex(false, 0, 0, RDI, false)
+    b(0xFF)
+    modrr(4, RDI)                          # jmp rdi
+    # clone_thread(rdi = entry, rsi = arg, rdx = stack top): the child calls entry(arg) on the
+    # new stack, then exits the thread; the parent gets the thread id (or -errno)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[5] = code.len()
+    loop x in [0x48, 0x83, 0xEA, 0x10,        # sub rdx, 16
+              0x48, 0x89, 0x3A,              # mov [rdx], rdi
+              0x48, 0x89, 0x72, 0x08,        # mov [rdx+8], rsi
+              0x48, 0x89, 0xD6,              # mov rsi, rdx
+              0xBF, 0x00, 0x0F, 0x05, 0x00,  # mov edi, CLONE_VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
+              0x31, 0xD2,                    # xor edx, edx
+              0x45, 0x31, 0xD2,              # xor r10d, r10d
+              0x45, 0x31, 0xC0,              # xor r8d, r8d
+              0xB8, 0x38, 0x00, 0x00, 0x00,  # mov eax, 56 (clone)
+              0x0F, 0x05,                    # syscall
+              0x48, 0x85, 0xC0,              # test rax, rax
+              0x74, 0x01,                    # jz child
+              0xC3,                          # ret
+              0x58,                          # child: pop rax
+              0x5F,                          # pop rdi
+              0xFF, 0xD0,                    # call rax
+              0xB8, 0x3C, 0x00, 0x00, 0x00,  # mov eax, 60 (exit this thread)
+              0x31, 0xFF,                    # xor edi, edi
+              0x0F, 0x05,                    # syscall
+              0x0F, 0x0B]: b(x)              # ud2
+    # atomic_add(rdi = p, rsi = v) -> old value
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[6] = code.len()
+    loop x in [0x48, 0x89, 0xF0, 0xF0, 0x48, 0x0F, 0xC1, 0x07, 0xC3]: b(x)     # mov rax, rsi; lock xadd [rdi], rax; ret
+    # atomic_cas(rdi = p, rsi = expected, rdx = desired) -> old value
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[7] = code.len()
+    loop x in [0x48, 0x89, 0xF0, 0xF0, 0x48, 0x0F, 0xB1, 0x17, 0xC3]: b(x)     # mov rax, rsi; lock cmpxchg [rdi], rdx; ret
+    # stack_ptr() -> the caller's stack pointer
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[8] = code.len()
+    loop x in [0x48, 0x8D, 0x44, 0x24, 0x08, 0xC3]: b(x)                        # lea rax, [rsp+8]; ret
+    # cpu_features() -> bit 0: AVX2 usable (cpuid 1: OSXSAVE and AVX; xgetbv: the system saves
+    # xmm and ymm state; cpuid 7: AVX2)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[9] = code.len()
+    loop x in [0x53,                                     # push rbx
+               0xB8, 0x01, 0x00, 0x00, 0x00,             # mov eax, 1
+               0x31, 0xC9,                               # xor ecx, ecx
+               0x0F, 0xA2,                               # cpuid
+               0x41, 0x89, 0xC8,                         # mov r8d, ecx
+               0x41, 0x81, 0xE0, 0x00, 0x00, 0x00, 0x18, # and r8d, (1 << 27) | (1 << 28)
+               0x41, 0x81, 0xF8, 0x00, 0x00, 0x00, 0x18, # cmp r8d, (1 << 27) | (1 << 28)
+               0x75, 0x20,                               # jne no
+               0x31, 0xC9,                               # xor ecx, ecx
+               0x0F, 0x01, 0xD0,                         # xgetbv
+               0x83, 0xE0, 0x06,                         # and eax, 6
+               0x83, 0xF8, 0x06,                         # cmp eax, 6
+               0x75, 0x13,                               # jne no
+               0xB8, 0x07, 0x00, 0x00, 0x00,             # mov eax, 7
+               0x31, 0xC9,                               # xor ecx, ecx
+               0x0F, 0xA2,                               # cpuid
+               0x89, 0xD8,                               # mov eax, ebx
+               0xC1, 0xE8, 0x05,                         # shr eax, 5
+               0x83, 0xE0, 0x01,                         # and eax, 1
+               0x5B, 0xC3,                               # pop rbx; ret
+               0x31, 0xC0, 0x5B, 0xC3]: b(x)             # no: xor eax, eax; pop rbx; ret
+    # code_sync(p, n): nothing to do (x86-64 keeps the instruction cache coherent)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[11] = code.len()
+    loop x in [0x31, 0xC0, 0xC3]: b(x)                                          # xor eax, eax; ret
+    # call rcx with rax as its argument, keeping every register but rax and rcx (a call the
+    # register allocator need not know of: CALL_IF_SHARED's when it is taken)
+    loop code.len() % 16 != 0: b(0xCC)
+    stub_addr[12] = code.len()
+    loop x in [0x55, 0x48, 0x89, 0xE5,                       # push rbp; mov rbp, rsp
+               0x57, 0x56, 0x52, 0x41, 0x50, 0x41, 0x51,     # push rdi, rsi, rdx, r8, r9
+               0x41, 0x52, 0x41, 0x53,                       # push r10, r11
+               0x48, 0x83, 0xE4, 0xF0,                       # and rsp, -16
+               0x48, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00]: b(x)  # sub rsp, 256
+    loop i in [0..16): xmm_spill(true, i)
+    loop x in [0x48, 0x89, 0xC7, 0xFF, 0xD1]: b(x)           # mov rdi, rax; call rcx
+    loop i in [0..16): xmm_spill(false, i)
+    loop x in [0x48, 0x8D, 0x65, 0xC8,                       # lea rsp, [rbp - 56]
+               0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58,  # pop r11, r10, r9, r8
+               0x5A, 0x5E, 0x5F, 0x5D, 0xC3]: b(x)           # pop rdx, rsi, rdi, rbp; ret
+
+# movdqu [rsp + 16 i], xmm i (or back)
+xmm_spill = (store: bool, i: int):
+    b(0xF3)
+    if i >= 8: b(0x44)
+    b(0x0F)
+    if store: b(0x7F)
+    else: b(0x6F)
+    b(0x84 | ((i & 7) << 3))
+    b(0x24)
+    b32(16 * i)
+
+lf_is_cabi = (lf: int) -> bool: lfuncs[lf].kind == LK_INST and fns[lfuncs[lf].inst].cabi
+
+x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
+    if stub_fix.len() > 0 and stub_addr[2] < 0: ice("stubs not emitted")
+    loop f in cabi_fix:
+        a = cabi_adapter.get(f.1) ?? -1
+        if a < 0: ice("no adapter for {lfuncs[f.1].name}")
+        patch32(f.0, a - (f.0 + 4))
+    loop f in stub_fix: patch32(f.0, stub_addr[f.1] - (f.0 + 4))
+    loop f in call_fix:
+        target = fn_addr[f.1]
+        if target < 0: ice("unresolved function {lfuncs[f.1].name}")
+        patch32(f.0, target - (f.0 + 4))
+    loop f in data_fix:
+        base = ro_addr
+        if f.1 == 1: base = data_addr
+        target = base + f.2
+        patch32(f.0, target - (text_addr + f.0 + 4))

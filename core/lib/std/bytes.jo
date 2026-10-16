@@ -1,0 +1,108 @@
+# Bytes and bits: whole numbers in byte arrays (file formats, network messages) in little- or
+# big-endian order, bit counting and turning, and bytes from C.
+#   header: u8[]
+#   append_le(header, 0x46464952, 4)              # "RIFF"
+#   append_le(header, 36 + n, 4)
+#   size = get_le(file, 4, 4)                     # 4 bytes at offset 4, little-endian
+#   rate = get_be(packet, 0, 2)
+#   rate_f = f32_from_bits(u32(get_le(file, 8, 4)))   # a float's bytes
+# Sizes are 1, 2, 4 or 8 bytes; get_le and get_be give the bytes as an unsigned number (8 bytes:
+# its bits as an int), get_le_signed and get_be_signed with their sign.
+
+# the size-byte number at b[at..], least significant byte first
+get_le = (b: u8[], at: int, size: int) -> int:
+    __bytes_check(b, at, size)
+    v = 0
+    loop i in [0..size): v |= int(b[at + i]) << (8 * i)
+    v
+
+# the size-byte number at b[at..], most significant byte first (network order)
+get_be = (b: u8[], at: int, size: int) -> int:
+    __bytes_check(b, at, size)
+    v = 0
+    loop i in [0..size): v = (v << 8) | int(b[at + i])
+    v
+
+get_le_signed = (b: u8[], at: int, size: int) -> int: __sign_extend(get_le(b, at, size), size)
+get_be_signed = (b: u8[], at: int, size: int) -> int: __sign_extend(get_be(b, at, size), size)
+
+# v as size bytes at b[at..] (b grows to hold them), least or most significant byte first
+put_le = (b: mut u8[], at: int, size: int, v: int):
+    __bytes_room(b, at, size)
+    loop i in [0..size): b[at + i] = u8((v >> (8 * i)) & 0xFF)
+put_be = (b: mut u8[], at: int, size: int, v: int):
+    __bytes_room(b, at, size)
+    loop i in [0..size): b[at + i] = u8((v >> (8 * (size - 1 - i))) & 0xFF)
+
+# v as size bytes at the end of b
+append_le = (b: mut u8[], v: int, size: int): put_le(b, b.len(), size, v)
+append_be = (b: mut u8[], v: int, size: int): put_be(b, b.len(), size, v)
+
+__bytes_check = (b: u8[], at: int, size: int):
+    if size != 1 and size != 2 and size != 4 and size != 8: panic("a size of {size} bytes (1, 2, 4 or 8)")
+    if at < 0 or at + size > b.len(): panic("{size} bytes at {at} of {b.len()}")
+
+__bytes_room = (b: mut u8[], at: int, size: int):
+    if size != 1 and size != 2 and size != 4 and size != 8: panic("a size of {size} bytes (1, 2, 4 or 8)")
+    if at < 0: panic("bytes at {at}")
+    if at + size > b.len(): b.resize(at + size)
+
+__sign_extend = (v: int, size: int) -> int:
+    if size >= 8: return v
+    bits = 8 * size
+    if (v >> (bits - 1)) & 1 == 1: return v - (1 << bits)
+    v
+
+# ---------------- bits ----------------
+# how many bits are 1
+popcount = (x: int) -> int:
+    v = u64(x)
+    v = v - ((v >> 1) & 0x5555555555555555)
+    v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333)
+    v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0F
+    int((v * 0x0101010101010101) >> 56)
+
+# how many 0 bits come before the highest 1 (64 for 0)
+leading_zeros = (x: int) -> int:
+    if x == 0: return 64
+    v = u64(x)
+    n = 0
+    loop s in [32, 16, 8, 4, 2, 1]:
+        if v >> u64(64 - s) == 0:
+            n += s
+            v = v << u64(s)
+    n
+
+# how many 0 bits come after the lowest 1 (64 for 0)
+trailing_zeros = (x: int) -> int:
+    if x == 0: return 64
+    v = u64(x)
+    n = 0
+    loop s in [32, 16, 8, 4, 2, 1]:
+        if v << u64(64 - s) == 0:
+            n += s
+            v = v >> u64(s)
+    n
+
+# the bits turned by n places (those going out at one end come back at the other)
+rotate_left = (x: int, n: int) -> int:
+    k = n & 63
+    if k == 0: return x
+    int((u64(x) << u64(k)) | (u64(x) >> u64(64 - k)))
+rotate_right = (x: int, n: int) -> int: rotate_left(x, 64 - (n & 63))
+
+# the bytes of a size-byte number in the other order (0x1234, 2 -> 0x3412)
+byte_swap = (x: int, size: int = 8) -> int:
+    v = 0
+    loop i in [0..size): v = (v << 8) | ((x >> (8 * i)) & 0xFF)
+    v
+
+# ---------------- from C ----------------
+# a copy of the n bytes at p
+bytes_from = (p: *u8, n: int) -> u8[]:
+    out = fill(u8(0), max(n, 0))
+    if n > 0: mem_copy(data(out), p, n)
+    out
+
+# a copy of C's text at p, up to its zero byte ("" for null)
+str_from_c = (p: *u8) -> str: __cstr(p)

@@ -1,0 +1,1157 @@
+# Shader translation: Sloppy functions -> Metal Shading Language (macOS: lib/game/metal.jo). The
+# same functions become GLSL (glsl.jo, which checks them first: what it accepts, this accepts) and
+# SPIR-V (spirv.jo); this follows the SPIR-V translation's data model, so the runtime is Vulkan's
+# in Metal's words:
+#   buffer(0)  SlPC: the parameters, vertices and instances as device addresses, the vertex and
+#              instance strides, flip (0, or the height of the window when drawing to it), depth
+#   buffer(1)  the textures: an array of (texture, sampler) entries; a Texture is its index
+# There is no vertex descriptor: the vertex function's input is read from the vertex buffer at
+# vertex_id (and the instance's at instance_id). The uniforms are read in place from the bytes of
+# the CPU's struct, so a value of the uniforms' type is an address, not a copy. A GpuBuffer is
+# its address and length; its elements are laid out as the CPU lays them out, read and written a
+# word at a time.
+#
+# Clip space is OpenGL's (z from -1 to 1, made 0 to 1 here). Images keep OpenGL's row order (row 0
+# is what y = -1 lands on): Metal puts y = 1 in row 0, so y is turned over when drawing to a
+# texture, and not when drawing to the window, whose row 0 is its top; there the fragment's y is
+# counted from the bottom, as OpenGL counts it.
+
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'glsl.jo'
+
+ml_out: str[]
+ml_decls: str[]              # struct and function definitions, in dependency order
+ml_done: {str: bool} = {}    # declarations already made (by name)
+ml_done_fns: {int: bool} = {}
+ml_pending: int[]
+ml_stage = ""                # "vertex", "fragment", "compute" or "kernel"
+ml_utype = 0                 # the uniforms' type: its values are addresses
+ml_lref: {int: str} = {}     # locals holding the uniforms (or a part): their address
+ml_temps = 0
+
+ml_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+
+ml_first = (name: str) -> bool:
+    if ml_done.get(name) != none: return false
+    ml_done[name] = true
+    true
+
+ml_head = () -> str: join([
+    "#include <metal_stdlib>\nusing namespace metal;\n",
+    "struct SlPC \{ device const uint* params; device const uint* verts; device const uint* insts; int vstride; int istride; float flip; int depth; };\n",
+    "struct SlTex \{ texture2d<float> t; sampler s; };\n",
+    "struct SlGB \{ device uint* p; int n; };\n",
+    "struct SlPtr \{ device uint* p; };\n"], "")
+
+# ---------------- types ----------------
+ml_type = (t0: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_: return "float"
+    if k == .int_: return "int"
+    if k == .bool_: return "bool"
+    if k == .vec:
+        if t == T_MAT4: return "float4x4"
+        if types[t].sign: return "int{types[t].bits}"
+        return "float{types[t].bits}"
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si): return "uint"
+        if is_gpu_buffer(t): return "SlGB"
+        ml_struct(t, pos)
+        return "S_{gl_name(structs[si].name)}_{si}"
+    if k == .void_: return "void"
+    if k == .fixed: return "array<{ml_type(int(types[t].elem), pos)}, {fixed_len(t)}>"
+    ml_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    ""
+
+ml_struct = (t: int, pos: int):
+    si = int(types[t].st)
+    nm = "S_{gl_name(structs[si].name)}_{si}"
+    if not ml_first(nm): return
+    check_struct_fields(si)
+    s = "struct {nm} \{\n"
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        s += "    {ml_type(int(fields[f].type), pos)} {name_of(int(fields[f].name))}_;\n"
+    ml_decls.push(s + "};\n")
+
+ml_float = (x: f64) -> str:
+    if x != x: return "NAN"
+    if x == INF: return "INFINITY"
+    if x == -INF: return "(-INFINITY)"
+    s = "{f32(x)}"
+    if find(s, ".") < 0 and find(s, "e") < 0: s += ".0"
+    s + "f"
+
+ml_int = (v: int) -> str:
+    w = v & 0xFFFFFFFF
+    if w >= 0x80000000: w -= 0x100000000
+    if w == -2147483648: return "int(0x80000000u)"
+    "{w}"
+
+ml_local = (l: int) -> str: "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+ml_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
+
+# ---------------- memory (uniforms, vertices, GPU buffers) ----------------
+# where a value is: the address of a buffer of words, plus a byte offset (c a constant, d an
+# expression added to it, or "")
+struct MlRef:
+    base: str
+    c: int
+    d: str
+    t: int
+
+ml_off = (c: int, d: str) -> str:
+    if len(d) == 0: return "{c}"
+    if c == 0: return d
+    "({d} + {c})"
+
+# the word at byte offset (c + d) of base (a multiple of 4)
+ml_word = (base: str, c: int, d: str) -> str:
+    if len(d) == 0: return "{base}[{c >> 2}]"
+    "{base}[({ml_off(c, d)}) >> 2]"
+
+ml_mem_decls = ():
+    if not ml_first("mem"): return
+    # (bits of the word holding byte a, from bit 8 * (a & 3); sign-extended if sgn)
+    ml_decls.push("int sl_sub(device const uint* b, int a, int bits, bool sgn) \{\n    uint w = b[a >> 2] >> uint((a & 3) * 8);\n    int sh = 32 - bits;\n    if (sgn) return as_type<int>(w << uint(sh)) >> sh;\n    return int((w << uint(sh)) >> uint(sh));\n}\n")
+    # (an f64 from its two words, rounded to an f32 as spirv.jo does)
+    ml_decls.push("float sl_f64(uint lo, uint hi) \{\n    uint e = (hi >> 20) & 0x7FFu;\n    uint m = ((hi & 0xFFFFFu) << 3) | (lo >> 29);\n    uint bits = (((e - 896u) << 23) | m) + ((lo >> 28) & 1u);\n    if (e >= 1151u || bits >= 0x7F800000u) bits = 0x7F800000u;\n    if (e <= 896u) bits = 0u;\n    if (e == 0x7FFu && (m | lo) != 0u) bits = 0x7FC00000u;\n    return as_type<float>(bits | (hi & 0x80000000u));\n}\n")
+    # (a device address stored at byte offset a)
+    ml_decls.push("device uint* sl_ptr(device const uint* b, int a) \{\n    return ((device const SlPtr*)(b + (a >> 2)))->p;\n}\n")
+
+ml_field_offset = (si: int, name: str) -> int:
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) == name: return int(fields[f].offset)
+    0
+
+# a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
+ml_read = (t0: int, base: str, c: int, d: str, pos: int) -> str:
+    ml_mem_decls()
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_:
+        if int(types[t].bits) == 64: return "sl_f64({ml_word(base, c, d)}, {ml_word(base, c + 4, d)})"
+        return "as_type<float>({ml_word(base, c, d)})"
+    if k == .int_:
+        bits = int(types[t].bits)
+        if bits >= 32: return "as_type<int>({ml_word(base, c, d)})"
+        sg = "false"
+        if types[t].sign: sg = "true"
+        return "sl_sub({base}, {ml_off(c, d)}, {bits}, {sg})"
+    if k == .bool_: return "(sl_sub({base}, {ml_off(c, d)}, 8, false) != 0)"
+    ty = ml_type(t, pos)
+    parts: str[]
+    if k == .vec:
+        if t == T_MAT4:
+            loop col in [0..4): parts.push(ml_read(T_VEC4, base, c + 16 * col, d, pos))
+        else:
+            ct = "float"
+            if types[t].sign: ct = "int"
+            loop i in [0..int(types[t].bits)): parts.push("as_type<{ct}>({ml_word(base, c + 4 * i, d)})")
+        return "{ty}({join(parts, ", ")})"
+    if k == .struct_:
+        si = int(types[t].st)
+        layout(t)
+        if is_lib_texture(si): return ml_word(base, c + ml_field_offset(si, "id"), d)
+        if is_gpu_buffer(t):
+            return "SlGB\{sl_ptr({base}, {ml_off(c + ml_field_offset(si, "addr"), d)}), as_type<int>({ml_word(base, c + ml_field_offset(si, "n"), d)})}"
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            parts.push(ml_read(int(fields[f].type), base, c + int(fields[f].offset), d, pos))
+        return "{ty}\{{join(parts, ", ")}}"
+    if k == .fixed:
+        el = int(types[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)): parts.push(ml_read(el, base, c + i * tsize(el), d, pos))
+        return "{ty}\{{join(parts, ", ")}}"
+    ml_err(pos, "type {type_str(t)} cannot be read by a shader")
+    ""
+
+# the uniforms (or a part of them) an expression stands for, if it does (base "" if not)
+ml_ref = (e: int) -> MlRef:
+    k = nodes[e].kind
+    if k == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return ml_ref(int(locals[l].alias))
+        if let p = ml_lref.get(l): return MlRef(p, 0, "", ntype(e))
+        return MlRef()
+    if k == .field and nodes[e].aux >= 0:
+        a = int(nodes[e].a)
+        r = ml_ref(a)
+        if len(r.base) == 0: return r
+        bt = prune(ntype(a))
+        if types[bt].kind != .struct_: return MlRef()
+        layout(bt)
+        f = int(structs[int(types[bt].st)].fields) + int(nodes[e].aux)
+        return MlRef(r.base, r.c + int(fields[f].offset), r.d, ntype(e))
+    if k == .index:
+        a = int(nodes[e].a)
+        r = ml_ref(a)
+        if len(r.base) == 0: return r
+        bt = prune(ntype(a))
+        stride = 4
+        if bt == T_MAT4: stride = 16
+        else if types[bt].kind == .fixed:
+            layout(int(types[bt].elem))
+            stride = tsize(int(types[bt].elem))
+        b = int(nodes[e].b)
+        if nodes[b].kind == .int_lit: return MlRef(r.base, r.c + int(nodes[b].ival) * stride, r.d, ntype(e))
+        off = "({ml_expr(b)}) * {stride}"
+        if len(r.d) > 0: off = "{r.d} + {off}"
+        return MlRef(r.base, r.c, "({off})", ntype(e))
+    if ml_is_gbuf_op(e, "[]"): return ml_gbuf_elem(e)
+    MlRef()
+
+# ---------------- functions ----------------
+ml_fn = (f: int) -> str:
+    if ml_done_fns.get(f) == none:
+        ml_done_fns[f] = true
+        ml_pending.push(f)
+    ml_fn_name(f)
+
+ml_param = (l: int) -> str:
+    t = int(locals[l].type)
+    if prune(t) == ml_utype: return "device const uint* {ml_local(l)}"
+    ty = ml_type(t, locals[l].pos)
+    if int(locals[l].flags) & LF_MUTPARAM != 0: return "thread {ty}& {ml_local(l)}"
+    "{ty} {ml_local(l)}"
+
+# translate a function (its declaration first: callers may come before it in the text)
+ml_function = (f: int):
+    decl = int(fns[f].decl)
+    if decl == 0 or (nodes[decl].kind != .fn_ and nodes[decl].kind != .lambda): ml_err(0, "only named functions can be used in shaders")
+    if fns[f].caps.len() > 0: ml_err(nodes[decl].pos, "a function that captures variables cannot run on the GPU")
+    rt = int(fns[f].ret)
+    ret = ml_type(rt, nodes[decl].pos)
+    ps: str[]
+    loop l in fns[f].params:
+        ps.push(ml_param(l))
+        if prune(int(locals[l].type)) == ml_utype: ml_lref[l] = ml_local(l)
+    sig = "{ret} {ml_fn_name(f)}({ml_with_ctx(ml_ctx_params(), ps)})"
+    saved = ml_out
+    ml_out = []
+    body = int(fns[f].body)
+    ml_block(body, 1, tkind(rt) != .void_)
+    lines_ = ml_out
+    ml_out = saved
+    ml_protos.push("{sig};\n")
+    ml_bodies.push("{sig} \{\n{join(lines_, "")}}\n")
+
+ml_protos: str[]
+ml_bodies: str[]
+
+ml_drain = ():
+    loop ml_pending.len() > 0: ml_function(ml_pending.pop())
+
+ml_block = (b: int, depth: int, ret_value: bool):
+    n = nkids(b)
+    loop i in [0..n):
+        s = kid(b, i)
+        if i == n - 1 and ret_value and nodes[b].aux != 0:
+            ml_out.push("{ind(depth)}return {ml_expr(int(nodes[s].a))};\n")
+            continue
+        ml_stmt(s, depth)
+
+# an assignment's target, its indexes computed once beforehand (into temporaries) when they are
+# more than a name or a number
+ml_target = (n: int, pre: str) -> str:
+    k = nodes[n].kind
+    if k == .index:
+        base = ml_target(int(nodes[n].a), pre)
+        ix = int(nodes[n].b)
+        if nodes[ix].kind == .int_lit: return "{base}[{ml_expr(ix)}]"
+        x = ml_expr(ix)
+        ml_temps += 1
+        ml_out.push("{pre}int sl_t{ml_temps} = {x};\n")
+        return "{base}[sl_t{ml_temps}]"
+    if k == .field and nodes[n].aux == -4: return "{ml_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}"
+    if k == .field and nodes[n].aux >= 0: return "{ml_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}_"
+    ml_expr(n)
+
+ml_stmt = (s: int, depth: int):
+    k = nodes[s].kind
+    pre = ind(depth)
+    if k == .vardecl:
+        if nodes[s].nlist > 0: ml_err(nodes[s].pos, "tuple destructuring is not supported in shaders")
+        l = int(nodes[s].sym)
+        t = int(locals[l].type)
+        if prune(t) == ml_utype:
+            # (another name for the uniforms, or a part of them: their address)
+            r = MlRef()
+            if nodes[s].b != 0: r = ml_ref(int(nodes[s].b))
+            if len(r.base) == 0 or r.c != 0 or len(r.d) != 0: ml_err(nodes[s].pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            ml_lref[l] = r.base
+            return
+        if is_gpu_buffer(t): ml_err(nodes[s].pos, "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")
+        ty = ml_type(t, nodes[s].pos)
+        if nodes[s].b != 0: ml_out.push("{pre}{ty} {ml_local(l)} = {ml_expr(int(nodes[s].b))};\n")
+        else: ml_out.push("{pre}{ty} {ml_local(l)} = {ml_zero(t, nodes[s].pos)};\n")
+    else if k == .assign:
+        if nodes[s].aux != 0: ml_err(nodes[s].pos, "unsupported assignment in shader")
+        a = int(nodes[s].a)
+        op = int(nodes[s].op)
+        ta = prune(ntype(a))
+        b = int(nodes[s].b)
+        if op == int(Tok.assign):
+            ml_out.push("{pre}{ml_target(a, pre)} = {ml_expr(b)};\n")
+            return
+        bop = gl_compound_op(op as Tok)
+        x = ml_target(a, pre)
+        if types[ta].kind == .bool_:
+            # (and= or= xor= on bools: both sides computed)
+            o = "&"
+            if bop == .pipe: o = "|"
+            if bop == .caret: o = "!="
+            ml_out.push("{pre}{x} = bool(({x}) {o} ({ml_expr(b)}));\n")
+            return
+        ml_out.push("{pre}{x} = {ml_arith(bop, x, ml_expr(b), ta, ta, ntype(b))};\n")
+    else if k == .exprstmt:
+        e = int(nodes[s].a)
+        if nodes[e].kind == .if_ or nodes[e].kind == .match_:
+            ml_stmt_if(e, depth)
+            return
+        if ml_is_gbuf_op(e, "[]="):
+            ml_gbuf_store(e, pre)
+            return
+        ml_out.push("{pre}{ml_expr(e)};\n")
+    else if k == .if_: ml_stmt_if(s, depth)
+    else if k == .return_:
+        if nodes[s].a != 0: ml_out.push("{pre}return {ml_expr(int(nodes[s].a))};\n")
+        else: ml_out.push("{pre}return;\n")
+    else if k == .while_:
+        ml_out.push("{pre}while ({ml_expr(int(nodes[s].a))}) \{\n")
+        ml_block(int(nodes[s].b), depth + 1, false)
+        ml_out.push("{pre}}\n")
+    else if k == .for_ and (nodes[s].aux == 1 or nodes[s].aux == 2) and tkind(ntype(int(nodes[s].a))) == .fixed:
+        # loop [mut] x in xs (a fixed-size array): an index loop; without `mut`, over a copy (in the
+        # uniforms: over its elements there, read one at a time)
+        ct = prune(ntype(int(nodes[s].a)))
+        et = int(types[ct].elem)
+        iv = ml_local(int(nodes[s].c))
+        el = int(nodes[s].sym)
+        arr = ""
+        r = MlRef()
+        if nodes[s].aux == 1:
+            r = ml_ref(int(nodes[s].a))
+            if len(r.base) == 0:
+                arr = ml_local(int(nodes[s].d))
+                ml_out.push("{pre}{ml_type(ct, nodes[s].pos)} {arr} = {ml_expr(int(nodes[s].a))};\n")
+        ml_out.push("{pre}for (int {iv} = 0; {iv} < {fixed_len(ct)}; {iv}++) \{\n")
+        if nodes[s].aux == 1:
+            ety = ml_type(et, nodes[s].pos)
+            if len(r.base) > 0:
+                layout(et)
+                d = "{iv} * {tsize(et)}"
+                if len(r.d) > 0: d = "{r.d} + {d}"
+                ml_out.push("{pre}    {ety} {ml_local(el)} = {ml_read(et, r.base, r.c, "({d})", nodes[s].pos)};\n")
+            else: ml_out.push("{pre}    {ety} {ml_local(el)} = {arr}[{iv}];\n")
+        ml_block(int(nodes[s].b), depth + 1, false)
+        ml_out.push("{pre}}\n")
+    else if k == .for_:
+        if nodes[s].aux != 0: ml_err(nodes[s].pos, "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")
+        l = int(nodes[s].sym)
+        it = int(nodes[s].a)
+        v = ml_local(l)
+        cmp = "<"
+        if has_flag(it, NF_INCLUSIVE): cmp = "<="
+        ml_out.push("{pre}for (int {v} = {ml_expr(int(nodes[it].a))}; {v} {cmp} {ml_expr(int(nodes[it].b))}; {v}++) \{\n")
+        ml_block(int(nodes[s].b), depth + 1, false)
+        ml_out.push("{pre}}\n")
+    else if k == .break_: ml_out.push("{pre}break;\n")
+    else if k == .continue_: ml_out.push("{pre}continue;\n")
+    else if k == .block:
+        loop i in [0..nkids(s)): ml_stmt(kid(s, i), depth)
+    else if k == .const_: pass
+    else: ml_err(nodes[s].pos, "unsupported statement in shader")
+
+ml_stmt_if = (e: int, depth: int):
+    if nodes[e].kind != .if_: ml_err(nodes[e].pos, "match is not supported in shaders")
+    pre = ind(depth)
+    ml_out.push("{pre}if ({ml_expr(int(nodes[e].a))}) \{\n")
+    ml_block(int(nodes[e].b), depth + 1, false)
+    if nodes[e].c != 0:
+        ml_out.push("{pre}} else \{\n")
+        ml_block(int(nodes[e].c), depth + 1, false)
+    ml_out.push("{pre}}\n")
+
+ml_zero = (t0: int, pos: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_: return "0.0f"
+    if k == .int_: return "0"
+    if k == .bool_: return "false"
+    if k == .vec:
+        if t == T_MAT4: return "float4x4(0.0f)"
+        return "{ml_type(t, pos)}(0)"
+    if k == .struct_ or k == .fixed: return "{ml_type(t, pos)}\{}"
+    ml_err(pos, "cannot zero-initialize {type_str(t)} in a shader")
+    ""
+
+# ---------------- expressions ----------------
+ml_is_floaty = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
+
+ml_is_vector = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .vec and t != T_MAT4
+
+ml_ncomp = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .vec: return int(types[t].bits)
+    1
+
+# value x of e's type converted to the scalar kind of t (int <-> float), for operands the checker left mixed
+ml_as = (e: int, x: str, t: int) -> str:
+    from_ = prune(ntype(e))
+    n = ml_ncomp(from_)
+    if ml_is_floaty(t) and not ml_is_floaty(from_) and types[from_].kind != .bool_:
+        ty = "float"
+        if n > 1: ty = "float{n}"
+        if gl_unsigned(from_): return "{ty}(uint({x}))"
+        return "{ty}({x})"
+    if not ml_is_floaty(t) and ml_is_floaty(from_) and types[prune(t)].kind != .bool_:
+        ty = "int"
+        if n > 1: ty = "int{n}"
+        return "{ty}({x})"
+    x
+
+ml_expr = (e: int) -> str:
+    k = nodes[e].kind
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    # (the uniforms, or a part of them: read from memory)
+    if k == .ident or k == .field or k == .index or ml_is_gbuf_op(e, "[]"):
+        r = ml_ref(e)
+        if len(r.base) > 0:
+            if prune(r.t) == ml_utype:
+                if r.c == 0 and len(r.d) == 0: return r.base
+                ml_err(pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            return ml_read(r.t, r.base, r.c, r.d, pos)
+    if k == .int_lit:
+        if types[t].kind == .float_: return ml_float(f64(nodes[e].ival))
+        if nodes[e].ival < -2147483648 or nodes[e].ival > 4294967295: ml_err(nodes[e].pos, "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")
+        return ml_int(int(nodes[e].ival))
+    if k == .float_lit: return ml_float(nodes[e].fval)
+    if k == .bool_lit:
+        if nodes[e].ival != 0: return "true"
+        return "false"
+    if k == .ident:
+        if nodes[e].aux != i32(int(SK.local)): ml_err(pos, "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return ml_expr(int(locals[l].alias))
+        return ml_local(l)
+    if k == .field:
+        a = int(nodes[e].a)
+        if nodes[e].aux == -4: return "{ml_expr(a)}.{name_of(int(nodes[e].name))}"
+        if nodes[e].aux < 0: ml_err(pos, "unsupported field access in shader")
+        return "{ml_expr(a)}.{name_of(int(nodes[e].name))}_"
+    if k == .index:
+        bt = prune(ntype(int(nodes[e].a)))
+        if types[bt].kind != .vec and types[bt].kind != .fixed: ml_err(pos, "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")
+        return "{ml_expr(int(nodes[e].a))}[{ml_expr(int(nodes[e].b))}]"
+    if k == .binary:
+        a = int(nodes[e].a)
+        b = int(nodes[e].b)
+        op = nodes[e].op as Tok
+        ta = ntype(a)
+        tb = ntype(b)
+        if op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge:
+            x = ml_expr(a)
+            y = ml_expr(b)
+            ct = ta
+            # (an int compared with a float: as floats)
+            if ml_is_floaty(ta) != ml_is_floaty(tb) and types[prune(ta)].kind != .bool_:
+                if ml_is_floaty(tb):
+                    x = ml_as(a, x, tb)
+                    ct = tb
+                else: y = ml_as(b, y, ta)
+            return ml_compare(op, ct, x, y, pos)
+        x = ml_as(a, ml_expr(a), t)
+        y = ml_as(b, ml_expr(b), t)
+        if types[t].kind == .bool_:
+            if op == .amp: return "bool({x} & {y})"
+            if op == .pipe: return "bool({x} | {y})"
+            if op == .caret: return "({x} != {y})"
+        return ml_arith(op, x, y, ta, t, tb)
+    if k == .unary:
+        x = ml_expr(int(nodes[e].a))
+        if nodes[e].op == i32(int(Tok.minus)):
+            # (integers through unsigned ones, which wrap)
+            if types[t].kind == .int_: return gl_narrow("as_type<int>(-as_type<uint>(int({x})))", t)
+            if is_vec(t) and types[t].sign: return "as_type<int{types[t].bits}>(-as_type<uint{types[t].bits}>({x}))"
+            return "(- {x})"
+        return gl_narrow("(~{x})", t)
+    if k == .not_: return "(!{ml_expr(int(nodes[e].a))})"
+    if k == .and_: return "({ml_expr(int(nodes[e].a))} && {ml_expr(int(nodes[e].b))})"
+    if k == .or_: return "({ml_expr(int(nodes[e].a))} || {ml_expr(int(nodes[e].b))})"
+    if k == .conv:
+        cv = nodes[e].aux as CV
+        a = ml_expr(int(nodes[e].a))
+        from_ = prune(ntype(int(nodes[e].a)))
+        if cv == .int2float:
+            if gl_unsigned(from_): return "float(as_type<uint>(int({a})))"
+            return "float({a})"
+        if cv == .float2int:
+            if types[t].kind != .int_: return "int({a})"
+            return ml_float_to_int(a, t)
+        if cv == .int_ and types[t].kind == .int_:
+            if types[from_].kind == .bool_: return "int({a})"
+            return gl_narrow(a, t)
+        if cv == .float_ or cv == .none_: return a
+        ml_err(pos, "unsupported conversion in shader")
+    if k == .if_:
+        b = int(nodes[e].b)
+        c = int(nodes[e].c)
+        if nkids(b) != 1 or nkids(c) != 1 or nodes[b].aux == 0 or nodes[c].aux == 0: ml_err(pos, "if expressions in shaders must be single expressions: `if c: a else: b`")
+        return "({ml_expr(int(nodes[e].a))} ? {ml_expr(block_value(b))} : {ml_expr(block_value(c))})"
+    if k == .intrinsic: return ml_intrinsic(e)
+    if k == .call: return ml_call(e)
+    if k == .array and types[t].kind == .fixed:
+        parts: str[]
+        if nodes[e].b != 0:
+            v = ml_expr(kid(e, 0))
+            loop i in [0..fixed_len(t)): parts.push(v)
+        else if nkids(e) == 0: return ml_zero(t, pos)
+        else:
+            loop i in [0..nkids(e)): parts.push(ml_expr(kid(e, i)))
+        return "{ml_type(t, pos)}\{{join(parts, ", ")}}"
+    if k == .array: ml_err(pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    ml_err(pos, "unsupported expression in shader")
+    ""
+
+# a == b, a < b...: a bool (vectors: whether every component is equal, or any differs)
+ml_compare = (op: Tok, t0: int, x: str, y: str, pos: int) -> str:
+    t = prune(t0)
+    o = gl_binop(op)
+    if types[t].kind == .bool_:
+        if op != .eq and op != .ne: ml_err(pos, "bools can only be compared with == and !=")
+        return "({x} {o} {y})"
+    if t == T_MAT4:
+        r: str[]
+        loop c in [0..4): r.push("all(({x})[{c}] == ({y})[{c}])")
+        if op == .eq: return "({join(r, " && ")})"
+        return "(!({join(r, " && ")}))"
+    if gl_unsigned(t) and op != .eq and op != .ne: return "(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))"
+    if ml_is_vector(t):
+        if op == .ne: return "any({x} != {y})"
+        return "all({x} {o} {y})"
+    "({x} {o} {y})"
+
+# (operands are already a name, a call or in parentheses: an extra pair around one that looks
+# like a type, float2(float(a), float(b)), makes C++ read a cast)
+# x op y for operands of type ta, giving type t, the CPU's way: integer + - * through unsigned
+# numbers (which wrap), unsigned ones divide, take remainders, shift and compare as such, narrow
+# ones wrap to their range (tb: the right operand's type, where it may be a scalar beside a vector)
+ml_arith = (op: Tok, x: str, y: str, ta0: int, t0: int, tb0: int = 0) -> str:
+    ta = prune(ta0)
+    t = prune(t0)
+    tb = prune(tb0)
+    o = gl_binop(op)
+    if ta == T_MAT4 or tb == T_MAT4:
+        if (op == .plus or op == .minus) and (tb == 0 or not (tb == T_MAT4)) and ta == T_MAT4 and not is_vec(tb):
+            return "({x} {o} float4x4(float4({y}), float4({y}), float4({y}), float4({y})))"
+        return "({x} {o} {y})"
+    if op == .plus or op == .minus or op == .star:
+        if types[ta].kind == .int_ and types[t].kind == .int_: return gl_narrow("as_type<int>(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))", t)
+        if is_vec(t) and types[t].sign:
+            n = int(types[t].bits)
+            ux = "as_type<uint>(int({x}))"
+            if is_vec(ta): ux = "as_type<uint{n}>({x})"
+            uy = "as_type<uint>(int({y}))"
+            if tb == 0 or is_vec(tb): uy = "as_type<uint{n}>({y})"
+            return "as_type<int{n}>({ux} {o} {uy})"
+    if (op == .shl or op == .shr) and types[ta].kind == .int_:
+        ml_shift_decls()
+        if op == .shl: return gl_narrow("sl_shl({x}, {y})", t)
+        if gl_unsigned(ta): return "sl_shru({x}, {y})"
+        return "sl_shr({x}, {y})"
+    # (% keeps the dividend's sign, as on the CPU)
+    if op == .percent and (ml_is_floaty(ta) or ml_is_floaty(t)): return "({x} - {y} * trunc({x} / {y}))"
+    if gl_unsigned(ta):
+        if op == .slash or op == .percent or op == .shr: return gl_narrow("as_type<int>(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))", t)
+    if (op == .slash or op == .percent) and (types[ta].kind == .int_ or (is_vec(ta) and types[ta].sign)):
+        # (the smallest integer / -1 wraps, as on the CPU)
+        d = ml_sdiv(ta, tb)
+        if op == .slash: return gl_narrow("{d}({x}, {y})", t)
+        return gl_narrow("as_type<int>(as_type<uint>(int({x})) - as_type<uint>(int({d}({x}, {y}))) * as_type<uint>(int({y})))", t)
+    if op == .plus or op == .minus or op == .star or op == .slash or op == .shl: return gl_narrow("({x} {o} {y})", t)
+    "({x} {o} {y})"
+
+ml_sdiv = (ta: int, tb: int) -> str:
+    if ml_first("sdiv"): ml_decls.push("int sl_sdiv(int a, int b) \{\n    int q = a / (b == -1 ? 1 : b);\n    return b == -1 ? as_type<int>(-as_type<uint>(a)) : q;\n}\n")
+    if types[ta].kind == .int_: return "sl_sdiv"
+    n = int(types[ta].bits)
+    sc = tb != 0 and not is_vec(tb)
+    nm = "sl_sdiv{n}"
+    bty = "int{n}"
+    if sc:
+        nm = "sl_sdiv{n}s"
+        bty = "int"
+    if ml_first(nm):
+        sw = ["x", "y", "z", "w"]
+        cs: str[]
+        loop j in [0..n):
+            if sc: cs.push("sl_sdiv(a.{sw[j]}, b)")
+            else: cs.push("sl_sdiv(a.{sw[j]}, b.{sw[j]})")
+        ml_decls.push("int{n} {nm}(int{n} a, {bty} b) \{\n    return int{n}({join(cs, ", ")});\n}\n")
+    nm
+
+ml_shift_decls = ():
+    if not ml_first("shift"): return
+    ml_decls.push("int sl_shl(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : as_type<int>(as_type<uint>(x) << uint(c));\n}\n")
+    ml_decls.push("int sl_shr(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? x >> 31 : x >> c;\n}\n")
+    ml_decls.push("int sl_shru(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : int(as_type<uint>(x) >> uint(c));\n}\n")
+
+# float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
+# most), NaN to 0
+ml_float_to_int = (x: str, t0: int) -> str:
+    t = prune(t0)
+    bits = int(types[t].bits)
+    if bits > 32: bits = 32
+    sg = types[t].sign
+    lo = 0
+    hi = (1 << bits) - 1
+    if sg:
+        lo = -(1 << (bits - 1))
+        hi = (1 << (bits - 1)) - 1
+    if ml_first("f2i"):
+        ml_decls.push("int sl_f2i(float x, float lo, float top, float hi1, int him) \{\n    if (isnan(x)) return 0;\n    if (x >= hi1) return him;\n    return int(clamp(x, lo, top));\n}\n")
+        ml_decls.push("int sl_f2u(float x, float top) \{\n    if (isnan(x)) return 0;\n    if (x >= 4294967296.0f) return -1;\n    return as_type<int>(uint(clamp(x, 0.0f, top)));\n}\n")
+    if bits == 32 and not sg: return "sl_f2u({x}, 4294967040.0f)"
+    top = f64(hi)
+    if bits == 32: top = 2147483520.0
+    "sl_f2i({x}, {ml_float(f64(lo))}, {ml_float(top)}, {ml_float(f64(hi) + 1.0)}, {ml_int(hi)})"
+
+ml_intrinsic = (e: int) -> str:
+    id = nodes[e].aux as IN
+    pos = nodes[e].pos
+    if id == .vec_ctor: return ml_vec_ctor(e)
+    if id == .sqrt: return "sqrt({ml_expr(kid(e, 0))})"
+    if id == .floor_: return "floor({ml_expr(kid(e, 0))})"
+    if id == .ceil_: return "ceil({ml_expr(kid(e, 0))})"
+    if id == .fabs: return "abs({ml_expr(kid(e, 0))})"
+    if id == .fmin: return "min({ml_expr(kid(e, 0))}, {ml_expr(kid(e, 1))})"
+    if id == .fmax: return "max({ml_expr(kid(e, 0))}, {ml_expr(kid(e, 1))})"
+    ml_err(pos, "this operation is not available in shaders")
+    ""
+
+ml_vec_ctor = (e: int) -> str:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    ty = ml_type(t, pos)
+    n = nkids(e)
+    if t == T_MAT4:
+        if n == 0: return "float4x4(1.0f)"
+        if n == 1 and not is_vec(ntype(kid(e, 0))): return "float4x4(float({ml_expr(kid(e, 0))}))"
+        all_cols = n == 4
+        loop i in [0..n):
+            if prune(ntype(kid(e, i))) != T_VEC4: all_cols = false
+        parts: str[]
+        loop i in [0..n):
+            a = kid(e, i)
+            at = prune(ntype(a))
+            x = ml_expr(a)
+            if all_cols or not is_vec(at): parts.push(ml_as(a, x, T_FLOAT))
+            else if types[at].sign: parts.push("float{types[at].bits}({x})")
+            else: parts.push(x)
+        if all_cols: return "float4x4({join(parts, ", ")})"
+        # (sixteen numbers, or vectors adding up to them: column by column)
+        return ml_mat_from(parts, e)
+    if n == 0: return "{ty}(0)"
+    integer = types[t].sign
+    parts: str[]
+    loop i in [0..n):
+        a = kid(e, i)
+        at = prune(ntype(a))
+        x = ml_expr(a)
+        if is_vec(at) and types[at].sign != integer:
+            # (a vector of the other kind: each component converted as a scalar is)
+            m = int(types[at].bits)
+            if integer:
+                sw = ["x", "y", "z", "w"]
+                cs: str[]
+                loop j in [0..m): cs.push(ml_float_to_int("({x}).{sw[j]}", T_I32))
+                parts.push("int{m}({join(cs, ", ")})")
+            else: parts.push("float{m}({x})")
+        else if is_vec(at): parts.push(x)
+        else: parts.push(ml_as(a, x, t))
+    "{ty}({join(parts, ", ")})"
+
+# a matrix from 16 numbers (or vectors of them), column by column
+ml_mat_from = (parts: str[], e: int) -> str:
+    # (each part is a float or a float vector: flattened into a temporary array of 16)
+    ml_temps += 1
+    vals: str[]
+    loop i in [0..nkids(e)):
+        at = prune(ntype(kid(e, i)))
+        if is_vec(at):
+            sw = ["x", "y", "z", "w"]
+            loop j in [0..int(types[at].bits)): vals.push("({parts[i]}).{sw[j]}")
+        else: vals.push(parts[i])
+    if vals.len() != 16: ml_err(nodes[e].pos, "a mat4 is made of 16 numbers or 4 columns")
+    cols: str[]
+    loop c in [0..4): cols.push("float4({vals[4 * c]}, {vals[4 * c + 1]}, {vals[4 * c + 2]}, {vals[4 * c + 3]})")
+    "float4x4({join(cols, ", ")})"
+
+# the prelude's math functions, as Metal names them
+ml_math_names: {str: str} = {
+    "sin": "sin", "cos": "cos", "tan": "tan", "asin": "asin", "acos": "acos", "atan": "atan", "atan2": "atan2",
+    "exp": "exp", "log": "log", "pow": "pow", "sqrt": "sqrt", "abs": "abs", "floor": "floor", "ceil": "ceil",
+    "fract": "fract", "min": "min", "max": "max", "clamp": "clamp", "mix": "mix", "lerp": "mix",
+    "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
+    "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "sl_inverse",
+    "sign": "sign", "sinf": "sin", "cosf": "cos", "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "mod": "sl_mod",
+}
+
+ml_call = (e: int) -> str:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    aux = int(nodes[e].aux)
+    if aux == 2:
+        # a struct constructor (fields left out are zero)
+        si = int(types[t].st)
+        parts: str[]
+        loop i in [0..int(structs[si].nfields)):
+            a = kid(e, i)
+            if a == 0: parts.push(ml_zero(int(fields[int(structs[si].fields) + i].type), pos))
+            else: parts.push(ml_expr(a))
+        return "{ml_type(t, pos)}\{{join(parts, ", ")}}"
+    if aux != 0: ml_err(pos, "function values cannot be called in shaders")
+    f = int(nodes[e].sym)
+    decl = int(fns[f].decl)
+    nm = name_of(int(nodes[decl].name))
+    if modules[int(nodes[decl].mod)].is_prelude:
+        if nm == "discard":
+            if ml_stage != "fragment": ml_err(pos, "discard() can only be used in the fragment shader")
+            return "discard_fragment()"
+        if nm == "vertex_id" or nm == "instance_id":
+            if ml_stage != "vertex": ml_err(pos, "{nm}() can only be used in the vertex shader")
+            if nm == "vertex_id": return "int(sl_vid)"
+            return "int(sl_iid)"
+        if nm == "sample" or nm == "sample_lod":
+            tx = "tx[{ml_expr(kid(e, 0))}]"
+            uv = ml_expr(kid(e, 1))
+            if nm == "sample" and ml_stage == "fragment": return "{tx}.t.sample({tx}.s, {uv})"
+            lod = "0.0f"
+            if nm == "sample_lod": lod = ml_expr(kid(e, 2))
+            return "{tx}.t.sample({tx}.s, {uv}, level({lod}))"
+        if nm == "texel":
+            tx = "tx[{ml_expr(kid(e, 0))}]"
+            p = ml_expr(kid(e, 1))
+            return "{tx}.t.read(uint2(clamp(({p}), int2(0), int2({tx}.t.get_width(), {tx}.t.get_height()) - 1)), 0)"
+        if nm == "texture_size":
+            tx = "tx[{ml_expr(kid(e, 0))}]"
+            return "int2({tx}.t.get_width(), {tx}.t.get_height())"
+        if ml_math_names.get(nm) != none: return ml_math(nm, e)
+        if nkids(e) > 0 and is_gpu_buffer(ntype(kid(e, 0))):
+            if nm == "len": return "({ml_expr(kid(e, 0))}).n"
+            if nm == "[]=": ml_err(pos, "GPU buffers are written in statements of compute functions")
+            if starts_with(nm, "atomic_"): return ml_atomic(e, nm)
+        if starts_with(nm, "subgroup_"): return ml_subgroup(e, nm)
+        # (prelude helpers written in Sloppy are translated like user code)
+    args: str[]
+    loop i in [0..nkids(e)):
+        a = kid(e, i)
+        l = fns[f].params[i]
+        if prune(int(locals[l].type)) == ml_utype:
+            r = ml_ref(a)
+            if len(r.base) == 0 or r.c != 0 or len(r.d) != 0: ml_err(nodes[a].pos, "the uniforms can only be passed on as they are")
+            args.push(r.base)
+        else if int(locals[l].flags) & LF_MUTPARAM != 0: args.push(ml_target(a, ""))
+        else: args.push(ml_expr(a))
+    "{ml_fn(f)}({ml_with_ctx(ml_ctx_args(), args)})"
+
+# (what every function is given besides its parameters: the textures, and in the vertex stage
+# the vertex and instance, in compute ones the SIMD group's size and place in it)
+ml_ctx_params = () -> str:
+    if ml_stage == "vertex": return "constant SlTex* tx, uint sl_vid, uint sl_iid"
+    if ml_stage == "compute": return "constant SlTex* tx, uint sl_sg_size, uint sl_sg_id"
+    "constant SlTex* tx"
+ml_ctx_args = () -> str:
+    if ml_stage == "vertex": return "tx, sl_vid, sl_iid"
+    if ml_stage == "compute": return "tx, sl_sg_size, sl_sg_id"
+    "tx"
+ml_with_ctx = (ctx: str, rest: str[]) -> str:
+    if rest.len() == 0: return ctx
+    ctx + ", " + join(rest, ", ")
+
+# the math functions, scalars spread to vectors where the result is a vector (min(v, 0.0),
+# mix(a, b, t), step(edge, v))
+ml_math = (nm: str, e: int) -> str:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    n = nkids(e)
+    args: str[]
+    loop i in [0..n):
+        a = kid(e, i)
+        x = ml_expr(a)
+        at = prune(ntype(a))
+        if ml_is_vector(t) and not is_vec(at) and nm != "length" and nm != "distance" and nm != "dot":
+            x = "{ml_type(t, pos)}({ml_as(a, x, t)})"
+        else if ml_is_floaty(t) and not ml_is_floaty(at) and types[at].kind != .bool_: x = ml_as(a, x, t)
+        args.push(x)
+    if nm == "dot" and not is_vec(ntype(kid(e, 0))): return "({args[0]} * {args[1]})"
+    if nm == "fwidth" and ml_stage != "fragment": ml_err(pos, "fwidth() can only be used in the fragment shader")
+    if nm == "atan" and n == 2: return "atan2({args[0]}, {args[1]})"
+    if nm == "inverse":
+        if ml_first("inverse"): ml_decls.push(ML_INVERSE())
+    if nm == "mod":
+        if ml_first("mod"): ml_decls.push("template <typename T, typename U> T sl_mod(T x, U y) \{ return x - y * floor(x / y); }\n")
+        if not ml_is_floaty(t): return "({args[0]} % {args[1]})"
+    if nm == "abs" and not ml_is_floaty(t) and types[t].kind != .bool_:
+        # (x below 0 negated through unsigned numbers, which wrap: abs of the smallest integer is itself)
+        if ml_is_vector(t):
+            m = int(types[t].bits)
+            return gl_narrow("select(({args[0]}), as_type<int{m}>(-as_type<uint{m}>({args[0]})), ({args[0]}) < 0)", t)
+        return gl_narrow("(({args[0]}) < 0 ? as_type<int>(-as_type<uint>(int({args[0]}))) : ({args[0]}))", t)
+    if gl_unsigned(t) and (nm == "min" or nm == "max" or nm == "clamp"):
+        us: str[]
+        loop x in args: us.push("as_type<uint>(int({x}))")
+        return "as_type<int>({nm}({join(us, ", ")}))"
+    g = ml_math_names[nm]
+    gl_narrow("{g}({join(args, ", ")})", t)
+
+ML_INVERSE = () -> str: join([
+    "float4x4 sl_inverse(float4x4 m) \{\n",
+    "    float a00 = m[0][0], a01 = m[0][1], a02 = m[0][2], a03 = m[0][3];\n",
+    "    float a10 = m[1][0], a11 = m[1][1], a12 = m[1][2], a13 = m[1][3];\n",
+    "    float a20 = m[2][0], a21 = m[2][1], a22 = m[2][2], a23 = m[2][3];\n",
+    "    float a30 = m[3][0], a31 = m[3][1], a32 = m[3][2], a33 = m[3][3];\n",
+    "    float b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;\n",
+    "    float b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;\n",
+    "    float b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;\n",
+    "    float b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;\n",
+    "    float d = 1.0f / (b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06);\n",
+    "    return float4x4(\n",
+    "        float4(a11 * b11 - a12 * b10 + a13 * b09, a02 * b10 - a01 * b11 - a03 * b09, a31 * b05 - a32 * b04 + a33 * b03, a22 * b04 - a21 * b05 - a23 * b03) * d,\n",
+    "        float4(a12 * b08 - a10 * b11 - a13 * b07, a00 * b11 - a02 * b08 + a03 * b07, a32 * b02 - a30 * b05 - a33 * b01, a20 * b05 - a22 * b02 + a23 * b01) * d,\n",
+    "        float4(a10 * b10 - a11 * b08 + a13 * b06, a01 * b08 - a00 * b10 - a03 * b06, a30 * b04 - a31 * b02 + a33 * b00, a21 * b02 - a20 * b04 - a23 * b00) * d,\n",
+    "        float4(a11 * b07 - a10 * b09 - a12 * b06, a00 * b09 - a01 * b07 + a02 * b06, a31 * b01 - a30 * b03 - a32 * b00, a20 * b03 - a21 * b01 + a22 * b00) * d);\n}\n"], "")
+
+# ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
+# A GpuBuffer here is SlGB (its address, its length). Reads past either end read the nearest
+# element; writes (and atomics) past them do nothing. Only compute programs write.
+ml_is_gbuf_op = (e: int, name: str) -> bool:
+    if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) == 0: return false
+    decl = int(fns[int(nodes[e].sym)].decl)
+    decl != 0 and modules[int(nodes[decl].mod)].is_prelude and name_of(int(nodes[decl].name)) == name and is_gpu_buffer(ntype(kid(e, 0)))
+
+# b[i]: where the element is
+ml_gbuf_elem = (e: int) -> MlRef:
+    et = gpu_buffer_elem(ntype(kid(e, 0)))
+    layout(et)
+    b = ml_gbuf_value(kid(e, 0))
+    i = ml_expr(kid(e, 1))
+    MlRef("({b}).p", 0, "(clamp({i}, 0, max(({b}).n - 1, 0)) * {tsize(et)})", et)
+
+# a GpuBuffer operand, kept in a temporary unless it is read from the uniforms each time it is used
+ml_gbuf_value = (e: int) -> str: ml_expr(e)
+
+# b[i] = v, as a statement
+ml_gbuf_store = (e: int, pre: str):
+    pos = nodes[e].pos
+    if ml_stage != "compute": ml_err(pos, "GPU buffers are written by compute programs only")
+    et = gpu_buffer_elem(ntype(kid(e, 0)))
+    layout(et)
+    ml_temps += 1
+    k = ml_temps
+    ml_out.push("{pre}\{\n{pre}    SlGB sl_b{k} = {ml_expr(kid(e, 0))};\n{pre}    int sl_i{k} = {ml_expr(kid(e, 1))};\n")
+    ml_out.push("{pre}    {ml_type(et, pos)} sl_v{k} = {ml_expr(kid(e, 2))};\n")
+    ml_out.push("{pre}    if (as_type<uint>(sl_i{k}) < as_type<uint>(sl_b{k}.n)) \{\n")
+    ml_write(et, "sl_b{k}.p", 0, "sl_i{k} * {tsize(et)}", "sl_v{k}", pre + "        ", pos)
+    ml_out.push("{pre}    }\n{pre}}\n")
+
+ml_store_decls = ():
+    if not ml_first("store"): return
+    # (the low `bits` bits of v to bits [8 * (a & 3), ...) of their word: cleared, then set, each
+    # atomically, so that the bytes beside them, which other threads may write, stay)
+    ml_decls.push("void sl_store_sub(device uint* b, int a, int bits, int v) \{\n    device atomic_uint* w = (device atomic_uint*)(b + (a >> 2));\n    uint sh = uint((a & 3) * 8);\n    uint ones = (1u << uint(bits)) - 1u;\n    atomic_fetch_and_explicit(w, ~(ones << sh), memory_order_relaxed);\n    atomic_fetch_or_explicit(w, (as_type<uint>(v) & ones) << sh, memory_order_relaxed);\n}\n")
+    # (an f32 as an f64's two words; numbers too small for an f32's normal range become 0)
+    ml_decls.push("uint2 sl_to_f64(float v) \{\n    uint bits = as_type<uint>(v);\n    uint sign = bits & 0x80000000u;\n    uint e = (bits >> 23) & 0xFFu;\n    uint m = bits & 0x7FFFFFu;\n    uint hi = sign | (((e + 896u) << 20) | (m >> 3));\n    if (e == 0xFFu) hi = sign | 0x7FF00000u | (m >> 3);\n    if (e == 0u) return uint2(0u, sign);\n    return uint2(m << 29, hi);\n}\n")
+
+ml_wref = (base: str, c: int, d: str) -> str: "{base}[({ml_off(c, d)}) >> 2]"
+
+# value v of type t written at byte offset (c + d) of buffer memory base, laid out as the CPU does
+ml_write = (t0: int, base: str, c: int, d: str, v: str, pre: str, pos: int):
+    ml_store_decls()
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_:
+        if int(types[t].bits) == 64:
+            ml_temps += 1
+            ml_out.push("{pre}uint2 sl_d{ml_temps} = sl_to_f64({v});\n")
+            ml_out.push("{pre}{ml_wref(base, c, d)} = sl_d{ml_temps}.x;\n{pre}{ml_wref(base, c + 4, d)} = sl_d{ml_temps}.y;\n")
+        else: ml_out.push("{pre}{ml_wref(base, c, d)} = as_type<uint>(float({v}));\n")
+        return
+    if k == .int_:
+        bits = int(types[t].bits)
+        if bits < 32:
+            ml_out.push("{pre}sl_store_sub({base}, {ml_off(c, d)}, {bits}, {v});\n")
+            return
+        ml_out.push("{pre}{ml_wref(base, c, d)} = as_type<uint>(int({v}));\n")
+        if bits == 64:
+            hi = "0u"
+            if types[t].sign: hi = "as_type<uint>(int({v}) >> 31)"
+            ml_out.push("{pre}{ml_wref(base, c + 4, d)} = {hi};\n")
+        return
+    if k == .bool_:
+        ml_out.push("{pre}sl_store_sub({base}, {ml_off(c, d)}, 8, ({v}) ? 1 : 0);\n")
+        return
+    if k == .vec:
+        if t == T_MAT4:
+            loop col in [0..4): ml_write(T_VEC4, base, c + 16 * col, d, "({v})[{col}]", pre, pos)
+            return
+        sw = ["x", "y", "z", "w"]
+        loop i in [0..int(types[t].bits)): ml_out.push("{pre}{ml_wref(base, c + 4 * i, d)} = as_type<uint>(({v}).{sw[i]});\n")
+        return
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t): ml_err(pos, "a {structs[si].name} cannot be written into a GPU buffer")
+        layout(t)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            ml_write(int(fields[f].type), base, c + int(fields[f].offset), d, "({v}).{name_of(int(fields[f].name))}_", pre, pos)
+        return
+    if k == .fixed:
+        el = int(types[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)): ml_write(el, base, c + i * tsize(el), d, "({v})[{i}]", pre, pos)
+        return
+    ml_err(pos, "type {type_str(t)} cannot be written into a GPU buffer")
+
+# atomic_op(b, i, v...): the element's old value (0 past the ends, where nothing is done)
+ml_atomic = (e: int, nm: str) -> str:
+    pos = nodes[e].pos
+    if ml_stage != "compute": ml_err(pos, "{nm}() can be used in compute programs only")
+    et = prune(gpu_buffer_elem(ntype(kid(e, 0))))
+    if types[et].kind != .int_ or int(types[et].bits) != 32: ml_err(pos, "atomic operations work on GpuBuffer[i32] and GpuBuffer[u32]")
+    sg = types[et].sign
+    op = ""
+    if nm == "atomic_compare_exchange": op = "cas"
+    else if nm == "atomic_exchange": op = "exchange"
+    else if nm == "atomic_add" or nm == "atomic_sub" or nm == "atomic_min" or nm == "atomic_max" or nm == "atomic_and" or nm == "atomic_or" or nm == "atomic_xor": op = replace(nm, "atomic_", "")
+    else: ml_err(pos, "{nm}() is not available in compute functions")
+    ty = "uint"
+    if sg and (op == "min" or op == "max"): ty = "int"
+    fname = "sl_at_{op}_{ty}"
+    if ml_first(fname):
+        at = "atomic_{ty}"
+        if op == "cas":
+            ml_decls.push("int {fname}(SlGB b, int i, int expected, int desired) \{\n    if (as_type<uint>(i) >= as_type<uint>(b.n)) return 0;\n    device {at}* p = (device {at}*)(b.p + i);\n    uint e = as_type<uint>(expected);\n    uint old = e;\n    while (!atomic_compare_exchange_weak_explicit(p, &old, as_type<uint>(desired), memory_order_relaxed, memory_order_relaxed)) \{\n        if (old != e) break;\n    }\n    return as_type<int>(old);\n}\n")
+        else:
+            call = "atomic_fetch_{op}_explicit(p, as_type<{ty}>(v), memory_order_relaxed)"
+            if op == "exchange": call = "atomic_exchange_explicit(p, as_type<{ty}>(v), memory_order_relaxed)"
+            ml_decls.push("int {fname}(SlGB b, int i, int v) \{\n    if (as_type<uint>(i) >= as_type<uint>(b.n)) return 0;\n    device {at}* p = (device {at}*)(b.p + i);\n    return as_type<int>({call});\n}\n")
+    args: str[]
+    loop j in [0..nkids(e)): args.push(ml_expr(kid(e, j)))
+    "{fname}({join(args, ", ")})"
+
+# subgroup_add(x) and the others: Metal's SIMD-group functions
+ml_subgroup = (e: int, nm: str) -> str:
+    pos = nodes[e].pos
+    if ml_stage != "compute": ml_err(pos, "{nm}() can be used in compute functions only")
+    if nm == "subgroup_size": return "int(sl_sg_size)"
+    if nm == "subgroup_invocation_id": return "int(sl_sg_id)"
+    if nm == "subgroup_elect": return "simd_is_first()"
+    x = ""
+    if nkids(e) > 0: x = ml_expr(kid(e, 0))
+    if nm == "subgroup_all": return "simd_all({x})"
+    if nm == "subgroup_any": return "simd_any({x})"
+    if nm == "subgroup_broadcast_first": return "simd_broadcast_first({x})"
+    t = prune(ntype(e))
+    k = types[t].kind
+    un = gl_unsigned(t)
+    if nm == "subgroup_add": return gl_narrow("simd_sum({x})", t)
+    if nm == "subgroup_inclusive_add": return gl_narrow("simd_prefix_inclusive_sum({x})", t)
+    if nm == "subgroup_exclusive_add": return gl_narrow("simd_prefix_exclusive_sum({x})", t)
+    if nm == "subgroup_min" or nm == "subgroup_max":
+        f = "simd_min"
+        if nm == "subgroup_max": f = "simd_max"
+        if un: return "as_type<int>({f}(as_type<uint>(int({x}))))"
+        return "{f}({x})"
+    if nm == "subgroup_and" or nm == "subgroup_or" or nm == "subgroup_xor":
+        f = replace(nm, "subgroup_", "simd_")
+        if k == .bool_: return "bool({f}(int({x})))"
+        return "{f}({x})"
+    ml_err(pos, "{nm}() is not available in compute functions")
+    ""
+
+# ---------------- the stages ----------------
+ml_reset = (stage: str):
+    ml_out = []
+    ml_decls = []
+    ml_done = {}
+    ml_done_fns = {}
+    ml_pending = []
+    ml_lref = {}
+    ml_protos = []
+    ml_bodies = []
+    ml_temps = 0
+    ml_stage = stage
+
+# the source: the declarations, then every function's prototype, then the functions, then main
+ml_source = (main: str) -> str: ml_head() + join(ml_decls, "") + join(ml_protos, "") + join(ml_bodies, "") + main
+
+# the parts of the vertex function's result passed between the stages (after the clip position),
+# each a scalar or vector: (how to reach it from the struct, its type)
+ml_leaves = (t0: int, path: str, out: mut (str, int)[]):
+    t = prune(t0)
+    if types[t].kind == .struct_ and not is_lib_texture(int(types[t].st)):
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            ml_leaves(int(fields[f].type), "{path}.{name_of(int(fields[f].name))}_", out)
+        return
+    if types[t].kind == .fixed:
+        loop i in [0..fixed_len(t)): ml_leaves(int(types[t].elem), "{path}[{i}]", out)
+        return
+    if t == T_MAT4:
+        loop i in [0..4): ml_leaves(T_VEC4, "{path}[{i}]", out)
+        return
+    out.push((path, t))
+
+ml_varyings = (otype: int, pos: int) -> ((str, int)[], str):
+    si = int(types[prune(otype)].st)
+    check_struct_fields(si)
+    leaves: (str, int)[]
+    loop i in [1..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        ml_leaves(int(fields[f].type), ".{name_of(int(fields[f].name))}_", leaves)
+    s = "struct SlV \{\n    float4 pos [[position]];\n"
+    loop i in 0.. and lf in leaves:
+        lt = prune(lf.1)
+        if types[lt].kind == .bool_: ml_err(pos, "bools cannot be passed from the vertex to the fragment shader (use an int)")
+        flat = ""
+        if types[lt].kind == .int_ or (types[lt].kind == .vec and types[lt].sign) or (types[lt].kind == .struct_ and is_lib_texture(int(types[lt].st))): flat = ", flat"
+        s += "    {ml_type(lt, pos)} v{i} [[user(locn{i}){flat}]];\n"
+    (leaves, s + "};\n")
+
+# returns (the vertex stage's source, the fragment stage's): entry points sl_vs and sl_fs
+msl_build = (vsf: int, fsf: int) -> (str, str):
+    pos = nodes[int(fns[vsf].decl)].pos
+    np = fns[vsf].ptypes.len()
+    vtype_ = int(fns[vsf].ptypes[0])
+    itype = 0
+    if np == 3: itype = int(fns[vsf].ptypes[1])
+    otype = int(fns[vsf].ret)
+    # vertex
+    ml_reset("vertex")
+    ml_utype = prune(int(fns[vsf].ptypes[np - 1]))
+    ml_mem_decls()
+    vname = ml_fn(vsf)
+    ml_drain()
+    leaves, vstruct = ml_varyings(otype, pos)
+    m = vstruct + "vertex SlV sl_vs(uint sl_vid [[vertex_id]], uint sl_iid [[instance_id]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    args: str[] = [ml_read(vtype_, "pc.verts", 0, "int(sl_vid) * pc.vstride", pos)]
+    if itype != 0: args.push(ml_read(itype, "pc.insts", 0, "int(sl_iid) * pc.istride", pos))
+    args.push("pc.params")
+    ofs = gl_struct_fields(otype)
+    m += "    {ml_type(otype, pos)} o = {vname}(tx, sl_vid, sl_iid, {join(args, ", ")});\n"
+    # (y turned over when drawing to a texture: see the top; z from -1..1 to 0..1)
+    m += "    float4 p = o.{ofs[0].0}_;\n    SlV r;\n    r.pos = float4(p.x, pc.flip > 0.0f ? p.y : -p.y, (p.z + p.w) * 0.5f, p.w);\n"
+    loop i in 0.. and lf in leaves: m += "    r.v{i} = o{lf.0};\n"
+    m += "    return r;\n}\n"
+    vs = ml_source(m)
+    # fragment
+    ml_reset("fragment")
+    fnp = fns[fsf].ptypes.len()
+    ml_utype = prune(int(fns[fsf].ptypes[fnp - 1]))
+    ml_mem_decls()
+    fname = ml_fn(fsf)
+    ml_drain()
+    itype2 = int(fns[fsf].ptypes[0])
+    leaves2, vstruct2 = ml_varyings(itype2, pos)
+    ifs = gl_struct_fields(itype2)
+    m = vstruct2 + "fragment float4 sl_fs(SlV in [[stage_in]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    # (OpenGL counts the window's rows from the bottom)
+    m += "    float4 fc = in.pos;\n    if (pc.flip > 0.0f) fc.y = pc.flip - fc.y;\n"
+    m += "    {ml_type(itype2, pos)} i = {ml_type(itype2, pos)}\{};\n    i.{ifs[0].0}_ = fc;\n"
+    loop j in 0.. and lf in leaves2: m += "    i{lf.0} = in.v{j};\n"
+    m += "    return {fname}(tx, i, pc.params);\n}\n"
+    fs = ml_source(m)
+    if let dir = env("SLOPPY_MSL_DUMP"):
+        write_file("{dir}/{ml_dumped}.vs.metal", vs)
+        write_file("{dir}/{ml_dumped}.fs.metal", fs)
+        ml_dumped += 1
+    (vs, fs)
+
+ml_dumped = 0
+
+# compute(f) (lib/game/gpubuffer.jo): f(id, params) for each id in [0, n) (n where the vertex
+# stride is), or each cell of a grid (f(id: ivec2 or ivec3, params): its width and height where
+# the strides are, its depth in depth). Entry point sl_main.
+msl_compute = (f: int) -> str:
+    ml_reset("compute")
+    ml_utype = prune(int(fns[f].ptypes[1]))
+    ml_mem_decls()
+    name = ml_fn(f)
+    ml_drain()
+    it = prune(fns[f].ptypes[0])
+    m = "kernel void sl_main(uint3 gid [[thread_position_in_grid]], uint sl_sg_size [[threads_per_simdgroup]], uint sl_sg_id [[thread_index_in_simdgroup]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    if it == T_IVEC3: m += "    if (int(gid.x) < pc.vstride && int(gid.y) < pc.istride && int(gid.z) < pc.depth) {name}(tx, sl_sg_size, sl_sg_id, int3(gid), pc.params);\n"
+    else if it == T_IVEC2: m += "    if (int(gid.x) < pc.vstride && int(gid.y) < pc.istride) {name}(tx, sl_sg_size, sl_sg_id, int2(gid.xy), pc.params);\n"
+    else: m += "    if (int(gid.x) < pc.vstride) {name}(tx, sl_sg_size, sl_sg_id, int(gid.x), pc.params);\n"
+    m += "}\n"
+    src = ml_source(m)
+    if let dir = env("SLOPPY_MSL_DUMP"):
+        write_file("{dir}/{ml_dumped}.comp.metal", src)
+        ml_dumped += 1
+    src
+
+# the compute program of a dotted expression on GPU arrays (see spirv_kernel: the same
+# parameters, at pc.params): each thread computes one element of the result. Entry point sl_main.
+msl_kernel = (f: int, desc: str) -> str:
+    ml_reset("kernel")
+    ml_utype = 0
+    ml_mem_decls()
+    name = ml_fn(f)
+    ml_drain()
+    m = "kernel void sl_main(uint3 gid [[thread_position_in_grid]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    m += "    device const uint* q = pc.params;\n    int idx = int(gid.x);\n    if (idx >= as_type<int>(q[6])) return;\n"
+    m += "    int od3 = as_type<int>(q[5]), od2 = as_type<int>(q[4]), od1 = as_type<int>(q[3]);\n"
+    m += "    int i3 = idx % od3;\n    int r = idx / od3;\n    int i2 = r % od2;\n    r /= od2;\n    int i1 = r % od1;\n    int i0 = r / od1;\n"
+    nt = 0
+    nf = 0
+    loop c in desc:
+        if c == 't' or c == 'i': nt += 1
+        if c == 's': nf += 1
+    sbase = 8 + 6 * nt
+    args: str[]
+    kt = 0
+    kf = 0
+    ki = 0
+    loop c in desc:
+        if c == 't' or c == 'i':
+            w0 = 8 + 6 * kt
+            m += "    int o{kt} = i0 * as_type<int>(q[{w0 + 2}]) + i1 * as_type<int>(q[{w0 + 3}]) + i2 * as_type<int>(q[{w0 + 4}]) + i3 * as_type<int>(q[{w0 + 5}]);\n"
+            v = "sl_ptr(q, {w0 * 4})[o{kt}]"
+            if c == 'i': args.push("as_type<int>({v})")
+            else: args.push("as_type<float>({v})")
+            kt += 1
+        else if c == 's':
+            args.push("as_type<float>(q[{sbase + kf}])")
+            kf += 1
+        else:
+            args.push("as_type<int>(q[{sbase + nf + ki}])")
+            ki += 1
+    rt = prune(int(fns[f].ret))
+    val = "{name}(tx, {join(args, ", ")})"
+    bits = "as_type<uint>({val})"
+    if types[rt].kind == .bool_: bits = "as_type<uint>(({val}) ? 1.0f : 0.0f)"
+    else if types[rt].kind == .int_: bits = "as_type<uint>(int({val}))"
+    m += "    sl_ptr(q, 0)[idx] = {bits};\n}\n"
+    src = ml_source(m)
+    if let dir = env("SLOPPY_MSL_DUMP"):
+        write_file("{dir}/{ml_dumped}.kernel.metal", src)
+        ml_dumped += 1
+    src

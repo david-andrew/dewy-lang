@@ -1,0 +1,340 @@
+# Machine code made on several processors (x86-64): after every function is lowered, worker
+# processes (fork: each starts as a copy of the compiler, the checked program and its IR
+# included) each emit the code of a run of consecutive functions, and send back the code and
+# what the tables need of it (calls and data to fix up, symbols, line rows, unwind and debugger
+# information, new constants). The compiler joins them in order, moving each run's offsets to
+# where its code lands: the same bytes as emitting the functions one after another here (each
+# function starts at a multiple of 16, as it would anyway; constants get their places in the
+# order they are first used, as they would anyway). A worker that fails has its run emitted here.
+
+use 'main.jo'
+use 'util.jo'
+use 'ir.jo'
+use 'x64.jo'
+use 'elf.jo'
+use 'pe.jo'
+use 'check.jo'
+use 'watch.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'ast.jo'
+
+# (SLOPPY_EMIT_WORKERS=n: how many; 1: none. SLOPPY_EMIT_FORCE=1: workers even for a small
+# program, for tests. SLOPPY_PAR_TIME=1: how long each part took)
+emit_workers = () -> int:
+    n = 1
+    when not BOOTSTRAP: n = min(cpu_count(), 16)          # (the C bootstrap's compiler: one)
+    if let w = env("SLOPPY_EMIT_WORKERS"): n = to_int(w) ?? n
+    n
+
+# true when the queued functions' code was made in parallel (and joined)
+emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
+    when TARGET == "windows" or TARGET == "wasm":
+        return false
+    else:
+        if target_wasm or target_arm64 or ra_stat or watch_build or repl_image or len(ra_dump) > 0: return false
+        total = 0
+        loop f in q: total += f.code.len()
+        n = emit_workers()
+        # (each worker should have enough to make the fork worth it)
+        n = min(n, total / 20000)
+        forced = env("SLOPPY_EMIT_FORCE") != none
+        if forced: n = max(emit_workers(), 1)
+        if (n < 2 and not forced) or q.len() < n: return false
+        # runs of consecutive functions with about the same amount of IR each
+        cuts = [0]
+        acc = 0
+        loop k in 0.. and f in q:
+            acc += f.code.len()
+            if acc * n >= total * cuts.len() and cuts.len() < n and k + 1 < q.len(): cuts.push(k + 1)
+        cuts.push(q.len())
+        # (forked one by one and read in order: each pipe holds what a worker writes until read)
+        r0 = rodata.len()
+        tm = env("SLOPPY_PAR_TIME") != none
+        ta = time()
+        pids: int[]
+        fds: int[]
+        loop w in [0..cuts.len() - 1):
+            pfd = [0]
+            if syscall(293, data(pfd), 0x80000) != 0:
+                pids.push(-1)
+                fds.push(-1)
+                continue
+            rfd = pfd[0] & 0xFFFFFFFF
+            wfd = pfd[0] >> 32
+            pid = syscall(57)
+            if pid == 0:
+                syscall(3, rfd)
+                par_worker(q, fin, cuts[w], cuts[w + 1], r0, wfd)
+            syscall(3, wfd)
+            if pid < 0:
+                syscall(3, rfd)
+                pids.push(-1)
+                fds.push(-1)
+            else:
+                pids.push(pid)
+                fds.push(rfd)
+        tb = time()
+        tread = 0.0
+        tjoin = 0.0
+        loop w in [0..cuts.len() - 1):
+            got: u8[]
+            ok = fds[w] >= 0
+            if ok:
+                t_0 = time()
+                got = par_read(fds[w])
+                tread += time() - t_0
+                syscall(3, fds[w])
+                st = [0]
+                syscall(61, pids[w], data(st), 0, 0)
+                ok = st[0] & 0xFFFF == 0 and got.len() >= 8
+            if ok:
+                t_1 = time()
+                par_join(got, r0)
+                tjoin += time() - t_1
+            else:
+                # (that run, here)
+                loop k in [cuts[w]..cuts[w + 1]):
+                    ir = q[k]
+                    emit_now(fin[k])
+        if tm: eprint("emit: {cuts.len() - 1} workers, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {tread * 1000.0:.1} ms, joining {tjoin * 1000.0:.1} ms")
+        true
+
+# everything a pipe gives until it is closed
+par_read = (fd: int) -> u8[]:
+    out: u8[]
+    loop true:
+        n = out.len()
+        out.resize(n + 262144)
+        r = syscall(0, fd, data(out) + n, 262144)
+        if r <= 0:
+            out.resize(n)
+            return out
+        out.resize(n + r)
+
+# ---- a worker: emit q[a..b), write what came of it to fd, end ----
+par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
+    code = []
+    call_fix = []
+    data_fix = []
+    stub_fix = []
+    cabi_fix = []
+    cabi_adapter = {}
+    elf_syms = []
+    line_rows = []
+    call_sites = []
+    unwind_fns = []
+    uw_data = []
+    dbg_raw = []
+    dbg_cfi = []
+    ro_new = []
+    tw0 = time()
+    out: u8[]
+    pw(out, b - a)
+    loop k in [a..b):
+        ir = q[k]
+        emit_now(fin[k])
+        pw(out, ir.fn_index)
+        pw(out, fn_addr[ir.fn_index])
+        pw(out, fn_len[ir.fn_index])
+    tw1 = time()
+    pw(out, code.len())
+    out.reserve(out.len() + code.len() + 16 * (call_fix.len() + data_fix.len() + line_rows.len() + call_sites.len()) + 1024)
+    when BOOTSTRAP:
+        loop c in code: out.push(c)
+    else: out.extend(code)
+    pw(out, call_fix.len())
+    loop f in call_fix:
+        pw(out, f.0)
+        pw(out, f.1)
+    pw(out, data_fix.len())
+    loop f in data_fix:
+        pw(out, f.0)
+        pw(out, f.1)
+        pw(out, f.2)
+    pw(out, stub_fix.len())
+    loop f in stub_fix:
+        pw(out, f.0)
+        pw(out, f.1)
+    pw(out, cabi_fix.len())
+    loop f in cabi_fix:
+        pw(out, f.0)
+        pw(out, f.1)
+    pw(out, cabi_adapter.len())
+    loop k2, v in cabi_adapter:
+        pw(out, k2)
+        pw(out, v)
+    pw(out, elf_syms.len())
+    loop s in elf_syms:
+        pw(out, len(s.0))
+        loop c in bytes(s.0): out.push(c)
+        pw(out, s.1)
+        pw(out, s.2)
+    pw_ints(out, line_rows)
+    pw_ints(out, call_sites)
+    pw(out, unwind_fns.len())
+    loop u in unwind_fns:
+        pw(out, u.0)
+        pw(out, u.1)
+        pw(out, u.2)
+        pw(out, u.3)
+    pw_ints(out, uw_data)
+    pw_ints(out, dbg_raw)
+    pw_ints(out, dbg_cfi)
+    news: int[]
+    loop c in ro_new:
+        if c.0 >= r0:
+            news.push(c.0)
+            news.push(c.1)
+    pw_ints(out, news)
+    tw2 = time()
+    __olen = 0                      # (the compiler's own output, not yet written, is the parent's to write)
+    __write_fd(fd, data(out), out.len())
+    if env("SLOPPY_PAR_TIME") != none: eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, write {(time() - tw2) * 1000.0:.1} ms, {out.len()} bytes")
+    exit(0)
+
+pw = (b: mut u8[], v: int):
+    loop k in [0..8): b.push(u8((v >> (8 * k)) & 255))
+
+pw_ints = (b: mut u8[], xs: int[]):
+    pw(b, xs.len())
+    loop x in xs: pw(b, x)
+
+# ---- joining a worker's run onto what is here ----
+struct ParIn:
+    b: u8[]
+    i = 0
+
+pr = (r: mut ParIn) -> int:
+    v = 0
+    when BOOTSTRAP:
+        loop k in [0..8): v = v | (int(r.b[r.i + k]) << (8 * k))
+    else: v = ((data(r.b) + r.i) as *int)[0]            # (x86-64 and arm64 load from any address)
+    r.i += 8
+    v
+
+pr_ints = (r: mut ParIn) -> int[]:
+    n = pr(r)
+    xs: int[]
+    xs.reserve(n)
+    loop _ in [0..n): xs.push(pr(r))
+    xs
+
+par_join = (bytes_: u8[], r0: int):
+    r = ParIn(bytes_)
+    loop code.len() % 16 != 0: code.push(0xCC)
+    base = code.len()
+    nf = pr(r)
+    loop _ in [0..nf):
+        fi = pr(r)
+        at = pr(r)
+        ln = pr(r)
+        loop fn_addr.len() <= fi: fn_addr.push(-1)
+        loop fn_len.len() <= fi: fn_len.push(0)
+        fn_addr[fi] = base + at
+        fn_len[fi] = ln
+    nc = pr(r)
+    when BOOTSTRAP:
+        loop k in [0..nc): code.push(r.b[r.i + k])
+    else: code.extend(r.b[r.i..r.i + nc))
+    r.i += nc
+    loop _ in [0..pr(r)):
+        p = pr(r)
+        call_fix.push((base + p, pr(r)))
+    # (constants the worker added: their places here, in the order it first used them)
+    fixes: (int, int, int)[]
+    loop _ in [0..pr(r)):
+        p = pr(r)
+        kind = pr(r)
+        off = pr(r)
+        fixes.push((base + p, kind, off))
+    loop _ in [0..pr(r)):
+        p = pr(r)
+        stub_fix.push((base + p, pr(r)))
+    loop _ in [0..pr(r)):
+        p = pr(r)
+        cabi_fix.push((base + p, pr(r)))
+    loop _ in [0..pr(r)):
+        f = pr(r)
+        cabi_adapter[f] = base + pr(r)
+    e0 = elf_syms.len()
+    loop _ in [0..pr(r)):
+        n = pr(r)
+        nm = str_from_bytes(r.b[r.i..r.i + n))
+        r.i += n
+        s = pr(r)
+        elf_syms.push((nm, base + s, pr(r)))
+    rows = pr_ints(r)
+    loop k in [0..rows.len() / 2):
+        line_rows.push(base + rows[2 * k])
+        line_rows.push(rows[2 * k + 1])
+    sites = pr_ints(r)
+    loop k in [0..sites.len() / 2):
+        call_sites.push(base + sites[2 * k])
+        call_sites.push(sites[2 * k + 1])
+    u0 = uw_data.len()
+    nu = pr(r)
+    uws: (int, int, int, int)[]
+    loop _ in [0..nu):
+        s = pr(r)
+        e = pr(r)
+        kind = pr(r)
+        sz = pr(r)
+        uws.push((s, e, kind, sz))
+    loop u in uws:
+        sz = u.3
+        if u.2 == UW_SAVES: sz += u0
+        unwind_fns.push((base + u.0, base + u.1, u.2, sz))
+    loop x in pr_ints(r): uw_data.push(x)
+    # dbg_raw: per function its symbol, start, length, frame, count; per variable 6 numbers (lo, hi: code)
+    raw = pr_ints(r)
+    k = 0
+    loop k < raw.len():
+        dbg_raw.push(raw[k] + e0)
+        dbg_raw.push(raw[k + 1] + base)
+        dbg_raw.push(raw[k + 2])
+        dbg_raw.push(raw[k + 3])
+        cnt = raw[k + 4]
+        dbg_raw.push(cnt)
+        k += 5
+        loop _ in [0..cnt):
+            dbg_raw.push(raw[k])
+            dbg_raw.push(raw[k + 1])
+            dbg_raw.push(raw[k + 2])
+            dbg_raw.push(raw[k + 3])
+            dbg_raw.push(raw[k + 4] + base)
+            dbg_raw.push(raw[k + 5] + base)
+            k += 6
+    # dbg_cfi: per function its start (code), length, body, then the saved registers and epilogues
+    cfi = pr_ints(r)
+    k = 0
+    loop k < cfi.len():
+        dbg_cfi.push(cfi[k] + base)
+        dbg_cfi.push(cfi[k + 1])
+        dbg_cfi.push(cfi[k + 2])
+        ns = cfi[k + 3]
+        dbg_cfi.push(ns)
+        k += 4
+        loop _ in [0..2 * ns):
+            dbg_cfi.push(cfi[k])
+            k += 1
+        ne = cfi[k]
+        dbg_cfi.push(ne)
+        k += 1
+        loop _ in [0..ne):
+            dbg_cfi.push(cfi[k])
+            k += 1
+    news = pr_ints(r)
+    starts: int[]
+    to: int[]
+    loop j in [0..news.len() / 2):
+        starts.push(news[2 * j])
+        to.push(ro_const(news[2 * j + 1]))
+    loop f in fixes:
+        off = f.2
+        if f.1 == 0 and off >= r0:
+            # (within which of the worker's constants)
+            j = starts.len() - 1
+            loop j > 0 and starts[j] > off: j -= 1
+            if j >= 0 and starts.len() > 0 and starts[j] <= off: off = to[j] + (off - starts[j])
+        data_fix.push((f.0, f.1, off))

@@ -1,0 +1,18 @@
+# Source-language dispatch. The C bootstrap substitutes bootstrap/frontend.jo.
+use 'util.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'dewy_parse.jo'
+
+source_declarations = (file: int) -> int[]:
+    if ends_with(files[file].path, ".dewy"):
+        first = nodes.len()
+        decls = dewy_parse_file(file)
+        i = nodes.len() - 1
+        loop i >= first:
+            if nodes[i].kind == .loopx:
+                lowered = desugar_loopx(i)
+                nodes[i] = nodes[lowered]
+            i -= 1
+        return decls
+    parse_file(file)

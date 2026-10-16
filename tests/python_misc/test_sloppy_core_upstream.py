@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.sloppy_core.build import PIN
-
 CASES = ('arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
          'loop_combined_mut', 'loop_kv_mut', 'arg_alias_copy', 'loop_and_unpack')
 
@@ -15,18 +13,13 @@ CASES = ('arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_pinned_core_loops(tmp_path, name, release):
     compiler = os.environ.get('DEWY_CORE_COMPILER')
-    reference = os.environ.get('DEWY_SLOPPY_ROOT')
-    if not compiler or not reference:
-        pytest.skip('set DEWY_CORE_COMPILER and DEWY_SLOPPY_ROOT for pinned upstream checks')
+    if not compiler:
+        pytest.skip('set DEWY_CORE_COMPILER for core regression checks')
     compiler = Path(compiler).resolve(strict=True)
-    reference = Path(reference).resolve(strict=True)
+    fixtures = Path(__file__).resolve().parents[2] / 'core/tests/upstream'
     source = tmp_path / f'{name}.jo'
-    # Read committed fixtures, not the user's potentially modified checkout.
-    def pinned(extension):
-        return subprocess.check_output(['git', '-C', reference, 'show',
-                                        f'{PIN}:tests/t/{name}.{extension}'])
-    source.write_bytes(pinned('jo'))
-    expected = pinned('out').decode()
+    source.write_bytes((fixtures / f'{name}.jo').read_bytes())
+    expected = (fixtures / f'{name}.expected').read_text()
     binary = tmp_path / name
     flags = ['--release'] if release else []
     env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}

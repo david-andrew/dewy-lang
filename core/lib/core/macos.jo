@@ -1,0 +1,329 @@
+# The operating system layer of macOS programs (sloppy build --target macos). The library's
+# Linux system calls become calls of __mac_syscall (compiler/lower.jo), which does each with the
+# C functions of libSystem (Apple does not keep its system calls stable): flags, clock numbers and
+# errors translated, what macOS lacks (inotify, futexes) failing with ENOSYS. dyld puts the
+# functions of `extern` declarations in their slots when the program starts (compiler/macho.jo
+# writes the binds), so nothing here is looked up at run time.
+#
+# (C's variadic functions -- open, fcntl, ioctl -- take their variadic arguments on the stack on
+# Apple's arm64: declared here with eight arguments before them, so that they go there)
+
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("isatty")
+    extern __mac_isatty = (fd: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("mmap")
+    extern __c_mmap = (addr: int, len: int, prot: i32, flags: i32, fd: i32, off: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("munmap")
+    extern __c_munmap = (addr: int, len: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("mprotect")
+    extern __c_mprotect = (addr: int, len: int, prot: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("mincore")
+    extern __c_mincore = (addr: int, len: int, vec: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("write")
+    extern __c_write = (fd: i32, p: int, n: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("read")
+    extern __c_read = (fd: i32, p: int, n: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pread")
+    extern __c_pread = (fd: i32, p: int, n: int, off: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("_exit")
+    extern __c_exit = (code: i32)
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("clock_gettime")
+    extern __c_clock_gettime = (clock: i32, ts: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("nanosleep")
+    extern __c_nanosleep = (ts: int, rem: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("open")
+    extern __c_open = (path: int, flags: i32, x2: int, x3: int, x4: int, x5: int, x6: int, x7: int, mode: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("fcntl")
+    extern __c_fcntl = (fd: i32, cmd: i32, x2: int, x3: int, x4: int, x5: int, x6: int, x7: int, arg: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("close")
+    extern __c_close = (fd: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("lseek")
+    extern __c_lseek = (fd: i32, off: int, whence: i32) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("access")
+    extern __c_access = (path: int, mode: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("chmod")
+    extern __c_chmod = (path: int, mode: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("unlink")
+    extern __c_unlink = (path: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("rename")
+    extern __c_rename = (from: int, to: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("renamex_np")
+    extern __c_renamex_np = (from: int, to: int, flags: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("mkdir")
+    extern __c_mkdir = (path: int, mode: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getcwd")
+    extern __c_getcwd = (buf: int, size: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("readlink")
+    extern __c_readlink = (path: int, buf: int, size: int) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("execve")
+    extern __c_execve = (path: int, argv: int, envp: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("fork")
+    extern __c_fork = () -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("setsid")
+    extern __c_setsid = () -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getpid")
+    extern __c_getpid = () -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("kill")
+    extern __c_kill = (pid: i32, sig: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("wait4")
+    extern __c_wait4 = (pid: i32, status: int, options: i32, usage: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("dup2")
+    extern __c_dup2 = (a: i32, b: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pipe")
+    extern __c_pipe = (fds: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("poll")
+    extern __c_poll = (fds: int, n: i32, ms: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("opendir")
+    extern __c_opendir = (path: *u8) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("readdir")
+    extern __c_readdir = (d: *u8) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("closedir")
+    extern __c_closedir = (d: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("realpath")
+    extern __c_realpath = (path: *u8, out: *u8) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("_NSGetExecutablePath")
+    extern __c_NSGetExecutablePath = (buf: *u8, size: *u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("_dyld_get_image_header")
+    extern __c_dyld_get_image_header = (k: u32) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("__error")
+    extern __c_error = () -> *i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("sigaltstack")
+    extern __c_sigaltstack = (ss: *u8, old: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("sigaction")
+    extern __c_sigaction = (sig: i32, act: *u8, old: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("stat")
+    extern __c_stat = (path: *u8, st: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("rmdir")
+    extern __c_rmdir = (path: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("chdir")
+    extern __c_chdir = (path: int) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("tcgetattr")
+    extern __c_tcgetattr = (fd: i32, t: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("tcsetattr")
+    extern __c_tcsetattr = (fd: i32, how: i32, t: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pthread_jit_write_protect_np")
+    extern __c_jit_write_protect = (on: i32)
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("posix_spawnattr_init")
+    extern __c_spawnattr_init = (attr: *u8) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("posix_spawnattr_setflags")
+    extern __c_spawnattr_setflags = (attr: *u8, flags: i16) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("posix_spawn")
+    extern __c_posix_spawn = (pid: *u8, path: *u8, actions: *u8, attr: *u8, argv: *u8, envp: *u8) -> i32
+
+    # a C function whose library is missing (dyld left its slot empty)
+    __ffi_missing = (lib: str, name: str):
+        __write_err("panic: function {name} not found ({lib} is missing)\n")
+        __c_exit(101)
+
+    # TCGETS / TCSETS: Linux's struct termios (u32 iflag, oflag, cflag, lflag, line, cc[19]) to
+    # and from macOS's (u64 flags, cc[20], speeds), for the bits the library changes (raw mode)
+    __mac_termios = (fd: i32, set: bool, lt: *u8) -> int:
+        mt = fill(0, 9)
+        m = data(mt) as *u8
+        if __c_tcgetattr(fd, m) != 0: return __mac_r(-1)
+        li = lt as *u32
+        mcc = m + 32
+        if not set:
+            loop k in [0..36): lt[k] = 0
+            ifl = 0
+            if mt[0] & 0x100 != 0: ifl |= 0x100                 # ICRNL
+            if mt[0] & 0x200 != 0: ifl |= 0x400                 # IXON
+            lfl = 0
+            if mt[3] & 0x100 != 0: lfl |= 0x2                   # ICANON
+            if mt[3] & 0x8 != 0: lfl |= 0x8                     # ECHO
+            if mt[3] & 0x80 != 0: lfl |= 0x1                    # ISIG
+            li[0] = u32(ifl)
+            li[3] = u32(lfl)
+            lt[17 + 6] = mcc[16]                                # VMIN
+            lt[17 + 5] = mcc[17]                                # VTIME
+            return 0
+        ifl = int(li[0])
+        lfl = int(li[3])
+        mt[0] = mt[0] & ~(0x100 | 0x200)
+        if ifl & 0x100 != 0: mt[0] |= 0x100
+        if ifl & 0x400 != 0: mt[0] |= 0x200
+        mt[3] = mt[3] & ~(0x100 | 0x8 | 0x80)
+        if lfl & 0x2 != 0: mt[3] |= 0x100
+        if lfl & 0x8 != 0: mt[3] |= 0x8
+        if lfl & 0x1 != 0: mt[3] |= 0x80
+        mcc[16] = lt[17 + 6]
+        mcc[17] = lt[17 + 5]
+        __mac_r(int(__c_tcsetattr(fd, 0, m)))
+
+    # (a C function's result: r, or -errno where it failed, with Linux's numbers)
+    __mac_r = (r: int) -> int:
+        if r != -1: return r
+        e = int(__c_error()[0])
+        if e == 35: e = 11                                  # EAGAIN
+        else if e == 78: e = 38                             # ENOSYS
+        else if e == 62: e = 40                             # ELOOP
+        else if e == 63: e = 36                             # ENAMETOOLONG
+        else if e == 66: e = 39                             # ENOTEMPTY
+        -e
+
+    # Linux's open flags as macOS's
+    __mac_oflags = (f: int) -> int:
+        r = f & 3
+        if f & 0x40 != 0: r |= 0x200                        # O_CREAT
+        if f & 0x80 != 0: r |= 0x800                        # O_EXCL
+        if f & 0x200 != 0: r |= 0x400                       # O_TRUNC
+        if f & 0x400 != 0: r |= 8                           # O_APPEND
+        if f & 0x800 != 0: r |= 4                           # O_NONBLOCK
+        if f & 0x10000 != 0: r |= 0x100000                  # O_DIRECTORY
+        if f & 0x20000 != 0: r |= 0x100                     # O_NOFOLLOW
+        if f & 0x80000 != 0: r |= 0x1000000                 # O_CLOEXEC
+        r
+
+    __mac_clock_id = (c: int) -> int:
+        if c == 1: return 6                                 # CLOCK_MONOTONIC
+        if c == 2: return 12                                # CLOCK_PROCESS_CPUTIME_ID
+        if c == 3: return 16                                # CLOCK_THREAD_CPUTIME_ID
+        c
+
+    # a Linux system call (x86-64's numbers), done with libSystem
+    __mac_syscall = (n: int, a: int, b: int, c: int, d: int, e: int, f: int) -> int:
+        if n == 0: return __mac_r(__c_read(i32(a), b, c))
+        if n == 1: return __mac_r(__c_write(i32(a), b, c))
+        if n == 2: return __mac_r(int(__c_open(a, i32(__mac_oflags(b)), 0, 0, 0, 0, 0, 0, c)))
+        if n == 3: return __mac_r(int(__c_close(i32(a))))
+        if n == 7: return __mac_r(int(__c_poll(a, i32(b), i32(c))))
+        if n == 8: return __mac_r(__c_lseek(i32(a), b, i32(c)))
+        if n == 9:
+            fl = d & 0x13                                   # MAP_SHARED, MAP_PRIVATE, MAP_FIXED
+            if d & 0x20 != 0: fl |= 0x1000                  # MAP_ANONYMOUS
+            if d & 0x4000 != 0: fl |= 0x40                  # MAP_NORESERVE
+            return __mac_r(__c_mmap(a, b, i32(c), i32(fl), i32(e), f))
+        if n == 10: return __mac_r(int(__c_mprotect(a, b, i32(c))))
+        if n == 11: return __mac_r(int(__c_munmap(a, b)))
+        if n == 17: return __mac_r(__c_pread(i32(a), b, c, d))
+        if n == 21: return __mac_r(int(__c_access(a, i32(b))))
+        if n == 27: return __mac_r(int(__c_mincore(a, b, c)))
+        if n == 28: return 0                                # madvise: only a hint
+        if n == 33: return __mac_r(int(__c_dup2(i32(a), i32(b))))
+        if n == 35: return __mac_r(int(__c_nanosleep(a, b)))
+        if n == 39: return int(__c_getpid())
+        if n == 57: return __mac_r(int(__c_fork()))
+        if n == 59: return __mac_r(int(__c_execve(a, b, c)))
+        if n == 60 or n == 231: __c_exit(i32(a))
+        if n == 61: return __mac_r(int(__c_wait4(i32(a), b, i32(c), d)))
+        if n == 62: return __mac_r(int(__c_kill(i32(a), i32(b))))
+        if n == 72: return __mac_r(int(__c_fcntl(i32(a), i32(b), 0, 0, 0, 0, 0, 0, c)))
+        if n == 79:
+            # (Linux's gives the length with the NUL)
+            if __c_getcwd(a, b) == 0: return __mac_r(-1)
+            k = 0
+            loop (a as *u8)[k] != 0: k += 1
+            return k + 1
+        if n == 82: return __mac_r(int(__c_rename(a, b)))
+        if n == 316: return __mac_r(int(__c_renamex_np(b, d, u32(4))))       # renameat2(NOREPLACE): RENAME_EXCL
+        if n == 83: return __mac_r(int(__c_mkdir(a, i32(b))))
+        if n == 84: return __mac_r(int(__c_rmdir(a)))
+        if n == 80: return __mac_r(int(__c_chdir(a)))
+        if n == 87: return __mac_r(int(__c_unlink(a)))
+        if n == 89: return __mac_r(__c_readlink(a, b, c))
+        if n == 90: return __mac_r(int(__c_chmod(a, i32(b))))
+        if n == 112: return __mac_r(int(__c_setsid()))
+        if n == 293:
+            r = __mac_r(int(__c_pipe(a)))
+            if r == 0 and b & 0x80000 != 0:
+                fds = a as *i32
+                __c_fcntl(fds[0], 2, 0, 0, 0, 0, 0, 0, 1)    # F_SETFD FD_CLOEXEC
+                __c_fcntl(fds[1], 2, 0, 0, 0, 0, 0, 0, 1)
+            return r
+        if n == 228: return __mac_r(int(__c_clock_gettime(i32(__mac_clock_id(a)), b)))
+        if n == 13:
+            # rt_sigaction: the handler and the flags the library uses (SA_SIGINFO, SA_ONSTACK,
+            # SA_RESTART), into macOS's struct sigaction (handler, mask, flags)
+            if b == 0: return 0
+            la = b as *int
+            fl = 0
+            if la[1] & 4 != 0: fl |= 0x40
+            if la[1] & 0x08000000 != 0: fl |= 1
+            if la[1] & 0x10000000 != 0: fl |= 2
+            act = [la[0], fl << 32]
+            return __mac_r(int(__c_sigaction(i32(a), data(act) as *u8, null)))
+        if n == 16 and (b == 0x5401 or b == 0x5402): return __mac_termios(i32(a), b == 0x5402, c as *u8)
+        # (ioctl's terminal calls: no terminal; inotify, futexes, signal handlers, getdents64,
+        # mremap, sched_getaffinity: what macOS lacks or does differently)
+        if n == 16: return -25                              # ENOTTY
+        -38                                                 # ENOSYS
+
+    # (struct dirent: the name's length at 18, the name at 21)
+    __mac_list_dir = (path: str) -> str[]:
+        out: str[]
+        d = __c_opendir(data(__zstr(path)))
+        if d == null:
+            __ferr(__mac_r(-1))
+            return out
+        loop true:
+            e = __c_readdir(d)
+            if e == null: break
+            n = int(((e + 18) as *u16)[0])
+            q = __str_new(n)
+            mem_copy(q + 24, e + 21, n)
+            name = q as str
+            if name != "." and name != "..": out.push(name)
+        __c_closedir(d)
+        out
+
+    __mac_exe_path = () -> str:
+        buf = __alloc(4096)
+        size: u32[] = [4096]
+        s = ""
+        if __c_NSGetExecutablePath(buf, data(size)) == 0:
+            full = __alloc(4096)
+            if __c_realpath(buf, full) != null: s = __cstr(full)
+            else: s = __cstr(buf)
+            __free(full)
+        __free(buf)
+        s

@@ -1,0 +1,28 @@
+# __TITLE__: run it with `sloppy __NAME__.jo`, test it with `sloppy test __NAME__.jo`.
+
+build:
+    name = "__TITLE__"
+
+# the words of a text and how often each comes, most frequent first
+word_counts = (text: str) -> (str, int)[]:
+    counts: {str: int}
+    loop raw in text.lower().words():
+        w = raw.trim(".,;:!?\"'()")
+        if len(w) > 0: counts[w] += 1          # (a missing key starts at 0)
+    pairs = [loop w, n in counts: (w, n)]
+    pairs.sort_by((p): p.1, descending = true)
+    pairs
+
+main = ():
+    a = args()
+    text = "the quick brown fox jumps over the lazy dog, and the dog sleeps"
+    if a.len() >= 2:
+        # (a file given: its words)
+        text = read_file(a[1]) ?? ""
+    counts = word_counts(text)
+    loop p in counts.first(5): print("{p.0:<10} {p.1}")
+
+test "words are counted":
+    c = word_counts("a b a, A!")
+    assert(c[0] == ("a", 3))
+    assert(c[1] == ("b", 1))

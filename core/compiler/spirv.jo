@@ -1,0 +1,1944 @@
+# Shader translation: Sloppy functions -> SPIR-V 1.5 for Vulkan. The same functions become GLSL
+# for OpenGL and WebGL (glsl.jo, which checks them first: what it accepts, this accepts).
+#
+# What a module expects (lib/game/vk.jo provides it):
+#   push constants   params, vertices, instances: buffer addresses; vertex and instance strides;
+#                    flip: 0, or the height of the window when drawing to it (y is turned over)
+#   set 0 binding 0  every texture (combined image samplers); a Texture is its index (Texture.id)
+# There is no vertex input state: the vertex function's input is read from the vertex buffer at
+# vertex_id() (and the instance's at instance_id()). The uniforms are read in place from the bytes
+# of the CPU's struct, so a value of the uniforms' type is an address, not a copy: a large array
+# (bones: vec4[192]) is read an element at a time. Clip space is OpenGL's: z goes from -1 to 1 (made
+# 0 to 1 here), and a frame drawn to a texture has row 0 at y = -1. A GpuBuffer is its address and
+# length; its elements are laid out as the CPU lays them out, read and written a word at a time.
+
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'glsl.jo'
+
+# where in the push constants (see the comment above)
+const SV_PC_PARAMS = 0
+const SV_PC_VERTS = 1
+const SV_PC_INSTS = 2
+const SV_PC_VSTRIDE = 3
+const SV_PC_ISTRIDE = 4
+const SV_PC_FLIP = 5
+const SV_PC_DEPTH = 6        # (compute programs over a 3D grid: its depth, in the padding)
+
+sv_group = [64, 1, 1]        # the workgroup's size (x, y, z) of the compute program being made
+
+# storage classes
+const SC_UCONST = 0
+const SC_INPUT = 1
+const SC_OUTPUT = 3
+const SC_FUNCTION = 7
+const SC_PUSH = 9
+const SC_PSB = 5349
+
+# an address the uniforms (or part of them) are read from: a buffer address, plus a byte offset
+# (c: a constant, d: an id of an i32 added to it, or 0)
+struct SvRef:
+    base: int
+    c: int
+    d: int
+    t: int
+
+sv_bound = 0
+sv_caps: int[]
+sv_dec: int[]
+sv_glob: int[]
+sv_fns: int[]
+sv_cache: {str: int} = {}
+sv_std = 0                     # the GLSL.std.450 instructions
+sv_stage = ""                  # "vertex" or "fragment"
+sv_iface: int[]                # the global variables the entry point uses
+sv_fn_ids: {int: int} = {}     # Sloppy function -> SPIR-V function
+sv_pending: int[]              # functions called but not yet translated
+sv_translated: {int: bool} = {}
+sv_utype = 0                   # the uniforms' type: its values are addresses
+sv_pc = 0                      # global variables, made when first used
+sv_textures = 0
+sv_vid = 0
+sv_iid = 0
+
+# the function being translated
+sv_body: int[]
+sv_vars: int[]
+sv_label = 0
+sv_dead = false                # the current block has ended (code that follows is unreachable)
+sv_loops: (int, int)[]         # (merge, continue) of the loops around
+sv_lvar: {int: int} = {}       # local -> its variable (a pointer)
+sv_lref: {int: int} = {}       # local of the uniforms' type -> its address
+
+sv_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+
+sv_pick = (c: bool, a: int, b: int) -> int:
+    if c: return a
+    b
+
+# ---------------- instructions ----------------
+sv_ins = (o: mut int[], op: int, args: int[]):
+    o.push(((args.len() + 1) << 16) | op)
+    loop a in args: o.push(a)
+
+sv_new = () -> int:
+    sv_bound += 1
+    sv_bound
+
+# the words of a string operand: its bytes and a terminating 0, padded to a whole word
+sv_strw = (s: str) -> int[]:
+    w: int[]
+    n = len(s)
+    loop i in [0..n / 4 + 1):
+        x = 0
+        loop j in [0..4):
+            k = i * 4 + j
+            if k < n: x = x | (int(s[k]) << (8 * j))
+        w.push(x)
+    w
+
+sv_deco = (id: int, d: int, extra: int[]):
+    a: int[] = [id, d]
+    loop x in extra: a.push(x)
+    sv_ins(sv_dec, 71, a)
+
+sv_mdeco = (st: int, member: int, d: int, extra: int[]):
+    a: int[] = [st, member, d]
+    loop x in extra: a.push(x)
+    sv_ins(sv_dec, 72, a)
+
+# an instruction in the function being translated (in a new, unreachable block after a branch)
+sv_code = (op: int, args: int[]):
+    if sv_dead: sv_begin(sv_new())
+    sv_ins(sv_body, op, args)
+
+# an instruction with a result: returns its id
+sv_val = (op: int, ty: int, args: int[]) -> int:
+    id = sv_new()
+    a: int[] = [ty, id]
+    loop x in args: a.push(x)
+    sv_code(op, a)
+    id
+
+sv_begin = (label: int):
+    sv_ins(sv_body, 248, [label])
+    sv_label = label
+    sv_dead = false
+
+# end the block with a branch (unless it has ended); returns whether it branched
+sv_branch = (target: int) -> bool:
+    if sv_dead: return false
+    sv_ins(sv_body, 249, [target])
+    sv_dead = true
+    true
+
+sv_cond_branch = (c: int, a: int, b: int):
+    sv_code(250, [c, a, b])
+    sv_dead = true
+
+# ---------------- types and constants ----------------
+sv_type_key = (key: str, op: int, args: int[]) -> int:
+    if let id = sv_cache.get(key): return id
+    id = sv_new()
+    a: int[] = [id]
+    loop x in args: a.push(x)
+    sv_ins(sv_glob, op, a)
+    sv_cache[key] = id
+    id
+
+sv_void = () -> int: sv_type_key("void", 19, [])
+sv_bool = () -> int: sv_type_key("bool", 20, [])
+sv_f32 = () -> int: sv_type_key("f32", 22, [32])
+sv_i32 = () -> int: sv_type_key("i32", 21, [32, 1])
+sv_u32 = () -> int: sv_type_key("u32", 21, [32, 0])
+sv_vecf = (n: int) -> int: sv_type_key("v{n}", 23, [sv_f32(), n])
+sv_veci = (n: int) -> int: sv_type_key("iv{n}", 23, [sv_i32(), n])
+sv_vecb = (n: int) -> int: sv_type_key("bv{n}", 23, [sv_bool(), n])
+sv_mat4 = () -> int: sv_type_key("m4", 24, [sv_vecf(4), 4])
+sv_ptr = (sc: int, t: int) -> int: sv_type_key("p{sc},{t}", 32, [sc, t])
+
+sv_fntype = (ret: int, params: int[]) -> int:
+    key = "fn{ret}"
+    loop p in params: key += ",{p}"
+    a: int[] = [ret]
+    loop p in params: a.push(p)
+    sv_type_key(key, 33, a)
+
+# the SPIR-V type of a Sloppy type (ints are 32-bit and floats f32, as in GLSL; a Texture is the
+# index of its descriptor)
+sv_type = (t0: int, pos: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_: return sv_f32()
+    if k == .int_: return sv_i32()
+    if k == .bool_: return sv_bool()
+    if k == .void_: return sv_void()
+    if k == .vec:
+        if t == T_MAT4: return sv_mat4()
+        if types[t].sign: return sv_veci(int(types[t].bits))
+        return sv_vecf(int(types[t].bits))
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si): return sv_u32()
+        if is_gpu_buffer(t): return sv_gbuf_type()
+        key = "s{si}"
+        if let id = sv_cache.get(key): return id
+        check_struct_fields(si)
+        ms: int[]
+        loop i in [0..int(structs[si].nfields)): ms.push(sv_type(int(fields[int(structs[si].fields) + i].type), pos))
+        return sv_type_key(key, 30, ms)
+    if k == .fixed:
+        el = sv_type(int(types[t].elem), pos)
+        n = sv_cu(fixed_len(t))
+        return sv_type_key("a{el}x{fixed_len(t)}", 28, [el, n])
+    sv_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    0
+
+sv_const = (ty: int, bits: int) -> int:
+    key = "c{ty}:{bits}"
+    if let id = sv_cache.get(key): return id
+    id = sv_new()
+    sv_ins(sv_glob, 43, [ty, id, bits])
+    sv_cache[key] = id
+    id
+
+sv_ci = (v: int) -> int: sv_const(sv_i32(), v & 0xFFFFFFFF)
+sv_cu = (v: int) -> int: sv_const(sv_u32(), v & 0xFFFFFFFF)
+sv_cf = (x: f64) -> int: sv_const(sv_f32(), int(f32_bits(f32(x))))
+
+sv_cbool = (b: bool) -> int:
+    key = "false"
+    op = 42
+    if b:
+        key = "true"
+        op = 41
+    if let id = sv_cache.get(key): return id
+    id = sv_new()
+    sv_ins(sv_glob, op, [sv_bool(), id])
+    sv_cache[key] = id
+    id
+
+# the zero value of a type
+sv_null = (ty: int) -> int:
+    key = "null{ty}"
+    if let id = sv_cache.get(key): return id
+    id = sv_new()
+    sv_ins(sv_glob, 46, [ty, id])
+    sv_cache[key] = id
+    id
+
+# a variable of the current function (declared at the start of its first block)
+sv_var = (ty: int) -> int:
+    id = sv_new()
+    sv_ins(sv_vars, 59, [sv_ptr(SC_FUNCTION, ty), id, SC_FUNCTION])
+    id
+
+sv_global = (ptrty: int, sc: int) -> int:
+    id = sv_new()
+    sv_ins(sv_glob, 59, [ptrty, id, sc])
+    sv_iface.push(id)
+    id
+
+sv_load = (ty: int, p: int) -> int: sv_val(61, ty, [p])
+sv_store = (p: int, v: int): sv_code(62, [p, v])
+
+# ---------------- the interface ----------------
+# a buffer read as 32-bit words, and an address of one
+sv_rawptr = () -> int:
+    if let id = sv_cache.get("rawptr"): return id
+    u = sv_u32()
+    rt = sv_type_key("rawrt", 29, [u])
+    sv_deco(rt, 6, [4])
+    st = sv_type_key("rawst", 30, [rt])
+    sv_deco(st, 2, [])
+    sv_mdeco(st, 0, 35, [0])
+    sv_mdeco(st, 0, 24, [])
+    p = sv_ptr(SC_PSB, st)
+    sv_cache["rawptr"] = p
+    p
+
+sv_pc_types = () -> int[]:
+    r = sv_rawptr()
+    [r, r, r, sv_i32(), sv_i32(), sv_f32(), sv_i32()]
+
+sv_pc_var = () -> int:
+    if sv_pc != 0: return sv_pc
+    ms = sv_pc_types()
+    st = sv_type_key("pcst", 30, ms)
+    sv_deco(st, 2, [])
+    offs = [0, 8, 16, 24, 28, 32, 36]
+    loop i in [0..ms.len()): sv_mdeco(st, i, 35, [offs[i]])
+    sv_pc = sv_global(sv_ptr(SC_PUSH, st), SC_PUSH)
+    sv_pc
+
+sv_pc_get = (i: int) -> int:
+    ty = sv_pc_types()[i]
+    p = sv_val(65, sv_ptr(SC_PUSH, ty), [sv_pc_var(), sv_ci(i)])
+    sv_load(ty, p)
+
+sv_builtin_var = (ty: int, sc: int, builtin: int) -> int:
+    v = sv_global(sv_ptr(sc, ty), sc)
+    sv_deco(v, 11, [builtin])
+    v
+
+sv_vertex_id = () -> int:
+    if sv_vid == 0: sv_vid = sv_builtin_var(sv_i32(), SC_INPUT, 42)
+    sv_load(sv_i32(), sv_vid)
+
+sv_instance_id = () -> int:
+    if sv_iid == 0: sv_iid = sv_builtin_var(sv_i32(), SC_INPUT, 43)
+    sv_load(sv_i32(), sv_iid)
+
+sv_image_type = () -> int: sv_type_key("img2d", 25, [sv_f32(), 1, 0, 0, 0, 1, 0])
+sv_sampled_type = () -> int: sv_type_key("simg2d", 27, [sv_image_type()])
+
+# the texture with index t (a u32), as a sampled image
+sv_texture = (t: int) -> int:
+    si = sv_sampled_type()
+    if sv_textures == 0:
+        arr = sv_type_key("texarr", 29, [si])
+        sv_textures = sv_global(sv_ptr(SC_UCONST, arr), SC_UCONST)
+        sv_deco(sv_textures, 34, [0])
+        sv_deco(sv_textures, 33, [0])
+    i = sv_val(83, sv_u32(), [t])
+    sv_deco(i, 5300, [])
+    p = sv_val(65, sv_ptr(SC_UCONST, si), [sv_textures, i])
+    sv_deco(p, 5300, [])
+    v = sv_load(si, p)
+    sv_deco(v, 5300, [])
+    v
+
+# ---------------- reading the uniforms (and vertices) from memory ----------------
+# the word at byte offset (c + d) of base (c + d is a multiple of 4)
+sv_word = (base: int, c: int, d: int) -> int:
+    idx = sv_ci(c >> 2)
+    if d != 0:
+        off = d
+        if c != 0: off = sv_val(128, sv_i32(), [d, sv_ci(c)])
+        idx = sv_val(195, sv_i32(), [off, sv_ci(2)])
+    p = sv_val(65, sv_ptr(SC_PSB, sv_u32()), [base, sv_ci(0), idx])
+    id = sv_new()
+    sv_code(61, [sv_u32(), id, p, 2, 4])
+    id
+
+# bits [bit, bit + count) of the 32-bit-aligned word holding byte offset (c + d), as an i32
+sv_subword = (base: int, c: int, d: int, count: int, signed: bool) -> int:
+    w = 0
+    shift = 0
+    if d == 0:
+        w = sv_word(base, c & -4, 0)
+        shift = sv_ci((c & 3) * 8)
+    else:
+        off = d
+        if c != 0: off = sv_val(128, sv_i32(), [d, sv_ci(c)])
+        w = sv_word(base, 0, sv_val(199, sv_i32(), [off, sv_ci(-4)]))
+        shift = sv_val(132, sv_i32(), [sv_val(199, sv_i32(), [off, sv_ci(3)]), sv_ci(8)])
+    wi = sv_val(124, sv_i32(), [w])
+    op = 203
+    if signed: op = 202
+    sv_val(op, sv_i32(), [wi, shift, sv_ci(count)])
+
+# an f64 (its two words) as an f32, rounded to nearest (too small: 0; too large: infinity)
+sv_f64 = (lo: int, hi: int) -> int:
+    u = sv_u32()
+    sign = sv_val(199, u, [hi, sv_cu(0x80000000)])
+    e = sv_val(199, u, [sv_val(194, u, [hi, sv_cu(20)]), sv_cu(0x7FF)])
+    m = sv_val(197, u, [sv_val(196, u, [sv_val(199, u, [hi, sv_cu(0xFFFFF)]), sv_cu(3)]), sv_val(194, u, [lo, sv_cu(29)])])
+    rnd = sv_val(199, u, [sv_val(194, u, [lo, sv_cu(28)]), sv_cu(1)])
+    ne = sv_val(130, u, [e, sv_cu(896)])
+    bits = sv_val(128, u, [sv_val(197, u, [sv_val(196, u, [ne, sv_cu(23)]), m]), rnd])
+    b = sv_bool()
+    inf = sv_cu(0x7F800000)
+    big = sv_val(166, b, [sv_val(174, b, [e, sv_cu(1151)]), sv_val(174, b, [bits, inf])])
+    r = sv_val(169, u, [big, inf, bits])
+    r = sv_val(169, u, [sv_val(178, b, [e, sv_cu(896)]), sv_cu(0), r])
+    nan = sv_val(167, b, [sv_val(170, b, [e, sv_cu(0x7FF)]), sv_val(171, b, [sv_val(197, u, [m, lo]), sv_cu(0)])])
+    r = sv_val(169, u, [nan, sv_cu(0x7FC00000), r])
+    sv_val(124, sv_f32(), [sv_val(197, u, [r, sign])])
+
+# a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
+sv_read = (t0: int, base: int, c: int, d: int, pos: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_:
+        if int(types[t].bits) == 64: return sv_f64(sv_word(base, c, d), sv_word(base, c + 4, d))
+        return sv_val(124, sv_f32(), [sv_word(base, c, d)])
+    if k == .int_:
+        bits = int(types[t].bits)
+        if bits >= 32: return sv_val(124, sv_i32(), [sv_word(base, c, d)])
+        return sv_subword(base, c, d, bits, types[t].sign)
+    if k == .bool_: return sv_val(171, sv_bool(), [sv_subword(base, c, d, 8, false), sv_ci(0)])
+    ty = sv_type(t, pos)
+    parts: int[]
+    if k == .vec:
+        if t == T_MAT4:
+            loop col in [0..4): parts.push(sv_read(T_VEC4, base, c + 16 * col, d, pos))
+        else:
+            ct = sv_f32()
+            if types[t].sign: ct = sv_i32()
+            loop i in [0..int(types[t].bits)): parts.push(sv_val(124, ct, [sv_word(base, c + 4 * i, d)]))
+        return sv_val(80, ty, parts)
+    if k == .struct_:
+        si = int(types[t].st)
+        layout(t)
+        if is_lib_texture(si): return sv_word(base, c + sv_field_offset(si, "id"), d)
+        if is_gpu_buffer(t):
+            ao = c + sv_field_offset(si, "addr")
+            a = sv_val(80, sv_uv2(), [sv_word(base, ao, d), sv_word(base, ao + 4, d)])
+            return sv_val(80, sv_gbuf_type(), [a, sv_val(124, sv_i32(), [sv_word(base, c + sv_field_offset(si, "n"), d)])])
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            parts.push(sv_read(int(fields[f].type), base, c + int(fields[f].offset), d, pos))
+        return sv_val(80, ty, parts)
+    if k == .fixed:
+        el = int(types[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)): parts.push(sv_read(el, base, c + i * tsize(el), d, pos))
+        return sv_val(80, ty, parts)
+    sv_err(pos, "type {type_str(t)} cannot be read by a shader")
+    0
+
+sv_field_offset = (si: int, name: str) -> int:
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) == name: return int(fields[f].offset)
+    0
+
+# the uniforms (or a part of them) an expression stands for, if it does (base 0 if not)
+sv_ref = (e: int) -> SvRef:
+    k = nodes[e].kind
+    if k == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return sv_ref(int(locals[l].alias))
+        if let p = sv_lref.get(l): return SvRef(p, 0, 0, ntype(e))
+        return SvRef()
+    if k == .field and nodes[e].aux >= 0:
+        a = int(nodes[e].a)
+        r = sv_ref(a)
+        if r.base == 0: return r
+        bt = prune(ntype(a))
+        if types[bt].kind != .struct_: return SvRef()
+        layout(bt)
+        f = int(structs[int(types[bt].st)].fields) + int(nodes[e].aux)
+        return SvRef(r.base, r.c + int(fields[f].offset), r.d, ntype(e))
+    if k == .index:
+        a = int(nodes[e].a)
+        r = sv_ref(a)
+        if r.base == 0: return r
+        bt = prune(ntype(a))
+        stride = 4
+        if bt == T_MAT4: stride = 16
+        else if types[bt].kind == .fixed:
+            layout(int(types[bt].elem))
+            stride = tsize(int(types[bt].elem))
+        b = int(nodes[e].b)
+        if nodes[b].kind == .int_lit: return SvRef(r.base, r.c + int(nodes[b].ival) * stride, r.d, ntype(e))
+        off = sv_val(132, sv_i32(), [sv_expr(b), sv_ci(stride)])
+        if r.d != 0: off = sv_val(128, sv_i32(), [r.d, off])
+        return SvRef(r.base, r.c, off, ntype(e))
+    if sv_is_gbuf_op(e, "[]"): return sv_gbuf_elem(e)
+    SvRef()
+
+# ---------------- functions ----------------
+sv_fn_id = (f: int) -> int:
+    if let id = sv_fn_ids.get(f): return id
+    id = sv_new()
+    sv_fn_ids[f] = id
+    sv_pending.push(f)
+    id
+
+sv_param_type = (l: int) -> int:
+    t = int(locals[l].type)
+    if prune(t) == sv_utype: return sv_rawptr()
+    ty = sv_type(t, locals[l].pos)
+    if int(locals[l].flags) & LF_MUTPARAM != 0: return sv_ptr(SC_FUNCTION, ty)
+    ty
+
+# the function's words: header and parameters, then its first block with the variables first
+sv_finish_fn = (head: int[]):
+    loop w in head: sv_fns.push(w)
+    # (the body starts with the first block's label: the variables go right after it)
+    loop i in [0..2): sv_fns.push(sv_body[i])
+    loop w in sv_vars: sv_fns.push(w)
+    loop i in [2..sv_body.len()): sv_fns.push(sv_body[i])
+    sv_ins(sv_fns, 56, [])
+
+sv_start_fn = ():
+    sv_body = []
+    sv_vars = []
+    sv_loops = []
+    sv_lvar = {}
+    sv_lref = {}
+    sv_dead = false
+    sv_begin(sv_new())
+
+# translate a function (the ones it calls are translated later: see sv_pending)
+sv_function = (f: int):
+    decl = int(fns[f].decl)
+    if decl == 0 or (nodes[decl].kind != .fn_ and nodes[decl].kind != .lambda): sv_err(0, "only named functions can be used in shaders")
+    if fns[f].caps.len() > 0: sv_err(nodes[decl].pos, "a function that captures variables cannot run on the GPU")
+    rt = int(fns[f].ret)
+    ret = sv_type(rt, nodes[decl].pos)
+    ptys: int[]
+    loop l in fns[f].params: ptys.push(sv_param_type(l))
+    id = sv_fn_id(f)
+    head: int[]
+    sv_ins(head, 54, [ret, id, 0, sv_fntype(ret, ptys)])
+    pids: int[]
+    loop i in 0.. and l in fns[f].params:
+        p = sv_new()
+        sv_ins(head, 55, [ptys[i], p])
+        if prune(int(locals[l].type)) == sv_utype: sv_deco(p, 19, [])
+        pids.push(p)
+    sv_start_fn()
+    loop i in 0.. and l in fns[f].params:
+        t = int(locals[l].type)
+        if prune(t) == sv_utype: sv_lref[l] = pids[i]
+        else if int(locals[l].flags) & LF_MUTPARAM != 0: sv_lvar[l] = pids[i]
+        else:
+            v = sv_var(ptys[i])
+            sv_store(v, pids[i])
+            sv_lvar[l] = v
+    body = int(fns[f].body)
+    want = tkind(rt) != .void_
+    n = nkids(body)
+    loop i in [0..n):
+        s = kid(body, i)
+        if i == n - 1 and want and nodes[body].aux != 0:
+            v = sv_expr(int(nodes[s].a))
+            sv_code(254, [v])
+            sv_dead = true
+            continue
+        sv_stmt(s)
+    if not sv_dead:
+        if want: sv_code(255, [])
+        else: sv_code(253, [])
+        sv_dead = true
+    sv_finish_fn(head)
+
+# ---------------- statements ----------------
+sv_stmts = (b: int):
+    loop i in [0..nkids(b)): sv_stmt(kid(b, i))
+
+sv_stmt = (s: int):
+    k = nodes[s].kind
+    if k == .vardecl:
+        if nodes[s].nlist > 0: sv_err(nodes[s].pos, "tuple destructuring is not supported in shaders")
+        l = int(nodes[s].sym)
+        t = int(locals[l].type)
+        if prune(t) == sv_utype:
+            # (another name for the uniforms, or a part of them: their address)
+            r = SvRef()
+            if nodes[s].b != 0: r = sv_ref(int(nodes[s].b))
+            if r.base == 0 or r.c != 0 or r.d != 0: sv_err(nodes[s].pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            sv_lref[l] = r.base
+            return
+        ty = sv_type(t, nodes[s].pos)
+        v = sv_var(ty)
+        sv_lvar[l] = v
+        if nodes[s].b != 0: sv_store(v, sv_expr(int(nodes[s].b)))
+        else: sv_store(v, sv_null(ty))
+    else if k == .assign:
+        if nodes[s].aux != 0: sv_err(nodes[s].pos, "unsupported assignment in shader")
+        sv_assign(int(nodes[s].a), nodes[s].op as Tok, int(nodes[s].b), nodes[s].pos)
+    else if k == .exprstmt:
+        e = int(nodes[s].a)
+        if nodes[e].kind == .if_ or nodes[e].kind == .match_:
+            sv_if_stmt(e)
+            return
+        sv_expr(e)
+    else if k == .if_: sv_if_stmt(s)
+    else if k == .return_:
+        if nodes[s].a != 0:
+            v = sv_expr(int(nodes[s].a))
+            sv_code(254, [v])
+        else: sv_code(253, [])
+        sv_dead = true
+    else if k == .while_:
+        header, body, cont, merge = sv_loop_start()
+        c = sv_expr(int(nodes[s].a))
+        sv_cond_branch(c, body, merge)
+        sv_begin(body)
+        sv_loop_body(int(nodes[s].b), merge, cont)
+        sv_branch(header)
+        sv_begin(merge)
+    else if k == .for_ and (nodes[s].aux == 1 or nodes[s].aux == 2) and tkind(ntype(int(nodes[s].a))) == .fixed:
+        sv_for_fixed(s)
+    else if k == .for_:
+        if nodes[s].aux != 0: sv_err(nodes[s].pos, "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")
+        l = int(nodes[s].sym)
+        it = int(nodes[s].a)
+        v = sv_var(sv_i32())
+        sv_lvar[l] = v
+        sv_store(v, sv_expr(int(nodes[it].a)))
+        header, body, cont, merge = sv_loop_start()
+        op = 177
+        if has_flag(it, NF_INCLUSIVE): op = 179
+        c = sv_val(op, sv_bool(), [sv_load(sv_i32(), v), sv_expr(int(nodes[it].b))])
+        sv_cond_branch(c, body, merge)
+        sv_begin(body)
+        sv_loop_body(int(nodes[s].b), merge, cont)
+        sv_store(v, sv_val(128, sv_i32(), [sv_load(sv_i32(), v), sv_ci(1)]))
+        sv_branch(header)
+        sv_begin(merge)
+    else if k == .break_:
+        if sv_loops.len() > 0: sv_branch(sv_loops[sv_loops.len() - 1].0)
+    else if k == .continue_:
+        if sv_loops.len() > 0: sv_branch(sv_loops[sv_loops.len() - 1].1)
+    else if k == .block: sv_stmts(s)
+    else if k == .const_: pass
+    else: sv_err(nodes[s].pos, "unsupported statement in shader")
+
+# a loop's header (where the loop is declared) and the blocks it needs: (header, body, continue,
+# merge). The header branches to a block of its own, where the condition is computed.
+sv_loop_start = () -> (int, int, int, int):
+    header = sv_new()
+    body = sv_new()
+    cont = sv_new()
+    merge = sv_new()
+    cond = sv_new()
+    sv_branch(header)
+    sv_begin(header)
+    sv_code(246, [merge, cont, 0])
+    sv_branch(cond)
+    sv_begin(cond)
+    (header, body, cont, merge)
+
+# the body, then the continue block (the caller adds what it does, and the branch back)
+sv_loop_body = (b: int, merge: int, cont: int):
+    sv_loops.push((merge, cont))
+    sv_stmts(b)
+    sv_loops.pop()
+    sv_branch(cont)
+    sv_begin(cont)
+
+# loop [mut] x in xs, xs a fixed-size array: an index loop (without `mut`, over a copy; xs in the
+# uniforms: over its elements there, read one at a time)
+sv_for_fixed = (s: int):
+    ct = prune(ntype(int(nodes[s].a)))
+    el = int(nodes[s].sym)
+    n = fixed_len(ct)
+    et = int(types[ct].elem)
+    iv = sv_var(sv_i32())
+    sv_lvar[int(nodes[s].c)] = iv
+    sv_store(iv, sv_ci(0))
+    copy = 0
+    r = SvRef()
+    if nodes[s].aux == 1:
+        r = sv_ref(int(nodes[s].a))
+        if r.base == 0:
+            copy = sv_var(sv_type(ct, nodes[s].pos))
+            sv_lvar[int(nodes[s].d)] = copy
+            sv_store(copy, sv_expr(int(nodes[s].a)))
+    header, body, cont, merge = sv_loop_start()
+    c = sv_val(177, sv_bool(), [sv_load(sv_i32(), iv), sv_ci(n)])
+    sv_cond_branch(c, body, merge)
+    sv_begin(body)
+    if nodes[s].aux == 1:
+        ety = sv_type(et, nodes[s].pos)
+        ev = sv_var(ety)
+        sv_lvar[el] = ev
+        i = sv_load(sv_i32(), iv)
+        if r.base != 0:
+            layout(et)
+            off = sv_val(132, sv_i32(), [i, sv_ci(tsize(et))])
+            if r.d != 0: off = sv_val(128, sv_i32(), [r.d, off])
+            sv_store(ev, sv_read(et, r.base, r.c, off, nodes[s].pos))
+        else:
+            p = sv_val(65, sv_ptr(SC_FUNCTION, ety), [copy, i])
+            sv_store(ev, sv_load(ety, p))
+    sv_loop_body(int(nodes[s].b), merge, cont)
+    sv_store(iv, sv_val(128, sv_i32(), [sv_load(sv_i32(), iv), sv_ci(1)]))
+    sv_branch(header)
+    sv_begin(merge)
+
+sv_if_stmt = (e: int):
+    if nodes[e].kind != .if_: sv_err(nodes[e].pos, "match is not supported in shaders")
+    c = sv_expr(int(nodes[e].a))
+    merge = sv_new()
+    then = sv_new()
+    els = merge
+    if nodes[e].c != 0: els = sv_new()
+    sv_code(247, [merge, 0])
+    sv_cond_branch(c, then, els)
+    sv_begin(then)
+    sv_stmts(int(nodes[e].b))
+    sv_branch(merge)
+    if nodes[e].c != 0:
+        sv_begin(els)
+        sv_stmts(int(nodes[e].c))
+        sv_branch(merge)
+    sv_begin(merge)
+
+# ---------------- places (what can be assigned) ----------------
+# a pointer to what e names, or 0 if it is not a variable (or a part of one)
+sv_place = (e: int) -> int:
+    k = nodes[e].kind
+    if k == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return sv_place(int(locals[l].alias))
+        if let v = sv_lvar.get(l): return v
+        return 0
+    if k == .field:
+        a = int(nodes[e].a)
+        if nodes[e].aux == -4:
+            nm = name_of(int(nodes[e].name))
+            if len(nm) != 1: return 0
+            p = sv_place(a)
+            if p == 0: return 0
+            return sv_val(65, sv_ptr(SC_FUNCTION, sv_type(ntype(e), nodes[e].pos)), [p, sv_ci(swizzle_index(nm[0]))])
+        if nodes[e].aux < 0: return 0
+        p = sv_place(a)
+        if p == 0: return 0
+        return sv_val(65, sv_ptr(SC_FUNCTION, sv_type(ntype(e), nodes[e].pos)), [p, sv_ci(int(nodes[e].aux))])
+    if k == .index:
+        p = sv_place(int(nodes[e].a))
+        if p == 0: return 0
+        i = sv_expr(int(nodes[e].b))
+        return sv_val(65, sv_ptr(SC_FUNCTION, sv_type(ntype(e), nodes[e].pos)), [p, i])
+    0
+
+sv_assign = (target: int, op: Tok, rhs: int, pos: int):
+    tt = ntype(target)
+    swz = nodes[target].kind == .field and nodes[target].aux == -4 and len(name_of(int(nodes[target].name))) > 1
+    # (as on the CPU: x = v computes v first; x op= v finds x and reads it first)
+    v = 0
+    if op == .assign or swz: v = sv_expr(rhs)
+    # v.xy = ...: the vector with those components replaced
+    if swz:
+        a = int(nodes[target].a)
+        p = sv_place(a)
+        if p == 0: sv_err(pos, "unsupported assignment in shader")
+        bt = ntype(a)
+        bty = sv_type(bt, pos)
+        old = sv_load(bty, p)
+        if op != .assign: v = sv_arith(sv_assign_op(op), tt, sv_expr(target), ntype(rhs), v, tt, pos)
+        nm = name_of(int(nodes[target].name))
+        n = int(types[prune(bt)].bits)
+        sel: int[] = [old, v]
+        loop j in [0..n):
+            src = j
+            loop q in [0..len(nm)):
+                if swizzle_index(nm[q]) == j: src = n + q
+            sel.push(src)
+        sv_store(p, sv_val(79, bty, sel))
+        return
+    p = sv_place(target)
+    if p == 0: sv_err(pos, "unsupported assignment in shader")
+    if op != .assign:
+        ty = sv_type(tt, pos)
+        bop = sv_assign_op(op)
+        cur = sv_load(ty, p)
+        v = sv_expr(rhs)
+        if types[prune(tt)].kind == .bool_:
+            # (and= or= xor= on bools: logical)
+            v = sv_val(sv_pick(bop == .amp, 167, sv_pick(bop == .pipe, 166, 165)), sv_bool(), [cur, v])
+        else: v = sv_arith(bop, tt, cur, ntype(rhs), v, tt, pos)
+    sv_store(p, v)
+
+sv_assign_op = (op: Tok) -> Tok:
+    match op:
+        pluseq: .plus
+        minuseq: .minus
+        stareq: .star
+        slasheq: .slash
+        percenteq: .percent
+        ampeq: .amp
+        pipeeq: .pipe
+        careteq: .caret
+        shleq: .shl
+        shreq: .shr
+        _: .plus
+
+# ---------------- expressions ----------------
+sv_is_floaty = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
+
+sv_is_vector = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .vec and t != T_MAT4
+
+sv_ncomp = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .vec: return int(types[t].bits)
+    1
+
+# a scalar as a vector of type t (all components equal)
+sv_splat = (t: int, v: int, pos: int) -> int:
+    parts: int[]
+    loop i in [0..sv_ncomp(t)): parts.push(v)
+    sv_val(80, sv_type(t, pos), parts)
+
+# a op b for numbers and vectors (rt: the result's type)
+sv_arith = (op: Tok, ta0: int, a0: int, tb0: int, b0: int, rt: int, pos: int) -> int:
+    ta = prune(ta0)
+    tb = prune(tb0)
+    a = a0
+    b = b0
+    ty = sv_type(rt, pos)
+    fl = sv_is_floaty(rt)
+    if ta == T_MAT4 or tb == T_MAT4:
+        if ta == T_MAT4 and tb == T_MAT4 and op == .star: return sv_val(146, ty, [a, b])
+        if ta == T_MAT4 and tb == T_VEC4 and op == .star: return sv_val(145, ty, [a, b])
+        if ta == T_MAT4 and not is_vec(tb) and op == .star: return sv_val(143, ty, [a, b])
+        if tb == T_MAT4 and not is_vec(ta) and op == .star: return sv_val(143, ty, [b, a])
+        if ta == T_MAT4 and not is_vec(tb) and op == .slash: return sv_val(143, ty, [a, sv_val(136, sv_f32(), [sv_cf(1.0), b])])
+        # (+ and - a column at a time)
+        cols: int[]
+        loop c in [0..4):
+            x = sv_val(81, sv_vecf(4), [a, c])
+            y = b
+            if tb == T_MAT4: y = sv_val(81, sv_vecf(4), [b, c])
+            cols.push(sv_arith(op, T_VEC4, x, sv_pick(tb == T_MAT4, T_VEC4, tb), y, T_VEC4, pos))
+        return sv_val(80, ty, cols)
+    if sv_is_vector(rt):
+        if not is_vec(ta):
+            if fl and op == .star: return sv_val(142, ty, [b, a])
+            a = sv_splat(rt, a, pos)
+        if not is_vec(tb):
+            if fl and op == .star: return sv_val(142, ty, [a, b])
+            b = sv_splat(rt, b, pos)
+    # (unsigned integers divide, take remainders and shift right as unsigned numbers)
+    us = sv_unsigned(rt)
+    q = 0
+    if op == .slash or op == .percent:
+        if fl: q = sv_val(136, ty, [a, b])
+        else if us:
+            # (OpUDiv works on an unsigned type: the same bits)
+            u = sv_u32()
+            q = sv_val(124, ty, [sv_val(134, u, [sv_val(124, u, [a]), sv_val(124, u, [b])])])
+        else:
+            # (the smallest integer / -1 wraps, as on the CPU; OpSDiv leaves it undefined, and
+            # drivers differ: by -1 it divides by 1 and negates)
+            m1 = sv_ci(-1)
+            one = sv_ci(1)
+            bt = sv_bool()
+            if sv_is_vector(rt):
+                m1 = sv_splat(rt, m1, pos)
+                one = sv_splat(rt, one, pos)
+                bt = sv_vecb(sv_ncomp(rt))
+            neg = sv_val(170, bt, [b, m1])
+            safe = sv_val(169, ty, [neg, one, b])
+            q = sv_val(169, ty, [neg, sv_val(126, ty, [a]), sv_val(135, ty, [a, safe])])
+    match op:
+        plus: return sv_narrow(sv_val(sv_pick(fl, 129, 128), ty, [a, b]), rt)
+        minus: return sv_narrow(sv_val(sv_pick(fl, 131, 130), ty, [a, b]), rt)
+        star: return sv_narrow(sv_val(sv_pick(fl, 133, 132), ty, [a, b]), rt)
+        slash: return sv_narrow(q, rt)
+        percent:
+            # (the dividend's sign, as on the CPU: x - y * trunc(x / y), the way glsl.jo does it,
+            # rather than OpSRem / OpFRem, which drivers get wrong for negative numbers)
+            if fl:
+                t = sv_val(12, ty, [sv_std, 3, q])
+                return sv_val(131, ty, [a, sv_val(133, ty, [b, t])])
+            return sv_narrow(sv_val(130, ty, [a, sv_val(132, ty, [q, b])]), rt)
+        amp: return sv_val(199, ty, [a, b])
+        pipe: return sv_val(197, ty, [a, b])
+        caret: return sv_val(198, ty, [a, b])
+        shl: return sv_narrow(sv_shift(196, ty, a, b, rt), rt)
+        shr: return sv_shift(sv_pick(us, 194, 195), ty, a, b, rt)
+        _: pass
+    sv_err(pos, "unsupported operator in shader")
+    0
+
+# a << b, a >> b as on the CPU, where values shift in 64 bits by the count's low 6 bits: by 32
+# or more, nothing is left (or the sign, shifting a signed value right)
+sv_shift = (code: int, ty: int, a: int, b: int, rt: int) -> int:
+    if sv_is_vector(rt): return sv_val(code, ty, [a, b])
+    i = sv_i32()
+    c = sv_val(199, i, [b, sv_ci(63)])
+    r = sv_val(code, ty, [a, sv_val(199, i, [c, sv_ci(31)])])
+    far = sv_ci(0)
+    if code == 195: far = sv_val(195, ty, [a, sv_ci(31)])
+    sv_val(169, ty, [sv_val(175, sv_bool(), [c, sv_ci(32)]), far, r])
+
+# integers are 32 bits in shaders; an unsigned one (u8 u16 u32 u64) is held in the same bits
+sv_unsigned = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .int_ and not types[t].sign
+
+# v (32 bits) wrapped to the range of a narrower integer type t, as on the CPU
+sv_narrow = (v: int, t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind != .int_: return v
+    bits = int(types[t].bits)
+    if bits >= 32: return v
+    if not types[t].sign: return sv_val(199, sv_i32(), [v, sv_ci((1 << bits) - 1)])
+    sh = sv_ci(32 - bits)
+    sv_val(195, sv_i32(), [sv_val(196, sv_i32(), [v, sh]), sh])
+
+# float v to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
+# most here), NaN to 0
+sv_float_to_int = (v: int, t0: int) -> int:
+    t = prune(t0)
+    bits = int(types[t].bits)
+    if bits > 32: bits = 32
+    sg = types[t].sign
+    lo = 0.0
+    hi = f64((1 << bits) - 1)
+    if sg:
+        lo = -f64(1 << (bits - 1))
+        hi = f64((1 << (bits - 1)) - 1)
+    f = sv_f32()
+    i = sv_i32()
+    bo = sv_bool()
+    # (2^31 - 1 and 2^32 - 1 are not f32s: the largest f32 below them, and the top above it)
+    top = hi
+    if bits == 32 and sg: top = 2147483520.0
+    else if bits == 32: top = 4294967040.0
+    c = sv_val(12, f, [sv_std, 43, v, sv_cf(lo), sv_cf(top)])
+    r = 0
+    if sg: r = sv_val(110, i, [c])
+    else: r = sv_val(124, i, [sv_val(109, sv_u32(), [c])])
+    if bits == 32: r = sv_val(169, i, [sv_val(190, bo, [v, sv_cf(hi + 1.0)]), sv_ci(int(hi)), r])
+    sv_val(169, i, [sv_val(156, bo, [v]), sv_ci(0), r])
+
+# a == b, a < b...: a bool
+sv_compare = (op: Tok, t0: int, a: int, b: int, pos: int) -> int:
+    t = prune(t0)
+    bo = sv_bool()
+    if types[t].kind == .bool_:
+        if op == .eq: return sv_val(164, bo, [a, b])
+        if op == .ne: return sv_val(165, bo, [a, b])
+        sv_err(pos, "bools can only be compared with == and !=")
+    if t == T_MAT4:
+        # (equal if every column is)
+        r = 0
+        loop c in [0..4):
+            x = sv_compare(op, T_VEC4, sv_val(81, sv_vecf(4), [a, c]), sv_val(81, sv_vecf(4), [b, c]), pos)
+            if c == 0: r = x
+            else if op == .eq: r = sv_val(167, bo, [r, x])
+            else: r = sv_val(166, bo, [r, x])
+        return r
+    fl = sv_is_floaty(t)
+    us = sv_unsigned(t)
+    code = 0
+    match op:
+        eq: code = sv_pick(fl, 180, 170)
+        ne: code = sv_pick(fl, 183, 171)
+        lt: code = sv_pick(fl, 184, sv_pick(us, 176, 177))
+        le: code = sv_pick(fl, 188, sv_pick(us, 178, 179))
+        gt: code = sv_pick(fl, 186, sv_pick(us, 172, 173))
+        ge: code = sv_pick(fl, 190, sv_pick(us, 174, 175))
+        _: sv_err(pos, "unsupported comparison in shader")
+    if sv_is_vector(t):
+        v = sv_val(code, sv_vecb(sv_ncomp(t)), [a, b])
+        if op == .ne: return sv_val(154, bo, [v])
+        return sv_val(155, bo, [v])
+    sv_val(code, bo, [a, b])
+
+# value e converted to the scalar type of t (int <-> float), for operands the checker left mixed
+sv_as = (e: int, v: int, t: int, pos: int) -> int:
+    from_ = prune(ntype(e))
+    if sv_is_floaty(t) and not sv_is_floaty(from_) and types[from_].kind != .bool_:
+        n = sv_ncomp(from_)
+        ty = sv_f32()
+        if n > 1: ty = sv_vecf(n)
+        return sv_val(sv_pick(sv_unsigned(from_), 112, 111), ty, [v])
+    if not sv_is_floaty(t) and sv_is_floaty(from_) and types[prune(t)].kind != .bool_:
+        n = sv_ncomp(from_)
+        ty = sv_i32()
+        if n > 1: ty = sv_veci(n)
+        return sv_val(110, ty, [v])
+    v
+
+sv_expr = (e: int) -> int:
+    k = nodes[e].kind
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    # (the uniforms, or a part of them: read from memory)
+    if k == .ident or k == .field or k == .index or sv_is_gbuf_op(e, "[]"):
+        r = sv_ref(e)
+        if r.base != 0:
+            if prune(r.t) == sv_utype: sv_err(pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            return sv_read(r.t, r.base, r.c, r.d, pos)
+    if k == .int_lit:
+        if types[t].kind == .float_: return sv_cf(f64(nodes[e].ival))
+        if nodes[e].ival < -2147483648 or nodes[e].ival > 4294967295: sv_err(nodes[e].pos, "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")
+        return sv_ci(int(nodes[e].ival))
+    if k == .float_lit: return sv_cf(nodes[e].fval)
+    if k == .bool_lit: return sv_cbool(nodes[e].ival != 0)
+    if k == .ident:
+        if nodes[e].aux != i32(int(SK.local)): sv_err(pos, "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: return sv_expr(int(locals[l].alias))
+        if let v = sv_lvar.get(l): return sv_load(sv_type(t, pos), v)
+        sv_err(pos, "unsupported variable in shader")
+    if k == .field:
+        a = int(nodes[e].a)
+        if nodes[e].aux == -4:
+            v = sv_expr(a)
+            nm = name_of(int(nodes[e].name))
+            if len(nm) == 1: return sv_val(81, sv_type(t, pos), [v, swizzle_index(nm[0])])
+            sel: int[] = [v, v]
+            loop c in nm: sel.push(swizzle_index(c))
+            return sv_val(79, sv_type(t, pos), sel)
+        if nodes[e].aux < 0: sv_err(pos, "unsupported field access in shader")
+        return sv_val(81, sv_type(t, pos), [sv_expr(a), int(nodes[e].aux)])
+    if k == .index:
+        a = int(nodes[e].a)
+        b = int(nodes[e].b)
+        bt = prune(ntype(a))
+        if types[bt].kind != .vec and types[bt].kind != .fixed: sv_err(pos, "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")
+        ty = sv_type(t, pos)
+        if nodes[b].kind == .int_lit: return sv_val(81, ty, [sv_expr(a), int(nodes[b].ival)])
+        if sv_is_vector(bt): return sv_val(77, ty, [sv_expr(a), sv_expr(b)])
+        # (an array or a matrix at a computed index: through memory)
+        p = sv_place(a)
+        if p == 0:
+            p = sv_var(sv_type(bt, pos))
+            sv_store(p, sv_expr(a))
+        q = sv_val(65, sv_ptr(SC_FUNCTION, ty), [p, sv_expr(b)])
+        return sv_load(ty, q)
+    if k == .binary:
+        a = int(nodes[e].a)
+        b = int(nodes[e].b)
+        op = nodes[e].op as Tok
+        ta = ntype(a)
+        tb = ntype(b)
+        if op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge:
+            x = sv_expr(a)
+            y = sv_expr(b)
+            ct = ta
+            # (an int compared with a float: as floats)
+            if sv_is_floaty(ta) != sv_is_floaty(tb) and types[prune(ta)].kind != .bool_:
+                if sv_is_floaty(tb):
+                    x = sv_as(a, x, tb, pos)
+                    ct = tb
+                else: y = sv_as(b, y, ta, pos)
+            return sv_compare(op, ct, x, y, pos)
+        x = sv_as(a, sv_expr(a), t, pos)
+        y = sv_as(b, sv_expr(b), t, pos)
+        if types[t].kind == .bool_:
+            if op == .amp: return sv_val(167, sv_bool(), [x, y])
+            if op == .pipe: return sv_val(166, sv_bool(), [x, y])
+            if op == .caret: return sv_val(165, sv_bool(), [x, y])
+        return sv_arith(op, ta, x, tb, y, t, pos)
+    if k == .unary:
+        v = sv_expr(int(nodes[e].a))
+        ty = sv_type(t, pos)
+        if nodes[e].op == i32(int(Tok.minus)):
+            if t == T_MAT4: return sv_val(143, ty, [v, sv_cf(-1.0)])
+            if sv_is_floaty(t): return sv_val(127, ty, [v])
+            return sv_narrow(sv_val(126, ty, [v]), t)
+        return sv_narrow(sv_val(200, ty, [v]), t)
+    if k == .not_: return sv_val(168, sv_bool(), [sv_expr(int(nodes[e].a))])
+    if k == .and_ or k == .or_: return sv_logic(e, k == .and_)
+    if k == .conv:
+        cv = nodes[e].aux as CV
+        a = int(nodes[e].a)
+        v = sv_expr(a)
+        from_ = prune(ntype(a))
+        if cv == .int2float: return sv_val(sv_pick(sv_unsigned(from_), 112, 111), sv_type(t, pos), [v])
+        if cv == .float2int:
+            if types[t].kind == .int_: return sv_float_to_int(v, t)
+            return sv_val(110, sv_type(t, pos), [v])
+        if cv == .int_ and types[t].kind == .int_:
+            if types[from_].kind == .bool_: return sv_val(169, sv_i32(), [v, sv_ci(1), sv_ci(0)])
+            return sv_narrow(v, t)
+        if cv == .float_ or cv == .none_: return v
+        sv_err(pos, "unsupported conversion in shader")
+    if k == .if_: return sv_if_expr(e)
+    if k == .intrinsic: return sv_intrinsic(e)
+    if k == .call: return sv_call(e)
+    if k == .array and types[t].kind == .fixed:
+        ty = sv_type(t, pos)
+        parts: int[]
+        if nodes[e].b != 0:
+            v = sv_expr(kid(e, 0))
+            loop i in [0..fixed_len(t)): parts.push(v)
+        else if nkids(e) == 0: return sv_null(ty)
+        else:
+            loop i in [0..nkids(e)): parts.push(sv_expr(kid(e, i)))
+        return sv_val(80, ty, parts)
+    if k == .array: sv_err(pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    sv_err(pos, "unsupported expression in shader")
+    0
+
+# a and b, a or b: b is computed only when it decides
+sv_logic = (e: int, is_and: bool) -> int:
+    bo = sv_bool()
+    x = sv_expr(int(nodes[e].a))
+    from_ = sv_label
+    rhs = sv_new()
+    merge = sv_new()
+    sv_code(247, [merge, 0])
+    if is_and: sv_cond_branch(x, rhs, merge)
+    else: sv_cond_branch(x, merge, rhs)
+    sv_begin(rhs)
+    y = sv_expr(int(nodes[e].b))
+    rhs_end = sv_label
+    sv_branch(merge)
+    sv_begin(merge)
+    sv_val(245, bo, [x, from_, y, rhs_end])
+
+# if c: a else: b as a value
+sv_if_expr = (e: int) -> int:
+    t = ntype(e)
+    ty = sv_type(t, nodes[e].pos)
+    c = sv_expr(int(nodes[e].a))
+    merge = sv_new()
+    then = sv_new()
+    els = sv_new()
+    sv_code(247, [merge, 0])
+    sv_cond_branch(c, then, els)
+    ins: int[]
+    loop arm in [int(nodes[e].b), int(nodes[e].c)]:
+        sv_begin(sv_pick(arm == int(nodes[e].b), then, els))
+        n = nkids(arm)
+        loop i in [0..n - 1): sv_stmt(kid(arm, i))
+        v = sv_expr(block_value(arm))
+        lab = sv_label
+        if sv_branch(merge):
+            ins.push(v)
+            ins.push(lab)
+    sv_begin(merge)
+    if ins.len() == 0: return sv_val(1, ty, [])
+    sv_val(245, ty, ins)
+
+sv_intrinsic = (e: int) -> int:
+    id = nodes[e].aux as IN
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    ty = sv_type(t, pos)
+    if id == .vec_ctor: return sv_vec_ctor(e)
+    if id == .sqrt: return sv_val(12, ty, [sv_std, 31, sv_expr(kid(e, 0))])
+    if id == .floor_: return sv_val(12, ty, [sv_std, 8, sv_expr(kid(e, 0))])
+    if id == .ceil_: return sv_val(12, ty, [sv_std, 9, sv_expr(kid(e, 0))])
+    if id == .fabs: return sv_val(12, ty, [sv_std, 4, sv_expr(kid(e, 0))])
+    if id == .fmin: return sv_val(12, ty, [sv_std, 37, sv_expr(kid(e, 0)), sv_expr(kid(e, 1))])
+    if id == .fmax: return sv_val(12, ty, [sv_std, 40, sv_expr(kid(e, 0)), sv_expr(kid(e, 1))])
+    sv_err(pos, "this operation is not available in shaders")
+    0
+
+sv_vec_ctor = (e: int) -> int:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    ty = sv_type(t, pos)
+    n = nkids(e)
+    integer = types[t].sign
+    sv_f32()
+    if integer: sv_i32()
+    if t == T_MAT4:
+        if n == 0 or (n == 1 and not is_vec(ntype(kid(e, 0)))):
+            # (the identity, or a value along the diagonal)
+            d = sv_cf(1.0)
+            if n == 1: d = sv_expr(kid(e, 0))
+            z = sv_cf(0.0)
+            cols: int[]
+            loop c in [0..4):
+                parts: int[]
+                loop r in [0..4): parts.push(sv_pick(r == c, d, z))
+                cols.push(sv_val(80, sv_vecf(4), parts))
+            return sv_val(80, ty, cols)
+        comps = sv_components(e)
+        cols: int[]
+        if comps.len() == 4:
+            # (four columns)
+            return sv_val(80, ty, comps)
+        loop c in [0..4): cols.push(sv_val(80, sv_vecf(4), [comps[4 * c], comps[4 * c + 1], comps[4 * c + 2], comps[4 * c + 3]]))
+        return sv_val(80, ty, cols)
+    if n == 0: return sv_null(ty)
+    if n == 1 and not is_vec(ntype(kid(e, 0))): return sv_splat(t, sv_as(kid(e, 0), sv_expr(kid(e, 0)), t, pos), pos)
+    parts: int[]
+    loop i in [0..n):
+        a = kid(e, i)
+        at = prune(ntype(a))
+        v = sv_expr(a)
+        if is_vec(at) and types[at].sign != integer:
+            # (a vector of the other kind: each component converted as a scalar is)
+            loop j in [0..sv_ncomp(at)):
+                c = sv_val(81, sv_pick(integer, sv_f32(), sv_i32()), [v, j])
+                if integer: parts.push(sv_float_to_int(c, T_I32))
+                else: parts.push(sv_val(111, sv_f32(), [c]))
+        else if is_vec(at) and n == 1: return v
+        else: parts.push(sv_as(a, v, t, pos))
+    sv_val(80, ty, parts)
+
+# a matrix constructor's arguments: four vec4 columns as they are, or else every component
+sv_components = (e: int) -> int[]:
+    out: int[]
+    all_cols = nkids(e) == 4
+    loop i in [0..nkids(e)):
+        if prune(ntype(kid(e, i))) != T_VEC4: all_cols = false
+    loop i in [0..nkids(e)):
+        a = kid(e, i)
+        v = sv_expr(a)
+        at = prune(ntype(a))
+        if all_cols: out.push(v)
+        else if not is_vec(at): out.push(sv_as(a, v, T_FLOAT, nodes[e].pos))
+        else if types[at].sign:
+            # (an integer vector's components, as floats)
+            loop j in [0..sv_ncomp(at)): out.push(sv_val(111, sv_f32(), [sv_val(81, sv_i32(), [v, j])]))
+        else:
+            loop j in [0..sv_ncomp(at)): out.push(sv_val(81, sv_f32(), [v, j]))
+    out
+
+# GLSL.std.450 instructions for the prelude's math functions: (float, int) (0: none)
+sv_std_ops: {str: (int, int)} = {
+    "sin": (13, 0), "cos": (14, 0), "tan": (15, 0), "asin": (16, 0), "acos": (17, 0), "atan": (18, 0), "atan2": (25, 0),
+    "exp": (27, 0), "log": (28, 0), "exp2": (29, 0), "log2": (30, 0), "pow": (26, 0), "sqrt": (31, 0), "abs": (4, 5),
+    "floor": (8, 0), "ceil": (9, 0), "fract": (10, 0), "min": (37, 39), "max": (40, 42), "clamp": (43, 45), "mix": (46, 0),
+    "lerp": (46, 0), "step": (48, 0), "smoothstep": (49, 0), "length": (66, 0), "distance": (67, 0), "cross": (68, 0),
+    "normalize": (69, 0), "reflect": (71, 0), "inverse": (34, 0), "sign": (6, 7), "sinf": (13, 0), "cosf": (14, 0),
+}
+
+sv_call = (e: int) -> int:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    aux = int(nodes[e].aux)
+    if aux == 2:
+        # a struct constructor (fields left out are zero)
+        si = int(types[t].st)
+        ty = sv_type(t, pos)
+        parts: int[]
+        loop i in [0..int(structs[si].nfields)):
+            a = kid(e, i)
+            if a == 0: parts.push(sv_null(sv_type(int(fields[int(structs[si].fields) + i].type), pos)))
+            else: parts.push(sv_expr(a))
+        return sv_val(80, ty, parts)
+    if aux != 0: sv_err(pos, "function values cannot be called in shaders")
+    f = int(nodes[e].sym)
+    decl = int(fns[f].decl)
+    nm = name_of(int(nodes[decl].name))
+    if modules[int(nodes[decl].mod)].is_prelude:
+        if nm == "discard":
+            if sv_stage != "fragment": sv_err(pos, "discard() can only be used in the fragment shader")
+            sv_code(252, [])
+            sv_dead = true
+            return 0
+        if nm == "vertex_id" or nm == "instance_id":
+            if sv_stage != "vertex": sv_err(pos, "{nm}() can only be used in the vertex shader")
+            if nm == "vertex_id": return sv_vertex_id()
+            return sv_instance_id()
+        if nm == "sample" or nm == "sample_lod":
+            img = sv_texture(sv_expr(kid(e, 0)))
+            uv = sv_expr(kid(e, 1))
+            if nm == "sample" and sv_stage == "fragment": return sv_val(87, sv_vecf(4), [img, uv])
+            lod = sv_cf(0.0)
+            if nm == "sample_lod": lod = sv_expr(kid(e, 2))
+            return sv_val(88, sv_vecf(4), [img, uv, 2, lod])
+        if nm == "texel" or nm == "texture_size":
+            img = sv_val(100, sv_image_type(), [sv_texture(sv_expr(kid(e, 0)))])
+            if nm == "texture_size": return sv_val(103, sv_veci(2), [img, sv_ci(0)])
+            return sv_val(95, sv_vecf(4), [img, sv_expr(kid(e, 1)), 2, sv_ci(0)])
+        if builtin_map.get(nm) != none: return sv_math(nm, e)
+        if nkids(e) > 0 and is_gpu_buffer(ntype(kid(e, 0))):
+            if nm == "len": return sv_gbuf_len(sv_expr(kid(e, 0)))
+            if nm == "[]=":
+                sv_gbuf_store(e)
+                return 0
+            if let op = sv_atomic_ops.get(nm): return sv_atomic(e, nm, op)
+        if starts_with(nm, "subgroup_"): return sv_subgroup(e, nm)
+        # (prelude helpers written in Sloppy are translated like user code)
+    args: int[]
+    back: (int, int)[]        # mut arguments: (argument, the variable passed for it)
+    loop i in [0..nkids(e)):
+        a = kid(e, i)
+        l = fns[f].params[i]
+        pt = int(locals[l].type)
+        if prune(pt) == sv_utype:
+            r = sv_ref(a)
+            if r.base == 0 or r.c != 0 or r.d != 0: sv_err(nodes[a].pos, "the uniforms can only be passed on as they are")
+            args.push(r.base)
+        else if int(locals[l].flags) & LF_MUTPARAM != 0:
+            v = sv_var(sv_type(pt, pos))
+            sv_store(v, sv_expr(a))
+            args.push(v)
+            back.push((a, v))
+        else: args.push(sv_expr(a))
+    fid = sv_fn_id(f)
+    rty = sv_type(int(fns[f].ret), pos)
+    call: int[] = [fid]
+    loop x in args: call.push(x)
+    r = sv_val(57, rty, call)
+    loop b in back:
+        p = sv_place(b.0)
+        if p != 0: sv_store(p, sv_load(sv_type(ntype(b.0), pos), b.1))
+    r
+
+# the prelude's math functions: GLSL.std.450 instructions (or core ones), with scalars spread to
+# vectors where the result is a vector (min(v, 0.0), mix(a, b, t), step(edge, v))
+sv_math = (nm: str, e: int) -> int:
+    t = prune(ntype(e))
+    pos = nodes[e].pos
+    ty = sv_type(t, pos)
+    n = nkids(e)
+    args: int[]
+    loop i in [0..n):
+        a = kid(e, i)
+        v = sv_expr(a)
+        at = prune(ntype(a))
+        if sv_is_vector(t) and not is_vec(at) and nm != "length" and nm != "distance" and nm != "dot":
+            v = sv_splat(t, sv_as(a, v, t, pos), pos)
+        args.push(v)
+    if nm == "dot":
+        if not is_vec(ntype(kid(e, 0))): return sv_val(133, ty, [args[0], args[1]])
+        return sv_val(148, ty, args)
+    if nm == "transpose": return sv_val(84, ty, args)
+    if nm == "fwidth":
+        if sv_stage != "fragment": sv_err(nodes[e].pos, "fwidth() can only be used in the fragment shader")
+        return sv_val(209, ty, args)
+    if nm == "mod":
+        if sv_is_floaty(t): return sv_val(141, ty, args)
+        return sv_val(139, ty, args)
+    if nm == "abs" and not sv_is_floaty(t) and types[t].kind != .bool_:
+        # (x below 0 negated, which wraps: abs of the smallest integer is itself, as on the CPU;
+        # SAbs leaves that undefined)
+        zero = sv_ci(0)
+        bt = sv_bool()
+        if sv_is_vector(t):
+            zero = sv_splat(t, zero, pos)
+            bt = sv_vecb(sv_ncomp(t))
+        return sv_narrow(sv_val(169, ty, [sv_val(177, bt, [args[0], zero]), sv_val(126, ty, [args[0]]), args[0]]), t)
+    ops = sv_std_ops.get(nm) ?? (0, 0)
+    op = ops.0
+    if not sv_is_floaty(t) and types[t].kind != .bool_ and ops.1 != 0: op = ops.1
+    # (unsigned: UMin, UMax, UClamp)
+    if sv_unsigned(t) and (nm == "min" or nm == "max" or nm == "clamp"): op -= 1
+    if nm == "atan" and n == 2: op = 25
+    if op == 0: sv_err(pos, "{nm}() is not available in shaders")
+    w: int[] = [sv_std, op]
+    loop a in args: w.push(a)
+    # (abs(i8(-128)) is -128, as on the CPU)
+    sv_narrow(sv_val(12, ty, w), t)
+
+# ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
+# A GpuBuffer here is (its address, its length): struct { uvec2, i32 }. Reads past either end read
+# the nearest element; writes (and atomics) past them do nothing. Only compute programs write.
+sv_uv2 = () -> int: sv_type_key("uv2", 23, [sv_u32(), 2])
+sv_gbuf_type = () -> int: sv_type_key("gbuf", 30, [sv_uv2(), sv_i32()])
+sv_gbuf_ptr = (b: int) -> int: sv_val(124, sv_rawptr_w(), [sv_val(81, sv_uv2(), [b, 0])])
+sv_gbuf_len = (b: int) -> int: sv_val(81, sv_i32(), [b, 1])
+
+# e is a call of the library's operation `name` on a GpuBuffer (its first argument)
+sv_is_gbuf_op = (e: int, name: str) -> bool:
+    if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) == 0: return false
+    decl = int(fns[int(nodes[e].sym)].decl)
+    decl != 0 and modules[int(nodes[decl].mod)].is_prelude and name_of(int(nodes[decl].name)) == name and is_gpu_buffer(ntype(kid(e, 0)))
+
+# b[i]: where the element is
+sv_gbuf_elem = (e: int) -> SvRef:
+    i32_ = sv_i32()
+    b = sv_expr(kid(e, 0))
+    i = sv_expr(kid(e, 1))
+    hi = sv_val(12, i32_, [sv_std, 42, sv_val(130, i32_, [sv_gbuf_len(b), sv_ci(1)]), sv_ci(0)])
+    i = sv_val(12, i32_, [sv_std, 45, i, sv_ci(0), hi])
+    et = gpu_buffer_elem(ntype(kid(e, 0)))
+    layout(et)
+    SvRef(sv_gbuf_ptr(b), 0, sv_val(132, i32_, [i, sv_ci(tsize(et))]), et)
+
+# the block that runs only when index i is inside buffer b: (the block left, the merge block)
+sv_gbuf_inside = (b: int, i: int) -> (int, int):
+    u = sv_u32()
+    inside = sv_val(176, sv_bool(), [sv_val(124, u, [i]), sv_val(124, u, [sv_gbuf_len(b)])])
+    from_ = sv_label
+    then = sv_new()
+    merge = sv_new()
+    sv_code(247, [merge, 0])
+    sv_cond_branch(inside, then, merge)
+    sv_begin(then)
+    (from_, merge)
+
+# b[i] = v
+sv_gbuf_store = (e: int):
+    pos = nodes[e].pos
+    if sv_stage != "compute": sv_err(pos, "GPU buffers are written by compute programs only")
+    bt = ntype(kid(e, 0))
+    b = sv_expr(kid(e, 0))
+    i = sv_expr(kid(e, 1))
+    v = sv_expr(kid(e, 2))
+    et = gpu_buffer_elem(bt)
+    layout(et)
+    _, merge = sv_gbuf_inside(b, i)
+    sv_write(et, sv_gbuf_ptr(b), 0, sv_val(132, sv_i32(), [i, sv_ci(tsize(et))]), v, pos)
+    sv_branch(merge)
+    sv_begin(merge)
+
+# a pointer to the word at byte offset (c + d) of buffer memory base
+sv_word_ptr = (base: int, c: int, d: int) -> int:
+    idx = sv_ci(c >> 2)
+    if d != 0:
+        off = d
+        if c != 0: off = sv_val(128, sv_i32(), [d, sv_ci(c)])
+        idx = sv_val(195, sv_i32(), [off, sv_ci(2)])
+    sv_val(65, sv_ptr(SC_PSB, sv_u32()), [base, sv_ci(0), idx])
+
+sv_store_word = (base: int, c: int, d: int, w: int): sv_code(62, [sv_word_ptr(base, c, d), w, 2, 4])
+
+# the low `bits` bits of v (an i32) to bits [8 * ((c + d) & 3), ...) of their word: cleared, then
+# set, each atomically, so that the bytes beside them, which other invocations may write, stay
+sv_store_sub = (base: int, c: int, d: int, bits: int, v: int):
+    u = sv_u32()
+    p = 0
+    shift = 0
+    if d == 0:
+        p = sv_word_ptr(base, c & -4, 0)
+        shift = sv_cu((c & 3) * 8)
+    else:
+        off = d
+        if c != 0: off = sv_val(128, sv_i32(), [d, sv_ci(c)])
+        p = sv_word_ptr(base, 0, sv_val(199, sv_i32(), [off, sv_ci(-4)]))
+        shift = sv_val(124, u, [sv_val(132, sv_i32(), [sv_val(199, sv_i32(), [off, sv_ci(3)]), sv_ci(8)])])
+    ones = sv_cu((1 << bits) - 1)
+    mask = sv_val(196, u, [ones, shift])
+    val = sv_val(196, u, [sv_val(199, u, [sv_val(124, u, [v]), ones]), shift])
+    sv_val(240, u, [p, sv_cu(1), sv_cu(0), sv_val(200, u, [mask])])
+    sv_val(241, u, [p, sv_cu(1), sv_cu(0), val])
+
+# an f32 as an f64's two words (low, high); numbers too small for an f32's normal range become 0
+sv_to_f64 = (v: int) -> (int, int):
+    u = sv_u32()
+    b = sv_bool()
+    bits = sv_val(124, u, [v])
+    sign = sv_val(199, u, [bits, sv_cu(0x80000000)])
+    e = sv_val(199, u, [sv_val(194, u, [bits, sv_cu(23)]), sv_cu(0xFF)])
+    m = sv_val(199, u, [bits, sv_cu(0x7FFFFF)])
+    mhi = sv_val(194, u, [m, sv_cu(3)])
+    lo = sv_val(196, u, [m, sv_cu(29)])
+    hi = sv_val(197, u, [sign, sv_val(197, u, [sv_val(196, u, [sv_val(128, u, [e, sv_cu(896)]), sv_cu(20)]), mhi])])
+    hi = sv_val(169, u, [sv_val(170, b, [e, sv_cu(0xFF)]), sv_val(197, u, [sign, sv_val(197, u, [sv_cu(0x7FF00000), mhi])]), hi])
+    zero = sv_val(170, b, [e, sv_cu(0)])
+    (sv_val(169, u, [zero, sv_cu(0), lo]), sv_val(169, u, [zero, sign, hi]))
+
+# value v of type t written at byte offset (c + d) of buffer memory base, laid out as the CPU does
+sv_write = (t0: int, base: int, c: int, d: int, v: int, pos: int):
+    t = prune(t0)
+    k = types[t].kind
+    u = sv_u32()
+    if k == .float_:
+        if int(types[t].bits) == 64:
+            lo, hi = sv_to_f64(v)
+            sv_store_word(base, c, d, lo)
+            sv_store_word(base, c + 4, d, hi)
+        else: sv_store_word(base, c, d, sv_val(124, u, [v]))
+        return
+    if k == .int_:
+        bits = int(types[t].bits)
+        if bits < 32:
+            sv_store_sub(base, c, d, bits, v)
+            return
+        sv_store_word(base, c, d, sv_val(124, u, [v]))
+        if bits == 64:
+            hi = sv_cu(0)
+            if types[t].sign: hi = sv_val(124, u, [sv_val(195, sv_i32(), [v, sv_ci(31)])])
+            sv_store_word(base, c + 4, d, hi)
+        return
+    if k == .bool_:
+        sv_store_sub(base, c, d, 8, sv_val(169, sv_i32(), [v, sv_ci(1), sv_ci(0)]))
+        return
+    if k == .vec:
+        if t == T_MAT4:
+            loop col in [0..4): sv_write(T_VEC4, base, c + 16 * col, d, sv_val(81, sv_vecf(4), [v, col]), pos)
+            return
+        ct = sv_f32()
+        if types[t].sign: ct = sv_i32()
+        loop i in [0..int(types[t].bits)): sv_store_word(base, c + 4 * i, d, sv_val(124, u, [sv_val(81, ct, [v, i])]))
+        return
+    if k == .struct_:
+        si = int(types[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t): sv_err(pos, "a {structs[si].name} cannot be written into a GPU buffer")
+        layout(t)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            ft = int(fields[f].type)
+            sv_write(ft, base, c + int(fields[f].offset), d, sv_val(81, sv_type(ft, pos), [v, i]), pos)
+        return
+    if k == .fixed:
+        el = int(types[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)): sv_write(el, base, c + i * tsize(el), d, sv_val(81, sv_type(el, pos), [v, i]), pos)
+        return
+    sv_err(pos, "type {type_str(t)} cannot be written into a GPU buffer")
+
+# atomic operations on an element of a GpuBuffer[i32] or GpuBuffer[u32]: (signed, unsigned) opcode
+sv_atomic_ops: {str: (int, int)} = {
+    "atomic_add": (234, 234), "atomic_sub": (235, 235), "atomic_min": (236, 237), "atomic_max": (238, 239),
+    "atomic_and": (240, 240), "atomic_or": (241, 241), "atomic_xor": (242, 242), "atomic_exchange": (229, 229),
+    "atomic_compare_exchange": (230, 230),
+}
+
+# atomic_op(b, i, v...): the element's old value (0 past the ends, where nothing is done)
+sv_atomic = (e: int, nm: str, ops: (int, int)) -> int:
+    pos = nodes[e].pos
+    if sv_stage != "compute": sv_err(pos, "{nm}() can be used in compute programs only")
+    et = prune(gpu_buffer_elem(ntype(kid(e, 0))))
+    if types[et].kind != .int_ or int(types[et].bits) != 32: sv_err(pos, "atomic operations work on GpuBuffer[i32] and GpuBuffer[u32]")
+    u = sv_u32()
+    b = sv_expr(kid(e, 0))
+    i = sv_expr(kid(e, 1))
+    vals: int[]
+    loop j in [2..nkids(e)): vals.push(sv_val(124, u, [sv_expr(kid(e, j))]))
+    from_, merge = sv_gbuf_inside(b, i)
+    p = sv_word_ptr(sv_gbuf_ptr(b), 0, sv_val(132, sv_i32(), [i, sv_ci(4)]))
+    op = ops.0
+    if not types[et].sign: op = ops.1
+    r = 0
+    # (compare_exchange(b, i, expected, desired): the value is the desired one)
+    if op == 230: r = sv_val(op, u, [p, sv_cu(1), sv_cu(0), sv_cu(0), vals[1], vals[0]])
+    else: r = sv_val(op, u, [p, sv_cu(1), sv_cu(0), vals[0]])
+    then_end = sv_label
+    sv_branch(merge)
+    sv_begin(merge)
+    sv_val(124, sv_i32(), [sv_val(245, u, [r, then_end, sv_cu(0), from_])])
+
+# ---------------- subgroups ----------------
+sv_cap = (c: int):
+    if sv_cache.get("cap{c}") != none: return
+    sv_cache["cap{c}"] = 1
+    sv_ins(sv_caps, 17, [c])
+
+sv_subgroup_builtin = (b: int) -> int:
+    key = "sgb{b}"
+    if let v = sv_cache.get(key): return sv_val(124, sv_i32(), [sv_load(sv_u32(), v)])
+    v = sv_builtin_var(sv_u32(), SC_INPUT, b)
+    sv_cache[key] = v
+    sv_val(124, sv_i32(), [sv_load(sv_u32(), v)])
+
+# subgroup_add(x) and the others (lib/game/gpubuffer.jo): OpGroupNonUniform* over the subgroup
+sv_subgroup = (e: int, nm: str) -> int:
+    pos = nodes[e].pos
+    if sv_stage != "compute": sv_err(pos, "{nm}() can be used in compute functions only")
+    sv_cap(61)
+    sc = sv_ci(3)
+    if nm == "subgroup_size": return sv_subgroup_builtin(36)
+    if nm == "subgroup_invocation_id": return sv_subgroup_builtin(41)
+    if nm == "subgroup_elect": return sv_val(333, sv_bool(), [sc])
+    if nm == "subgroup_all" or nm == "subgroup_any":
+        sv_cap(62)
+        return sv_val(sv_pick(nm == "subgroup_all", 334, 335), sv_bool(), [sc, sv_expr(kid(e, 0))])
+    t = prune(ntype(e))
+    ty = sv_type(t, pos)
+    x = sv_expr(kid(e, 0))
+    if nm == "subgroup_broadcast_first":
+        sv_cap(64)
+        return sv_val(338, ty, [sc, x])
+    sv_cap(63)
+    k = types[t].kind
+    fl = k == .float_ or (k == .vec and not types[t].sign and t != T_MAT4)
+    it = k == .int_ or (k == .vec and types[t].sign)
+    un = sv_unsigned(t)
+    op = 0
+    grp = 0
+    if nm == "subgroup_add" or nm == "subgroup_inclusive_add" or nm == "subgroup_exclusive_add":
+        if fl: op = 350
+        else if it: op = 349
+        if nm == "subgroup_inclusive_add": grp = 1
+        if nm == "subgroup_exclusive_add": grp = 2
+    else if nm == "subgroup_min":
+        if fl: op = 355
+        else if it: op = sv_pick(un, 354, 353)
+    else if nm == "subgroup_max":
+        if fl: op = 358
+        else if it: op = sv_pick(un, 357, 356)
+    else if nm == "subgroup_and" or nm == "subgroup_or" or nm == "subgroup_xor":
+        b = sv_pick(nm == "subgroup_and", 0, sv_pick(nm == "subgroup_or", 1, 2))
+        if it: op = 359 + b
+        else if k == .bool_: op = 362 + b
+    else: sv_err(pos, "{nm}() is not available in compute functions")
+    if op == 0: sv_err(pos, "{nm}() takes numbers or vectors here (found {type_str(t)})")
+    r = sv_val(op, ty, [sc, grp, x])
+    if op == 349: return sv_narrow(r, t)
+    r
+
+# ---------------- the stages ----------------
+sv_reset = (stage: str):
+    sv_bound = 0
+    sv_caps = []
+    sv_dec = []
+    sv_glob = []
+    sv_fns = []
+    sv_cache = {}
+    sv_iface = []
+    sv_fn_ids = {}
+    sv_pending = []
+    sv_pc = 0
+    sv_textures = 0
+    sv_vid = 0
+    sv_iid = 0
+    sv_stage = stage
+    sv_group = [SV_KERNEL_GROUP, 1, 1]
+    sv_std = sv_new()
+    # Shader, ImageQuery, ShaderNonUniform, RuntimeDescriptorArray,
+    # SampledImageArrayNonUniformIndexing, PhysicalStorageBufferAddresses
+    loop c in [1, 50, 5301, 5302, 5307, 5347]: sv_ins(sv_caps, 17, [c])
+
+# translate everything called (functions can call more functions)
+sv_drain = ():
+    loop sv_pending.len() > 0:
+        f = sv_pending.pop()
+        if sv_fn_ids.get(f) != none and sv_translated.get(f) == none:
+            sv_translated[f] = true
+            sv_function(f)
+
+
+# the module's bytes
+sv_module = (model: int, main: int) -> str:
+    w: int[] = [0x07230203, 0x00010500, 0, sv_bound + 1, 0]
+    loop x in sv_caps: w.push(x)
+    imp: int[] = [sv_std]
+    loop x in sv_strw("GLSL.std.450"): imp.push(x)
+    sv_ins(w, 11, imp)
+    sv_ins(w, 14, [5348, 1])
+    ep: int[] = [model, main]
+    loop x in sv_strw("main"): ep.push(x)
+    loop v in sv_iface: ep.push(v)
+    sv_ins(w, 15, ep)
+    if model == 4: sv_ins(w, 16, [main, 7])
+    if model == 5: sv_ins(w, 16, [main, 17, sv_group[0], sv_group[1], sv_group[2]])
+    loop x in sv_dec: w.push(x)
+    loop x in sv_glob: w.push(x)
+    loop x in sv_fns: w.push(x)
+    b: u8[]
+    loop x in w:
+        loop j in [0..4): b.push(u8((x >> (8 * j)) & 0xFF))
+    str_from_bytes(b)
+
+# the parts of a struct passed between the stages, each a variable at its own location: (the
+# path of field indices to it, its type)
+sv_leaves = (t0: int, path: int[], out: mut (int[], int)[]):
+    t = prune(t0)
+    if types[t].kind == .struct_ and not is_lib_texture(int(types[t].st)):
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            p: int[]
+            loop x in path: p.push(x)
+            p.push(i)
+            sv_leaves(int(fields[int(structs[si].fields) + i].type), p, out)
+        return
+    out.push((path, t))
+
+# the locations a value of type t takes
+sv_slots = (t0: int) -> int:
+    t = prune(t0)
+    if t == T_MAT4: return 4
+    if types[t].kind == .fixed: return fixed_len(t) * sv_slots(int(types[t].elem))
+    1
+
+sv_is_int_leaf = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind == .fixed: return sv_is_int_leaf(int(types[t].elem))
+    types[t].kind == .int_ or (types[t].kind == .vec and types[t].sign) or (types[t].kind == .struct_ and is_lib_texture(int(types[t].st)))
+
+# the varyings: one variable per part of the vertex function's result after the first (the
+# clip position), at consecutive locations; integers are not interpolated
+sv_varyings = (otype: int, sc: int, pos: int) -> ((int[], int)[], int[]):
+    si = int(types[prune(otype)].st)
+    check_struct_fields(si)
+    leaves: (int[], int)[]
+    loop i in [1..int(structs[si].nfields)): sv_leaves(int(fields[int(structs[si].fields) + i].type), [i], leaves)
+    vars: int[]
+    loc = 0
+    loop lf in leaves:
+        if types[prune(lf.1)].kind == .bool_: sv_err(pos, "bools cannot be passed from the vertex to the fragment shader (use an int)")
+        v = sv_global(sv_ptr(sc, sv_type(lf.1, pos)), sc)
+        sv_deco(v, 30, [loc])
+        if sv_is_int_leaf(lf.1) and sc == SC_INPUT: sv_deco(v, 14, [])
+        loc += sv_slots(lf.1)
+        vars.push(v)
+    (leaves, vars)
+
+# the value of type t (a part of the varyings struct at path) rebuilt from the leaf values
+sv_rebuild = (t0: int, path: int[], leaves: (int[], int)[], vals: int[], pos: int) -> int:
+    t = prune(t0)
+    loop i in 0.. and lf in leaves:
+        if lf.0.len() == path.len():
+            same = true
+            loop j in [0..path.len()):
+                if lf.0[j] != path[j]: same = false
+            if same: return vals[i]
+    si = int(types[t].st)
+    parts: int[]
+    loop i in [0..int(structs[si].nfields)):
+        p: int[]
+        loop x in path: p.push(x)
+        p.push(i)
+        parts.push(sv_rebuild(int(fields[int(structs[si].fields) + i].type), p, leaves, vals, pos))
+    sv_val(80, sv_type(t, pos), parts)
+
+# the vertex stage: read this vertex (and instance), call the vertex function, write the clip
+# position (in Vulkan's conventions) and the varyings
+sv_vertex = (vsf: int) -> str:
+    sv_reset("vertex")
+    pos = nodes[int(fns[vsf].decl)].pos
+    np = fns[vsf].ptypes.len()
+    vtype_ = int(fns[vsf].ptypes[0])
+    itype = 0
+    if np == 3: itype = int(fns[vsf].ptypes[1])
+    sv_utype = prune(int(fns[vsf].ptypes[np - 1]))
+    otype = int(fns[vsf].ret)
+    sv_fn_id(vsf)
+    sv_drain()
+    main = sv_new()
+    head: int[]
+    sv_ins(head, 54, [sv_void(), main, 0, sv_fntype(sv_void(), [])])
+    sv_start_fn()
+    out_pos = sv_builtin_var(sv_vecf(4), SC_OUTPUT, 0)
+    leaves, outs = sv_varyings(otype, SC_OUTPUT, pos)
+    voff = sv_val(132, sv_i32(), [sv_vertex_id(), sv_pc_get(SV_PC_VSTRIDE)])
+    args: int[] = [sv_read(vtype_, sv_pc_get(SV_PC_VERTS), 0, voff, pos)]
+    if itype != 0:
+        ioff = sv_val(132, sv_i32(), [sv_instance_id(), sv_pc_get(SV_PC_ISTRIDE)])
+        args.push(sv_read(itype, sv_pc_get(SV_PC_INSTS), 0, ioff, pos))
+    args.push(sv_pc_get(SV_PC_PARAMS))
+    call: int[] = [sv_fn_id(vsf)]
+    loop a in args: call.push(a)
+    o = sv_val(57, sv_type(otype, pos), call)
+    # (y turned over when drawing to the window; z from -1..1 to 0..1)
+    p = sv_val(81, sv_vecf(4), [o, 0])
+    f = sv_f32()
+    x = sv_val(81, f, [p, 0])
+    y = sv_val(81, f, [p, 1])
+    z = sv_val(81, f, [p, 2])
+    w = sv_val(81, f, [p, 3])
+    flip = sv_val(186, sv_bool(), [sv_pc_get(SV_PC_FLIP), sv_cf(0.0)])
+    y = sv_val(169, f, [flip, sv_val(127, f, [y]), y])
+    z = sv_val(133, f, [sv_val(129, f, [z, w]), sv_cf(0.5)])
+    sv_store(out_pos, sv_val(80, sv_vecf(4), [x, y, z, w]))
+    loop i in 0.. and lf in leaves:
+        ex: int[] = [sv_type(lf.1, pos), sv_new(), o]
+        loop j in lf.0: ex.push(j)
+        sv_code(81, ex)
+        sv_store(outs[i], ex[1])
+    sv_code(253, [])
+    sv_dead = true
+    sv_finish_fn(head)
+    sv_drain()
+    sv_module(0, main)
+
+# the fragment stage: the varyings (and the window position, as OpenGL has it) into the fragment
+# function, its color out
+sv_fragment = (fsf: int) -> str:
+    sv_reset("fragment")
+    pos = nodes[int(fns[fsf].decl)].pos
+    np = fns[fsf].ptypes.len()
+    itype = int(fns[fsf].ptypes[0])
+    sv_utype = prune(int(fns[fsf].ptypes[np - 1]))
+    sv_fn_id(fsf)
+    sv_drain()
+    main = sv_new()
+    head: int[]
+    sv_ins(head, 54, [sv_void(), main, 0, sv_fntype(sv_void(), [])])
+    sv_start_fn()
+    fc_var = sv_builtin_var(sv_vecf(4), SC_INPUT, 15)
+    leaves, ins = sv_varyings(itype, SC_INPUT, pos)
+    out = sv_global(sv_ptr(SC_OUTPUT, sv_vecf(4)), SC_OUTPUT)
+    sv_deco(out, 30, [0])
+    # (OpenGL counts rows from the bottom of the window)
+    f = sv_f32()
+    fc = sv_load(sv_vecf(4), fc_var)
+    flip = sv_pc_get(SV_PC_FLIP)
+    y = sv_val(81, f, [fc, 1])
+    y = sv_val(169, f, [sv_val(186, sv_bool(), [flip, sv_cf(0.0)]), sv_val(131, f, [flip, y]), y])
+    fc = sv_val(82, sv_vecf(4), [y, fc, 1])
+    vals: int[]
+    loop i in 0.. and lf in leaves: vals.push(sv_load(sv_type(lf.1, pos), ins[i]))
+    si = int(types[prune(itype)].st)
+    parts: int[] = [fc]
+    loop i in [1..int(structs[si].nfields)): parts.push(sv_rebuild(int(fields[int(structs[si].fields) + i].type), [i], leaves, vals, pos))
+    inv = sv_val(80, sv_type(itype, pos), parts)
+    color = sv_val(57, sv_vecf(4), [sv_fn_id(fsf), inv, sv_pc_get(SV_PC_PARAMS)])
+    sv_store(out, color)
+    sv_code(253, [])
+    sv_dead = true
+    sv_finish_fn(head)
+    sv_drain()
+    sv_module(4, main)
+
+sv_dumped = 0
+
+# returns (vertex module, fragment module). With SLOPPY_SPIRV_DUMP=dir, each is also written to
+# dir/<n>.vert.spv and dir/<n>.frag.spv (for spirv-val: tools/spirvtest.py)
+spirv_build = (vsf: int, fsf: int) -> (str, str):
+    sv_translated = {}
+    vs = sv_vertex(vsf)
+    sv_translated = {}
+    fs = sv_fragment(fsf)
+    if let dir = env("SLOPPY_SPIRV_DUMP"):
+        write_file("{dir}/{sv_dumped}.vert.spv", vs)
+        write_file("{dir}/{sv_dumped}.frag.spv", fs)
+        sv_dumped += 1
+    (vs, fs)
+
+# ---------------- GPU array kernels ----------------
+# The compute program of a dotted expression on GPU arrays (see glsl_kernel for the GLSL one, and
+# __gpu_run in lib/game/gpuarray.jo): each invocation computes one element of the result. Its
+# parameters are at the push constants' params address, as 32-bit words:
+#   0: the result's address (2 words)   2..5: its shape, padded in front to 4 dimensions
+#   6: its number of elements
+#   8 + 6k: input k's address (2 words), then its steps per dimension (4: 0 where it stretches)
+#   then the f32 numbers, then the i32 ones (desc says which operand is which: see glsl_kernel)
+const SV_KERNEL_GROUP = 64
+
+# a buffer address from two words (low, high) of the parameters
+sv_addr_at = (params: int, word: int, ptrty: int) -> int:
+    v = sv_val(80, sv_type_key("uv2", 23, [sv_u32(), 2]), [sv_word(params, word * 4, 0), sv_word(params, word * 4 + 4, 0)])
+    sv_val(124, ptrty, [v])
+
+# a buffer of 32-bit words that can be written
+sv_rawptr_w = () -> int:
+    if let id = sv_cache.get("rawptrw"): return id
+    rt = sv_type_key("rawrtw", 29, [sv_u32()])
+    sv_deco(rt, 6, [4])
+    st = sv_type_key("rawstw", 30, [rt])
+    sv_deco(st, 2, [])
+    sv_mdeco(st, 0, 35, [0])
+    p = sv_ptr(SC_PSB, st)
+    sv_cache["rawptrw"] = p
+    p
+
+# this invocation's index: they are laid out in rows of all the x groups (as many as there may be,
+# 65535, then more rows)
+sv_invocation = () -> int:
+    i = sv_i32()
+    uv3 = sv_type_key("uv3", 23, [sv_u32(), 3])
+    gid = sv_load(uv3, sv_builtin_var(uv3, SC_INPUT, 28))
+    ng = sv_load(uv3, sv_builtin_var(uv3, SC_INPUT, 24))
+    gx = sv_val(124, i, [sv_val(81, sv_u32(), [gid, 0])])
+    gy = sv_val(124, i, [sv_val(81, sv_u32(), [gid, 1])])
+    nx = sv_val(124, i, [sv_val(81, sv_u32(), [ng, 0])])
+    sv_val(128, i, [gx, sv_val(132, i, [gy, sv_val(132, i, [nx, sv_ci(SV_KERNEL_GROUP)])])])
+
+spirv_kernel = (f: int, desc: str) -> str:
+    sv_translated = {}
+    sv_reset("kernel")
+    sv_utype = 0
+    pos = nodes[int(fns[f].decl)].pos
+    sv_fn_id(f)
+    sv_drain()
+    main = sv_new()
+    head: int[]
+    sv_ins(head, 54, [sv_void(), main, 0, sv_fntype(sv_void(), [])])
+    sv_start_fn()
+    i = sv_i32()
+    bo = sv_bool()
+    params = sv_pc_get(SV_PC_PARAMS)
+    idx = sv_invocation()
+    total = sv_val(124, i, [sv_word(params, 24, 0)])
+    done = sv_new()
+    body = sv_new()
+    past = sv_val(175, bo, [idx, total])
+    sv_code(247, [done, 0])
+    sv_cond_branch(past, done, body)
+    sv_begin(body)
+    od: int[]
+    loop k in [0..4): od.push(sv_val(124, i, [sv_word(params, 8 + 4 * k, 0)]))
+    i3 = sv_val(138, i, [idx, od[3]])
+    q = sv_val(135, i, [idx, od[3]])
+    i2 = sv_val(138, i, [q, od[2]])
+    q = sv_val(135, i, [q, od[2]])
+    i1 = sv_val(138, i, [q, od[1]])
+    i0 = sv_val(135, i, [q, od[1]])
+    nt = 0
+    loop c in desc:
+        if c == 't' or c == 'i': nt += 1
+    sbase = 32 + 24 * nt
+    nf = 0
+    loop c in desc:
+        if c == 's': nf += 1
+    args: int[]
+    kt = 0
+    kf = 0
+    ki = 0
+    loop c in desc:
+        if c == 't' or c == 'i':
+            w0 = 8 + 6 * kt
+            p = sv_addr_at(params, w0, sv_rawptr())
+            o = sv_val(132, i, [i0, sv_val(124, i, [sv_word(params, (w0 + 2) * 4, 0)])])
+            o = sv_val(128, i, [o, sv_val(132, i, [i1, sv_val(124, i, [sv_word(params, (w0 + 3) * 4, 0)])])])
+            o = sv_val(128, i, [o, sv_val(132, i, [i2, sv_val(124, i, [sv_word(params, (w0 + 4) * 4, 0)])])])
+            o = sv_val(128, i, [o, sv_val(132, i, [i3, sv_val(124, i, [sv_word(params, (w0 + 5) * 4, 0)])])])
+            v = sv_word(p, 0, sv_val(132, i, [o, sv_ci(4)]))
+            if c == 'i': args.push(sv_val(124, i, [v]))
+            else: args.push(sv_val(124, sv_f32(), [v]))
+            kt += 1
+        else if c == 's':
+            args.push(sv_val(124, sv_f32(), [sv_word(params, sbase + 4 * kf, 0)]))
+            kf += 1
+        else:
+            args.push(sv_val(124, i, [sv_word(params, sbase + 4 * (nf + ki), 0)]))
+            ki += 1
+    rt = prune(int(fns[f].ret))
+    call: int[] = [sv_fn_id(f)]
+    loop a in args: call.push(a)
+    r = sv_val(57, sv_type(rt, pos), call)
+    bits = 0
+    if types[rt].kind == .int_: bits = sv_val(124, sv_u32(), [r])
+    else if types[rt].kind == .bool_: bits = sv_val(124, sv_u32(), [sv_val(169, sv_f32(), [r, sv_cf(1.0), sv_cf(0.0)])])
+    else: bits = sv_val(124, sv_u32(), [r])
+    out = sv_addr_at(params, 0, sv_rawptr_w())
+    dst = sv_val(65, sv_ptr(SC_PSB, sv_u32()), [out, sv_ci(0), idx])
+    sv_code(62, [dst, bits, 2, 4])
+    sv_branch(done)
+    sv_begin(done)
+    sv_code(253, [])
+    sv_dead = true
+    sv_finish_fn(head)
+    sv_drain()
+    m = sv_module(5, main)
+    if let dir = env("SLOPPY_SPIRV_DUMP"):
+        write_file("{dir}/{sv_dumped}.comp.spv", m)
+        sv_dumped += 1
+    m
+
+# ---------------- compute programs ----------------
+# compute(f) (lib/game/gpubuffer.jo): f(id, params) for each id in [0, n). The push constants hold
+# the parameters' address (as for the stages) and n (where the vertex stride is).
+# A grid's (f(id: ivec2, params)) are in groups of 8 x 8, its width and height in the push
+# constants where the strides are; a 3D grid's (f(id: ivec3, params)) in groups of 4 x 4 x 4,
+# its depth in the push constants' padding.
+spirv_compute = (f: int) -> str:
+    sv_translated = {}
+    sv_reset("compute")
+    sv_utype = prune(int(fns[f].ptypes[1]))
+    grid = prune(fns[f].ptypes[0]) == T_IVEC2 or prune(fns[f].ptypes[0]) == T_IVEC3
+    grid3 = prune(fns[f].ptypes[0]) == T_IVEC3
+    sv_fn_id(f)
+    sv_drain()
+    main = sv_new()
+    head: int[]
+    sv_ins(head, 54, [sv_void(), main, 0, sv_fntype(sv_void(), [])])
+    sv_start_fn()
+    params = sv_pc_get(SV_PC_PARAMS)
+    idx = 0
+    inside = 0
+    if grid:
+        sv_group = [8, 8, 1]
+        if grid3: sv_group = [4, 4, 4]
+        i = sv_i32()
+        uv3 = sv_type_key("uv3", 23, [sv_u32(), 3])
+        gid = sv_load(uv3, sv_builtin_var(uv3, SC_INPUT, 28))
+        x = sv_val(124, i, [sv_val(81, sv_u32(), [gid, 0])])
+        y = sv_val(124, i, [sv_val(81, sv_u32(), [gid, 1])])
+        idx = sv_val(80, sv_veci(2), [x, y])
+        inside = sv_val(167, sv_bool(), [sv_val(177, sv_bool(), [x, sv_pc_get(SV_PC_VSTRIDE)]), sv_val(177, sv_bool(), [y, sv_pc_get(SV_PC_ISTRIDE)])])
+        if grid3:
+            z = sv_val(124, i, [sv_val(81, sv_u32(), [gid, 2])])
+            idx = sv_val(80, sv_veci(3), [x, y, z])
+            inside = sv_val(167, sv_bool(), [inside, sv_val(177, sv_bool(), [z, sv_pc_get(SV_PC_DEPTH)])])
+    else:
+        idx = sv_invocation()
+        inside = sv_val(177, sv_bool(), [idx, sv_pc_get(SV_PC_VSTRIDE)])
+    done = sv_new()
+    body = sv_new()
+    sv_code(247, [done, 0])
+    sv_cond_branch(inside, body, done)
+    sv_begin(body)
+    sv_val(57, sv_void(), [sv_fn_id(f), idx, params])
+    sv_branch(done)
+    sv_begin(done)
+    sv_code(253, [])
+    sv_dead = true
+    sv_finish_fn(head)
+    sv_drain()
+    m = sv_module(5, main)
+    if let dir = env("SLOPPY_SPIRV_DUMP"):
+        write_file("{dir}/{sv_dumped}.comp.spv", m)
+        sv_dumped += 1
+    m

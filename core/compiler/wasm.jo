@@ -1,0 +1,1061 @@
+# WebAssembly backend: IR -> wasm binary module, packaged into a self-contained HTML file.
+# Memory layout: [0,1024) unused | rodata | data (globals) | shadow stack (grows down) | heap
+
+use 'util.jo'
+use 'zip.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'x64.jo'
+
+const RO_BASE = 1024
+const STACK_SIZE = 1 << 20
+
+wfuncs: IrFn[]            # lowered functions, by lfunc index
+wf_present: bool[]
+
+wasm_collect = ():
+    loop wfuncs.len() <= ir.fn_index:
+        wfuncs.push(IrFn())
+        wf_present.push(false)
+    wfuncs[ir.fn_index] = ir
+    wf_present[ir.fn_index] = true
+
+# ---------------- encoding helpers ----------------
+uleb = (o: mut u8[], v0: int):
+    v = v0
+    loop true:
+        byte = v & 0x7F
+        v = v >> 7
+        if v == 0:
+            o.push(u8(byte))
+            return
+        o.push(u8(byte | 0x80))
+
+sleb = (o: mut u8[], v0: int):
+    v = v0
+    loop true:
+        byte = v & 0x7F
+        v = v >> 7
+        if (v == 0 and byte & 0x40 == 0) or (v == -1 and byte & 0x40 != 0):
+            o.push(u8(byte))
+            return
+        o.push(u8(byte | 0x80))
+
+wstr = (o: mut u8[], s: str):
+    uleb(o, len(s))
+    loop c in s: o.push(c)
+
+section = (out: mut u8[], id: int, body: u8[]):
+    out.push(u8(id))
+    uleb(out, body.len())
+    append_bytes(out, body)
+
+const WT_I32 = 0x7F
+const WT_I64 = 0x7E
+const WT_F32 = 0x7D
+const WT_F64 = 0x7C
+
+wt = (vt: int) -> int:
+    if vt == VF: return WT_F64
+    if vt == VS: return WT_F32
+    WT_I64
+
+# wasm value type for an import parameter of Sloppy type t
+import_wt = (t0: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .float_:
+        if int(types[t].bits) == 32: return WT_F32
+        return WT_F64
+    if k == .int_ and int(types[t].bits) == 64: return WT_I64
+    WT_I32
+
+# ---------------- function types ----------------
+type_sigs: u8[][]
+type_index: {str: int} = {}
+
+sig_index = (params: int[], results: int[]) -> int:
+    key = "{params}:{results}"
+    if let i = type_index.get(key): return i
+    s: u8[] = [0x60]
+    uleb(s, params.len())
+    loop p in params: s.push(u8(p))
+    uleb(s, results.len())
+    loop r in results: s.push(u8(r))
+    type_sigs.push(s)
+    i = type_sigs.len() - 1
+    type_index[key] = i
+    i
+
+fn_sig_of = (f: IrFn) -> int:
+    ps: int[]
+    loop p in [0..f.nparams): ps.push(wt(int(f.vtypes[p])))
+    rs: int[]
+    if f.ret >= 0: rs.push(wt(f.ret))
+    sig_index(ps, rs)
+
+is_import = (lf: int) -> bool:
+    l = lfuncs[lf]
+    l.kind == LK_INST and fns[l.inst].decl != 0 and has_flag(int(fns[l.inst].decl), NF_EXTERN)
+
+import_sig = (lf: int) -> int:
+    f = lfuncs[lf].inst
+    ps: int[]
+    loop t in fns[f].ptypes: ps.push(import_wt(t))
+    rs: int[]
+    if tkind(int(fns[f].ret)) != .void_: rs.push(import_wt(int(fns[f].ret)))
+    sig_index(ps, rs)
+
+# ---------------- module state ----------------
+wfn_index: int[]          # lfunc -> wasm function index
+table_index: {int: int} = {}
+table_funcs: int[]
+data_base = 0
+stack_top = 0
+
+tbl = (lf: int) -> int:
+    if let i = table_index.get(lf): return i
+    table_funcs.push(lf)
+    i = table_funcs.len()      # index 0 stays null
+    table_index[lf] = i
+    i
+
+# ---------------- function body ----------------
+wb: u8[]
+loc_of: int[]             # vreg -> local index
+fp_local = 0
+cur_frame = 0
+cur_wf: IrFn
+
+op = (x: int): wb.push(u8(x))
+lget = (v: int):
+    if int(cur_wf.vtypes[v]) == VK:
+        i64c(cur_wf.kval[v])
+        return
+    op(0x20)
+    uleb(wb, loc_of[v])
+lset = (v: int):
+    op(0x21)
+    uleb(wb, loc_of[v])
+i64c = (v: int):
+    op(0x42)
+    sleb(wb, v)
+i32c = (v: int):
+    op(0x41)
+    sleb(wb, v)
+# push the i32 address of a load/store; returns the static offset for its memarg
+waddr = (ins: Ins) -> int:
+    lget(int(ins.a))
+    ix = mem_index(ins)
+    if ix >= 0:
+        lget(ix)
+        sc = mem_scale(ins)
+        if sc > 0:
+            i64c(sc)
+            op(0x86)            # i64.shl
+        op(0x7C)                # i64.add
+    off = int(ins.imm)
+    if off < 0:
+        i64c(off)
+        op(0x7C)
+        off = 0
+    op(0xA7)                    # i32.wrap_i64
+    off
+
+# CALL_IF_SHARED, CALL_RC_INC and CALL_RC_DEC (ir.jo): the common case without the call
+w_guarded_call = (ins: Ins, lf: int):
+    a = int(ins.a)
+    d = int(ins.dst)
+    p = int(cur_wf.args[a])
+    if ins.c == CALL_IF_SHARED and d >= 0:
+        lget(p)
+        lset(d)                                 # (x itself, unless the call is made)
+    op(0x02); op(0x40)                          # block $done
+    lget(p); op(0x50); op(0x0D); uleb(wb, 0)    # br_if $done when x is 0
+    addr32(p); op(0x29); memarg(3, 0)           # its refcount
+    if ins.c == CALL_IF_SHARED:
+        i64c(1); op(0x51); op(0x0D); uleb(wb, 0)                # == 1: not shared
+    else:
+        if ins.c == CALL_RC_INC: i64c(0); op(0x57)             # <= 0: immortal
+        else: i64c(1); op(0x53)                                 # < 1: immortal
+        op(0x0D); uleb(wb, 0)
+        op(0x02); op(0x40)                                      # block $slow
+        if ins.c == CALL_RC_DEC:
+            addr32(p); op(0x29); memarg(3, 0)
+            i64c(1); op(0x51); op(0x0D); uleb(wb, 0)            # the last reference: the call frees
+        i32c(data_base + mt_active_off); op(0x2D); memarg(0, 0)  # __mt_active
+        op(0x0D); uleb(wb, 0)
+        addr32(p)
+        addr32(p); op(0x29); memarg(3, 0)
+        if ins.c == CALL_RC_INC: i64c(1)
+        else: i64c(-1)
+        op(0x7C); op(0x37); memarg(3, 0)                        # the refcount one more or less
+        op(0x0C); uleb(wb, 1)                                   # br $done
+        op(0x0B)                                                # end $slow
+    emit_call_args(a, int(ins.b), lf)
+    op(0x10)
+    uleb(wb, wfn_index[lf])
+    call_result(ins, lf)
+    op(0x0B)                                                    # end $done
+
+# (a call in the program's own code: where it is, for a panic's call trace in a page; the call
+# instruction's offset in the body, and its source position)
+w_sites: int[]
+w_site = (ins: Ins):
+    if ins.pos == 0 or pos_in_lib(ir_positions[int(ins.pos)]): return
+    w_sites.push(wb.len())
+    w_sites.push(int(ins.pos))
+
+addr32 = (v: int):
+    lget(v)
+    op(0xA7)              # i32.wrap_i64
+memarg = (align: int, off: int):
+    uleb(wb, align)
+    uleb(wb, off)
+to_i64_from_i32 = (): op(0xAD)    # i64.extend_i32_u
+restore_sp = ():
+    if cur_frame > 0:
+        op(0x20)
+        uleb(wb, fp_local)
+        i32c(cur_frame)
+        op(0x6A)          # i32.add
+        op(0x24)
+        uleb(wb, 0)       # global.set $sp
+
+bin64 = (code: int, ins: Ins):
+    lget(int(ins.a))
+    lget(int(ins.b))
+    op(code)
+    lset(int(ins.dst))
+
+cmp_res = (): to_i64_from_i32()
+
+emit_call_args = (start: int, n: int, lf: int):
+    imp = lf >= 0 and is_import(lf)
+    pts: int[]
+    if imp:
+        loop t in fns[lfuncs[lf].inst].ptypes: pts.push(import_wt(t))
+    loop k in [0..n):
+        v = int(cur_wf.args[start + k])
+        lget(v)
+        if imp and pts[k] == WT_I32: op(0xA7)
+
+call_result = (ins: Ins, lf: int):
+    d = int(ins.dst)
+    imp = lf >= 0 and is_import(lf)
+    if imp:
+        f = lfuncs[lf].inst
+        rt = int(fns[f].ret)
+        if tkind(rt) != .void_:
+            if import_wt(rt) == WT_I32: to_i64_from_i32()
+            if d >= 0: lset(d)
+            else: op(0x1A)            # drop
+        return
+    if d >= 0: lset(d)
+    else if int(ins.ty) >= 0: op(0x1A)
+
+emit_wins = (ins: Ins):
+    o = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    match o:
+        nop, assume: pass
+        vld, vst, vbin, vsplat, vzu, mulhs, mulhu: ice("vector instructions (or mulhs) in wasm code")
+        iconst:
+            i64c(ins.imm)
+            lset(d)
+        fconst:
+            if int(ins.ty) == VS:
+                op(0x43)
+                bits = ins.imm
+                loop k in [0..4): wb.push(u8((bits >> (8 * k)) & 255))
+            else:
+                op(0x44)
+                bits = ins.imm
+                loop k in [0..8): wb.push(u8((bits >> (8 * k)) & 255))
+            lset(d)
+        mov:
+            lget(a)
+            lset(d)
+        add: bin64(0x7C, ins)
+        sub: bin64(0x7D, ins)
+        mul: bin64(0x7E, ins)
+        divs: bin64(0x7F, ins)
+        divu: bin64(0x80, ins)
+        rems: bin64(0x81, ins)
+        remu: bin64(0x82, ins)
+        and_: bin64(0x83, ins)
+        or_: bin64(0x84, ins)
+        xor: bin64(0x85, ins)
+        shl: bin64(0x86, ins)
+        shrs: bin64(0x87, ins)
+        shru: bin64(0x88, ins)
+        neg:
+            i64c(0)
+            lget(a)
+            op(0x7D)
+            lset(d)
+        not_:
+            lget(a)
+            i64c(-1)
+            op(0x85)
+            lset(d)
+        eq, ne, lts, ltu, gts, gtu, les, leu, ges, geu:
+            lget(a)
+            lget(bb)
+            c = 0x51
+            if o == .ne: c = 0x52
+            else if o == .lts: c = 0x53
+            else if o == .ltu: c = 0x54
+            else if o == .gts: c = 0x55
+            else if o == .gtu: c = 0x56
+            else if o == .les: c = 0x57
+            else if o == .leu: c = 0x58
+            else if o == .ges: c = 0x59
+            else if o == .geu: c = 0x5A
+            op(c)
+            cmp_res()
+            lset(d)
+        fadd, fsub, fmul, fdiv, fmin, fmax:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            lget(bb)
+            base = 0xA0
+            if f32: base = 0x92
+            k = 0
+            if o == .fsub: k = 1
+            else if o == .fmul: k = 2
+            else if o == .fdiv: k = 3
+            else if o == .fmin: k = 4
+            else if o == .fmax: k = 5
+            op(base + k)
+            lset(d)
+        fneg, fabs, fsqrt, ffloor, fceil, ftrunc:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            c = 0
+            if o == .fabs: c = 0x99
+            else if o == .fneg: c = 0x9A
+            else if o == .fceil: c = 0x9B
+            else if o == .ffloor: c = 0x9C
+            else if o == .ftrunc: c = 0x9D
+            else: c = 0x9F
+            if f32: c -= 14
+            op(c)
+            lset(d)
+        feq, fne, flt, fle, fgt, fge:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            lget(bb)
+            c = 0x61
+            if o == .fne: c = 0x62
+            else if o == .flt: c = 0x63
+            else if o == .fgt: c = 0x64
+            else if o == .fle: c = 0x65
+            else if o == .fge: c = 0x66
+            if f32: c -= 6
+            op(c)
+            cmp_res()
+            lset(d)
+        sext8, sext16, sext32:
+            lget(a)
+            if o == .sext8: op(0xC2)
+            else if o == .sext16: op(0xC3)
+            else: op(0xC4)
+            lset(d)
+        zext8, zext16, zext32:
+            lget(a)
+            if o == .zext32:
+                op(0xA7)
+                op(0xAD)
+            else:
+                if o == .zext8: i64c(0xFF)
+                else: i64c(0xFFFF)
+                op(0x83)
+            lset(d)
+        i2f, u2f:
+            lget(a)
+            if int(ins.ty) == VS:
+                if o == .i2f: op(0xB4)
+                else: op(0xB5)
+            else:
+                if o == .i2f: op(0xB9)
+                else: op(0xBA)
+            lset(d)
+        f2i:
+            lget(a)
+            op(0xFC)
+            if int(ins.ty) == VS: uleb(wb, 4)
+            else: uleb(wb, 6)
+            lset(d)
+        f2f:
+            lget(a)
+            if int(ins.ty) == VF: op(0xBB)
+            else: op(0xB6)
+            lset(d)
+        bits2f:
+            lget(a)
+            if int(ins.ty) == VS:
+                op(0xA7)
+                op(0xBE)
+            else: op(0xBF)
+            lset(d)
+        f2bits:
+            lget(a)
+            if int(ins.ty) == VS:
+                op(0xBC)
+                op(0xAD)
+            else: op(0xBD)
+            lset(d)
+        load:
+            mode = int(ins.c)
+            size = mode & 15
+            off = waddr(ins)
+            if mode & M_FLOAT != 0:
+                if size == 4:
+                    op(0x2A)
+                    memarg(2, off)
+                else:
+                    op(0x2B)
+                    memarg(3, off)
+            else:
+                sg = mode & M_SIGNED != 0
+                if size == 8:
+                    op(0x29)
+                    memarg(3, off)
+                else if size == 4:
+                    if sg: op(0x34)
+                    else: op(0x35)
+                    memarg(2, off)
+                else if size == 2:
+                    if sg: op(0x32)
+                    else: op(0x33)
+                    memarg(1, off)
+                else:
+                    if sg: op(0x30)
+                    else: op(0x31)
+                    memarg(0, off)
+            lset(d)
+        store:
+            mode = int(ins.c)
+            size = mode & 15
+            off = waddr(ins)
+            lget(bb)
+            vt = vtype_of(bb)
+            if vt == VF:
+                op(0x39)
+                memarg(3, off)
+            else if vt == VS:
+                op(0x38)
+                memarg(2, off)
+            else if size == 8:
+                op(0x37)
+                memarg(3, off)
+            else if size == 4:
+                op(0x3E)
+                memarg(2, off)
+            else if size == 2:
+                op(0x3D)
+                memarg(1, off)
+            else:
+                op(0x3C)
+                memarg(0, off)
+        slot:
+            op(0x20)
+            uleb(wb, fp_local)
+            to_i64_from_i32()
+            i64c(slot_offs[a])
+            op(0x7C)
+            lset(d)
+        gaddr:
+            i64c(data_base + int(ins.imm))
+            lset(d)
+        daddr:
+            i64c(RO_BASE + int(ins.imm))
+            lset(d)
+        faddr:
+            i64c(tbl(int(ins.imm)))
+            lset(d)
+        copy:
+            addr32(a)
+            addr32(bb)
+            i32c(int(ins.imm))
+            op(0xFC)
+            uleb(wb, 10)
+            op(0)
+            op(0)
+        zero:
+            addr32(a)
+            i32c(0)
+            i32c(int(ins.imm))
+            op(0xFC)
+            uleb(wb, 11)
+            op(0)
+        memcpy:
+            addr32(a)
+            addr32(bb)
+            addr32(int(ins.c))
+            op(0xFC)
+            uleb(wb, 10)
+            op(0)
+            op(0)
+        vop:
+            # one f32 lane at a time
+            vcode = int(ins.imm)
+            n = (vcode >> 4) & 7
+            loop i in [0..n):
+                addr32(a)
+                if vcode & VOP_SPLAT_B != 0: lget(bb)
+                else:
+                    addr32(bb)
+                    op(0x2A)
+                    memarg(2, 4 * i)
+                if vcode & VOP_SPLAT_C != 0: lget(int(ins.c))
+                else:
+                    addr32(int(ins.c))
+                    op(0x2A)
+                    memarg(2, 4 * i)
+                op([0x92, 0x93, 0x94, 0x95][vcode & 3])                   # f32.add sub mul div
+                op(0x38)                                                 # f32.store
+                memarg(2, 4 * i)
+        memset:
+            addr32(a)
+            addr32(bb)
+            addr32(int(ins.c))
+            op(0xFC)
+            uleb(wb, 11)
+            op(0)
+        zeroslots:
+            loop k in [0..bb):
+                item = int(cur_wf.args[a + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if vtype_of(v) == VF:
+                        op(0x44)
+                        loop z in [0..8): op(0)
+                    else if vtype_of(v) == VS:
+                        op(0x43)
+                        loop z in [0..4): op(0)
+                    else: i64c(0)
+                    lset(v)
+                else:
+                    s = item >> 1
+                    op(0x20)
+                    uleb(wb, fp_local)
+                    i32c(slot_offs[s])
+                    op(0x6A)
+                    i32c(0)
+                    i32c(int(cur_wf.slot_size[s]))
+                    op(0xFC)
+                    uleb(wb, 11)
+                    op(0)
+        call:
+            lf = int(ins.imm)
+            if is_import(lf) and name_of(int(nodes[int(fns[lfuncs[lf].inst].decl)].name)) == "__wasm_grow":
+                lget(int(cur_wf.args[a]))
+                op(0xA7)
+                op(0x40)
+                op(0)
+                op(0xAC)                 # i64.extend_i32_s
+                if d >= 0: lset(d)
+                else: op(0x1A)
+                return
+            if ins.c == CALL_IF_SHARED or ins.c == CALL_RC_INC or ins.c == CALL_RC_DEC:
+                w_guarded_call(ins, lf)
+                return
+            emit_call_args(a, bb, lf)
+            w_site(ins)
+            op(0x10)
+            uleb(wb, wfn_index[lf])
+            call_result(ins, lf)
+        calli, callc:
+            emit_call_args(a, bb, -1)
+            addr32(int(ins.c))
+            ps: int[]
+            loop k in [0..bb): ps.push(wt(vtype_of(int(cur_wf.args[a + k]))))
+            rs: int[]
+            if int(ins.ty) >= 0: rs.push(wt(int(ins.ty)))
+            w_site(ins)
+            op(0x11)
+            uleb(wb, sig_index(ps, rs))
+            op(0)
+            call_result(ins, -1)
+        syscall:
+            op(0x00)
+        intr:
+            i64c(0)
+            lset(d)
+        block:
+            op(0x02)
+            op(0x40)
+        loop:
+            op(0x03)
+            op(0x40)
+        if_:
+            lget(a)
+            op(0x50)       # i64.eqz
+            op(0x45)       # i32.eqz
+            op(0x04)
+            op(0x40)
+        else_: op(0x05)
+        end: op(0x0B)
+        br:
+            op(0x0C)
+            uleb(wb, int(ins.imm))
+        brif:
+            lget(a)
+            op(0x50)
+            op(0x45)
+            op(0x0D)
+            uleb(wb, int(ins.imm))
+        brtable:
+            # out-of-range indices (unsigned) select the default entry
+            lget(a)
+            op(0xA7)                    # i32.wrap_i64
+            i32c(bb)
+            lget(a)
+            i64c(bb)
+            op(0x54)                    # i64.lt_u
+            op(0x1B)                    # select
+            op(0x0E)
+            uleb(wb, bb)
+            loop k in [0..bb): uleb(wb, int(cur_wf.args[int(ins.c) + k]))
+            uleb(wb, int(ins.imm))
+        ret:
+            if a >= 0: lget(a)
+            restore_sp()
+            op(0x0F)
+        trap: op(0x00)
+        select: op(0x00)
+
+vtype_of = (v: int) -> int:
+    t = int(cur_wf.vtypes[v])
+    if t == VK: return VI
+    t
+
+slot_offs: int[]
+
+wasm_group = (t: int) -> int:
+    if t == VF: return 1
+    if t == VS: return 2
+    0
+
+# where each value is first and last live (positions in the code; -1: never used), extended
+# over loops it is live in (as the x86-64 backend's analysis)
+wasm_live = (f: IrFn) -> (int[], int[]):
+    saved = ir
+    ir = f
+    nv = f.vtypes.len()
+    first = fill(INF_POS, nv)
+    last = fill(-1, nv)
+    loop_s: int[]
+    loop_e: int[]
+    kinds: int[]
+    starts: int[]
+    loop pos in 0.. and ins in f.code:
+        d = operands(ins)
+        loop u in use_buf:
+            if pos < first[u]: first[u] = pos
+            if pos > last[u]: last[u] = pos
+        if d >= 0:
+            if pos < first[d]: first[d] = pos
+            if pos > last[d]: last[d] = pos
+        if ins.op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(f.args[int(ins.a) + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if pos < first[v]: first[v] = pos
+                    if pos > last[v]: last[v] = pos
+        if ins.op == .block or ins.op == .loop or ins.op == .if_:
+            kinds.push(int(ins.op))
+            starts.push(pos)
+        else if ins.op == .end:
+            k = kinds.pop()
+            st = starts.pop()
+            if k == int(Op.loop):
+                loop_s.push(st)
+                loop_e.push(pos)
+    ir = saved
+    # loops in order of their start; a value live where a loop starts lives to its end
+    nl = loop_s.len()
+    order: int[]
+    loop i in [0..nl): order.push(i)
+    order.sort_by((i: int): loop_s[i])
+    ls: int[]
+    le: int[]
+    loop i in order:
+        ls.push(loop_s[i])
+        le.push(loop_e[i])
+    loop v in [0..nv):
+        if last[v] < 0: continue
+        fv = first[v]
+        if v < f.nparams: fv = -1
+        lo = 0
+        hi = nl
+        loop lo < hi:
+            mid = (lo + hi) / 2
+            if ls[mid] <= fv: lo = mid + 1
+            else: hi = mid
+        i = lo
+        loop i < nl and ls[i] <= last[v]:
+            if le[i] > last[v]: last[v] = le[i]
+            i += 1
+    (first, last)
+
+wasm_body = (f: IrFn) -> u8[]:
+    cur_wf = f
+    wb = []
+    w_sites = []
+    nv = f.vtypes.len()
+    loc_of = fill(0, nv)
+    # locals: params keep their indices; other values share locals of their type when they are
+    # not live at the same time (as registers are shared on x86-64: engines give every local a
+    # stack slot, and big frames make deep recursion run out of stack)
+    loop p in [0..f.nparams): loc_of[p] = p
+    first, last = wasm_live(f)
+    order: int[]
+    loop v in [f.nparams..nv):
+        if last[v] >= 0: order.push(v)
+    order.sort_by((v: int): first[v])
+    counts = [0, 0, 0]
+    free: int[][] = [[], [], []]
+    active: (int, int, int)[]           # (last, type group, local within the group)
+    loop v in order:
+        g = wasm_group(vtype_of(v))
+        k = 0
+        loop k < active.len():
+            if active[k].0 < first[v]:
+                free[active[k].1].push(active[k].2)
+                active[k] = active[active.len() - 1]
+                active.pop()
+            else: k += 1
+        idx = 0
+        if free[g].len() > 0: idx = free[g].pop()
+        else:
+            idx = counts[g]
+            counts[g] += 1
+        loc_of[v] = idx
+        active.push((last[v], g, idx))
+    # (values never used still need a local of their type)
+    loop v in [f.nparams..nv):
+        if last[v] < 0:
+            g = wasm_group(vtype_of(v))
+            if counts[g] == 0: counts[g] = 1
+            loc_of[v] = 0
+    next = f.nparams
+    base = [0, 0, 0]
+    groups: (int, int)[]
+    loop g in [0..3):
+        base[g] = next
+        next += counts[g]
+        if counts[g] > 0: groups.push((counts[g], wt([VI, VF, VS][g])))
+    loop v in [f.nparams..nv): loc_of[v] += base[wasm_group(vtype_of(v))]
+    fp_local = next
+    next += 1
+    groups.push((1, WT_I32))
+    # frame
+    slot_offs = fill(0, f.slot_size.len())
+    off = 0
+    loop s in [0..f.slot_size.len()):
+        al = int(f.slot_align[s])
+        off = align_up(off, al)
+        slot_offs[s] = off
+        off += int(f.slot_size[s])
+    cur_frame = align_up(off, 16)
+    uleb(wb, groups.len())
+    loop g in groups:
+        uleb(wb, g.0)
+        wb.push(u8(g.1))
+    if cur_frame > 0:
+        op(0x23)
+        uleb(wb, 0)          # global.get $sp
+        i32c(cur_frame)
+        op(0x6B)             # i32.sub
+        op(0x22)
+        uleb(wb, fp_local)   # local.tee $fp
+        op(0x24)
+        uleb(wb, 0)          # global.set $sp
+    loop ins in f.code: emit_wins(ins)
+    op(0x0B)
+    out = wb
+    wb = []
+    out
+
+# ---------------- module ----------------
+wasm_module = (inits: int[], main_lf: int, frame_lf: int) -> u8[]:
+    nf = lfuncs.len()
+    wfn_index = fill(-1, nf)
+    imports: int[]
+    defined: int[]
+    loop lf in [0..nf):
+        if is_import(lf): imports.push(lf)
+        else if lf < wf_present.len() and wf_present[lf]: defined.push(lf)
+    k = 0
+    loop lf in imports:
+        wfn_index[lf] = k
+        k += 1
+    loop lf in defined:
+        wfn_index[lf] = k
+        k += 1
+    start_index = k
+    # exported functions get adapters with JavaScript-friendly parameter types (i32/f32/f64)
+    exp_lfs: int[]
+    loop lf in defined:
+        if len(wfuncs[lf].export_name) > 0: exp_lfs.push(lf)
+    adapter_base = start_index + 1
+    data_base = align_up(RO_BASE + rodata.len(), 16)
+    stack_top = align_up(data_base + data_size + STACK_SIZE, 16)
+    pages = (stack_top + 65535) / 65536 + 1
+    # bodies (this also registers table entries and signatures)
+    bodies: u8[][]
+    body_sites: int[][]
+    body_names: str[]
+    loop lf in defined:
+        bodies.push(wasm_body(wfuncs[lf]))
+        body_sites.push(w_sites)
+        body_names.push(sym_name(wfuncs[lf].name))
+    # entry function: initializers then main
+    eb: u8[] = [0]
+    if main_code: eb = [1, 1, 0x7E]          # (a local: main's result)
+    loop f in inits:
+        eb.push(0x10)
+        uleb(eb, wfn_index[f])
+    if main_lf >= 0:
+        eb.push(0x10)
+        uleb(eb, wfn_index[main_lf])
+        if main_code:
+            # main = () -> int: a code other than 0 ends the program with it (0: as without one,
+            # a page goes on to its frames)
+            ex = main_exit_lf
+            if ex < 0 or wfn_index[ex] < 0: eb.push(0x1A)          # drop
+            else:
+                eb.push(0x22)                 # local.tee 0
+                eb.push(0)
+                eb.push(0x50)                 # i64.eqz
+                eb.push(0x45)                 # i32.eqz
+                eb.push(0x04)                 # if
+                eb.push(0x40)
+                eb.push(0x20)                 # local.get 0
+                eb.push(0)
+                eb.push(0x10)
+                uleb(eb, wfn_index[ex])
+                eb.push(0x0B)
+    eb.push(0x0B)
+    start_sig = sig_index([], [])
+    adapter_sigs: int[]
+    adapter_bodies: u8[][]
+    loop lf in exp_lfs:
+        f = lfuncs[lf].inst
+        ps: int[]
+        loop t in fns[f].ptypes: ps.push(import_wt(t))
+        rs: int[]
+        rt = int(fns[f].ret)
+        if tkind(rt) != .void_: rs.push(import_wt(rt))
+        adapter_sigs.push(sig_index(ps, rs))
+        ab: u8[] = [0]
+        loop i in 0.. and t in fns[f].ptypes:
+            ab.push(0x20)
+            uleb(ab, i)
+            if import_wt(t) == WT_I32:
+                tt = prune(t)
+                if types[tt].kind == .int_ and types[tt].sign: ab.push(0xAC)
+                else: ab.push(0xAD)
+        ab.push(0x10)
+        uleb(ab, wfn_index[lf])
+        if tkind(rt) != .void_ and import_wt(rt) == WT_I32: ab.push(0xA7)
+        ab.push(0x0B)
+        adapter_bodies.push(ab)
+    sigs: int[]
+    loop lf in imports: sigs.push(import_sig(lf))
+    loop lf in defined: sigs.push(fn_sig_of(wfuncs[lf]))
+    out: u8[] = [0, 'a', 's', 'm', 1, 0, 0, 0]
+    # type section
+    s: u8[]
+    uleb(s, type_sigs.len())
+    loop t in type_sigs:
+        append_bytes(s, t)
+    section(out, 1, s)
+    # imports
+    s = []
+    uleb(s, imports.len())
+    loop i in 0.. and lf in imports:
+        wstr(s, "env")
+        wstr(s, name_of(int(nodes[int(fns[lfuncs[lf].inst].decl)].name)))
+        s.push(0)
+        uleb(s, sigs[i])
+    section(out, 2, s)
+    # functions
+    s = []
+    uleb(s, defined.len() + 1 + exp_lfs.len())
+    loop i in [0..defined.len()): uleb(s, sigs[imports.len() + i])
+    uleb(s, start_sig)
+    loop a in adapter_sigs: uleb(s, a)
+    section(out, 3, s)
+    # table
+    s = [1, 0x70, 0]
+    uleb(s, table_funcs.len() + 1)
+    section(out, 4, s)
+    # memory
+    s = [1, 0]
+    uleb(s, pages)
+    section(out, 5, s)
+    # globals: $sp
+    s = [1, WT_I32, 1, 0x41]
+    sleb(s, stack_top)
+    s.push(0x0B)
+    section(out, 6, s)
+    # exports
+    s = []
+    exports: (str, int)[]
+    exports.push(("__start", start_index))
+    loop i in 0.. and lf in exp_lfs: exports.push((wfuncs[lf].export_name, adapter_base + i))
+    uleb(s, exports.len() + 2)
+    wstr(s, "memory")
+    s.push(2)
+    uleb(s, 0)
+    wstr(s, "table")
+    s.push(1)
+    uleb(s, 0)
+    loop e in exports:
+        wstr(s, e.0)
+        s.push(0)
+        uleb(s, e.1)
+    section(out, 7, s)
+    # elements: table[1..] = address-taken functions
+    s = [1, 0, 0x41, 1, 0x0B]
+    uleb(s, table_funcs.len())
+    loop lf in table_funcs:
+        if wfn_index[lf] < 0: ice("function {lfuncs[lf].name} used as a value but not generated")
+        uleb(s, wfn_index[lf])
+    section(out, 9, s)
+    # code
+    s = []
+    uleb(s, defined.len() + 1 + exp_lfs.len())
+    body_at: int[]
+    loop bd in bodies:
+        uleb(s, bd.len())
+        body_at.push(s.len())
+        append_bytes(s, bd)
+    uleb(s, eb.len())
+    append_bytes(s, eb)
+    loop ab in adapter_bodies:
+        uleb(s, ab.len())
+        loop c in ab: s.push(c)
+    section(out, 10, s)
+    code_at = out.len() - s.len()
+    # data: rodata
+    s = [1, 0, 0x41]
+    sleb(s, RO_BASE)
+    s.push(0x0B)
+    uleb(s, rodata.len())
+    loop c in rodata: s.push(c)
+    section(out, 11, s)
+    w_line_section(out, code_at, body_at, body_sites, body_names)
+    out
+
+# the custom section "sloppy_lines": where the program's own calls are, so that a page can show a
+# panic's call trace as a native program does (lib/web/runtime.js reads it). The files and the
+# functions (each a count, then a length and the bytes of each), then the calls: a count, then
+# for each the distance in the module from the one before, its file, line and function
+w_line_section = (out: mut u8[], code_at: int, body_at: int[], body_sites: int[][], body_names: str[]):
+    fidx = fill(-1, files.len())
+    fnames: str[]
+    names: str[]
+    ents: int[]
+    loop k in 0.. and sites in body_sites:
+        ni = -1
+        j = 0
+        loop j < sites.len():
+            f = pos_file(ir_positions[sites[j + 1]])
+            if f >= 0 and f < files.len():
+                if fidx[f] < 0:
+                    fidx[f] = fnames.len()
+                    path = files[f].path
+                    sl = rfind(path, "/")
+                    if sl >= 0: path = path[sl + 1..]
+                    fnames.push(path)
+                if ni < 0:
+                    ni = names.len()
+                    names.push(body_names[k])
+                ents.push(code_at + body_at[k] + sites[j])
+                ents.push(fidx[f])
+                ents.push(ir_line(sites[j + 1]))
+                ents.push(ni)
+            j += 2
+    if ents.len() == 0: return
+    s: u8[]
+    nm = "sloppy_lines"
+    uleb(s, len(nm))
+    loop c in nm: s.push(c)
+    uleb(s, fnames.len())
+    loop fname in fnames:
+        uleb(s, len(fname))
+        loop c in fname: s.push(c)
+    uleb(s, names.len())
+    loop fname in names:
+        uleb(s, len(fname))
+        loop c in fname: s.push(c)
+    uleb(s, ents.len() / 4)
+    last = 0
+    j = 0
+    loop j < ents.len():
+        uleb(s, ents[j] - last)
+        last = ents[j]
+        uleb(s, ents[j + 1])
+        uleb(s, ents[j + 2])
+        uleb(s, ents[j + 3])
+        j += 4
+    section(out, 0, s)
+
+# ---------------- HTML packaging ----------------
+base64 = (b: u8[]) -> str:
+    tbl_ = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    out: u8[]
+    out.reserve(b.len() * 4 / 3 + 4)
+    i = 0
+    n = b.len()
+    loop i + 2 < n:
+        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8) | int(b[i + 2])
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push(tbl_[(v >> 6) & 63])
+        out.push(tbl_[v & 63])
+        i += 3
+    if n - i == 1:
+        v = int(b[i]) << 16
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push('=')
+        out.push('=')
+    else if n - i == 2:
+        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8)
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push(tbl_[(v >> 6) & 63])
+        out.push('=')
+    str_from_bytes(out)
+
+write_html = (path: str, wasm: u8[], title: str, icon: u8[]) -> bool:
+    page = html_page(wasm, title, icon)
+    # (game.zip: the page as index.html in a zip, for sites like itch.io)
+    if ends_with(path, ".zip"): return write_zip(path, [("index.html", bytes(page))])
+    write_file(path, page)
+
+html_page = (wasm: u8[], title: str, icon: u8[]) -> str:
+    link = ""
+    if icon.len() > 0: link = "<link rel=\"icon\" href=\"data:image/png;base64,{base64(icon)}\">\n"
+    else: link = "<link rel=\"icon\" href=\"data:,\">\n"      # (no icon: no request for /favicon.ico)
+    js = ""
+    loop part in ["runtime.js", "gfx.js", "audio.js", "boot.js"]:
+        # (the program's own JavaScript, from the build block's js: before it starts)
+        if part == "boot.js" and len(program_js) > 0: js += program_js + "\n"
+        src = read_file("{lib_dir}/web/{part}") ?? ""
+        if len(src) == 0 and part != "audio.js": ice("missing {lib_dir}/web/{part}")
+        js += src + "\n"
+    html = "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{title}</title>\n{link}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<style>html,body\{margin:0;height:100%;background:#111;color:#ddd;font:14px monospace}canvas\{display:block;margin:auto;outline:none}#log\{white-space:pre-wrap;margin:8px;max-height:40vh;overflow:auto}</style>\n</head><body><canvas id=\"sloppy-canvas\" tabindex=\"1\" width=\"0\" height=\"0\"></canvas><div id=\"log\"></div>\n<div id=\"sloppy-loading\" style=\"position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#888\">loading…</div>\n<script>\nconst SLOPPY_WASM = \"{base64(wasm)}\";\n{js}\n</script></body></html>\n"
+    html

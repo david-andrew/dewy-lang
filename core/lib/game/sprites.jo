@@ -1,0 +1,111 @@
+# Sprite sheets and animations. A sheet is a texture cut into frames: a grid of equal frames
+# (sprite_sheet), or the frames and animations Aseprite exports (load_aseprite: File > Export
+# Sprite Sheet with "JSON Data" on; each tag becomes an animation). Pixel art wants its texture
+# loaded unsmoothed: load_texture(file, false).
+#
+#   hero = sprite_sheet(load_texture(embed("hero.png"), false), 32, 32)
+#   walk = animation(4, 7, 10.0)                    # frames 4 to 7, ten a second
+#   draw = ():
+#       draw_anim(hero, walk, elapsed(), pos, 3.0)  # three times as big
+
+struct Animation:
+    frames: int[]               # the sheet's frames, in order
+    durations: f64[]            # how long each one shows (seconds)
+    looping = true
+
+struct SpriteSheet:
+    texture: Texture
+    frames: vec4[]              # each frame's rectangle in the texture: x, y, width, height
+    anims: {str: Animation}     # its animations by name (load_aseprite: its tags)
+
+# a sheet of equal frames in a grid, numbered from 0 left to right, then down (count: how many
+# there are, if the last row is not full; spacing: pixels between frames; margin: around them)
+sprite_sheet = (t: Texture, frame_w: int, frame_h: int, count: int = 0, spacing: int = 0, margin: int = 0) -> SpriteSheet:
+    frames: vec4[]
+    cols = max((t.width - 2 * margin + spacing) / (frame_w + spacing), 1)
+    rows = max((t.height - 2 * margin + spacing) / (frame_h + spacing), 1)
+    n = cols * rows
+    if count > 0: n = min(count, n)
+    loop i in [0..n):
+        x = margin + (i % cols) * (frame_w + spacing)
+        y = margin + (i / cols) * (frame_h + spacing)
+        frames.push(vec4(f32(x), f32(y), f32(frame_w), f32(frame_h)))
+    SpriteSheet(t, frames, {})
+
+# an animation through these frames, `fps` a second
+animation = (frames: int[], fps: f64 = 10.0, looping: bool = true) -> Animation:
+    Animation(frames, fill(1.0 / max(fps, 0.001), frames.len()), looping)
+
+# frames first..last (inclusive)
+animation = (first: int, last: int, fps: f64 = 10.0, looping: bool = true) -> Animation:
+    frames: int[]
+    loop i in [first..last]: frames.push(i)
+    animation(frames, fps, looping)
+
+# how long it takes to go through once (seconds)
+anim_length = (a: Animation) -> f64:
+    total = 0.0
+    loop d in a.durations: total += d
+    total
+
+# the frame showing t seconds after it started (a non-looping one stays on its last frame)
+anim_frame = (a: Animation, t: f64) -> int:
+    if a.frames.len() == 0: return 0
+    total = anim_length(a)
+    tt = t
+    if a.looping and total > 0.0: tt = mod(t, total)
+    loop i in 0.. and d in a.durations:
+        if tt < d: return a.frames[i]
+        tt -= d
+    a.frames[a.frames.len() - 1]
+
+# has a non-looping animation finished, t seconds after it started?
+anim_done = (a: Animation, t: f64) -> bool: not a.looping and t >= anim_length(a)
+
+# frame i of the sheet, centered at `center` (scale: its size times this; flip_x: mirrored, to
+# face the other way)
+draw_frame = (s: SpriteSheet, frame: int, center: vec2, scale: f64 = 1.0, tint: vec4 = vec4(1, 1, 1, 1), angle: f64 = 0.0, flip_x: bool = false, flip_y: bool = false):
+    if frame < 0 or frame >= s.frames.len(): return
+    r = s.frames[frame]
+    size = vec2(r.z, r.w) * f32(scale)
+    if flip_x: size.x = -size.x
+    if flip_y: size.y = -size.y
+    sprite_region(s.texture, r, center, size, tint, angle)
+
+# the frame an animation shows t seconds after it started
+draw_anim = (s: SpriteSheet, a: Animation, t: f64, center: vec2, scale: f64 = 1.0, tint: vec4 = vec4(1, 1, 1, 1), angle: f64 = 0.0, flip_x: bool = false, flip_y: bool = false):
+    draw_frame(s, anim_frame(a, t), center, scale, tint, angle, flip_x, flip_y)
+
+# a sheet from Aseprite's export: its texture, and the JSON it wrote beside it (as an array or a
+# hash of frames). Tags become animations (forward, reverse or ping-pong), with each frame's own
+# duration.
+load_aseprite = (t: Texture, json: str) -> SpriteSheet | JsonError:
+    j = parse_json(json)
+    if j is JsonError: return j
+    sheet = SpriteSheet(t, [], {})
+    durations: f64[]
+    fr = j.get("frames")
+    list = fr.as_list()
+    if list.len() == 0:
+        loop k in fr.keys(): list.push(fr.get(k)!)
+    loop f in list:
+        r = f.get("frame")
+        sheet.frames.push(vec4(f32(r.get("x").as_num() ?? 0.0), f32(r.get("y").as_num() ?? 0.0), f32(r.get("w").as_num() ?? 0.0), f32(r.get("h").as_num() ?? 0.0)))
+        durations.push((f.get("duration").as_num() ?? 100.0) / 1000.0)
+    if sheet.frames.len() == 0: return JsonError("no frames (is this Aseprite's JSON?)", 1, 1)
+    loop tag in j.get("meta").get("frameTags").as_list():
+        name = tag.get("name").as_str() ?? ""
+        first = clamp(tag.get("from").as_int() ?? 0, 0, sheet.frames.len() - 1)
+        last = clamp(tag.get("to").as_int() ?? first, first, sheet.frames.len() - 1)
+        order: int[]
+        loop i in [first..last]: order.push(i)
+        dir = tag.get("direction").as_str() ?? "forward"
+        if dir == "reverse": order.reverse()
+        else if dir == "pingpong":
+            i = last - 1
+            loop i > first:
+                order.push(i)
+                i -= 1
+        a = Animation(order, order.map((i): durations[i]))
+        sheet.anims[name] = a
+    sheet

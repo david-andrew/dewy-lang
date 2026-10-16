@@ -73,3 +73,26 @@ fell from 624 ms to 396 ms, while whole compilation moved from 71 ms to 73 ms.
 Release was 203 ms and C (`-O2`) 174 ms in this run. Every checksum agreed.
 `default-loops-tests.log` records 131 Dewy, LSP and pinned upstream checks passing
 in 7.77 seconds, including mutation from loop conditions and bodies.
+
+## Repository-owned compiler
+
+`core/` now contains the compiler, libraries, C bootstrap and focused upstream
+fixtures. The Sloppy checkout is no longer an input to building or testing. The
+imported baseline is recorded in `core/UPSTREAM.json`; only seven imported files
+changed initially, plus the new Dewy frontend and bootstrap dispatch seam.
+The adapter moved from `tools/sloppy_core/dewy_parse.jo` to
+`core/compiler/dewy_parse.jo`. The patch-generation layer was removed.
+
+`repository-bootstrap-build.json` records the C → implementation frontend →
+Dewy frontend → self-build route, reusing the previously built native syntax
+parser. `repository-bootstrap-tests.log` records all 137 checks passing in
+7.68 seconds on the resulting compiler. `repository-seeded-build.json` also
+exercises rebuilding the syntax parser with the old native Dewy seed and building
+the core with the newly bootstrapped compiler; its native/web model, CLI identity
+and unsaved editor smoke are recorded in `repository-seeded-tests.log`.
+
+The compiler identifies itself as `dewy-core 0.1.0-dev`. Its inherited automatic
+Sloppy updater is removed. Dewy-inappropriate REPL, package editing and project
+scaffolding commands are explicitly unavailable until adapted; `.jo` remains
+the implementation/library language. The existing installed compiler and the
+user's dirty Sloppy checkout are unchanged.

@@ -1,0 +1,339 @@
+# Controls the player can change. The game names its actions and gives each its default inputs,
+# then asks for actions, never for keys; ui_controls() is a settings screen where the player
+# rebinds them (choose one, press the new key or button), and the bindings are saved.
+#
+#   action("jump", [.key(.space), .button(.a)])
+#   action("left", [.key(.a), .key(.left), .stick(0, -1), .button(.left)])
+#   action("right", [.key(.d), .key(.right), .stick(0, 1), .button(.right)])
+#   ...
+#   if action_pressed("jump"): jump()
+#   x = action_axis("left", "right")            # -1..1, analog on a stick
+#
+#   # in the settings menu:
+#   ui_begin("settings", vec2(640, 140))
+#   ui_controls()
+#   if ui_button("Back") or ui_back(): ...
+#   ui_end()
+#
+# Local multiplayer: a player number reads that gamepad (keys and the mouse count for player 0);
+# give players on one keyboard actions of their own ("p2 jump").
+
+# an input: a key, a gamepad button, a mouse button, or a stick or trigger pushed one way (axis:
+# 0 left x, 1 left y, 2 right x, 3 right y, 4 left trigger, 5 right trigger; dir: 1 or -1)
+enum Input: key(k: Key), button(b: PadButton), mouse(m: Mouse), stick(axis: int, dir: int)
+
+__ctl_names: str[]
+__ctl_defaults: Input[][]
+__ctl_binds: Input[][]
+__ctl_saved: {str: str} = {}            # bindings read from the save, by action (until declared)
+__ctl_loaded = false
+__ctl_capture = -1                      # the action being rebound (ui_controls), or -1
+__ctl_capture_frame = -1
+__ctl_done_frame = -1                   # (the frame a rebinding ended: its key is used up)
+__ctl_scroll = 0                        # (ui_controls: the first row shown)
+
+# declare an action and its default inputs (once, before reading it: again, nothing changes); a
+# binding the player saved replaces the defaults
+action = (name: str, defaults: Input[]):
+    if not __ctl_loaded:
+        __ctl_loaded = true
+        if let s = load_data("controls"):
+            loop line in lines(s):
+                t = find(line, "\t")
+                if t > 0: __ctl_saved[line[..t)] = line[t + 1..]
+    if __ctl_index(name) >= 0: return
+    __ctl_names.push(name)
+    __ctl_defaults.push(defaults)
+    b = defaults
+    if let s = __ctl_saved.get(name): b = __ctl_parse(s)
+    __ctl_binds.push(b)
+
+__ctl_index = (name: str) -> int:
+    loop i in 0.. and n in __ctl_names:
+        if n == name: return i
+    -1
+
+__ctl_get = (name: str) -> int:
+    i = __ctl_index(name)
+    if i < 0: panic("no action \"{name}\" (declare it first: action(\"{name}\", [...]))")
+    i
+
+# how far input x is pushed, 0 to 1, for player (-1: anyone)
+input_value = (x: Input, player: int = -1) -> f64:
+    keyboard = player <= 0
+    match x:
+        .key(k):
+            if keyboard and key_down(k): return 1.0
+        .mouse(m):
+            if keyboard and mouse_down(m): return 1.0
+        .button(b):
+            if player < 0 and gamepad_down(b) or player >= 0 and gamepad_down(player, b): return 1.0
+        .stick(a, d):
+            v = 0.0
+            if player < 0:
+                loop p in gamepads(): v = max(v, __ctl_stick(p, a, d, false))
+            else: v = __ctl_stick(player, a, d, false)
+            return v
+    0.0
+
+# (past a dead zone: 0.25 of the way, rescaled; now, or in the last frame)
+__ctl_stick = (pad: int, axis: int, dir: int, before: bool) -> f64:
+    if not gamepad_connected(pad) or axis < 0 or axis >= 6: return 0.0
+    v = __pad_axes[pad * 6 + axis]
+    if before: v = __pad_prev_axes[pad * 6 + axis]
+    if axis < 4: v *= f64(dir)
+    clamp((v - 0.25) / 0.75, 0.0, 1.0)
+
+# how far the action is pushed, 0 to 1 (the most of its inputs)
+action_value = (name: str, player: int = -1) -> f64:
+    i = __ctl_get(name)
+    v = 0.0
+    loop x in __ctl_binds[i]: v = max(v, input_value(x, player))
+    v
+
+action_down = (name: str, player: int = -1) -> bool: action_value(name, player) >= 0.5
+
+# true in the frame the action was pressed (a stick: when it goes past halfway)
+action_pressed = (name: str, player: int = -1) -> bool:
+    i = __ctl_get(name)
+    keyboard = player <= 0
+    loop x in __ctl_binds[i]:
+        match x:
+            .key(k):
+                if keyboard and key_pressed(k): return true
+            .mouse(m):
+                if keyboard and mouse_pressed(m): return true
+            .button(b):
+                if player < 0 and gamepad_pressed(b) or player >= 0 and gamepad_pressed(player, b): return true
+            .stick(a, d):
+                loop p in gamepads():
+                    if (player < 0 or p == player) and __ctl_stick(p, a, d, false) >= 0.5 and __ctl_stick(p, a, d, true) < 0.5: return true
+    false
+
+action_released = (name: str, player: int = -1) -> bool:
+    i = __ctl_get(name)
+    keyboard = player <= 0
+    loop x in __ctl_binds[i]:
+        match x:
+            .key(k):
+                if keyboard and key_released(k): return true
+            .mouse(m):
+                if keyboard and mouse_released(m): return true
+            .button(b):
+                if player < 0 and gamepad_released(b) or player >= 0 and gamepad_released(player, b): return true
+            _: pass
+    false
+
+# from -1 (neg) to 1 (pos): action_axis("left", "right")
+action_axis = (neg: str, pos: str, player: int = -1) -> f64: action_value(pos, player) - action_value(neg, player)
+
+# a direction (y down), at most 1 long
+action_vec = (left: str, right: str, up: str, down: str, player: int = -1) -> vec2:
+    v = vec2(f32(action_axis(left, right, player)), f32(action_axis(up, down, player)))
+    if length(v) > 1.0: v = normalize(v)
+    v
+
+# ---------------- bindings ----------------
+bindings = (name: str) -> Input[]: __ctl_binds[__ctl_get(name)]
+
+set_bindings = (name: str, inputs: Input[]):
+    __ctl_binds[__ctl_get(name)] = inputs
+    __ctl_save()
+
+# every action back to its defaults
+reset_controls = ():
+    loop i in [0..__ctl_names.len()): __ctl_binds[i] = __ctl_defaults[i]
+    __ctl_save()
+
+# what an input is called, for showing it ("Space", "Pad A", "Left stick right")
+input_name = (x: Input) -> str:
+    match x:
+        .key(k): return __ctl_key_name(k)
+        .mouse(m):
+            if m == .left: return "Left click"
+            if m == .right: return "Right click"
+            return "Middle click"
+        .button(b):
+            n = ["A", "B", "X", "Y", "LB", "RB", "Back", "Start", "Home", "L3", "R3", "D-pad up", "D-pad down", "D-pad left", "D-pad right"]
+            if int(b) <= 10: return "Pad {n[int(b)]}"
+            return n[int(b)]
+        .stick(a, d):
+            if a == 4: return "Left trigger"
+            if a == 5: return "Right trigger"
+            side = "Left"
+            if a >= 2: side = "Right"
+            way = "right"
+            if a % 2 == 0 and d < 0: way = "left"
+            if a % 2 == 1: way = "down"
+            if a % 2 == 1 and d < 0: way = "up"
+            return "{side} stick {way}"
+    "?"
+
+__ctl_key_name = (k: Key) -> str:
+    s = "{k}"
+    if starts_with(s, "n") and len(s) == 2: return s[1..]                 # n0 .. n9
+    if starts_with(s, "kp") and len(s) == 3: return "Pad {s[2..]}"         # kp0 .. kp9
+    names = [("space", "Space"), ("enter", "Enter"), ("escape", "Escape"), ("tab", "Tab"), ("backspace", "Backspace"),
+        ("page_up", "Page Up"), ("page_down", "Page Down"), ("lbracket", "["), ("rbracket", "]"), ("backslash", "\\"),
+        ("semicolon", ";"), ("quote", "'"), ("comma", ","), ("period", "."), ("slash", "/"), ("minus", "-"), ("equals", "="), ("grave", "`"),
+        ("kp_period", "Pad ."), ("kp_plus", "Pad +"), ("kp_minus", "Pad -"), ("kp_star", "Pad *"), ("kp_slash", "Pad /")]
+    loop p in names:
+        if p.0 == s: return p.1
+    if len(s) == 1: return upper(s)
+    upper(s[..1)) + s[1..]
+
+# (saved: a line per action, its inputs as key:space button:a mouse:left stick:0:-1)
+__ctl_save = ():
+    out = ""
+    loop i in 0.. and n in __ctl_names:
+        parts: str[]
+        loop x in __ctl_binds[i]:
+            match x:
+                .key(k): parts.push("key:{k}")
+                .button(b): parts.push("button:{b}")
+                .mouse(m): parts.push("mouse:{m}")
+                .stick(a, d): parts.push("stick:{a}:{d}")
+        out += "{n}\t{join(parts, " ")}\n"
+    save_data("controls", out)
+
+__ctl_parse = (s: str) -> Input[]:
+    out: Input[]
+    loop w in split(s, " "):
+        p = split(w, ":")
+        if p.len() == 2 and p[0] == "key":
+            loop k in [0..__NKEYS):
+                if "{k as Key}" == p[1]: out.push(.key(k as Key))
+        else if p.len() == 2 and p[0] == "button":
+            loop b in [0..__PAD_BUTTONS):
+                if "{b as PadButton}" == p[1]: out.push(.button(b as PadButton))
+        else if p.len() == 2 and p[0] == "mouse":
+            loop m in [0..3):
+                if "{m as Mouse}" == p[1]: out.push(.mouse(m as Mouse))
+        else if p.len() == 3 and p[0] == "stick":
+            a = to_int(p[1]) ?? -1
+            d = to_int(p[2]) ?? 0
+            if a >= 0 and a < 6 and (d == 1 or d == -1): out.push(.stick(a, d))
+    out
+
+# ---------------- rebinding ----------------
+# the input the player pressed first this frame (a key, a button, a click, a stick pushed most of
+# the way), if any
+input_pressed = () -> Input?:
+    loop k in [1..__NKEYS):
+        if key_pressed(k as Key): return .key(k as Key)
+    loop b in [0..__PAD_BUTTONS):
+        if gamepad_pressed(b as PadButton): return .button(b as PadButton)
+    loop m in [0..3):
+        if mouse_pressed(m as Mouse): return .mouse(m as Mouse)
+    loop p in gamepads():
+        loop a in [0..6):
+            v = gamepad_axis(p, a)
+            if abs(v) > 0.7:
+                d = 1
+                if v < 0.0: d = -1
+                return .stick(a, d)
+    none
+
+# whether ui_controls is waiting for a new input (the game's own keys should wait too), or took
+# one this frame
+rebinding = () -> bool: __ctl_capture >= 0 or __ctl_done_frame == frame_number()
+
+# a row per action (its name, and its inputs), in a menu (between ui_begin and ui_end), and a row
+# to put the defaults back. Choosing an action waits for its new input: a key replaces its first
+# key (or the mouse), a gamepad's button or stick its first gamepad input; Escape cancels.
+# names: the actions shown (and what they are called), in order: all of them if none given.
+# rows: how many are shown at once (0: as many as fit on the screen, with room for two items
+# after); the list scrolls to the chosen one, and with the mouse wheel.
+ui_controls = (names: str[] = [], labels: str[] = [], rows: int = 0):
+    shown = names
+    if shown.len() == 0: shown = __ctl_names
+    w = ui_style.width * 1.6
+    sp = ui_style.spacing
+    # (rows closer together than other items, in smaller text)
+    rs = sp * 0.72
+    size = ui_style.size
+    first_item = __ui_count
+    y0 = __ui_pos.y + f32(f64(first_item) * sp)
+    fit = rows
+    if fit <= 0:
+        v = visible_rect()
+        fit = int((f64(v.y + v.h) - f64(y0) - sp * 2.0) / rs)
+    fit = clamp(fit, 1, shown.len())
+    # (the rows shown: the chosen one among them)
+    if fit < shown.len():
+        f = __ui_focus - first_item
+        if f >= 0 and f < shown.len():
+            if f < __ctl_scroll: __ctl_scroll = f
+            if f >= __ctl_scroll + fit: __ctl_scroll = f - fit + 1
+        if mouse_wheel() < 0.0: __ctl_scroll += 1
+        if mouse_wheel() > 0.0: __ctl_scroll -= 1
+    __ctl_scroll = clamp(__ctl_scroll, 0, shown.len() - fit)
+    top = __ui_pos
+    ui_style.spacing = rs
+    ui_style.size = size * 0.8
+    loop j in 0.. and n in shown:
+        i = __ctl_get(n)
+        label = n
+        if j < labels.len(): label = labels[j]
+        # (rows scrolled away still count as items, far off the screen)
+        hidden = j < __ctl_scroll or j >= __ctl_scroll + fit
+        if hidden: __ui_pos = vec2(top.x, -100000)
+        else: __ui_pos = vec2(top.x, y0 - f32(f64(first_item + __ctl_scroll) * rs))
+        r = __ui_item(w)
+        if hidden: continue
+        c = r.1
+        over = abs(f64(mouse_pos().x - c.x)) < w / 2.0 and abs(f64(mouse_pos().y - c.y)) < rs / 2.0
+        col = ui_style.color
+        if r.2: col = ui_style.focus_color
+        what = ""
+        if __ctl_capture == i:
+            what = "press a key or button  (Escape: cancel)"
+            if frame_number() > __ctl_capture_frame:
+                if key_pressed(.escape):
+                    __ctl_capture = -1
+                    __ctl_done_frame = frame_number()
+                else if let x = input_pressed():
+                    __ctl_rebind(i, x)
+                    __ctl_capture = -1
+                    __ctl_done_frame = frame_number()
+        else:
+            parts: str[]
+            loop x in __ctl_binds[i]: parts.push(input_name(x))
+            what = join(parts, ", ")
+            if not rebinding() and ((r.2 and __ui_ok) or (over and mouse_pressed(.left) and ui_ready())):
+                __ctl_capture = i
+                __ctl_capture_frame = frame_number()
+        text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+        sz = ui_style.size * 0.7
+        text(what, vec2(f32(f64(c.x) + w / 2.0 - text_width(what, sz)), f32(f64(c.y) - sz * 0.5)), sz, col)
+    ui_style.spacing = sp
+    ui_style.size = size
+    # (marks where more rows are, above and below)
+    mark = ui_style.color * vec4(1, 1, 1, 0.7)
+    x = top.x + f32(w / 2.0 + 30.0)
+    if __ctl_scroll > 0: triangle(vec2(x - 10, y0 + 6), vec2(x + 10, y0 + 6), vec2(x, y0 - 8), mark)
+    if __ctl_scroll + fit < shown.len():
+        yb = y0 + f32(f64(fit - 1) * rs)
+        triangle(vec2(x - 10, yb - 6), vec2(x + 10, yb - 6), vec2(x, yb + 8), mark)
+    # (the items after the list: just below the rows shown)
+    __ui_pos = vec2(top.x, y0 + f32(f64(fit - 1) * rs + sp * 1.05 - f64(first_item + shown.len()) * sp))
+    if ui_button("Reset to defaults", __ctl_capture < 0): reset_controls()
+
+# (a new input for action i: in place of its first of the same kind, keyboard or gamepad)
+__ctl_rebind = (i: int, x: Input):
+    pad = __ctl_is_pad(x)
+    b = __ctl_binds[i]
+    loop k in [0..b.len()):
+        if __ctl_is_pad(b[k]) == pad:
+            b[k] = x
+            set_bindings(__ctl_names[i], b)
+            return
+    b.push(x)
+    set_bindings(__ctl_names[i], b)
+
+__ctl_is_pad = (x: Input) -> bool:
+    match x:
+        .button(b): return true
+        .stick(a, d): return true
+        _: pass
+    false

@@ -1,0 +1,104 @@
+# Big numbers: past f64's 1.8e308, as an idle game's currency grows (1e1000, 1e100000). A Big
+# is a mantissa from 1 to 10 and a power of ten, so it keeps about 15 digits, as a float does,
+# whatever its size; arithmetic, comparison, min, max and sort work as for numbers:
+#
+#   use big
+#   dust = big(0)
+#   rate = big(1.5, 120)                  # 1.5e120
+#   dust += rate * dt
+#   if dust >= cost: ...
+#   print(dust)                           # 4.20e+1234 (short_number's form below 1e15)
+#
+# to_text, to_json and saves write its fields (Big(m=4.2, e=1234)) and read them back.
+
+struct Big:
+    m: f64          # 0, or from 1 up to (not including) 10 (negative: from -10)
+    e: int          # the power of ten
+
+# x as a Big
+big = (x: f64) -> Big: __big_norm(x, 0)
+
+big = (x: int) -> Big: __big_norm(f64(x), 0)
+
+# m times ten to the power e: big(1.5, 120) is 1.5e120
+big = (m: f64, e: int) -> Big: __big_norm(m, e)
+
+__big_norm = (m0: f64, e0: int) -> Big:
+    m = m0
+    e = e0
+    if m == 0.0 or m != m: return Big(m, 0)
+    if m - m != 0.0:
+        # (infinity: as large as a Big goes)
+        if m > 0.0: return Big(9.999999999999999, 1 << 62)
+        return Big(-9.999999999999999, 1 << 62)
+    k = int(floor(log10(abs(m))))
+    if k != 0:
+        m = m / pow(10.0, f64(k))
+        e += k
+    # (rounding can leave 10.0 or 0.999...)
+    if abs(m) >= 10.0:
+        m = m / 10.0
+        e += 1
+    else if abs(m) < 1.0:
+        m = m * 10.0
+        e -= 1
+    Big(m, e)
+
+# the f64 nearest a Big (infinity past 1.8e308, 0 below 1e-308)
+to_f64 = (b: Big) -> f64:
+    if b.m == 0.0: return 0.0
+    if b.e > 308: return b.m * INF
+    if b.e < -330: return 0.0
+    if b.e < -300: return b.m * pow(10.0, f64(b.e + 300)) * 1e-300
+    b.m * pow(10.0, f64(b.e))
+
+(+) = (a: Big, b: Big) -> Big:
+    if a.m == 0.0: return b
+    if b.m == 0.0: return a
+    # (more than 17 powers of ten apart, the smaller is lost in the larger's digits)
+    if a.e - b.e > 17: return a
+    if b.e - a.e > 17: return b
+    if a.e >= b.e: return __big_norm(a.m + b.m * pow(10.0, f64(b.e - a.e)), a.e)
+    __big_norm(b.m + a.m * pow(10.0, f64(a.e - b.e)), b.e)
+(-) = (a: Big, b: Big) -> Big: a + Big(-b.m, b.e)
+(-) = (a: Big) -> Big: Big(-a.m, a.e)
+(*) = (a: Big, b: Big) -> Big: __big_norm(a.m * b.m, a.e + b.e)
+(/) = (a: Big, b: Big) -> Big:
+    if b.m == 0.0: panic("a Big divided by zero")
+    __big_norm(a.m / b.m, a.e - b.e)
+(+) = (a: Big, x: f64) -> Big: a + big(x)
+(-) = (a: Big, x: f64) -> Big: a - big(x)
+(*) = (a: Big, x: f64) -> Big: __big_norm(a.m * x, a.e)
+(/) = (a: Big, x: f64) -> Big: a / big(x)
+(*) = (x: f64, a: Big) -> Big: __big_norm(a.m * x, a.e)
+
+(<) = (a: Big, b: Big) -> bool:
+    if (a.m < 0.0) != (b.m < 0.0) or a.m == 0.0 or b.m == 0.0: return a.m < b.m
+    if a.e != b.e:
+        if a.m > 0.0: return a.e < b.e
+        return a.e > b.e
+    a.m < b.m
+(==) = (a: Big, b: Big) -> bool: a.m == b.m and (a.e == b.e or a.m == 0.0)
+(<) = (a: Big, x: f64) -> bool: a < big(x)
+(<) = (x: f64, a: Big) -> bool: big(x) < a
+
+# the power of ten it is near: log10(big(1, 500)) is 500
+log10 = (b: Big) -> f64: log10(abs(b.m)) + f64(b.e)
+# b to the power p (p may be a fraction: a cost that grows 1.15 times for each one bought)
+pow = (b: Big, p: f64) -> Big:
+    if b.m <= 0.0: return big(pow(to_f64(b), p))
+    l = log10(b) * p
+    k = floor(l)
+    __big_norm(pow(10.0, l - k), int(k))
+floor = (b: Big) -> Big:
+    if b.e >= 16: return b
+    big(floor(to_f64(b)))
+abs = (b: Big) -> Big: Big(abs(b.m), b.e)
+
+# how it shows: short_number's form below 1e15 (1.23K, 45.6M), else 1.23e+45
+str = (b: Big) -> str:
+    if b.e < 15: return short_number(to_f64(b))
+    "{b.m:.2f}e+{b.e}"
+__fmt = (buf: mut u8[], b: Big):
+    if __text_exact: __fmt_fields(buf, b)
+    else: __buf_append_str(buf, str(b))

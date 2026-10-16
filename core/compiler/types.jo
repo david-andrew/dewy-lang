@@ -1,0 +1,798 @@
+# Type representation: all types live in `types` and are referred to by index.
+# Concrete types are interned (equal types have equal ids); types containing
+# inference variables are not, and are compared structurally.
+
+use 'util.jo'
+use 'ast.jo'
+use 'check.jo'
+
+# (fixed: T[N], N elements stored in place; elem is T, bits is N)
+enum TK:
+    void_, bool_, int_, float_, str_, array, ptr, fn_, struct_, enum_, tuple, opt, var, param,
+    null_, range, module, typeval, none_lit, vec, cfn, fixed
+
+const TF_HAS_VAR = 1
+const TF_LAID_OUT = 2
+const TF_MANAGED = 4
+const TF_NEVER = 8
+
+struct TypeInfo:
+    kind: TK
+    bits: i32
+    sign: bool
+    flags: i32
+    elem: i32
+    args: i32
+    nargs: i32
+    st: i32
+    ref: i32
+    id: i32
+    mutmask: i32
+    size: i32
+    align: i32
+    mod: i32
+
+struct Field:
+    name: i32
+    type: i32
+    offset: i32
+    defval: i32
+
+struct Variant:
+    name: i32
+    fields: i32
+    nfields: i32
+    tag: i32
+    value: int
+
+struct StructInfo:
+    decl: i32
+    targs: i32
+    ntargs: i32
+    fields: i32
+    nfields: i32
+    variants: i32
+    nvariants: i32
+    payload_off: i32
+    simple_enum: bool
+    resolving: bool
+    resolved: bool
+    type: i32
+    name: str
+    union_: bool     # A | B: an enum whose variant i holds type argument (member) i
+    soa_: bool       # soa T[]: a struct with an array for each field of T (type argument 0)
+
+types: TypeInfo[] = [TypeInfo()]
+type_args: i32[]
+type_ht: i32[]
+structs: StructInfo[]
+fields: Field[]
+variants: Variant[]
+ptr_size = 8     # 4 for wasm32
+
+# built-in types (indices fixed at startup)
+T_VOID = 0
+T_BOOL = 0
+T_INT = 0
+T_I8 = 0
+T_I16 = 0
+T_I32 = 0
+T_U8 = 0
+T_U16 = 0
+T_U32 = 0
+T_U64 = 0
+T_FLOAT = 0
+T_F32 = 0
+T_STR = 0
+T_NULL = 0
+T_RANGE = 0
+T_NONE = 0
+T_NEVER = 0
+T_RAWPTR = 0
+T_VEC2 = 0
+T_VEC3 = 0
+T_VEC4 = 0
+T_MAT4 = 0
+T_IVEC2 = 0
+T_IVEC3 = 0
+T_IVEC4 = 0
+
+targ = (t: int, i: int) -> int: int(type_args[int(types[t].args) + i])
+tkind = (t: int) -> TK: types[prune(t)].kind
+telem = (t: int) -> int: int(types[prune(t)].elem)
+has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
+
+__type_hash = (t: TypeInfo, args: int[]) -> u64:
+    h = u64(int(t.kind)) * 31 + u64(int(t.elem)) * 7 + u64(int(t.st)) * 13 + u64(int(t.bits)) + u64(int(t.mutmask)) * 17
+    if t.sign: h += 1000003
+    loop a in args: h = h * 131 + u64(a)
+    (h xor (h >> 29))
+
+__type_same = (id: int, t: TypeInfo, args: int[]) -> bool:
+    x = types[id]
+    if x.kind != t.kind or x.elem != t.elem or x.st != t.st or int(x.nargs) != args.len() or x.bits != t.bits or x.mutmask != t.mutmask or x.sign != t.sign: return false
+    loop i in 0.. and a in args:
+        if int(type_args[int(x.args) + i]) != a: return false
+    true
+
+__type_rehash = ():
+    n = type_ht.len() * 2
+    if n < 4096: n = 4096
+    type_ht = fill(0 as i32, n)
+    loop id in [1..types.len()):
+        if int(types[id].flags) & TF_HAS_VAR != 0: continue
+        if types[id].kind == .var or types[id].kind == .param: continue
+        args: int[]
+        loop i in [0..int(types[id].nargs)): args.push(targ(id, i))
+        h = int(__type_hash(types[id], args)) & (n - 1)
+        loop type_ht[h] != 0: h = (h + 1) & (n - 1)
+        type_ht[h] = i32(id)
+
+# intern a type with the given args
+mk_type = (t0: TypeInfo, args: int[]) -> int:
+    t = t0
+    hv = false
+    if t.elem != 0 and has_var(int(t.elem)): hv = true
+    loop a in args:
+        if has_var(a): hv = true
+    if t.kind == .var or t.kind == .param: hv = true
+    if hv: t.flags = i32(int(t.flags) | TF_HAS_VAR)
+    if not hv or t.kind == .param:
+        if type_ht.len() == 0 or types.len() * 2 >= type_ht.len(): __type_rehash()
+        mask = type_ht.len() - 1
+        h = int(__type_hash(t, args)) & mask
+        loop type_ht[h] != 0:
+            id = int(type_ht[h])
+            if __type_same(id, t, args): return id
+            h = (h + 1) & mask
+        t.args = i32(type_args.len())
+        t.nargs = i32(args.len())
+        loop a in args: type_args.push(i32(a))
+        id = types.len()
+        types.push(t)
+        type_ht[h] = i32(id)
+        return id
+    t.args = i32(type_args.len())
+    t.nargs = i32(args.len())
+    loop a in args: type_args.push(i32(a))
+    types.push(t)
+    types.len() - 1
+
+basic = (kind: TK, bits: int, sign: bool, size: int) -> int:
+    t = TypeInfo(kind = kind, bits = i32(bits), sign = sign, size = i32(size), align = i32(size))
+    if size == 0: t.align = 1
+    t.flags = i32(TF_LAID_OUT)
+    mk_type(t, [])
+
+mk_array = (e: int) -> int: mk_type(TypeInfo(kind = .array, elem = i32(e)), [])
+mk_fixed = (e: int, n: int) -> int: mk_type(TypeInfo(kind = .fixed, elem = i32(e), bits = i32(n)), [])
+fixed_len = (t: int) -> int: int(types[prune(t)].bits)
+mk_ptr = (e: int) -> int: mk_type(TypeInfo(kind = .ptr, elem = i32(e)), [])
+mk_opt = (e: int) -> int: mk_type(TypeInfo(kind = .opt, elem = i32(e)), [])
+mk_fn = (params: int[], ret: int, mutmask: int) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask)), params)
+mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
+mk_tuple = (elems: int[]) -> int: mk_type(TypeInfo(kind = .tuple), elems)
+var_counter = 0
+mk_var = () -> int:
+    var_counter += 1
+    mk_type(TypeInfo(kind = .var, id = i32(var_counter)), [])
+mk_param = (idx: int) -> int: mk_type(TypeInfo(kind = .param, id = i32(idx), bits = i32(idx)), [])
+mk_typeval = (t: int) -> int:
+    types.push(TypeInfo(kind = .typeval, elem = i32(t), flags = i32(TF_LAID_OUT)))
+    types.len() - 1
+mk_modval = (m: int) -> int:
+    types.push(TypeInfo(kind = .module, mod = i32(m), flags = i32(TF_LAID_OUT)))
+    types.len() - 1
+
+init_types = ():
+    T_VOID = basic(.void_, 0, false, 0)
+    T_BOOL = basic(.bool_, 8, false, 1)
+    T_INT = basic(.int_, 64, true, 8)
+    T_I8 = basic(.int_, 8, true, 1)
+    T_I16 = basic(.int_, 16, true, 2)
+    T_I32 = basic(.int_, 32, true, 4)
+    T_U8 = basic(.int_, 8, false, 1)
+    T_U16 = basic(.int_, 16, false, 2)
+    T_U32 = basic(.int_, 32, false, 4)
+    T_U64 = basic(.int_, 64, false, 8)
+    T_FLOAT = basic(.float_, 64, true, 8)
+    T_F32 = basic(.float_, 32, true, 4)
+    T_STR = basic(.str_, 0, false, ptr_size)
+    types[T_STR].flags = i32(TF_LAID_OUT | TF_MANAGED)
+    T_NULL = basic(.null_, 0, false, ptr_size)
+    T_RANGE = basic(.range, 0, false, 16)
+    types[T_RANGE].align = 8
+    T_NONE = basic(.none_lit, 0, false, 0)
+    T_NEVER = basic(.void_, 1, false, 0)
+    types[T_NEVER].flags = i32(TF_LAID_OUT | TF_NEVER)
+    T_RAWPTR = mk_ptr(T_U8)
+    T_VEC2 = basic(.vec, 2, false, 8)
+    types[T_VEC2].align = 4
+    T_VEC3 = basic(.vec, 3, false, 12)
+    types[T_VEC3].align = 4
+    T_VEC4 = basic(.vec, 4, false, 16)
+    types[T_VEC4].align = 4
+    T_MAT4 = basic(.vec, 16, false, 64)
+    types[T_MAT4].align = 4
+    T_IVEC2 = basic(.vec, 2, true, 8)
+    types[T_IVEC2].align = 4
+    T_IVEC3 = basic(.vec, 3, true, 12)
+    types[T_IVEC3].align = 4
+    T_IVEC4 = basic(.vec, 4, true, 16)
+    types[T_IVEC4].align = 4
+
+prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
+    t
+
+is_int = (t: int) -> bool: types[prune(t)].kind == .int_
+is_float = (t: int) -> bool: types[prune(t)].kind == .float_
+is_numeric = (t: int) -> bool:
+    k = types[prune(t)].kind
+    k == .int_ or k == .float_
+is_vec = (t: int) -> bool: types[prune(t)].kind == .vec
+
+occurs = (v: int, t0: int) -> bool:
+    t = prune(t0)
+    if t == v: return true
+    if not has_var(t): return false
+    if types[t].elem != 0 and occurs(v, int(types[t].elem)): return true
+    loop i in [0..int(types[t].nargs)):
+        if occurs(v, targ(t, i)): return true
+    if (types[t].kind == .struct_ or types[t].kind == .enum_) and types[t].st != 0:
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].ntargs)):
+            if occurs(v, int(type_args[int(structs[si].targs) + i])): return true
+    false
+
+zonk = (t0: int) -> int:
+    t = prune(t0)
+    if t == 0 or not has_var(t) or types[t].kind == .var or types[t].kind == .param: return t
+    k = types[t].kind
+    if k == .struct_ or k == .enum_:
+        si = int(types[t].st)
+        args: int[]
+        loop i in [0..int(structs[si].ntargs)): args.push(zonk(int(type_args[int(structs[si].targs) + i])))
+        return get_struct_inst(int(structs[si].decl), args)
+    if k == .typeval or k == .module: return t
+    c = types[t]
+    c.flags = i32(int(c.flags) & ~(TF_HAS_VAR | TF_LAID_OUT))
+    if c.elem != 0: c.elem = i32(zonk(int(c.elem)))
+    args: int[]
+    loop i in [0..int(types[t].nargs)): args.push(zonk(targ(t, i)))
+    mk_type(c, args)
+
+struct_targ = (si: int, i: int) -> int: int(type_args[int(structs[si].targs) + i])
+
+type_eq = (a0: int, b0: int) -> bool:
+    a = prune(a0)
+    b = prune(b0)
+    if a == b: return true
+    if a == 0 or b == 0: return false
+    if not has_var(a) and not has_var(b): return false
+    ta = types[a]
+    tb = types[b]
+    if ta.kind != tb.kind or ta.nargs != tb.nargs or ta.bits != tb.bits: return false
+    if ta.kind == .var: return false
+    if ta.kind == .struct_ or ta.kind == .enum_:
+        if ta.st == tb.st: return true
+        sa = int(ta.st)
+        sb = int(tb.st)
+        if structs[sa].decl != structs[sb].decl: return false
+        loop i in [0..int(structs[sa].ntargs)):
+            if not type_eq(struct_targ(sa, i), struct_targ(sb, i)): return false
+        return true
+    if ta.st != tb.st: return false
+    if (ta.elem != 0 or tb.elem != 0) and not type_eq(int(ta.elem), int(tb.elem)): return false
+    loop i in [0..int(ta.nargs)):
+        if not type_eq(targ(a, i), targ(b, i)): return false
+    true
+
+unify = (a0: int, b0: int) -> bool:
+    a = prune(a0)
+    b = prune(b0)
+    if a == b: return true
+    if types[a].kind == .var:
+        if occurs(a, b): return false
+        types[a].ref = i32(b)
+        return true
+    if types[b].kind == .var:
+        if occurs(b, a): return false
+        types[b].ref = i32(a)
+        return true
+    if is_union(a) and is_union(b) and (has_var(a) or has_var(b)): return unify_unions(a, b)
+    ta = types[a]
+    tb = types[b]
+    if ta.kind != tb.kind or ta.nargs != tb.nargs or ta.bits != tb.bits or ta.sign != tb.sign: return false
+    if ta.kind == .struct_ or ta.kind == .enum_:
+        if ta.st == tb.st: return true
+        sa = int(ta.st)
+        sb = int(tb.st)
+        if structs[sa].decl != structs[sb].decl: return false
+        loop i in [0..int(structs[sa].ntargs)):
+            if not unify(struct_targ(sa, i), struct_targ(sb, i)): return false
+        return true
+    if ta.elem != 0 or tb.elem != 0:
+        if ta.elem == 0 or tb.elem == 0 or not unify(int(ta.elem), int(tb.elem)): return false
+    loop i in [0..int(ta.nargs)):
+        if not unify(targ(a, i), targ(b, i)): return false
+    if ta.kind == .fn_ and ta.mutmask != tb.mutmask: return false
+    true
+
+# unions with type variables: members that are equal match each other, and a single variable
+# member of one side stands for the other side's remaining members
+unify_unions = (a: int, b: int) -> bool:
+    if has_var(b) and not has_var(a): return unify_unions(b, a)
+    ams = union_members(a)
+    bms = union_members(b)
+    rest: int[]
+    loop m in bms:
+        same = false
+        loop am in ams:
+            if not has_var(am) and type_eq(am, m): same = true
+        if not same: rest.push(m)
+    vars: int[]
+    loop am in ams:
+        if has_var(am): vars.push(am)
+    if vars.len() != 1 or types[prune(vars[0])].kind != .var or rest.len() == 0: return false
+    if not unify(vars[0], mk_union(rest)): return false
+    type_eq(a, b)
+
+simple_enum = (t: int) -> bool:
+    layout(t)
+    structs[int(types[prune(t)].st)].simple_enum
+
+is_managed = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .str_ or k == .array or k == .fn_: return true
+    if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
+        layout(t)
+        return int(types[t].flags) & TF_MANAGED != 0
+    false
+
+# what in a value of this type is not plain data (numbers, bools, vectors, and structs, tuples,
+# enums and fixed arrays of them): a string, array, function, pointer...; "" when nothing is
+plain_problem = (t0: int) -> str:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .str_ or k == .array or k == .fn_ or k == .ptr or k == .cfn or k == .null_: return type_str(t)
+    if k == .opt or k == .fixed: return plain_problem(int(types[t].elem))
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            p = plain_problem(targ(t, i))
+            if p != "": return p
+        return ""
+    if k != .struct_ and k != .enum_: return ""
+    layout(t)
+    si = int(types[t].st)
+    # (a Texture is the GL name of a GPU resource, not data the GPU can use from a buffer)
+    if is_lib_texture(si): return "Texture"
+    if structs[si].union_:
+        loop i in [0..int(structs[si].ntargs)):
+            p = plain_problem(struct_targ(si, i))
+            if p != "": return p
+    loop i in [0..int(structs[si].nfields)):
+        p = plain_problem(int(fields[int(structs[si].fields) + i].type))
+        if p != "": return p
+    loop v in [0..int(structs[si].nvariants)):
+        vi = int(structs[si].variants) + v
+        loop i in [0..int(variants[vi].nfields)):
+            p = plain_problem(int(fields[int(variants[vi].fields) + i].type))
+            if p != "": return p
+    ""
+
+# is struct si the library's Texture (lib/game/draw2d.jo), not one of the program's?
+is_lib_texture = (si: int) -> bool:
+    if structs[si].name != "Texture" or structs[si].decl == 0: return false
+    fi = pos_file(nodes[int(structs[si].decl)].pos)
+    fi >= 0 and fi < files.len() and files[fi].path == lib_dir + "/game/draw2d.jo"
+
+# can a value of this type hold a function value (a closure)? (through arrays, optionals, tuples,
+# struct and enum fields, and union members)
+has_fn_memo: {int: int} = {}          # 1: being worked out (a recursive type), 2: yes, 3: no
+
+type_has_fn = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .fn_: return true
+    if k == .array or k == .opt or k == .fixed: return type_has_fn(int(types[t].elem))
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if type_has_fn(targ(t, i)): return true
+        return false
+    if k != .struct_ and k != .enum_: return false
+    if let c = has_fn_memo.get(t): return c == 2
+    has_fn_memo[t] = 1
+    si = int(types[t].st)
+    check_struct_fields(si)
+    r = false
+    # (a union's members are its type arguments; other structs hold only what their fields do)
+    if structs[si].union_:
+        loop i in [0..int(structs[si].ntargs)):
+            if type_has_fn(struct_targ(si, i)): r = true
+    loop i in [0..int(structs[si].nfields)):
+        if type_has_fn(int(fields[int(structs[si].fields) + i].type)): r = true
+    loop v in [0..int(structs[si].nvariants)):
+        vi = int(structs[si].variants) + v
+        loop i in [0..int(variants[vi].nfields)):
+            if type_has_fn(int(fields[int(variants[vi].fields) + i].type)): r = true
+    has_fn_memo[t] = 3
+    if r: has_fn_memo[t] = 2
+    r
+
+is_aggregate = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .range or k == .vec or k == .fixed: return true
+    if k == .enum_: return not simple_enum(t)
+    false
+
+align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
+tsize = (t: int) -> int:
+    layout(t)
+    int(types[prune(t)].size)
+talign = (t: int) -> int:
+    layout(t)
+    a = int(types[prune(t)].align)
+    if a == 0: return 1
+    a
+
+layout = (t0: int):
+    t = prune(t0)
+    if int(types[t].flags) & TF_LAID_OUT != 0: return
+    k = types[t].kind
+    size = 0
+    al = 1
+    m = false
+    if k == .array or k == .ptr or k == .null_ or k == .cfn:
+        size = ptr_size
+        al = ptr_size
+        m = k == .array
+    else if k == .fn_:
+        size = 2 * ptr_size
+        al = ptr_size
+        m = true
+    else if k == .opt:
+        e = int(types[t].elem)
+        layout(e)
+        al = talign(e)
+        size = align_up(tsize(e) + 1, al)
+        m = is_managed(e)
+    else if k == .fixed:
+        e = int(types[t].elem)
+        layout(e)
+        al = talign(e)
+        size = tsize(e) * int(types[t].bits)
+        m = is_managed(e)
+    else if k == .tuple:
+        off = 0
+        loop i in [0..int(types[t].nargs)):
+            e = targ(t, i)
+            layout(e)
+            off = align_up(off, talign(e))
+            off += tsize(e)
+            if talign(e) > al: al = talign(e)
+            if is_managed(e): m = true
+        size = align_up(off, al)
+    else if k == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        if structs[si].resolving: fatal(nodes[int(structs[si].decl)].pos, "struct '{structs[si].name}' contains itself (use an array T[] for recursive data)")
+        structs[si].resolving = true
+        off = 0
+        loop i in [0..int(structs[si].nfields)):
+            fi = int(structs[si].fields) + i
+            e = int(fields[fi].type)
+            layout(e)
+            off = align_up(off, talign(e))
+            fields[fi].offset = i32(off)
+            off += tsize(e)
+            if talign(e) > al: al = talign(e)
+            if is_managed(e): m = true
+        structs[si].resolving = false
+        size = align_up(off, al)
+    else if k == .enum_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        if structs[si].resolving: fatal(nodes[int(structs[si].decl)].pos, "enum '{structs[si].name}' contains itself")
+        structs[si].resolving = true
+        psize = 0
+        pal = 4
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            off = 0
+            loop i in [0..int(variants[vi].nfields)):
+                fi = int(variants[vi].fields) + i
+                e = int(fields[fi].type)
+                layout(e)
+                off = align_up(off, talign(e))
+                fields[fi].offset = i32(off)
+                off += tsize(e)
+                if talign(e) > pal: pal = talign(e)
+                if is_managed(e): m = true
+            if off > psize: psize = off
+        structs[si].resolving = false
+        structs[si].simple_enum = psize == 0
+        poff = align_up(4, pal)
+        structs[si].payload_off = i32(poff)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            loop i in [0..int(variants[vi].nfields)):
+                fi = int(variants[vi].fields) + i
+                fields[fi].offset = i32(int(fields[fi].offset) + poff)
+        if psize == 0:
+            size = 4
+            al = 4
+        else:
+            size = align_up(poff + psize, pal)
+            al = pal
+    else:
+        types[t].flags = i32(int(types[t].flags) | TF_LAID_OUT)
+        return
+    types[t].size = i32(size)
+    types[t].align = i32(al)
+    f = int(types[t].flags) | TF_LAID_OUT
+    if m: f |= TF_MANAGED
+    types[t].flags = i32(f)
+
+# a type followed by [] or ? or |: function types and unions need parentheses there
+type_str_postfix = (t: int) -> str:
+    if tkind(t) == .fn_ or is_union(t): return "({type_str(t)})"
+    type_str(t)
+
+# (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
+# (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
+ts_depth = 0
+ts_left = 0
+
+type_str = (t0: int) -> str:
+    if ts_depth == 0: ts_left = 150
+    if ts_left <= 0: return "…"
+    ts_left -= 1
+    ts_depth += 1
+    s = type_str_in(t0)
+    ts_depth -= 1
+    s
+
+type_str_in = (t0: int) -> str:
+    t = prune(t0)
+    if t == 0: return "?"
+    ti = types[t]
+    match ti.kind:
+        void_:
+            if int(ti.flags) & TF_NEVER != 0: return "never"
+            "void"
+        bool_: "bool"
+        int_:
+            if t == T_INT: return "int"
+            if ti.sign: return "i{ti.bits}"
+            "u{ti.bits}"
+        float_:
+            if ti.bits == 64: return "f64"
+            "f32"
+        str_: "str"
+        array: "{type_str_postfix(int(ti.elem))}[]"
+        fixed: "{type_str_postfix(int(ti.elem))}[{ti.bits}]"
+        ptr: "*{type_str(int(ti.elem))}"
+        opt: "{type_str_postfix(int(ti.elem))}?"
+        null_: "null"
+        range: "range"
+        none_lit: "none"
+        var: "?T{ti.id}"
+        param: "${ti.id}"
+        module: "module"
+        typeval: "type"
+        vec:
+            if t == T_MAT4: return "mat4"
+            if ti.sign: return "ivec{ti.bits}"
+            "vec{ti.bits}"
+        fn_, cfn:
+            s = "("
+            if ti.kind == .cfn: s = "cfn("
+            loop i in [0..int(ti.nargs)):
+                if i > 0: s += ", "
+                if int(ti.mutmask) & (1 << i) != 0: s += "mut "
+                s += type_str(targ(t, i))
+            s += ")"
+            if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem))
+            else if ti.kind == .fn_: s += " -> void"
+            s
+        tuple:
+            s = "("
+            loop i in [0..int(ti.nargs)):
+                if i > 0: s += ", "
+                s += type_str(targ(t, i))
+            s + ")"
+        struct_, enum_:
+            si = int(ti.st)
+            nm = structs[si].name
+            if structs[si].union_ or structs[si].soa_: return nm
+            if nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0))}[,]"
+            if nm == "Map" and int(structs[si].ntargs) == 2: return "\{{type_str(struct_targ(si, 0))}: {type_str(struct_targ(si, 1))}}"
+            s = nm
+            if int(structs[si].ntargs) > 0:
+                s += "["
+                loop i in [0..int(structs[si].ntargs)):
+                    if i > 0: s += ", "
+                    s += type_str(struct_targ(si, i))
+                s += "]"
+            s
+
+# ---------- unions ----------
+# A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
+# distinct and sorted by type id, so A | B is B | A; T | none is T?, and a single member is itself.
+is_union = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .enum_ and structs[int(types[t].st)].union_
+
+union_members = (t0: int) -> int[]:
+    si = int(types[prune(t0)].st)
+    out: int[]
+    loop i in [0..int(structs[si].ntargs)): out.push(struct_targ(si, i))
+    out
+
+# the index of member m in union u (-1 if it is not one)
+union_index = (u: int, m: int) -> int:
+    si = int(types[prune(u)].st)
+    loop i in [0..int(structs[si].ntargs)):
+        if type_eq(struct_targ(si, i), m): return i
+    -1
+
+mk_union = (ms0: int[]) -> int:
+    ms: int[]
+    has_none = false
+    work = ms0
+    i = 0
+    loop i < work.len():
+        m = prune(work[i])
+        i += 1
+        k = types[m].kind
+        if m == T_NEVER: continue           # (a value that never exists adds nothing)
+        if k == .none_lit: has_none = true
+        else if k == .opt:
+            has_none = true
+            work.push(int(types[m].elem))
+        else if is_union(m):
+            loop x in union_members(m): work.push(x)
+        else:
+            dup = false
+            loop x in ms:
+                if type_eq(x, m): dup = true
+            if not dup: ms.push(m)
+    # sort by type id (few members: insertion sort)
+    loop i in [1..ms.len()):
+        j = i
+        loop j > 0 and ms[j - 1] > ms[j]:
+            tmp = ms[j]
+            ms[j] = ms[j - 1]
+            ms[j - 1] = tmp
+            j -= 1
+    r = T_NONE
+    if ms.len() == 1: r = ms[0]
+    else if ms.len() > 1: r = union_inst(ms)
+    if has_none and ms.len() > 0: r = mk_opt(r)
+    r
+
+union_inst = (ms: int[]) -> int:
+    loop i in 0.. and si in structs:
+        if not si.union_ or int(si.ntargs) != ms.len(): continue
+        same = true
+        loop k in [0..ms.len()):
+            if not type_eq(struct_targ(i, k), ms[k]):
+                same = false
+                break
+        if same: return int(si.type)
+    name = ""
+    hv = false
+    loop i in 0.. and m in ms:
+        if i > 0: name += " | "
+        name += type_str_postfix(m)
+        if has_var(prune(m)): hv = true
+    si = StructInfo(decl = 0, ntargs = i32(ms.len()), name = name, union_ = true, resolved = true)
+    si.targs = i32(type_args.len())
+    loop m in ms: type_args.push(i32(m))
+    si.variants = i32(variants.len())
+    si.nvariants = i32(ms.len())
+    loop i in 0.. and m in ms:
+        variants.push(Variant(name = i32(intern(type_str(m))), fields = i32(fields.len()), nfields = 1, tag = i32(i), value = i))
+        fields.push(Field(name = i32(intern("0")), type = i32(m)))
+    idx = structs.len()
+    structs.push(si)
+    flags = 0
+    if hv: flags = TF_HAS_VAR
+    types.push(TypeInfo(kind = .enum_, st = i32(idx), flags = i32(flags)))
+    structs[idx].type = i32(types.len() - 1)
+    types.len() - 1
+
+# ---------- struct-of-arrays ----------
+# soa T[] behaves like T[] but keeps each field of T in an array of its own (see check_soa_*)
+soa_decl = 0       # the declaration node standing for all soa types
+
+is_soa = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .struct_ and structs[int(types[t].st)].soa_
+
+soa_elem = (t: int) -> int: struct_targ(int(types[prune(t)].st), 0)
+
+soa_inst = (p: int) -> int:
+    loop i in 0.. and si in structs:
+        if si.soa_ and type_eq(struct_targ(i, 0), p): return int(si.type)
+    pt = prune(p)
+    # (of a type parameter: no fields until it is known, as substituting makes it again)
+    psi = -1
+    if types[pt].kind != .param:
+        psi = int(types[pt].st)
+        check_struct_fields(psi)
+    si = StructInfo(decl = i32(soa_decl), ntargs = 1, name = "soa {type_str(p)}[]", soa_ = true, resolved = true)
+    si.targs = i32(type_args.len())
+    type_args.push(i32(p))
+    si.fields = i32(fields.len())
+    if psi >= 0:
+        si.nfields = structs[psi].nfields
+        loop i in [0..int(structs[psi].nfields)):
+            f = fields[int(structs[psi].fields) + i]
+            fields.push(Field(name = f.name, type = i32(mk_array(int(f.type)))))
+    idx = structs.len()
+    structs.push(si)
+    flags = 0
+    if has_var(pt): flags = TF_HAS_VAR
+    types.push(TypeInfo(kind = .struct_, st = i32(idx), flags = i32(flags)))
+    structs[idx].type = i32(types.len() - 1)
+    types.len() - 1
+
+# how deeply a type nests (counted up to lim; remembered per type once known exactly, so a type
+# sharing parts, (F, F) -> int, is not walked once per path)
+nesting_memo: {int: int} = {}
+nesting_least: {int: int} = {}
+type_nesting = (t0: int, lim: int) -> int:
+    if lim <= 0 or t0 <= 0: return 0
+    t = prune(t0)
+    if let m = nesting_memo.get(t): return min(m, lim)
+    if let m = nesting_least.get(t):
+        if m >= lim: return lim
+    d = 0
+    if int(types[t].elem) > 0: d = type_nesting(int(types[t].elem), lim - 1)
+    loop i in [0..int(types[t].nargs)): d = max(d, type_nesting(targ(t, i), lim - 1))
+    if (types[t].kind == .struct_ or types[t].kind == .enum_) and int(types[t].st) < structs.len():
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].ntargs)): d = max(d, type_nesting(struct_targ(si, i), lim - 1))
+    if int(types[t].flags) & TF_HAS_VAR == 0:
+        if d + 1 < lim: nesting_memo[t] = d + 1
+        else: nesting_least[t] = lim         # (at least that deep: cut off there)
+    d + 1
+
+const MAX_TYPE_NESTING = 48
+
+# ---------- struct instances ----------
+get_struct_inst = (decl: int, targs: int[]) -> int:
+    if decl == 0: return mk_union(targs)
+    if decl == soa_decl: return soa_inst(targs[0])
+    loop i in 0.. and si in structs:
+        if int(si.decl) != decl or int(si.ntargs) != targs.len(): continue
+        same = true
+        loop k in [0..targs.len()):
+            if not type_eq(struct_targ(i, k), targs[k]):
+                same = false
+                break
+        if same: return int(si.type)
+    # (a generic struct whose fields use it with bigger type arguments would expand without end)
+    loop t in targs:
+        if type_nesting(t, MAX_TYPE_NESTING + 1) > MAX_TYPE_NESTING:
+            fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
+    si = StructInfo(decl = i32(decl), ntargs = i32(targs.len()), name = name_of(int(nodes[decl].name)))
+    si.targs = i32(type_args.len())
+    hv = false
+    loop t in targs:
+        type_args.push(i32(t))
+        if has_var(prune(t)): hv = true
+    idx = structs.len()
+    structs.push(si)
+    kind = TK.struct_
+    if nodes[decl].kind == .enum_: kind = .enum_
+    flags = 0
+    if hv: flags = TF_HAS_VAR
+    types.push(TypeInfo(kind = kind, st = i32(idx), flags = i32(flags)))
+    structs[idx].type = i32(types.len() - 1)
+    types.len() - 1

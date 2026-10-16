@@ -1,0 +1,906 @@
+import net
+
+# Rollback netplay: two or more players on different machines play one game as if it ran on
+# each of them alone. Every machine runs the whole game; only the players' inputs travel. A
+# remote input that has not arrived yet is predicted (the player's last one, repeated), and
+# when it arrives and was different, the game goes back to the tick it changes and plays the
+# ticks since again: a remote player's moves show up at once, corrected a few frames later at
+# worst. `import netplay`, then:
+#
+#   struct Game: ...                    # everything play depends on (copied for each tick kept)
+#   struct Pad:                         # one player's input for one tick
+#       x = 0
+#       jump = false
+#   tick = (g: Game, pads: Pad[]) -> Game: ...     # one tick of play, from everyone's input
+#
+#   s = netplay.session(Game(), tick, players = 2, me = 0)
+#   s.over([-1, friend])               # the other player: a peer from net.invite (a code to send)
+#   s.udp(4000, [("192.168.1.20", 4000), ("192.168.1.21", 4000)])   # (or: each one's address)
+#   update = (dt: f64): s.play(Pad(x = int(input_axis().x), jump = action_pressed("Jump")))
+#   draw = (): ... s.state ...
+#
+# The tick function must give the same result for the same game and inputs on every machine:
+# no random() without a seed kept in the game, no reading the clock, no dt (a tick is
+# 1/60 s: call play once a frame, at 60 frames a second). Inputs take effect `delay` ticks
+# after they are made (2: about 33 ms), which hides that much latency without any rollback;
+# more delay, fewer rollbacks. A session may run at most `max_ahead` ticks ahead of the inputs
+# it has from everyone, then it waits (s.waiting).
+#
+# s.over plays over net's peers: invite codes connect web pages and native programs straight to
+# each other with no server. A web page also plays through a relay (netplay.relay in a native
+# program; s.join_relay), and pages then connect straight to each other (WebRTC) when they can.
+# Over net's peers, the game's own messages to the other players (a chat, "again?") go on the
+# same peers: net.send and net.receive, as ever; the session's are its own.
+# Without s.over, s.udp or a relay, the session only says what to send (s.outgoing()) and is told what arrived
+# (s.receive(player, bytes)): any transport works (net's WebSockets, a relay server), and two
+# sessions in one program can play each other over netplay.Link, a simulated network with
+# latency, jitter and loss. s.lag(ms, jitter_ms, loss) simulates the same on a real one.
+
+const __NP_HIST = 128               # ticks kept: states and inputs
+
+struct Session[S, I]:
+    step: (S, I[]) -> S
+    players: int
+    me: int
+    delay = 2
+    max_ahead = 10                  # (no more than __NP_HIST / 2)
+    tick = 0                        # the tick state is at
+    state: S
+    waiting = false                 # play could not move on (too far ahead of someone's inputs)
+    rollbacks = 0                   # how many times a tick was played again, so far
+    longest_rollback = 0
+    desync = -1                     # the first tick at which two machines' games differed (-1: none)
+    problem = ""                    # what is wrong, said once on stderr too: packets that cannot be
+                                    # read (another build?), two players with one number, a
+                                    # player not heard from for 5 s, the games differing
+    __states: S[]
+    __inputs: I[]                   # [tick % HIST * players + player]
+    __known: bool[]
+    __last: I[]                     # each player's latest input (what is predicted for them)
+    __recv: int[]                   # each player's inputs below this tick have arrived (mine: are made)
+    __acked: int[]                  # each player has my inputs below this tick
+    __their_tick: int[]             # the tick each said it was at
+    __their_adv: int[]              # how far ahead of me each said it was
+    __heard: f64[]                  # when each was last heard from
+    __rtt: f64[]                    # each one's round trip, in ms (smoothed)
+    __stamp: f64[]                  # the clock each sent with its latest packet (its `sent`)
+    __wrong = -1                    # the first tick played with a prediction that was wrong
+    __hashes: {int: u64}            # my game's hash at some confirmed ticks
+    __their_hashes: {int: u64}
+    __check = -1                    # the latest tick hashed
+    __out: (int, u8[])[]
+    __frames = 0
+    # (over net's peers: s.over)
+    __peers: int[]
+    # (a UDP transport: s.udp)
+    __sock = -1
+    __addrs: (str, int)[]
+    # (through a relay: s.join_relay; web pages also connect straight to each other with WebRTC)
+    __relay = -1
+    __room = ""
+    __stun = ""
+    __rtc: int[]                    # each player's WebRTC connection (-1: none)
+    __rtc_open: bool[]
+    # (simulated lag on sending: s.lag)
+    __lag = 0.0
+    __jitter = 0.0
+    __loss = 0.0
+    __held: (f64, int, u8[])[]
+    __rand: u64 = 12345
+
+struct __NpPacket[I]:
+    from: int
+    to: int
+    tick: int                       # the sender's tick
+    adv: int                        # how far ahead of the receiver it is, as it sees it
+    ack: int                        # the receiver's inputs below this have arrived
+    first: int                      # the tick of inputs[0]
+    inputs: I[]                     # the sender's inputs from first on
+    check: int                      # a tick of the sender's game, and its hash (-1: none)
+    hash: u64
+    sent = 0.0                      # the sender's clock (ms)
+    echo = -1.0                     # the receiver's clock in the latest packet from it, and how
+    held = 0.0                      # long ago that came (ms): the round trip is now - echo - held
+
+# a session of `players` players, this machine's being player `me` (from 0)
+session[S, I] = (start: S, step: (S, I[]) -> S, players: int, me: int, delay: int = 2) -> Session[S, I]:
+    s = Session[S, I](step = step, players = players, me = me, delay = delay, state = start)
+    zero: I
+    __default_init(zero)
+    s.__states = fill(start, __NP_HIST)
+    s.__inputs = fill(zero, __NP_HIST * players)
+    s.__known = fill(false, __NP_HIST * players)
+    s.__last = fill(zero, players)
+    s.__recv = fill(delay, players)
+    s.__acked = fill(delay, players)
+    s.__their_tick = fill(0, players)
+    s.__their_adv = fill(0, players)
+    s.__heard = fill(elapsed(), players)
+    s.__rtt = fill(0.0, players)
+    s.__stamp = fill(-1.0, players)
+    # (the first ticks, before anyone's input can take effect: no input)
+    loop t in [0..delay):
+        loop p in [0..players): s.__known[t * players + p] = true
+    s
+
+# ticks below this have every player's input: they will not change again (some may not have
+# been played here yet: those from s.tick on)
+confirmed[S, I] = (s: Session[S, I]) -> int:
+    c = s.__recv[0]
+    loop r in s.__recv: c = min(c, r)
+    c
+
+# player p has not been heard from for this many seconds
+silent[S, I] = (s: Session[S, I], p: int) -> f64: elapsed() - s.__heard[p]
+
+# the round trip to player p and back, in milliseconds (smoothed; 0 before it is known)
+ping[S, I] = (s: Session[S, I], p: int) -> f64: s.__rtt[p]
+
+__np_smooth = (old: f64, sample: f64) -> f64:
+    if sample < 0.0: return old
+    if old <= 0.0: return sample
+    old * 0.875 + sample * 0.125
+
+# this frame's input from this machine's player; the game moves on a tick (unless waiting)
+play[S, I] = (s: mut Session[S, I], input: I):
+    s.__frames += 1
+    if s.__sock >= 0: __np_udp_receive(s)
+    if s.__relay >= 0: __np_relay_receive(s)
+    if s.__peers.len() > 0:
+        loop d in net.__net_take_marked(s.__peers): s.receive(d)
+    # (my input for the tick it takes effect: once per tick, as others may have it already)
+    t = s.tick + s.delay
+    if s.__recv[s.me] == t:
+        __np_set(s, s.me, t, input)
+    if s.__wrong >= 0 and s.__wrong < s.tick: __np_replay(s, s.__wrong)
+    s.__wrong = -1
+    # wait when too far ahead of someone's inputs, or a tick at times when ahead of their clock
+    s.waiting = false
+    loop p in [0..s.players):
+        if p == s.me: continue
+        if s.tick - s.__recv[p] >= s.max_ahead: s.waiting = true
+        lead = (s.tick - s.__their_tick[p] - s.__their_adv[p]) / 2
+        if lead >= 2 and s.__frames % 4 == 0: s.waiting = true
+    if not s.waiting: __np_advance(s)
+    # (a player who was there and has gone quiet)
+    loop p in [0..s.players):
+        if p != s.me and s.__their_tick[p] > 0 and silent(s, p) > 5.0: __np_problem(s, "player {p} has not been heard from for 5 seconds (gone?)")
+    __np_hash_confirmed(s)
+    __np_send(s)
+    if s.__sock >= 0: __np_udp_send(s)
+    if s.__peers.len() > 0:
+        loop o in s.outgoing():
+            if o.0 >= s.__peers.len(): continue
+            # (a player with no peer here: through the one this machine has, the host, who passes
+            # it on)
+            to = s.__peers[o.0]
+            if to < 0 and o.0 != s.me:
+                loop q in s.__peers:
+                    if q >= 0 and to < 0: to = q
+            if to < 0: continue
+            # (marked: the game's own messages on the same peer stay the game's)
+            b: u8[] = [u8(net.__NET_MARK)]
+            b.extend(o.1)
+            net.send(to, b)
+    if s.__relay >= 0:
+        loop o in s.outgoing():
+            if not __np_rtc_send(s, o.0, o.1): net.send(s.__relay, o.1)
+
+# what to send to whom since the last call: (player, bytes) (without s.udp)
+outgoing[S, I] = (s: mut Session[S, I]) -> (int, u8[])[]:
+    if s.__held.len() > 0: __np_due(s)
+    o = s.__out
+    s.__out.clear()
+    o
+
+# bytes that arrived from another player (the packet says which)
+receive[S, I] = (s: mut Session[S, I], data: u8[]):
+    r = from_text[__NpPacket[I]](str_from_bytes(data))
+    if r is TextError:
+        __np_problem(s, "a packet from another player could not be read as this game's input: does the other player run another build of the game? ({r.message})")
+        return
+    pk = r
+    p = pk.from
+    if p == s.me and pk.to != s.me: __np_problem(s, "two players are both player {p}: give each machine its own number (`me`)")
+    # (over net's peers, for another player: from one who has no peer to them, passed on (this is the host))
+    if pk.to != s.me and pk.to >= 0 and pk.to < s.__peers.len() and s.__peers[pk.to] >= 0 and p != s.me:
+        b: u8[] = [u8(net.__NET_MARK)]
+        b.extend(data)
+        net.send(s.__peers[pk.to], b)
+        return
+    if p < 0 or p >= s.players or p == s.me or pk.to != s.me: return
+    s.__heard[p] = elapsed()
+    # (a player gone quiet is back: that problem is over)
+    if starts_with(s.problem, "player {p} has not been heard from"): s.problem = ""
+    s.__stamp[p] = pk.sent
+    if pk.echo >= 0.0: s.__rtt[p] = __np_smooth(s.__rtt[p], elapsed() * 1000.0 - pk.echo - pk.held)
+    s.__acked[p] = max(s.__acked[p], pk.ack)
+    s.__their_tick[p] = max(s.__their_tick[p], pk.tick)
+    s.__their_adv[p] = pk.adv
+    loop k in 0.. and inp in pk.inputs:
+        t = pk.first + k
+        if t < s.__recv[p]: continue
+        if t > s.__recv[p] or t - confirmed(s) >= __NP_HIST - 1: break
+        if t < s.tick and s.__inputs[t % __NP_HIST * s.players + p] != inp:
+            if s.__wrong < 0 or t < s.__wrong: s.__wrong = t
+        __np_set(s, p, t, inp)
+    if pk.check >= 0:
+        s.__their_hashes[pk.check] = pk.hash
+        __np_compare(s, pk.check)
+
+__np_problem[S, I] = (s: mut Session[S, I], what: str):
+    if len(s.problem) > 0: return
+    s.problem = what
+    eprint("netplay: {what}")
+
+__np_set[S, I] = (s: mut Session[S, I], p: int, t: int, inp: I):
+    k = t % __NP_HIST * s.players + p
+    s.__inputs[k] = inp
+    s.__known[k] = true
+    s.__last[p] = inp
+    s.__recv[p] = t + 1
+
+# one tick: everyone's input (or a prediction), the state kept, the game moved on
+__np_advance[S, I] = (s: mut Session[S, I]):
+    t = s.tick
+    base = t % __NP_HIST * s.players
+    ins: I[]
+    loop p in [0..s.players):
+        if not s.__known[base + p] or t >= s.__recv[p]:
+            s.__known[base + p] = false
+            s.__inputs[base + p] = s.__last[p]
+        ins.push(s.__inputs[base + p])
+    s.__states[t % __NP_HIST] = s.state
+    s.state = s.step(s.state, ins)
+    s.tick = t + 1
+    # (the slot of the tick HIST ahead: not known yet)
+    nb = (t + 1) % __NP_HIST * s.players
+    if t + 1 >= s.delay:
+        loop p in [0..s.players):
+            if t + 1 >= s.__recv[p]: s.__known[nb + p] = false
+
+# back to tick `from` and every tick since played again
+__np_replay[S, I] = (s: mut Session[S, I], from: int):
+    now = s.tick
+    s.state = s.__states[from % __NP_HIST]
+    s.tick = from
+    loop _ in [from..now): __np_advance(s)
+    s.rollbacks += 1
+    s.longest_rollback = max(s.longest_rollback, now - from)
+
+# every half second, the hash of the game at a tick everyone's inputs are in for, to compare
+__np_hash_confirmed[S, I] = (s: mut Session[S, I]):
+    c = min(confirmed(s), s.tick - 1)
+    c = c - c % 30
+    if c <= s.__check or c <= 0 or s.tick - c >= __NP_HIST: return
+    s.__check = c
+    s.__hashes[c] = hash(s.__states[c % __NP_HIST])
+    __np_compare(s, c)
+    # (only recent ones are kept)
+    if s.__hashes.len() > 8: s.__hashes.remove(s.__hashes.keys()[0])
+    if s.__their_hashes.len() > 8: s.__their_hashes.remove(s.__their_hashes.keys()[0])
+
+__np_compare[S, I] = (s: mut Session[S, I], c: int):
+    if let mine = s.__hashes.get(c):
+        if let theirs = s.__their_hashes.get(c):
+            if mine != theirs and (s.desync < 0 or c < s.desync):
+                if s.desync < 0: __np_problem(s, "the games differ from tick {c} on: tick must give the same game for the same inputs on every machine (no random() without a seed in the game, no clock, no dt, no globals it changes)")
+                s.desync = c
+
+__np_send[S, I] = (s: mut Session[S, I]):
+    loop p in [0..s.players):
+        if p == s.me: continue
+        first = max(s.__acked[p], s.__recv[s.me] - 64)
+        ins: I[]
+        loop t in [first..s.__recv[s.me]): ins.push(s.__inputs[t % __NP_HIST * s.players + s.me])
+        h: u64 = 0
+        if s.__check >= 0: h = s.__hashes.get(s.__check) ?? 0
+        now = elapsed() * 1000.0
+        pk = __NpPacket[I](s.me, p, s.tick, s.tick - s.__their_tick[p], s.__recv[p], first, ins, s.__check, h, now, s.__stamp[p], now - s.__heard[p] * 1000.0)
+        __np_out(s, p, bytes(to_text(pk)))
+
+__np_out[S, I] = (s: mut Session[S, I], p: int, b: u8[]):
+    if s.__lag <= 0.0 and s.__loss <= 0.0 and s.__jitter <= 0.0:
+        s.__out.push((p, b))
+        return
+    if __np_rand(s) < s.__loss: return
+    s.__held.push((elapsed() + s.__lag + s.__jitter * __np_rand(s), p, b))
+
+__np_rand[S, I] = (s: mut Session[S, I]) -> f64:
+    s.__rand = s.__rand * 6364136223846793005 + 1442695040888963407
+    f64(s.__rand >> 11) / 9007199254740992.0
+
+# simulate a slow network on what this session sends: ms more latency, up to jitter_ms more at
+# random, and a share of packets lost (0 to 1)
+lag[S, I] = (s: mut Session[S, I], ms: f64, jitter_ms: f64 = 0, loss: f64 = 0):
+    s.__lag = ms / 1000.0
+    s.__jitter = jitter_ms / 1000.0
+    s.__loss = loss
+
+# held packets whose time has come
+__np_due[S, I] = (s: mut Session[S, I]):
+    now = elapsed()
+    keep: (f64, int, u8[])[]
+    loop h in s.__held:
+        if h.0 <= now: s.__out.push((h.1, h.2))
+        else: keep.push(h)
+    s.__held = keep
+
+# ---------------- over net's peers (invite codes: web pages and native programs) ----------------
+# play with the other players over peers from net: peers[p] is player p's (this machine's own
+# entry is not used), from net.invite or net.join_invite (with no server: a page and a native
+# program alike), or net.connect. The session's packets on them are its own (marked: the game's
+# net.receive() leaves them); the game's own messages (a chat, "again?") and their joining and
+# leaving are the game's, through net.send and net.receive as ever. For two, invited with
+# net.invite(reliable = false) (packets lost
+# are not resent: newer ones carry the same inputs, and nothing waits for an old one):
+#   player 0: friend = net.invite(reliable = false) ... s.over([-1, friend])
+#   player 1: host = net.join_invite(code) ...          s.over([host, -1])
+# For three or four, one hosts: it invites each of the others (each an invite and a reply), tells
+# each its number (a message of the game's), and plays over all of them; the others play over the
+# host alone (the rest -1), who passes their packets on: [-1, a, b] for the host, [host, -1, -1]
+# for player 1.
+over[S, I] = (s: mut Session[S, I], peers: int[]):
+    if peers.len() != s.players: panic("netplay: over takes one peer for each player, -1 for this machine's own: [-1, friend] when this is player 1 of 2, [host, -1] for player 2 (it was given {peers.len()} for {s.players} players)")
+    s.__peers = peers
+    loop p in peers:
+        if p >= 0: net.__net_mark(p)
+
+# ---------------- over UDP (native programs) ----------------
+# play over UDP: this machine listens on port, and each player p is at addrs[p] (this one's own
+# entry is not used)
+@no_web("does not work in a web page, which has no UDP: s.join_relay(host, port, room) plays through a relay (pages then connect straight to each other)")
+udp[S, I] = (s: mut Session[S, I], port: int, addrs: (str, int)[]):
+    when TARGET == "wasm":
+        panic("netplay: a web page has no UDP: s.join_relay(host, port, room) plays through a relay")
+    s.__sock = net.udp(port)
+    if s.__sock < 0: panic("cannot use UDP port {port} (another program has it? each player on one machine needs its own)")
+    s.__addrs = addrs
+
+__np_udp_receive[S, I] = (s: mut Session[S, I]):
+    loop d in net.udp_receive(s.__sock): s.receive(d.data)
+
+__np_udp_send[S, I] = (s: mut Session[S, I]):
+    loop o in s.outgoing():
+        if o.0 < s.__addrs.len(): net.udp_send(s.__sock, s.__addrs[o.0].0, s.__addrs[o.0].1, o.1)
+
+# ---------------- through a relay (web pages too) ----------------
+# A web page cannot use UDP or wait for others to connect, so players meet at a relay: a native
+# program (netplay.relay) that passes each packet on to the other players in the same room.
+# (Its WebSockets go over TCP: a lost packet holds up those after it, unlike UDP.)
+
+# Web pages in a room also connect to each other straight, with WebRTC: once they have, their
+# packets go between them as over UDP (unordered, never resent, never held up), not through the
+# relay. The relay passes on what they say to find each other; a STUN server (stun: its URLs,
+# separated by spaces; "" for none, which reaches only pages on the same network) tells each
+# page its address as others see it. Pages that cannot reach each other keep to the relay.
+
+# play through the relay at host and port (or a ws:// or wss:// URL), with the players who name
+# the same room
+join_relay[S, I] = (s: mut Session[S, I], host: str, port: int, room: str, stun: str = "stun:stun.l.google.com:19302"):
+    s.__relay = net.connect(host, port)
+    s.__room = room
+    s.__stun = stun
+    s.__rtc = fill(-1, s.players)
+    s.__rtc_open = fill(false, s.players)
+
+# player p's packets come and go straight (WebRTC between web pages), not through the relay
+direct[S, I] = (s: Session[S, I], p: int) -> bool: p >= 0 and p < s.__rtc_open.len() and s.__rtc_open[p]
+
+__np_relay_receive[S, I] = (s: mut Session[S, I]):
+    loop e in net.receive([s.__relay]):
+        if e.kind == .joined:
+            net.send(s.__relay, "join {s.__room}")
+            # (pages say they are here: the one with the lower number offers a connection)
+            when TARGET == "wasm": __np_rtc_say(s, -1, "hello", "")
+        else if e.kind == .message:
+            if e.data.len() > 4 and e.data[0] == 'r' and e.data[1] == 't' and e.data[2] == 'c' and e.data[3] == ' ': __np_rtc_message(s, str_from_bytes(e.data))
+            else: s.receive(e.data)
+    when TARGET == "wasm": __np_rtc_poll(s)
+
+# ("rtc <from> <to> <what> <data>", through the relay; to -1: everyone)
+__np_rtc_say[S, I] = (s: mut Session[S, I], to: int, what: str, data: str):
+    net.send(s.__relay, "rtc {s.me} {to} {what} {data}")
+
+__np_rtc_message[S, I] = (s: mut Session[S, I], m: str):
+    when TARGET == "wasm":
+        parts = split(m, " ")
+        if parts.len() < 4: return
+        from = to_int(parts[1]) ?? -1
+        to = to_int(parts[2]) ?? -2
+        if from < 0 or from >= s.players or from == s.me or (to != s.me and to != -1): return
+        what = parts[3]
+        rest = ""
+        at = len(parts[0]) + len(parts[1]) + len(parts[2]) + len(parts[3]) + 4
+        if at < len(m): rest = m[at..]
+        if what == "hello":
+            if s.__rtc_open[from]: return
+            if s.me < from:
+                # (a fresh offer: the other page may have come back)
+                if s.__rtc[from] >= 0: __wasm_rtc_close(s.__rtc[from])
+                s.__rtc[from] = __wasm_rtc_new(1, data(s.__stun), len(s.__stun))
+            else: __np_rtc_say(s, from, "hello", "")
+        else if what == "signal":
+            if s.__rtc[from] < 0:
+                if s.me < from: return
+                s.__rtc[from] = __wasm_rtc_new(0, data(s.__stun), len(s.__stun))
+            if s.__rtc[from] >= 0: __wasm_rtc_signal_in(s.__rtc[from], data(rest), len(rest))
+
+# what the connections have to say and what came through them
+__np_rtc_poll[S, I] = (s: mut Session[S, I]):
+    when TARGET == "wasm":
+        buf = fill(u8(0), 4096)
+        loop p in [0..s.players):
+            id = s.__rtc[p]
+            if id < 0: continue
+            loop:
+                n = __wasm_rtc_signal_out(id, data(buf), buf.len())
+                if n < 0: break
+                if n > buf.len():
+                    buf = fill(u8(0), n)
+                    continue
+                __np_rtc_say(s, p, "signal", str_from_bytes(buf[..n)))
+            loop:
+                n = __wasm_rtc_poll(id, data(buf), buf.len())
+                if n == -1: break
+                if n == -2: s.__rtc_open[p] = true
+                else if n == -3:
+                    # (closed: back to the relay until it connects again)
+                    s.__rtc_open[p] = false
+                    __wasm_rtc_close(id)
+                    s.__rtc[p] = -1
+                    break
+                else if n > buf.len(): buf = fill(u8(0), n)
+                else: s.receive(buf[..n))
+
+# true when it went straight to player p
+__np_rtc_send[S, I] = (s: mut Session[S, I], p: int, b: u8[]) -> bool:
+    when TARGET == "wasm":
+        if p < 0 or p >= s.__rtc_open.len() or not s.__rtc_open[p]: return false
+        __wasm_rtc_send(s.__rtc[p], data(b), b.len())
+        return true
+    else: return false
+
+when TARGET == "wasm":
+    extern __wasm_rtc_new = (init: int, stun: *u8, n: int) -> int
+    extern __wasm_rtc_signal_in = (id: int, p: *u8, n: int)
+    extern __wasm_rtc_signal_out = (id: int, out: *u8, cap: int) -> int
+    extern __wasm_rtc_send = (id: int, p: *u8, n: int)
+    extern __wasm_rtc_poll = (id: int, out: *u8, cap: int) -> int
+    extern __wasm_rtc_close = (id: int)
+
+__np_rooms: {int: str}
+
+# a relay on port: call it every frame (in a game that hosts others), or relay_forever
+relay = (port: int):
+    if not net.listen(port): panic("netplay.relay: cannot listen on port {port} (another program has it?)")
+    loop e in net.receive_server():
+        if e.kind == .left: __np_rooms.remove(e.peer)
+        else if e.kind != .message: continue
+        else if let r = __np_rooms.get(e.peer):
+            loop k, v in __np_rooms:
+                if v == r and k != e.peer: net.send(k, e.data)
+        else if starts_with(e.text, "join "): __np_rooms[e.peer] = e.text[5..]
+
+# a program that is only a relay
+relay_forever = (port: int):
+    if not net.listen(port): panic("cannot listen on port {port}")
+    print("netplay relay on port {port}")
+    loop:
+        relay(port)
+        sleep(0.001)
+
+# ---------------- a simulated network, for trying netplay in one program ----------------
+# packets between numbered ends, each arriving after latency (plus up to jitter at random),
+# some lost; time is the caller's (seconds), so a test runs the same every time
+struct Link:
+    latency = 0.05
+    jitter = 0.0
+    loss = 0.0
+    seed: u64 = 1
+    __queue: (f64, int, u8[])[]
+
+send = (l: mut Link, to: int, data: u8[], now: f64):
+    l.seed = l.seed * 6364136223846793005 + 1442695040888963407
+    r = f64(l.seed >> 11) / 9007199254740992.0
+    if r < l.loss: return
+    l.seed = l.seed * 6364136223846793005 + 1442695040888963407
+    j = f64(l.seed >> 11) / 9007199254740992.0
+    l.__queue.push((now + l.latency + l.jitter * j, to, data))
+
+# what has arrived by now: (to, data), in the order it arrives
+deliver = (l: mut Link, now: f64) -> (int, u8[])[]:
+    out: (int, u8[])[]
+    keep: (f64, int, u8[])[]
+    due: (f64, int, u8[])[]
+    loop q in l.__queue:
+        if q.0 <= now: due.push(q)
+        else: keep.push(q)
+    due.sort_with((a, b): a.0 < b.0)
+    loop q in due: out.push((q.1, q.2))
+    l.__queue = keep
+    out
+
+# ---------------- client and server ----------------
+# For more players, and games where one machine must decide (shooters, anything with cheating to
+# keep out): a server runs the game; clients send it their inputs and draw what it sends back.
+# What hides the latency:
+# - prediction: a client applies its own inputs at once, to the latest world from the server
+#   with every input the server has not answered yet applied again (reconciliation), so its own
+#   player moves without delay and ends up where the server puts it;
+# - interpolation: the others are drawn a little in the past, between two worlds the server sent
+#   (c.view()), so they move smoothly however unevenly the worlds arrive;
+# - lag compensation: each input says which tick its player was seeing, and the server hands the
+#   game's apply that world too (`seen`), so a shot hits what the shooter saw.
+#
+#   apply = (w: World, player: int, input: Pad, seen: World) -> World: ...   # a player's input
+#   step = (w: World) -> World: ...                                          # the rest of a tick
+#
+#   srv = netplay.server(World(), apply, step)          # (a native program)
+#   srv.listen(4600)
+#   every tick: srv.update()      (srv.joined, srv.left: the players who came and went: add and
+#                                  remove what they play in srv.world)
+#
+#   c = netplay.client(World(), apply)
+#   c.connect("game.example.com", 4600)                 # (web pages too)
+#   every tick: c.play(pad); draw c.state for one's own player, c.view() for the others
+#
+# Ticks are 1/60 s on both sides; the server sends its world every send_every ticks.
+
+struct Server[W, I]:
+    world: W
+    apply: (W, int, I, W) -> W
+    step: (W) -> W
+    tick = 0
+    send_every = 2                  # (30 worlds a second)
+    joined: int[]                   # the players who came, and went, in the last update
+    left: int[]
+    __came: int[]
+    __went: int[]
+    __hist: W[]                     # the last __CS_HIST worlds, by tick
+    __clients: {int: __CsClient[I]}
+    __out: (int, u8[])[]
+    __port = -1
+    __lag: __CsLag
+
+const __CS_HIST = 64
+
+struct __CsClient[I]:
+    queue: (int, int, I)[]          # inputs not applied yet: sequence number, the tick seen, input
+    acked = 0                       # the last applied
+    credit = 1                      # inputs it may have applied now: one more each tick, a few kept
+                                    # (no faster than one a tick: sending two a tick moves no faster)
+    warned = false
+    hello = ""                      # what it gave connect
+
+# (a simulated slow network on what one side sends: latency, jitter; in order, as TCP keeps it)
+struct __CsLag:
+    ms = 0.0
+    jitter = 0.0
+    held: (f64, int, u8[])[]        # (when it goes, to whom, what)
+    last = 0.0
+    seed = 1
+
+__cs_lag_hold = (l: mut __CsLag, to: int, b: u8[]):
+    l.seed = (l.seed * 1103515245 + 12345) & 0x7FFFFFFF
+    at = elapsed() + (l.ms + l.jitter * f64(l.seed % 1000) / 1000.0) / 1000.0
+    at = max(at, l.last)
+    l.last = at
+    l.held.push((at, to, b))
+
+# (the held messages whose time has come)
+__cs_lag_due = (l: mut __CsLag) -> (int, u8[])[]:
+    out: (int, u8[])[]
+    now = elapsed()
+    k = 0
+    loop k < l.held.len() and l.held[k].0 <= now:
+        out.push((l.held[k].1, l.held[k].2))
+        k += 1
+    if k > 0: l.held = l.held[k..]
+    out
+
+struct __CsInput[I]:
+    seq: int
+    seen: int
+    input: I
+
+struct __CsWorld[W]:
+    you: int
+    tick: int
+    ack: int
+    world: W
+
+server[W, I] = (world: W, apply: (W, int, I, W) -> W, step: (W) -> W) -> Server[W, I]:
+    s = Server[W, I](world = world, apply = apply, step = step)
+    s.__hist = fill(world, __CS_HIST)
+    s
+
+# a player connected (as the player number, any int); a player left
+join[W, I] = (s: mut Server[W, I], player: int):
+    s.__clients[player] = __CsClient[I]()
+    s.__came.push(player)
+leave[W, I] = (s: mut Server[W, I], player: int):
+    s.__clients.remove(player)
+    s.__went.push(player)
+
+# bytes from a player
+receive[W, I] = (s: mut Server[W, I], player: int, data: u8[]):
+    if not s.__clients.has(player): return
+    # (what the client gave connect: its name, a token)
+    if data.len() > 0 and data[0] == 1:
+        s.__clients[player].hello = str_from_bytes(data[1..])
+        return
+    r = from_text[__CsInput[I]](str_from_bytes(data))
+    if r is TextError:
+        if not s.__clients[player].warned: eprint("netplay: an input from player {player} could not be read: does it run another build of the game? ({r.message})")
+        s.__clients[player].warned = true
+        return
+    s.__clients[player].queue.push((r.seq, r.seen, r.input))
+
+# what player p's client gave connect (its name, a token to know it again by): "" until it has
+# come, which is soon after p joined
+hello[W, I] = (s: Server[W, I], p: int) -> str:
+    if let c = s.__clients.get(p): return c.hello
+    ""
+
+# how many of player p's inputs are waiting to be applied (1 or 2 normally; more: they come
+# faster than the server ticks, which shows as lag)
+waiting[W, I] = (s: Server[W, I], p: int) -> int:
+    if let c = s.__clients.get(p): return c.queue.len()
+    0
+
+# simulate a slow network on what the server sends: ms more latency, up to jitter_ms more at
+# random (kept in order, as over TCP); the client's lag does the same both ways
+lag[W, I] = (s: mut Server[W, I], ms: f64, jitter_ms: f64 = 0):
+    s.__lag.ms = ms
+    s.__lag.jitter = jitter_ms
+
+# run the server: update 60 times a second, on time (each tick's start set from the first, so a
+# slow sleep does not make it fall behind), until the program ends
+run[W, I] = (s: mut Server[W, I], ticks_per_second: f64 = 60.0):
+    dt = 1.0 / ticks_per_second
+    next = time()
+    loop true:
+        s.update()
+        next += dt
+        wait = next - time()
+        if wait > 0.0: sleep(wait)
+        else if wait < -0.25: next = time()          # (far behind: a pause; start again from now)
+
+# what to send to whom since the last call (without listen)
+outgoing[W, I] = (s: mut Server[W, I]) -> (int, u8[])[]:
+    o = s.__out
+    s.__out.clear()
+    o
+
+# serve over WebSockets on port: native and web clients connect (players are net's peers)
+listen[W, I] = (s: mut Server[W, I], port: int):
+    if not net.listen(port): panic("cannot listen on port {port}")
+    s.__port = port
+
+# one tick: each player's next input applied, the rest of the tick, and the world sent out
+update[W, I] = (s: mut Server[W, I]):
+    if s.__port >= 0:
+        loop e in net.receive_server():
+            if e.kind == .joined: s.join(e.peer)
+            else if e.kind == .left: s.leave(e.peer)
+            else: s.receive(e.peer, e.data)
+    s.joined = s.__came
+    s.left = s.__went
+    s.__came.clear()
+    s.__went.clear()
+    loop p, c in s.__clients:
+        # (one input a tick, as they are made; a few more after a pause, to catch up, but never
+        # more than one a tick over time: a client sending two a tick moves no faster)
+        cr = min(c.credit + 1, 4)
+        # (a server ticking a little slower than its clients, 59.5 a second: one more now and
+        # then, so their inputs do not pile up and lag; at most 1 in 32, no help to a cheat)
+        if s.tick % 32 == 0 and c.queue.len() > 2: cr += 1
+        n = min(c.queue.len(), cr)
+        s.__clients[p].credit = cr - n
+        # (what piles up beyond that is dropped, the oldest first)
+        queue = c.queue
+        if queue.len() - n > 8: queue = queue[queue.len() - n - 8..]
+        loop k in [0..n):
+            q = queue[k]
+            seen = s.world
+            if q.1 >= 0 and q.1 < s.tick and s.tick - q.1 < __CS_HIST: seen = s.__hist[q.1 % __CS_HIST]
+            s.world = s.apply(s.world, p, q.2, seen)
+            s.__clients[p].acked = q.0
+        if n > 0 or queue.len() != c.queue.len(): s.__clients[p].queue = queue[n..]
+    s.world = s.step(s.world)
+    s.tick += 1
+    s.__hist[s.tick % __CS_HIST] = s.world
+    if s.tick % s.send_every == 0 and s.__clients.len() > 0:
+        # (the world as text, compressed once for everyone: who, tick and ack before it)
+        z = deflate(bytes(to_text(s.world)))
+        loop p, c in s.__clients:
+            b = bytes("\x02{p} {s.tick} {c.acked} ")
+            loop x in z: b.push(x)
+            __cs_server_send(s, p, b)
+    if s.__lag.held.len() > 0:
+        loop m in __cs_lag_due(s.__lag): __cs_server_put(s, m.0, m.1)
+
+__cs_server_send[W, I] = (s: mut Server[W, I], p: int, b: u8[]):
+    if s.__lag.ms > 0.0 or s.__lag.jitter > 0.0: __cs_lag_hold(s.__lag, p, b)
+    else: __cs_server_put(s, p, b)
+
+__cs_server_put[W, I] = (s: mut Server[W, I], p: int, b: u8[]):
+    if s.__port >= 0: net.send(p, b)
+    else: s.__out.push((p, b))
+
+# the world as it was at an earlier tick (the latest kept, if that one is gone)
+world_at[W, I] = (s: Server[W, I], tick: int) -> W:
+    if tick < 0 or tick >= s.tick or s.tick - tick >= __CS_HIST: return s.world
+    s.__hist[tick % __CS_HIST]
+
+struct Client[W, I]:
+    apply: (W, int, I, W) -> W
+    state: W                        # the latest world from the server, with this player's newer inputs applied
+    server: W                       # the latest world from the server, as it sent it
+    me = -1                         # this player's number (once the server has said)
+    server_tick = -1                # the tick of server
+    interpolation = 6               # how far in the past others are drawn (view), in ticks
+    ping = 0.0                      # milliseconds from an input sent to the world that answers it (smoothed)
+    __seq = 0
+    __pending: (int, I)[]           # inputs the server has not answered yet
+    __sent: (int, f64)[]            # (when each of those was sent)
+    __worlds: (int, W)[]            # the latest worlds, with their ticks
+    __clock = 0                     # this client's ticks
+    __got_at = 0                    # (its clock when the latest world came)
+    __out: u8[][]
+    __peer = -1
+    problem = ""                    # what is wrong, said once on stderr too: could not connect, the
+                                    # server gone or not heard from for 5 s, worlds that cannot be read
+    __heard = -1.0
+    __hello = ""
+    __lag: __CsLag
+
+client[W, I] = (start: W, apply: (W, int, I, W) -> W) -> Client[W, I]:
+    Client[W, I](apply = apply, state = start, server = start)
+
+# connect to the server; hello: text the server gets as srv.hello(player) (a name, a token to
+# know a player again by after a reconnect). A client that lost its connection, or called
+# disconnect, connects again the same way
+connect[W, I] = (c: mut Client[W, I], host: str, port: int, hello: str = ""):
+    if c.__peer >= 0: disconnect(c)
+    c.me = -1
+    c.server_tick = -1
+    c.problem = ""
+    c.__heard = -1.0
+    c.__pending.clear()
+    c.__sent.clear()
+    c.__worlds.clear()
+    c.__hello = hello
+    c.__peer = net.connect(host, port)
+    # (a screenshot run of a networked game keeps to real time: the server does)
+    __pace_real_time = true
+
+# close the connection (connect again later, to the same server or another)
+disconnect[W, I] = (c: mut Client[W, I]):
+    if c.__peer >= 0: net.close(c.__peer)
+    c.__peer = -1
+    c.me = -1
+
+# simulate a slow network on what the client sends and gets: ms more latency each way, up to
+# jitter_ms more at random (kept in order, as over TCP)
+lag[W, I] = (c: mut Client[W, I], ms: f64, jitter_ms: f64 = 0):
+    c.__lag.ms = ms
+    c.__lag.jitter = jitter_ms
+
+__cs_client_send[W, I] = (c: mut Client[W, I], b: u8[]):
+    if c.__lag.ms > 0.0 or c.__lag.jitter > 0.0: __cs_lag_hold(c.__lag, 0, b)
+    else if c.__peer >= 0: net.send(c.__peer, b)
+    else: c.__out.push(b)
+
+# connected, and the server has sent a world (and is still heard from)
+connected[W, I] = (c: Client[W, I]) -> bool: c.me >= 0 and len(c.problem) == 0
+
+__cs_problem[W, I] = (c: mut Client[W, I], what: str):
+    if len(c.problem) > 0: return
+    c.problem = what
+    eprint("netplay: {what}")
+
+# this tick's input: applied here at once (prediction) and sent
+play[W, I] = (c: mut Client[W, I], input: I):
+    # (with lag: what is held, sent when its time comes; worlds from the server held as long)
+    if c.__lag.held.len() > 0:
+        loop m in __cs_lag_due(c.__lag):
+            if m.0 == 0:
+                if c.__peer >= 0: net.send(c.__peer, m.1)
+                else: c.__out.push(m.1)
+            else: c.receive(m.1)
+    if c.__peer >= 0:
+        loop e in net.receive([c.__peer]):
+            if e.kind == .message:
+                if c.__lag.ms > 0.0 or c.__lag.jitter > 0.0: __cs_lag_hold(c.__lag, 1, e.data)
+                else: c.receive(e.data)
+            else if e.kind == .left:
+                if c.me < 0:
+                    w = net.why(c.__peer)
+                    if len(w) > 0: __cs_problem(c, "could not connect to the server: {w}")
+                    else: __cs_problem(c, "could not connect to the server")
+                else: __cs_problem(c, "the server closed the connection")
+    if c.me >= 0 and c.__heard >= 0.0 and elapsed() - c.__heard > 5.0: __cs_problem(c, "the server has not been heard from for 5 seconds (gone?)")
+    c.__clock += 1
+    if c.me < 0: return
+    c.__seq += 1
+    c.__pending.push((c.__seq, input))
+    c.__sent.push((c.__seq, elapsed()))
+    seen = int(floor(view_tick(c)))
+    __cs_client_send(c, bytes(to_text(__CsInput[I](c.__seq, seen, input))))
+    c.state = c.apply(c.state, c.me, input, c.state)
+
+# bytes from the server
+receive[W, I] = (c: mut Client[W, I], data: u8[]):
+    r = __cs_world[W](data)
+    if r is TextError:
+        __cs_problem(c, "a world from the server could not be read: does it run another build of the game? ({r.message})")
+        return
+    c.__heard = elapsed()
+    if r.tick <= c.server_tick: return
+    # (the hello, once the server knows this client: with its first world)
+    if c.me < 0 and len(c.__hello) > 0:
+        h: u8[] = [1]
+        loop x in bytes(c.__hello): h.push(x)
+        __cs_client_send(c, h)
+    c.me = r.you
+    c.server_tick = r.tick
+    c.server = r.world
+    c.__got_at = c.__clock
+    c.__worlds.push((r.tick, r.world))
+    if c.__worlds.len() > 32: c.__worlds.remove(0)
+    # (what the server has done of mine is in its world; the rest applied again)
+    keep: (int, I)[]
+    loop p in c.__pending:
+        if p.0 > r.ack: keep.push(p)
+    c.__pending = keep
+    # (the round trip of the newest input answered)
+    k = 0
+    loop k < c.__sent.len() and c.__sent[k].0 <= r.ack: k += 1
+    if k > 0:
+        c.ping = __np_smooth(c.ping, (elapsed() - c.__sent[k - 1].1) * 1000.0)
+        c.__sent = c.__sent[k..]
+    c.state = r.world
+    loop p in c.__pending: c.state = c.apply(c.state, c.me, p.1, c.state)
+
+# (a world as the server sends it: 2, "you tick ack ", then the world's text deflated)
+__cs_world[W] = (data: u8[]) -> __CsWorld[W] | TextError:
+    if data.len() == 0 or data[0] != 2: return TextError("not a world", 1, 1)
+    sp = 0
+    k = 1
+    loop k < data.len() and sp < 3:
+        if data[k] == ' ': sp += 1
+        k += 1
+    head = split(trim(str_from_bytes(data[1..k))), " ")
+    if head.len() != 3: return TextError("a world's header is not readable", 1, 1)
+    you = to_int(head[0]) ?? -1
+    tick = to_int(head[1]) ?? -1
+    ack = to_int(head[2]) ?? -1
+    if let raw = inflate(data, k):
+        w = from_text[W](str_from_bytes(raw))
+        if w is TextError: return w
+        return __CsWorld[W](you, tick, ack, w)
+    TextError("a world could not be inflated", 1, 1)
+
+# what to send since the last call (without connect)
+outgoing[W, I] = (c: mut Client[W, I]) -> u8[][]:
+    o = c.__out
+    c.__out.clear()
+    o
+
+# the server's tick being drawn for the others: some ticks in the past (fractional)
+view_tick[W, I] = (c: Client[W, I]) -> f64: f64(c.server_tick + (c.__clock - c.__got_at) - c.interpolation)
+
+# the two worlds around view_tick and how far between them (0 to 1): draw the others at
+# mix(a's, b's, f)
+view[W, I] = (c: Client[W, I]) -> (W, W, f32):
+    t = view_tick(c)
+    n = c.__worlds.len()
+    if n == 0: return (c.server, c.server, 0)
+    if t <= f64(c.__worlds[0].0): return (c.__worlds[0].1, c.__worlds[0].1, 0)
+    loop k in [0..n - 1):
+        a = c.__worlds[k]
+        b = c.__worlds[k + 1]
+        if t >= f64(a.0) and t < f64(b.0): return (a.1, b.1, f32((t - f64(a.0)) / f64(b.0 - a.0)))
+    (c.__worlds[n - 1].1, c.__worlds[n - 1].1, 0)

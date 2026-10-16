@@ -1,0 +1,380 @@
+# Backtraces at a panic (called by __panic in lib/core/rt.jo).
+
+# where the functions on the call stack were called from: return addresses found through the
+# frame pointers, function names in the program file's .symtab, lines in its .sloppy_lines
+# (written by the compiler: compiler/x64.jo, x64_line_table)
+__in_backtrace = false
+
+__backtrace = ():
+    when TARGET != "wasm":
+        jb = __alloc(192)
+        __setjmp(jb)
+        # (the frame pointer: rbp, the jump buffer's second word; arm64's x29, its eleventh)
+        when ARCH == "arm64":
+            __backtrace_from((jb as *int)[10], 0)
+        else:
+            __backtrace_from((jb as *int)[1], 0)
+
+# the frames from frame pointer fp (pc: where the program was, when it is not in a call; 0:
+# none). Runs of the same call (deep recursion) are told once, with a count.
+__backtrace_from = (fp0: int, pc: int):
+    when TARGET != "wasm":
+        if __in_backtrace: return
+        __in_backtrace = true
+        rets: int[]
+        counts: int[]
+        if pc != 0:
+            rets.push(pc + 1)
+            counts.push(1)
+        fp = fp0
+        n = 0
+        loop n < 100000000 and fp != 0 and fp & 7 == 0:
+            ret = (fp as *int)[1]
+            next = (fp as *int)[0]
+            if ret == 0: break
+            if rets.len() > 0 and rets[rets.len() - 1] == ret: counts[counts.len() - 1] += 1
+            else if rets.len() < 400:
+                rets.push(ret)
+                counts.push(1)
+            n += 1
+            # (frames of callers are above; another stack -- a thread's parent -- is not followed)
+            if next <= fp or next - fp > (1 << 23): break
+            fp = next
+        when TARGET == "windows":
+            __backtrace_print_pe(rets, counts)
+        else when TARGET == "macos":
+            __backtrace_print_macho(rets, counts)
+        else:
+            if let exe = read_bytes("/proc/self/exe"): __backtrace_print(rets, counts, exe)
+        __in_backtrace = false
+
+# ---------------- crashes ----------------
+# a segmentation fault (a stack overflow, or a bad pointer in code using raw pointers or C) or
+# another fatal signal is told like a panic, with a backtrace. The handler runs on a stack of
+# its own, since a stack overflow leaves none.
+# (the compiler puts a call of __crash_install first in a native program)
+when TARGET == "windows":
+    # (a vectored handler: it comes before Windows looks for handlers through the stack, which
+    # it cannot do in code without unwind tables. It runs on the stack the exception happened on,
+    # so for a stack overflow a guard page 64 KB above the end of the main thread's stack (all of
+    # it committed: compiler/pe.jo) leaves room to tell it.)
+    __crash_install = () -> bool:
+        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        f: cfn(*u8) -> i32 = __w32_crash
+        AddVectoredExceptionHandler(1, f as *u8)
+        __w32_stack_guard()
+        true
+
+    # (again after a stack overflow the program went on from: the interactive prompt's session)
+    __w32_stack_guard = ():
+        lo = [0]
+        hi = [0]
+        GetCurrentThreadStackLimits(data(lo), data(hi))
+        old: u32[] = [0]
+        if lo[0] != 0: VirtualProtect((lo[0] + (64 << 10)) as *u8, 4096, u32(0x104), data(old))   # PAGE_READWRITE | PAGE_GUARD
+
+    __w32_image_size = () -> int:
+        base = 0x400000 as *u8
+        int(((base + int(((base + 0x3C) as *u32)[0]) + 24 + 56) as *u32)[0])
+
+    # (EXCEPTION_POINTERS: the record (code at 0, address at 32 + 8) and the registers (CONTEXT:
+    # rsp at 0x98, rbp at 0xA0, rip at 0xF8). Only faults in the program's own code: libraries
+    # may handle their exceptions themselves.)
+    @cabi
+    __w32_crash = (ep: *u8) -> i32:
+        rec = (ep as **u8)[0]
+        ctx = (ep as **u8)[1]
+        code = int((rec as *u32)[0])
+        rsp = ((ctx + 0x98) as *int)[0]
+        rbp = ((ctx + 0xA0) as *int)[0]
+        rip = ((ctx + 0xF8) as *int)[0]
+        # (code of the interactive prompt's inputs is the program's too: lib/std/repl.jo)
+        if (rip < 0x400000 or rip >= 0x400000 + __w32_image_size()) and (rip < __repl_lo or rip >= __repl_hi): return 0          # EXCEPTION_CONTINUE_SEARCH
+        if code != 0x80000001 and code != 0xC00000FD and code != 0xC0000005 and code != 0xC0000094 and code != 0xC0000095 and code != 0xC000001D and code != 0xC0000096: return 0
+        what = "crashed (exception 0x{code:x})"
+        if code == 0x80000001 or code == 0xC00000FD: what = "stack overflow (a function calls itself without end, or too deeply?)"
+        else if code == 0xC0000005:
+            a = ((rec + 40) as *int)[0]
+            if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
+            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+        else if code == 0xC0000094 or code == 0xC0000095: what = "arithmetic error"
+        else if code == 0xC000001D or code == 0xC0000096: what = "illegal instruction"
+        __write_err("panic: {what}\n")
+        __backtrace_from(rbp, rip)
+        if __repl_crashed(ctx): return -1                                    # EXCEPTION_CONTINUE_EXECUTION
+        __exit(101)
+        0
+else when TARGET == "macos":
+    __crash_install = () -> bool:
+        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        size = 1 << 16
+        st = fill(0, 3)
+        st[0] = __os_pages(size) as int
+        st[1] = size
+        __c_sigaltstack(data(st) as *u8, null)
+        h: cfn(i32, *u8, *u8) = __crash
+        act = fill(0, 2)
+        act[0] = h as int
+        act[1] = (1 | 4 | 0x40) << 32                       # SA_ONSTACK | SA_RESETHAND | SA_SIGINFO
+        loop sig in [4, 8, 10, 11]: __c_sigaction(i32(sig), data(act) as *u8, null)
+        true
+
+    # (ucontext's uc_mcontext, a pointer, at 48; in it x0-x28 from 16, then fp, lr, sp, pc;
+    # siginfo's si_addr at 24)
+    @cabi
+    __crash = (sig: i32, info: *u8, uc: *u8):
+        g = (((uc + 48) as **u8)[0] + 16) as *int
+        rbp = g[29]
+        rsp = g[31]
+        rip = g[32]
+        what = "crashed (signal {sig})"
+        if sig == 11 or sig == 10:
+            a = ((info + 24) as *int)[0]
+            if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
+            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+        else if sig == 8: what = "arithmetic error"
+        else if sig == 4: what = "illegal instruction"
+        if env("SLOPPY_CRASH_DETAIL") != none: what = "{what} [signal {sig}, address 0x{((info + 24) as *int)[0]:x}, sp 0x{rsp:x}, pc 0x{rip:x}, thread {__tid()}]"
+        __write_err("panic: {what}\n")
+        __backtrace_from(rbp, rip)
+        __exit(101)
+else when TARGET != "wasm":
+    __crash_install = () -> bool:
+        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        size = 1 << 16
+        alt = __os_pages(size)
+        st = fill(0, 3)
+        st[0] = alt as int
+        st[2] = size
+        syscall(131, data(st), 0)                          # sigaltstack
+        h: cfn(i32, *u8, *u8) = __crash
+        act = fill(0, 4)
+        act[0] = h as int
+        act[1] = 4 | 0x08000000 | 0x04000000 | 0x80000000   # SA_SIGINFO | SA_ONSTACK | SA_RESTORER | SA_RESETHAND
+        act[2] = h as int                                  # (never returned to)
+        loop sig in [4, 7, 8, 11]: syscall(13, sig, data(act), 0, 8)    # rt_sigaction
+        true
+
+    @cabi
+    __crash = (sig: i32, info: *u8, uc: *u8):
+        # the registers when it happened (x86-64: ucontext_t's uc_mcontext.gregs at 40; arm64:
+        # uc_mcontext at 176, its x0-x30 from 184, then sp and pc)
+        rbp = 0
+        rsp = 0
+        rip = 0
+        when ARCH == "arm64":
+            g = (uc + 184) as *int
+            rbp = g[29]
+            rsp = g[31]
+            rip = g[32]
+        else:
+            g = (uc + 40) as *int
+            rbp = g[10]
+            rsp = g[15]
+            rip = g[16]
+        addr = (info + 16) as *int
+        what = "crashed (signal {sig})"
+        if sig == 11 or sig == 7:
+            a = addr[0]
+            if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
+            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+        else if sig == 8: what = "arithmetic error"
+        else if sig == 4: what = "illegal instruction"
+        __write_err("panic: {what}\n")
+        __backtrace_from(rbp, rip)
+        __exit(101)
+
+__u16_at = (b: u8[], o: int) -> int: int(b[o]) | (int(b[o + 1]) << 8)
+__u32_at = (b: u8[], o: int) -> int: __u16_at(b, o) | (__u16_at(b, o + 2) << 16)
+__u64_at = (b: u8[], o: int) -> int: __u32_at(b, o) | (__u32_at(b, o + 4) << 32)
+
+__cstr_at = (b: u8[], o: int) -> str:
+    e = o
+    loop e < b.len() and b[e] != 0: e += 1
+    str_from_bytes(b[o..e))
+
+# the function each return address is in, from the program file's .symtab; then the report
+__backtrace_print = (rets: int[], counts: int[], exe: u8[]):
+    if exe.len() < 64 or exe[0] != 0x7F: return
+    shoff = __u64_at(exe, 0x28)
+    shnum = __u16_at(exe, 0x3C)
+    shstr = __u16_at(exe, 0x3E)
+    if shnum == 0 or shoff + shnum * 64 > exe.len(): return
+    names_off = __u64_at(exe, shoff + shstr * 64 + 24)
+    sym_off = 0
+    sym_size = 0
+    str_off = 0
+    lines_off = 0
+    text_addr = 0
+    loop i in [0..shnum):
+        h = shoff + i * 64
+        nm = __cstr_at(exe, names_off + __u32_at(exe, h))
+        if nm == ".symtab":
+            sym_off = __u64_at(exe, h + 24)
+            sym_size = __u64_at(exe, h + 32)
+        else if nm == ".strtab": str_off = __u64_at(exe, h + 24)
+        else if nm == ".sloppy_lines": lines_off = __u64_at(exe, h + 24)
+        else if nm == ".text": text_addr = __u64_at(exe, h + 16)
+    if sym_off == 0 or lines_off == 0: return
+    fnames: str[]
+    loop ret in rets:
+        fname = ""
+        s = sym_off
+        loop s + 24 <= sym_off + sym_size:
+            v = __u64_at(exe, s + 8)
+            sz = __u64_at(exe, s + 16)
+            if ret > v and ret <= v + sz:
+                fname = __cstr_at(exe, str_off + __u32_at(exe, s))
+                break
+            s += 24
+        fnames.push(fname)
+    __backtrace_report(rets, counts, fnames, exe, lines_off, text_addr)
+
+# (Windows: the program's .sloppy section, where it is loaded: compiler/pe.jo, pe_backtrace_info)
+__backtrace_print_pe = (rets: int[], counts: int[]):
+    base = 0x400000 as *u8
+    pe = base + int(((base + 0x3C) as *u32)[0])
+    nsec = int(((pe + 6) as *u16)[0])
+    sects = pe + 24 + int(((pe + 20) as *u16)[0])
+    text_addr = 0
+    info: u8[]
+    loop i in [0..nsec):
+        h = sects + i * 40
+        nm = __cstr(h)
+        if len(nm) > 8: nm = nm[..8)
+        rva = int(((h + 12) as *u32)[0])
+        size = int(((h + 8) as *u32)[0])
+        if nm == ".text": text_addr = 0x400000 + rva
+        else if nm == ".sloppy":
+            info = fill(u8(0), size)
+            mem_copy(data(info), base + rva, size)
+    __backtrace_print_info(rets, counts, info, text_addr)
+
+# (macOS: the same in __TEXT's __sloppy section, found through the program's Mach-O header
+# where dyld put it: compiler/macho.jo)
+__backtrace_print_macho = (rets: int[], counts: int[]):
+    when TARGET == "macos":
+        mh = __c_dyld_get_image_header(0)
+        if mh == null: return
+        ncmds = int(((mh + 16) as *u32)[0])
+        lc = mh + 32
+        text_addr = 0
+        info: u8[]
+        loop k in [0..ncmds):
+            cmd = int((lc as *u32)[0])
+            if cmd == 0x19 and __cstr(lc + 8) == "__TEXT":
+                vm = ((lc + 24) as *int)[0]
+                nsect = int(((lc + 64) as *u32)[0])
+                loop j in [0..nsect):
+                    sc = lc + 72 + 80 * j
+                    nm = __cstr(sc)
+                    if len(nm) > 16: nm = nm[..16)
+                    at = mh + (((sc + 32) as *int)[0] - vm)
+                    size = ((sc + 40) as *int)[0]
+                    if nm == "__text": text_addr = at as int
+                    else if nm == "__sloppy":
+                        info = fill(u8(0), size)
+                        mem_copy(data(info), at, size)
+            lc = lc + int(((lc + 4) as *u32)[0])
+        __backtrace_print_info(rets, counts, info, text_addr)
+
+# (the functions' names and places, then the line table: compiler/x64.jo, pe_backtrace_info)
+__backtrace_print_info = (rets: int[], counts: int[], info: u8[], text_addr: int):
+    if info.len() < 8 or info[0] != 'S' or info[3] != '1': return
+    n = __u32_at(info, 4)
+    p = 8
+    starts = fill(0, n)
+    ends = fill(0, n)
+    names: str[]
+    loop k in [0..n):
+        starts[k] = text_addr + __u32_at(info, p)
+        ends[k] = starts[k] + __u32_at(info, p + 4)
+        ln = __u32_at(info, p + 8)
+        names.push(str_from_bytes(info[p + 12..p + 12 + ln)))
+        p += 12 + ln
+    fnames: str[]
+    loop ret in rets:
+        fname = ""
+        loop k in [0..n):
+            if ret > starts[k] and ret <= ends[k]:
+                fname = names[k]
+                break
+        fnames.push(fname)
+    if p + 4 <= info.len(): __backtrace_report(rets, counts, fnames, info, p, text_addr)
+
+# the frames shown, with the lines of the calls from the line table at b[lines_off..]
+__backtrace_report = (rets: int[], counts: int[], fnames: str[], b: u8[], lines_off: int, text_addr: int):
+    # the line table: return address -> (file, line)
+    files: str[]
+    p = lines_off + 4
+    nf = __u32_at(b, p)
+    p += 4
+    loop k in [0..nf):
+        n = __u32_at(b, p)
+        files.push(str_from_bytes(b[p + 4..p + 4 + n)))
+        p += 4 + n
+    ne = __u32_at(b, p)
+    p += 4
+    addrs = fill(0, ne)
+    fis = fill(0, ne)
+    lns = fill(0, ne)
+    a = text_addr
+    loop k in [0..ne):
+        v = 0
+        loop j in [0..3):
+            x = 0
+            sh = 0
+            loop true:
+                c = int(b[p])
+                p += 1
+                x |= (c & 127) << sh
+                sh += 7
+                if c < 128: break
+            if j == 0: v = x
+            else if j == 1: fis[k] = x
+            else: lns[k] = x
+        a += v
+        addrs[k] = a
+    shown = 0
+    game_loop = false
+    loop ri in 0.. and ret in rets:
+        fname = fnames[ri]
+        # (runtime and library internals are left out; update and draw are called by the game loop,
+        # which the top level starts: no line of it is where they were called from)
+        if fname == "__game_run": game_loop = true
+        if len(fname) == 0 or starts_with(fname, "__") or starts_with(fname, "h_thunk") or fname == "_start" or fname == "_main": continue
+        if game_loop and starts_with(fname, "init_") and shown > 0:
+            __write_err("    called by the game loop, each frame\n")
+            return
+        lo = 0
+        hi = ne - 1
+        found = -1
+        loop lo <= hi:
+            mid = (lo + hi) / 2
+            if addrs[mid] == ret:
+                found = mid
+                break
+            if addrs[mid] < ret: lo = mid + 1
+            else: hi = mid - 1
+        where = ""
+        if found >= 0 and fis[found] < files.len(): where = " ({files[fis[found]]}:{lns[found]})"
+        how = "    called from "
+        if shown == 0: how = "    in "
+        if shown >= 24:
+            __write_err("    ... and more\n")
+            return
+        times = ""
+        if counts[ri] > 1: times = " ({counts[ri]} times)"
+        __write_err("{how}{__fn_display(fname)}{where}{times}\n")
+        shown += 1
+
+# (the compiler's names: init_game is the top level of game; lambda a function literal)
+__fn_display = (s: str) -> str:
+    if starts_with(s, "init_"):
+        if __test_child: return "this test"
+        return "the top level of {s[5..]}"
+    if s == "lambda": return "a function literal"
+    if s == "op_index": return "[] (indexing)"
+    if s == "op_set": return "[]= (indexing)"
+    if starts_with(s, "op_"): return "an operator ({s[3..]})"
+    s

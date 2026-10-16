@@ -1,0 +1,704 @@
+# Tilemaps: layers of tiles drawn from a tileset image. Make one from text (tile_layer: each
+# character is a tile), or load a map made in Tiled (`load_tiled("level.tmx", embed_dir("assets"))`:
+# .tmx or .tmj, with its tilesets and their images found by their paths). Draw it with
+# draw_tilemap, and move boxes through it with tilemap_move, which stops them at solid tiles.
+# Every tile is solid unless set_tile_shape says otherwise: a one-way platform (landed on from
+# above, passed through from below and the sides), a slope (a floor that rises or falls across the
+# tile), or empty (scenery).
+#
+#   tiles = tileset(load_texture(embed("tiles.png"), false), 16, 16)
+#   level = tilemap(tiles, [tile_layer("walls", WALLS, "#=")])     # '#': tile 1, '=': tile 2
+#   update = (dt: f64):
+#       m = tilemap_move(level, 0, box, vel * f32(dt))
+#       box = m.rect
+#       if m.hit_y: vel.y = 0.0
+#   draw = (): draw_tilemap(level)
+
+struct Tileset:
+    texture: Texture
+    tile_w: int
+    tile_h: int
+    columns: int
+    first = 1                   # the id of its first tile (Tiled's firstgid)
+    count = 0                   # tiles in it
+    spacing = 0                 # pixels between tiles in the image
+    margin = 0                  # around them
+
+struct TileLayer:
+    name: str
+    width: int                  # in tiles
+    height: int
+    tiles: int[]                # tile ids, a row at a time from the top; 0: no tile
+    visible = true
+
+# an object placed in Tiled (an object layer's): a spawn point, a door, a coin...
+struct MapObject:
+    name: str
+    kind: str                   # its class (Tiled's "type")
+    layer: str                  # the object layer it is on
+    rect: Rect                  # where (a point: width and height 0)
+    props: {str: str}           # its custom properties, as text
+
+# how a tile stops what moves through the map (tilemap_move): solid; empty (scenery); platform
+# (one-way: landed on from above, passed through from below and the sides); slope(left, right), a
+# floor whose height (0: the tile's bottom, 1: its top) goes from left at the tile's left side to
+# right at its right side: slope(0, 1) rises to the right, slope(0, 0.5) then slope(0.5, 1) gently
+# over two tiles (passed through from below)
+enum TileShape:
+    solid
+    empty
+    platform
+    slope(left: f64, right: f64)
+
+struct Tilemap:
+    tile_w: int
+    tile_h: int
+    width: int                  # in tiles
+    height: int
+    tilesets: Tileset[]
+    layers: TileLayer[]
+    objects: MapObject[]
+    shapes: TileShape[]         # by tile id (set_tile_shape); solid past its end
+
+struct TileMove:
+    rect: Rect                  # where the box ended up
+    hit_x: bool                 # it was stopped going sideways
+    hit_y: bool                 # ... or up or down (moving down: it landed)
+
+# a tileset: an image of equal tiles in a grid, numbered from `first` (1) left to right, then down
+tileset = (t: Texture, tile_w: int, tile_h: int, spacing: int = 0, margin: int = 0) -> Tileset:
+    cols = max((t.width - 2 * margin + spacing) / (tile_w + spacing), 1)
+    rows = max((t.height - 2 * margin + spacing) / (tile_h + spacing), 1)
+    Tileset(t, tile_w, tile_h, cols, 1, cols * rows, spacing, margin)
+
+# a layer from rows of text: the character at position i of `chars` is tile i + 1, and any other
+# character (a space, a dot) is no tile; a character the rows never use skips a number ("_#":
+# '#' is tile 2). Rows of spaces are rows of the map (open sky); only an empty first line (the
+# line break after the opening quote) and a last line of spaces (before the closing quote) are
+# left out. For tilemap_move every tile is solid, floor tiles too: a tile walked over is
+# `set_tile_shape(map, id, .empty)`, or a character left out of `chars` (no tile).
+tile_layer = (name: str, rows: str, chars: str) -> TileLayer:
+    ls = lines(rows)
+    if ls.len() > 0 and len(ls[0]) == 0: ls.remove(0)
+    if ls.len() > 0 and trim(ls[ls.len() - 1]) == "": ls.pop()
+    w = 0
+    loop l in ls: w = max(w, len(l))
+    tiles = fill(0, w * ls.len())
+    loop y in 0.. and l in ls:
+        loop x in [0..len(l)):
+            k = find_byte(chars, l[x])
+            if k >= 0: tiles[y * w + x] = k + 1
+    TileLayer(name, w, ls.len(), tiles)
+
+# a map of these layers, drawn with one tileset
+tilemap = (ts: Tileset, layers: TileLayer[]) -> Tilemap:
+    w = 0
+    h = 0
+    loop l in layers:
+        w = max(w, l.width)
+        h = max(h, l.height)
+    Tilemap(ts.tile_w, ts.tile_h, w, h, [ts], layers, [], [])
+
+# the index of the layer with this name (-1: none)
+layer_index = (m: Tilemap, name: str) -> int:
+    loop i in 0.. and l in m.layers:
+        if l.name == name: return i
+    -1
+
+# the tile at column x, row y of a layer (0 outside the map)
+tile_at = (m: Tilemap, layer: int, x: int, y: int) -> int:
+    if layer < 0 or layer >= m.layers.len(): return 0
+    l = m.layers[layer]
+    if x < 0 or y < 0 or x >= l.width or y >= l.height: return 0
+    l.tiles[y * l.width + x] & 0x1FFFFFFF
+
+# the tile under a point (in pixels)
+tile_at = (m: Tilemap, layer: int, p: vec2) -> int:
+    tile_at(m, layer, int(floor(f64(p.x) / f64(m.tile_w))), int(floor(f64(p.y) / f64(m.tile_h))))
+
+set_tile = (m: mut Tilemap, layer: int, x: int, y: int, id: int):
+    if layer < 0 or layer >= m.layers.len(): return
+    if x < 0 or y < 0 or x >= m.layers[layer].width or y >= m.layers[layer].height: return
+    m.layers[layer].tiles[y * m.layers[layer].width + x] = id
+
+# how tile id stops what moves (every tile is solid until this says otherwise)
+set_tile_shape = (m: mut Tilemap, id: int, shape: TileShape):
+    if id <= 0: return
+    loop m.shapes.len() <= id: m.shapes.push(.solid)
+    m.shapes[id] = shape
+
+tile_shape = (m: Tilemap, id: int) -> TileShape:
+    if id == 0: return .empty
+    if id < m.shapes.len(): return m.shapes[id]
+    .solid
+
+# the map's size in pixels
+tilemap_size = (m: Tilemap) -> vec2: vec2(f32(m.width * m.tile_w), f32(m.height * m.tile_h))
+
+# draw a layer (-1: every visible layer, bottom first), with the map's top left corner at `at`.
+# Only the tiles on the screen are drawn, wherever the camera is.
+draw_tilemap = (m: Tilemap, layer: int = -1, at: vec2 = vec2(0, 0), tint: vec4 = vec4(1, 1, 1, 1)):
+    # (the part of the world on the screen: its corners under the current transform)
+    v = visible_rect()
+    lo = vec2(1e9, 1e9)
+    hi = vec2(-1e9, -1e9)
+    loop c in [vec2(v.x, v.y), vec2(v.x + v.w, v.y), vec2(v.x, v.y + v.h), vec2(v.x + v.w, v.y + v.h)]:
+        p = screen_to_world(c) - at
+        lo = vec2(min(lo.x, p.x), min(lo.y, p.y))
+        hi = vec2(max(hi.x, p.x), max(hi.y, p.y))
+    x0 = max(int(floor(f64(lo.x) / f64(m.tile_w))), 0)
+    y0 = max(int(floor(f64(lo.y) / f64(m.tile_h))), 0)
+    x1 = min(int(floor(f64(hi.x) / f64(m.tile_w))), m.width - 1)
+    y1 = min(int(floor(f64(hi.y) / f64(m.tile_h))), m.height - 1)
+    loop li in 0.. and l in m.layers:
+        if layer >= 0 and li != layer: continue
+        if layer < 0 and not l.visible: continue
+        loop y in [y0..min(y1, l.height - 1)]:
+            loop x in [x0..min(x1, l.width - 1)]:
+                raw = l.tiles[y * l.width + x]
+                id = raw & 0x1FFFFFFF
+                if id == 0: continue
+                # the tileset with this tile: the last one starting at or before it
+                ts = -1
+                loop k in 0.. and t in m.tilesets:
+                    if t.first <= id: ts = k
+                if ts < 0: continue
+                t = m.tilesets[ts]
+                i = id - t.first
+                src = vec4(f32(t.margin + (i % t.columns) * (t.tile_w + t.spacing)), f32(t.margin + (i / t.columns) * (t.tile_h + t.spacing)), f32(t.tile_w), f32(t.tile_h))
+                size = vec2(f32(m.tile_w), f32(m.tile_h))
+                # (Tiled's flip bits)
+                if raw & 0x80000000 != 0: size.x = -size.x
+                if raw & 0x40000000 != 0: size.y = -size.y
+                center = at + vec2(f32((f64(x) + 0.5) * f64(m.tile_w)), f32((f64(y) + 0.5) * f64(m.tile_h)))
+                sprite_region(t.texture, src, center, size, tint)
+
+# does a box (in pixels) touch a tile of the layer?
+tilemap_hits = (m: Tilemap, layer: int, r: Rect) -> bool:
+    x0 = int(floor(f64(r.x) / f64(m.tile_w)))
+    y0 = int(floor(f64(r.y) / f64(m.tile_h)))
+    x1 = int(ceil(f64(r.x + r.w) / f64(m.tile_w))) - 1
+    y1 = int(ceil(f64(r.y + r.h) / f64(m.tile_h))) - 1
+    loop y in [y0..y1]:
+        loop x in [x0..x1]:
+            if tile_at(m, layer, x, y) != 0: return true
+    false
+
+# move a box by d, stopping it against the layer's tiles: sideways first, then up or down, so it
+# slides along walls and floors. However far it moves in one step, it does not pass through a
+# solid tile. Platforms stop it only coming down onto them (drop: not even then, to drop through
+# one); on a slope it walks up and down the slope's floor, staying on it going down.
+tilemap_move = (m: Tilemap, layer: int, r: Rect, d: vec2, drop: bool = false) -> TileMove:
+    if not __tm_warned: __tm_inside_check(m, layer, r)
+    out = TileMove(r, false, false)
+    tw = f64(m.tile_w)
+    th = f64(m.tile_h)
+    # (on the ground at the start, in a map with slopes: the box may climb what is below
+    # lift going sideways, and follows the floor down as far going down; on a slope, its front
+    # is above the floor under its middle by as much as the slope rises in half its width)
+    lift = 0.0
+    if m.shapes.len() > 0 and d.y >= 0.0 and __floor_below(m, layer, r, 1.0, drop) < 1e30:
+        lift = abs(f64(d.x)) + 1.0
+        g = __slope_under(m, layer, r)
+        if g > 0.0: lift += g * f64(r.w) / 2.0
+    # rows the box covers (above lift), then columns it crosses
+    if d.x != 0.0:
+        y0 = int(floor(f64(r.y) / th))
+        y1 = int(ceil((f64(r.y + r.h) - lift) / th)) - 1
+        nx = f64(r.x) + f64(d.x)
+        if d.x > 0.0:
+            c0 = int(ceil(f64(r.x + r.w) / tw))             # the first column to the right
+            c1 = int(ceil((nx + f64(r.w)) / tw)) - 1
+            loop c in [c0..c1]:
+                if __column_solid(m, layer, c, y0, y1):
+                    nx = f64(c) * tw - f64(r.w)
+                    out.hit_x = true
+                    break
+        else:
+            c0 = int(floor(f64(r.x) / tw)) - 1               # the first column to the left
+            c1 = int(floor(nx / tw))
+            c = c0
+            loop c >= c1:
+                if __column_solid(m, layer, c, y0, y1):
+                    nx = f64(c + 1) * tw
+                    out.hit_x = true
+                    break
+                c -= 1
+        out.rect.x = f32(nx)
+    if d.y > 0.0 or (d.y == 0.0 and lift > 0.0):
+        # down: onto the highest floor between where the box's bottom is (less lift) and where it
+        # goes (more lift: following a slope down)
+        bottom = f64(r.y + r.h)
+        want = bottom + f64(d.y)
+        f = __floor_in(m, layer, out.rect, bottom - lift, want + lift, drop)
+        if f < 1e30 and (f <= want or lift > 0.0):
+            out.rect.y = f32(f - f64(r.h))
+            out.hit_y = true
+        else: out.rect.y = f32(want - f64(r.h))
+    else if d.y < 0.0:
+        x0 = int(floor(f64(out.rect.x) / tw))
+        x1 = int(ceil(f64(out.rect.x + r.w) / tw)) - 1
+        ny = f64(r.y) + f64(d.y)
+        r0 = int(floor(f64(r.y) / th)) - 1
+        r1 = int(floor(ny / th))
+        row = r0
+        loop row >= r1:
+            if __row_solid(m, layer, row, x0, x1):
+                ny = f64(row + 1) * th
+                out.hit_y = true
+                break
+            row -= 1
+        out.rect.y = f32(ny)
+    out
+
+# (a box that starts inside a solid tile cannot move out of it: said once, as it is most often a
+# floor tile left solid)
+__tm_warned = false
+__tm_inside_check = (m: Tilemap, layer: int, r: Rect):
+    x0 = int(floor(f64(r.x) / f64(m.tile_w)))
+    y0 = int(floor(f64(r.y) / f64(m.tile_h)))
+    x1 = int(ceil(f64(r.x + r.w) / f64(m.tile_w))) - 1
+    y1 = int(ceil(f64(r.y + r.h) / f64(m.tile_h))) - 1
+    loop y in [y0..y1]:
+        loop x in [x0..x1]:
+            if __solid(m, layer, x, y):
+                __tm_warned = true
+                id = tile_at(m, layer, x, y)
+                eprint("tilemap_move: a box starts inside solid tile {id} (column {x}, row {y}), where it is stuck: every tile is solid until set_tile_shape says otherwise, and a floor is `set_tile_shape(map, {id}, .empty)`")
+                return
+
+__solid = (m: Tilemap, layer: int, x: int, y: int) -> bool:
+    id = tile_at(m, layer, x, y)
+    id != 0 and (id >= m.shapes.len() or m.shapes[id] == .solid)
+
+__column_solid = (m: Tilemap, layer: int, c: int, y0: int, y1: int) -> bool:
+    loop y in [y0..y1]:
+        if __solid(m, layer, c, y): return true
+    false
+
+__row_solid = (m: Tilemap, layer: int, row: int, x0: int, x1: int) -> bool:
+    loop x in [x0..x1]:
+        if __solid(m, layer, x, row): return true
+    false
+
+# the highest floor under box r with its top from lo to hi (in pixels; 1e30: none): solid tiles
+# and platforms under any of its columns, slopes under its middle. A slope's row wins over solid
+# tiles in the same row (they carry its floor on).
+__floor_in = (m: Tilemap, layer: int, r: Rect, lo: f64, hi: f64, drop: bool) -> f64:
+    tw = f64(m.tile_w)
+    th = f64(m.tile_h)
+    x0 = int(floor(f64(r.x) / tw))
+    x1 = int(ceil(f64(r.x + r.w) / tw)) - 1
+    cx = f64(r.x) + f64(r.w) / 2.0
+    cc = int(floor(cx / tw))
+    best = 1e30
+    slope_row = -1
+    if m.shapes.len() > 0:
+        row = int(floor(lo / th))
+        loop row <= int(floor(hi / th)):
+            id = tile_at(m, layer, cc, row)
+            if id > 0 and id < m.shapes.len():
+                match m.shapes[id]:
+                    slope(a, b):
+                        fx = clamp((cx - f64(cc) * tw) / tw, 0.0, 1.0)
+                        y = (f64(row) + 1.0 - (a + (b - a) * fx)) * th
+                        if y >= lo and y <= hi:
+                            best = y
+                            slope_row = row
+                            break
+                    else: pass
+            row += 1
+    row = int(ceil(lo / th))
+    loop row <= int(floor(hi / th)) and f64(row) * th < best:
+        if row != slope_row:
+            loop x in [x0..x1]:
+                id = tile_at(m, layer, x, row)
+                if id == 0: continue
+                if id >= m.shapes.len() or m.shapes[id] == .solid or (m.shapes[id] == .platform and not drop):
+                    return f64(row) * th
+        row += 1
+    best
+
+# how steep the slope under box r's middle is (height over width; 0: no slope there)
+__slope_under = (m: Tilemap, layer: int, r: Rect) -> f64:
+    cx = f64(r.x) + f64(r.w) / 2.0
+    b = f64(r.y + r.h)
+    loop y in [b - 1.0, b + 1.0]:
+        id = tile_at(m, layer, vec2(f32(cx), f32(y)))
+        if id > 0 and id < m.shapes.len():
+            match m.shapes[id]:
+                slope(lo, hi): return abs(hi - lo) * f64(m.tile_h) / f64(m.tile_w)
+                else: 0.0
+    0.0
+
+# the floor within reach below box r's bottom (1e30: none)
+__floor_below = (m: Tilemap, layer: int, r: Rect, reach: f64, drop: bool) -> f64:
+    bottom = f64(r.y + r.h)
+    __floor_in(m, layer, r, bottom - reach, bottom + reach, drop)
+
+# ---------------- Tiled ----------------
+# a map made in Tiled, with its tilesets and their images, from files built into the program:
+#   assets = embed_dir("assets")
+#   level = load_tiled("maps/level1.tmx", assets)
+# The map may be Tiled's XML (.tmx) or JSON (.tmj), its tilesets inside it or in files of their
+# own (.tsx, .tsj), found as Tiled does: next to the file that names them. Tile layers (also
+# inside groups) become layers, object layers become `objects`; tiles stay sharp (no smoothing).
+load_tiled = (path: str, files: {str: u8[]}) -> Tilemap | JsonError:
+    mb = files.get(path)
+    if mb == none: return JsonError("no file '{path}' among the files given{__tiled_names(files)}", 1, 1)
+    j = __tiled_doc(str_from_bytes(mb!))
+    if j is JsonError: return __tiled_in(j, path)
+    dir = dir_name(path)
+    full: Json[]
+    textures: Texture[]
+    loop i in 0.. and ts in j.get("tilesets").as_list():
+        t = ts
+        tdir = dir
+        if let src = ts.get("source").as_str():
+            tp = __tiled_path(dir, src)
+            tb = files.get(tp)
+            if tb == none: return JsonError("{path}: its tileset file '{tp}' is not among the files given", 1, 1)
+            tj = __tiled_doc(str_from_bytes(tb!))
+            if tj is JsonError: return __tiled_in(tj, tp)
+            t = __json_set(tj, "firstgid", ts.get("firstgid") ?? Json.number(1.0))
+            tdir = dir_name(tp)
+        img = t.get("image").as_str() ?? ""
+        if len(img) == 0: return JsonError("{path}: tileset {i + 1} has no image (a tileset made of separate images is not supported)", 1, 1)
+        ip = __tiled_path(tdir, img)
+        ib = files.get(ip)
+        if ib == none: return JsonError("{path}: the image '{ip}' is not among the files given", 1, 1)
+        textures.push(load_texture(ib!, false))
+        full.push(t)
+    __tiled_build(__json_set(j, "tilesets", Json.list(full)), textures)
+
+# a map saved by Tiled (its text: XML, .tmx, or JSON, .tmj), with its tilesets embedded in it
+# (Tiled: in the Tilesets view, "Embed Tileset"), and a texture for each tileset, in the map's
+# order (load_tiled(path, files) finds tileset files and images by itself). Layer data can be
+# plain, CSV or base64 (uncompressed, zlib or gzip).
+load_tiled = (text: str, textures: Texture[]) -> Tilemap | JsonError:
+    j = __tiled_doc(text)
+    if j is JsonError: return j
+    __tiled_build(j, textures)
+
+__tiled_build = (j: Json, textures: Texture[]) -> Tilemap | JsonError:
+    if j.get("infinite").as_bool() ?? false: return JsonError("infinite maps are not supported (Tiled: Map > Map Properties, Infinite off)", 1, 1)
+    if (j.get("orientation").as_str() ?? "orthogonal") != "orthogonal": return JsonError("only orthogonal maps are supported", 1, 1)
+    m = Tilemap(j.get("tilewidth").as_int() ?? 16, j.get("tileheight").as_int() ?? 16, j.get("width").as_int() ?? 0, j.get("height").as_int() ?? 0, [], [], [], [])
+    sets = j.get("tilesets").as_list()
+    loop i in 0.. and ts in sets:
+        if ts.get("source").as_str() != none:
+            return JsonError("tileset {i + 1} is in a file of its own: load the map with `load_tiled(path, embed_dir(\"assets\"))`, which finds it, or embed it in the map (Tiled: the Tilesets view, Embed Tileset)", 1, 1)
+        if i >= textures.len(): return JsonError("the map has {sets.len()} tilesets: give a texture for each", 1, 1)
+        tw = ts.get("tilewidth").as_int() ?? m.tile_w
+        th = ts.get("tileheight").as_int() ?? m.tile_h
+        sp = ts.get("spacing").as_int() ?? 0
+        mg = ts.get("margin").as_int() ?? 0
+        cols = ts.get("columns").as_int() ?? max((textures[i].width - 2 * mg + sp) / (tw + sp), 1)
+        first = ts.get("firstgid").as_int() ?? 1
+        m.tilesets.push(Tileset(textures[i], tw, th, max(cols, 1), first, ts.get("tilecount").as_int() ?? 0, sp, mg))
+        # (a tile's custom property "shape": solid, empty, platform, or "slope 0 1": set_tile_shape)
+        loop t in ts.get("tiles").as_list():
+            loop p in t.get("properties").as_list():
+                if (p.get("name").as_str() ?? "") != "shape": continue
+                v = p.get("value").as_str() ?? ""
+                w = split(trim(v), " ")
+                id = first + (t.get("id").as_int() ?? 0)
+                if v == "solid": set_tile_shape(m, id, .solid)
+                else if v == "empty": set_tile_shape(m, id, .empty)
+                else if v == "platform": set_tile_shape(m, id, .platform)
+                else if w.len() == 3 and w[0] == "slope" and to_float(w[1]) != none and to_float(w[2]) != none:
+                    set_tile_shape(m, id, .slope(to_float(w[1])!, to_float(w[2])!))
+                else: return JsonError("tile {id}: shape '{v}' is not solid, empty, platform or 'slope <left> <right>' (heights from 0 to 1)", 1, 1)
+    r = __tiled_layers(m, j.get("layers").as_list())
+    if r is JsonError: return r
+    m
+
+__tiled_layers = (m: mut Tilemap, layers: Json[]) -> bool | JsonError:
+    loop l in layers:
+        kind = l.get("type").as_str() ?? ""
+        name = l.get("name").as_str() ?? ""
+        if kind == "group":
+            r = __tiled_layers(m, l.get("layers").as_list())
+            if r is JsonError: return r
+        else if kind == "tilelayer":
+            w = l.get("width").as_int() ?? m.width
+            h = l.get("height").as_int() ?? m.height
+            tiles: int[]
+            data = l.get("data")
+            if let s = data.as_str():
+                raw = base64_decode(s) ?? []
+                comp = l.get("compression").as_str() ?? ""
+                if comp == "zlib": raw = inflate(raw, 2) ?? []
+                else if comp == "gzip": raw = inflate(raw, __gzip_start(raw)) ?? []
+                else if comp != "": return JsonError("layer '{name}': {comp} compression is not supported (use zlib, gzip or none)", 1, 1)
+                k = 0
+                loop k + 3 < raw.len():
+                    tiles.push(int(raw[k]) | (int(raw[k + 1]) << 8) | (int(raw[k + 2]) << 16) | (int(raw[k + 3]) << 24))
+                    k += 4
+            else:
+                loop t in data.as_list(): tiles.push(int(t.as_num() ?? 0.0))
+            if tiles.len() != w * h: return JsonError("layer '{name}' has {tiles.len()} tiles for {w} x {h}", 1, 1)
+            m.layers.push(TileLayer(name, w, h, tiles, l.get("visible").as_bool() ?? true))
+        else if kind == "objectgroup":
+            loop o in l.get("objects").as_list():
+                props: {str: str}
+                loop p in o.get("properties").as_list():
+                    v = p.get("value")
+                    s = v.as_str() ?? ""
+                    if let n = v.as_num():
+                        s = "{n}"
+                        if n == floor(n) and abs(n) < 1e15: s = "{int(n)}"
+                    if let b = v.as_bool(): s = "{b}"
+                    props[p.get("name").as_str() ?? ""] = s
+                kind_ = o.get("type").as_str() ?? (o.get("class").as_str() ?? "")
+                rect = Rect(f32(o.get("x").as_num() ?? 0.0), f32(o.get("y").as_num() ?? 0.0), f32(o.get("width").as_num() ?? 0.0), f32(o.get("height").as_num() ?? 0.0))
+                m.objects.push(MapObject(o.get("name").as_str() ?? "", kind_, name, rect, props))
+    true
+
+# (dir, "../tiles/forest.tsx": the path among the files, with . and .. gone)
+__tiled_path = (dir: str, rel: str) -> str:
+    parts: str[]
+    loop p in split(replace(join_path(dir, rel), "\\", "/"), "/"):
+        if p == "" or p == ".": continue
+        if p == ".." and parts.len() > 0 and parts[parts.len() - 1] != "..": parts.pop()
+        else: parts.push(p)
+    join(parts, "/")
+
+__tiled_names = (files: {str: u8[]}) -> str:
+    names: str[]
+    loop k, v in files:
+        e = extension(k)
+        if e == ".tmx" or e == ".tmj" or e == ".json": names.push(k)
+    if names.len() == 0: return ""
+    sep = ", "
+    " (there are {join(sorted(names), sep)})"
+
+__tiled_in = (e: JsonError, path: str) -> JsonError: JsonError("{path}: {e.message}", e.line, e.column)
+
+# an object with a field set (added, or replaced)
+__json_set = (j: Json, key: str, v: Json) -> Json:
+    match j:
+        .object(keys, values):
+            ks = keys
+            vs = values
+            loop i in 0.. and k in ks:
+                if k == key:
+                    vs[i] = v
+                    return Json.object(ks, vs)
+            ks.push(key)
+            vs.push(v)
+            return Json.object(ks, vs)
+        _: return j
+
+# a Tiled file's text as JSON: XML (.tmx, .tsx) becomes what Tiled's JSON (.tmj, .tsj) would be
+__tiled_doc = (text: str) -> Json | JsonError:
+    t = trim(text)
+    if len(t) == 0 or t[0] != '<': return parse_json(text)
+    x = __xml_parse(t)
+    if x is JsonError: return x
+    if x.name == "map":
+        ks, vs = __tmx_attrs(x)
+        sets: Json[]
+        loop c in x.kids:
+            if c.name == "tileset": sets.push(__tmx_tileset(c))
+        ks.push("tilesets")
+        vs.push(Json.list(sets))
+        ks.push("layers")
+        vs.push(Json.list(__tmx_layers(x)))
+        return Json.object(ks, vs)
+    if x.name == "tileset": return __tmx_tileset(x)
+    JsonError("a Tiled file holds a <map> or a <tileset>, not <{x.name}>", 1, 1)
+
+# (the attributes Tiled's JSON has as numbers, and as true or false)
+__TMX_NUMS = ["width", "height", "tilewidth", "tileheight", "firstgid", "spacing", "margin", "tilecount", "columns", "id", "x", "y", "rotation", "gid", "imagewidth", "imageheight", "opacity"]
+
+__tmx_attrs = (e: __XmlEl) -> (str[], Json[]):
+    ks: str[]
+    vs: Json[]
+    loop i in 0.. and k in e.keys:
+        v = e.vals[i]
+        ks.push(k)
+        if k == "visible" or k == "infinite": vs.push(Json.boolean(v != "0"))
+        else if k in __TMX_NUMS and to_float(v) != none: vs.push(Json.number(to_float(v)!))
+        else: vs.push(Json.text(v))
+    (ks, vs)
+
+__tmx_tileset = (e: __XmlEl) -> Json:
+    ks, vs = __tmx_attrs(e)
+    tiles: Json[]
+    loop c in e.kids:
+        if c.name == "image":
+            ks.push("image")
+            vs.push(Json.text(__xml_attr(c, "source") ?? ""))
+        else if c.name == "tile":
+            tk, tv = __tmx_attrs(c)
+            tk.push("properties")
+            tv.push(Json.list(__tmx_props(c)))
+            tiles.push(Json.object(tk, tv))
+    ks.push("tiles")
+    vs.push(Json.list(tiles))
+    Json.object(ks, vs)
+
+__tmx_props = (e: __XmlEl) -> Json[]:
+    out: Json[]
+    loop c in e.kids:
+        if c.name != "properties": continue
+        loop p in c.kids:
+            if p.name != "property": continue
+            ty = __xml_attr(p, "type") ?? "string"
+            raw = __xml_attr(p, "value") ?? p.text
+            v = Json.text(raw)
+            if (ty == "int" or ty == "float") and to_float(raw) != none: v = Json.number(to_float(raw)!)
+            if ty == "bool": v = Json.boolean(raw == "true")
+            out.push(Json.object(["name", "type", "value"], [Json.text(__xml_attr(p, "name") ?? ""), Json.text(ty), v]))
+    out
+
+__tmx_layers = (e: __XmlEl) -> Json[]:
+    out: Json[]
+    loop c in e.kids:
+        ks, vs = __tmx_attrs(c)
+        if c.name == "layer":
+            ks.push("type")
+            vs.push(Json.text("tilelayer"))
+            loop d in c.kids:
+                if d.name != "data": continue
+                enc = __xml_attr(d, "encoding") ?? ""
+                if enc == "base64":
+                    ks.push("encoding")
+                    vs.push(Json.text("base64"))
+                    if let comp = __xml_attr(d, "compression"):
+                        ks.push("compression")
+                        vs.push(Json.text(comp))
+                    ks.push("data")
+                    vs.push(Json.text(trim(d.text)))
+                else:
+                    gids: Json[]
+                    if enc == "csv":
+                        loop w in split(d.text, ","):
+                            if len(trim(w)) > 0: gids.push(Json.number(to_float(trim(w)) ?? 0.0))
+                    else:
+                        loop tl in d.kids:
+                            if tl.name == "tile": gids.push(Json.number(to_float(__xml_attr(tl, "gid") ?? "0") ?? 0.0))
+                    ks.push("data")
+                    vs.push(Json.list(gids))
+            out.push(Json.object(ks, vs))
+        else if c.name == "objectgroup":
+            ks.push("type")
+            vs.push(Json.text("objectgroup"))
+            objs: Json[]
+            loop o in c.kids:
+                if o.name != "object": continue
+                ok, ov = __tmx_attrs(o)
+                ok.push("properties")
+                ov.push(Json.list(__tmx_props(o)))
+                objs.push(Json.object(ok, ov))
+            ks.push("objects")
+            vs.push(Json.list(objs))
+            out.push(Json.object(ks, vs))
+        else if c.name == "group":
+            ks.push("type")
+            vs.push(Json.text("group"))
+            ks.push("layers")
+            vs.push(Json.list(__tmx_layers(c)))
+            out.push(Json.object(ks, vs))
+    out
+
+# ---------------- XML (as much as Tiled's files use) ----------------
+struct __XmlEl:
+    name: str
+    keys: str[]
+    vals: str[]
+    kids: __XmlEl[]
+    text: str
+
+__xml_attr = (e: __XmlEl, k: str) -> str?:
+    loop i in 0.. and x in e.keys:
+        if x == k: return e.vals[i]
+    none
+
+__xml_unescape = (s: str) -> str:
+    if find(s, "&") < 0: return s
+    replace(replace(replace(replace(replace(s, "&lt;", "<"), "&gt;", ">"), "&quot;", "\""), "&apos;", "'"), "&amp;", "&")
+
+# the document's element (its first): elements, attributes and text; comments, <?...?> and
+# <!...> are passed over
+__xml_parse = (s: str) -> __XmlEl | JsonError:
+    stack = [__XmlEl()]
+    n = len(s)
+    i = 0
+    line = 1
+    loop i < n:
+        if s[i] != '<':
+            j = find(s, "<", i)
+            if j < 0: j = n
+            stack[stack.len() - 1].text += __xml_unescape(s[i..j))
+            loop k in [i..j):
+                if s[k] == '\n': line += 1
+            i = j
+            continue
+        if i + 3 < n and s[i + 1] == '!' and s[i + 2] == '-' and s[i + 3] == '-':
+            j = find(s, "-->", i)
+            if j < 0: return JsonError("a comment is not closed", line, 1)
+            i = j + 3
+            continue
+        if i + 1 < n and (s[i + 1] == '?' or s[i + 1] == '!'):
+            j = find(s, ">", i)
+            if j < 0: return JsonError("a <{s[i + 1..i + 2)} is not closed", line, 1)
+            i = j + 1
+            continue
+        if i + 1 < n and s[i + 1] == '/':
+            j = find(s, ">", i)
+            if j < 0 or stack.len() < 2: return JsonError("a closing tag with nothing open", line, 1)
+            cn = trim(s[i + 2..j))
+            if cn != stack[stack.len() - 1].name: return JsonError("</{cn}> where <{stack[stack.len() - 1].name}> is to be closed", line, 1)
+            e = stack.pop()
+            stack[stack.len() - 1].kids.push(e)
+            i = j + 1
+            continue
+        i += 1
+        st = i
+        loop i < n and not is_space(s[i]) and s[i] != '>' and s[i] != '/': i += 1
+        e = __XmlEl(name = s[st..i))
+        loop true:
+            loop i < n and is_space(s[i]):
+                if s[i] == '\n': line += 1
+                i += 1
+            if i >= n: return JsonError("<{e.name}> is not closed", line, 1)
+            if s[i] == '>':
+                i += 1
+                stack.push(e)
+                break
+            if s[i] == '/':
+                i += 2
+                stack[stack.len() - 1].kids.push(e)
+                break
+            ks = i
+            loop i < n and s[i] != '=' and not is_space(s[i]) and s[i] != '>': i += 1
+            k = s[ks..i)
+            loop i < n and s[i] != '"' and s[i] != '\'' and s[i] != '>': i += 1
+            if i >= n or s[i] == '>': return JsonError("<{e.name}>: the attribute {k} has no quoted value", line, 1)
+            q = s[i]
+            i += 1
+            vs = i
+            loop i < n and s[i] != q: i += 1
+            e.keys.push(k)
+            e.vals.push(__xml_unescape(s[vs..i)))
+            i += 1
+    if stack.len() != 1: return JsonError("<{stack[stack.len() - 1].name}> is not closed", line, 1)
+    if stack[0].kids.len() == 0: return JsonError("no element in the file", 1, 1)
+    stack[0].kids[0]
+
+# where the deflate data starts in a gzip file (after its header)
+__gzip_start = (b: u8[]) -> int:
+    if b.len() < 10: return 0
+    flags = int(b[3])
+    i = 10
+    if flags & 4 != 0 and i + 1 < b.len(): i += 2 + (int(b[i]) | (int(b[i + 1]) << 8))
+    if flags & 8 != 0:
+        loop i < b.len() and b[i] != u8(0): i += 1
+        i += 1
+    if flags & 16 != 0:
+        loop i < b.len() and b[i] != u8(0): i += 1
+        i += 1
+    if flags & 2 != 0: i += 2
+    i

@@ -1,0 +1,1953 @@
+# The GPU through Vulkan 1.3, in the style of mr_gpu (codeberg.org/games-by-Mason/mr_gpu): one
+# device with dynamic rendering, synchronization2, buffer device addresses and one bindless array
+# of every texture; a few large memory blocks; a frame's data written into a per-frame upload
+# buffer and found by its address. Each frame is drawn into an image of its own ("the screen"),
+# then copied, turned over, into the window's swapchain image: so the screen, like a texture
+# drawn into, has OpenGL's rows (row 0 at the bottom), and shaders need no special case for it.
+#
+# The library draws through it on Linux and Windows (OpenGL stays for the web, for SLOPPY_VULKAN=0,
+# and wherever Vulkan 1.3 is missing). SLOPPY_VK_VALIDATE=1 asks for the Khronos validation layer.
+
+when TARGET != "wasm" and TARGET != "macos":
+    # ---------------- the functions (the loader exports them all) ----------------
+    @lib("libvulkan.so.1")
+    extern vkGetInstanceProcAddr = (inst: *u8, name: *u8) -> *u8
+    @lib("libvulkan.so.1")
+    extern vkEnumerateInstanceExtensionProperties = (layer: *u8, count: *u32, props: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkEnumerateInstanceLayerProperties = (count: *u32, props: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateInstance = (info: *u8, alloc: *u8, out: **u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkEnumeratePhysicalDevices = (inst: *u8, count: *u32, out: **u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceProperties = (pd: *u8, props: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceProperties2 = (pd: *u8, props: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceFeatures2 = (pd: *u8, features: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceQueueFamilyProperties = (pd: *u8, count: *u32, props: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceMemoryProperties = (pd: *u8, props: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceFormatProperties = (pd: *u8, format: u32, props: *u8)
+    @lib("libvulkan.so.1")
+    extern vkEnumerateDeviceExtensionProperties = (pd: *u8, layer: *u8, count: *u32, props: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateDevice = (pd: *u8, info: *u8, alloc: *u8, out: **u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetDeviceQueue = (dev: *u8, family: u32, index: u32, out: **u8)
+    @lib("libvulkan.so.1")
+    extern vkDeviceWaitIdle = (dev: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceSurfaceSupportKHR = (pd: *u8, family: u32, surface: int, out: *u32) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (pd: *u8, surface: int, caps: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceSurfaceFormatsKHR = (pd: *u8, surface: int, count: *u32, formats: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPhysicalDeviceSurfacePresentModesKHR = (pd: *u8, surface: int, count: *u32, modes: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateXlibSurfaceKHR = (inst: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateWaylandSurfaceKHR = (inst: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateWin32SurfaceKHR = (inst: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateSwapchainKHR = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroySwapchainKHR = (dev: *u8, sc: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetSwapchainImagesKHR = (dev: *u8, sc: int, count: *u32, images: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkAcquireNextImageKHR = (dev: *u8, sc: int, timeout: u64, sem: int, fence: int, index: *u32) -> i32
+    @lib("libvulkan.so.1")
+    extern vkQueuePresentKHR = (queue: *u8, info: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkAllocateMemory = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkFreeMemory = (dev: *u8, mem: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkMapMemory = (dev: *u8, mem: int, off: u64, size: u64, flags: u32, out: **u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateBuffer = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroyBuffer = (dev: *u8, b: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetBufferMemoryRequirements = (dev: *u8, b: int, req: *u8)
+    @lib("libvulkan.so.1")
+    extern vkBindBufferMemory = (dev: *u8, b: int, mem: int, off: u64) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetBufferDeviceAddress = (dev: *u8, info: *u8) -> u64
+    @lib("libvulkan.so.1")
+    extern vkCreateImage = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroyImage = (dev: *u8, img: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkGetImageMemoryRequirements = (dev: *u8, img: int, req: *u8)
+    @lib("libvulkan.so.1")
+    extern vkBindImageMemory = (dev: *u8, img: int, mem: int, off: u64) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateImageView = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroyImageView = (dev: *u8, v: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreateSampler = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateDescriptorSetLayout = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateDescriptorPool = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkAllocateDescriptorSets = (dev: *u8, info: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkUpdateDescriptorSets = (dev: *u8, nwrites: u32, writes: *u8, ncopies: u32, copies: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreatePipelineLayout = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateShaderModule = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroyShaderModule = (dev: *u8, m: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreateGraphicsPipelines = (dev: *u8, cache: int, n: u32, infos: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateFence = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkWaitForFences = (dev: *u8, n: u32, fences: *int, all: u32, timeout: u64) -> i32
+    @lib("libvulkan.so.1")
+    extern vkResetFences = (dev: *u8, n: u32, fences: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreateSemaphore = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkDestroySemaphore = (dev: *u8, s: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreateCommandPool = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkResetCommandPool = (dev: *u8, pool: int, flags: u32) -> i32
+    @lib("libvulkan.so.1")
+    extern vkAllocateCommandBuffers = (dev: *u8, info: *u8, out: **u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkBeginCommandBuffer = (cb: *u8, info: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkEndCommandBuffer = (cb: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkQueueSubmit2 = (queue: *u8, n: u32, submits: *u8, fence: int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCmdPipelineBarrier2 = (cb: *u8, dep: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdBeginRendering = (cb: *u8, info: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreateQueryPool = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCmdResetQueryPool = (cb: *u8, pool: int, first: u32, count: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdWriteTimestamp2 = (cb: *u8, stage: u64, pool: int, query: u32)
+    @lib("libvulkan.so.1")
+    extern vkGetQueryPoolResults = (dev: *u8, pool: int, first: u32, count: u32, size: int, out: *u8, stride: u64, flags: u32) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCmdEndRendering = (cb: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdBlitImage2 = (cb: *u8, info: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdCopyBufferToImage = (cb: *u8, buf: int, img: int, layout: u32, n: u32, regions: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdCopyImageToBuffer = (cb: *u8, img: int, layout: u32, buf: int, n: u32, regions: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdClearAttachments = (cb: *u8, n: u32, atts: *u8, nrects: u32, rects: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetViewport = (cb: *u8, first: u32, n: u32, vps: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetScissor = (cb: *u8, first: u32, n: u32, rects: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdBindPipeline = (cb: *u8, point: u32, p: int)
+    @lib("libvulkan.so.1")
+    extern vkCmdBindDescriptorSets = (cb: *u8, point: u32, layout: int, first: u32, n: u32, sets: *int, ndyn: u32, dyn: *u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdPushConstants = (cb: *u8, layout: int, stages: u32, off: u32, size: u32, values: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdDraw = (cb: *u8, nverts: u32, ninst: u32, first_vert: u32, first_inst: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdDrawIndexed = (cb: *u8, nidx: u32, ninst: u32, first_idx: u32, vert_off: i32, first_inst: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdBindIndexBuffer = (cb: *u8, buf: int, off: u64, ty: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetCullMode = (cb: *u8, mode: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetFrontFace = (cb: *u8, face: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetPrimitiveTopology = (cb: *u8, topo: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetDepthTestEnable = (cb: *u8, on: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetDepthWriteEnable = (cb: *u8, on: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdSetDepthCompareOp = (cb: *u8, op: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdCopyBuffer = (cb: *u8, src: int, dst: int, n: u32, regions: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCmdFillBuffer = (cb: *u8, buf: int, off: u64, size: u64, value: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdDrawIndirect = (cb: *u8, buf: int, off: u64, count: u32, stride: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdDrawIndexedIndirect = (cb: *u8, buf: int, off: u64, count: u32, stride: u32)
+    @lib("libvulkan.so.1")
+    extern vkCmdDrawIndexedIndirectCount = (cb: *u8, buf: int, off: u64, cbuf: int, coff: u64, most: u32, stride: u32)
+    @lib("libvulkan.so.1")
+    extern vkDestroySampler = (dev: *u8, s: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkDestroyPipeline = (dev: *u8, p: int, alloc: *u8)
+    @lib("libvulkan.so.1")
+    extern vkCreateComputePipelines = (dev: *u8, cache: int, n: u32, infos: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCreatePipelineCache = (dev: *u8, info: *u8, alloc: *u8, out: *int) -> i32
+    @lib("libvulkan.so.1")
+    extern vkGetPipelineCacheData = (dev: *u8, cache: int, size: *int, out: *u8) -> i32
+    @lib("libvulkan.so.1")
+    extern vkCmdDispatch = (cb: *u8, x: u32, y: u32, z: u32)
+
+    # ---------------- structures (laid out as C lays them out) ----------------
+    struct VkApplicationInfo:
+        stype: u32
+        next: *u8
+        app_name: *u8
+        app_version: u32
+        engine_name: *u8
+        engine_version: u32
+        api_version: u32
+
+    struct VkInstanceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        app: *u8
+        nlayers: u32
+        layers: *u8
+        nexts: u32
+        exts: *u8
+
+    struct VkXlibSurfaceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        dpy: *u8
+        window: int
+
+    struct VkWaylandSurfaceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        display: *u8
+        surface: *u8
+
+    struct VkWin32SurfaceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        hinstance: *u8
+        hwnd: *u8
+
+    struct VkDeviceQueueCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        family: u32
+        count: u32
+        priorities: *f32
+
+    struct VkDeviceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nqueues: u32
+        queues: *u8
+        nlayers: u32
+        layers: *u8
+        nexts: u32
+        exts: *u8
+        features: *u8
+
+    struct VkSwapchainCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        surface: int
+        min_images: u32
+        format: u32
+        color_space: u32
+        width: u32
+        height: u32
+        layers: u32
+        usage: u32
+        sharing: u32
+        nfamilies: u32
+        families: *u8
+        transform: u32
+        alpha: u32
+        present_mode: u32
+        clipped: u32
+        old: int
+
+    struct VkPresentInfo:
+        stype: u32
+        next: *u8
+        nwait: u32
+        wait: *int
+        nswapchains: u32
+        swapchains: *int
+        indices: *u32
+        results: *u8
+
+    struct VkMemoryAllocateInfo:
+        stype: u32
+        next: *u8
+        size: u64
+        type_index: u32
+
+    struct VkMemoryAllocateFlagsInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        mask: u32
+
+    struct VkMemoryRequirements:
+        size: u64
+        alignment: u64
+        type_bits: u32
+
+    struct VkBufferCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        size: u64
+        usage: u32
+        sharing: u32
+        nfamilies: u32
+        families: *u8
+
+    struct VkBufferDeviceAddressInfo:
+        stype: u32
+        next: *u8
+        buffer: int
+
+    struct VkImageCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        image_type: u32
+        format: u32
+        width: u32
+        height: u32
+        depth: u32
+        mips: u32
+        layers: u32
+        samples: u32
+        tiling: u32
+        usage: u32
+        sharing: u32
+        nfamilies: u32
+        families: *u8
+        layout: u32
+
+    struct VkImageViewCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        image: int
+        view_type: u32
+        format: u32
+        swizzle: u32[4]
+        aspect: u32
+        base_mip: u32
+        mips: u32
+        base_layer: u32
+        layers: u32
+
+    struct VkCommandPoolCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        family: u32
+
+    struct VkCommandBufferAllocateInfo:
+        stype: u32
+        next: *u8
+        pool: int
+        level: u32
+        count: u32
+
+    struct VkCommandBufferBeginInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        inherit: *u8
+
+    struct VkFenceCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+
+    struct VkSemaphoreCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+
+    struct VkSemaphoreSubmitInfo:
+        stype: u32
+        next: *u8
+        semaphore: int
+        value: int
+        stages: int
+        device: u32
+
+    struct VkCommandBufferSubmitInfo:
+        stype: u32
+        next: *u8
+        cb: *u8
+        mask: u32
+
+    struct VkSubmitInfo2:
+        stype: u32
+        next: *u8
+        flags: u32
+        nwait: u32
+        wait: *u8
+        ncbs: u32
+        cbs: *u8
+        nsignal: u32
+        signal: *u8
+
+    struct VkImageMemoryBarrier2:
+        stype: u32
+        next: *u8
+        src_stages: int
+        src_access: int
+        dst_stages: int
+        dst_access: int
+        old_layout: u32
+        new_layout: u32
+        src_family: u32
+        dst_family: u32
+        image: int
+        aspect: u32
+        base_mip: u32
+        mips: u32
+        base_layer: u32
+        layers: u32
+
+    struct VkMemoryBarrier2:
+        stype: u32
+        next: *u8
+        src_stages: int
+        src_access: int
+        dst_stages: int
+        dst_access: int
+
+    struct VkDependencyInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nmem: u32
+        mem: *u8
+        nbuf: u32
+        buf: *u8
+        nimg: u32
+        img: *u8
+
+    struct VkRenderingAttachmentInfo:
+        stype: u32
+        next: *u8
+        view: int
+        layout: u32
+        resolve_mode: u32
+        resolve_view: int
+        resolve_layout: u32
+        load_op: u32
+        store_op: u32
+        clear: f32[4]
+
+    struct VkRenderingInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        x: i32
+        y: i32
+        width: u32
+        height: u32
+        layers: u32
+        view_mask: u32
+        ncolors: u32
+        colors: *u8
+        depth: *u8
+        stencil: *u8
+
+    struct VkImageBlit2:
+        stype: u32
+        next: *u8
+        src_aspect: u32
+        src_mip: u32
+        src_base_layer: u32
+        src_layers: u32
+        src0: i32[3]
+        src1: i32[3]
+        dst_aspect: u32
+        dst_mip: u32
+        dst_base_layer: u32
+        dst_layers: u32
+        dst0: i32[3]
+        dst1: i32[3]
+
+    struct VkBlitImageInfo2:
+        stype: u32
+        next: *u8
+        src: int
+        src_layout: u32
+        dst: int
+        dst_layout: u32
+        nregions: u32
+        regions: *u8
+        filter: u32
+
+    struct VkBufferImageCopy:
+        offset: u64
+        row_length: u32
+        image_height: u32
+        aspect: u32
+        mip: u32
+        base_layer: u32
+        layers: u32
+        x: i32
+        y: i32
+        z: i32
+        width: u32
+        height: u32
+        depth: u32
+
+    struct VkSamplerCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        mag: u32
+        min: u32
+        mip_mode: u32
+        wrap_u: u32
+        wrap_v: u32
+        wrap_w: u32
+        lod_bias: f32
+        aniso_on: u32
+        aniso: f32
+        compare_on: u32
+        compare: u32
+        min_lod: f32
+        max_lod: f32
+        border: u32
+        unnormalized: u32
+
+    struct VkDescriptorSetLayoutBinding:
+        binding: u32
+        ty: u32
+        count: u32
+        stages: u32
+        samplers: *u8
+
+    struct VkDescriptorSetLayoutCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nbindings: u32
+        bindings: *u8
+
+    struct VkDescriptorSetLayoutBindingFlagsCreateInfo:
+        stype: u32
+        next: *u8
+        nbindings: u32
+        flags: *u32
+
+    struct VkDescriptorPoolSize:
+        ty: u32
+        count: u32
+
+    struct VkDescriptorPoolCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        max_sets: u32
+        nsizes: u32
+        sizes: *u8
+
+    struct VkDescriptorSetAllocateInfo:
+        stype: u32
+        next: *u8
+        pool: int
+        nlayouts: u32
+        layouts: *int
+
+    struct VkDescriptorImageInfo:
+        sampler: int
+        view: int
+        layout: u32
+
+    struct VkWriteDescriptorSet:
+        stype: u32
+        next: *u8
+        set: int
+        binding: u32
+        element: u32
+        count: u32
+        ty: u32
+        images: *u8
+        buffers: *u8
+        texel_views: *u8
+
+    struct VkPushConstantRange:
+        stages: u32
+        offset: u32
+        size: u32
+
+    struct VkPipelineLayoutCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nsets: u32
+        sets: *int
+        nranges: u32
+        ranges: *u8
+
+    struct VkShaderModuleCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        size: int
+        code: *u8
+
+    struct VkPipelineShaderStageCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        stage: u32
+        module: int
+        name: *u8
+        spec: *u8
+
+    struct VkPipelineVertexInputStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nbindings: u32
+        bindings: *u8
+        nattribs: u32
+        attribs: *u8
+
+    struct VkPipelineInputAssemblyStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        topology: u32
+        restart: u32
+
+    struct VkPipelineViewportStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nviewports: u32
+        viewports: *u8
+        nscissors: u32
+        scissors: *u8
+
+    struct VkPipelineRasterizationStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        depth_clamp: u32
+        discard: u32
+        polygon: u32
+        cull: u32
+        front: u32
+        bias_on: u32
+        bias: f32
+        bias_clamp: f32
+        bias_slope: f32
+        line_width: f32
+
+    struct VkPipelineMultisampleStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        samples: u32
+        sample_shading: u32
+        min_sample_shading: f32
+        mask: *u8
+        alpha_to_coverage: u32
+        alpha_to_one: u32
+
+    struct VkPipelineDepthStencilStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        depth_test: u32
+        depth_write: u32
+        compare: u32
+        bounds: u32
+        stencil: u32
+        front: u32[7]
+        back: u32[7]
+        min_bounds: f32
+        max_bounds: f32
+
+    struct VkPipelineColorBlendAttachmentState:
+        on: u32
+        src: u32
+        dst: u32
+        op: u32
+        src_a: u32
+        dst_a: u32
+        op_a: u32
+        mask: u32
+
+    struct VkPipelineColorBlendStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        logic_on: u32
+        logic: u32
+        natts: u32
+        atts: *u8
+        constants: f32[4]
+
+    struct VkPipelineDynamicStateCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nstates: u32
+        states: *u32
+
+    struct VkPipelineRenderingCreateInfo:
+        stype: u32
+        next: *u8
+        view_mask: u32
+        ncolors: u32
+        colors: *u32
+        depth: u32
+        stencil: u32
+
+    struct VkGraphicsPipelineCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        nstages: u32
+        stages: *u8
+        vertex_input: *u8
+        input_assembly: *u8
+        tessellation: *u8
+        viewport: *u8
+        raster: *u8
+        multisample: *u8
+        depth: *u8
+        blend: *u8
+        dynamic: *u8
+        layout: int
+        render_pass: int
+        subpass: u32
+        base: int
+        base_index: i32
+
+    struct VkComputePipelineCreateInfo:
+        stype: u32
+        next: *u8
+        flags: u32
+        stage: VkPipelineShaderStageCreateInfo
+        layout: int
+        base: int
+        base_index: i32
+
+    struct VkViewport:
+        x: f32
+        y: f32
+        width: f32
+        height: f32
+        min_depth: f32
+        max_depth: f32
+
+    struct VkRect2D:
+        x: i32
+        y: i32
+        width: u32
+        height: u32
+
+    struct VkClearAttachment:
+        aspect: u32
+        attachment: u32
+        clear: f32[4]
+
+    struct VkClearRect:
+        x: i32
+        y: i32
+        width: u32
+        height: u32
+        base_layer: u32
+        layers: u32
+
+    struct VkBufferCopy:
+        src: u64
+        dst: u64
+        size: u64
+
+    # ---------------- constants ----------------
+    const VK_API_1_3 = (1 << 22) | (3 << 12)
+    const VK_SUCCESS = 0
+    const VK_SUBOPTIMAL = 1000001003
+    const VK_OUT_OF_DATE = -1000001004
+
+    const VK_FORMAT_R8G8B8A8_UNORM = 37
+    const VK_FORMAT_B8G8R8A8_UNORM = 44
+    const VK_FORMAT_D32_SFLOAT = 126
+
+    const VK_LAYOUT_UNDEFINED = 0
+    const VK_LAYOUT_GENERAL = 1
+    const VK_LAYOUT_COLOR = 2
+    const VK_LAYOUT_SHADER_READ = 5
+    const VK_LAYOUT_TRANSFER_SRC = 6
+    const VK_LAYOUT_TRANSFER_DST = 7
+    const VK_LAYOUT_DEPTH = 1000241000
+    const VK_LAYOUT_PRESENT = 1000001002
+
+    const VK_STAGE_TOP = 0x1
+    const VK_STAGE_VERTEX = 0x8
+    const VK_STAGE_FRAGMENT = 0x80
+    const VK_STAGE_EARLY_TESTS = 0x100
+    const VK_STAGE_LATE_TESTS = 0x200
+    const VK_STAGE_COLOR_OUT = 0x400
+    const VK_STAGE_COMPUTE = 0x800
+    const VK_STAGE_TRANSFER = 0x1000
+    const VK_STAGE_HOST = 0x4000
+    const VK_STAGE_ALL = 0x10000
+
+    const VK_ACCESS_SHADER_READ = 0x20
+    const VK_ACCESS_COLOR_READ = 0x80
+    const VK_ACCESS_COLOR_WRITE = 0x100
+    const VK_ACCESS_DEPTH_READ = 0x200
+    const VK_ACCESS_DEPTH_WRITE = 0x400
+    const VK_ACCESS_TRANSFER_READ = 0x800
+    const VK_ACCESS_TRANSFER_WRITE = 0x1000
+    const VK_ACCESS_HOST_READ = 0x2000
+    const VK_ACCESS_MEMORY_READ = 0x8000
+    const VK_ACCESS_MEMORY_WRITE = 0x10000
+
+    const VK_USAGE_TRANSFER_SRC = 0x1
+    const VK_USAGE_TRANSFER_DST = 0x2
+    const VK_USAGE_SAMPLED = 0x4
+    const VK_USAGE_STORAGE = 0x8
+    const VK_USAGE_COLOR = 0x10
+    const VK_USAGE_DEPTH = 0x20
+
+    const VK_MEM_DEVICE_LOCAL = 0x1
+    const VK_MEM_HOST_VISIBLE = 0x2
+    const VK_MEM_HOST_COHERENT = 0x4
+    const VK_MEM_HOST_CACHED = 0x8
+
+    # ---------------- state ----------------
+    __vk = false                   # the library draws through Vulkan
+    __vk_inst: *u8 = null
+    __vk_pd: *u8 = null            # the physical device
+    __vk_dev: *u8 = null
+    __vk_queue: *u8 = null
+    __vk_family: u32 = 0
+    __vk_surface = 0
+    __vk_headless = false          # no window: frames are drawn, not shown (screenshot runs)
+    __vk_device_name = ""
+    __vk_provoking_last = false    # VK_EXT_provoking_vertex is on: flat values from the last vertex
+    __vk_mem_props: u8[]           # VkPhysicalDeviceMemoryProperties
+
+    __vk_swapchain = 0
+    __vk_sc_format: u32 = 0
+    __vk_sc_images: int[]
+    __vk_sc_w = 0
+    __vk_sc_h = 0
+    __vk_sc_req_w = 0              # the size asked for (the surface may differ)
+    __vk_sc_req_h = 0
+    __vk_sc_rendered: int[]        # per swapchain image: signaled when its frame is drawn
+    __vk_sc_layout_fresh: bool[]   # per swapchain image: not presented yet (layout undefined)
+
+    const __VK_FRAMES = 2          # frames in flight
+    struct __VkFrame:
+        pool: int
+        cb: *u8
+        fence: int
+        acquired: int              # signaled when the swapchain image is ours
+        arena: int[]               # its upload blocks (indices into __vk_blocks), used in order
+        block: int                 # the one being filled (index into arena)
+        used: int                  # bytes of it used
+        dead: __VkDead[]           # what to destroy once this frame's commands have run
+
+    # something the GPU may still be using, to destroy later (see __vk_defer)
+    struct __VkDead:
+        kind: int                  # 0 buffer, 1 image (with its view), 2 memory, 3 pipeline
+        a: int
+        b: int
+
+    __vk_frames: __VkFrame[]
+    __vk_frame = 0                 # which of them is being recorded
+    __vk_recording = false
+
+    # the screen: what a frame is drawn into before it is copied to the window
+    struct __VkImage:
+        image: int
+        view: int
+        mem: int
+        width: int
+        height: int
+        format: u32
+        layout: u32
+        aspect: u32
+
+    __vk_screen = __VkImage()
+    __vk_screen_depth = __VkImage()
+    # (antialiasing, as a web page's canvas has: the screen drawn with __vk_samples samples a
+    # pixel into these, resolved into __vk_screen at the end of each pass; SLOPPY_MSAA=1: none.
+    # Every Vulkan device has 4 for these formats)
+    __vk_samples = if (env("SLOPPY_MSAA") ?? "") == "1": 1 else: 4
+    __vk_screen_ms = __VkImage()
+    __vk_screen_ms_depth = __VkImage()
+
+    # a missing or too old driver is not a program bug: say why, so the caller can fall back
+    __vk_fail = ""
+
+    # Vulkan is tried first unless SLOPPY_VULKAN=0 (OpenGL, then); without a driver that has what
+    # this needs, the library uses OpenGL, saying why only when SLOPPY_VULKAN=1 asked for Vulkan
+    __vk_wanted = () -> bool: (env("SLOPPY_VULKAN") ?? "") != "0"
+    __vk_note = (msg: str):
+        if (env("SLOPPY_VULKAN") ?? "") == "1": eprint("note: {msg}")
+
+    __vk_check = (r: i32, what: str):
+        if r != 0: panic("Vulkan: {what} failed ({r})")
+
+    # ---------------- instance, device ----------------
+    __vk_has_layer = (name: str) -> bool:
+        n: u32 = 0
+        vkEnumerateInstanceLayerProperties(&n, null)
+        if n == 0: return false
+        props = fill(u8(0), int(n) * 520)          # VkLayerProperties: 256 + 4 + 4 + 256
+        vkEnumerateInstanceLayerProperties(&n, data(props))
+        loop i in [0..int(n)):
+            if __vk_cstr(data(props) + i * 520) == name: return true
+        false
+
+    __vk_cstr = (p: *u8) -> str:
+        b: u8[]
+        i = 0
+        loop p[i] != 0:
+            b.push(p[i])
+            i += 1
+        str_from_bytes(b)
+
+    # the extensions a device has
+    __vk_device_exts = (pd: *u8) -> str[]:
+        n: u32 = 0
+        vkEnumerateDeviceExtensionProperties(pd, null, &n, null)
+        props = fill(u8(0), int(n) * 260)          # VkExtensionProperties: 256 + 4
+        vkEnumerateDeviceExtensionProperties(pd, null, &n, data(props))
+        out: str[]
+        loop i in [0..int(n)): out.push(__vk_cstr(data(props) + i * 260))
+        out
+
+    # the Vulkan 1.2 and 1.3 features this needs, as the words of their structures (see
+    # VkPhysicalDeviceVulkan12Features / 13Features: a word for sType, a pointer, then one per
+    # feature)
+    __VK12_NEEDED = [14, 21, 26, 27, 29, 31, 37, 38]   # non-uniform sampled image indexing, update after bind (sampled images, unused while pending), partially bound, runtime arrays, scalar layout, timeline semaphores, buffer device address
+    __VK13_NEEDED = [9, 12]                            # synchronization2, dynamic rendering
+
+    # the features structures chained for vkGetPhysicalDeviceFeatures2 / vkCreateDevice:
+    # (features2, v12, v13); each holds its own words, linked by address
+    __vk_features = (want: bool) -> (u32[], u32[], u32[]):
+        f2 = fill(u32(0), 4 + 56)          # VkPhysicalDeviceFeatures2: 55 VkBool32
+        f12 = fill(u32(0), 4 + 48)
+        f13 = fill(u32(0), 4 + 16)
+        f2[0] = 1000059000
+        f12[0] = 51
+        f13[0] = 53
+        if want:
+            loop i in __VK12_NEEDED: f12[4 + i] = 1
+            loop i in __VK13_NEEDED: f13[4 + i] = 1
+        __vk_link(f2, f12)
+        __vk_link(f12, f13)
+        (f2, f12, f13)
+
+    __vk_link = (a: mut u32[], b: u32[]):
+        p = data(b) as int
+        a[2] = u32(p & 0xFFFFFFFF)
+        a[3] = u32((p >> 32) & 0xFFFFFFFF)
+
+    # why this device cannot be used ("" if it can)
+    __vk_device_unfit = (pd: *u8) -> str:
+        props = fill(u8(0), 1024)
+        vkGetPhysicalDeviceProperties(pd, data(props))
+        api = (data(props) as *u32)[0]
+        if api < u32(VK_API_1_3): return "Vulkan 1.{(api >> 12) & 0x3FF} (1.3 is needed)"
+        f2, f12, f13 = __vk_features(false)
+        vkGetPhysicalDeviceFeatures2(pd, data(f2) as *u8)
+        loop i in __VK12_NEEDED:
+            if f12[4 + i] == 0: return "a Vulkan 1.2 feature is missing ({i})"
+        loop i in __VK13_NEEDED:
+            if f13[4 + i] == 0: return "a Vulkan 1.3 feature is missing ({i})"
+        has_sc = __vk_surface == 0
+        loop e in __vk_device_exts(pd):
+            if e == "VK_KHR_swapchain": has_sc = true
+        if not has_sc: return "no swapchain"
+        if __vk_queue_family(pd) < 0: return "no queue that draws and presents"
+        ""
+
+    # a queue family that draws, computes and presents to the surface, or -1
+    __vk_queue_family = (pd: *u8) -> int:
+        n: u32 = 0
+        vkGetPhysicalDeviceQueueFamilyProperties(pd, &n, null)
+        props = fill(u8(0), int(n) * 24)
+        vkGetPhysicalDeviceQueueFamilyProperties(pd, &n, data(props))
+        loop i in [0..int(n)):
+            flags = (data(props) as *u32)[i * 6]
+            if flags & 3 != 3: continue
+            if __vk_surface == 0: return i
+            ok: u32 = 0
+            vkGetPhysicalDeviceSurfaceSupportKHR(pd, u32(i), __vk_surface, &ok)
+            if ok != 0: return i
+        -1
+
+    # set up Vulkan on the window: the instance, its surface, a device; returns why that is
+    # impossible, or "". make_surface makes the surface for the window system.
+    # the instance extensions there are
+    __vk_instance_exts = () -> str[]:
+        n: u32 = 0
+        vkEnumerateInstanceExtensionProperties(null, &n, null)
+        props = fill(u8(0), int(n) * 260)
+        vkEnumerateInstanceExtensionProperties(null, &n, data(props))
+        out: str[]
+        loop i in [0..int(n)): out.push(__vk_cstr(data(props) + i * 260))
+        out
+
+    # set up Vulkan for a window (surface_ext: the window system's surface extension, make_surface
+    # makes the window's surface), or with no window (surface_ext ""); returns why that is
+    # impossible, or "". GPU arrays may have made the instance and device already (with no window).
+    __vk_open = (surface_ext: str, make_surface: () -> int) -> str:
+        if __vk_inst == null:
+            why = __vk_make_instance()
+            if len(why) > 0: return why
+        __vk_headless = len(surface_ext) == 0
+        if not __vk_headless:
+            has = false
+            loop e in __vk_inst_exts:
+                if e == surface_ext: has = true
+            if not has: return "the Vulkan driver cannot show windows here ({surface_ext})"
+            __vk_surface = make_surface()
+            if __vk_surface == 0: return "the window's Vulkan surface could not be made"
+        if __vk_dev != null:
+            if __vk_headless: return ""
+            ok: u32 = 0
+            vkGetPhysicalDeviceSurfaceSupportKHR(__vk_pd, __vk_family, __vk_surface, &ok)
+            if ok == 0 or not __vk_has_swapchain: return "the Vulkan device in use cannot show this window"
+            return ""
+        __vk_make_device()
+
+    __vk_inst_exts: str[]          # the instance's extensions
+    __vk_multi_draw = false        # optional features the device has (see __vk_make_device)
+    __vk_first_instance = false
+    __vk_draw_count = false        # (draws whose number is in a buffer)
+    __vk_subgroups = false         # (subgroup operations in compute programs)
+    __vk_has_swapchain = false
+
+    __vk_make_instance = () -> str:
+        if not lib_available("libvulkan.so.1"): return "no Vulkan loader (libvulkan) found"
+        app = VkApplicationInfo(stype = 0, app_name = data(__zstr(__win_title)), engine_name = data("Sloppy"), api_version = u32(VK_API_1_3))
+        # (every window system's surface extension the loader has: a window may come later)
+        have = __vk_instance_exts()
+        names: str[]
+        loop want in ["VK_KHR_surface", "VK_KHR_xlib_surface", "VK_KHR_wayland_surface", "VK_KHR_win32_surface"]:
+            loop e in have:
+                if e == want: names.push(want)
+        exts: *u8[]
+        loop nm in names: exts.push(data(nm))
+        layers: *u8[]
+        if (env("SLOPPY_VK_VALIDATE") ?? "") == "1":
+            if __vk_has_layer("VK_LAYER_KHRONOS_validation"): layers.push(data("VK_LAYER_KHRONOS_validation"))
+            else: eprint("note: the Vulkan validation layer is not installed")
+        info = VkInstanceCreateInfo(stype = 1, app = (&app) as *u8, nlayers = u32(layers.len()), layers = data(layers) as *u8, nexts = u32(exts.len()), exts = data(exts) as *u8)
+        r = vkCreateInstance((&info) as *u8, null, &__vk_inst)
+        if r != 0:
+            __vk_inst = null
+            return "vkCreateInstance failed ({r}: no Vulkan driver?)"
+        __vk_inst_exts = names
+        ""
+
+    __vk_make_device = () -> str:
+        # the device: a discrete GPU before an integrated one before anything else
+        n: u32 = 0
+        vkEnumeratePhysicalDevices(__vk_inst, &n, null)
+        if n == 0: return "no Vulkan device"
+        pds: *u8[]
+        loop i in [0..int(n)): pds.push(null)
+        vkEnumeratePhysicalDevices(__vk_inst, &n, data(pds))
+        best = -1
+        best_rank = 0
+        why = ""
+        loop i in [0..int(n)):
+            unfit = __vk_device_unfit(pds[i])
+            if len(unfit) > 0:
+                why = unfit
+                continue
+            props = fill(u8(0), 1024)
+            vkGetPhysicalDeviceProperties(pds[i], data(props))
+            kind = (data(props) as *u32)[4]
+            rank = 1
+            if kind == 2: rank = 3
+            else if kind == 1: rank = 2
+            if rank > best_rank:
+                best = i
+                best_rank = rank
+        if best < 0: return "no Vulkan device can be used: {why}"
+        if let want = env("SLOPPY_VK_DEVICE"):
+            # (by index, for testing: e.g. the software one)
+            if let k = to_int(want):
+                if k >= 0 and k < int(n) and len(__vk_device_unfit(pds[k])) == 0: best = k
+        __vk_pd = pds[best]
+        props = fill(u8(0), 1024)
+        vkGetPhysicalDeviceProperties(__vk_pd, data(props))
+        __vk_device_name = __vk_cstr(data(props) + 20)
+        __vk_mem_props = fill(u8(0), 520)
+        vkGetPhysicalDeviceMemoryProperties(__vk_pd, data(__vk_mem_props))
+        __vk_family = u32(__vk_queue_family(__vk_pd))
+        prio: f32 = 1.0
+        q = VkDeviceQueueCreateInfo(stype = 2, family = __vk_family, count = 1, priorities = &prio)
+        f2, f12, f13 = __vk_features(true)
+        # (wanted where the device has them: several draws in one indirect draw, indirect draws
+        # with a first instance, and their number read from a buffer)
+        h2, h12, _ = __vk_features(false)
+        vkGetPhysicalDeviceFeatures2(__vk_pd, data(h2) as *u8)
+        __vk_multi_draw = h2[4 + 9] != 0
+        __vk_first_instance = h2[4 + 10] != 0
+        __vk_draw_count = h12[4 + 1] != 0 and __vk_multi_draw
+        # (VkPhysicalDeviceSubgroupProperties: compute among its stages, and the basic, vote,
+        # arithmetic and ballot operations)
+        sgp = fill(u32(0), 8)
+        sgp[0] = 1000094000
+        pp = fill(u8(0), 16 + 1024)
+        (data(pp) as *u32)[0] = 1000059001
+        (data(pp) as *int)[1] = data(sgp) as int
+        vkGetPhysicalDeviceProperties2(__vk_pd, data(pp))
+        __vk_subgroups = sgp[5] & 0x20 != 0 and sgp[6] & 0xF == 0xF
+        f2[4 + 9] = h2[4 + 9]
+        f2[4 + 10] = h2[4 + 10]
+        if __vk_draw_count: f12[4 + 1] = 1
+        dexts: *u8[]
+        loop e in __vk_device_exts(__vk_pd):
+            if e == "VK_KHR_swapchain": __vk_has_swapchain = true
+        if __vk_has_swapchain and __vk_inst_exts.len() > 0: dexts.push(data("VK_KHR_swapchain"))
+        # (flat outputs from a triangle's last vertex, as in OpenGL, where the device can)
+        pv = fill(u32(0), 6)
+        pv[0] = 1000254000
+        has_pv = false
+        loop e in __vk_device_exts(__vk_pd):
+            if e == "VK_EXT_provoking_vertex": has_pv = true
+        if has_pv:
+            q2 = fill(u32(0), 6)
+            q2[0] = 1000254000
+            g2 = fill(u32(0), 4 + 56)
+            g2[0] = 1000059000
+            __vk_link(g2, q2)
+            vkGetPhysicalDeviceFeatures2(__vk_pd, data(g2) as *u8)
+            if q2[4] != 0:
+                __vk_provoking_last = true
+                pv[4] = 1
+                __vk_link(f13, pv)
+                dexts.push(data("VK_EXT_provoking_vertex"))
+        dinfo = VkDeviceCreateInfo(stype = 3, next = data(f2) as *u8, nqueues = 1, queues = (&q) as *u8, nexts = u32(dexts.len()), exts = data(dexts) as *u8)
+        if vkCreateDevice(__vk_pd, (&dinfo) as *u8, null, &__vk_dev) != 0: return "vkCreateDevice failed"
+        vkGetDeviceQueue(__vk_dev, __vk_family, 0, &__vk_queue)
+        __vk_make_frames()
+        __vk_make_bindless()
+        __vk_load_pipeline_cache()
+        if (env("SLOPPY_VK_VALIDATE") ?? "") == "1": eprint("vulkan: {__vk_device_name}")
+        ""
+
+    # ---------------- the pipeline cache ----------------
+    # Pipelines (made the first time a shader is drawn with some state, or a compute function
+    # dispatched) are kept in a VkPipelineCache, saved between runs: making one again takes the
+    # driver a fraction of the time (on NVIDIA, Breakwater's take 10 ms instead of 70). The file
+    # is the program's in ~/.cache/sloppy ($XDG_CACHE_HOME; %LOCALAPPDATA%\sloppy on Windows),
+    # saved after a frame that made pipelines; SLOPPY_VK_PIPELINE_CACHE=0 leaves it out.
+    __vk_pcache = 0
+    __vk_pcache_dirty = false
+
+    __vk_pcache_path = () -> str:
+        if (env("SLOPPY_VK_PIPELINE_CACHE") ?? "") == "0": return ""
+        dir = ""
+        when TARGET == "windows":
+            dir = env("LOCALAPPDATA") ?? ""
+            if len(dir) == 0: return ""
+            dir = "{dir}\\sloppy"
+        else:
+            if let x = env("XDG_CACHE_HOME"): dir = x
+            if len(dir) == 0:
+                home = env("HOME") ?? ""
+                if len(home) == 0: return ""
+                dir = "{home}/.cache"
+                mkdir(dir)
+            dir = "{dir}/sloppy"
+        if not mkdir(dir): return ""
+        exe = exe_path()
+        name = exe[max(rfind(exe, "/"), rfind(exe, "\\")) + 1..]
+        if ends_with(name, ".exe"): name = name[..len(name) - 4)
+        if len(name) == 0: name = "program"
+        when TARGET == "windows":
+            return "{dir}\\{name}.vkpipelines"
+        "{dir}/{name}.vkpipelines"
+
+    # (the file: "SLPC", the data's length and a hash of it, then the data VkPipelineCache gave)
+    __vk_pcache_hash = (b: *u8, n: int) -> int:
+        h = -3750763034362895579
+        loop i in [0..n): h = (h xor int(b[i])) * 1099511628211
+        h
+
+    __vk_load_pipeline_cache = ():
+        info = fill(0, 5)
+        info[0] = 17
+        path = __vk_pcache_path()
+        bs: u8[]
+        if len(path) > 0:
+            if let f = read_bytes(path): bs = f
+        if bs.len() >= 20 and bs[0] == u8('S') and bs[1] == u8('L') and bs[2] == u8('P') and bs[3] == u8('C'):
+            q = data(bs) + 4
+            n = (q as *int)[0]
+            # (and made by this device and driver: its vendor, device and cache UUID, which the
+            # driver checks too)
+            props = fill(u8(0), 1024)
+            vkGetPhysicalDeviceProperties(__vk_pd, data(props))
+            h = data(bs) + 20
+            same = n >= 32 and __mem_eq(h + 8, data(props) + 8, 8) and __mem_eq(h + 16, data(props) + 276, 16)
+            if same and n == bs.len() - 20 and (q as *int)[1] == __vk_pcache_hash(h, n):
+                info[3] = n
+                info[4] = h as int
+        if vkCreatePipelineCache(__vk_dev, data(info) as *u8, null, &__vk_pcache) != 0: __vk_pcache = 0
+
+    __vk_save_pipeline_cache = ():
+        __vk_pcache_dirty = false
+        if __vk_pcache == 0: return
+        path = __vk_pcache_path()
+        if len(path) == 0: return
+        n = 0
+        if vkGetPipelineCacheData(__vk_dev, __vk_pcache, &n, null) != 0 or n <= 0: return
+        bs = fill(u8(0), 20 + n)
+        if vkGetPipelineCacheData(__vk_dev, __vk_pcache, &n, data(bs) + 20) != 0: return
+        bs.truncate(20 + n)
+        bs[0] = u8('S')
+        bs[1] = u8('L')
+        bs[2] = u8('P')
+        bs[3] = u8('C')
+        q = (data(bs) + 4) as *int
+        q[0] = n
+        q[1] = __vk_pcache_hash(data(bs) + 20, n)
+        write_bytes(path, bs)
+
+    __vk_make_frames = ():
+        __vk_frames = []
+        loop i in [0..__VK_FRAMES):
+            f = __VkFrame()
+            pinfo = VkCommandPoolCreateInfo(stype = 39, flags = 1, family = __vk_family)   # transient
+            __vk_check(vkCreateCommandPool(__vk_dev, (&pinfo) as *u8, null, &f.pool), "vkCreateCommandPool")
+            ainfo = VkCommandBufferAllocateInfo(stype = 40, pool = f.pool, level = 0, count = 1)
+            __vk_check(vkAllocateCommandBuffers(__vk_dev, (&ainfo) as *u8, &f.cb), "vkAllocateCommandBuffers")
+            finfo = VkFenceCreateInfo(stype = 8, flags = 1)         # signaled: the first wait passes
+            __vk_check(vkCreateFence(__vk_dev, (&finfo) as *u8, null, &f.fence), "vkCreateFence")
+            sinfo = VkSemaphoreCreateInfo(stype = 9)
+            __vk_check(vkCreateSemaphore(__vk_dev, (&sinfo) as *u8, null, &f.acquired), "vkCreateSemaphore")
+            __vk_frames.push(f)
+
+    # ---------------- GPU time (the statistics overlay, stats.jo) ----------------
+    # Timestamps written among a frame's commands, in pairs around what is timed, read back when
+    # the frame comes round again (its fence has passed): __VK_TS queries per frame in flight.
+    const __VK_TS = 128
+    __vk_ts_tried = false
+    __vk_ts_pool = 0
+    __vk_ts_period = 0.0           # seconds per tick
+    __vk_ts_mask = 0
+    __vk_ts_used: int[]            # per frame in flight: its queries written
+    __vk_ts_pairs: int[][]         # per frame in flight: what each pair timed, its two queries
+    __vk_ts_session = 0            # (each recording: a pair begun in an earlier one is dropped)
+    __vk_ts_first = -1             # (the recording's first timestamp: the whole of it is timed)
+
+    # time the GPU's work from now on, if the device can (a query pool, made the first time)
+    __vk_ts_want = ():
+        if __vk_ts_tried: return
+        __vk_ts_tried = true
+        props = fill(u8(0), 1024)
+        vkGetPhysicalDeviceProperties(__vk_pd, data(props))
+        period = f64(((data(props) + 720) as *f32)[0])     # VkPhysicalDeviceLimits.timestampPeriod (ns)
+        n: u32 = 0
+        vkGetPhysicalDeviceQueueFamilyProperties(__vk_pd, &n, null)
+        qf = fill(u8(0), int(n) * 24)
+        vkGetPhysicalDeviceQueueFamilyProperties(__vk_pd, &n, data(qf))
+        bits = int((data(qf) as *u32)[int(__vk_family) * 6 + 2])    # timestampValidBits
+        if bits == 0 or period <= 0.0: return
+        info = fill(u32(0), 8)
+        info[0] = 11
+        info[5] = 2                                        # VK_QUERY_TYPE_TIMESTAMP
+        info[6] = u32(__VK_TS * __VK_FRAMES)
+        if vkCreateQueryPool(__vk_dev, data(info) as *u8, null, &__vk_ts_pool) != 0:
+            __vk_ts_pool = 0
+            return
+        __vk_ts_period = period * 1e-9
+        __vk_ts_mask = -1
+        if bits < 64: __vk_ts_mask = (1 << bits) - 1
+        __vk_ts_used = fill(0, __VK_FRAMES)
+        __vk_ts_pairs = []
+        loop _ in [0..__VK_FRAMES): __vk_ts_pairs.push([])
+        # (this frame's queries are not reset yet: its recording times nothing)
+        __vk_ts_used[__vk_frame] = __VK_TS
+        __vk_ts_first = -1
+
+    # (a recording begins: what this frame timed the last time round comes back, its queries are
+    # reset, and the recording's start is marked)
+    __vk_ts_begin = (cb: *u8):
+        base = __vk_frame * __VK_TS
+        u = __vk_ts_used[__vk_frame]
+        p = __vk_ts_pairs[__vk_frame]
+        if u > 0 and u <= __VK_TS and p.len() > 0:
+            res = fill(0, u)
+            if vkGetQueryPoolResults(__vk_dev, __vk_ts_pool, u32(base), u32(u), 8 * u, data(res) as *u8, u64(8), u32(1)) == 0:
+                k = 0
+                loop k < p.len():
+                    __gpu_time(p[k], f64((res[p[k + 2]] - res[p[k + 1]]) & __vk_ts_mask) * __vk_ts_period)
+                    k += 3
+        __vk_ts_pairs[__vk_frame].clear()
+        vkCmdResetQueryPool(cb, __vk_ts_pool, u32(base), u32(__VK_TS))
+        __vk_ts_used[__vk_frame] = 0
+        __vk_ts_session += 1
+        __vk_ts_first = __vk_ts_mark()
+
+    # a timestamp now, in the commands (its query, counted from the frame's first; -1: none)
+    __vk_ts_mark = () -> int:
+        if __vk_ts_pool == 0 or not __vk_recording: return -1
+        u = __vk_ts_used[__vk_frame]
+        if u >= __VK_TS: return -1
+        vkCmdWriteTimestamp2(__vk_cb(), u64(VK_STAGE_ALL), __vk_ts_pool, u32(__vk_frame * __VK_TS + u))
+        __vk_ts_used[__vk_frame] = u + 1
+        u
+
+    # what (a zone; -1: the whole recording) took the GPU from the timestamp q0 (made in recording
+    # session) until now
+    __vk_ts_pair = (what: int, q0: int, session: int):
+        if q0 < 0 or session != __vk_ts_session: return
+        q1 = __vk_ts_mark()
+        if q1 < 0: return
+        __vk_ts_pairs[__vk_frame].push(what)
+        __vk_ts_pairs[__vk_frame].push(q0)
+        __vk_ts_pairs[__vk_frame].push(q1)
+
+    # ---------------- memory ----------------
+    # a memory type allowed by bits with all of the flags in want (and, preferably, those in like)
+    # (a type with want, and without avoid: -1 when there is none)
+    __vk_memory_type_without = (bits: u32, want: u32, avoid: u32) -> int:
+        p = data(__vk_mem_props) as *u32
+        loop i in [0..int(p[0])):
+            flags = p[1 + 2 * i]
+            if bits & (u32(1) << u32(i)) != 0 and flags & want == want and flags & avoid != avoid: return i
+        -1
+
+    __vk_memory_type = (bits: u32, want: u32, like: u32) -> int:
+        p = data(__vk_mem_props) as *u32
+        n = int(p[0])
+        found = -1
+        loop i in [0..n):
+            flags = p[1 + 2 * i]
+            if bits & (u32(1) << u32(i)) == 0 or flags & want != want: continue
+            if flags & like == like: return i
+            if found < 0: found = i
+        found
+
+    # Device memory comes in large blocks (64 MiB), each resource a range of one (what does not fit
+    # in half a block gets a block of its own, as do host-visible buffers, which are mapped); buffers
+    # and images keep to blocks of their own kind (bufferImageGranularity). A resource's memory is
+    # the id of its range.
+    const __VK_MEM_BLOCK = 64 << 20
+
+    struct __VkMemBlock:
+        mem: int
+        type: int
+        kind: int                  # 0 buffers, 1 images
+        size: int
+        dedicated: bool
+        free_off: int[]            # free ranges, in order
+        free_size: int[]
+        ptr: *u8                   # mapped (host-visible), or null
+
+    struct __VkRange:
+        block: int
+        off: int
+        size: int
+
+    __vk_mblocks: __VkMemBlock[]
+    __vk_ranges: __VkRange[] = [__VkRange()]
+    __vk_free_ranges: int[]
+
+    __vk_new_block = (t: int, kind: int, size: int, dedicated: bool, host: bool, may_fail: bool = false) -> int:
+        flags = VkMemoryAllocateFlagsInfo(stype = 1000060000, flags = 2)    # device address
+        info = VkMemoryAllocateInfo(stype = 5, next = (&flags) as *u8, size = u64(size), type_index = u32(t))
+        mem = 0
+        r = vkAllocateMemory(__vk_dev, (&info) as *u8, null, &mem)
+        if r != 0 and may_fail: return -1
+        __vk_check(r, "vkAllocateMemory")
+        b = __VkMemBlock(mem = mem, type = t, kind = kind, size = size, dedicated = dedicated)
+        b.free_off.push(0)
+        b.free_size.push(size)
+        if host: __vk_check(vkMapMemory(__vk_dev, mem, 0, u64(0) - u64(1), 0, &b.ptr), "vkMapMemory")
+        __vk_mblocks.push(b)
+        __vk_mblocks.len() - 1
+
+    # a range of n bytes (aligned) in block bi, or -1
+    __vk_fit = (bi: int, n: int, align: int) -> int:
+        loop i in [0..__vk_mblocks[bi].free_off.len()):
+            o = __vk_mblocks[bi].free_off[i]
+            z = __vk_mblocks[bi].free_size[i]
+            start = (o + align - 1) / align * align
+            if start + n > o + z: continue
+            # (what is left before and after it stays free)
+            __vk_mblocks[bi].free_off.remove(i)
+            __vk_mblocks[bi].free_size.remove(i)
+            k = i
+            if start > o:
+                __vk_mblocks[bi].free_off.insert(k, o)
+                __vk_mblocks[bi].free_size.insert(k, start - o)
+                k += 1
+            if start + n < o + z:
+                __vk_mblocks[bi].free_off.insert(k, start + n)
+                __vk_mblocks[bi].free_size.insert(k, o + z - start - n)
+            r = __VkRange(bi, start, n)
+            if __vk_free_ranges.len() > 0:
+                id = __vk_free_ranges.pop()
+                __vk_ranges[id] = r
+                return id
+            __vk_ranges.push(r)
+            return __vk_ranges.len() - 1
+        -1
+
+    __vk_alloc = (req: VkMemoryRequirements, want: u32, like: u32, kind: int) -> int:
+        t = __vk_memory_type(req.type_bits, want, like)
+        if t < 0: panic("Vulkan: no suitable memory")
+        n = int(req.size)
+        align = max(int(req.alignment), 1)
+        host = want & u32(VK_MEM_HOST_VISIBLE) != 0
+        if host or n > __VK_MEM_BLOCK / 2:
+            # (memory it would rather have, full: a GPU's 256 MB the CPU can write, without
+            # resizable BAR. Then memory without it: host memory the GPU reads over the bus)
+            if like != 0:
+                bi = __vk_new_block(t, kind, n, true, host, true)
+                if bi >= 0: return __vk_fit(bi, n, 1)
+                t2 = __vk_memory_type_without(req.type_bits, want, like)
+                if t2 >= 0: t = t2
+            return __vk_fit(__vk_new_block(t, kind, n, true, host), n, 1)
+        loop bi in [0..__vk_mblocks.len()):
+            if __vk_mblocks[bi].type != t or __vk_mblocks[bi].kind != kind or __vk_mblocks[bi].dedicated: continue
+            r = __vk_fit(bi, n, align)
+            if r >= 0: return r
+        __vk_fit(__vk_new_block(t, kind, __VK_MEM_BLOCK, false, false), n, align)
+
+    __vk_range_mem = (r: int) -> int: __vk_mblocks[__vk_ranges[r].block].mem
+    __vk_range_off = (r: int) -> int: __vk_ranges[r].off
+
+    # give a range back (a block of its own is freed whole)
+    __vk_mem_free = (r: int):
+        if r <= 0: return
+        rg = __vk_ranges[r]
+        bi = rg.block
+        __vk_free_ranges.push(r)
+        __vk_ranges[r] = __VkRange()
+        if __vk_mblocks[bi].dedicated:
+            vkFreeMemory(__vk_dev, __vk_mblocks[bi].mem, null)
+            __vk_mblocks[bi].type = -1
+            __vk_mblocks[bi].mem = 0
+            return
+        offs = __vk_mblocks[bi].free_off
+        k = 0
+        loop k < offs.len() and offs[k] < rg.off: k += 1
+        __vk_mblocks[bi].free_off.insert(k, rg.off)
+        __vk_mblocks[bi].free_size.insert(k, rg.size)
+        # (joined with the free ranges next to it)
+        if k + 1 < __vk_mblocks[bi].free_off.len() and __vk_mblocks[bi].free_off[k] + __vk_mblocks[bi].free_size[k] == __vk_mblocks[bi].free_off[k + 1]:
+            __vk_mblocks[bi].free_size[k] += __vk_mblocks[bi].free_size[k + 1]
+            __vk_mblocks[bi].free_off.remove(k + 1)
+            __vk_mblocks[bi].free_size.remove(k + 1)
+        if k > 0 and __vk_mblocks[bi].free_off[k - 1] + __vk_mblocks[bi].free_size[k - 1] == __vk_mblocks[bi].free_off[k]:
+            __vk_mblocks[bi].free_size[k - 1] += __vk_mblocks[bi].free_size[k]
+            __vk_mblocks[bi].free_off.remove(k)
+            __vk_mblocks[bi].free_size.remove(k)
+
+    # ---------------- buffers ----------------
+    struct __VkBuffer:
+        buffer: int
+        mem: int
+        size: int
+        ptr: *u8                   # mapped (host-visible buffers), or null
+        addr: int                  # its device address (buffers made with one), or 0
+
+    __vk_buffer = (size: int, usage: u32, want: u32, like: u32) -> __VkBuffer:
+        info = VkBufferCreateInfo(stype = 12, size = u64(size), usage = usage)
+        b = __VkBuffer(size = size)
+        __vk_check(vkCreateBuffer(__vk_dev, (&info) as *u8, null, &b.buffer), "vkCreateBuffer")
+        req = VkMemoryRequirements()
+        vkGetBufferMemoryRequirements(__vk_dev, b.buffer, (&req) as *u8)
+        address = usage & 0x20000 != 0
+        b.mem = __vk_alloc(req, want, like, 0)
+        __vk_check(vkBindBufferMemory(__vk_dev, b.buffer, __vk_range_mem(b.mem), u64(__vk_range_off(b.mem))), "vkBindBufferMemory")
+        p = __vk_mblocks[__vk_ranges[b.mem].block].ptr
+        if p != null: b.ptr = p + __vk_range_off(b.mem)
+        if address:
+            ai = VkBufferDeviceAddressInfo(stype = 1000244001, buffer = b.buffer)
+            b.addr = int(vkGetBufferDeviceAddress(__vk_dev, (&ai) as *u8))
+        b
+
+    __vk_free_buffer = (b: __VkBuffer):
+        if b.buffer == 0: return
+        vkDestroyBuffer(__vk_dev, b.buffer, null)
+        __vk_mem_free(b.mem)
+
+    # a memory dependency (no layouts): e.g. a transfer's writes before the host reads them
+    __vk_memory_barrier = (cb: *u8, src_stages: int, src_access: int, dst_stages: int, dst_access: int):
+        b = VkMemoryBarrier2(stype = 1000314000, src_stages = src_stages, src_access = src_access, dst_stages = dst_stages, dst_access = dst_access)
+        dep = VkDependencyInfo(stype = 1000314003, nmem = 1, mem = (&b) as *u8)
+        vkCmdPipelineBarrier2(cb, (&dep) as *u8)
+
+    # ---------------- images ----------------
+    __vk_image = (w: int, h: int, format: u32, usage: u32, aspect: u32, samples: int = 1) -> __VkImage:
+        info = VkImageCreateInfo(stype = 14, image_type = 1, format = format, width = u32(w), height = u32(h), depth = 1, mips = 1, layers = 1, samples = u32(samples), usage = usage)
+        img = __VkImage(width = w, height = h, format = format, layout = u32(VK_LAYOUT_UNDEFINED), aspect = aspect)
+        __vk_check(vkCreateImage(__vk_dev, (&info) as *u8, null, &img.image), "vkCreateImage")
+        req = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(__vk_dev, img.image, (&req) as *u8)
+        img.mem = __vk_alloc(req, u32(VK_MEM_DEVICE_LOCAL), 0, 1)
+        __vk_check(vkBindImageMemory(__vk_dev, img.image, __vk_range_mem(img.mem), u64(__vk_range_off(img.mem))), "vkBindImageMemory")
+        img.view = __vk_view(img.image, format, aspect)
+        img
+
+    __vk_view = (image: int, format: u32, aspect: u32) -> int:
+        info = VkImageViewCreateInfo(stype = 15, image = image, view_type = 1, format = format, aspect = aspect, mips = 1, layers = 1)
+        v = 0
+        __vk_check(vkCreateImageView(__vk_dev, (&info) as *u8, null, &v), "vkCreateImageView")
+        v
+
+    __vk_free_image = (img: __VkImage):
+        if img.image == 0: return
+        vkDestroyImageView(__vk_dev, img.view, null)
+        vkDestroyImage(__vk_dev, img.image, null)
+        __vk_mem_free(img.mem)
+
+    # a layout transition (and the memory dependency that goes with it) for an image
+    __vk_barrier = (cb: *u8, img: mut __VkImage, layout: u32, src_stages: int, src_access: int, dst_stages: int, dst_access: int):
+        __vk_barrier_raw(cb, img.image, img.aspect, img.layout, layout, src_stages, src_access, dst_stages, dst_access)
+        img.layout = layout
+
+    __vk_barrier_raw = (cb: *u8, image: int, aspect: u32, old: u32, new: u32, src_stages: int, src_access: int, dst_stages: int, dst_access: int):
+        b = VkImageMemoryBarrier2(stype = 1000314002, src_stages = src_stages, src_access = src_access, dst_stages = dst_stages, dst_access = dst_access,
+            old_layout = old, new_layout = new, src_family = 0xFFFFFFFF, dst_family = 0xFFFFFFFF, image = image, aspect = aspect, mips = 1, layers = 1)
+        dep = VkDependencyInfo(stype = 1000314003, nimg = 1, img = (&b) as *u8)
+        vkCmdPipelineBarrier2(cb, (&dep) as *u8)
+
+    # ---------------- the swapchain ----------------
+    __vk_make_swapchain = (w: int, h: int):
+        __vk_sc_req_w = w
+        __vk_sc_req_h = h
+        caps = fill(u8(0), 64)
+        __vk_check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(__vk_pd, __vk_surface, data(caps)), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
+        cu = data(caps) as *u32
+        min_images = cu[0]
+        max_images = cu[1]
+        cur_w = cu[2]
+        width = w
+        height = h
+        if cur_w != 0xFFFFFFFF:
+            width = int(cu[2])
+            height = int(cu[3])
+        width = clamp(width, int(cu[4]), int(cu[6]))
+        height = clamp(height, int(cu[5]), int(cu[7]))
+        if width <= 0 or height <= 0:
+            __vk_sc_w = 0
+            __vk_sc_h = 0
+            return
+        transform = cu[10]
+        alpha_ok = cu[11]
+        images = min_images + 1
+        if max_images != 0 and images > max_images: images = max_images
+        # a format the window takes (8 bits a channel, as OpenGL's default framebuffer)
+        n: u32 = 0
+        vkGetPhysicalDeviceSurfaceFormatsKHR(__vk_pd, __vk_surface, &n, null)
+        fmts = fill(u32(0), int(n) * 2)
+        vkGetPhysicalDeviceSurfaceFormatsKHR(__vk_pd, __vk_surface, &n, data(fmts) as *u8)
+        format = fmts[0]
+        space = fmts[1]
+        loop i in [0..int(n)):
+            if (fmts[2 * i] == u32(VK_FORMAT_B8G8R8A8_UNORM) or fmts[2 * i] == u32(VK_FORMAT_R8G8B8A8_UNORM)) and fmts[2 * i + 1] == 0:
+                format = fmts[2 * i]
+                space = 0
+                break
+        alpha = u32(1)
+        if alpha_ok & 1 == 0: alpha = alpha_ok & (0 - alpha_ok)
+        old = __vk_swapchain
+        info = VkSwapchainCreateInfo(stype = 1000001000, surface = __vk_surface, min_images = images, format = format, color_space = space,
+            width = u32(width), height = u32(height), layers = 1, usage = u32(VK_USAGE_TRANSFER_DST | VK_USAGE_COLOR), transform = transform, alpha = alpha,
+            present_mode = __vk_present_mode(), clipped = 1, old = old)
+        __vk_check(vkCreateSwapchainKHR(__vk_dev, (&info) as *u8, null, &__vk_swapchain), "vkCreateSwapchainKHR")
+        if old != 0: vkDestroySwapchainKHR(__vk_dev, old, null)
+        __vk_sc_format = format
+        __vk_sc_w = width
+        __vk_sc_h = height
+        count: u32 = 0
+        vkGetSwapchainImagesKHR(__vk_dev, __vk_swapchain, &count, null)
+        __vk_sc_images = fill(0, int(count))
+        vkGetSwapchainImagesKHR(__vk_dev, __vk_swapchain, &count, data(__vk_sc_images))
+        loop s in __vk_sc_rendered: vkDestroySemaphore(__vk_dev, s, null)
+        __vk_sc_rendered = []
+        __vk_sc_layout_fresh = []
+        loop i in [0..int(count)):
+            sinfo = VkSemaphoreCreateInfo(stype = 9)
+            s = 0
+            __vk_check(vkCreateSemaphore(__vk_dev, (&sinfo) as *u8, null, &s), "vkCreateSemaphore")
+            __vk_sc_rendered.push(s)
+            __vk_sc_layout_fresh.push(true)
+
+    # vsync (FIFO, which every driver has) unless SLOPPY_VSYNC=0 asks for the fastest
+    __vk_present_mode = () -> u32:
+        if (env("SLOPPY_VSYNC") ?? "") != "0": return 2
+        n: u32 = 0
+        vkGetPhysicalDeviceSurfacePresentModesKHR(__vk_pd, __vk_surface, &n, null)
+        modes = fill(u32(0), int(n))
+        vkGetPhysicalDeviceSurfacePresentModesKHR(__vk_pd, __vk_surface, &n, data(modes) as *u8)
+        loop m in modes:
+            if m == 1: return 1                # mailbox
+        loop m in modes:
+            if m == 0: return 0                # immediate
+        2
+
+    # the screen image (and its depth) at the window's size
+    __vk_resize_screen = (w: int, h: int):
+        if __vk_screen.width == max(w, 1) and __vk_screen.height == max(h, 1): return
+        vkDeviceWaitIdle(__vk_dev)
+        __vk_free_image(__vk_screen)
+        __vk_free_image(__vk_screen_depth)
+        __vk_free_image(__vk_screen_ms)
+        __vk_free_image(__vk_screen_ms_depth)
+        __vk_screen = __vk_image(max(w, 1), max(h, 1), u32(VK_FORMAT_R8G8B8A8_UNORM), u32(VK_USAGE_COLOR | VK_USAGE_TRANSFER_SRC | VK_USAGE_TRANSFER_DST | VK_USAGE_SAMPLED), 1)
+        if __vk_samples > 1:
+            __vk_screen_ms = __vk_image(max(w, 1), max(h, 1), u32(VK_FORMAT_R8G8B8A8_UNORM), u32(VK_USAGE_COLOR), 1, __vk_samples)
+            __vk_screen_ms_depth = __vk_image(max(w, 1), max(h, 1), u32(VK_FORMAT_D32_SFLOAT), u32(VK_USAGE_DEPTH), 2, __vk_samples)
+        else: __vk_screen_depth = __vk_image(max(w, 1), max(h, 1), u32(VK_FORMAT_D32_SFLOAT), u32(VK_USAGE_DEPTH), 2)
+
+    # ---------------- frames ----------------
+    __vk_cb = () -> *u8: __vk_frames[__vk_frame].cb
+
+    # start recording this frame's commands (after its previous use has finished)
+    __vk_begin_frame = ():
+        if __vk_recording: return
+        f = __vk_frames[__vk_frame]
+        __vk_check(vkWaitForFences(__vk_dev, 1, &f.fence, 1, u64(0) - u64(1)), "vkWaitForFences")
+        __vk_check(vkResetCommandPool(__vk_dev, f.pool, 0), "vkResetCommandPool")
+        loop d in __vk_frames[__vk_frame].dead: __vk_destroy(d)
+        __vk_frames[__vk_frame].dead.clear()
+        __vk_frames[__vk_frame].block = 0
+        __vk_frames[__vk_frame].used = 0
+        bi = VkCommandBufferBeginInfo(stype = 42, flags = 1)
+        __vk_check(vkBeginCommandBuffer(f.cb, (&bi) as *u8), "vkBeginCommandBuffer")
+        __vk_recording = true
+        if __vk_ts_pool != 0: __vk_ts_begin(f.cb)
+        __vk_resize_screen(__win_w, __win_h)
+
+    # (Wayland, when the window draws its own title bar: its pixels, BGRX rows top first, shown
+    # above the frame)
+    __vk_bar: u8[]
+    __vk_bar_h = 0
+
+    # show the frame: copy the screen into the next swapchain image (turned over: the screen's
+    # row 0 is the bottom), submit, present
+    __vk_present = ():
+        __vk_begin_frame()
+        __vg_end_frame()
+        if __vk_pcache_dirty: __vk_save_pipeline_cache()
+        if __vk_headless:
+            __vk_submit_and_wait()
+            __vk_frame = (__vk_frame + 1) % __VK_FRAMES
+            return
+        f = __vk_frames[__vk_frame]
+        cb = f.cb
+        if __win_w <= 0 or __win_h <= 0:
+            # (minimized: the frame is drawn but not shown)
+            __vk_submit_and_wait()
+            __vk_frame = (__vk_frame + 1) % __VK_FRAMES
+            return
+        win_h = __win_h + __vk_bar_h
+        if __vk_swapchain == 0 or __vk_sc_req_w != __win_w or __vk_sc_req_h != win_h: __vk_make_swapchain(__win_w, win_h)
+        if __vk_sc_w <= 0 or __vk_sc_h <= 0:
+            __vk_submit_and_wait()
+            __vk_frame = (__vk_frame + 1) % __VK_FRAMES
+            return
+        idx: u32 = 0
+        r = vkAcquireNextImageKHR(__vk_dev, __vk_swapchain, u64(0) - u64(1), f.acquired, 0, &idx)
+        if r == VK_OUT_OF_DATE:
+            vkDeviceWaitIdle(__vk_dev)
+            __vk_make_swapchain(__win_w, __win_h)
+            r = vkAcquireNextImageKHR(__vk_dev, __vk_swapchain, u64(0) - u64(1), f.acquired, 0, &idx)
+        if r != 0 and r != VK_SUBOPTIMAL: panic("Vulkan: vkAcquireNextImageKHR failed ({r})")
+        sc_img = __vk_sc_images[int(idx)]
+        __vk_barrier(cb, __vk_screen, u32(VK_LAYOUT_TRANSFER_SRC), VK_STAGE_ALL, VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_READ)
+        __vk_barrier_raw(cb, sc_img, 1, u32(VK_LAYOUT_UNDEFINED), u32(VK_LAYOUT_TRANSFER_DST), VK_STAGE_TRANSFER, 0, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE)
+        bar = min(__vk_bar_h, __vk_sc_h)
+        if bar > 0 and __vk_bar.len() >= __vk_sc_w * bar * 4:
+            px = __vk_bar
+            # (drawn as BGRX)
+            if __vk_sc_format == u32(VK_FORMAT_R8G8B8A8_UNORM):
+                loop i in [0..__vk_sc_w * bar):
+                    t = px[i * 4]
+                    px[i * 4] = px[i * 4 + 2]
+                    px[i * 4 + 2] = t
+            blk, off = __vk_upload(data(px), __vk_sc_w * bar * 4)
+            creg = VkBufferImageCopy(offset = u64(off), aspect = 1, layers = 1, width = u32(__vk_sc_w), height = u32(bar), depth = 1)
+            vkCmdCopyBufferToImage(cb, __vk_blocks[blk].buffer, sc_img, u32(VK_LAYOUT_TRANSFER_DST), 1, (&creg) as *u8)
+        reg = VkImageBlit2(stype = 1000337008, src_aspect = 1, src_layers = 1, dst_aspect = 1, dst_layers = 1)
+        reg.src0[1] = i32(__vk_screen.height)
+        reg.src1[0] = i32(__vk_screen.width)
+        reg.src1[2] = 1
+        reg.dst0[1] = i32(bar)
+        reg.dst1[0] = i32(__vk_sc_w)
+        reg.dst1[1] = i32(__vk_sc_h)
+        reg.dst1[2] = 1
+        bi = VkBlitImageInfo2(stype = 1000337004, src = __vk_screen.image, src_layout = u32(VK_LAYOUT_TRANSFER_SRC), dst = sc_img, dst_layout = u32(VK_LAYOUT_TRANSFER_DST), nregions = 1, regions = (&reg) as *u8, filter = 0)
+        vkCmdBlitImage2(cb, (&bi) as *u8)
+        __vk_barrier_raw(cb, sc_img, 1, u32(VK_LAYOUT_TRANSFER_DST), u32(VK_LAYOUT_PRESENT), VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_ALL, 0)
+        __vk_ts_pair(-1, __vk_ts_first, __vk_ts_session)
+        __vk_check(vkEndCommandBuffer(cb), "vkEndCommandBuffer")
+        __vk_recording = false
+        wait = VkSemaphoreSubmitInfo(stype = 1000314005, semaphore = f.acquired, stages = VK_STAGE_TRANSFER)
+        signal = VkSemaphoreSubmitInfo(stype = 1000314005, semaphore = __vk_sc_rendered[int(idx)], stages = VK_STAGE_ALL)
+        cbi = VkCommandBufferSubmitInfo(stype = 1000314006, cb = cb)
+        si = VkSubmitInfo2(stype = 1000314004, nwait = 1, wait = (&wait) as *u8, ncbs = 1, cbs = (&cbi) as *u8, nsignal = 1, signal = (&signal) as *u8)
+        __vk_check(vkResetFences(__vk_dev, 1, &f.fence), "vkResetFences")
+        __vk_check(vkQueueSubmit2(__vk_queue, 1, (&si) as *u8, f.fence), "vkQueueSubmit2")
+        pi = VkPresentInfo(stype = 1000001001, nwait = 1, wait = &__vk_sc_rendered[int(idx)], nswapchains = 1, swapchains = &__vk_swapchain, indices = &idx)
+        r = vkQueuePresentKHR(__vk_queue, (&pi) as *u8)
+        if r == VK_OUT_OF_DATE or r == VK_SUBOPTIMAL:
+            vkDeviceWaitIdle(__vk_dev)
+            __vk_make_swapchain(__win_w, __win_h)
+        else if r != 0: panic("Vulkan: vkQueuePresentKHR failed ({r})")
+        __vk_frame = (__vk_frame + 1) % __VK_FRAMES
+
+    # run what this frame has recorded so far and wait for it (for reading results back); the
+    # frame goes on recording afresh
+    __vk_submit_and_wait = ():
+        f = __vk_frames[__vk_frame]
+        __vk_ts_pair(-1, __vk_ts_first, __vk_ts_session)
+        __vk_check(vkEndCommandBuffer(f.cb), "vkEndCommandBuffer")
+        __vk_recording = false
+        cbi = VkCommandBufferSubmitInfo(stype = 1000314006, cb = f.cb)
+        si = VkSubmitInfo2(stype = 1000314004, ncbs = 1, cbs = (&cbi) as *u8)
+        __vk_check(vkResetFences(__vk_dev, 1, &f.fence), "vkResetFences")
+        __vk_check(vkQueueSubmit2(__vk_queue, 1, (&si) as *u8, f.fence), "vkQueueSubmit2")
+        __vk_check(vkWaitForFences(__vk_dev, 1, &f.fence, 1, u64(0) - u64(1)), "vkWaitForFences")
+
+    __vk_readback = __VkBuffer()
+
+    # an RGBA8 image's pixels, rows as stored (for the screen: bottom first, as glReadPixels)
+    __vk_read_pixels = (img: mut __VkImage, out: *u8):
+        __vk_begin_frame()
+        n = img.width * img.height * 4
+        if __vk_readback.size < n:
+            __vk_free_buffer(__vk_readback)
+            __vk_readback = __vk_buffer(n, u32(0x2), u32(VK_MEM_HOST_VISIBLE | VK_MEM_HOST_COHERENT), u32(VK_MEM_HOST_CACHED))
+        cb = __vk_cb()
+        __vk_barrier(cb, img, u32(VK_LAYOUT_TRANSFER_SRC), VK_STAGE_ALL, VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_READ)
+        reg = VkBufferImageCopy(aspect = 1, layers = 1, width = u32(img.width), height = u32(img.height), depth = 1)
+        vkCmdCopyImageToBuffer(cb, img.image, u32(VK_LAYOUT_TRANSFER_SRC), __vk_readback.buffer, 1, (&reg) as *u8)
+        __vk_memory_barrier(cb, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_HOST, VK_ACCESS_HOST_READ)
+        __vk_submit_and_wait()
+        mem_copy(out, __vk_readback.ptr, n)
+
+    # ---------------- per-frame upload memory ----------------
+    # Data a frame's commands read (uniforms, 2D vertices, staging copies) is written into
+    # host-visible blocks that belong to the frame: bumped through, reused when the frame comes
+    # around again (its fence has passed). Reached by device address or by buffer and offset.
+    const __VK_BLOCK = 8 << 20
+    __vk_blocks: __VkBuffer[]
+
+    # room for n bytes (aligned to `align`) in this frame's upload memory: (block, offset)
+    __vk_upload_room = (n: int, align: int) -> (int, int):
+        __vk_begin_frame()
+        fi = __vk_frame
+        loop true:
+            f = __vk_frames[fi]
+            if f.block < f.arena.len():
+                b = f.arena[f.block]
+                off = (f.used + align - 1) / align * align
+                if off + n <= __vk_blocks[b].size:
+                    __vk_frames[fi].used = off + n
+                    return (b, off)
+                __vk_frames[fi].block += 1
+                __vk_frames[fi].used = 0
+                continue
+            # a new block (as large as needed)
+            size = max(__VK_BLOCK, n)
+            usage = u32(0x1 | 0x2 | 0x20 | 0x40 | 0x100 | 0x20000)     # transfer src/dst, storage, index, indirect, address
+            __vk_blocks.push(__vk_buffer(size, usage, u32(VK_MEM_HOST_VISIBLE | VK_MEM_HOST_COHERENT), u32(VK_MEM_DEVICE_LOCAL)))
+            __vk_frames[fi].arena.push(__vk_blocks.len() - 1)
+        (0, 0)
+
+    # copy n bytes to this frame's upload memory: (block, offset); see __vk_addr
+    __vk_upload = (p: *u8, n: int, align: int = 16) -> (int, int):
+        b, off = __vk_upload_room(max(n, 4), align)
+        if n > 0: mem_copy(__vk_blocks[b].ptr + off, p, n)
+        (b, off)
+
+    __vk_addr = (b: int, off: int) -> int: __vk_blocks[b].addr + off
+
+    # ---------------- destroying what the GPU may still use ----------------
+    # (with the frame being recorded, destroyed once it has run; between frames, with the last
+    # one: the frame to come begins by emptying its own list, which only waits for the frame
+    # before the last)
+    __vk_defer = (kind: int, a: int, b: int):
+        if a == 0: return
+        f = __vk_frame
+        if not __vk_recording: f = (__vk_frame + __VK_FRAMES - 1) % __VK_FRAMES
+        __vk_frames[f].dead.push(__VkDead(kind, a, b))
+
+    __vk_destroy = (d: __VkDead):
+        if d.kind == 0:
+            vkDestroyBuffer(__vk_dev, d.a, null)
+            __vk_mem_free(d.b)
+        else if d.kind == 1:
+            vkDestroyImageView(__vk_dev, d.b, null)
+            vkDestroyImage(__vk_dev, d.a, null)
+        else if d.kind == 2: __vk_mem_free(d.a)
+        else if d.kind == 3: vkDestroyPipeline(__vk_dev, d.a, null)
+        else if d.kind == 4:
+            # (a texture slot: free again, pointing at the white texture until reused)
+            __vk_set_texture(d.a, __vgt[0].img.view, false, false)
+            __vk_slot_free.push(d.a)
+
+    __vk_defer_image = (img: __VkImage):
+        __vk_defer(1, img.image, img.view)
+        __vk_defer(2, img.mem, 0)
+
+    __vk_defer_buffer = (b: __VkBuffer): __vk_defer(0, b.buffer, b.mem)
+
+    # ---------------- the bindless textures and the pipeline layout ----------------
+    # One descriptor set for everything: binding 0 holds every texture (combined image samplers,
+    # indexed by Texture.id), updated as textures come and go, even while frames use it. The push
+    # constants are the same for every pipeline (see compiler/spirv.jo).
+    const __VK_MAX_TEXTURES = 16384
+    const __VK_PUSH_SIZE = 40
+    __vk_set_layout = 0
+    __vk_set = 0
+    __vk_layout = 0
+    __vk_samplers: int[]           # [linear?][repeat?]: nearest clamp, nearest repeat, linear clamp, linear repeat
+
+    __vk_make_bindless = ():
+        b = VkDescriptorSetLayoutBinding(binding = 0, ty = 1, count = u32(__VK_MAX_TEXTURES), stages = 0x7FFFFFFF)
+        bflags: u32 = 0x1 | 0x2 | 0x4                 # update after bind, unused while pending, partially bound
+        fi = VkDescriptorSetLayoutBindingFlagsCreateInfo(stype = 1000161000, nbindings = 1, flags = &bflags)
+        li = VkDescriptorSetLayoutCreateInfo(stype = 32, next = (&fi) as *u8, flags = 0x2, nbindings = 1, bindings = (&b) as *u8)
+        __vk_check(vkCreateDescriptorSetLayout(__vk_dev, (&li) as *u8, null, &__vk_set_layout), "vkCreateDescriptorSetLayout")
+        size = VkDescriptorPoolSize(ty = 1, count = u32(__VK_MAX_TEXTURES))
+        pi = VkDescriptorPoolCreateInfo(stype = 33, flags = 0x2, max_sets = 1, nsizes = 1, sizes = (&size) as *u8)
+        pool = 0
+        __vk_check(vkCreateDescriptorPool(__vk_dev, (&pi) as *u8, null, &pool), "vkCreateDescriptorPool")
+        ai = VkDescriptorSetAllocateInfo(stype = 34, pool = pool, nlayouts = 1, layouts = &__vk_set_layout)
+        __vk_check(vkAllocateDescriptorSets(__vk_dev, (&ai) as *u8, &__vk_set), "vkAllocateDescriptorSets")
+        range = VkPushConstantRange(stages = 0x7FFFFFFF, offset = 0, size = u32(__VK_PUSH_SIZE))
+        pli = VkPipelineLayoutCreateInfo(stype = 30, nsets = 1, sets = &__vk_set_layout, nranges = 1, ranges = (&range) as *u8)
+        __vk_check(vkCreatePipelineLayout(__vk_dev, (&pli) as *u8, null, &__vk_layout), "vkCreatePipelineLayout")
+        loop linear in [0, 1]:
+            loop rep in [0, 1]:
+                wrap = u32(2)
+                if rep == 1: wrap = 0
+                si = VkSamplerCreateInfo(stype = 31, mag = u32(linear), min = u32(linear), mip_mode = u32(linear), wrap_u = wrap, wrap_v = wrap, wrap_w = wrap, max_lod = 1000.0)
+                smp = 0
+                __vk_check(vkCreateSampler(__vk_dev, (&si) as *u8, null, &smp), "vkCreateSampler")
+                __vk_samplers.push(smp)
+
+    # slots of the bindless array: 0 is the white texture's; a texture takes a new one whenever
+    # its image or sampling changes, and the old one is free again once the GPU is done with
+    # the frames that may use it, so draws already recorded keep what they were given
+    __vk_slot_free: int[]
+    __vk_slot_next = 1
+    __vk_slot_new = () -> int:
+        if __vk_slot_free.len() > 0: return __vk_slot_free.pop()
+        if __vk_slot_next >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        __vk_slot_next += 1
+        __vk_slot_next - 1
+
+    # point texture slot `slot` at an image view (sampled with the given filter and wrapping)
+    __vk_set_texture = (slot: int, view: int, linear: bool, repeat: bool):
+        k = 0
+        if linear: k += 2
+        if repeat: k += 1
+        ii = VkDescriptorImageInfo(sampler = __vk_samplers[k], view = view, layout = u32(VK_LAYOUT_SHADER_READ))
+        w = VkWriteDescriptorSet(stype = 35, set = __vk_set, binding = 0, element = u32(slot), count = 1, ty = 1, images = (&ii) as *u8)
+        vkUpdateDescriptorSets(__vk_dev, 1, (&w) as *u8, 0, null)
+
+    # a shader module from SPIR-V bytes
+    __vk_module = (code: str) -> int:
+        info = VkShaderModuleCreateInfo(stype = 16, size = len(code), code = data(code))
+        m = 0
+        __vk_check(vkCreateShaderModule(__vk_dev, (&info) as *u8, null, &m), "vkCreateShaderModule")
+        m
+
+    # ---------------- compute ----------------
+    # a compute pipeline from SPIR-V bytes (entry point main)
+    __vk_compute_pipeline = (code: str) -> int:
+        # (OpCapability GroupNonUniform: the program uses subgroup operations)
+        if not __vk_subgroups:
+            w = data(code) as *u32
+            loop i in [5..len(code) / 4 - 1):
+                if w[i] != u32(0x20011): break
+                if w[i + 1] == u32(61): panic("this GPU ({__vk_device_name}) lacks the subgroup operations a compute function uses (SLOPPY_VULKAN=0 runs it on the CPU)")
+        m = __vk_module(code)
+        info = VkComputePipelineCreateInfo(stype = 29, stage = VkPipelineShaderStageCreateInfo(stype = 18, stage = 0x20, module = m, name = data("main")), layout = __vk_layout, base_index = -1)
+        pl = 0
+        __vk_check(vkCreateComputePipelines(__vk_dev, __vk_pcache, 1, (&info) as *u8, null, &pl), "vkCreateComputePipelines")
+        __vk_save_pipeline_cache()
+        pl
+
+    # run compute pipeline pl over groups (x, y), its parameters the n bytes at p (their address in
+    # the push constants); what ran before it is done, and what runs after sees its writes
+    __vk_dispatch = (pl: int, p: *u8, n: int, gx: int, gy: int, count: int = 0, count2: int = 0, gz: int = 1, count3: int = 0):
+        blk, off = __vk_upload(p, n)
+        __vg_end_pass()
+        cb = __vk_cb()
+        __vk_memory_barrier(cb, VK_STAGE_ALL, VK_ACCESS_MEMORY_WRITE, VK_STAGE_COMPUTE, VK_ACCESS_MEMORY_READ | VK_ACCESS_MEMORY_WRITE)
+        vkCmdBindPipeline(cb, 1, pl)
+        # (the textures, for compute programs that read them)
+        if __vk_set != 0: vkCmdBindDescriptorSets(cb, 1, __vk_layout, 0, 1, &__vk_set, 0, null)
+        pc = fill(0, __VK_PUSH_SIZE / 8)
+        pc[0] = __vk_addr(blk, off)
+        # (where the strides are: compute programs' element count, or grid's width and height; a
+        # 3D grid's depth in the padding after the flip)
+        pc[3] = (count & 0xFFFFFFFF) | (count2 << 32)
+        pc[4] = count3 << 32
+        vkCmdPushConstants(cb, __vk_layout, 0x7FFFFFFF, 0, u32(__VK_PUSH_SIZE), data(pc) as *u8)
+        vkCmdDispatch(cb, u32(gx), u32(gy), u32(gz))
+        __vk_memory_barrier(cb, VK_STAGE_COMPUTE, VK_ACCESS_MEMORY_WRITE, VK_STAGE_ALL, VK_ACCESS_MEMORY_READ | VK_ACCESS_MEMORY_WRITE)
+
+    # a buffer's first n bytes set to 0, before what runs next
+    __vk_fill_buffer = (b: int, n: int):
+        __vk_begin_frame()
+        __vg_end_pass()
+        cb = __vk_cb()
+        __vk_memory_barrier(cb, VK_STAGE_ALL, VK_ACCESS_MEMORY_READ | VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE)
+        vkCmdFillBuffer(cb, b, 0, u64(n), 0)
+        __vk_memory_barrier(cb, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_ALL, VK_ACCESS_MEMORY_READ | VK_ACCESS_MEMORY_WRITE)
+
+    # n bytes of a buffer (from byte off), after everything recorded so far has run
+    __vk_read_buffer = (b: int, n: int, out: *u8, off: int = 0):
+        __vk_begin_frame()
+        __vg_end_pass()
+        if __vk_readback.size < n:
+            __vk_free_buffer(__vk_readback)
+            __vk_readback = __vk_buffer(max(n, 16), u32(0x2), u32(VK_MEM_HOST_VISIBLE | VK_MEM_HOST_COHERENT), u32(VK_MEM_HOST_CACHED))
+        cb = __vk_cb()
+        __vk_memory_barrier(cb, VK_STAGE_ALL, VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_READ)
+        r = VkBufferCopy(src = u64(off), size = u64(n))
+        vkCmdCopyBuffer(cb, b, __vk_readback.buffer, 1, (&r) as *u8)
+        __vk_memory_barrier(cb, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_HOST, VK_ACCESS_HOST_READ)
+        __vk_submit_and_wait()
+        mem_copy(out, __vk_readback.ptr, n)

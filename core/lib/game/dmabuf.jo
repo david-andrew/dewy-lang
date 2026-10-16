@@ -1,0 +1,176 @@
+# Handing GPU-rendered frames to a Wayland compositor without a trip through the CPU: three
+# textures exported as dma-bufs (EGL_MESA_image_dma_buf_export) become the window's buffers
+# (zwp_linux_dmabuf_v1). Each frame is blitted from the offscreen screen framebuffer into a free
+# one, flipped (GL's rows go bottom up), with the title bar above it; a fence attached to the
+# dma-buf makes the compositor wait for the GPU instead of us.
+
+when TARGET != "wasm":
+    @lib("libEGL.so.1")
+    extern eglGetProcAddress = (name: *u8) -> *u8
+    @lib("libGLESv2.so.2")
+    extern glBlitFramebuffer = (sx0: i32, sy0: i32, sx1: i32, sy1: i32, dx0: i32, dy0: i32, dx1: i32, dy1: i32, mask: u32, filter: u32)
+    @lib("libGLESv2.so.2")
+    extern glFlush = ()
+    @lib("libGLESv2.so.2")
+    extern glFinish = ()
+
+    const __GL_READ_FRAMEBUFFER = 0x8CA8
+    const __GL_DRAW_FRAMEBUFFER = 0x8CA9
+
+    __egl_create_image: cfn(*u8, *u8, u32, *u8, *i32) -> *u8 = null
+    __egl_destroy_image: cfn(*u8, *u8) -> u32 = null
+    __egl_export_query: cfn(*u8, *u8, *i32, *i32, *int) -> u32 = null
+    __egl_export: cfn(*u8, *u8, *i32, *i32, *i32) -> u32 = null
+    __egl_create_sync: cfn(*u8, u32, *i32) -> *u8 = null
+    __egl_destroy_sync: cfn(*u8, *u8) -> u32 = null
+    __egl_dup_fence: cfn(*u8, *u8) -> i32 = null
+    __dmabuf_fences = true          # false once attaching a fence fails: glFinish instead
+
+    # one image of the swap chain: a texture and its framebuffer, exported as a dma-buf
+    struct __SwapImage:
+        tex: int
+        fbo: int
+        img: *u8
+        fd: int
+        fourcc: int
+        modifier: int
+        stride: int
+        offset: int
+    __swap: __SwapImage[]
+    __bar_tex = 0
+    __bar_fbo = 0
+
+    __egl_proc = (name: str) -> *u8: eglGetProcAddress(data(__zstr(name)))
+
+    # look up the EGL extension functions; false if the driver lacks them
+    __dmabuf_init = () -> bool:
+        if __egl_export != null: return true
+        if __egl_dpy == null or __egl_ctx == null: return false
+        ci = __egl_proc("eglCreateImageKHR")
+        di = __egl_proc("eglDestroyImageKHR")
+        q = __egl_proc("eglExportDMABUFImageQueryMESA")
+        ex = __egl_proc("eglExportDMABUFImageMESA")
+        if ci == null or di == null or q == null or ex == null: return false
+        __egl_create_image = ci as cfn(*u8, *u8, u32, *u8, *i32) -> *u8
+        __egl_destroy_image = di as cfn(*u8, *u8) -> u32
+        __egl_export_query = q as cfn(*u8, *u8, *i32, *i32, *int) -> u32
+        cs = __egl_proc("eglCreateSyncKHR")
+        ds = __egl_proc("eglDestroySyncKHR")
+        df = __egl_proc("eglDupNativeFenceFDANDROID")
+        if cs != null and ds != null and df != null:
+            __egl_create_sync = cs as cfn(*u8, u32, *i32) -> *u8
+            __egl_destroy_sync = ds as cfn(*u8, *u8) -> u32
+            __egl_dup_fence = df as cfn(*u8, *u8) -> i32
+        else: __dmabuf_fences = false
+        __egl_export = ex as cfn(*u8, *u8, *i32, *i32, *i32) -> u32
+        true
+
+    __gen_tex = () -> int:
+        id: u32 = 0
+        __glGenTextures(1, &id)
+        int(id)
+    __gen_fbo = () -> int:
+        id: u32 = 0
+        __glGenFramebuffers(1, &id)
+        int(id)
+
+    # make n swap images of w x h pixels; false (and none made) if the driver cannot export them
+    __swap_make = (n: int, w: int, h: int) -> bool:
+        __swap_free()
+        if not __dmabuf_init(): return false
+        loop k in [0..n):
+            tex = __gen_tex()
+            __glBindTexture(GL_TEXTURE_2D, u32(tex))
+            __glTexImage2D(GL_TEXTURE_2D, 0, i32(GL_RGBA8), i32(w), i32(h), 0, GL_RGBA, GL_UNSIGNED_BYTE, null)
+            __glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(GL_LINEAR))
+            __glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(GL_LINEAR))
+            fbo = __gen_fbo()
+            __glBindFramebuffer(GL_FRAMEBUFFER, u32(fbo))
+            __glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(tex), 0)
+            # (the driver allocates the texture's memory when it is first drawn to)
+            __glClearColor(0.0, 0.0, 0.0, 1.0)
+            __glClear(GL_COLOR_BUFFER_BIT)
+            glFlush()
+            s = __SwapImage(tex, fbo, null, -1, 0, 0, 0, 0)
+            __swap.push(s)
+            s.img = __egl_create_image(__egl_dpy, __egl_ctx, 0x30B1, tex as *u8, null)      # EGL_GL_TEXTURE_2D
+            fourcc: i32 = 0
+            planes: i32 = 0
+            modifier = 0
+            fds: i32[] = [-1, -1, -1, -1]
+            strides: i32[] = [0, 0, 0, 0]
+            offsets: i32[] = [0, 0, 0, 0]
+            ok = s.img != null and __egl_export_query(__egl_dpy, s.img, &fourcc, &planes, &modifier) != 0 and planes == 1
+            ok = ok and __egl_export(__egl_dpy, s.img, data(fds), data(strides), data(offsets)) != 0 and fds[0] >= 0
+            s.fd = int(fds[0])
+            s.fourcc = int(fourcc)
+            s.modifier = modifier
+            s.stride = int(strides[0])
+            s.offset = int(offsets[0])
+            __swap[k] = s
+            if not ok:
+                __swap_free()
+                return false
+        __glBindFramebuffer(GL_FRAMEBUFFER, u32(__screen_fbo))
+        true
+
+    __swap_free = ():
+        loop s in __swap:
+            if s.img != null: __egl_destroy_image(__egl_dpy, s.img)
+            if s.fd >= 0: syscall(3, s.fd)
+            fb = u32(s.fbo)
+            __glDeleteFramebuffers(1, &fb)
+            t = u32(s.tex)
+            __glDeleteTextures(1, &t)
+        __swap.clear()
+
+    # the title bar's pixels (RGBA rows, top first) for the next frames
+    __swap_bar = (pixels: u8[], w: int, h: int):
+        if __bar_tex == 0:
+            __bar_tex = __gen_tex()
+            __bar_fbo = __gen_fbo()
+        __glBindTexture(GL_TEXTURE_2D, u32(__bar_tex))
+        __glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+        __glTexImage2D(GL_TEXTURE_2D, 0, i32(GL_RGBA8), i32(w), i32(h), 0, GL_RGBA, GL_UNSIGNED_BYTE, data(pixels))
+        __glBindFramebuffer(GL_FRAMEBUFFER, u32(__bar_fbo))
+        __glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(__bar_tex), 0)
+        __glBindFramebuffer(GL_FRAMEBUFFER, u32(__screen_fbo))
+
+    # draw the frame into swap image k: the screen (w x h) below a title bar bar_h pixels tall;
+    # returns once the compositor can safely be handed the image
+    __swap_draw = (k: int, w: int, h: int, bar_h: int):
+        s = __swap[k]
+        __glDisable(GL_SCISSOR_TEST)
+        __glBindFramebuffer(__GL_READ_FRAMEBUFFER, u32(__screen_fbo))
+        __glBindFramebuffer(__GL_DRAW_FRAMEBUFFER, u32(s.fbo))
+        glBlitFramebuffer(0, 0, i32(w), i32(h), 0, i32(bar_h + h), i32(w), i32(bar_h), GL_COLOR_BUFFER_BIT, GL_NEAREST)
+        if bar_h > 0:
+            __glBindFramebuffer(__GL_READ_FRAMEBUFFER, u32(__bar_fbo))
+            glBlitFramebuffer(0, 0, i32(w), i32(bar_h), 0, 0, i32(w), i32(bar_h), GL_COLOR_BUFFER_BIT, GL_NEAREST)
+        # the compositor would blend with whatever alpha the frame was drawn with
+        __glBindFramebuffer(GL_FRAMEBUFFER, u32(s.fbo))
+        __glColorMask(0, 0, 0, 1)
+        __glClearColor(0.0, 0.0, 0.0, 1.0)
+        __glClear(GL_COLOR_BUFFER_BIT)
+        __glColorMask(1, 1, 1, 1)
+        __glBindFramebuffer(GL_FRAMEBUFFER, u32(__screen_fbo))
+        if not __swap_fence(s.fd): glFinish()
+
+    # attach a fence for the drawing so far to the dma-buf (the compositor waits for it)
+    __swap_fence = (fd: int) -> bool:
+        if not __dmabuf_fences: return false
+        attrs: i32[] = [0x3145, -1, 0x3038]            # EGL_SYNC_NATIVE_FENCE_FD_ANDROID: none yet
+        sync = __egl_create_sync(__egl_dpy, 0x3144, data(attrs))        # EGL_SYNC_NATIVE_FENCE_ANDROID
+        if sync == null:
+            __dmabuf_fences = false
+            return false
+        glFlush()
+        fence = int(__egl_dup_fence(__egl_dpy, sync))
+        __egl_destroy_sync(__egl_dpy, sync)
+        ok = false
+        if fence >= 0:
+            arg = [2 | (fence << 32)]              # struct dma_buf_import_sync_file: DMA_BUF_SYNC_WRITE, fd
+            ok = syscall(16, fd, 0x40086203, data(arg)) == 0       # DMA_BUF_IOCTL_IMPORT_SYNC_FILE
+            syscall(3, fence)
+        if not ok: __dmabuf_fences = false
+        ok

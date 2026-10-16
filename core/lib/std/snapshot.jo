@@ -1,0 +1,171 @@
+# A copy of a native program's memory, to put back later: its globals and all it has from the
+# system for its heap (listed by lib/core/rt.jo, __os_list). The interactive prompt takes one
+# before an input is compiled or runs, and puts it back if that fails: as fork would, where
+# there is no fork (Windows), and with no second process to talk to.
+#
+#   s = __snap_take(lo, hi)     # globals: the bytes [lo, hi) (__image_data(): all of them)
+#   ...
+#   __snap_restore(s)           # (optional) memory is as it was at __snap_take
+#   __snap_drop(s)              # done with it
+#
+# Only what this program's own code keeps there is put back: what the system holds (files,
+# windows), and what libraries keep in memory of their own, stays as it is. Stacks are not
+# copied: put back in a function that was running when the copy was taken (after a __longjmp to
+# it). Other threads must be waiting meanwhile.
+#
+# A copy is [count, size of the block, then for each part: address, size (negative: pages given
+# back while held, not copied), where its bytes are in the block]; the first part is the
+# globals. It is in pages of its own, not on the list.
+
+const __SNAP_PAGE = 4096
+
+# where the program's globals are: (address, size), from its headers (in memory, at 0x400000)
+__image_data = () -> (int, int):
+    when TARGET == "windows":
+        base = 0x400000 as *u8
+        nt = base + int(((base + 0x3C) as *u32)[0])
+        nsec = int(((nt + 6) as *u16)[0])
+        sec = nt + 24 + int(((nt + 20) as *u16)[0])
+        loop i in [0..nsec):
+            h = sec + 40 * i
+            if int(((h + 36) as *u32)[0]) & 0x80000000 != 0:
+                return (0x400000 + int(((h + 12) as *u32)[0]), int(((h + 8) as *u32)[0]))
+    else when TARGET == "linux":
+        base = 0x400000 as *u8
+        ph = base + ((base + 32) as *int)[0]
+        n = int(((base + 56) as *u16)[0])
+        loop i in [0..n):
+            h = ph + 56 * i
+            if int((h as *u32)[0]) == 1 and int(((h + 4) as *u32)[0]) & 2 != 0:
+                return (((h + 16) as *int)[0], ((h + 40) as *int)[0])
+    else when TARGET == "macos":
+        # (the __DATA segment, where dyld put the program: compiler/macho.jo)
+        mh = __c_dyld_get_image_header(0)
+        lc = mh + 32
+        loop k in [0..int(((mh + 16) as *u32)[0])):
+            if int((lc as *u32)[0]) == 0x19 and __cstr(lc + 8) == "__DATA":
+                return ((mh as int) + ((lc + 24) as *int)[0] - 0x100000000, ((lc + 32) as *int)[0])
+            lc = lc + int(((lc + 4) as *u32)[0])
+    (0, 0)
+
+__snap_take = (lo: int, hi: int) -> *int:
+    when TARGET == "wasm":
+        return null
+    else:
+        __os_hold += 1
+        l = __os_list
+        n = 0
+        if l != null: n = l[0]
+        total = 0
+        loop i in [0..n):
+            if l[3 + 2 * i] > 0: total += (l[3 + 2 * i] + __SNAP_PAGE - 1) & ~(__SNAP_PAGE - 1)
+        head = ((3 * (n + 1) + 2) * 8 + __SNAP_PAGE - 1) & ~(__SNAP_PAGE - 1)
+        g = (hi - lo + __SNAP_PAGE - 1) & ~(__SNAP_PAGE - 1)
+        size = head + g + total
+        s = __os_raw_pages(size) as *int
+        s[0] = n + 1
+        s[1] = size
+        at = head
+        loop i in [0..n + 1):
+            a = lo
+            z = hi - lo
+            if i > 0:
+                a = l[2 + 2 * (i - 1)]
+                z = l[3 + 2 * (i - 1)]
+            e = s + 2 + 3 * i
+            e[0] = a
+            e[1] = z
+            e[2] = at
+            if z > 0:
+                __snap_copy(s as *u8 + at, a as *u8, z, false)
+                at += (z + __SNAP_PAGE - 1) & ~(__SNAP_PAGE - 1)
+        s
+
+# copy n bytes, a page at a time, leaving pages alone that are the same already. Taking: pages of
+# zeros are left out (the copy's pages start as zeros: untouched, they take no memory). Putting
+# back: pages that did not change are not written (untouched ones stay so).
+__snap_copy = (to: *u8, from: *u8, n: int, back: bool):
+    o = 0
+    loop o < n:
+        k = min(__SNAP_PAGE, n - o)
+        if back:
+            if not __mem_eq(to + o, from + o, k): mem_copy(to + o, from + o, k)
+        else if not __snap_zero(from + o, k): mem_copy(to + o, from + o, k)
+        o += k
+
+__snap_zero = (p: *u8, n: int) -> bool:
+    q = p as *int
+    loop i in [0..n / 8):
+        if q[i] != 0: return false
+    loop i in [n / 8 * 8..n):
+        if p[i] != 0: return false
+    true
+
+__snap_restore = (s: *int):
+    when TARGET != "wasm":
+        # pages taken since the copy: back to the system
+        l = __os_list
+        i = 0
+        loop i < l[0]:
+            a = l[2 + 2 * i]
+            if not __snap_has(s, a):
+                z = l[3 + 2 * i]
+                if z < 0: z = -z
+                __os_raw_free(a as *u8, z)
+            i += 1
+        # the bytes (the globals among them: __os_list is the list the copy was taken with, which
+        # has stayed, as the copy was held)
+        n = s[0]
+        loop k in [0..n):
+            e = s + 2 + 3 * k
+            if e[1] > 0: __snap_copy(e[0] as *u8, s as *u8 + e[2], e[1], true)
+        # and the list as it was then
+        l = __os_list
+        l[0] = n - 1
+        loop k in [1..n):
+            e = s + 2 + 3 * k
+            l[2 + 2 * (k - 1)] = e[0]
+            l[3 + 2 * (k - 1)] = e[1]
+
+__snap_has = (s: *int, a: int) -> bool:
+    loop k in [1..s[0]):
+        if s[2 + 3 * k] == a: return true
+    false
+
+__snap_drop = (s: *int):
+    when TARGET != "wasm":
+        __os_raw_free(s as *u8, s[1])
+        __os_hold -= 1
+        if __os_hold > 0: return
+        # pages given back while it was held: now they go
+        l = __os_list
+        i = 0
+        loop i < l[0]:
+            z = l[3 + 2 * i]
+            if z < 0:
+                __os_raw_free(l[2 + 2 * i] as *u8, -z)
+                n = l[0] - 1
+                l[2 + 2 * i] = l[2 + 2 * n]
+                l[3 + 2 * i] = l[3 + 2 * n]
+                l[0] = n
+            else: i += 1
+
+# text kept across __snap_restore: in pages of its own until __snap_unkeep
+__snap_keep = (t: str) -> *u8:
+    when TARGET == "wasm":
+        return null
+    else:
+        p = __os_raw_pages(len(t) + 8)
+        (p as *int)[0] = len(t)
+        if len(t) > 0: mem_copy(p + 8, data(t), len(t))
+        return p
+
+__snap_unkeep = (p: *u8) -> str:
+    when TARGET == "wasm":
+        return ""
+    else:
+        n = (p as *int)[0]
+        b = fill(u8(0), n)
+        if n > 0: mem_copy(data(b), p + 8, n)
+        __os_raw_free(p, n + 8)
+        return str_from_bytes(b)

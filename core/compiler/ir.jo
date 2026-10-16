@@ -1,0 +1,306 @@
+# Intermediate representation: register-based with structured control flow (wasm-like).
+# Integer vregs are always 64-bit; floats are f64 or f32. Aggregates live in frame slots
+# or on the heap and are handled through addresses.
+
+use 'util.jo'
+
+enum Op:
+    nop,
+    iconst, fconst, mov,
+    add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_,
+    eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu,
+    fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc,
+    feq, fne, flt, fle, fgt, fge,
+    sext8, sext16, sext32, zext8, zext16, zext32,
+    i2f, u2f, f2i, f2f, bits2f, f2bits,
+    load, store, slot, gaddr, daddr, faddr, copy, zero, memcpy, memset, zeroslots, vop,
+    call, calli, callc, syscall, intr,
+    block, loop, if_, else_, end, br, brif, ret, trap, select,
+    assume,           # a = vreg, imm = A_* fact (no code)
+    brtable,          # a = index, b = count, c = args start (depths), imm = default depth; index >= count (unsigned) -> default
+    # vectors (made by the loop vectorizer, x86-64 only); ty = VX or VY; lanes of one element
+    # kind (Ins.c for memory, Ins.imm otherwise): 0 f32, 1 f64, 2 i32, 3 i64
+    vld,              # dst = [a + b * element size + imm]
+    vst,              # [a + dst * element size + imm] = b
+    vbin,             # dst = a op b, c = op: 0 add, 1 sub, 2 mul, 3 div, 4 min, 5 max, 6 and, 7 or, 8 xor
+    vsplat,           # dst = a (a scalar) in every lane
+    vzu,              # leave 256-bit code (vzeroupper)
+    mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
+    mulhu             # ... unsigned
+
+const VI = 0
+const VF = 1
+const VS = 2
+const VK = 3          # integer constant: no defining instruction, value in IrFn.kval (behaves as VI)
+const VX = 4          # 128-bit vector (SSE2)
+const VY = 5          # 256-bit vector (AVX2)
+
+# memory access encodings (Ins.c for load/store)
+const M_SIGNED = 16
+const M_FLOAT = 32
+
+# indexed access (set by the optimizer): address = a + (index << scale) + imm, where the index
+# vreg is in Ins.b for loads and Ins.dst for stores, and the scale in bits 8..9 of the mode
+const M_INDEX = 128
+const M_HDR = 64          # access to an object header word (refcount / length / capacity)
+
+mem_index = (ins: Ins) -> int:
+    if int(ins.c) & M_INDEX == 0: return -1
+    if ins.op == .store: return int(ins.dst)
+    int(ins.b)
+
+mem_scale = (ins: Ins) -> int: (int(ins.c) >> 8) & 3
+
+# facts for the optimizer (Op.assume)
+const A_RC1 = 1       # the array/string object a (if not null) has refcount 1
+
+struct Ins:
+    op: Op
+    ty: i32
+    dst: i32
+    a: i32
+    b: i32
+    c: i32
+    imm: int
+    pos: i32 = 0      # where in the source (an index into ir_positions; 0: not known)
+
+struct IrFn:
+    name: str
+    nparams: int
+    ret: int          # VI/VF/VS or -1 for none
+    vtypes: i8[]
+    slot_size: i32[]
+    slot_align: i32[]
+    code: Ins[]
+    args: i32[]
+    cabi: bool
+    noinline: bool    # (@noinline)
+    export_name: str
+    fn_index: int
+    raw_mem: bool     # dereferences raw pointers (disables type-based alias reasoning)
+    kval: int[]       # values of VK vregs (indexed by vreg; may be shorter than vtypes)
+    decl_pos: int     # the line of its declaration (an index into ir_positions; 0: none)
+    dbg_locals: int[] # (debug information: its parameters, then its other variables)
+
+dbg_on = false        # debug information for debuggers: where variables are (sloppy build)
+mulh_ok = true        # the target has mulhs (x86-64 and arm64; not WebAssembly)
+
+# current function being built
+ir: IrFn
+
+ir_begin = (name: str, fn_index: int):
+    ir = IrFn(name = name, ret = -1, fn_index = fn_index)
+    kc_fn += 1
+
+vreg = (ty: int) -> int:
+    ir.vtypes.push(i8(ty))
+    ir.vtypes.len() - 1
+
+vtype = (v: int) -> int:
+    t = int(ir.vtypes[v])
+    if t == VK: return VI
+    t
+
+is_kv = (v: int) -> bool: int(ir.vtypes[v]) == VK
+kv_of = (v: int) -> int: ir.kval[v]
+
+# per-function cache of constant vregs (direct mapped; constants are immutable, so sharing is safe)
+kc_val: int[] = fill(0, 256)
+kc_reg: int[] = fill(0, 256)
+kc_fn = 0
+kc_epoch: int[] = fill(0, 256)
+
+# a constant vreg (32-bit values only: backends use them as immediates)
+k_vreg = (v: int) -> int:
+    slot = ((v xor (v >> 8))) & 255
+    if kc_epoch[slot] == kc_fn and kc_val[slot] == v: return kc_reg[slot]
+    d = k_vreg_new(v)
+    kc_epoch[slot] = kc_fn
+    kc_val[slot] = v
+    kc_reg[slot] = d
+    d
+
+k_vreg_new = (v: int) -> int:
+    d = ir.vtypes.len()
+    ir.vtypes.push(i8(VK))
+    loop ir.kval.len() < d: ir.kval.push(0)
+    ir.kval.push(v)
+    d
+
+ir_fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
+
+new_slot = (size: int, align: int) -> int:
+    ir.slot_size.push(i32(size))
+    a = align
+    if a < 8: a = 8
+    ir.slot_align.push(i32(a))
+    ir.slot_size.len() - 1
+
+# calls emitted while this is set are on a rarely taken path (c = 2 marks such a direct call;
+# 1 marks one that never returns): register allocation weighs them as if outside any loop
+ir_cold = false
+
+# source positions of instructions (for backtraces and debuggers): ir_pos is the current one,
+# as an index into ir_positions
+ir_positions: int[] = [0]
+ir_pos = 0
+
+# the line of each position id, worked out at once (the ids mostly follow the source, so the
+# next one is usually on the same line or a little further: a step from the last, not a search)
+ir_lines: int[]
+ir_line = (i: int) -> int:
+    if ir_lines.len() != ir_positions.len():
+        ir_lines = fill(0, ir_positions.len())
+        lf = -1
+        li = 0
+        ls: int[]
+        loop k in [1..ir_positions.len()):
+            p = ir_positions[k]
+            f = pos_file(p)
+            if f < 0 or f >= files.len(): continue
+            off = pos_off(p)
+            if f != lf:
+                line_col(p)                    # (makes the file's line starts)
+                ls = line_starts[f]
+                lf = f
+                li = 0
+            if off < ls[li] or li + 4 < ls.len() and off >= ls[li + 4]: li = line_col(p).0 - 1
+            else:
+                loop li + 1 < ls.len() and ls[li + 1] <= off: li += 1
+            ir_lines[k] = li + 1
+    if i <= 0 or i >= ir_lines.len(): return 0
+    ir_lines[i]
+
+ir_set_pos = (p: int):
+    if p == 0: return
+    if ir_positions[ir_pos] == p: return
+    ir_positions.push(p)
+    ir_pos = ir_positions.len() - 1
+
+emit = (op: Op, ty: int, dst: int, a: int, b: int, c0: int, imm: int) -> int:
+    c = c0
+    if ir_cold and op == .call and c == 0: c = 2
+    ir.code.push(Ins(op, i32(ty), i32(dst), i32(a), i32(b), i32(c), imm, i32(ir_pos)))
+    ir.code.len() - 1
+
+e_iconst = (v: int) -> int:
+    if ir_fits32(v): return k_vreg(v)
+    d = vreg(VI)
+    emit(.iconst, VI, d, 0, 0, 0, v)
+    d
+
+e_fconst = (f: f64, ty: int) -> int:
+    d = vreg(ty)
+    bits = int(f64_bits(f))
+    if ty == VS: bits = int(f32_bits(f32(f)))
+    emit(.fconst, ty, d, 0, 0, 0, bits)
+    d
+
+e_bin = (op: Op, ty: int, a: int, b: int) -> int:
+    rt = ty
+    if op == .eq or op == .ne or op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu or op == .feq or op == .fne or op == .flt or op == .fle or op == .fgt or op == .fge: rt = VI
+    d = vreg(rt)
+    emit(op, ty, d, a, b, 0, 0)
+    d
+
+e_un = (op: Op, ty: int, a: int) -> int:
+    rt = ty
+    if op == .i2f or op == .u2f: rt = ty
+    d = vreg(rt)
+    emit(op, ty, d, a, 0, 0, 0)
+    d
+
+e_mov = (dst: int, src: int):
+    if is_kv(dst): ice("assignment to a constant vreg")
+    emit(.mov, vtype(dst), dst, src, 0, 0, 0)
+
+e_addi = (a: int, k: int) -> int:
+    if k == 0: return a
+    e_bin(.add, VI, a, e_iconst(k))
+
+# load size bytes from [addr + off]; mode = size | M_SIGNED | M_FLOAT
+e_load = (ty: int, addr: int, off: int, mode: int) -> int:
+    d = vreg(ty)
+    emit(.load, ty, d, addr, 0, mode, off)
+    d
+
+e_store = (addr: int, off: int, val: int, mode: int): emit(.store, vtype(val), 0, addr, val, mode, off)
+
+e_slot = (s: int) -> int:
+    d = vreg(VI)
+    emit(.slot, VI, d, s, 0, 0, 0)
+    d
+
+e_copy = (dst: int, src: int, size: int): emit(.copy, VI, 0, dst, src, 0, size)
+
+# float vector arithmetic: dst[0..n] = b[0..n] op c[0..n] (f32 lanes); b or c may instead be a
+# scalar f32 vreg used for every lane (VOP_SPLAT_B / VOP_SPLAT_C). op: 0 add, 1 sub, 2 mul, 3 div
+const VOP_SPLAT_B = 0x100
+const VOP_SPLAT_C = 0x200
+e_vop = (dst: int, bsrc: int, csrc: int, kind: int, n: int, flags: int): emit(.vop, VI, 0, dst, bsrc, csrc, kind | (n << 4) | flags)
+e_zero = (dst: int, size: int): emit(.zero, VI, 0, dst, 0, 0, size)
+
+# a .call's c: 1 it never returns (a panic), 2 cold; CALL_IF_SHARED: a call f(x) -> x' that
+# gives x back unchanged when x is 0 or its refcount (at x) is 1, so the code generator may skip
+# it then (making an array unique, in debug builds)
+# main = () -> int: the program's exit code is what it gives back (set before the entry is made)
+main_code = false
+main_exit_lf = -1       # (wasm: exit, which main's code goes to)
+
+const CALL_IF_SHARED = 3
+# f(x) adding a reference to x (0, or a refcount of 0 or below: nothing; with threads running
+# (__mt_active), atomically): the code generator adds it inline when no threads run
+const CALL_RC_INC = 4
+# f(x) dropping a reference to x, freeing it with the last: inline while more than one is left
+const CALL_RC_DEC = 5
+
+e_call = (f: int, args: int[], rt: int) -> int:
+    start = ir.args.len()
+    loop a in args: ir.args.push(i32(a))
+    d = -1
+    if rt >= 0: d = vreg(rt)
+    emit(.call, rt, d, i32(start), i32(args.len()), 0, f)
+    d
+
+e_calli = (fp: int, args: int[], rt: int, cabi: bool) -> int:
+    start = ir.args.len()
+    loop a in args: ir.args.push(i32(a))
+    d = -1
+    if rt >= 0: d = vreg(rt)
+    op = Op.calli
+    if cabi: op = .callc
+    emit(op, rt, d, i32(start), i32(args.len()), i32(fp), 0)
+    d
+
+e_block = (): emit(.block, 0, 0, 0, 0, 0, 0)
+e_loop = (): emit(.loop, 0, 0, 0, 0, 0, 0)
+e_if = (c: int): emit(.if_, 0, 0, c, 0, 0, 0)
+e_else = (): emit(.else_, 0, 0, 0, 0, 0, 0)
+e_end = (): emit(.end, 0, 0, 0, 0, 0, 0)
+e_br = (depth: int): emit(.br, 0, 0, 0, 0, 0, depth)
+e_brif = (c: int, depth: int): emit(.brif, 0, 0, c, 0, 0, depth)
+e_brtable = (idx: int, depths: int[], default_depth: int):
+    start = ir.args.len()
+    loop d in depths: ir.args.push(i32(d))
+    emit(.brtable, 0, 0, idx, depths.len(), start, default_depth)
+e_ret = (v: int): emit(.ret, 0, 0, v, 0, 0, 0)
+e_trap = (): emit(.trap, 0, 0, 0, 0, 0, 0)
+
+op_name = (op: Op) -> str: "{op}"
+
+dump_ir = ():
+    print("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):")
+    loop i in 0.. and s in ir.slot_size: print("  slot{i}: size {s} align {ir.slot_align[i]}")
+    ind = 1
+    loop ins in ir.code:
+        if ins.op == .end or ins.op == .else_: ind -= 1
+        pad = repeat("  ", ind)
+        line = "{pad}{ins.op}"
+        if ins.dst >= 0 and ins.op != .store and ins.op != .br and ins.op != .brif and ins.op != .brtable and ins.op != .block and ins.op != .loop and ins.op != .end and ins.op != .if_ and ins.op != .else_ and ins.op != .ret: line = "{pad}v{ins.dst} = {ins.op}"
+        line += " a={ins.a} b={ins.b} c={ins.c} imm={ins.imm} ty={ins.ty}"
+        if ins.op == .call or ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr:
+            al = ""
+            loop k in [0..int(ins.b)): al += " v{ir.args[int(ins.a) + k]}"
+            line += " args:{al}"
+        print(line)
+        if ins.op == .block or ins.op == .loop or ins.op == .if_ or ins.op == .else_: ind += 1

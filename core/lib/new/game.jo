@@ -1,0 +1,25 @@
+# __TITLE__: a game with update and draw: a window, every frame.
+# Run it with `sloppy watch __NAME__.jo`, then change it and save: the running game takes the
+# new code at once, without starting over.
+
+build:
+    name = "__TITLE__"
+
+window("__TITLE__", 1280, 720)      # the title, and the size of the 2D area (whatever the window's)
+
+pos = vec2(640, 360)
+vel = vec2(0, 0)
+trail: vec2[]
+
+update = (dt: f64):                  # every frame: dt is the seconds since the last one
+    vel = approach(vel, input_axis() * 420.0, 10.0, dt)     # arrows, W A S D or a gamepad's stick
+    pos = clamp(pos + vel * dt, vec2(24, 24), vec2(1256, 696))
+    trail.push(pos)
+    if trail.len() > 40: trail.remove(0)
+    if key_pressed(.escape): quit()
+
+draw = ():                           # every frame, after update
+    clear(rgb(0.07, 0.08, 0.12))
+    loop i in 0.. and p in trail: circle(p, 4.0 + 10.0 * i / 40.0, rgba(0.3, 0.6, 1.0, i / 80.0))
+    circle(pos, 24, rgb(1.0, 0.6, 0.2))
+    text("move: arrows, W A S D or a gamepad      Escape: quit", vec2(24, 24), 24, rgba(1, 1, 1, 0.7))

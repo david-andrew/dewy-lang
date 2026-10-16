@@ -12,6 +12,11 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 ## Current Status
 
+The `restart/sloppy-frontend` branch develops a faster implementation in
+[core/](core/README.md), derived from Sloppy with Dewy syntax and language behavior.
+It already runs native/web game examples and has a focused validation gate taking
+seconds. It is an experimental subset; see its README for building and limitations.
+
 ### dewy
 
 The main compiler lives under [dewy/](dewy/)

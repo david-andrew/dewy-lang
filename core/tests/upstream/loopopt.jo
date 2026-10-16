@@ -1,0 +1,105 @@
+# requires: sloppy
+# loop and copy optimizations must keep the meaning: bottom-tested loops, loop variables as
+# counters, copies of variables that change later, loop-invariant code, branches folded on what
+# an enclosing test decided, low-bit tests, float comparisons with NaN
+struct B:
+    x: f64
+    v: f64
+
+copies = ():
+    x = 5
+    x = x + 1
+    y = x                       # a copy of x, which the loop changes after reading y
+    loop i in [0..3):
+        print(y)
+        x += 1
+    print(x)
+    k = 10
+    k -= 1
+    z = k
+    loop j in [0..2):
+        loop i in [0..2):
+            print(z + i)
+        k += 100                # (in the outer loop, after the inner one read z)
+    print(k)
+
+loops = ():
+    s = 0
+    loop i in [0..10):
+        if i == 3: continue
+        if i == 7: break
+        s += i
+    print(s)
+    loop i in [5..0): print("never")
+    loop i in [3, 2..1]: print("down {i}")
+    n = 0
+    loop i in [0, 7..20): n += i
+    print(n)
+    a = 0
+    b = 9
+    loop a < b:
+        a += 2
+        if a == 4: continue
+        b -= 1
+    print("{a} {b}")
+    c = 0
+    loop c != 0: print("never")
+    w = 0
+    loop true:
+        w += 1
+        if w > 4: break
+    print(w)
+    j = 0
+    loop j < 3 and w > 0:
+        j += 1
+    print(j)
+
+grid = (w: int, h: int) -> int:
+    cells = fill(0, w * h)
+    loop y in [0..h):
+        loop x in [0..w):
+            cells[y * w + x] = y * 10 + x
+    t = 0
+    loop c in cells: t += c
+    t
+
+mut_loop = ():
+    bs = [B(1.0, 0.5), B(2.0, -1.0), B(3.0, 2.0)]
+    other = bs
+    loop mut b in bs: b.x += b.v * 2.0
+    print("{bs[0].x} {bs[1].x} {bs[2].x} / {other[0].x}")
+    empty: B[]
+    loop mut b in empty: print("never")
+
+checks = ():
+    loop x in [-5..6):
+        print("{x} {x % 4 == 0} {x % 2 != 0} {(x * 3) % 8 == 0}")
+    nan = 0.0 / 0.0
+    vals = [1.0, -2.0, nan, 0.0]
+    loop v in vals:
+        r = ""
+        if not (v < 0.5): r = r + "a"
+        if not (v >= 0.5): r = r + "b"
+        if not (v == 1.0): r = r + "c"
+        if not (v != 1.0): r = r + "d"
+        print(r)
+    f = 0.0
+    loop i in [0..5): f += f64(i) * 1.5 + 0.25
+    print(f)
+
+nested_if = (p: int[]) -> int:
+    r = 0
+    if p.len() > 0:
+        if p.len() > 0: r += 1
+        if p.len() == 0: r += 100
+    else:
+        if p.len() > 0: r += 1000
+    r
+
+copies()
+loops()
+print(grid(7, 5))
+mut_loop()
+checks()
+print(nested_if([1, 2]))
+print(nested_if([]))

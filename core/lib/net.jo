@@ -1,0 +1,1363 @@
+# Networking: messages between programs, over WebSockets, so that the same game reaches others
+# from a native build and from a web page. `import net`, then:
+#
+#   net.listen(4000)                        # a server: others connect to this machine's port 4000
+#   p = net.connect("192.168.1.20", 4000)   # a client: a peer (it connects in the background)
+#   loop e in net.receive():                # what happened since the last call (every frame)
+#       if e.kind == .joined: ...           # a peer connected (to a server, or the server, to a client)
+#       if e.kind == .message: print(e.text)
+#       if e.kind == .left: ...             # it went away (or could not be reached)
+#   net.send(p, "hello")                    # a str or u8[]; net.send_all(...) to every peer
+#
+# Messages arrive whole and in order (WebSockets over TCP). A web page can only connect, not
+# listen: the server is a native program (a game that hosts, or a small server of its own). A page
+# served over https can only reach a wss:// server (TLS: put a proxy that has a certificate, such
+# as Caddy, in front of the server); net.connect("wss://game.example.com") takes a URL as well.
+
+import crypto
+import rtc
+
+enum NetKind: joined, message, left
+
+struct NetEvent:
+    kind: NetKind
+    peer: int
+    data: u8[]              # a message's bytes ...
+    text = ""               # ... and as text
+
+__net_msg = (peer: int, b: u8[]) -> NetEvent: NetEvent(.message, peer, b, str_from_bytes(b))
+
+# ---------------- the peers ----------------
+struct __NetPeer:
+    id: int
+    fd: int
+    state: int              # 0 connecting, 1 handshake (client: waiting for the reply; server: for the request), 2 open, 3 gone
+    client: bool            # we connected to it (our frames are masked)
+    host: str
+    port: int
+    inbuf: u8[]
+    outbuf: u8[]
+    since: f64              # (connecting: when it began)
+    rtc = -1                # (straight to another player, WebRTC: its connection; else -1)
+    answering = false       # (joined with a code: its own code is the reply)
+    code = ""               # (this side's code, once made)
+
+__net_peers: __NetPeer[]
+__net_next = 1
+__net_listen_fd = -1
+__net_events: NetEvent[]
+__net_accepted: {int: bool}     # the peers that connected to this program's server
+__net_key = ""              # (a client's handshake key)
+const __NET_MAX = 16 << 20  # the biggest message taken (bigger: the connection ends)
+
+# ---------------- straight to another player, with no server (WebRTC) ----------------
+# (the peers made by invite and join_invite: opened, their messages, gone)
+__net_rtc_poll = ():
+    loop i in [0..__net_peers.len()):
+        if __net_peers[i].rtc < 0 or __net_peers[i].state == 3: continue
+        id = __net_peers[i].rtc
+        when TARGET == "wasm":
+            buf = fill(u8(0), 1 << 16)
+            loop __net_peers[i].state != 3:
+                n = __wasm_rtcp_poll(id, data(buf), buf.len())
+                if n == -1: break
+                if n == -2:
+                    __net_peers[i].state = 2
+                    __net_events.push(NetEvent(.joined, __net_peers[i].id, []))
+                    continue
+                if n == -3:
+                    if __net_peers[i].state != 2: __net_why[__net_peers[i].id] = "no connection could be made (both of you online? a strict network, as mobile data or a school's, may allow none)"
+                    __net_gone(i)
+                    break
+                if n > buf.len():
+                    buf = fill(u8(0), n)
+                    continue
+                __net_events.push(__net_msg(__net_peers[i].id, buf[..n)))
+        else:
+            rtc.__rtc_poll(id)
+            st = rtc.__rtc_status(id)
+            if st.0 == 1 and __net_peers[i].state != 2:
+                __net_peers[i].state = 2
+                __net_events.push(NetEvent(.joined, __net_peers[i].id, []))
+            loop m in rtc.__rtc_take(id): __net_events.push(__net_msg(__net_peers[i].id, m[1..]))
+            if st.0 == 2:
+                if len(st.1) > 0: __net_why[__net_peers[i].id] = st.1
+                rtc.__rtc_close(id)
+                __net_gone(i)
+
+
+# One side invites: invite_code gives a short code to send the other player any way (a chat
+# message). They join with it, and invite_code then gives them a reply code to send back, which
+# the first side accepts. Then the peer is as any other: joined, messages, left. Web pages and
+# native programs connect so, each to the other too; a STUN server (Google's, rtc.rtc_stun_servers)
+# says how each looks from the internet, and nothing else is in between.
+#   p = net.invite()                     # inviting
+#   code = net.invite_code(p)            # "" for a moment, then the code to send
+#   net.accept_reply(p, their_reply)
+#   p = net.join_invite(their_code)      # joining: then net.invite_code(p) is the reply to send
+# reliable = false: messages may be lost or come in another order, never late (a fast game's state)
+invite = (reliable: bool = true) -> int:
+    __pace_real_time = true
+    __net_hook()
+    p = __NetPeer(id = __net_next, fd = -1, state = 0, client = true, host = "", port = 0, since = time())
+    __net_next += 1
+    when TARGET == "wasm":
+        p.rtc = __wasm_rtc_invite(if reliable: 1 else: 0, data(__net_stun()), len(__net_stun()))
+    else:
+        p.rtc = rtc.__rtc_new(true)
+        if p.rtc >= 0: rtc.__conns[p.rtc].s_reliable = reliable
+    __net_peers.push(p)
+    if p.rtc < 0: __net_fail(__net_peers.len() - 1, "a connection could not be made here")
+    p.id
+
+# join a game with the code its host sent, or a link with the code in it (…?invite=code): a peer,
+# whose invite_code(p) is then the reply to send back
+join_invite = (code0: str) -> int:
+    code = trim(code0)
+    k = find(code, "invite=")
+    if k >= 0:
+        code = code[k + 7..]
+        e = find(code, "&")
+        if e >= 0: code = code[..e)
+    __pace_real_time = true
+    __net_hook()
+    p = __NetPeer(id = __net_next, fd = -1, state = 0, client = true, host = "", port = 0, since = time(), answering = true)
+    __net_next += 1
+    __net_peers.push(p)
+    i = __net_peers.len() - 1
+    d = rtc.rtc_from_code(code)
+    if d == none:
+        __net_fail(i, "that is not an invite code (copied whole?)")
+        return p.id
+    if d!.active:
+        __net_fail(i, "that is a reply code, for the game that made the invite: it goes there (Invite a friend's box)")
+        return p.id
+    when TARGET == "wasm":
+        sdp = rtc.__rtc_sdp(d!, true)
+        __net_peers[i].rtc = __wasm_rtc_join(data(__net_stun()), len(__net_stun()), data(sdp), len(sdp))
+    else:
+        __net_peers[i].rtc = rtc.__rtc_new(false)
+        if __net_peers[i].rtc >= 0: rtc.__rtc_set_remote(__net_peers[i].rtc, d!)
+    if __net_peers[i].rtc < 0: __net_fail(i, "a connection could not be made here")
+    p.id
+
+# this side's code for a peer from invite or join_invite: "" while it is being made (a moment, as
+# this machine's addresses are found)
+invite_code = (peer: int) -> str:
+    loop i in [0..__net_peers.len()):
+        if __net_peers[i].id != peer or __net_peers[i].rtc < 0: continue
+        if len(__net_peers[i].code) > 0: return __net_peers[i].code
+        when TARGET == "wasm":
+            buf = fill(u8(0), 8192)
+            n = __wasm_rtc_local(__net_peers[i].rtc, data(buf), buf.len())
+            if n < 0 or n > buf.len(): return ""
+            if let d = rtc.__rtc_parse_sdp(str_from_bytes(buf[..n))): __net_peers[i].code = rtc.rtc_code(d)
+        else:
+            rtc.__rtc_poll(__net_peers[i].rtc)
+            __net_peers[i].code = rtc.__rtc_code(__net_peers[i].rtc, __net_peers[i].answering)
+        return __net_peers[i].code
+    ""
+
+# what a code is: "invite" (from net.invite: for join_invite), "reply" (from join_invite: for
+# accept_reply), or "" (not a code: cut short, or something else pasted); a link to an invite is one
+code_kind = (code: str) -> str:
+    c = code
+    k = find(c, "invite=")
+    if k >= 0:
+        c = c[k + 7..]
+        e = find(c, "&")
+        if e >= 0: c = c[..e)
+    if let d = rtc.rtc_from_code(c): return if d.active: "reply" else: "invite"
+    ""
+
+# the other player's reply to this side's invite; false when it is not a reply code
+accept_reply = (peer: int, reply: str) -> bool:
+    dd = rtc.rtc_from_code(reply)
+    if dd == none: return false
+    d = dd!
+    if not d.active: return false
+    loop i in [0..__net_peers.len()):
+        if __net_peers[i].id != peer or __net_peers[i].rtc < 0 or __net_peers[i].answering: continue
+        when TARGET == "wasm":
+            sdp = rtc.__rtc_sdp(d, false)
+            __wasm_rtc_answer(__net_peers[i].rtc, data(sdp), len(sdp))
+        else: rtc.__rtc_set_remote(__net_peers[i].rtc, d)
+        return true
+    false
+
+# a TURN server ("turn:host:port", or "host:port") with the user name and password it gives: the
+# invites made after this also offer a path through it, a relay, for players whose networks allow
+# none straight to each other (some mobile data, schools, offices). Your own (coturn), or a
+# service's (some have a free tier); its password goes into every copy of the game. UDP only
+turn_server = (url: str, user: str, password: str):
+    u = url
+    if starts_with(u, "turn:"): u = u[5..]
+    k = find(u, "?")
+    if k >= 0: u = u[..k)
+    if find(u, ":") < 0: u = u + ":3478"
+    rtc.rtc_turn_servers = [(u, user, password)]
+
+# (the servers for a web page's RTCPeerConnection, one a line: "stun:host:port", and
+# "turn:host:port", its user and its password between tabs)
+__net_stun = () -> str:
+    out: str[]
+    loop s in rtc.rtc_stun_servers: out.push("stun:" + s)
+    loop t in rtc.rtc_turn_servers: out.push("turn:{t.0}\t{t.1}\t{t.2}")
+    join(out, "\n")
+
+__net_fail = (i: int, why: str):
+    __net_why[__net_peers[i].id] = why
+    __net_gone(i)
+
+# start a server on port (native programs); false if the port cannot be had
+@no_web("does nothing in a web page: a page can only connect (the server is a native program)")
+listen = (port: int) -> bool:
+    when TARGET == "wasm":
+        return false
+    else:
+        if __net_listen_fd >= 0: return true
+        __pace_real_time = true         # (a test's screenshot run: at the other end's pace, a frame each 60th of a second)
+        __net_hook()
+        fd = __n_listen(port)
+        if fd < 0: return false
+        __net_listen_fd = fd
+        true
+
+# stop taking new connections (the peers connected stay); listen starts again
+stop_listening = ():
+    when TARGET != "wasm":
+        if __net_listen_fd >= 0:
+            __n_close(__net_listen_fd)
+            __net_listen_fd = -1
+
+# connect to a server: a peer, connecting in the background (joined or left arrive by receive);
+# host is a name or address and port its port, or host is a ws:// or wss:// URL (port then unused)
+connect = (host: str, port: int = 0) -> int:
+    __pace_real_time = true             # (a test's screenshot run: at the other end's pace)
+    __net_hook()
+    id = __net_next
+    __net_next += 1
+    p = __NetPeer(id = id, fd = -1, state = 0, client = true, host = host, port = port, since = time())
+    when TARGET == "wasm":
+        url = host
+        if not starts_with(url, "ws://") and not starts_with(url, "wss://"): url = "ws://{host}:{port}"
+        p.fd = __wasm_ws_open(data(url), len(url))
+        if p.fd < 0: p.state = 3
+        # (a page served over https: its browser lets it reach wss:// servers only, and ws:// on
+        # this same computer)
+        if p.fd == -4: __net_why[id] = "this page is served over https, so the browser only lets it reach wss:// servers (a host behind a TLS proxy) or this same computer (localhost); a page served over http, or a native build, can join {url}"
+        else if p.fd < 0: __net_why[id] = "the browser would not open {url}"
+        __net_peers.push(p)
+        if p.state == 3: __net_events.push(NetEvent(.left, id, []))
+        return id
+    else:
+        h = host
+        pt = port
+        if starts_with(h, "wss://"):
+            # (no TLS here: a native program connects to ws:// servers)
+            __net_events.push(NetEvent(.left, id, []))
+            p.state = 3
+            __net_why[id] = "a native program connects to ws:// addresses (wss:// needs TLS, which it does not have)"
+            __net_peers.push(p)
+            return id
+        if starts_with(h, "ws://"):
+            h = h[5..]
+            sl = find(h, "/")
+            if sl >= 0: h = h[..sl)
+            c = find(h, ":")
+            if c >= 0:
+                pt = to_int(h[c + 1..]) ?? 80
+                h = h[..c)
+            else: pt = 80
+        p.host = h
+        p.port = pt
+        ip = __n_resolve(h)
+        if ip >= 0: p.fd = __n_connect(ip, pt)
+        if p.fd < 0:
+            p.state = 3
+            if ip < 0: __net_why[id] = "no machine named '{h}' was found"
+            else: __net_why[id] = "the connection could not be started"
+            __net_events.push(NetEvent(.left, id, []))
+        __net_peers.push(p)
+        id
+
+# send a message to a peer (nothing if it is not connected, or has gone): text goes as a text
+# message (a string to a page's WebSocket), bytes as a binary one
+send = (peer: int, msg: u8[]): __net_send(peer, msg, false)
+send = (peer: int, msg: str): __net_send(peer, bytes(msg), true)
+
+__net_send = (peer: int, msg: u8[], text: bool):
+    loop i in [0..__net_peers.len()):
+        if __net_peers[i].id == peer:
+            if __net_peers[i].rtc >= 0:
+                if __net_peers[i].state == 2:
+                    when TARGET == "wasm":
+                        __wasm_rtcp_send(__net_peers[i].rtc, data(msg), msg.len())
+                    else:
+                        rtc.__rtc_send(__net_peers[i].rtc, msg, text)
+                return
+            when TARGET == "wasm":
+                if __net_peers[i].state != 3:
+                    if text: __wasm_ws_send_text(__net_peers[i].fd, data(msg), msg.len())
+                    else: __wasm_ws_send(__net_peers[i].fd, data(msg), msg.len())
+            else:
+                if __net_peers[i].state == 2:
+                    op = 2
+                    if text: op = 1
+                    __ws_frame(__net_peers[i].outbuf, op, msg, __net_peers[i].client)
+                    __net_flush(i)
+            return
+
+# send a message to every connected peer
+send_all = (msg: u8[]):
+    loop p in __net_peers:
+        if p.state == 2: send(p.id, msg)
+
+send_all = (msg: str):
+    loop p in __net_peers:
+        if p.state == 2: send(p.id, msg)
+
+# the peers connected now
+peers = () -> int[]:
+    out: int[]
+    loop p in __net_peers:
+        if p.state == 2: out.push(p.id)
+    out
+
+# end a connection (a left event follows)
+close = (peer: int):
+    loop i in [0..__net_peers.len()):
+        if __net_peers[i].id == peer and __net_peers[i].state != 3:
+            if __net_peers[i].rtc >= 0:
+                when TARGET == "wasm":
+                    __wasm_rtcp_close(__net_peers[i].rtc)
+                else:
+                    rtc.__rtc_close(__net_peers[i].rtc)
+                __net_gone(i)
+                return
+            when TARGET == "wasm":
+                __wasm_ws_close(__net_peers[i].fd)
+            else:
+                if __net_peers[i].state == 2:
+                    empty: u8[]
+                    __ws_frame(__net_peers[i].outbuf, 8, empty, __net_peers[i].client)
+                    __net_flush(i)
+                __n_close(__net_peers[i].fd)
+            __net_gone(i)
+
+# (the program ending: every peer told, as by close)
+__net_hooked = false
+__net_hook = ():
+    if __net_hooked: return
+    __net_hooked = true
+    __at_end(__net_goodbye)
+__net_goodbye = ():
+    ids: int[]
+    loop p in __net_peers:
+        if p.state != 3: ids.push(p.id)
+    loop id in ids: close(id)
+
+__net_gone = (i: int):
+    if __net_peers[i].state == 3: return
+    __net_peers[i].state = 3
+    __net_events.push(NetEvent(.left, __net_peers[i].id, []))
+
+# why a peer could not connect, once it has left ("": it did not say; a web page's browser does
+# not tell)
+why = (peer: int) -> str: __net_why.get(peer) ?? ""
+
+# this machine's address on its network (as 192.168.1.20): what another machine there connects to,
+# and what a host tells the players joining it; "" when it has none (no network, or a web page)
+local_address = () -> str:
+    ip = __n_local_ip()
+    if ip <= 0 or (ip >> 24) == 127: return ""
+    "{(ip >> 24) & 255}.{(ip >> 16) & 255}.{(ip >> 8) & 255}.{ip & 255}"
+
+__net_why: {int: str}
+
+# (a failed connection's error: Linux's and macOS's numbers)
+__n_why = (e: int, port: int) -> str:
+    if e == 111 or e == 61 or e == 10061: return "refused: nothing is listening on port {port} there"
+    if e == 110 or e == 60 or e == 10060: return "no answer"
+    if e == 113 or e == 65 or e == 10065: return "that machine cannot be reached"
+    if e == 101 or e == 51 or e == 10051: return "no network reaches it"
+    if e == 1: return "refused, or nothing is listening on port {port} there"
+    "error {e}"
+
+# what happened since the last call: peers joining and leaving, and their messages, in order
+receive = () -> NetEvent[]:
+    __net_poll()
+    if __net_held.len() == 0 and __net_marked.len() == 0:
+        out = __net_events
+        __net_events = []
+        return out
+    out: NetEvent[]
+    keep: NetEvent[]
+    loop e in __net_events:
+        if __net_kept(e): keep.push(e)
+        else: out.push(e)
+    __net_events = keep
+    out
+
+# the same, for the given peers only (the others' events wait for another call): parts of a
+# program that each have peers of their own, as a game hosting a relay and playing through it
+receive = (only: int[]) -> NetEvent[]:
+    __net_poll()
+    out: NetEvent[]
+    keep: NetEvent[]
+    loop e in __net_events:
+        if e.peer in only and not __net_kept(e): out.push(e)
+        else: keep.push(e)
+    __net_events = keep
+    out
+
+# (an event receive() leaves for another part of the library: an invite peer's while invite's
+# screens connect it, and netplay's packets on peers it plays over, which start with its mark)
+__net_kept = (e: NetEvent) -> bool:
+    if e.peer in __net_held: return true
+    if e.kind != .message or __net_marked.len() == 0 or not (e.peer in __net_marked): return false
+    __net_has_mark(e.data)
+__net_marked: int[]
+const __NET_MARK = 1                # (netplay's packets begin with this byte, which text does not)
+__net_has_mark = (b: u8[]) -> bool: b.len() > 0 and b[0] == u8(__NET_MARK)
+
+# (peers whose events receive() leaves for another part of the library: invite's, while its
+# screens are connecting them)
+__net_held: int[]
+__net_hold = (p: int, on: bool):
+    if on and not (p in __net_held): __net_held.push(p)
+    else if not on:
+        keep: int[]
+        loop h in __net_held:
+            if h != p: keep.push(h)
+        __net_held = keep
+
+# (invite's: these peers' events but their messages; the rest stay for receive())
+__net_take = (only: int[], messages: bool) -> NetEvent[]:
+    __net_poll()
+    out: NetEvent[]
+    keep: NetEvent[]
+    loop e in __net_events:
+        if (e.kind == .message) == messages and e.peer in only: out.push(e)
+        else: keep.push(e)
+    __net_events = keep
+    out
+
+# (netplay's: the marked messages from these peers, which receive() leaves to it, mark taken off;
+# their other messages stay for the game)
+__net_take_marked = (only: int[]) -> u8[][]:
+    __net_poll()
+    out: u8[][]
+    keep: NetEvent[]
+    loop e in __net_events:
+        if e.kind == .message and e.peer in only and __net_has_mark(e.data): out.push(e.data[1..])
+        else: keep.push(e)
+    __net_events = keep
+    out
+
+# (netplay's: peer p's marked messages are its own from now on)
+__net_mark = (p: int):
+    if not (p in __net_marked): __net_marked.push(p)
+
+# the same, for the peers that connected to this program's server (listen) only
+receive_server = () -> NetEvent[]:
+    __net_poll()
+    out: NetEvent[]
+    keep: NetEvent[]
+    loop e in __net_events:
+        if __net_accepted.has(e.peer): out.push(e)
+        else: keep.push(e)
+    __net_events = keep
+    loop e in out:
+        if e.kind == .left: __net_accepted.remove(e.peer)
+    out
+
+__net_poll = ():
+    __net_rtc_poll()
+    when TARGET == "wasm":
+        buf = fill(u8(0), 1 << 16)
+        loop i in [0..__net_peers.len()):
+            if __net_peers[i].rtc >= 0: continue
+            loop __net_peers[i].state != 3:
+                n = __wasm_ws_poll(__net_peers[i].fd, data(buf), buf.len())
+                if n == -1: break                                  # (nothing now)
+                if n == -2:
+                    if __net_peers[i].state == 0:
+                        __net_peers[i].state = 2
+                        __net_events.push(NetEvent(.joined, __net_peers[i].id, []))
+                    continue
+                if n == -3:
+                    # (closed before it ever opened: nothing answered there)
+                    if __net_peers[i].state == 0 and __net_why.get(__net_peers[i].id) == none:
+                        at = "{__net_peers[i].host}:{__net_peers[i].port}"
+                        if starts_with(__net_peers[i].host, "ws"): at = __net_peers[i].host
+                        __net_why[__net_peers[i].id] = "nothing answered at {at} (is the game hosting there, and is its port open?)"
+                    __net_gone(i)
+                    break
+                if n > buf.len():
+                    buf = fill(u8(0), n)                           # (a big message: room for it)
+                    continue
+                __net_events.push(__net_msg(__net_peers[i].id, buf[..n)))
+    else:
+        # new connections
+        if __net_listen_fd >= 0:
+            loop true:
+                fd = __n_accept(__net_listen_fd)
+                if fd < 0: break
+                __net_peers.push(__NetPeer(id = __net_next, fd = fd, state = 1, client = false, since = time()))
+                __net_accepted[__net_next] = true
+                __net_next += 1
+        loop i in [0..__net_peers.len()):
+            st = __net_peers[i].state
+            if st == 3 or __net_peers[i].rtc >= 0: continue
+            fd = __net_peers[i].fd
+            if st == 0:
+                c = __n_connected(fd)
+                if c < 0 or c == 0 and time() - __net_peers[i].since > 10.0:
+                    if c == 0: __net_why[__net_peers[i].id] = "no answer in 10 seconds (a wrong address, or a firewall in the way?)"
+                    else: __net_why[__net_peers[i].id] = __n_why(-c, __net_peers[i].port)
+                    __n_close(fd)
+                    __net_gone(i)
+                    continue
+                if c == 0: continue
+                # (connected: the WebSocket handshake)
+                __net_peers[i].state = 1
+                __net_key = __ws_key()
+                req = "GET / HTTP/1.1\r\nHost: {__net_peers[i].host}:{__net_peers[i].port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {__net_key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                __net_peers[i].outbuf.extend(bytes(req))
+            __net_flush(i)
+            if __net_peers[i].state == 3: continue
+            # what has come in
+            buf = fill(u8(0), 1 << 16)
+            loop true:
+                n = __n_recv(fd, data(buf), buf.len())
+                if n == -1: break
+                if n <= 0:
+                    __n_close(fd)
+                    __net_gone(i)
+                    break
+                __net_peers[i].inbuf.extend(buf[..n))
+            if __net_peers[i].state == 3: continue
+            __net_parse(i)
+        # (gone peers: dropped once their left event is out)
+        k = 0
+        loop k < __net_peers.len():
+            if __net_peers[k].state == 3:
+                __net_peers.remove(k)
+                continue
+            k += 1
+
+# write what is waiting to go out (as much as the socket takes now)
+__net_flush = (i: int):
+    when TARGET != "wasm":
+        loop __net_peers[i].outbuf.len() > 0 and __net_peers[i].state != 0:
+            n = __n_send(__net_peers[i].fd, data(__net_peers[i].outbuf), __net_peers[i].outbuf.len())
+            if n == -1: return
+            if n < 0:
+                __n_close(__net_peers[i].fd)
+                __net_gone(i)
+                return
+            __net_peers[i].outbuf = __net_peers[i].outbuf[n..)
+
+# the handshake, then frames, from what has come in
+__net_parse = (i: int):
+    if __net_peers[i].state == 1:
+        b = __net_peers[i].inbuf
+        e = __find_crlf2(b)
+        if e < 0:
+            if b.len() > 16384: __net_gone(i)
+            return
+        head = str_from_bytes(b[..e))
+        __net_peers[i].inbuf = b[e + 4..)
+        if __net_peers[i].client:
+            if not starts_with(head, "HTTP/1.1 101"):
+                __n_close(__net_peers[i].fd)
+                __net_gone(i)
+                return
+        else:
+            key = ""
+            loop line in split(head, "\r\n"):
+                c = find(line, ":")
+                if c > 0 and trim(line[..c)).lower() == "sec-websocket-key": key = trim(line[c + 1..])
+            if len(key) == 0:
+                __n_close(__net_peers[i].fd)
+                __net_gone(i)
+                return
+            acc = base64_encode(crypto.sha1(bytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")))
+            __net_peers[i].outbuf.extend(bytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {acc}\r\n\r\n"))
+            __net_flush(i)
+        __net_peers[i].state = 2
+        __net_events.push(NetEvent(.joined, __net_peers[i].id, []))
+    # frames: [fin, opcode] [mask, length] [16 or 64-bit length] [mask key] payload
+    msg: u8[]
+    loop __net_peers[i].state == 2:
+        b = __net_peers[i].inbuf
+        if b.len() < 2: return
+        op = int(b[0]) & 15
+        masked = int(b[1]) & 128 != 0
+        n = int(b[1]) & 127
+        at = 2
+        if n == 126:
+            if b.len() < 4: return
+            n = (int(b[2]) << 8) | int(b[3])
+            at = 4
+        else if n == 127:
+            if b.len() < 10: return
+            n = 0
+            loop k in [2..10): n = (n << 8) | int(b[k])
+            at = 10
+        if n > __NET_MAX or n < 0:
+            # (a frame bigger than any message is let be: the peer is not playing)
+            __n_close(__net_peers[i].fd)
+            __net_gone(i)
+            return
+        mk = at
+        if masked: at += 4
+        if b.len() < at + n: return
+        payload = b[at..at + n)
+        if masked:
+            loop k in [0..n): payload[k] = payload[k] xor b[mk + (k & 3)]
+        __net_peers[i].inbuf = b[at + n..)
+        fin = int(b[0]) & 128 != 0
+        if op == 8:
+            __n_close(__net_peers[i].fd)
+            __net_gone(i)
+            return
+        if op == 9:
+            __ws_frame(__net_peers[i].outbuf, 10, payload, __net_peers[i].client)      # pong
+            __net_flush(i)
+            continue
+        if op == 10: continue
+        msg.extend(payload)
+        if msg.len() > __NET_MAX:
+            __n_close(__net_peers[i].fd)
+            __net_gone(i)
+            return
+        if fin:
+            __net_events.push(__net_msg(__net_peers[i].id, msg))
+            msg = []
+
+__find_crlf2 = (b: u8[]) -> int:
+    loop k in [0..b.len() - 3):
+        if b[k] == '\r' and b[k + 1] == '\n' and b[k + 2] == '\r' and b[k + 3] == '\n': return k
+    -1
+
+# a frame of opcode op into out (masked: from a client)
+__ws_frame = (out: mut u8[], op: int, payload: u8[], masked: bool):
+    out.push(u8(128 | op))
+    m = 0
+    if masked: m = 128
+    n = payload.len()
+    if n < 126: out.push(u8(m | n))
+    else if n < 65536:
+        out.push(u8(m | 126))
+        out.push(u8(n >> 8))
+        out.push(u8(n & 255))
+    else:
+        out.push(u8(m | 127))
+        loop k in [0..8): out.push(u8((n >> (56 - 8 * k)) & 255))
+    if not masked:
+        out.extend(payload)
+        return
+    key = [u8(random_int(0, 256)), u8(random_int(0, 256)), u8(random_int(0, 256)), u8(random_int(0, 256))]
+    out.extend(key)
+    loop k in [0..n): out.push(payload[k] xor key[k & 3])
+
+__ws_key = () -> str:
+    b: u8[]
+    loop _ in [0..16): b.push(u8(random_int(0, 256)))
+    base64_encode(b)
+
+# ---------------- UDP (native programs) ----------------
+# Datagrams: no connection, each one arrives whole or not at all, maybe out of order. Faster
+# than messages over WebSockets for what is sent often and soon stale (positions, inputs); a
+# web page cannot use UDP.
+#
+#   s = net.udp(4000)                          # a socket on port 4000 (0: any port)
+#   net.udp_send(s, "192.168.1.20", 4000, bytes("hello"))
+#   loop d in net.udp_receive(s): print(d.host, d.port, str_from_bytes(d.data))
+
+struct Datagram:
+    host: str               # where it came from: an address, "1.2.3.4"
+    port: int
+    data: u8[]
+
+__net_hosts: {str: int}
+
+# a UDP socket on port (0: one the system picks), or -1 (in use, or in a web page)
+@no_web("gives -1 in a web page: browsers have no UDP (net.connect and net.send, over WebSockets, work there)")
+udp = (port: int = 0) -> int: __n_udp(port)
+
+# false if host is not known or it could not be sent (a datagram may also be lost on the way)
+udp_send = (sock: int, host: str, port: int, data: u8[]) -> bool:
+    ip = -1
+    if let known = __net_hosts.get(host): ip = known
+    else:
+        ip = __n_resolve(host)
+        __net_hosts[host] = ip
+    if ip < 0 or data.len() == 0: return false
+    __n_sendto(sock, data(data), data.len(), ip, port) == data.len()
+udp_send = (sock: int, host: str, port: int, text: str) -> bool: udp_send(sock, host, port, bytes(text))
+
+# the datagrams that have arrived since the last call
+udp_receive = (sock: int) -> Datagram[]:
+    out: Datagram[]
+    if sock < 0: return out
+    buf = fill(u8(0), 65536)
+    from = fill(u8(0), 16)
+    loop:
+        n = __n_recvfrom(sock, data(buf), buf.len(), from)
+        if n < 0: break
+        ip = "{from[4]}.{from[5]}.{from[6]}.{from[7]}"
+        out.push(Datagram(ip, (int(from[2]) << 8) | int(from[3]), buf[..n)))
+    out
+
+# the port a UDP socket is on (as one made with udp(0), which the system picked), or -1
+udp_port = (sock: int) -> int: __n_sock_port(sock)
+
+udp_close = (sock: int):
+    if sock >= 0: __n_close(sock)
+
+# ---------------- TCP: a stream of bytes to one other program ----------------
+# For a tool or a server of your own speaking someone else's protocol (HTTP, a game server's);
+# between your own programs, the messages above are simpler. Native programs only.
+#   c = net.tcp_connect("example.com", 80)                 # -1 if it cannot be reached
+#   net.tcp_send(c, "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")
+#   reply: u8[]
+#   loop not net.tcp_closed(c): reply.extend(net.tcp_receive(c, wait = 5.0))
+#   net.tcp_close(c)
+# A server: s = net.tcp_listen(8080), then each c = net.tcp_accept(s) (-1: none waiting).
+
+__tcp_eof: {int: bool}
+
+# a connection to host's port, waiting up to `timeout` seconds for it; -1 if it cannot be made
+@no_web("gives -1 in a web page: browsers have no TCP sockets (net.connect, over WebSockets, works there)")
+tcp_connect = (host: str, port: int, timeout: f64 = 5.0) -> int:
+    ip = __n_resolve(host)
+    if ip < 0: return -1
+    fd = __n_connect(ip, port)
+    if fd < 0: return -1
+    end = time() + timeout
+    loop true:
+        st = __n_connected(fd)
+        if st > 0:
+            __tcp_eof[fd] = false
+            return fd
+        if st < 0 or time() > end:
+            __n_close(fd)
+            return -1
+        sleep(0.001)
+    -1
+
+# a server on port: connections come from tcp_accept; -1 if the port cannot be had
+@no_web("gives -1 in a web page: a page cannot listen (the server is a native program)")
+tcp_listen = (port: int) -> int: __n_listen(port)
+
+# a connection made to the server (waiting up to `wait` seconds for one), or -1 if none came
+tcp_accept = (server: int, wait: f64 = 0.0) -> int:
+    if server < 0: return -1
+    end = time() + wait
+    loop true:
+        fd = __n_accept(server)
+        if fd >= 0:
+            __tcp_eof[fd] = false
+            return fd
+        if time() >= end: return -1
+        sleep(0.001)
+    -1
+
+# all of data sent (waiting while the other side is slow to take it); false if the connection
+# has failed or closed
+tcp_send = (c: int, data: u8[]) -> bool:
+    at = 0
+    loop at < data.len():
+        n = __n_send(c, data(data) + at, data.len() - at)
+        if n == -2: return false
+        if n < 0:
+            sleep(0.001)
+            continue
+        at += n
+    true
+tcp_send = (c: int, text: str) -> bool: tcp_send(c, bytes(text))
+
+# the bytes that have arrived (waiting up to `wait` seconds for the first); empty when none has
+# (or the connection has ended: tcp_closed says)
+tcp_receive = (c: int, wait: f64 = 0.0) -> u8[]:
+    out: u8[]
+    if c < 0 or (__tcp_eof.get(c) ?? true): return out
+    buf = fill(u8(0), 65536)
+    end = time() + wait
+    loop true:
+        n = __n_recv(c, data(buf), buf.len())
+        if n > 0:
+            out.extend(buf[..n))
+            continue
+        if n == 0 or n == -2:
+            __tcp_eof[c] = true
+            return out
+        # (nothing now: done if something came, else wait a little)
+        if out.len() > 0 or time() >= end: return out
+        sleep(0.001)
+    out
+
+# the other side has closed the connection (or it failed), and everything sent has been received
+tcp_closed = (c: int) -> bool: __tcp_eof.get(c) ?? true
+
+tcp_close = (c: int):
+    if c < 0: return
+    __n_close(c)
+    __tcp_eof.remove(c)
+
+# ---------------- sockets: each system's ----------------
+# __n_listen(port) -> fd (-1: failed); __n_connect(ip, port) -> fd, connecting (-1: failed);
+# __n_connected(fd) -> 1 connected, 0 not yet, -1 failed; __n_accept(fd) -> fd (-1: none now);
+# __n_udp(port) -> a datagram socket bound to port, not blocking; __n_sendto(fd, p, n, ip, port)
+# and __n_recvfrom(fd, p, n, from) -> bytes (or < 0: nothing, failed);
+# __n_send / __n_recv -> bytes (recv: 0 closed), -1 not now, -2 failed; __n_close(fd);
+# __n_resolve(host) -> an IPv4 address as an int (a.b.c.d: a << 24 ...), -1 if unknown
+
+# a sockaddr_in (16 bytes): family, port and address in network order (macOS: a length first)
+__n_addr = (ip: int, port: int) -> u8[]:
+    a = fill(u8(0), 16)
+    when TARGET == "macos":
+        a[0] = 16
+        a[1] = 2
+    else:
+        a[0] = 2
+    a[2] = u8(port >> 8)
+    a[3] = u8(port & 255)
+    a[4] = u8((ip >> 24) & 255)
+    a[5] = u8((ip >> 16) & 255)
+    a[6] = u8((ip >> 8) & 255)
+    a[7] = u8(ip & 255)
+    a
+
+# "1.2.3.4" as an int, or -1
+__n_ip4 = (s: str) -> int:
+    parts = split(s, ".")
+    if parts.len() != 4: return -1
+    ip = 0
+    loop p in parts:
+        v = to_int(p) ?? -1
+        if v < 0 or v > 255 or len(p) == 0: return -1
+        ip = (ip << 8) | v
+    ip
+
+when TARGET == "linux":
+    __n_listen = (port: int) -> int:
+        fd = syscall(41, 2, 1 | 0x800 | 0x80000, 0)               # socket(AF_INET, SOCK_STREAM | NONBLOCK | CLOEXEC)
+        if fd < 0: return -1
+        one = [1]
+        syscall(54, fd, 1, 2, data(one), 4)                        # setsockopt(SOL_SOCKET, SO_REUSEADDR)
+        a = __n_addr(0, port)
+        if syscall(49, fd, data(a), 16) != 0 or syscall(50, fd, 64) != 0:
+            syscall(3, fd)
+            return -1
+        fd
+
+    __n_connect = (ip: int, port: int) -> int:
+        fd = syscall(41, 2, 1 | 0x800 | 0x80000, 0)
+        if fd < 0: return -1
+        a = __n_addr(ip, port)
+        r = syscall(42, fd, data(a), 16)
+        if r != 0 and r != -115:                                    # (EINPROGRESS)
+            syscall(3, fd)
+            return -1
+        one = [1]
+        syscall(54, fd, 6, 1, data(one), 4)                         # TCP_NODELAY
+        fd
+
+    __n_connected = (fd: int) -> int:
+        pfd = [fd | (4 << 32)]                                      # POLLOUT
+        if syscall(7, data(pfd), 1, 0) <= 0: return 0
+        err = [0]
+        len_ = [8]
+        syscall(55, fd, 1, 4, data(err), data(len_))                # getsockopt(SO_ERROR)
+        if err[0] & 0xFFFFFFFF != 0: return -(err[0] & 0xFFFFFFFF)
+        1
+
+    __n_accept = (lfd: int) -> int:
+        fd = syscall(288, lfd, 0, 0, 0x800 | 0x80000)               # accept4(NONBLOCK | CLOEXEC)
+        if fd < 0: return -1
+        one = [1]
+        syscall(54, fd, 6, 1, data(one), 4)
+        fd
+
+    __n_send = (fd: int, p: *u8, n: int) -> int:
+        r = syscall(44, fd, p, n, 0x4000, 0, 0)                     # sendto(MSG_NOSIGNAL)
+        if r == -11: return -1
+        if r < 0: return -2
+        r
+
+    __n_recv = (fd: int, p: *u8, n: int) -> int:
+        r = syscall(45, fd, p, n, 0, 0, 0)
+        if r == -11: return -1
+        if r < 0: return -2
+        r
+
+    __n_close = (fd: int): syscall(3, fd)
+
+    # this machine's address on its network: a datagram socket aimed at a public address (no
+    # packet is sent), and the address it was given to send from
+    __n_local_ip = () -> int:
+        fd = syscall(41, 2, 2 | 0x80000, 0)
+        if fd < 0: return -1
+        a = __n_addr(0x08080808, 53)
+        r = syscall(42, fd, data(a), 16)
+        b = fill(u8(0), 16)
+        l = [16]
+        g = syscall(51, fd, data(b), data(l))                       # getsockname
+        syscall(3, fd)
+        if r != 0 or g != 0: return -1
+        (int(b[4]) << 24) | (int(b[5]) << 16) | (int(b[6]) << 8) | int(b[7])
+
+    # the port a socket is bound to (-1: none)
+    __n_sock_port = (fd: int) -> int:
+        b = fill(u8(0), 16)
+        l = [16]
+        if syscall(51, fd, data(b), data(l)) != 0: return -1
+        (int(b[2]) << 8) | int(b[3])
+
+    __n_udp = (port: int) -> int:
+        fd = syscall(41, 2, 2 | 0x800 | 0x80000, 0)                 # socket(AF_INET, SOCK_DGRAM | NONBLOCK | CLOEXEC)
+        if fd < 0: return -1
+        a = __n_addr(0, port)
+        if syscall(49, fd, data(a), 16) != 0:
+            syscall(3, fd)
+            return -1
+        fd
+
+    __n_sendto = (fd: int, p: *u8, n: int, ip: int, port: int) -> int:
+        a = __n_addr(ip, port)
+        syscall(44, fd, p, n, 0x4000, data(a), 16)
+
+    # (from: the sender's 16-byte address)
+    __n_recvfrom = (fd: int, p: *u8, n: int, from: mut u8[]) -> int:
+        l = [16]
+        syscall(45, fd, p, n, 0, data(from), data(l))
+
+    # a name: an address, localhost, /etc/hosts, then the name server of /etc/resolv.conf
+    __n_resolve = (host: str) -> int:
+        ip = __n_ip4(host)
+        if ip >= 0: return ip
+        if host == "localhost": return 0x7F000001
+        if let hosts = read_file("/etc/hosts"):
+            loop line in hosts.lines():
+                t = line
+                h = find(t, "#")
+                if h >= 0: t = t[..h)
+                ws = split(t.replace("\t", " "), " ").filter((w: str): len(w) > 0)
+                if ws.len() >= 2 and __n_ip4(ws[0]) >= 0:
+                    loop w in ws[1..):
+                        if w == host: return __n_ip4(ws[0])
+        ns = 0x08080808
+        if let conf = read_file("/etc/resolv.conf"):
+            loop line in conf.lines():
+                t = trim(line)
+                if starts_with(t, "nameserver "):
+                    a = __n_ip4(trim(t[11..]))
+                    if a >= 0:
+                        ns = a
+                        break
+        __n_dns(host, ns)
+
+    # one question for an A record, over UDP (3 tries, a second each)
+    __n_dns = (host: str, ns: int) -> int:
+        q: u8[] = [0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+        loop part in split(host, "."):
+            q.push(u8(len(part)))
+            q.extend(bytes(part))
+        q.extend([u8(0), 0, 1, 0, 1])
+        fd = syscall(41, 2, 2 | 0x80000, 0)                         # socket(AF_INET, SOCK_DGRAM)
+        if fd < 0: return -1
+        a = __n_addr(ns, 53)
+        buf = fill(u8(0), 1500)
+        loop _ in [0..3):
+            syscall(44, fd, data(q), q.len(), 0, data(a), 16)
+            pfd = [fd | (1 << 32)]
+            if syscall(7, data(pfd), 1, 1000) <= 0: continue
+            n = syscall(45, fd, data(buf), buf.len(), 0, 0, 0)
+            if n < 12: continue
+            syscall(3, fd)
+            return __n_dns_answer(buf[..n), q.len())
+        syscall(3, fd)
+        -1
+
+    # the first A record of a reply
+    __n_dns_answer = (b: u8[], qlen: int) -> int:
+        an = (int(b[6]) << 8) | int(b[7])
+        at = qlen
+        loop _ in [0..an):
+            if at >= b.len(): return -1
+            # (the name: labels, or a pointer)
+            loop at < b.len() and b[at] != 0:
+                if int(b[at]) & 0xC0 == 0xC0:
+                    at += 1
+                    break
+                at += int(b[at]) + 1
+            at += 1
+            if at + 10 > b.len(): return -1
+            t = (int(b[at]) << 8) | int(b[at + 1])
+            rl = (int(b[at + 8]) << 8) | int(b[at + 9])
+            at += 10
+            if t == 1 and rl == 4 and at + 4 <= b.len(): return (int(b[at]) << 24) | (int(b[at + 1]) << 16) | (int(b[at + 2]) << 8) | int(b[at + 3])
+            at += rl
+        -1
+
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("socket")
+    extern __m_socket = (domain: i32, kind: i32, proto: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("connect")
+    extern __m_connect = (fd: i32, addr: *u8, len: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("bind")
+    extern __m_bind = (fd: i32, addr: *u8, len: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("listen")
+    extern __m_listen = (fd: i32, n: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("accept")
+    extern __m_accept = (fd: i32, addr: *u8, len: *u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("send")
+    extern __m_send = (fd: i32, p: *u8, n: int, flags: i32) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("recv")
+    extern __m_recv = (fd: i32, p: *u8, n: int, flags: i32) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("setsockopt")
+    extern __m_setsockopt = (fd: i32, level: i32, name: i32, v: *u8, len: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getsockopt")
+    extern __m_getsockopt = (fd: i32, level: i32, name: i32, v: *u8, len: *u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("gethostbyname")
+    extern __m_gethostbyname = (name: *u8) -> *u8
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("sendto")
+    extern __m_sendto = (fd: i32, p: *u8, n: int, flags: i32, addr: *u8, len: u32) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("recvfrom")
+    extern __m_recvfrom = (fd: i32, p: *u8, n: int, flags: i32, addr: *u8, len: *u32) -> int
+
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getsockname")
+    extern __m_getsockname = (fd: i32, addr: *u8, len: *u32) -> i32
+
+    __n_local_ip = () -> int:
+        fd = int(__m_socket(i32(2), i32(2), i32(0)))
+        if fd < 0: return -1
+        a = __n_addr(0x08080808, 53)
+        r = int(__m_connect(i32(fd), data(a), u32(16)))
+        b = fill(u8(0), 16)
+        l: u32[] = [16]
+        g = int(__m_getsockname(i32(fd), data(b), data(l)))
+        syscall(3, fd)
+        if r != 0 or g != 0: return -1
+        (int(b[4]) << 24) | (int(b[5]) << 16) | (int(b[6]) << 8) | int(b[7])
+
+    __n_sock_port = (fd: int) -> int:
+        b = fill(u8(0), 16)
+        l: u32[] = [16]
+        if int(__m_getsockname(i32(fd), data(b), data(l))) != 0: return -1
+        (int(b[2]) << 8) | int(b[3])
+
+    __n_udp = (port: int) -> int:
+        fd = int(__m_socket(i32(2), i32(2), i32(0)))
+        if fd < 0: return -1
+        a = __n_addr(0, port)
+        if int(__m_bind(i32(fd), data(a), u32(16))) != 0:
+            syscall(3, fd)
+            return -1
+        __c_fcntl(i32(fd), i32(4), 0, 0, 0, 0, 0, 0, 4)            # F_SETFL O_NONBLOCK
+        fd
+
+    __n_sendto = (fd: int, p: *u8, n: int, ip: int, port: int) -> int:
+        a = __n_addr(ip, port)
+        __m_sendto(i32(fd), p, n, i32(0), data(a), u32(16))
+
+    __n_recvfrom = (fd: int, p: *u8, n: int, from: mut u8[]) -> int:
+        l: u32[] = [16]
+        __m_recvfrom(i32(fd), p, n, i32(0), data(from), data(l))
+
+    # (non-blocking, and no SIGPIPE when the other end has gone: SO_NOSIGPIPE)
+    __n_setup = (fd: int):
+        __c_fcntl(i32(fd), i32(4), 0, 0, 0, 0, 0, 0, 4)            # F_SETFL O_NONBLOCK
+        one = [1]
+        __m_setsockopt(i32(fd), i32(0xFFFF), i32(0x1022), data(one) as *u8, u32(4))
+        __m_setsockopt(i32(fd), i32(6), i32(1), data(one) as *u8, u32(4))      # TCP_NODELAY
+
+    __n_listen = (port: int) -> int:
+        fd = int(__m_socket(i32(2), i32(1), i32(0)))
+        if fd < 0: return -1
+        one = [1]
+        __m_setsockopt(i32(fd), i32(0xFFFF), i32(4), data(one) as *u8, u32(4))  # SO_REUSEADDR
+        a = __n_addr(0, port)
+        if int(__m_bind(i32(fd), data(a), u32(16))) != 0 or int(__m_listen(i32(fd), i32(64))) != 0:
+            syscall(3, fd)
+            return -1
+        __n_setup(fd)
+        fd
+
+    __n_connect = (ip: int, port: int) -> int:
+        fd = int(__m_socket(i32(2), i32(1), i32(0)))
+        if fd < 0: return -1
+        __n_setup(fd)
+        a = __n_addr(ip, port)
+        r = __mac_r(int(__m_connect(i32(fd), data(a), u32(16))))
+        if r != 0 and r != -36:                                     # (EINPROGRESS: 36 on macOS, kept by __mac_r)
+            syscall(3, fd)
+            return -1
+        fd
+
+    __n_connected = (fd: int) -> int:
+        pfd = [fd | (4 << 32)]
+        if syscall(7, data(pfd), 1, 0) <= 0: return 0
+        err = [0]
+        len_: u32[] = [4]
+        __m_getsockopt(i32(fd), i32(0xFFFF), i32(0x1007), data(err) as *u8, data(len_))   # SO_ERROR
+        if err[0] & 0xFFFFFFFF != 0: return -(err[0] & 0xFFFFFFFF)
+        1
+
+    __n_accept = (lfd: int) -> int:
+        fd = int(__m_accept(i32(lfd), null, null))
+        if fd < 0: return -1
+        __n_setup(fd)
+        fd
+
+    __n_send = (fd: int, p: *u8, n: int) -> int:
+        r = __mac_r(__m_send(i32(fd), p, n, i32(0)))
+        if r == -11: return -1                                  # (EAGAIN, as __mac_r gives it: Linux's number)
+        if r < 0: return -2
+        r
+
+    __n_recv = (fd: int, p: *u8, n: int) -> int:
+        r = __mac_r(__m_recv(i32(fd), p, n, i32(0)))
+        if r == -11: return -1                                  # (EAGAIN, as __mac_r gives it: Linux's number)
+        if r < 0: return -2
+        r
+
+    __n_close = (fd: int): syscall(3, fd)
+
+    __n_resolve = (host: str) -> int:
+        ip = __n_ip4(host)
+        if ip >= 0: return ip
+        h = __m_gethostbyname(data(__zstr(host)))
+        if h == null: return -1
+        # (struct hostent: name, aliases, type and length, then the list of addresses)
+        list = ((h + 24) as **u8)[0]
+        if list == null: return -1
+        a = (list as **u8)[0]
+        if a == null: return -1
+        (int(a[0]) << 24) | (int(a[1]) << 16) | (int(a[2]) << 8) | int(a[3])
+
+when TARGET == "windows":
+    @lib("ws2_32.dll")
+    extern WSAStartup = (version: u16, data: *u8) -> i32
+    @lib("ws2_32.dll")
+    @symbol("socket")
+    extern __w_socket = (domain: i32, kind: i32, proto: i32) -> int
+    @lib("ws2_32.dll")
+    @symbol("connect")
+    extern __w_connect = (s: int, addr: *u8, len: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("bind")
+    extern __w_bind = (s: int, addr: *u8, len: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("listen")
+    extern __w_listen = (s: int, n: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("accept")
+    extern __w_accept = (s: int, addr: *u8, len: *i32) -> int
+    @lib("ws2_32.dll")
+    @symbol("send")
+    extern __w_send = (s: int, p: *u8, n: i32, flags: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("recv")
+    extern __w_recv = (s: int, p: *u8, n: i32, flags: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("closesocket")
+    extern __w_closesocket = (s: int) -> i32
+    @lib("ws2_32.dll")
+    @symbol("ioctlsocket")
+    extern __w_ioctlsocket = (s: int, cmd: i32, arg: *u32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("setsockopt")
+    extern __w_setsockopt = (s: int, level: i32, name: i32, v: *u8, len: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("getsockopt")
+    extern __w_getsockopt = (s: int, level: i32, name: i32, v: *u8, len: *i32) -> i32
+    @lib("ws2_32.dll")
+    extern WSAGetLastError = () -> i32
+    @lib("ws2_32.dll")
+    extern WSAPoll = (fds: *u8, n: u32, timeout: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("gethostbyname")
+    extern __w_gethostbyname = (name: *u8) -> *u8
+    @lib("ws2_32.dll")
+    @symbol("sendto")
+    extern __w_sendto = (s: int, p: *u8, n: i32, flags: i32, addr: *u8, len: i32) -> i32
+    @lib("ws2_32.dll")
+    @symbol("recvfrom")
+    extern __w_recvfrom = (s: int, p: *u8, n: i32, flags: i32, addr: *u8, len: *i32) -> i32
+
+    @lib("ws2_32.dll")
+    @symbol("getsockname")
+    extern __w_getsockname = (s: int, addr: *u8, len: *i32) -> i32
+
+    __n_local_ip = () -> int:
+        __n_start()
+        s = __w_socket(i32(2), i32(2), i32(17))
+        if s == -1: return -1
+        a = __n_addr(0x08080808, 53)
+        r = int(__w_connect(s, data(a), i32(16)))
+        b = fill(u8(0), 16)
+        l: i32[] = [16]
+        g = int(__w_getsockname(s, data(b), data(l)))
+        __w_closesocket(s)
+        if r != 0 or g != 0: return -1
+        (int(b[4]) << 24) | (int(b[5]) << 16) | (int(b[6]) << 8) | int(b[7])
+
+    __n_sock_port = (s: int) -> int:
+        b = fill(u8(0), 16)
+        l: i32[] = [16]
+        if int(__w_getsockname(s, data(b), data(l))) != 0: return -1
+        (int(b[2]) << 8) | int(b[3])
+
+    __n_udp = (port: int) -> int:
+        __n_start()
+        s = __w_socket(i32(2), i32(2), i32(17))
+        if s == -1: return -1
+        a = __n_addr(0, port)
+        if int(__w_bind(s, data(a), i32(16))) != 0:
+            __w_closesocket(s)
+            return -1
+        one: u32[] = [1]
+        __w_ioctlsocket(s, i32(-2147195266), data(one))             # FIONBIO
+        s
+
+    __n_sendto = (s: int, p: *u8, n: int, ip: int, port: int) -> int:
+        a = __n_addr(ip, port)
+        int(__w_sendto(s, p, i32(n), i32(0), data(a), i32(16)))
+
+    __n_recvfrom = (s: int, p: *u8, n: int, from: mut u8[]) -> int:
+        # (a datagram sent earlier to a port nothing listens on fails a later receive: WSAECONNRESET)
+        loop _ in [0..16):
+            l: i32[] = [16]
+            r = int(__w_recvfrom(s, p, i32(n), i32(0), data(from), data(l)))
+            if r >= 0 or int(WSAGetLastError()) != 10054: return r
+        -1
+
+    __n_started = false
+    __n_start = ():
+        if __n_started: return
+        __n_started = true
+        d = fill(u8(0), 512)
+        WSAStartup(u16(0x0202), data(d))
+
+    __n_setup = (s: int):
+        one: u32[] = [1]
+        __w_ioctlsocket(s, i32(-2147195266), data(one))   # (0x8004667E)              # FIONBIO
+        __w_setsockopt(s, i32(6), i32(1), data(one) as *u8, i32(4)) # TCP_NODELAY
+
+    __n_listen = (port: int) -> int:
+        __n_start()
+        s = __w_socket(i32(2), i32(1), i32(6))
+        if s == -1: return -1
+        a = __n_addr(0, port)
+        if int(__w_bind(s, data(a), i32(16))) != 0 or int(__w_listen(s, i32(64))) != 0:
+            __w_closesocket(s)
+            return -1
+        __n_setup(s)
+        s
+
+    __n_connect = (ip: int, port: int) -> int:
+        __n_start()
+        s = __w_socket(i32(2), i32(1), i32(6))
+        if s == -1: return -1
+        __n_setup(s)
+        a = __n_addr(ip, port)
+        if int(__w_connect(s, data(a), i32(16))) != 0 and int(WSAGetLastError()) != 10035:
+            __w_closesocket(s)
+            return -1
+        s
+
+    __n_connected = (s: int) -> int:
+        # (WSAPOLLFD: the socket, events, revents)
+        pfd = [s, 0x10]                                             # POLLWRNORM
+        if int(WSAPoll(data(pfd) as *u8, u32(1), i32(0))) <= 0: return 0
+        if (pfd[1] >> 16) & 0x3 != 0:                               # (POLLERR, POLLHUP)
+            # (why: SO_ERROR, a WSA error number)
+            err: i32[] = [0]
+            len_: i32[] = [4]
+            __w_getsockopt(s, i32(0xFFFF), i32(0x1007), data(err) as *u8, data(len_))
+            if err[0] != 0: return -int(err[0])
+            return -1
+        1
+
+    __n_accept = (lfd: int) -> int:
+        s = __w_accept(lfd, null, null)
+        if s == -1: return -1
+        __n_setup(s)
+        s
+
+    __n_send = (s: int, p: *u8, n: int) -> int:
+        r = int(__w_send(s, p, i32(min(n, 1 << 30)), i32(0)))
+        if r < 0:
+            if int(WSAGetLastError()) == 10035: return -1
+            return -2
+        r
+
+    __n_recv = (s: int, p: *u8, n: int) -> int:
+        r = int(__w_recv(s, p, i32(n), i32(0)))
+        if r < 0:
+            if int(WSAGetLastError()) == 10035: return -1
+            return -2
+        r
+
+    __n_close = (s: int): __w_closesocket(s)
+
+    __n_resolve = (host: str) -> int:
+        ip = __n_ip4(host)
+        if ip >= 0: return ip
+        if host == "localhost": return 0x7F000001
+        __n_start()
+        h = __w_gethostbyname(data(__zstr(host)))
+        if h == null: return -1
+        list = ((h + 24) as **u8)[0]
+        if list == null: return -1
+        a = (list as **u8)[0]
+        if a == null: return -1
+        (int(a[0]) << 24) | (int(a[1]) << 16) | (int(a[2]) << 8) | int(a[3])
+
+when TARGET == "wasm":
+    # (the page's WebSocket: lib/web/runtime.js)
+    extern __wasm_ws_open = (url: *u8, n: int) -> int
+    extern __wasm_ws_send = (id: int, p: *u8, n: int)
+    extern __wasm_ws_send_text = (id: int, p: *u8, n: int)
+    extern __wasm_ws_poll = (id: int, out: *u8, cap: int) -> int
+    extern __wasm_ws_close = (id: int)
+    extern __wasm_rtc_invite = (reliable: int, stun: *u8, n: int) -> int
+    extern __wasm_rtc_join = (stun: *u8, n: int, sdp: *u8, sn: int) -> int
+    extern __wasm_rtc_local = (id: int, out: *u8, cap: int) -> int
+    extern __wasm_rtc_answer = (id: int, sdp: *u8, n: int)
+    extern __wasm_rtcp_send = (id: int, p: *u8, n: int)
+    extern __wasm_rtcp_poll = (id: int, out: *u8, cap: int) -> int
+    extern __wasm_rtcp_close = (id: int)
+
+    # (a page has no sockets of its own: what the native code above would call)
+    __n_listen = (port: int) -> int: -1
+    __n_connect = (ip: int, port: int) -> int: -1
+    __n_connected = (fd: int) -> int: -1
+    __n_accept = (fd: int) -> int: -1
+    __n_send = (fd: int, p: *u8, n: int) -> int: -2
+    __n_recv = (fd: int, p: *u8, n: int) -> int: -2
+    __n_close = (fd: int): pass
+    __n_resolve = (host: str) -> int: -1
+    __n_udp = (port: int) -> int: -1
+    __n_local_ip = () -> int: -1
+    __n_sock_port = (fd: int) -> int: -1
+    __n_sendto = (fd: int, p: *u8, n: int, ip: int, port: int) -> int: -1
+    __n_recvfrom = (fd: int, p: *u8, n: int, from: mut u8[]) -> int: -1

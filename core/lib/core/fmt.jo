@@ -1,0 +1,700 @@
+# Value formatting used by string interpolation, print() and str().
+# `__fmt(buf, x)` appends x to a byte buffer; overload it to customize how a type prints.
+
+__fmt = (buf: mut u8[], s: str): __buf_append_str(buf, s)
+
+__fmt = (buf: mut u8[], b: bool):
+    if b: __buf_append_str(buf, "true")
+    else: __buf_append_str(buf, "false")
+
+__fmt_u64 = (buf: mut u8[], v: u64, neg: bool, minw: int, pad: int):
+    # write digits backwards into a small scratch area at the end of the buffer
+    ndig = 1
+    t = v
+    loop t >= 10:
+        t = t / 10
+        ndig += 1
+    width = ndig
+    if neg: width += 1
+    if width < minw: width = minw
+    old = len(buf)
+    p = __buf_reserve(buf, width)
+    d = p + 24 + old
+    i = 0
+    if neg and pad == '0':
+        d[0] = '-'
+        i = 1
+    loop i < width - ndig - (if neg and pad != '0': 1 else: 0):
+        d[i] = u8(pad)
+        i += 1
+    if neg and pad != '0':
+        d[i] = '-'
+        i += 1
+    k = width - 1
+    t = v
+    loop k >= i:
+        d[k] = u8(48 + int(t % 10))
+        t = t / 10
+        k -= 1
+    (p as *int)[1] = old + width
+
+__fmt = (buf: mut u8[], x: int):
+    if x < 0: __fmt_u64(buf, u64(0) - u64(x), true, 0, ' ')
+    else: __fmt_u64(buf, u64(x), false, 0, ' ')
+
+__fmt = (buf: mut u8[], x: u64): __fmt_u64(buf, x, false, 0, ' ')
+__fmt = (buf: mut u8[], x: u32): __fmt_u64(buf, u64(x), false, 0, ' ')
+__fmt = (buf: mut u8[], x: u16): __fmt_u64(buf, u64(x), false, 0, ' ')
+__fmt = (buf: mut u8[], x: u8): __fmt_u64(buf, u64(x), false, 0, ' ')
+
+__fmt_hex = (buf: mut u8[], x: u64, minw: int, upper: bool):
+    digits = "0123456789abcdef"
+    if upper: digits = "0123456789ABCDEF"
+    n = 1
+    t = x
+    loop t >= 16:
+        t = t >> 4
+        n += 1
+    w = n
+    if w < minw: w = minw
+    old = len(buf)
+    p = __buf_reserve(buf, w)
+    d = p + 24 + old
+    k = w - 1
+    t = x
+    loop k >= 0:
+        d[k] = digits[int(t & 15)]
+        t = t >> 4
+        k -= 1
+    (p as *int)[1] = old + w
+
+# ---------------- floats ----------------
+__pow10 = (k: int) -> f64:
+    r = 1.0
+    b = 10.0
+    e = k
+    loop e > 0:
+        if e & 1 == 1: r = r * b
+        b = b * b
+        e = e >> 1
+    r
+
+__scale10 = (x: f64, k: int) -> f64:
+    if k >= 0:
+        if k > 300: return x * __pow10(300) * __pow10(k - 300)
+        return x * __pow10(k)
+    if k < -300: return x / __pow10(300) / __pow10(-k - 300)
+    x / __pow10(-k)
+
+# decimal exponent e such that 10^e <= x < 10^(e+1)
+__exp10 = (x: f64) -> int:
+    e = 0
+    v = x
+    if v >= 10.0:
+        loop v >= 1e100:
+            v = v / 1e100
+            e += 100
+        loop v >= 1e10:
+            v = v / 1e10
+            e += 10
+        loop v >= 10.0:
+            v = v / 10.0
+            e += 1
+    else if v < 1.0:
+        loop v < 1e-100:
+            v = v * 1e100
+            e -= 100
+        loop v < 1e-10:
+            v = v * 1e10
+            e -= 10
+        loop v < 1.0:
+            v = v * 10.0
+            e -= 1
+    e
+
+# The shortest digit string that reads back as x (Steele & White / Burger & Dybvig free-format
+# algorithm on exact big integers); returns (digits, decimal exponent of the first digit).
+__shortest = (x: f64, is_f32: bool) -> (u64, int):
+    # fast path: candidates with up to 15 digits can be checked with one exact operation
+    if x >= 1e-5 and x < 1e15:
+        e = __exp10(x)
+        p = 1
+        loop p <= 15:
+            sh = p - 1 - e
+            if sh > 22 or sh < -22: break
+            scaled = 0.0
+            if sh >= 0: scaled = x * __pow10(sh)
+            else: scaled = x / __pow10(-sh)
+            d = floor(scaled + 0.5)
+            ee = e
+            if d >= __pow10(p):
+                d = d / 10.0
+                ee += 1
+            sh2 = p - 1 - ee
+            back = 0.0
+            if sh2 >= 0: back = d / __pow10(sh2)
+            else: back = d * __pow10(-sh2)
+            if (is_f32 and f32(back) == f32(x)) or (not is_f32 and back == x): return (u64(d), ee)
+            p += 1
+    __shortest_exact(x, is_f32)
+
+__shortest_exact = (x: f64, is_f32: bool) -> (u64, int):
+    m = 0
+    e2 = 0
+    hidden = 0
+    low_exp = false
+    if is_f32:
+        b = int((f32(x) as i32) as u32)
+        ef = (b >> 23) & 0xFF
+        m = b & 0x7FFFFF
+        hidden = 0x800000
+        if ef == 0: e2 = -149
+        else:
+            m = m | hidden
+            e2 = ef - 150
+        low_exp = ef <= 1
+    else:
+        b = int(x as u64)
+        ef = (b >> 52) & 0x7FF
+        m = b & 0x000FFFFFFFFFFFFF
+        hidden = 1 << 52
+        if ef == 0: e2 = -1074
+        else:
+            m = m | hidden
+            e2 = ef - 1075
+        low_exp = ef <= 1
+    even = m & 1 == 0
+    unequal = m == hidden and not low_exp     # the gap below is half the gap above
+    # value = r / s, half-gaps above and below = mp / s, mm / s
+    r = __big_of(m)
+    s: int[] = [1]
+    mp: int[] = [1]
+    mm: int[] = [1]
+    if e2 >= 0:
+        __big_shl(r, e2 + 1)
+        s = [2]
+        __big_shl(mp, e2)
+        __big_shl(mm, e2)
+        if unequal:
+            __big_shl(r, 1)
+            __big_shl(s, 1)
+            __big_shl(mp, 1)
+    else:
+        __big_shl(r, 1)
+        __big_shl(s, 1 - e2)
+        if unequal:
+            __big_shl(r, 1)
+            __big_shl(s, 1)
+            mp = [2]
+    # k: 10^(k-1) <= x < 10^k, from an estimate and exact fix-ups
+    k = int(ceil(log10(x) - 1e-10))
+    if k >= 0: __big_mul_pow10(s, k)
+    else:
+        __big_mul_pow10(r, -k)
+        __big_mul_pow10(mp, -k)
+        __big_mul_pow10(mm, -k)
+    loop true:
+        c = __big_cmp(__big_add(r, mp), s)
+        if c > 0 or (c == 0 and even):
+            __big_mul_small(s, 10)
+            k += 1
+        else: break
+    loop true:
+        t = __big_add(r, mp)
+        __big_mul_small(t, 10)
+        c = __big_cmp(t, s)
+        if c < 0 or (c == 0 and not even):
+            __big_mul_small(r, 10)
+            __big_mul_small(mp, 10)
+            __big_mul_small(mm, 10)
+            k -= 1
+        else: break
+    # generate digits until the remainder is within the rounding interval
+    digits: int[]
+    loop true:
+        __big_mul_small(r, 10)
+        __big_mul_small(mp, 10)
+        __big_mul_small(mm, 10)
+        d = 0
+        loop __big_cmp(r, s) >= 0:
+            __big_sub(r, s)
+            d += 1
+        lo = __big_cmp(r, mm)
+        tc1 = lo < 0 or (lo == 0 and even)
+        hi = __big_cmp(__big_add(r, mp), s)
+        tc2 = hi > 0 or (hi == 0 and even)
+        if not tc1 and not tc2:
+            digits.push(d)
+            continue
+        if tc1 and tc2:
+            r2 = r
+            __big_shl(r2, 1)
+            c = __big_cmp(r2, s)
+            if c > 0 or (c == 0 and d % 2 == 1): d += 1
+        else if tc2: d += 1
+        digits.push(d)
+        break
+    # a final round-up can carry into earlier digits
+    i = digits.len() - 1
+    loop i > 0 and digits[i] == 10:
+        digits[i] = 0
+        digits[i - 1] += 1
+        i -= 1
+    if digits[0] == 10:
+        digits[0] = 1
+        k += 1
+    loop digits.len() > 1 and digits[digits.len() - 1] == 0: digits.pop()
+    dv: u64 = 0
+    loop dg in digits: dv = dv * 10 + u64(dg)
+    (dv, k - 1)
+
+__fmt_float = (buf: mut u8[], x: f64, is_f32: bool):
+    if x != x:
+        __buf_append_str(buf, "nan")
+        return
+    if x == 0.0:
+        if (x as u64) >> 63 == 1: __buf_append_str(buf, "-0.0")
+        else: __buf_append_str(buf, "0.0")
+        return
+    v = x
+    if v < 0.0:
+        __buf_byte(buf, '-')
+        v = -v
+    if v > 1.7976931348623157e308:
+        __buf_append_str(buf, "inf")
+        return
+    d, e = __shortest(v, is_f32)
+    # digits of d
+    ds: u8[]
+    t = d
+    loop t > 0:
+        ds.push(u8(48 + int(t % 10)))
+        t = t / 10
+    if ds.len() == 0: ds.push('0')
+    nd = ds.len()
+    # ds is reversed; ds[nd-1] is the most significant digit
+    if e >= 16 or e < -5:
+        __buf_byte(buf, int(ds[nd - 1]))
+        if nd > 1:
+            __buf_byte(buf, '.')
+            i = nd - 2
+            loop i >= 0:
+                __buf_byte(buf, int(ds[i]))
+                i -= 1
+        __buf_byte(buf, 'e')
+        if e < 0:
+            __buf_byte(buf, '-')
+            __fmt(buf, -e)
+        else:
+            __buf_byte(buf, '+')
+            __fmt(buf, e)
+        return
+    if e < 0:
+        __buf_append_str(buf, "0.")
+        z = -e - 1
+        loop z > 0:
+            __buf_byte(buf, '0')
+            z -= 1
+        i = nd - 1
+        loop i >= 0:
+            __buf_byte(buf, int(ds[i]))
+            i -= 1
+        return
+    # integer part: digits [0..e]
+    k = 0
+    loop k <= e:
+        if k < nd: __buf_byte(buf, int(ds[nd - 1 - k]))
+        else: __buf_byte(buf, '0')
+        k += 1
+    __buf_byte(buf, '.')
+    if nd <= e + 1:
+        __buf_byte(buf, '0')
+        return
+    loop k < nd:
+        __buf_byte(buf, int(ds[nd - 1 - k]))
+        k += 1
+
+__fmt = (buf: mut u8[], x: f64): __fmt_float(buf, x, false)
+__fmt = (buf: mut u8[], x: f32): __fmt_float(buf, f64(x), true)
+
+# x with `prec` digits after the point, correctly rounded (ties to even), like C's %.Nf
+__fmt_fixed = (buf: mut u8[], x: f64, prec: int):
+    if x != x:
+        __buf_append_str(buf, "nan")
+        return
+    v = x
+    neg = (v as u64) >> 63 == 1          # (the sign of -0.0 and of values that round to zero shows, as in C)
+    if neg: v = -v
+    if v > 1.7976931348623157e308:
+        if neg: __buf_byte(buf, '-')
+        __buf_append_str(buf, "inf")
+        return
+    # fast path: the scaled value is far enough from a rounding tie to round it in floating point
+    if prec <= 22 and v * __pow10(prec) < 4e15:
+        scaled = v * __pow10(prec)
+        r = floor(scaled)
+        frac = scaled - r
+        if abs(frac - 0.5) > scaled * 4.5e-16 + 1e-300:
+            d = u64(r)
+            if frac > 0.5: d += 1
+            __fixed_digits(buf, neg, d, prec)
+            return
+    # exact: round m * 2^e2 * 10^prec to an integer with big integers
+    b = int(v as u64)
+    ef = (b >> 52) & 0x7FF
+    m = b & 0x000FFFFFFFFFFFFF
+    e2 = -1074
+    if ef > 0:
+        m = m | (1 << 52)
+        e2 = ef - 1075
+    a = __big_of(m)
+    __big_mul_pow10(a, prec)
+    if e2 >= 0: __big_shl(a, e2)
+    else:
+        sh = -e2
+        q = a
+        __big_shr(q, sh)
+        back = q
+        __big_shl(back, sh)
+        rem = a
+        __big_sub(rem, back)
+        __big_shl(rem, 1)
+        half: int[] = [1]
+        __big_shl(half, sh)
+        c = __big_cmp(rem, half)
+        if c > 0 or (c == 0 and q[0] & 1 == 1): __big_add_small(q, 1)
+        a = q
+    ds = __big_to_dec(a)
+    loop len(ds) <= prec: ds = "0" + ds
+    if neg: __buf_byte(buf, '-')
+    __buf_append_str(buf, ds[..len(ds) - prec))
+    if prec > 0:
+        __buf_byte(buf, '.')
+        __buf_append_str(buf, ds[len(ds) - prec..])
+
+__fixed_digits = (buf: mut u8[], neg: bool, d: u64, prec: int):
+    ip = d / u64(__pow10(prec))
+    fp = d % u64(__pow10(prec))
+    if neg: __buf_byte(buf, '-')
+    __fmt_u64(buf, ip, false, 0, ' ')
+    if prec > 0:
+        __buf_byte(buf, '.')
+        __fmt_u64(buf, fp, false, prec, '0')
+
+# ---------------- format specs ----------------
+# [[fill]align][+][0][width][,|_][.precision][type] as in Python: align is < > ^, type one of
+# x X b o (integers), f (fixed), e E (exponent), g G (fixed or exponent, whichever is shorter),
+# % (percent); {x:.2} {x:>8} {n:,} {x:08.3} {p:.1%} {s:^20} {tiny:.3e}
+struct __Spec:
+    width: int
+    prec: int
+    fill: int
+    align: int         # 0 (numbers right, text left), '<', '>' or '^'
+    zero: bool         # pad numbers with zeros after the sign
+    plus: bool
+    group: int         # thousands separator (0: none)
+    kind: int          # 0 or the type letter
+    alt = false        # (#: 0x, 0b or 0o before the digits)
+
+__is_align = (c: u8) -> bool: c == '<' or c == '>' or c == '^'
+
+__spec_parse = (spec: str) -> __Spec:
+    sp = __Spec(0, -1, ' ', 0, false, false, 0, 0)
+    i = 0
+    n = len(spec)
+    if n >= 2 and __is_align(spec[1]):
+        sp.fill = int(spec[0])
+        sp.align = int(spec[1])
+        i = 2
+    else if n >= 1 and __is_align(spec[0]):
+        sp.align = int(spec[0])
+        i = 1
+    if i < n and spec[i] == '+':
+        sp.plus = true
+        i += 1
+    if i < n and spec[i] == '#':
+        sp.alt = true
+        i += 1
+    if i < n and spec[i] == '0':
+        sp.zero = true
+        i += 1
+        # (with an alignment and no fill of its own, zeros are the fill: {7:>05} is 00007)
+        if sp.align != 0 and not (n >= 2 and __is_align(spec[1])): sp.fill = '0'
+    loop i < n and spec[i] >= '0' and spec[i] <= '9':
+        sp.width = sp.width * 10 + int(spec[i]) - 48
+        i += 1
+    if i < n and (spec[i] == ',' or spec[i] == '_'):
+        sp.group = int(spec[i])
+        i += 1
+    if i < n and spec[i] == '.':
+        i += 1
+        sp.prec = 0
+        loop i < n and spec[i] >= '0' and spec[i] <= '9':
+            sp.prec = sp.prec * 10 + int(spec[i]) - 48
+            i += 1
+    if i < n: sp.kind = int(spec[i])
+    sp
+
+# pad (and group) what was written since start according to the spec
+__spec_finish = (buf: mut u8[], start: int, sp: __Spec, number: bool):
+    if number and sp.group != 0: __group_digits(buf, start, sp.group)
+    if number and sp.plus and len(buf) > start and buf[start] != '-': __insert_bytes(buf, start, "+")
+    # (the width is in characters, as Python's: a byte of the middle of one is not counted)
+    n = 0
+    k = start
+    loop k < len(buf):
+        if buf[k] & 0xC0 != 0x80: n += 1
+        k += 1
+    if n >= sp.width: return
+    extra = sp.width - n
+    if number and sp.zero and sp.align == 0:
+        # zeros go after the sign
+        at = start
+        if buf[start] == '-' or buf[start] == '+': at += 1
+        # (and after 0x, 0b, 0o)
+        if sp.alt and at + 1 < len(buf) and buf[at] == '0' and (buf[at + 1] == 'x' or buf[at + 1] == 'X' or buf[at + 1] == 'b' or buf[at + 1] == 'o'): at += 2
+        __insert_fill(buf, at, extra, '0')
+        return
+    align = sp.align
+    if align == 0:
+        align = '<'
+        if number: align = '>'
+    if align == '<': __insert_fill(buf, len(buf), extra, sp.fill)
+    else if align == '>': __insert_fill(buf, start, extra, sp.fill)
+    else:
+        __insert_fill(buf, start, extra / 2, sp.fill)
+        __insert_fill(buf, len(buf), extra - extra / 2, sp.fill)
+
+__insert_fill = (buf: mut u8[], at: int, count: int, c: int):
+    if count <= 0: return
+    tail = len(buf) - at
+    old = len(buf)
+    p = __buf_reserve(buf, count)
+    __mem_move(p + 24 + at + count, p + 24 + at, tail)
+    i = 0
+    loop i < count:
+        p[24 + at + i] = u8(c)
+        i += 1
+    (p as *int)[1] = old + count
+
+__insert_bytes = (buf: mut u8[], at: int, s: str):
+    __insert_fill(buf, at, len(s), ' ')
+    i = 0
+    loop i < len(s):
+        buf[at + i] = s[i]
+        i += 1
+
+# 1234567.5 -> 1,234,567.5
+__group_digits = (buf: mut u8[], start: int, sep: int):
+    a = start
+    if a < len(buf) and buf[a] == '-': a += 1
+    e = a
+    loop e < len(buf) and buf[e] >= '0' and buf[e] <= '9': e += 1
+    k = e - 3
+    loop k > a:
+        __insert_fill(buf, k, 1, sep)
+        k -= 3
+
+__fmt_radix = (buf: mut u8[], x: u64, radix: int):
+    if x == 0:
+        __buf_byte(buf, '0')
+        return
+    digits: u8[]
+    v = x
+    loop v != 0:
+        digits.push(u8(48 + int(v % u64(radix))))
+        v = v / u64(radix)
+    i = digits.len() - 1
+    loop i >= 0:
+        __buf_byte(buf, int(digits[i]))
+        i -= 1
+
+__fmt_spec = (buf: mut u8[], x: f64, spec: str):
+    sp = __spec_parse(spec)
+    start = len(buf)
+    if sp.kind == '%':
+        p = sp.prec
+        if p < 0: p = 0
+        __fmt_fixed(buf, x * 100.0, p)
+        __buf_byte(buf, '%')
+    else if sp.kind == 'e' or sp.kind == 'E':
+        p = sp.prec
+        if p < 0: p = 6
+        __fmt_exp(buf, x, p, sp.kind == 'E')
+    else if sp.kind == 'g' or sp.kind == 'G': __fmt_general(buf, x, sp.prec, sp.kind == 'G')
+    else if sp.prec >= 0: __fmt_fixed(buf, x, sp.prec)
+    else if sp.kind == 'f': __fmt_fixed(buf, x, 6)
+    else: __fmt(buf, x)
+    __spec_finish(buf, start, sp, true)
+
+# x as d.ddde+XX (prec digits after the point)
+__fmt_exp = (buf: mut u8[], x: f64, prec: int, upper: bool):
+    if x != x or x - x != 0.0:
+        __fmt(buf, x)
+        return
+    e = 0
+    m = x
+    if x != 0.0:
+        e = int(floor(log10(abs(x))))
+        m = x / pow(10.0, f64(e))
+        # (rounded to prec digits, 9.9996 may become 10.000)
+        r = round(abs(m) * pow(10.0, f64(prec))) / pow(10.0, f64(prec))
+        if r >= 10.0:
+            e += 1
+            m = x / pow(10.0, f64(e))
+        else if r < 1.0:
+            e -= 1
+            m = x / pow(10.0, f64(e))
+    __fmt_fixed(buf, m, prec)
+    if upper: __buf_byte(buf, 'E')
+    else: __buf_byte(buf, 'e')
+    if e < 0: __buf_byte(buf, '-')
+    else: __buf_byte(buf, '+')
+    ae = abs(e)
+    if ae < 10: __buf_byte(buf, '0')
+    __fmt(buf, ae)
+
+# as Python's g: prec significant digits (6 when not given), as an exponent when the number is
+# very small or large, without trailing zeros
+__fmt_general = (buf: mut u8[], x: f64, prec0: int, upper: bool):
+    p = prec0
+    if p < 0: p = 6
+    if p == 0: p = 1
+    if x == 0.0 or x != x or x - x != 0.0:
+        __fmt(buf, x)
+        return
+    e = int(floor(log10(abs(x))))
+    at = len(buf)
+    if e < -4 or e >= p:
+        __fmt_exp(buf, x, p - 1, upper)
+        # (no trailing zeros in the digits before the exponent)
+        k = at
+        loop k < len(buf) and buf[k] != 'e' and buf[k] != 'E': k += 1
+        z = k
+        loop z > at and buf[z - 1] == '0': z -= 1
+        if z > at and buf[z - 1] == '.': z -= 1
+        tail: u8[]
+        loop j in [k..len(buf)): tail.push(buf[j])
+        buf.truncate(z)
+        loop c in tail: buf.push(c)
+    else:
+        __fmt_fixed(buf, x, max(p - 1 - e, 0))
+        z = len(buf)
+        dot = false
+        loop j in [at..len(buf)):
+            if buf[j] == '.': dot = true
+        if dot:
+            loop z > at and buf[z - 1] == '0': z -= 1
+            if z > at and buf[z - 1] == '.': z -= 1
+            buf.truncate(z)
+
+__fmt_spec = (buf: mut u8[], x: f32, spec: str): __fmt_spec(buf, f64(x), spec)
+
+__fmt_spec = (buf: mut u8[], x: int, spec: str):
+    sp = __spec_parse(spec)
+    start = len(buf)
+    k = sp.kind
+    if k == 'x' or k == 'X' or k == 'b' or k == 'o':
+        u = u64(x)
+        if x < 0:
+            __buf_byte(buf, '-')
+            u = u64(0) - u
+        if sp.alt: __radix_prefix(buf, k)
+        if k == 'b': __fmt_radix(buf, u, 2)
+        else if k == 'o': __fmt_radix(buf, u, 8)
+        else: __fmt_hex(buf, u, 0, k == 'X')
+    else if sp.prec >= 0 or k == 'f' or k == '%':
+        __fmt_spec(buf, f64(x), spec)
+        return
+    else: __fmt(buf, x)
+    __spec_finish(buf, start, sp, true)
+
+__fmt_spec = (buf: mut u8[], x: u64, spec: str):
+    sp = __spec_parse(spec)
+    start = len(buf)
+    k = sp.kind
+    if sp.alt: __radix_prefix(buf, k)
+    if k == 'b': __fmt_radix(buf, x, 2)
+    else if k == 'o': __fmt_radix(buf, x, 8)
+    else if k == 'x' or k == 'X': __fmt_hex(buf, x, 0, k == 'X')
+    else: __fmt(buf, x)
+    __spec_finish(buf, start, sp, true)
+
+__radix_prefix = (buf: mut u8[], k: int):
+    if k == 'x': __buf_append_str(buf, "0x")
+    else if k == 'X': __buf_append_str(buf, "0X")
+    else if k == 'b': __buf_append_str(buf, "0b")
+    else if k == 'o': __buf_append_str(buf, "0o")
+
+__fmt_spec = (buf: mut u8[], x: str, spec: str):
+    sp = __spec_parse(spec)
+    start = len(buf)
+    __buf_append_str(buf, x)
+    __spec_finish(buf, start, sp, false)
+
+__fmt_spec = (buf: mut u8[], x, spec: str):
+    sp = __spec_parse(spec)
+    start = len(buf)
+    __fmt(buf, x)
+    __spec_finish(buf, start, sp, false)
+
+# ---------------- containers ----------------
+__fmt_elem = (buf: mut u8[], s: str):
+    __buf_byte(buf, '"')
+    loop c in s:
+        if c == '"': __buf_append_str(buf, "\\\"")
+        else if c == '\\': __buf_append_str(buf, "\\\\")
+        else if c == '\n': __buf_append_str(buf, "\\n")
+        else if c == '\t': __buf_append_str(buf, "\\t")
+        else if c == '\r': __buf_append_str(buf, "\\r")
+        else if c < 32 or c == 127:
+            # (other control characters, which would change the terminal: as \x1b)
+            __buf_append_str(buf, "\\x")
+            __buf_byte(buf, int("0123456789abcdef"[int(c) >> 4]))
+            __buf_byte(buf, int("0123456789abcdef"[int(c) & 15]))
+        else: __buf_byte(buf, int(c))
+    __buf_byte(buf, '"')
+
+__fmt_elem = (buf: mut u8[], x): __fmt_elem_value(buf, x)
+
+__fmt[T] = (buf: mut u8[], xs: T[]):
+    __buf_byte(buf, '[')
+    loop i in 0.. and x in xs:
+        if i > 0: __buf_append_str(buf, ", ")
+        __fmt_elem(buf, x)
+    __buf_byte(buf, ']')
+
+__fmt[T] = (buf: mut u8[], x: T?):
+    if let v = x: __fmt_elem(buf, v)
+    else: __buf_append_str(buf, "none")
+
+__fmt[T] = (buf: mut u8[], p: *T):
+    __buf_append_str(buf, "0x")
+    __fmt_hex(buf, p as u64, 0, false)
+
+# structs, enums, tuples
+__fmt = (buf: mut u8[], x): __fmt_fields(buf, x)
+# (true while to_text writes: a type with a str of the program's own is written as its fields,
+# for from_text to read back; shown, it is the text its str gives)
+__text_exact = false
+
+# x in three digits and a letter for its size: 999, 1.23K, 45.6M, 789B, 1.00T, and past the
+# trillions 1.23e15 (a score, an idle game's numbers); whole numbers below 1000 as they are
+short_number = (x: f64) -> str:
+    if x != x: return "nan"
+    a = abs(x)
+    if a < 999.5:
+        if a == floor(a): return "{x:.0f}"
+        return "{x:.3g}"
+    sfx = ["K", "M", "B", "T"]
+    k = 0
+    m = a / 1000.0
+    loop k < 3 and m >= 999.5:
+        m = m / 1000.0
+        k += 1
+    if m >= 999.5: return "{x:.2e}"
+    sign = ""
+    if x < 0.0: sign = "-"
+    if m < 9.995: return "{sign}{m:.2f}{sfx[k]}"
+    if m < 99.95: return "{sign}{m:.1f}{sfx[k]}"
+    "{sign}{m:.0f}{sfx[k]}"

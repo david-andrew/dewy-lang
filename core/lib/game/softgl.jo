@@ -1,0 +1,973 @@
+# Software rendering: a CPU implementation of the part of OpenGL ES the game library uses,
+# for machines without a GPU driver (or with SLOPPY_SOFTWARE=1). Shaders written in Sloppy run as
+# the compiled Sloppy functions they are; triangles are rasterized in horizontal bands on all
+# cores. Frames are rendered at a reduced internal resolution and scaled up on screen.
+
+__soft = false
+__soft_scale = 0.5               # internal resolution / window resolution
+
+soft_rendering = () -> bool: __soft
+
+# ---------------- textures (also framebuffer attachments) ----------------
+# RGBA floats, rows in upload order (row 0 = texture coordinate v = 0)
+struct __SwTex:
+    p: *f32
+    w: int
+    h: int
+    linear: bool
+    rep: bool
+
+__st_data: f32[][] = [[]]
+__st: __SwTex[] = [__SwTex(null, 0, 0, false, false)]
+
+__st_new = () -> int:
+    __st_data.push([])
+    __st.push(__SwTex(null, 0, 0, true, false))
+    __st_data.len() - 1
+
+__st_alloc = (id: int, w: int, h: int):
+    if id <= 0 or id >= __st_data.len(): return
+    d = fill(f32(0), w * h * 4)
+    __st_data[id] = d
+    __st[id].p = data(__st_data[id])
+    __st[id].w = w
+    __st[id].h = h
+
+# texture lookup used by shader functions running on the CPU
+__sw_sample = (id: int, uv: vec2) -> vec4:
+    if id <= 0 or id >= __st.len(): return vec4(1, 1, 1, 1)
+    t = __st[id]
+    p = t.p
+    w = t.w
+    h = t.h
+    if p == null or w == 0: return vec4(0, 0, 0, 1)
+    if w == 1 and h == 1: return vec4(p[0], p[1], p[2], p[3])
+    u = uv.x * f32(w) - 0.5
+    v = uv.y * f32(h) - 0.5
+    rep = t.rep
+    if not t.linear:
+        q = p + (__wrap(__floor_i(u + 0.5), w, rep) + __wrap(__floor_i(v + 0.5), h, rep) * w) * 4
+        return vec4(q[0], q[1], q[2], q[3])
+    x0 = __floor_i(u)
+    y0 = __floor_i(v)
+    fx = u - f32(x0)
+    fy = v - f32(y0)
+    xa = 0
+    xb = 0
+    ya = 0
+    yb = 0
+    if rep:
+        xa = __wrap(x0, w, true)
+        xb = __wrap(x0 + 1, w, true)
+        ya = __wrap(y0, h, true)
+        yb = __wrap(y0 + 1, h, true)
+    else:
+        xa = clamp(x0, 0, w - 1)
+        xb = clamp(x0 + 1, 0, w - 1)
+        ya = clamp(y0, 0, h - 1)
+        yb = clamp(y0 + 1, 0, h - 1)
+    a = p + (ya * w + xa) * 4
+    b = p + (ya * w + xb) * 4
+    c = p + (yb * w + xa) * 4
+    d = p + (yb * w + xb) * 4
+    gx = 1.0 - fx
+    gy = 1.0 - fy
+    wa = gx * gy
+    wb = fx * gy
+    wc = gx * fy
+    wd = fx * fy
+    vec4(a[0] * wa + b[0] * wb + c[0] * wc + d[0] * wd, a[1] * wa + b[1] * wb + c[1] * wc + d[1] * wd,
+         a[2] * wa + b[2] * wb + c[2] * wc + d[2] * wd, a[3] * wa + b[3] * wb + c[3] * wc + d[3] * wd)
+
+# texelFetch on the CPU (outside the texture: the nearest edge texel)
+__sw_texel = (id: int, x: int, y: int) -> vec4:
+    if id <= 0 or id >= __st.len(): return vec4(1, 1, 1, 1)
+    t = __st[id]
+    if t.p == null or t.w == 0: return vec4(0, 0, 0, 1)
+    q = t.p + (clamp(y, 0, t.h - 1) * t.w + clamp(x, 0, t.w - 1)) * 4
+    vec4(q[0], q[1], q[2], q[3])
+
+# floor of a float as an int (texture coordinates stay far from the int range)
+__floor_i = (x: f32) -> int:
+    i = int(x)
+    if f32(i) > x: i -= 1
+    i
+
+__wrap = (i: int, n: int, rep: bool) -> int:
+    if rep:
+        m = i % n
+        if m < 0: m += n
+        return m
+    if i < 0: return 0
+    if i >= n: return n - 1
+    i
+
+# ---------------- state ----------------
+__s_buffers: u8[][] = [[]]
+__s_array_buf = 0
+__s_elem_buf = 0
+__s_unit = 0
+__s_bound: int[] = fill(0, 8)
+__s_fb = 0                        # current framebuffer (0 = the window)
+__s_fb_color: int[] = [0]          # per framebuffer: color texture
+__s_fb_depth: int[] = [0]          # per framebuffer: depth texture
+__s_fb_scale: f64[] = [0.5]      # per framebuffer: storage size / size the program asked for
+__s_rb_tex: int[] = [0]            # renderbuffer id -> texture holding its data
+__s_rb = 0
+__s_vp = (0, 0, 1, 1)
+__s_scissor = (0, 0, 1 << 20, 1 << 20)
+__s_blend = false
+__s_depth = false
+__s_cull = false
+__s_scissor_on = false
+__s_bf = (GL_ONE, GL_ZERO, GL_ONE, GL_ZERO)
+__s_depth_func = GL_LESS
+__s_depth_write = true
+__s_cmask = (true, true, true, true)
+__s_clear = vec4(0, 0, 0, 1)
+__s_cull_back = true
+__sp_vs: *u8[] = [null]
+__sp_fs: *u8[] = [null]
+__sp_out: int[] = [0]
+__sp_args: int[] = [0]
+__sp_flat: str[] = [""]
+__sp_discard: bool[] = [false]       # the fragment shader may discard()
+__sp_ids: bool[] = [false]           # the vertex shader asks for vertex_id() / instance_id()
+
+# per thread (by __tid()): the vertex and instance being shaded, and whether the fragment being
+# shaded was discarded (what vertex_id(), instance_id() and discard() read and write on the CPU)
+__sw_tls: *int = null
+
+__sw_tls_init = ():
+    if __sw_tls == null: __sw_tls = __alloc((__MAX_THREADS + 1) * 64) as *int
+
+# the window's framebuffer
+__sw_init_window = (w: int, h: int):
+    if __s_fb_color[0] == 0:
+        # SLOPPY_SOFT_SCALE=1 renders at full resolution (sharper, about 4x the work)
+        if let v = env("SLOPPY_SOFT_SCALE"): __soft_scale = clamp(to_float(v) ?? 0.5, 0.1, 1.0)
+        __s_fb_scale[0] = __soft_scale
+    iw = max(int(f64(w) * __soft_scale), 1)
+    ih = max(int(f64(h) * __soft_scale), 1)
+    if __s_fb_color[0] == 0:
+        __s_fb_color[0] = __st_new()
+        __s_fb_depth[0] = __st_new()
+    if __st[__s_fb_color[0]].w != iw or __st[__s_fb_color[0]].h != ih:
+        __st_alloc(__s_fb_color[0], iw, ih)
+        __st_alloc(__s_fb_depth[0], iw, ih)
+
+__sw_target = () -> (int, int):
+    (__s_fb_color[__s_fb], __s_fb_depth[__s_fb])
+
+__sw_target_size = () -> (int, int):
+    c, d = __sw_target()
+    if c > 0: return (__st[c].w, __st[c].h)
+    if d > 0: return (__st[d].w, __st[d].h)
+    (1, 1)
+
+# ---------------- GL entry points (called by gl.jo in software mode) ----------------
+sgl_clear_color = (r: f32, g: f32, b: f32, a: f32): __s_clear = vec4(r, g, b, a)
+
+sgl_clear = (mask: u32):
+    c, d = __sw_target()
+    if mask & u32(GL_COLOR_BUFFER_BIT) != 0 and c > 0:
+        cc = __s_clear
+        __sw_fill(__st[c].p, __st[c].w * __st[c].h, cc)
+    if mask & u32(GL_DEPTH_BUFFER_BIT) != 0 and d > 0:
+        __sw_fill(__st[d].p, __st[d].w * __st[d].h, vec4(1, 0, 0, 0))
+
+# n pixels at p set to c (the first one, then copies of what is set, doubling)
+__sw_fill = (p: *f32, n: int, c: vec4):
+    if p == null or n <= 0: return
+    p[0] = c.x
+    p[1] = c.y
+    p[2] = c.z
+    p[3] = c.w
+    done = 1
+    loop done < n:
+        k = min(done, n - done)
+        mem_copy((p + done * 4) as *u8, p as *u8, k * 16)
+        done += k
+
+sgl_viewport = (x: i32, y: i32, w: i32, h: i32):
+    s = __s_fb_scale[__s_fb]
+    __s_vp = (int(f64(x) * s), int(f64(y) * s), max(int(f64(w) * s), 1), max(int(f64(h) * s), 1))
+
+sgl_scissor = (x: i32, y: i32, w: i32, h: i32):
+    s = __s_fb_scale[__s_fb]
+    __s_scissor = (int(f64(x) * s), int(f64(y) * s), int(f64(w) * s), int(f64(h) * s))
+
+sgl_enable = (cap: u32, on: bool):
+    c = int(cap)
+    if c == GL_BLEND: __s_blend = on
+    else if c == GL_DEPTH_TEST: __s_depth = on
+    else if c == GL_CULL_FACE: __s_cull = on
+    else if c == GL_SCISSOR_TEST: __s_scissor_on = on
+
+sgl_blend_func = (s: u32, d: u32, sa: u32, da: u32): __s_bf = (int(s), int(d), int(sa), int(da))
+sgl_depth_func = (f: u32): __s_depth_func = int(f)
+sgl_depth_mask = (on: u32): __s_depth_write = on != 0
+sgl_color_mask = (r: u32, g: u32, b: u32, a: u32): __s_cmask = (r != 0, g != 0, b != 0, a != 0)
+sgl_cull_face = (mode: u32): __s_cull_back = int(mode) != GL_FRONT
+
+sgl_create_buffer = () -> int:
+    __s_buffers.push([])
+    __s_buffers.len() - 1
+
+sgl_bind_buffer = (target: u32, b: u32):
+    if int(target) == GL_ARRAY_BUFFER: __s_array_buf = int(b)
+    else: __s_elem_buf = int(b)
+
+sgl_buffer_data = (target: u32, size: int, p: *u8):
+    b = __s_array_buf
+    if int(target) != GL_ARRAY_BUFFER: b = __s_elem_buf
+    if b <= 0 or b >= __s_buffers.len(): return
+    d = fill(u8(0), size)
+    if p != null and size > 0: mem_copy(data(d), p, size)
+    __s_buffers[b] = d
+
+sgl_buffer_sub_data = (target: u32, off: int, size: int, p: *u8):
+    b = __s_array_buf
+    if int(target) != GL_ARRAY_BUFFER: b = __s_elem_buf
+    if b <= 0 or b >= __s_buffers.len() or size <= 0: return
+    if __s_buffers[b].len() < off + size: __s_buffers[b].resize(off + size)
+    mem_copy(data(__s_buffers[b]) + off, p, size)
+
+sgl_create_texture = () -> int: __st_new()
+sgl_active_texture = (unit: u32): __s_unit = int(unit) - GL_TEXTURE0
+sgl_bind_texture = (t: u32):
+    if __s_unit >= 0 and __s_unit < 8: __s_bound[__s_unit] = int(t)
+
+sgl_tex_image = (w: int, h: int, format: int, ty: int, pixels: *u8):
+    id = __s_bound[__s_unit]
+    __st_alloc(id, w, h)
+    if pixels == null or id <= 0: return
+    p = __st[id].p
+    n = w * h
+    if format == GL_RGBA and ty == GL_UNSIGNED_BYTE:
+        loop i in [0..n * 4): p[i] = f32(int(pixels[i])) / 255.0
+    else if format == GL_RED and ty == GL_UNSIGNED_BYTE:
+        loop i in [0..n):
+            p[i * 4] = f32(int(pixels[i])) / 255.0
+            p[i * 4 + 3] = 1.0
+    else if format == GL_RGB and ty == GL_UNSIGNED_BYTE:
+        loop i in [0..n):
+            loop k in [0..3): p[i * 4 + k] = f32(int(pixels[i * 3 + k])) / 255.0
+            p[i * 4 + 3] = 1.0
+
+sgl_tex_sub_image = (x: int, y: int, w: int, h: int, format: int, ty: int, pixels: *u8):
+    id = __s_bound[__s_unit]
+    if id <= 0 or pixels == null or format != GL_RGBA or ty != GL_UNSIGNED_BYTE: return
+    p = __st[id].p
+    tw = __st[id].w
+    loop r in [0..h):
+        loop c in [0..w):
+            loop k in [0..4): p[((y + r) * tw + x + c) * 4 + k] = f32(int(pixels[(r * w + c) * 4 + k])) / 255.0
+
+sgl_tex_parameter = (pname: u32, v: i32):
+    id = __s_bound[__s_unit]
+    if id <= 0 or id >= __st.len(): return
+    pn = int(pname)
+    if pn == GL_TEXTURE_MAG_FILTER: __st[id].linear = int(v) != GL_NEAREST
+    else if pn == GL_TEXTURE_WRAP_S: __st[id].rep = int(v) == GL_REPEAT
+
+sgl_create_framebuffer = () -> int:
+    __s_fb_color.push(0)
+    __s_fb_depth.push(0)
+    __s_fb_scale.push(1.0)
+    __s_fb_color.len() - 1
+
+sgl_bind_framebuffer = (f: u32): __s_fb = int(f)
+
+sgl_framebuffer_texture = (attachment: u32, tex: u32):
+    if __s_fb <= 0: return
+    if int(attachment) == GL_DEPTH_ATTACHMENT: __s_fb_depth[__s_fb] = int(tex)
+    else: __s_fb_color[__s_fb] = int(tex)
+
+sgl_create_renderbuffer = () -> int:
+    __s_rb_tex.push(__st_new())
+    __s_rb_tex.len() - 1
+
+sgl_bind_renderbuffer = (r: u32): __s_rb = int(r)
+sgl_renderbuffer_storage = (w: i32, h: i32):
+    if __s_rb > 0: __st_alloc(__s_rb_tex[__s_rb], int(w), int(h))
+sgl_framebuffer_renderbuffer = (attachment: u32, r: u32):
+    if __s_fb > 0 and int(r) > 0: __s_fb_depth[__s_fb] = __s_rb_tex[int(r)]
+
+# store a render target's pixels at the reduced internal resolution, like the window's
+__sw_scale_target = (fbo: int, w: int, h: int):
+    if fbo <= 0 or fbo >= __s_fb_color.len(): return
+    iw = max(int(f64(w) * __soft_scale), 1)
+    ih = max(int(f64(h) * __soft_scale), 1)
+    if __s_fb_color[fbo] > 0: __st_alloc(__s_fb_color[fbo], iw, ih)
+    if __s_fb_depth[fbo] > 0: __st_alloc(__s_fb_depth[fbo], iw, ih)
+    __s_fb_scale[fbo] = __soft_scale
+
+# a render target of exactly w x h pixels (a fixed resolution is not scaled down)
+__sw_exact_target = (fbo: int, w: int, h: int):
+    if fbo <= 0 or fbo >= __s_fb_color.len(): return
+    if __s_fb_color[fbo] > 0: __st_alloc(__s_fb_color[fbo], w, h)
+    if __s_fb_depth[fbo] > 0: __st_alloc(__s_fb_depth[fbo], w, h)
+    __s_fb_scale[fbo] = 1.0
+
+sgl_create_program = () -> int:
+    __sp_vs.push(null)
+    __sp_fs.push(null)
+    __sp_out.push(0)
+    __sp_args.push(0)
+    __sp_flat.push("")
+    __sp_discard.push(false)
+    __sp_ids.push(false)
+    __sp_vs.len() - 1
+
+# shader functions of a program made by make_shader
+__sw_program_info = (prog: int, src: ShaderSource):
+    if prog <= 0 or prog >= __sp_vs.len(): return
+    __sp_vs[prog] = src.cpu_vs
+    __sp_fs[prog] = src.cpu_fs
+    __sp_out[prog] = src.out_size
+    __sp_args[prog] = src.vs_args
+    __sp_flat[prog] = src.flat
+    # (the GLSL is the compiler's: these are only there when the shader functions use them)
+    __sp_discard[prog] = find(src.fs, "discard;") >= 0
+    __sp_ids[prog] = find(src.vs, "gl_VertexID") >= 0 or find(src.vs, "gl_InstanceID") >= 0
+    __sw_tls_init()
+
+# read the window (or bound target) as RGBA bytes, bottom row first, scaled to w x h
+sgl_read_pixels = (x: int, y: int, w: int, h: int, out: *u8):
+    c, d = __sw_target()
+    if c <= 0: return
+    p = __st[c].p
+    tw = __st[c].w
+    th = __st[c].h
+    sx = __s_fb_scale[__s_fb]
+    loop r in [0..h):
+        sy = min(int(f64(y + r) * sx), th - 1)
+        loop k in [0..w):
+            s = min(int(f64(x + k) * sx), tw - 1)
+            q = p + (sy * tw + s) * 4
+            o = out + (r * w + k) * 4
+            loop ch in [0..4): o[ch] = u8(int(clamp(q[ch], 0.0, 1.0) * 255.0 + 0.5))
+
+# ---------------- rasterization ----------------
+const __SW_BANDS = 32
+
+__blend_factor = (f: int, src: vec4, dst: vec4, ch: int) -> f32:
+    if f == GL_ZERO: return 0.0
+    if f == GL_ONE: return 1.0
+    if f == GL_SRC_ALPHA: return src.w
+    if f == GL_ONE_MINUS_SRC_ALPHA: return 1.0 - src.w
+    if f == GL_DST_COLOR: return dst[ch]
+    1.0
+
+# the blend equation as one of a few common cases (0 = replace, 5 = general)
+__s_bmode = 0
+
+__sw_blend_mode = ():
+    bf = __s_bf
+    m = 5
+    if not __s_blend or (bf.0 == GL_ONE and bf.1 == GL_ZERO and bf.2 == GL_ONE and bf.3 == GL_ZERO): m = 0
+    else if bf.0 == GL_SRC_ALPHA and bf.1 == GL_ONE_MINUS_SRC_ALPHA and bf.2 == GL_ONE and bf.3 == GL_ONE_MINUS_SRC_ALPHA: m = 1
+    else if bf.0 == GL_SRC_ALPHA and bf.1 == GL_ONE and bf.2 == GL_SRC_ALPHA and bf.3 == GL_ONE: m = 2
+    else if bf.0 == GL_ONE and bf.1 == GL_ONE_MINUS_SRC_ALPHA and bf.2 == GL_ONE and bf.3 == GL_ONE_MINUS_SRC_ALPHA: m = 3
+    m4 = __s_cmask
+    if not (m4.0 and m4.1 and m4.2 and m4.3): m = 5
+    __s_bmode = m
+
+# write a fragment color into the target (blending, color mask)
+__sw_put = (q: *f32, c: vec4):
+    m = __s_bmode
+    if m == 0:
+        q[0] = c.x
+        q[1] = c.y
+        q[2] = c.z
+        q[3] = c.w
+    else if m == 1:
+        a = c.w
+        k = 1.0 - a
+        q[0] = c.x * a + q[0] * k
+        q[1] = c.y * a + q[1] * k
+        q[2] = c.z * a + q[2] * k
+        q[3] = a + q[3] * k
+    else if m == 2:
+        a = c.w
+        q[0] = q[0] + c.x * a
+        q[1] = q[1] + c.y * a
+        q[2] = q[2] + c.z * a
+        q[3] = q[3] + a * a
+    else if m == 3:
+        k = 1.0 - c.w
+        q[0] = c.x + q[0] * k
+        q[1] = c.y + q[1] * k
+        q[2] = c.z + q[2] * k
+        q[3] = c.w + q[3] * k
+    else: __sw_put_general(q, c)
+
+__sw_put_general = (q: *f32, c: vec4):
+    dst = vec4(q[0], q[1], q[2], q[3])
+    bf = __s_bf
+    out = dst
+    if __s_blend:
+        loop ch in [0..3): out[ch] = c[ch] * __blend_factor(bf.0, c, dst, ch) + dst[ch] * __blend_factor(bf.1, c, dst, ch)
+        out.w = c.w * __blend_factor(bf.2, c, dst, 3) + dst.w * __blend_factor(bf.3, c, dst, 3)
+    else: out = c
+    m = __s_cmask
+    if m.0: q[0] = out.x
+    if m.1: q[1] = out.y
+    if m.2: q[2] = out.z
+    if m.3: q[3] = out.w
+
+__depth_ok = (z: f32, cur: f32) -> bool:
+    f = __s_depth_func
+    if f == GL_LESS: return z < cur
+    if f == GL_LEQUAL: return z <= cur
+    true
+
+# A full-screen pass: f(uv) for the center of every pixel of the viewport (uv 0..1 across it),
+# written over what is there (no blending): what a full-screen triangle with a fragment function
+# of uv gives, without rasterizing it (post effects)
+__sw_fullscreen = (f: (vec2) -> vec4):
+    c, _ = __sw_target()
+    if c <= 0: return
+    t = __st[c]
+    if t.p == null: return
+    x0, y0, x1, y1 = __sw_clip_rect()
+    if x1 <= x0 or y1 <= y0: return
+    vp = __s_vp
+    vw = f32(vp.2)
+    vh = f32(vp.3)
+    p = t.p
+    w = t.w
+    __par_serial = (x1 - x0) * (y1 - y0) < 4096
+    parallel_range(y1 - y0, (k: int):
+        y = y0 + k
+        v = (f32(y - vp.1) + 0.5) / vh
+        row = p + y * w * 4
+        loop x in [x0..x1):
+            col = f(vec2((f32(x - vp.0) + 0.5) / vw, v))
+            q = row + x * 4
+            q[0] = col.x
+            q[1] = col.y
+            q[2] = col.z
+            q[3] = col.w
+    )
+    __par_serial = false
+
+# bounds of the drawable area: viewport, target and scissor
+__sw_clip_rect = () -> (int, int, int, int):
+    tw, th = __sw_target_size()
+    vp = __s_vp
+    x0 = max(vp.0, 0)
+    y0 = max(vp.1, 0)
+    x1 = min(vp.0 + vp.2, tw)
+    y1 = min(vp.1 + vp.3, th)
+    if __s_scissor_on:
+        sc = __s_scissor
+        x0 = max(x0, sc.0)
+        y0 = max(y0, sc.1)
+        x1 = min(x1, sc.0 + sc.2)
+        y1 = min(y1, sc.1 + sc.3)
+    (x0, y0, x1, y1)
+
+__top_left = (ax: f64, ay: f64, bx: f64, by: f64) -> bool: by < ay or (ay == by and bx < ax)
+
+__sw_inside = (w0: f64, w1: f64, w2: f64, tl0: bool, tl1: bool, tl2: bool) -> bool:
+    if w0 < 0.0 or w1 < 0.0 or w2 < 0.0: return false
+    not ((w0 == 0.0 and not tl0) or (w1 == 0.0 and not tl1) or (w2 == 0.0 and not tl2))
+
+# Rasterize triangles: vertex positions (pixels, y up) are the first two floats of each
+# stride-sized vertex in sv, idx holds 3 vertex indices per triangle. For every run of covered
+# pixel centers on a row, shade(band, y, x0, x1, tri, l0, l1, l2, d0, d1, d2) is called with the
+# barycentric weights of the triangle's three vertices at x0 and their change per pixel. Triangles are binned into horizontal bands rendered in parallel;
+# within a band they are drawn in submission order, so blending stays correct.
+__sw_raster = (sv: *f32, stride: int, idx: *i32, ntri: int, shade: (int, int, int, int, int, f32, f32, f32, f32, f32, f32) -> void):
+    x0c, y0c, x1c, y1c = __sw_clip_rect()
+    if x1c <= x0c or y1c <= y0c or ntri == 0: return
+    __sw_blend_mode()
+    h = y1c - y0c
+    bands = clamp(h / 8, 1, __SW_BANDS)
+    band_h = (h + bands - 1) / bands
+    cull = __s_cull
+    cull_back = __s_cull_back
+    # triangle setup: counter-clockwise corners, 1/area, original order flag, pixel bounds
+    setup = fill(0.0, ntri * 8)
+    sp = data(setup)
+    bounds = fill(0, ntri * 4)
+    bp = data(bounds)
+    counts = fill(0, bands + 1)
+    pixels = 0                      # (how many the triangles' boxes cover: few, and one thread does them)
+    loop t in [0..ntri):
+        a = sv + int(idx[t * 3]) * stride
+        b = sv + int(idx[t * 3 + 1]) * stride
+        c = sv + int(idx[t * 3 + 2]) * stride
+        ax = f64(a[0])
+        ay = f64(a[1])
+        bx = f64(b[0])
+        by = f64(b[1])
+        cx = f64(c[0])
+        cy = f64(c[1])
+        area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+        bp[t * 4 + 2] = 1
+        bp[t * 4 + 3] = 0                  # empty unless set below
+        if not (area > 0.0 or area < 0.0): continue      # degenerate (or NaN)
+        if cull and ((area < 0.0) == cull_back): continue
+        flip = 0.0
+        if area < 0.0:
+            flip = 1.0
+            tx = bx
+            ty = by
+            bx = cx
+            by = cy
+            cx = tx
+            cy = ty
+            area = -area
+        minx = int(max(min(ax, min(bx, cx)), f64(x0c)))
+        maxx = int(min(max(ax, max(bx, cx)), f64(x1c - 1)))
+        miny = int(max(min(ay, min(by, cy)), f64(y0c)))
+        maxy = int(min(max(ay, max(by, cy)), f64(y1c - 1)))
+        if minx > maxx or miny > maxy: continue
+        s = sp + t * 8
+        s[0] = ax
+        s[1] = ay
+        s[2] = bx
+        s[3] = by
+        s[4] = cx
+        s[5] = cy
+        s[6] = 1.0 / area
+        s[7] = flip
+        bp[t * 4] = minx
+        bp[t * 4 + 1] = maxx
+        bp[t * 4 + 2] = miny
+        bp[t * 4 + 3] = maxy
+        pixels += (maxx - minx + 1) * (maxy - miny + 1)
+        loop k in [(miny - y0c) / band_h..(maxy - y0c) / band_h + 1): counts[k + 1] += 1
+    loop k in [0..bands): counts[k + 1] += counts[k]
+    # bin the triangles by band (a counting sort keeps submission order)
+    fill = counts
+    list = fill(0, counts[bands])
+    loop t in [0..ntri):
+        miny = bp[t * 4 + 2]
+        maxy = bp[t * 4 + 3]
+        if miny > maxy: continue
+        loop k in [(miny - y0c) / band_h..(maxy - y0c) / band_h + 1):
+            list[fill[k]] = t
+            fill[k] += 1
+    lp = data(list)
+    cp = data(counts)
+    __par_serial = pixels < 32768
+    parallel_range(bands, (band: int):
+        by0 = y0c + band * band_h
+        by1 = min(by0 + band_h, y1c) - 1
+        loop j in [cp[band]..cp[band + 1]):
+            t = lp[j]
+            s = sp + t * 8
+            ax = s[0]
+            ay = s[1]
+            bx = s[2]
+            by = s[3]
+            cx = s[4]
+            cy = s[5]
+            inv = s[6]
+            flip = s[7] != 0.0
+            minx = bp[t * 4]
+            maxx = bp[t * 4 + 1]
+            # edge functions e(x) = e + a * k at pixel center minx + k + 0.5; top-left fill rule
+            a0 = by - cy
+            a1 = cy - ay
+            a2 = ay - by
+            tl0 = __top_left(bx, by, cx, cy)
+            tl1 = __top_left(cx, cy, ax, ay)
+            tl2 = __top_left(ax, ay, bx, by)
+            px = f64(minx) + 0.5
+            loop y in [max(bp[t * 4 + 2], by0)..min(bp[t * 4 + 3], by1) + 1):
+                py = f64(y) + 0.5
+                e0 = (cx - bx) * (py - by) - (cy - by) * (px - bx)
+                e1 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx)
+                e2 = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+                # the span where all three are >= 0, widened by a pixel; exact tests below
+                klo = 0
+                khi = maxx - minx
+                if a0 > 0.0: klo = max(klo, int(max(-e0 / a0, -1.0e9)) - 1)
+                else if a0 < 0.0: khi = min(khi, int(min(e0 / -a0, 1.0e9)) + 1)
+                else if e0 < 0.0: continue
+                if a1 > 0.0: klo = max(klo, int(max(-e1 / a1, -1.0e9)) - 1)
+                else if a1 < 0.0: khi = min(khi, int(min(e1 / -a1, 1.0e9)) + 1)
+                else if e1 < 0.0: continue
+                if a2 > 0.0: klo = max(klo, int(max(-e2 / a2, -1.0e9)) - 1)
+                else if a2 < 0.0: khi = min(khi, int(min(e2 / -a2, 1.0e9)) + 1)
+                else if e2 < 0.0: continue
+                # trim to the exact covered run (rows of a triangle are convex)
+                loop klo <= khi and not __sw_inside(e0 + a0 * f64(klo), e1 + a1 * f64(klo), e2 + a2 * f64(klo), tl0, tl1, tl2): klo += 1
+                loop khi >= klo and not __sw_inside(e0 + a0 * f64(khi), e1 + a1 * f64(khi), e2 + a2 * f64(khi), tl0, tl1, tl2): khi -= 1
+                if klo > khi: continue
+                fk = f64(klo)
+                l0 = f32((e0 + a0 * fk) * inv)
+                l1 = f32((e1 + a1 * fk) * inv)
+                l2 = f32((e2 + a2 * fk) * inv)
+                d0 = f32(a0 * inv)
+                d1 = f32(a1 * inv)
+                d2 = f32(a2 * inv)
+                # barycentrics in the original vertex order
+                if flip: shade(band, y, minx + klo, minx + khi, t, l0, l2, l1, d0, d2, d1)
+                else: shade(band, y, minx + klo, minx + khi, t, l0, l1, l2, d0, d1, d2)
+    )
+    __par_serial = false
+
+# draw a mesh with a Sloppy shader (called by gpu.jo's draw / draw_instanced in software mode)
+__sw_warned_lines = false
+
+# (first: the first index, or vertex, drawn; ndraw: how many vertices, without indices (-1: all
+# from first); base_vertex: added to each index; ibase: added to instance_id(): see draw_indirect)
+__sw_draw_mesh = (prog: int, mode: int, vbo: int, stride: int, nverts: int, ibo: int, nidx: int, uni: *u8, ibuf: int, istride: int, ninst: int, ioff: int, first: int = 0, ndraw: int = -1, base_vertex: int = 0, ibase: int = 0):
+    if mode != GL_TRIANGLES and mode != GL_TRIANGLE_STRIP and mode != GL_TRIANGLE_FAN:
+        if not __sw_warned_lines:
+            __sw_warned_lines = true
+            eprint("note: the software renderer draws triangles only (lines and points are skipped)")
+        return
+    if prog <= 0 or prog >= __sp_vs.len() or __sp_vs[prog] == null or nverts == 0: return
+    nf = __sp_out[prog] / 4
+    vargs = __sp_args[prog]
+    vsp = __sp_vs[prog]
+    fsp = __sp_fs[prog]
+    vs2 = __sp_vs[prog] as cfn(*u8, *u8, *u8)
+    vs3 = __sp_vs[prog] as cfn(*u8, *u8, *u8, *u8)
+    fs = __sp_fs[prog] as cfn(*u8, *u8, *u8)
+    # slots holding integers are not interpolated: they come from the triangle's last vertex
+    flat = fill(false, nf)
+    any_flat = false
+    fl = __sp_flat[prog]
+    loop f in [0..min(nf, len(fl))):
+        if fl[f] == 'i':
+            flat[f] = true
+            any_flat = true
+    fp = data(flat)
+    if __s_buffers[vbo].len() < nverts * stride: return
+    vb = data(__s_buffers[vbo])
+    ib: *u32 = null
+    count = nverts
+    if nidx > 0:
+        if __s_buffers[ibo].len() < (first + nidx) * 4: return
+        ib = (data(__s_buffers[ibo]) as *u32) + first
+        count = nidx
+    else if ndraw >= 0: count = ndraw
+    else: count = nverts - first
+    ntri = count / 3
+    if mode != GL_TRIANGLES: ntri = max(count - 2, 0)
+    reps = max(ninst, 1)
+    instb: *u8 = null
+    if ninst > 0 and ibuf > 0:
+        if __s_buffers[ibuf].len() < ioff + ninst * istride: return
+        instb = data(__s_buffers[ibuf]) + ioff
+    c, d = __sw_target()
+    tw, th = __sw_target_size()
+    cp: *f32 = null
+    if c > 0: cp = __st[c].p
+    dp: *f32 = null
+    if d > 0 and __st[d].w == tw and __st[d].h == th: dp = __st[d].p
+    if cp == null and dp == null: return
+    m = __s_cmask
+    color = cp != null and (m.0 or m.1 or m.2 or m.3)
+    vp = __s_vp
+    vx = f64(vp.0)
+    vy = f64(vp.1)
+    vw = f64(vp.2)
+    vh = f64(vp.3)
+    # vertex shading (all instances at once), then projection to the screen:
+    # pv holds x, y (pixels), z (0..1), 1/w and the varyings divided by w
+    total = nverts * reps
+    pstride = 4 + nf
+    clip = fill(f32(0), total * nf)
+    clp = data(clip)
+    pv = fill(f32(0), total * pstride)
+    pvp = data(pv)
+    chunk = 256
+    ids = __sp_ids[prog]
+    tls = __sw_tls
+    __par_serial = total < 2048
+    parallel_range((total + chunk - 1) / chunk, (k: int):
+        mine = tls + __tid() * 8
+        loop g in [k * chunk..min((k + 1) * chunk, total)):
+            o = clp + g * nf
+            v = g % nverts
+            if ids:
+                mine[0] = v
+                mine[1] = g / nverts + ibase
+            when TARGET == "windows":
+                # (cfn calls use Windows' convention there; the shader functions are Sloppy's)
+                if vargs == 3: __call_raw(vsp, o as *u8, vb + v * stride, instb + (g / nverts) * istride, uni)
+                else: __call_raw(vsp, o as *u8, vb + v * stride, uni)
+            else:
+                if vargs == 3: vs3(o as *u8, vb + v * stride, instb + (g / nverts) * istride, uni)
+                else: vs2(o as *u8, vb + v * stride, uni)
+            __sw_project(o, pvp + g * pstride, nf, vx, vy, vw, vh, fp)
+    )
+    __par_serial = false
+    # triangles, clipped against the near plane z >= -w where needed
+    tris: i32[]
+    loop inst in [0..reps):
+        base = inst * nverts
+        loop t in [0..ntri):
+            # positions in the index (or vertex) sequence
+            j0 = 3 * t
+            j1 = 3 * t + 1
+            j2 = 3 * t + 2
+            if mode == GL_TRIANGLE_STRIP:
+                # every other strip triangle is reversed to keep the winding
+                j0 = t + (t & 1)
+                j1 = t + 1 - (t & 1)
+                j2 = t + 2
+            else if mode == GL_TRIANGLE_FAN:
+                j0 = 0
+                j1 = t + 1
+                j2 = t + 2
+            i0 = j0
+            i1 = j1
+            i2 = j2
+            if ib != null:
+                i0 = int(ib[j0])
+                i1 = int(ib[j1])
+                i2 = int(ib[j2])
+            else:
+                i0 += first
+                i1 += first
+                i2 += first
+            i0 += base_vertex
+            i1 += base_vertex
+            i2 += base_vertex
+            if i0 >= nverts or i1 >= nverts or i2 >= nverts or i0 < 0 or i1 < 0 or i2 < 0: continue
+            i0 += base
+            i1 += base
+            i2 += base
+            d0 = clp[i0 * nf + 2] + clp[i0 * nf + 3]
+            d1 = clp[i1 * nf + 2] + clp[i1 * nf + 3]
+            d2 = clp[i2 * nf + 2] + clp[i2 * nf + 3]
+            if d0 >= 0.0 and d1 >= 0.0 and d2 >= 0.0:
+                tris.push(i32(i0))
+                tris.push(i32(i1))
+                tris.push(i32(i2))
+            else if d0 >= 0.0 or d1 >= 0.0 or d2 >= 0.0:
+                __sw_clip_tri(clip, pv, tris, [i0, i1, i2], [d0, d1, d2], nf, vx, vy, vw, vh, fp)
+                clp = data(clip)
+    ntris = tris.len() / 3
+    if ntris == 0: return
+    pvp = data(pv)
+    tp = data(tris)
+    # per band scratch (padded to separate cache lines): varyings at the span start, their
+    # change per pixel, the interpolated varyings and the fragment color
+    bstride = (3 * nf + 4 + 15) / 16 * 16
+    scratch = fill(f32(0), __SW_BANDS * bstride)
+    scrp = data(scratch)
+    dtest = __s_depth and dp != null
+    dwrite = __s_depth_write and dp != null
+    inv_scale = f32(1.0 / __s_fb_scale[__s_fb])
+    # a shader that may discard runs before the depth write, also when no color is written
+    # (alpha-tested leaves in a shadow map)
+    disc = __sp_discard[prog]
+    shade = color or disc
+    tls = __sw_tls
+    __sw_raster(pvp, pstride, tp, ntris, (band: int, y: int, xa: int, xb: int, t: int, l0: f32, l1: f32, l2: f32, d0: f32, d1: f32, d2: f32):
+        a = pvp + int(tp[t * 3]) * pstride
+        b = pvp + int(tp[t * 3 + 1]) * pstride
+        c2 = pvp + int(tp[t * 3 + 2]) * pstride
+        z0 = l0 * a[2] + l1 * b[2] + l2 * c2[2]
+        dz = d0 * a[2] + d1 * b[2] + d2 * c2[2]
+        w0 = l0 * a[3] + l1 * b[3] + l2 * c2[3]
+        dw = d0 * a[3] + d1 * b[3] + d2 * c2[3]
+        s0 = scrp + band * bstride
+        sd = s0 + nf
+        vin = sd + nf
+        col = vin + nf
+        if shade:
+            loop f in [0..nf):
+                s0[f] = l0 * a[4 + f] + l1 * b[4 + f] + l2 * c2[4 + f]
+                sd[f] = d0 * a[4 + f] + d1 * b[4 + f] + d2 * c2[4 + f]
+        mine = tls
+        if disc: mine = tls + __tid() * 8
+        row = y * tw
+        loop x in [xa..xb + 1):
+            k = f32(x - xa)
+            z = z0 + dz * k
+            pix = row + x
+            if dtest and not __depth_ok(z, dp[pix * 4]): continue
+            if not disc:
+                if dwrite: dp[pix * 4] = z
+                if not color: continue
+            iw = w0 + dw * k
+            rw = 1.0 / iw
+            loop f in [0..nf): vin[f] = (s0[f] + sd[f] * k) * rw
+            if any_flat:
+                loop f in [0..nf):
+                    if fp[f]: vin[f] = c2[4 + f]
+            # like gl_FragCoord: window pixel center (at the size the program sees), depth, 1/w
+            vin[0] = (f32(x) + 0.5) * inv_scale
+            vin[1] = (f32(y) + 0.5) * inv_scale
+            vin[2] = z
+            vin[3] = iw
+            if disc: mine[2] = 0
+            when TARGET == "windows":
+                __call_raw(fsp, col as *u8, vin as *u8, uni)
+            else:
+                fs(col as *u8, vin as *u8, uni)
+            if disc:
+                if mine[2] != 0: continue
+                if dwrite: dp[pix * 4] = z
+                if not color: continue
+            __sw_put(cp + pix * 4, vec4(col[0], col[1], col[2], col[3]))
+    )
+
+# clip-space vertex (position first) -> screen position, depth, 1/w and varyings / w
+__sw_project = (q: *f32, o: *f32, nf: int, vx: f64, vy: f64, vw: f64, vh: f64, flat: *bool):
+    w = q[3]
+    iw: f32 = 0.0
+    if w != 0.0: iw = 1.0 / w
+    o[0] = f32(vx + (f64(q[0] * iw) * 0.5 + 0.5) * vw)
+    o[1] = f32(vy + (f64(q[1] * iw) * 0.5 + 0.5) * vh)
+    o[2] = q[2] * iw * 0.5 + 0.5
+    o[3] = iw
+    loop f in [0..nf):
+        if flat[f]: o[4 + f] = q[f]
+        else: o[4 + f] = q[f] * iw
+
+# Sutherland-Hodgman against the near plane for a triangle with 1 or 2 corners behind it;
+# new vertices are appended to clip and pv, the resulting triangles to tris
+__sw_clip_tri = (clip: mut f32[], pv: mut f32[], tris: mut i32[], ix: int[], ds: f32[], nf: int, vx: f64, vy: f64, vw: f64, vh: f64, flat: *bool):
+    poly: int[]
+    loop i in [0..3):
+        j = (i + 1) % 3
+        if ds[i] >= 0.0: poly.push(ix[i])
+        if (ds[i] >= 0.0) != (ds[j] >= 0.0):
+            t = ds[i] / (ds[i] - ds[j])
+            n = clip.len() / nf
+            a = ix[i] * nf
+            b = ix[j] * nf
+            loop f in [0..nf):
+                if flat[f]: clip.push(clip[ix[2] * nf + f])
+                else: clip.push(clip[a + f] + (clip[b + f] - clip[a + f]) * t)
+            pv.resize(pv.len() + 4 + nf)
+            __sw_project(data(clip) + n * nf, data(pv) + n * (4 + nf), nf, vx, vy, vw, vh, flat)
+            poly.push(n)
+    loop k in [1..poly.len() - 1):
+        tris.push(i32(poly[0]))
+        tris.push(i32(poly[k]))
+        tris.push(i32(poly[k + 1]))
+
+# the 2D batch: vertices of 9 floats (x, y, u, v, r, g, b, a, mode) under a projection matrix
+__sw_draw2d = (buf: *f32, count: int, proj: mat4, tex: int):
+    c, d = __sw_target()
+    if c <= 0 or count < 3: return
+    tw = __st[c].w
+    cp = __st[c].p
+    vp = __s_vp
+    sstride = 9
+    scr = fill(f32(0), count * sstride)
+    sp = data(scr)
+    idx = fill(i32(0), count)
+    loop i in [0..count):
+        q = buf + i * 9
+        ndc = proj * vec4(q[0], q[1], 0, 1)
+        o = sp + i * sstride
+        o[0] = f32(f64(vp.0) + (f64(ndc.x) * 0.5 + 0.5) * f64(vp.2))
+        o[1] = f32(f64(vp.1) + (f64(ndc.y) * 0.5 + 0.5) * f64(vp.3))
+        loop k in [2..9): o[k] = q[k]
+        idx[i] = i32(i)
+    tp: *f32 = null
+    txw = 1
+    txh = 1
+    if tex > 0 and tex < __st.len():
+        tp = __st[tex].p
+        txw = __st[tex].w
+        txh = __st[tex].h
+    __sw_raster(sp, sstride, data(idx), count / 3, (band: int, y: int, xa: int, xb: int, t: int, l0: f32, l1: f32, l2: f32, d0: f32, d1: f32, d2: f32):
+        a = sp + (t * 3) * sstride
+        b = a + sstride
+        cc = b + sstride
+        col0 = vec4(l0 * a[4] + l1 * b[4] + l2 * cc[4], l0 * a[5] + l1 * b[5] + l2 * cc[5], l0 * a[6] + l1 * b[6] + l2 * cc[6], l0 * a[7] + l1 * b[7] + l2 * cc[7])
+        dcol = vec4(d0 * a[4] + d1 * b[4] + d2 * cc[4], d0 * a[5] + d1 * b[5] + d2 * cc[5], d0 * a[6] + d1 * b[6] + d2 * cc[6], d0 * a[7] + d1 * b[7] + d2 * cc[7])
+        row = cp + (y * tw) * 4
+        if a[8] > 2.5:
+            # a band (a line's or a ring's quad): uv.y across it; how fast it changes over the
+            # screen, from the triangle's corners (as a GPU's fwidth)
+            den = f64((b[0] - a[0]) * (cc[1] - a[1]) - (cc[0] - a[0]) * (b[1] - a[1]))
+            gx = 0.0
+            gy = 0.0
+            if abs(den) > 1e-9:
+                gx = f64((b[3] - a[3]) * (cc[1] - a[1]) - (cc[3] - a[3]) * (b[1] - a[1])) / den
+                gy = f64((cc[3] - a[3]) * (b[0] - a[0]) - (b[3] - a[3]) * (cc[0] - a[0])) / den
+            w = max(abs(gx) + abs(gy), 0.0001)
+            v0 = f64(l0 * a[3] + l1 * b[3] + l2 * cc[3])
+            dv = f64(d0 * a[3] + d1 * b[3] + d2 * cc[3])
+            loop x in [xa..xb + 1):
+                k = f64(x - xa)
+                cov = clamp((1.0 - abs(v0 + dv * k)) / w + 0.5, 0.0, 1.0)
+                if cov <= 0.0: continue
+                col = col0 + dcol * f32(k)
+                col.w = col.w * f32(cov)
+                __sw_put(row + x * 4, col)
+            return
+        if a[8] > 1.5:
+            # a circle drawn as a square (draw2d's circle): uv in radii from its center
+            cuv0 = vec2(l0 * a[2] + l1 * b[2] + l2 * cc[2], l0 * a[3] + l1 * b[3] + l2 * cc[3])
+            cduv = vec2(d0 * a[2] + d1 * b[2] + d2 * cc[2], d0 * a[3] + d1 * b[3] + d2 * cc[3])
+            w = max(f64(length(cduv)), 0.0001)
+            loop x in [xa..xb + 1):
+                k = f32(x - xa)
+                cov = clamp((1.0 - f64(length(cuv0 + cduv * k))) / w + 0.5, 0.0, 1.0)
+                if cov <= 0.0: continue
+                col = col0 + dcol * k
+                col.w = col.w * f32(cov)
+                __sw_put(row + x * 4, col)
+            return
+        if tp == null or (txw == 1 and txh == 1):
+            tint = vec4(1, 1, 1, 1)
+            if tp != null: tint = vec4(tp[0], tp[1], tp[2], tp[3])
+            loop x in [xa..xb + 1): __sw_put(row + x * 4, (col0 + dcol * f32(x - xa)) * tint)
+            return
+        uv0 = vec2(l0 * a[2] + l1 * b[2] + l2 * cc[2], l0 * a[3] + l1 * b[3] + l2 * cc[3])
+        duv = vec2(d0 * a[2] + d1 * b[2] + d2 * cc[2], d0 * a[3] + d1 * b[3] + d2 * cc[3])
+        if a[8] > 0.5:
+            # signed distance text: edge softness from how many atlas texels a pixel covers
+            # (along the triangle's edge widest on the screen: fwidth's |d/dx| + |d/dy| is that
+            # for upright text, whose rows do not change along y)
+            e = b
+            if abs(f64(cc[0] - a[0])) + abs(f64(cc[1] - a[1])) > abs(f64(b[0] - a[0])) + abs(f64(b[1] - a[1])): e = cc
+            px = max(max(abs(f64(e[0] - a[0])), abs(f64(e[1] - a[1]))), 1.0)
+            texels = max(abs(f64(e[2] - a[2])) * f64(txw), abs(f64(e[3] - a[3])) * f64(txh)) / px
+            # (at most 0.45: atlas texels far from any glyph, 0, stay clear, as with the GPU's
+            # fwidth, which is 0 where the distance does not change; small text drew boxes)
+            w = f32(clamp(texels / 12.0, 0.02, 0.45))
+            loop x in [xa..xb + 1):
+                k = f32(x - xa)
+                tx = __sw_sample(tex, uv0 + duv * k)
+                col = col0 + dcol * k
+                col.w = col.w * __smooth01((tx.x - (0.5 - w)) / (2.0 * w))
+                __sw_put(row + x * 4, col)
+            return
+        loop x in [xa..xb + 1):
+            k = f32(x - xa)
+            __sw_put(row + x * 4, __sw_sample(tex, uv0 + duv * k) * (col0 + dcol * k))
+    )
+
+__smooth01 = (x: f32) -> f32:
+    if x <= 0.0: return 0.0
+    if x >= 1.0: return 1.0
+    x * x * (3.0 - 2.0 * x)
+
+# convert the window's framebuffer to 32-bit BGRX at window size (rows top first)
+__sw_present_pixels = (out: *u8, w: int, h: int):
+    c = __s_fb_color[0]
+    if c <= 0: return
+    p = __st[c].p
+    tw = __st[c].w
+    th = __st[c].h
+    parallel_range(h, (r: int):
+        sy = min(int(f64(h - 1 - r) * __soft_scale), th - 1)
+        row = out + r * w * 4
+        loop k in [0..w):
+            sx = min(int(f64(k) * __soft_scale), tw - 1)
+            q = p + (sy * tw + sx) * 4
+            o = row + k * 4
+            o[0] = u8(int(clamp(q[2], 0.0, 1.0) * 255.0))
+            o[1] = u8(int(clamp(q[1], 0.0, 1.0) * 255.0))
+            o[2] = u8(int(clamp(q[0], 0.0, 1.0) * 255.0))
+            o[3] = 255
+    )

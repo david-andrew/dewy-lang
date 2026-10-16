@@ -1,0 +1,366 @@
+# Common game helpers: noise, collision shapes, easing, timers and 2D particles.
+
+# ---------------- noise ----------------
+__hash2 = (x: int, y: int) -> f64:
+    # (32 bits, as a shader's integers are: noise in a shader is the noise here)
+    h = u32(x) * u32(0x8DA6B343) xor u32(y) * u32(0xD8163841)
+    h = (h xor (h >> 16)) * u32(0x7FEB352D)
+    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = h xor (h >> 16)
+    f64(h & u32(0xFFFFFF)) / 16777216.0
+
+# smooth value noise in [0, 1]
+noise = (x: f64, y: f64) -> f64:
+    xi = int(floor(x))
+    yi = int(floor(y))
+    fx = x - f64(xi)
+    fy = y - f64(yi)
+    u = fx * fx * (3.0 - 2.0 * fx)
+    v = fy * fy * (3.0 - 2.0 * fy)
+    a = __hash2(xi, yi)
+    b = __hash2(xi + 1, yi)
+    c = __hash2(xi, yi + 1)
+    d = __hash2(xi + 1, yi + 1)
+    lerp(lerp(a, b, u), lerp(c, d, u), v)
+
+# along a line: smooth value noise in [0, 1] (a wobble, a flicker, wind)
+noise = (x: f64) -> f64:
+    xi = int(floor(x))
+    fx = x - f64(xi)
+    lerp(__hash2(xi, 7919), __hash2(xi + 1, 7919), fx * fx * (3.0 - 2.0 * fx))
+
+# in 3D: smooth value noise in [0, 1] (clouds, caves; or 2D noise that changes with time as z)
+noise = (x: f64, y: f64, z: f64) -> f64:
+    xi = int(floor(x))
+    yi = int(floor(y))
+    zi = int(floor(z))
+    fx = x - f64(xi)
+    fy = y - f64(yi)
+    fz = z - f64(zi)
+    u = fx * fx * (3.0 - 2.0 * fx)
+    v = fy * fy * (3.0 - 2.0 * fy)
+    w = fz * fz * (3.0 - 2.0 * fz)
+    a = lerp(lerp(__hash3(xi, yi, zi), __hash3(xi + 1, yi, zi), u), lerp(__hash3(xi, yi + 1, zi), __hash3(xi + 1, yi + 1, zi), u), v)
+    b = lerp(lerp(__hash3(xi, yi, zi + 1), __hash3(xi + 1, yi, zi + 1), u), lerp(__hash3(xi, yi + 1, zi + 1), __hash3(xi + 1, yi + 1, zi + 1), u), v)
+    lerp(a, b, w)
+
+__hash3 = (x: int, y: int, z: int) -> f64:
+    h = u32(x) * u32(0x8DA6B343) xor u32(y) * u32(0xD8163841) xor u32(z) * u32(0xCB1AB31F)
+    h = (h xor (h >> 16)) * u32(0x7FEB352D)
+    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = h xor (h >> 16)
+    f64(h & u32(0xFFFFFF)) / 16777216.0
+
+# fractal noise (several octaves) in roughly [0, 1]
+fbm = (x: f64, y: f64, octaves: int = 4) -> f64:
+    s = 0.0
+    amp = 0.5
+    f = 1.0
+    total = 0.0
+    loop i in [0..octaves):
+        s += noise(x * f, y * f) * amp
+        total += amp
+        amp *= 0.5
+        f *= 2.0
+    s / total
+
+# ---------------- easing ----------------
+# curves from 0 (t = 0) to 1 (t = 1): in = slow at the start, out = slow at the end; back goes a
+# little past, elastic springs, bounce bounces (easings.net shows each)
+linear = (t: f64) -> f64: t
+ease_in = (t: f64) -> f64: t * t
+ease_out = (t: f64) -> f64: 1.0 - (1.0 - t) * (1.0 - t)
+ease_in_out = (t: f64) -> f64:
+    if t < 0.5: return 2.0 * t * t
+    1.0 - pow(-2.0 * t + 2.0, 2.0) / 2.0
+ease_in_cubic = (t: f64) -> f64: t * t * t
+ease_out_cubic = (t: f64) -> f64: 1.0 - pow(1.0 - t, 3.0)
+ease_in_out_cubic = (t: f64) -> f64:
+    if t < 0.5: return 4.0 * t * t * t
+    1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0
+ease_in_sine = (t: f64) -> f64: 1.0 - cos(t * PI / 2.0)
+ease_out_sine = (t: f64) -> f64: sin(t * PI / 2.0)
+ease_in_out_sine = (t: f64) -> f64: (1.0 - cos(t * PI)) / 2.0
+ease_in_back = (t: f64) -> f64:
+    c1 = 1.70158
+    (c1 + 1.0) * t * t * t - c1 * t * t
+ease_out_back = (t: f64) -> f64:
+    c1 = 1.70158
+    c3 = c1 + 1.0
+    1.0 + c3 * pow(t - 1.0, 3.0) + c1 * pow(t - 1.0, 2.0)
+ease_out_elastic = (t: f64) -> f64:
+    if t <= 0.0 or t >= 1.0: return t
+    pow(2.0, -10.0 * t) * sin((t * 10.0 - 0.75) * (2.0 * PI / 3.0)) + 1.0
+ease_out_bounce = (t: f64) -> f64:
+    n = 7.5625
+    d = 2.75
+    if t < 1.0 / d: return n * t * t
+    if t < 2.0 / d: return n * (t - 1.5 / d) * (t - 1.5 / d) + 0.75
+    if t < 2.5 / d: return n * (t - 2.25 / d) * (t - 2.25 / d) + 0.9375
+    n * (t - 2.625 / d) * (t - 2.625 / d) + 0.984375
+# how far to turn from angle a to angle b the short way, in radians (from -PI to PI)
+angle_difference = (a: f64, b: f64) -> f64:
+    d = (b - a) - TAU * floor((b - a) / TAU)
+    if d > PI: d -= TAU
+    d
+
+# turn an angle toward another the short way, at most max_step (radians) this time
+turn_toward = (angle: f64, target: f64, max_step: f64) -> f64:
+    d = angle_difference(angle, target)
+    angle + clamp(d, -max_step, max_step)
+
+# frame-rate independent smoothing of an angle toward another, the short way round (as approach)
+approach_angle = (current: f64, target: f64, speed: f64, dt: f64) -> f64:
+    current + angle_difference(current, target) * (1.0 - exp(-speed * dt))
+
+# frame-rate independent smoothing toward a target (higher speed = snappier)
+approach = (current: f64, target: f64, speed: f64, dt: f64) -> f64: target + (current - target) * exp(-speed * dt)
+approach = (current: vec2, target: vec2, speed: f64, dt: f64) -> vec2: target + (current - target) * f32(exp(-speed * dt))
+approach = (current: vec3, target: vec3, speed: f64, dt: f64) -> vec3: target + (current - target) * f32(exp(-speed * dt))
+
+# ---------------- tweens ----------------
+# once (then it stays at `to`), repeat (from the start again), pingpong (to and back, again and again)
+enum TweenMode: once, repeat, pingpong
+
+struct Tween[T]:
+    from: T
+    to: T
+    duration: f64
+    ease: (f64) -> f64 = linear            # (read back from text: this; the text cannot hold a function)
+    mode: TweenMode
+    t = 0.0                     # seconds since it started (below 0: still waiting)
+
+# a value going from `from` to `to` over `duration` seconds along an easing curve: a number, a
+# position (vec2, vec3) or a color (vec4); delay: seconds before it starts. For example
+# `pop = tween(0.0, 1.0, 0.4, ease_out_back)`, then `pop.update(dt)` each frame and `pop.value()`
+# where it is (grown in 0.4 s, a little past the end, then back).
+tween[T] = (from: T, to: T, duration: f64, ease: (f64) -> f64 = ease_in_out, delay: f64 = 0.0, mode: TweenMode = .once) -> Tween[T]:
+    Tween(from, to, duration, ease, mode, 0.0 - delay)
+# (numbers: tween(0, 10, 0.5) goes through the fractions between)
+tween = (from: f64, to: f64, duration: f64, ease: (f64) -> f64 = ease_in_out, delay: f64 = 0.0, mode: TweenMode = .once) -> Tween[f64]:
+    Tween(from, to, duration, ease, mode, 0.0 - delay)
+
+update[T] = (tw: mut Tween[T], dt: f64): tw.t += dt
+
+# where along the curve it is, from 0 to 1 (before the easing)
+progress[T] = (tw: Tween[T]) -> f64:
+    if tw.duration <= 0.0: return 1.0
+    k = max(tw.t, 0.0) / tw.duration
+    if tw.mode == .repeat: return k - floor(k)
+    if tw.mode == .pingpong:
+        k = k - 2.0 * floor(k / 2.0)
+        if k > 1.0: return 2.0 - k
+        return k
+    min(k, 1.0)
+
+value[T] = (tw: Tween[T]) -> T: __tween_mix(tw.from, tw.to, tw.ease(progress(tw)))
+
+# finished (a tween that repeats never is)
+done[T] = (tw: Tween[T]) -> bool: tw.mode == .once and tw.t >= tw.duration
+
+# start again from the start
+restart[T] = (tw: mut Tween[T]): tw.t = 0.0
+
+# go on from where it is now to a new target, taking duration again
+retarget[T] = (tw: mut Tween[T], to: T):
+    tw.from = value(tw)
+    tw.to = to
+    tw.t = 0.0
+
+# all of them finished (a set of tweens started together: cards dealt, then the next turn)
+done[T] = (tws: Tween[T][]) -> bool:
+    loop tw in tws:
+        if not done(tw): return false
+    true
+
+# tweens played one after another, as one: `hop = chain([tween(a, b, 0.2), tween(b, a, 0.3, ease_out_bounce)])`,
+# then hop.update(dt) each frame, hop.value() where it is, hop.done() once the last has ended
+# (each step's delay counts: a pause between two). A step that repeats keeps the chain on it
+struct Chain[T]:
+    steps: Tween[T][]
+    t = 0.0
+
+chain[T] = (steps: Tween[T][]) -> Chain[T]:
+    if steps.len() == 0: panic("chain: give it at least one tween, as chain([tween(0.0, 1.0, 0.5)])")
+    Chain(steps, 0.0)
+
+update[T] = (c: mut Chain[T], dt: f64): c.t += dt
+
+# (the step playing now, and its own time)
+__chain_at[T] = (c: Chain[T]) -> (int, f64):
+    left = c.t
+    loop i in 0.. and s in c.steps:
+        span = s.duration - s.t
+        if s.mode != .once or left < span or i == c.steps.len() - 1: return (i, left + s.t)
+        left -= span
+    (c.steps.len() - 1, left)
+
+value[T] = (c: Chain[T]) -> T:
+    at = __chain_at(c)
+    s = c.steps[at.0]
+    s.t = at.1
+    value(s)
+
+done[T] = (c: Chain[T]) -> bool:
+    at = __chain_at(c)
+    s = c.steps[at.0]
+    s.t = at.1
+    at.0 == c.steps.len() - 1 and done(s)
+
+# start again from the first step
+restart[T] = (c: mut Chain[T]): c.t = 0.0
+
+__tween_mix = (a: f64, b: f64, t: f64) -> f64: a + (b - a) * t
+__tween_mix = (a: f32, b: f32, t: f64) -> f32: a + (b - a) * f32(t)
+__tween_mix = (a: vec2, b: vec2, t: f64) -> vec2: a + (b - a) * f32(t)
+__tween_mix = (a: vec3, b: vec3, t: f64) -> vec3: a + (b - a) * f32(t)
+__tween_mix = (a: vec4, b: vec4, t: f64) -> vec4: a + (b - a) * f32(t)
+
+# ---------------- the camera: following and shaking ----------------
+# where a camera that follows target is next: it waits while target stays inside deadzone (half
+# its size, in 2D units, around the camera's center), then catches up smoothly (higher speed:
+# snappier). For camera2d(follow(...)).
+follow = (cam: vec2, target: vec2, dt: f64, speed: f64 = 8.0, deadzone: vec2 = vec2(0, 0)) -> vec2:
+    want = cam
+    d = target - cam
+    if abs(d.x) > deadzone.x: want.x = target.x - f32(sign(f64(d.x))) * deadzone.x
+    if abs(d.y) > deadzone.y: want.y = target.y - f32(sign(f64(d.y))) * deadzone.y
+    approach(cam, want, speed, dt)
+
+# A screen shake: add(trauma) on a hit or a blast (0 to 1; more adds up), update(dt) every frame,
+# and move the camera by offset() (in 3D, offset3d(right)): it shakes hard at first, fading as
+# the trauma wears off.
+struct Shake:
+    trauma = 0.0
+    strength = 24.0             # how far it moves at the most (2D units)
+    fade = 1.5                  # trauma lost each second
+    t = 0.0
+
+add = (s: mut Shake, trauma: f64): s.trauma = min(s.trauma + trauma, 1.0)
+update = (s: mut Shake, dt: f64):
+    s.trauma = max(s.trauma - s.fade * dt, 0.0)
+    s.t += dt
+offset = (s: Shake) -> vec2:
+    k = s.trauma * s.trauma * s.strength
+    vec2(f32((noise(s.t * 30.0, 1.5) * 2.0 - 1.0) * k), f32((noise(4.5, s.t * 30.0) * 2.0 - 1.0) * k))
+
+# the same shake for a 3D camera: up to `meters` along the camera's right and up (add it to
+# where the camera is: `camera3d(eye + shake.offset3d(right), target)`)
+offset3d = (s: Shake, right: vec3, up: vec3 = vec3(0, 1, 0), meters: f64 = 0.25) -> vec3:
+    o = offset(s)
+    k = 0.0
+    if s.strength > 0.0: k = meters / s.strength
+    right * f32(f64(o.x) * k) + up * f32(-f64(o.y) * k)
+
+# ---------------- collision ----------------
+# a box: its top left corner and its size, in the screen's units (any numbers go in:
+# `Rect(x, y, 120, 40)` with x an f64 is fine, as f64 converts to f32 by itself)
+struct Rect:
+    x: f32
+    y: f32
+    w: f32
+    h: f32
+
+overlaps = (a: Rect, b: Rect) -> bool: a.x < b.x + b.w and a.x + a.w > b.x and a.y < b.y + b.h and a.y + a.h > b.y
+contains = (r: Rect, p: vec2) -> bool: p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h
+center = (r: Rect) -> vec2: vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)
+circles_overlap = (a: vec2, ra: f64, b: vec2, rb: f64) -> bool: length_sq(a - b) < f32((ra + rb) * (ra + rb))
+circle_rect = (c: vec2, r: f64, rect: Rect) -> bool:
+    q = vec2(clamp(c.x, rect.x, rect.x + rect.w), clamp(c.y, rect.y, rect.y + rect.h))
+    length_sq(c - q) < f32(r * r)
+
+# ---------------- 2D particles ----------------
+struct Particle:
+    pos: vec2
+    vel: vec2
+    life: f32
+    max_life: f32
+    size: f32
+    color: vec4
+
+struct Particles:
+    items: Particle[]
+    gravity: vec2           # added to their velocity each second (vec2(0, 400): they fall)
+    drag: f32 = 1.0         # how fast they slow down: their speed shrinks by e^-drag a second (0: never)
+
+# count particles from pos, at up to speed (pixels a second), lasting up to `life` seconds, of
+# up to `size` pixels' radius; `spread` is the angle they go out in (radians, TAU: every way) around
+# `direction` (radians, 0: right, as from_angle)
+emit = (ps: mut Particles, pos: vec2, count: int, speed: f64, color: vec4, life: f64 = 1.0, size: f64 = 4.0, spread: f64 = TAU, direction: f64 = 0.0):
+    loop i in [0..count):
+        a = direction + random(-spread / 2.0, spread / 2.0)
+        sp = random(speed * 0.3, speed)
+        l = f32(random(life * 0.6, life))
+        ps.items.push(Particle(pos, from_angle(a) * f32(sp), l, l, f32(random(size * 0.5, size)), color))
+
+update = (ps: mut Particles, dt: f64):
+    k = 0
+    loop k < ps.items.len():
+        if ps.items[k].life <= 0.0:
+            ps.items[k] = ps.items[ps.items.len() - 1]
+            ps.items.pop()
+        else: k += 1
+    damp = f32(exp(-f64(ps.drag) * dt))
+    loop mut p in ps.items:
+        p.vel = (p.vel + ps.gravity * f32(dt)) * damp
+        p.pos += p.vel * f32(dt)
+        p.life -= f32(dt)
+
+# draw particles as soft glowing dots (additive blending)
+draw = (ps: Particles, glow: bool = true):
+    if glow: blend(.add)
+    loop p in ps.items:
+        t = p.life / p.max_life
+        c = p.color
+        c.w = c.w * t
+        if glow: circle_gradient(p.pos, f64(p.size * (0.5 + t)), c, with_alpha(c, 0), 12)
+        else: circle(p.pos, f64(p.size * t), c, 8)
+    if glow: blend(.alpha)
+
+# ---------------- timing ----------------
+__timers: {int: f64} = {}
+# true once every `period` seconds, the first time on the first call: each timer is told apart
+# by its id, any number of the game's own (every(1, 0.5) and every(2, 3.0) run apart)
+every = (id: int, period: f64) -> bool:
+    now = elapsed()
+    last = __timers.get(id, -1e9)
+    if now - last >= period:
+        __timers[id] = now
+        return true
+    false
+
+# things to do one after another, each a wait after the one before: an enemy's turn, the hits
+# of an attack, a cutscene. Steps are added with then, and update runs those whose time came.
+#   turn: Actions
+#   turn.then(0.3, (): enemy_attack(0))     # 0.3 s from now
+#   turn.then(0.5, (): enemy_attack(1))     # 0.5 s after that
+#   turn.then(0.2, (): start_player_turn())
+#   update = (dt: f64):
+#       turn.update(dt)
+#       if not turn.busy(): (the player's input)
+struct Actions:
+    __steps: (f64, () -> void)[]
+    __waited = 0.0
+
+# do f, `wait` seconds after the step before it (or after now, when there is none)
+then = (a: mut Actions, wait: f64, f: () -> void):
+    a.__steps.push((max(wait, 0.0), f))
+
+# the steps whose time has come, run in order (a step may add more)
+update = (a: mut Actions, dt: f64):
+    a.__waited += dt
+    loop a.__steps.len() > 0 and a.__waited >= a.__steps[0].0:
+        step = a.__steps[0]
+        a.__waited -= step.0
+        a.__steps.remove(0)
+        f = step.1
+        f()
+    if a.__steps.len() == 0: a.__waited = 0.0
+
+# steps still to come
+busy = (a: Actions) -> bool: a.__steps.len() > 0
+
+# drop the steps still to come
+clear = (a: mut Actions):
+    a.__steps.clear()
+    a.__waited = 0.0

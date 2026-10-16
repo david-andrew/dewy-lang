@@ -1,0 +1,69 @@
+# Zip archives (deflated, as the PNG writer does; stored when that is no smaller): `sloppy build --target wasm -o game.zip` writes the page
+# as index.html in one, the shape itch.io and similar sites take a web game in.
+
+use 'util.jo'
+use 'elf.jo'
+
+crc_table: int[] = []
+
+crc32 = (b: u8[]) -> int:
+    if crc_table.len() == 0:
+        loop n in [0..256):
+            c = n
+            loop k in [0..8):
+                if c & 1 != 0: c = 0xEDB88320 xor (c >> 1)
+                else: c = c >> 1
+            crc_table.push(c)
+    c = 0xFFFFFFFF
+    loop x in b: c = crc_table[(c xor int(x)) & 255] xor (c >> 8)
+    c xor 0xFFFFFFFF
+
+# files: (name in the archive, contents)
+write_zip = (path: str, files: (str, u8[])[]) -> bool:
+    out: u8[]
+    central: u8[]
+    loop f in files:
+        off = out.len()
+        crc = crc32(f.1)
+        packed = f.1
+        when not BOOTSTRAP: packed = deflate(f.1)      # (the C bootstrap's compiler does without)
+        method = 8
+        if packed.len() >= f.1.len():
+            packed = f.1
+            method = 0
+        header = (sig: int, at_central: bool) -> u8[]:
+            h: u8[]
+            put32(h, sig)
+            if at_central: put16(h, 20)                  # made by
+            put16(h, 20)                                  # version needed
+            put16(h, 0x800)                               # flags: names are UTF-8
+            put16(h, method)                              # 8: deflated, 0: stored
+            put16(h, 0)                                   # time
+            put16(h, 0x21)                                # date: 1980-01-01
+            put32(h, crc)
+            put32(h, packed.len())
+            put32(h, f.1.len())
+            put16(h, len(f.0))
+            put16(h, 0)                                   # extra
+            if at_central:
+                put16(h, 0)                               # comment
+                put16(h, 0)                               # disk
+                put16(h, 0)                               # internal attributes
+                put32(h, 0)                               # external attributes
+                put32(h, off)
+            loop c in f.0: h.push(c)
+            h
+        append_bytes(out, header(0x04034B50, false))
+        append_bytes(out, packed)
+        append_bytes(central, header(0x02014B50, true))
+    cd_off = out.len()
+    append_bytes(out, central)
+    put32(out, 0x06054B50)
+    put16(out, 0)
+    put16(out, 0)
+    put16(out, files.len())
+    put16(out, files.len())
+    put32(out, central.len())
+    put32(out, cd_off)
+    put16(out, 0)
+    write_bytes(path, out)

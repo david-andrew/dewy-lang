@@ -1,0 +1,539 @@
+# Wayland through the system's libwayland-client, and window decorations from libdecor.
+#
+# wayland.jo builds requests and reads events in the wire format. With libwayland (the usual
+# case: every Wayland desktop has it), each request it builds is handed to libwayland instead of
+# the socket, and each event libwayland delivers is turned back into wire format for it: one
+# implementation of the protocol logic, two transports. Using libwayland lets libdecor draw the
+# window's decorations the way the desktop does (on GNOME with GTK; where the compositor draws
+# them itself, libdecor leaves that to it). Without libwayland (SLOPPY_WAYLAND=protocol, or a
+# system without it) wayland.jo speaks the protocol itself and draws a title bar of its own;
+# without libdecor (or SLOPPY_LIBDECOR=0) it does the same over libwayland.
+
+when TARGET != "wasm":
+    @lib("libwayland-client.so.0")
+    extern wl_display_connect = (name: *u8) -> *u8
+    @lib("libwayland-client.so.0")
+    extern wl_display_get_fd = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_display_flush = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_display_prepare_read = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_display_read_events = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_display_cancel_read = (d: *u8)
+    @lib("libwayland-client.so.0")
+    extern wl_display_dispatch_pending = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_display_get_error = (d: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_proxy_marshal_array_flags = (proxy: *u8, opcode: u32, iface: *u8, version: u32, flags: u32, args: *u8) -> *u8
+    @lib("libwayland-client.so.0")
+    extern wl_proxy_add_dispatcher = (proxy: *u8, dispatcher: *u8, impl: *u8, user: *u8) -> i32
+    @lib("libwayland-client.so.0")
+    extern wl_proxy_get_version = (proxy: *u8) -> u32
+    @lib("libwayland-client.so.0")
+    extern wl_proxy_destroy = (proxy: *u8)
+
+    @lib("libdecor-0.so.0")
+    extern libdecor_new = (display: *u8, iface: *u8) -> *u8
+    @lib("libdecor-0.so.0")
+    extern libdecor_decorate = (ctx: *u8, surface: *u8, iface: *u8, user: *u8) -> *u8
+    @lib("libdecor-0.so.0")
+    extern libdecor_dispatch = (ctx: *u8, timeout: i32) -> i32
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_set_title = (frame: *u8, title: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_set_app_id = (frame: *u8, app_id: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_map = (frame: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_commit = (frame: *u8, state: *u8, configuration: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_set_fullscreen = (frame: *u8, output: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_unset_fullscreen = (frame: *u8)
+    @lib("libdecor-0.so.0")
+    extern libdecor_frame_set_min_content_size = (frame: *u8, w: i32, h: i32)
+    @lib("libdecor-0.so.0")
+    extern libdecor_configuration_get_content_size = (conf: *u8, frame: *u8, w: *i32, h: *i32) -> i32
+    @lib("libdecor-0.so.0")
+    extern libdecor_configuration_get_window_state = (conf: *u8, state: *i32) -> i32
+    @lib("libdecor-0.so.0")
+    extern libdecor_state_new = (w: i32, h: i32) -> *u8
+    @lib("libdecor-0.so.0")
+    extern libdecor_state_free = (state: *u8)
+
+    __lw_on = false
+    __lw_display: *u8 = null
+    __lw_fd = -1
+    __lw_lib: *u8 = null
+    __lw_ifaces: *u8[]              # WLK_* -> struct wl_interface
+    __lw_proxies: *u8[]             # our object id -> wl_proxy
+    __lw_srv_proxies: *u8[]         # objects the compositor made (ids from 0xff000000)
+    __lw_ids: {int: int} = {}       # wl_proxy -> our object id
+    __lw_dispatch_ptr: *u8 = null
+
+    # libdecor
+    __ld_ctx: *u8 = null
+    __ld_frame: *u8 = null
+    __ld_iface: *u8 = null
+    __ld_frame_iface: *u8 = null
+
+    # The protocols' messages, for the interfaces libwayland does not have (it has the core
+    # ones). Per interface: its name and version, then requests (>) and events (<): a name and
+    # its arguments (i int, u uint, f fixed, s string, o object, n new object, a array, h fd;
+    # ?: may be null; :name the interface of an object; @n: since version n).
+    const __LW_PROTOCOLS = "
+xdg_wm_base 1
+> destroy
+> create_positioner n:xdg_positioner
+> get_xdg_surface n:xdg_surface o:wl_surface
+> pong u
+< ping u
+xdg_positioner 1
+> destroy
+xdg_surface 1
+> destroy
+> get_toplevel n:xdg_toplevel
+> get_popup n:xdg_popup ?o:xdg_surface o:xdg_positioner
+> set_window_geometry i i i i
+> ack_configure u
+< configure u
+xdg_popup 1
+> destroy
+xdg_toplevel 1
+> destroy
+> set_parent ?o:xdg_toplevel
+> set_title s
+> set_app_id s
+> show_window_menu o:wl_seat u i i
+> move o:wl_seat u
+> resize o:wl_seat u u
+> set_max_size i i
+> set_min_size i i
+> set_maximized
+> unset_maximized
+> set_fullscreen ?o:wl_output
+> unset_fullscreen
+> set_minimized
+< configure i i a
+< close
+zxdg_decoration_manager_v1 1
+> destroy
+> get_toplevel_decoration n:zxdg_toplevel_decoration_v1 o:xdg_toplevel
+zxdg_toplevel_decoration_v1 1
+> destroy
+> set_mode u
+> unset_mode
+< configure u
+wp_cursor_shape_manager_v1 1
+> destroy
+> get_pointer n:wp_cursor_shape_device_v1 o:wl_pointer
+> get_tablet_tool_v2 n:wp_cursor_shape_device_v1 o
+wp_cursor_shape_device_v1 1
+> destroy
+> set_shape u u
+zwp_linux_dmabuf_v1 3
+> destroy
+> create_params n:zwp_linux_buffer_params_v1
+< format u
+< modifier @3 u u u
+zwp_linux_buffer_params_v1 3
+> destroy
+> add h u u u u u
+> create i i u u
+> create_immed @2 n:wl_buffer i i u u
+< created n:wl_buffer
+< failed
+wp_viewporter 1
+> destroy
+> get_viewport n:wp_viewport o:wl_surface
+wp_viewport 1
+> destroy
+> set_source f f f f
+> set_destination i i
+wp_fractional_scale_manager_v1 1
+> destroy
+> get_fractional_scale n:wp_fractional_scale_v1 o:wl_surface
+wp_fractional_scale_v1 1
+> destroy
+< preferred_scale u
+zwp_pointer_constraints_v1 1
+> destroy
+> lock_pointer n:zwp_locked_pointer_v1 o:wl_surface o:wl_pointer ?o u
+zwp_locked_pointer_v1 1
+> destroy
+> set_cursor_position_hint f f
+> set_region ?o
+< locked
+< unlocked
+zwp_relative_pointer_manager_v1 1
+> destroy
+> get_relative_pointer n:zwp_relative_pointer_v1 o:wl_pointer
+zwp_relative_pointer_v1 1
+> destroy
+< relative_motion u u f f f f
+"
+
+    # a C string that lives as long as the program
+    __lw_cstr = (s: str) -> *u8:
+        p = __alloc(len(s) + 1)
+        mem_copy(p, data(s), len(s))
+        p[len(s)] = 0
+        p
+
+    struct __LwMsg:
+        name: str
+        sig: str
+        types: str[]
+
+    struct __LwIface:
+        name: str
+        version: int
+        reqs: __LwMsg[]
+        evs: __LwMsg[]
+
+    __lw_parse = () -> __LwIface[]:
+        out: __LwIface[]
+        loop line0 in split(__LW_PROTOCOLS, "\n"):
+            line = trim(line0)
+            if len(line) == 0: continue
+            ws = split(line, " ")
+            if ws[0] != ">" and ws[0] != "<":
+                out.push(__LwIface(ws[0], to_int(ws[1]) ?? 1, [], []))
+                continue
+            m = __LwMsg(ws[1], "", [])
+            loop k in [2..ws.len()):
+                w = ws[k]
+                if len(w) == 0: continue
+                if w[0] == '@':
+                    m.sig = w[1..] + m.sig
+                    continue
+                c = find_byte(w, ':')
+                if c >= 0:
+                    m.sig += w[..c)
+                    m.types.push(w[c + 1..])
+                else:
+                    m.sig += w
+                    m.types.push("")
+            if ws[0] == ">": out[out.len() - 1].reqs.push(m)
+            else: out[out.len() - 1].evs.push(m)
+        out
+
+    # struct wl_interface for each kind of object wayland.jo uses
+    __lw_make_ifaces = () -> bool:
+        __lw_lib = dl_open("libwayland-client.so.0")
+        if __lw_lib == null: return false
+        defs = __lw_parse()
+        # the interfaces (allocated first: messages refer to one another's)
+        by_name: {str: *u8} = {}
+        loop n in ["wl_display", "wl_registry", "wl_callback", "wl_compositor", "wl_shm", "wl_shm_pool", "wl_buffer", "wl_surface", "wl_seat", "wl_pointer", "wl_keyboard", "wl_output", "wl_data_device_manager", "wl_data_device", "wl_data_source", "wl_data_offer"]:
+            p = dl_sym(__lw_lib, n + "_interface")
+            if p == null: return false
+            by_name[n] = p
+        loop d in defs: by_name[d.name] = __alloc(40)
+        loop d in defs:
+            ip = by_name[d.name]
+            mem_set(ip, 0, 40)
+            (ip as **u8)[0] = __lw_cstr(d.name)
+            (ip as *i32)[2] = i32(d.version)
+            (ip as *i32)[3] = i32(d.reqs.len())
+            (ip as **u8)[2] = __lw_messages(d.reqs, by_name)
+            (ip as *i32)[6] = i32(d.evs.len())
+            (ip as **u8)[4] = __lw_messages(d.evs, by_name)
+        kinds = ["", "wl_display", "wl_registry", "wl_callback", "wl_compositor", "wl_shm", "wl_shm_pool", "wl_buffer",
+            "wl_surface", "xdg_wm_base", "xdg_surface", "xdg_toplevel", "wl_seat", "wl_pointer", "wl_keyboard",
+            "zxdg_decoration_manager_v1", "zxdg_toplevel_decoration_v1", "wl_callback", "wp_cursor_shape_manager_v1",
+            "wp_cursor_shape_device_v1", "zwp_linux_dmabuf_v1", "zwp_linux_buffer_params_v1", "wp_viewporter", "wp_viewport",
+            "wp_fractional_scale_manager_v1", "wp_fractional_scale_v1", "wl_data_device_manager", "wl_data_device",
+            "wl_data_source", "wl_data_offer", "zwp_pointer_constraints_v1", "zwp_locked_pointer_v1",
+            "zwp_relative_pointer_manager_v1", "zwp_relative_pointer_v1"]
+        __lw_ifaces = []
+        loop n in kinds: __lw_ifaces.push(by_name.get(n) ?? null)
+        true
+
+    # an array of struct wl_message (24 bytes: name, signature, types)
+    __lw_messages = (ms: __LwMsg[], by_name: {str: *u8}) -> *u8:
+        if ms.len() == 0: return null
+        arr = __alloc(24 * ms.len())
+        loop i in 0.. and m in ms:
+            types = __alloc(8 * max(m.types.len(), 1))
+            loop k in 0.. and t in m.types:
+                p: *u8 = null
+                if len(t) > 0: p = by_name.get(t) ?? null
+                (types as **u8)[k] = p
+            e = arr + 24 * i
+            (e as **u8)[0] = __lw_cstr(m.name)
+            (e as **u8)[1] = __lw_cstr(m.sig)
+            (e as **u8)[2] = types
+        arr
+
+    # connect through libwayland; false if it is not there or cannot connect
+    __lw_connect = () -> bool:
+        if (env("SLOPPY_WAYLAND") ?? "") == "protocol" or not lib_available("libwayland-client.so.0"): return false
+        if not __lw_make_ifaces(): return false
+        d = wl_display_connect(null)
+        if d == null: return false
+        __lw_display = d
+        __lw_fd = int(wl_display_get_fd(d))
+        __lw_on = true
+        __lw_proxies = [null, d]
+        __lw_ids[d as int] = 1
+        f: cfn(*u8, *u8, u32, *u8, *u8) -> i32 = __lw_dispatch
+        __lw_dispatch_ptr = f as *u8
+        true
+
+    __lw_proxy = (id: int) -> *u8:
+        if id >= 0xff000000:
+            k = id - 0xff000000
+            if k < __lw_srv_proxies.len(): return __lw_srv_proxies[k]
+            return null
+        if id < __lw_proxies.len(): return __lw_proxies[id]
+        null
+
+    __lw_kind = (id: int) -> int:
+        if id >= 0xff000000:
+            k = id - 0xff000000
+            if k < __wl_srv_kind.len(): return __wl_srv_kind[k]
+            return WLK_NONE
+        if id < __wl_kind.len(): return __wl_kind[id]
+        WLK_NONE
+
+    __lw_set_proxy = (id: int, p: *u8):
+        if id >= 0xff000000:
+            k = id - 0xff000000
+            loop __lw_srv_proxies.len() <= k: __lw_srv_proxies.push(null)
+            __lw_srv_proxies[k] = p
+        else:
+            loop __lw_proxies.len() <= id: __lw_proxies.push(null)
+            __lw_proxies[id] = p
+        if p != null: __lw_ids[p as int] = id
+
+    __lw_forget = (id: int):
+        p = __lw_proxy(id)
+        if p == null: return
+        __lw_ids.remove(p as int)
+        __lw_set_proxy(id, null)
+        # (our ids are only ours: one can be used again at once)
+        if id < 0xff000000: __wl_gone(id)
+
+    # requests built by wayland.jo (wire-format messages) are sent through libwayland when it
+    # flushes: by then the file descriptors that go with them are queued too (__wl_out_fds)
+    __lw_queue = (msg: u8[]):
+        loop b in msg: __wl_out.push(b)
+
+    __lw_flush = ():
+        if __lw_display == null: return
+        if __wl_out.len() > 0:
+            pending = __wl_out
+            __wl_out = []
+            p = 0
+            loop p + 8 <= pending.len():
+                size = __wl_u32(pending, p + 4) >> 16
+                __lw_send(pending[p..p + size))
+                p += size
+            __wl_out_fds.clear()
+        wl_display_flush(__lw_display)
+
+    # send a request through libwayland
+    __lw_send = (msg: u8[]):
+        obj = __wl_u32(msg, 0)
+        op = __wl_u32(msg, 4) & 0xFFFF
+        proxy = __lw_proxy(obj)
+        iface = __lw_ifaces[__lw_kind(obj)]
+        if proxy == null or iface == null: return
+        if op >= int((iface as *i32)[3]): return
+        m = (iface as **u8)[2] + 24 * op
+        name = __cstr((m as **u8)[0])
+        sig = __cstr((m as **u8)[1])
+        args: int[] = fill(0, 8)
+        na = 0
+        at = 8
+        new_id = 0
+        version = int(wl_proxy_get_version(proxy))
+        loop c in sig:
+            if c == '?' or is_digit(c): continue
+            if na >= args.len(): args.push(0)
+            if c == 'i' or c == 'u' or c == 'f':
+                args[na] = __wl_u32(msg, at)
+                at += 4
+            else if c == 's':
+                n = __wl_u32(msg, at)
+                if n > 0: args[na] = (data(msg) + at + 4) as int
+                at += 4 + (n + 3) / 4 * 4
+            else if c == 'o':
+                args[na] = __lw_proxy(__wl_u32(msg, at)) as int
+                at += 4
+            else if c == 'n':
+                new_id = __wl_u32(msg, at)
+                at += 4
+            else if c == 'a':
+                at += 4 + (__wl_u32(msg, at) + 3) / 4 * 4
+            else if c == 'h':
+                if __wl_out_fds.len() > 0:
+                    args[na] = __wl_out_fds[0]
+                    __wl_out_fds = __wl_out_fds[1..]
+            na += 1
+        new_iface: *u8 = null
+        if new_id != 0:
+            new_iface = __lw_ifaces[__lw_kind(new_id)]
+            # wl_registry.bind: the version asked for
+            if __lw_kind(obj) == WLK_REGISTRY: version = args[2]
+        flags = u32(0)
+        if name == "destroy": flags = 1                    # WL_MARSHAL_FLAG_DESTROY
+        r = wl_proxy_marshal_array_flags(proxy, u32(op), new_iface, u32(version), flags, data(args) as *u8)
+        if new_id != 0 and r != null:
+            __lw_set_proxy(new_id, r)
+            wl_proxy_add_dispatcher(r, __lw_dispatch_ptr, new_id as *u8, null)
+        if flags != 0: __lw_forget(obj)
+
+    # an event from libwayland: back to wire format, for wayland.jo
+    @cabi
+    __lw_dispatch = (impl: *u8, target: *u8, opcode: u32, msg: *u8, args: *u8) -> i32:
+        id = impl as int
+        sig = __cstr((msg as **u8)[1])
+        a: u8[]
+        k = 0
+        av = args as *int
+        loop c in sig:
+            if c == '?' or is_digit(c): continue
+            v = av[k]
+            k += 1
+            if c == 'i' or c == 'u' or c == 'f': __put32(a, v & 0xFFFFFFFF)
+            else if c == 's':
+                if v == 0: __put32(a, 0)
+                else:
+                    s = __cstr(v as *u8)
+                    __put32(a, len(s) + 1)
+                    loop b in s: a.push(b)
+                    a.push(0)
+                    loop a.len() % 4 != 0: a.push(0)
+            else if c == 'o':
+                oid = 0
+                if v != 0: oid = __lw_ids.get(v) ?? 0
+                __put32(a, oid)
+            else if c == 'n':
+                # an object the compositor made: an id for it, and its events come here too
+                __wl_srv_kind.push(WLK_NONE)
+                nid = 0xff000000 + __wl_srv_kind.len() - 1
+                if v != 0:
+                    __lw_set_proxy(nid, v as *u8)
+                    wl_proxy_add_dispatcher(v as *u8, __lw_dispatch_ptr, nid as *u8, null)
+                __put32(a, nid)
+            else if c == 'a':
+                n = 0
+                p: *u8 = null
+                if v != 0:
+                    n = (v as *int)[0]
+                    p = (v as **u8)[2]
+                __put32(a, n)
+                loop j in [0..n): a.push(p[j])
+                loop a.len() % 4 != 0: a.push(0)
+            else if c == 'h': __wl_in_fds.push(v & 0xFFFFFFFF)
+        kind = __lw_kind(id)
+        __wl_event(id, int(opcode), a)
+        # (callbacks are done after their one event)
+        if (kind == WLK_FRAME or kind == WLK_CALLBACK) and opcode == 0:
+            __lw_forget(id)
+            wl_proxy_destroy(target)
+        0
+
+    # read and handle what arrived (waiting up to timeout_ms); whether anything did
+    __lw_read = (timeout_ms: int) -> bool:
+        d = __lw_display
+        if d == null: return false
+        __lw_flush()
+        if __ld_ctx != null:
+            n = libdecor_dispatch(__ld_ctx, i32(timeout_ms))
+            __lw_check()
+            return n > 0
+        loop wl_display_prepare_read(d) != 0: wl_display_dispatch_pending(d)
+        wl_display_flush(d)
+        pfd = fill(0, 1)
+        (data(pfd) as *i32)[0] = i32(__lw_fd)
+        (data(pfd) as *i16)[2] = 1                 # POLLIN
+        ready = syscall(7, data(pfd), 1, timeout_ms) > 0
+        if ready: wl_display_read_events(d)
+        else: wl_display_cancel_read(d)
+        n = wl_display_dispatch_pending(d)
+        __lw_check()
+        ready and n >= 0
+
+    __lw_check = ():
+        if __lw_display != null and wl_display_get_error(__lw_display) != 0 and len(__wl_failed) == 0:
+            __wl_failed = "the connection to the compositor failed (protocol error)"
+            __win_close = true
+
+    # ---- libdecor ----
+
+    # decorate the window with libdecor; false if it is not available
+    __ld_open = (title: str) -> bool:
+        if (env("SLOPPY_LIBDECOR") ?? "") == "0" or not lib_available("libdecor-0.so.0"): return false
+        __ld_iface = __alloc(8 * 16)
+        mem_set(__ld_iface, 0, 8 * 16)
+        err: cfn(*u8, i32, *u8) = __ld_error
+        (__ld_iface as **u8)[0] = err as *u8
+        __ld_frame_iface = __alloc(8 * 16)
+        mem_set(__ld_frame_iface, 0, 8 * 16)
+        conf: cfn(*u8, *u8, *u8) = __ld_configure
+        close: cfn(*u8, *u8) = __ld_close
+        commit: cfn(*u8, *u8) = __ld_commit
+        dismiss: cfn(*u8, *u8, *u8) = __ld_dismiss
+        (__ld_frame_iface as **u8)[0] = conf as *u8
+        (__ld_frame_iface as **u8)[1] = close as *u8
+        (__ld_frame_iface as **u8)[2] = commit as *u8
+        (__ld_frame_iface as **u8)[3] = dismiss as *u8
+        __ld_ctx = libdecor_new(__lw_display, __ld_iface)
+        if __ld_ctx == null: return false
+        __ld_frame = libdecor_decorate(__ld_ctx, __lw_proxy(__wl_surface), __ld_frame_iface, null)
+        if __ld_frame == null:
+            __ld_ctx = null
+            return false
+        libdecor_frame_set_title(__ld_frame, data(__zstr(title)))
+        libdecor_frame_set_app_id(__ld_frame, data(__zstr(__program_name())))
+        libdecor_frame_set_min_content_size(__ld_frame, 64, 48)
+        libdecor_frame_map(__ld_frame)
+        true
+
+    @cabi
+    __ld_error = (ctx: *u8, err: i32, message: *u8):
+        eprint("libdecor: {__cstr(message)}")
+
+    @cabi
+    __ld_configure = (frame: *u8, conf: *u8, user: *u8):
+        w: i32 = 0
+        h: i32 = 0
+        if libdecor_configuration_get_content_size(conf, frame, &w, &h) == 0 or w <= 0 or h <= 0:
+            w = i32(__wl_lw)
+            h = i32(__wl_lh)
+        st: i32 = 0
+        if libdecor_configuration_get_window_state(conf, &st) != 0:
+            __wl_maximized = int(st) & 2 != 0
+            __wl_fullscreen = int(st) & 4 != 0
+            __fullscreen = __wl_fullscreen
+        state = libdecor_state_new(w, h)
+        libdecor_frame_commit(frame, state, conf)
+        libdecor_state_free(state)
+        __wl_csd = false
+        __wl_lw = int(w)
+        __wl_lh = int(h)
+        __wl_configured = true
+        __wl_apply_size()
+
+    @cabi
+    __ld_close = (frame: *u8, user: *u8): __win_close = true
+
+    @cabi
+    __ld_commit = (frame: *u8, user: *u8):
+        __wl_begin(__wl_surface, 6)                # wl_surface.commit
+        __wl_end()
+
+    @cabi
+    __ld_dismiss = (frame: *u8, seat: *u8, user: *u8): pass
+
+    __ld_set_title = (title: str): libdecor_frame_set_title(__ld_frame, data(__zstr(title)))
+
+    __ld_set_fullscreen = (on: bool):
+        if on: libdecor_frame_set_fullscreen(__ld_frame, null)
+        else: libdecor_frame_unset_fullscreen(__ld_frame)

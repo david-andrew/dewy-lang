@@ -1,0 +1,188 @@
+# How a game's picture fits windows of any size and shape.
+#
+# A game is drawn in 2D units: the size given to window() (its design size), so the same
+# coordinates work in any window. Two settings decide how that maps to the window's pixels:
+#
+#   screen_fit(mode): what a window of another shape shows
+#       .expand     the design area, scaled to fit, and more around it (the default: no bars,
+#                   nothing cut; visible_rect() says what is shown)
+#       .letterbox  just the design area, scaled to fit, with bars (letterbox_color) around it
+#       .crop       the design area scaled to fill the window: what does not fit is cut off
+#       .stretch    the design area stretched to the window (shapes distort)
+#       .native     no scaling: one 2D unit is one pixel of the window (screen_size() is its size)
+#
+#   render_resolution(w, h): draw at a fixed resolution, scaled up to the window, by default
+#       with sharp pixels (nearest) and in whole steps (2x, 3x...); 2D units stay the design size
+#       (give both the same shape). The picture letterboxes (or crops/stretches with those
+#       fits). render_resolution(0, 0) goes back to the window's resolution.
+#   pixel_art(): render_resolution at the design size: for a game designed at 320 x 180, one
+#       2D unit is one sharp pixel. (A window for a design that small opens a whole number of
+#       times larger.)
+#   render_scale(s): draw at a fraction of the window's pixels (0.5: a quarter of them), scaled
+#       up smoothly: faster where pixels cost (3D, the software renderer).
+#
+# Drawing that needs it goes to an offscreen canvas, put on the window when the frame ends; the
+# mouse is mapped back the same way (mouse_pos() is in 2D units).
+
+enum Fit: expand, letterbox, crop, stretch, native
+
+__fit = Fit.expand
+__res_w = 0                     # a fixed resolution (0: the window's)
+__res_h = 0
+__res_smooth = false
+__res_whole = true
+__render_scale = 1.0
+__bar_color = vec4(0, 0, 0, 1)
+
+screen_fit = (mode: Fit): __fit = mode
+letterbox_color = (c: vec4): __bar_color = c
+
+render_resolution = (w: int, h: int, smooth: bool = false, whole: bool = true):
+    __res_w = max(w, 0)
+    __res_h = max(h, 0)
+    __res_smooth = smooth
+    __res_whole = whole
+
+pixel_art = (smooth: bool = false): render_resolution(__design_w, __design_h, smooth, true)
+
+render_scale = (s: f64): __render_scale = clamp(s, 0.05, 1.0)
+
+# ---- the layout (from the window's size and the settings above) ----
+__units_w = 1280.0              # the 2D units of the design area
+__units_h = 720.0
+__map_x0 = 0.0                  # where its top-left corner is in the window (pixels)
+__map_y0 = 0.0
+__map_sx = 1.0                  # window pixels per 2D unit
+__map_sy = 1.0
+__canvas_on = false             # drawing goes to an offscreen canvas this frame
+__canvas_whole = false          # (that canvas holds the design area; else all of the window)
+__canvas_w = 0
+__canvas_h = 0
+__canvas_smooth = true
+
+# (SLOPPY_FIT=letterbox and SLOPPY_RESOLUTION=320x180 try a mode on any game)
+__screen_env_read = false
+__screen_env = ():
+    __screen_env_read = true
+    if let f = env("SLOPPY_FIT"):
+        if f == "expand": __fit = .expand
+        else if f == "letterbox": __fit = .letterbox
+        else if f == "crop": __fit = .crop
+        else if f == "stretch": __fit = .stretch
+        else if f == "native": __fit = .native
+    if let r = env("SLOPPY_RESOLUTION"):
+        x = find(r, "x")
+        if x > 0: render_resolution(to_int(r[..x)) ?? 0, to_int(r[x + 1..]) ?? 0)
+
+__screen_layout = ():
+    if not __screen_env_read: __screen_env()
+    ww = f64(max(__win_w, 1))
+    wh = f64(max(__win_h, 1))
+    fixed = __res_w > 0 and __res_h > 0
+    uw = f64(max(__design_w, 1))
+    uh = f64(max(__design_h, 1))
+    if __fit == .native and not fixed:
+        uw = ww
+        uh = wh
+    sx = min(ww / uw, wh / uh)
+    if __fit == .crop: sx = max(ww / uw, wh / uh)
+    sy = sx
+    if fixed and __fit != .stretch:
+        # (the scale of the fixed resolution's pixels, in whole steps if asked)
+        k = min(ww / f64(__res_w), wh / f64(__res_h))
+        if __fit == .crop: k = max(ww / f64(__res_w), wh / f64(__res_h))
+        if __res_whole and k >= 1.0:
+            if __fit == .crop: k = ceil(k)
+            else: k = floor(k)
+        sx = f64(__res_w) * k / uw
+        sy = f64(__res_h) * k / uh
+    if __fit == .stretch:
+        sx = ww / uw
+        sy = wh / uh
+    if __fit == .native and not fixed:
+        sx = 1.0
+        sy = 1.0
+    __units_w = uw
+    __units_h = uh
+    __map_sx = sx
+    __map_sy = sy
+    __map_x0 = (ww - uw * sx) / 2.0
+    __map_y0 = (wh - uh * sy) / 2.0
+    # an offscreen canvas: for a fixed resolution, for bars (nothing may be drawn on them), or to
+    # draw at fewer pixels
+    __canvas_whole = fixed or __fit == .letterbox
+    __canvas_on = __canvas_whole or __render_scale < 1.0
+    __canvas_smooth = not fixed or __res_smooth
+    if fixed:
+        __canvas_w = __res_w
+        __canvas_h = __res_h
+    else if __canvas_whole:
+        __canvas_w = max(1, int(uw * sx * __render_scale + 0.5))
+        __canvas_h = max(1, int(uh * sy * __render_scale + 0.5))
+    else:
+        __canvas_w = max(1, int(ww * __render_scale + 0.5))
+        __canvas_h = max(1, int(wh * __render_scale + 0.5))
+
+# the 2D units shown by the screen (or the canvas standing in for it): left, top, right, bottom
+__screen_units = () -> vec4:
+    if __canvas_on and __canvas_whole: return vec4(0, 0, f32(__units_w), f32(__units_h))
+    vec4(f32(-__map_x0 / __map_sx), f32(-__map_y0 / __map_sy), f32((f64(__win_w) - __map_x0) / __map_sx), f32((f64(__win_h) - __map_y0) / __map_sy))
+
+# window pixels to 2D units
+__to_units = (x: f64, y: f64) -> vec2:
+    __screen_layout()
+    vec2(f32((x - __map_x0) / __map_sx), f32((y - __map_y0) / __map_sy))
+
+# ---- the canvas ----
+__canvas_rt = RenderTarget(Texture(0, 0, 0), 0, 0)
+__canvas_active = false         # (between the start and the end of drawing a frame)
+__canvas_filter = -1
+
+__canvas_begin = ():
+    __canvas_active = false
+    if not __canvas_on: return
+    t = __canvas_rt.texture
+    if t.width != __canvas_w or t.height != __canvas_h:
+        if t.id != 0: free_render_target(__canvas_rt)
+        __canvas_rt = render_target(__canvas_w, __canvas_h)
+        __canvas_filter = -1
+        when TARGET != "wasm":
+            if __soft and __res_w > 0: __sw_exact_target(__canvas_rt.fbo, __canvas_w, __canvas_h)
+    f = GL_LINEAR
+    if not __canvas_smooth: f = GL_NEAREST
+    if f != __canvas_filter:
+        glBindTexture(GL_TEXTURE_2D, u32(__canvas_rt.texture.id))
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(f))
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(f))
+        __canvas_filter = f
+    __canvas_active = true
+
+# the frame is drawn: put the canvas on the window
+__canvas_end = ():
+    if not __canvas_active: return
+    flush()
+    __canvas_active = false
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    glViewport(0, 0, i32(__win_w), i32(__win_h))
+    __target_w = __win_w
+    __target_h = __win_h
+    __proj = orthographic(0.0, f64(__win_w), f64(__win_h), 0.0, -1.0, 1.0)
+    saved = __xform
+    __xform = mat4()
+    x = 0.0
+    y = 0.0
+    w = f64(__win_w)
+    h = f64(__win_h)
+    if __canvas_whole:
+        glClearColor(__bar_color.x, __bar_color.y, __bar_color.z, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        x = __map_x0
+        y = __map_y0
+        w = __units_w * __map_sx
+        h = __units_h * __map_sy
+    glDisable(GL_BLEND)
+    p = vec2(f32(x), f32(y))
+    draw_target(__canvas_rt, p, vec2(f32(w), f32(h)))
+    flush()
+    __apply_blend(__blend)
+    __xform = saved

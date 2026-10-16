@@ -1,0 +1,1358 @@
+# A Wayland client: a window from xdg-shell, GPU frames handed over as dma-bufs
+# (zwp_linux_dmabuf_v1, see dmabuf.jo) or else presented through shared memory (wl_shm),
+# keyboard and pointer input from wl_seat. Decorations: libdecor's (as the desktop draws them,
+# see wlclient.jo), or the compositor's (xdg-decoration), or else a small title bar drawn here.
+# Requests are built and events read in the wire format, then go through libwayland-client
+# (wlclient.jo) or, without it, straight over the socket. Windows render at the display's real
+# resolution: the window's size is in the compositor's logical units, scaled by the output's
+# (possibly fractional) scale.
+
+__wl_fd = -1
+__wl_next_id = 2              # 1 is wl_display
+__wl_kind: int[]               # object id -> interface (WLK_*)
+__wl_out: u8[]                 # requests not yet sent
+__wl_out_fds: int[]            # file descriptors that go with them
+__wl_in: u8[]
+__wl_in_fds: int[]
+__wl_failed = ""
+
+const WLK_NONE = 0
+const WLK_DISPLAY = 1
+const WLK_REGISTRY = 2
+const WLK_CALLBACK = 3
+const WLK_COMPOSITOR = 4
+const WLK_SHM = 5
+const WLK_POOL = 6
+const WLK_BUFFER = 7
+const WLK_SURFACE = 8
+const WLK_WM_BASE = 9
+const WLK_XDG_SURFACE = 10
+const WLK_TOPLEVEL = 11
+const WLK_SEAT = 12
+const WLK_POINTER = 13
+const WLK_KEYBOARD = 14
+const WLK_DECO_MANAGER = 15
+const WLK_DECORATION = 16
+const WLK_FRAME = 17           # a frame callback
+const WLK_CURSOR_MGR = 18      # wp_cursor_shape_manager_v1
+const WLK_CURSOR_DEV = 19
+const WLK_DMABUF = 20          # zwp_linux_dmabuf_v1
+const WLK_DMABUF_PARAMS = 21
+const WLK_VIEWPORTER = 22
+const WLK_VIEWPORT = 23
+const WLK_FRAC_MGR = 24        # wp_fractional_scale_manager_v1
+const WLK_FRAC = 25
+const WLK_DDM = 26             # wl_data_device_manager (the clipboard)
+const WLK_DDEV = 27
+const WLK_DSOURCE = 28
+const WLK_DOFFER = 29
+const WLK_CONSTRAINTS = 30     # zwp_pointer_constraints_v1 (pointer lock, for mouse look)
+const WLK_LOCKED = 31
+const WLK_RELMGR = 32          # zwp_relative_pointer_manager_v1
+const WLK_RELPTR = 33
+
+__wl_registry = 0
+__wl_compositor = 0
+__wl_shm = 0
+__wl_wm_base = 0
+__wl_seat = 0
+__wl_deco_mgr = 0
+__wl_surface = 0
+__wl_xdg_surface = 0
+__wl_toplevel = 0
+__wl_pointer = 0
+__wl_keyboard = 0
+__wl_cursor_mgr = 0
+__wl_cursor_dev = 0
+__wl_dmabuf = 0
+__wl_viewporter = 0
+__wl_viewport = 0
+__wl_frac_mgr = 0
+__wl_frac = 0
+__wl_compositor_ver = 1
+__wl_fullscreen = false
+__wl_ctrl = false
+__wl_key_serial = 0            # of the last key press (setting the clipboard needs one)
+# key repeat (the compositor says how fast; the client repeats)
+__wl_rep_rate = 25
+__wl_rep_delay = 600
+__wl_rep_code = -1
+__wl_rep_next = 0.0
+# the clipboard
+__wl_ddm = 0
+__wl_ddev = 0
+__wl_source = 0                # ours, while we own the clipboard
+__wl_clip_text = ""
+__wl_sel_offer = 0             # the clipboard's current contents, offered by whoever owns it
+__wl_offers: int[]             # data offers: (id, has text) pairs
+__wl_srv_kind: int[]            # objects the compositor made (ids from 0xff000000) -> interface
+__wl_sync_done = false
+__wl_configured = false
+__wl_pending_w = 0
+__wl_pending_h = 0
+__wl_frame_pending = false
+
+# client-side decorations (a title bar above the content) when the server draws none
+__wl_csd = true
+__wl_bar_on = () -> bool: __wl_csd and not __wl_fullscreen
+const WL_BAR = 30
+__wl_pointer_serial = 0
+__wl_pointer_on = false         # over our surface
+__wl_pointer_in_bar = false
+__wl_pointer_x = 0.0
+__wl_pointer_y = 0.0
+__wl_enter_serial = 0
+__wl_edge = 0                  # window edges under the pointer (xdg_toplevel resize edges)
+__wl_cursor = 0                # the cursor shape last set
+__wl_maximized = false
+__wl_last_bar_click = -1.0
+const WL_EDGE = 8              # pixels along the window's border that resize it
+__wl_shift = false
+__wl_constraints = 0
+__wl_relmgr = 0
+__wl_locked = 0
+__wl_relptr = 0
+__wl_lock_want = false
+
+# sizes: the window's content in logical units, and the scale to pixels (__win_w and __win_h
+# are pixels; the title bar is __wl_bar_px pixels above them)
+__wl_lw = 0
+__wl_lh = 0
+__wl_scale = 1.0
+__wl_bar_px = 0
+__wl_set_buffer_scale = 1       # (integer scales, when there is no fractional scaling)
+__wl_dest_w = 0
+__wl_dest_h = 0
+
+# shared-memory buffers: three, so one can be drawn while the compositor holds the others
+struct __WlBuf:
+    id: int
+    busy: bool
+    offset: int
+__wl_bufs: __WlBuf[]
+__wl_pool = 0
+__wl_pool_fd = -1
+__wl_pool_mem: *u8 = null
+__wl_pool_size = 0
+__wl_buf_w = 0
+__wl_buf_h = 0
+
+# GPU buffers (dma-bufs): 0 untried, 1 in use, -1 unavailable (shared memory instead)
+__wl_gpu = 0
+__wl_gbufs: __WlBuf[]
+__wl_gbuf_w = 0
+__wl_gbuf_h = 0
+__wl_dmabuf_mods: int[]         # (format, modifier) pairs the compositor accepts
+__wl_params_result = 0          # a dma-buf buffer being made: 0 waiting, its id, or -1
+__wl_bar_key = ""               # the title bar last uploaded for GPU frames
+
+__wl_free_ids: int[]            # ids of objects that are gone (to use again)
+
+__wl_new = (kind: int) -> int:
+    id = 0
+    if __wl_free_ids.len() > 0: id = __wl_free_ids.pop()
+    else:
+        id = __wl_next_id
+        __wl_next_id += 1
+    loop __wl_kind.len() <= id: __wl_kind.push(WLK_NONE)
+    __wl_kind[id] = kind
+    id
+
+# object id is gone (and may be used again)
+__wl_gone = (id: int):
+    if id < __wl_kind.len() and __wl_kind[id] != WLK_NONE:
+        __wl_kind[id] = WLK_NONE
+        __wl_free_ids.push(id)
+
+# ---- requests ----
+__wl_msg: u8[]
+__wl_begin = (obj: int, op: int):
+    __wl_msg.clear()
+    __put32(__wl_msg, obj)
+    __put32(__wl_msg, op)            # size is patched in __wl_end
+__wl_u = (v: int): __put32(__wl_msg, v)
+__wl_s = (s: str):
+    __put32(__wl_msg, len(s) + 1)
+    loop c in s: __wl_msg.push(c)
+    __wl_msg.push(0)
+    loop __wl_msg.len() % 4 != 0: __wl_msg.push(0)
+__wl_end = ():
+    n = __wl_msg.len()
+    op = int(__wl_msg[4]) | (int(__wl_msg[5]) << 8)
+    v = (n << 16) | op
+    __wl_msg[4] = u8(v & 255)
+    __wl_msg[5] = u8((v >> 8) & 255)
+    __wl_msg[6] = u8((v >> 16) & 255)
+    __wl_msg[7] = u8((v >> 24) & 255)
+    loop b in __wl_msg: __wl_out.push(b)
+
+__wl_flush = ():
+    if __lw_on:
+        __lw_flush()
+        return
+    if __wl_out.len() == 0 or __wl_fd < 0: return
+    # sendmsg with the pending file descriptors as SCM_RIGHTS
+    iov = [0, 0]
+    iov[0] = data(__wl_out) as int
+    iov[1] = __wl_out.len()
+    ctl = fill(0, 8)
+    msg = fill(0, 7)
+    msg[2] = data(iov) as int
+    msg[3] = 1
+    if __wl_out_fds.len() > 0:
+        c = data(ctl) as *u8
+        clen = 16 + 4 * __wl_out_fds.len()
+        (c as *int)[0] = clen
+        (c as *i32)[2] = 1                     # SOL_SOCKET
+        (c as *i32)[3] = 1                     # SCM_RIGHTS
+        loop i in 0.. and f in __wl_out_fds: (c as *i32)[4 + i] = i32(f)
+        msg[4] = c as int
+        msg[5] = (clen + 7) / 8 * 8
+    r = syscall(46, __wl_fd, data(msg), 0x4000)          # MSG_NOSIGNAL
+    if r < 0: __wl_failed = "the compositor closed the connection"
+    __wl_out.clear()
+    __wl_out_fds.clear()
+
+# ---- events ----
+__wl_u32 = (b: u8[], i: int) -> int: int(b[i]) | (int(b[i + 1]) << 8) | (int(b[i + 2]) << 16) | (int(b[i + 3]) << 24)
+__wl_i32 = (b: u8[], i: int) -> int:
+    v = __wl_u32(b, i)
+    if v >= 0x80000000: return v - 0x100000000
+    v
+__wl_str = (b: u8[], i: int) -> (str, int):
+    n = __wl_u32(b, i)
+    s = ""
+    if n > 0: s = str_from_bytes(b[i + 4..i + 4 + n - 1))
+    (s, i + 4 + (n + 3) / 4 * 4)
+
+# read what the compositor sent (blocking up to timeout_ms; 0 polls) and handle it
+__wl_read = (timeout_ms: int) -> bool:
+    if __lw_on: return __lw_read(timeout_ms)
+    if __wl_fd < 0: return false
+    pfd = fill(0, 1)
+    (data(pfd) as *i32)[0] = i32(__wl_fd)
+    (data(pfd) as *i16)[2] = 1                 # POLLIN
+    if syscall(7, data(pfd), 1, timeout_ms) <= 0: return false
+    buf = fill(u8(0), 8192)
+    iov = [data(buf) as int, 8192]
+    ctl = fill(0, 16)
+    msg = fill(0, 7)
+    msg[2] = data(iov) as int
+    msg[3] = 1
+    msg[4] = data(ctl) as int
+    msg[5] = 128
+    r = syscall(47, __wl_fd, data(msg), 0x40)            # recvmsg, MSG_DONTWAIT
+    if r == 0:
+        __wl_failed = "the compositor closed the connection"
+        __win_close = true
+        return false
+    if r < 0: return false
+    # file descriptors that came along (keymaps)
+    if msg[5] >= 20:
+        c = data(ctl) as *u8
+        clen = (c as *int)[0]
+        loop k in [0..(clen - 16) / 4): __wl_in_fds.push(int((c as *i32)[4 + k]))
+    loop k in [0..r): __wl_in.push(buf[k])
+    __wl_dispatch()
+    true
+
+__wl_dispatch = ():
+    p = 0
+    loop p + 8 <= __wl_in.len():
+        obj = __wl_u32(__wl_in, p)
+        h = __wl_u32(__wl_in, p + 4)
+        size = h >> 16
+        op = h & 0xFFFF
+        if size < 8 or p + size > __wl_in.len(): break
+        __wl_event(obj, op, __wl_in[p + 8..p + size))
+        p += size
+    __wl_in = __wl_in[p..]
+
+__wl_take_fd = () -> int:
+    if __wl_in_fds.len() == 0: return -1
+    f = __wl_in_fds[0]
+    __wl_in_fds = __wl_in_fds[1..]
+    f
+
+__wl_event = (obj: int, op: int, a: u8[]):
+    kind = WLK_NONE
+    if obj >= 0xff000000:
+        if obj - 0xff000000 < __wl_srv_kind.len(): kind = __wl_srv_kind[obj - 0xff000000]
+    else if obj < __wl_kind.len(): kind = __wl_kind[obj]
+    if kind == WLK_DISPLAY:
+        if op == 0:
+            msg, _ = __wl_str(a, 8)
+            __wl_failed = "protocol error: {msg}"
+            eprint("wayland: {__wl_failed}")
+        else if op == 1:
+            id = __wl_u32(a, 0)
+            if id < __wl_kind.len(): __wl_gone(id)
+            else if id >= 0xff000000 and id - 0xff000000 < __wl_srv_kind.len(): __wl_srv_kind[id - 0xff000000] = WLK_NONE
+    else if kind == WLK_REGISTRY and op == 0:
+        name = __wl_u32(a, 0)
+        iface, q = __wl_str(a, 4)
+        ver = __wl_u32(a, q)
+        if iface == "wl_compositor":
+            __wl_compositor_ver = min(ver, 6)
+            __wl_compositor = __wl_bind(name, iface, __wl_compositor_ver, WLK_COMPOSITOR)
+        else if iface == "wl_shm": __wl_shm = __wl_bind(name, iface, 1, WLK_SHM)
+        else if iface == "xdg_wm_base": __wl_wm_base = __wl_bind(name, iface, 1, WLK_WM_BASE)
+        else if iface == "wl_seat" and __wl_seat == 0: __wl_seat = __wl_bind(name, iface, min(ver, 5), WLK_SEAT)
+        else if iface == "zxdg_decoration_manager_v1": __wl_deco_mgr = __wl_bind(name, iface, 1, WLK_DECO_MANAGER)
+        else if iface == "wp_cursor_shape_manager_v1": __wl_cursor_mgr = __wl_bind(name, iface, 1, WLK_CURSOR_MGR)
+        else if iface == "zwp_linux_dmabuf_v1" and ver >= 3: __wl_dmabuf = __wl_bind(name, iface, 3, WLK_DMABUF)
+        else if iface == "wp_viewporter": __wl_viewporter = __wl_bind(name, iface, 1, WLK_VIEWPORTER)
+        else if iface == "wp_fractional_scale_manager_v1": __wl_frac_mgr = __wl_bind(name, iface, 1, WLK_FRAC_MGR)
+        else if iface == "wl_data_device_manager": __wl_ddm = __wl_bind(name, iface, min(ver, 3), WLK_DDM)
+        else if iface == "zwp_pointer_constraints_v1": __wl_constraints = __wl_bind(name, iface, 1, WLK_CONSTRAINTS)
+        else if iface == "zwp_relative_pointer_manager_v1": __wl_relmgr = __wl_bind(name, iface, 1, WLK_RELMGR)
+    else if kind == WLK_CALLBACK and op == 0: __wl_sync_done = true
+    else if kind == WLK_FRAME and op == 0:
+        __wl_frame_pending = false
+    else if kind == WLK_WM_BASE and op == 0:
+        __wl_begin(__wl_wm_base, 3)            # pong
+        __wl_u(__wl_u32(a, 0))
+        __wl_end()
+        __wl_flush()
+    else if kind == WLK_XDG_SURFACE and op == 0:
+        __wl_begin(__wl_xdg_surface, 4)        # ack_configure
+        __wl_u(__wl_u32(a, 0))
+        __wl_end()
+        __wl_configured = true
+        if __wl_pending_w > 0 and __wl_pending_h > 0:
+            __wl_lw = __wl_pending_w
+            __wl_lh = __wl_pending_h
+            __wl_apply_size()
+    else if kind == WLK_TOPLEVEL:
+        if op == 0:
+            w = __wl_i32(a, 0)
+            h = __wl_i32(a, 4)
+            # the window's states (an array of u32): 1 = maximized, 2 = fullscreen
+            __wl_maximized = false
+            __wl_fullscreen = false
+            n = __wl_u32(a, 8) / 4
+            loop i in [0..n):
+                st = __wl_u32(a, 12 + 4 * i)
+                if st == 1: __wl_maximized = true
+                if st == 2: __wl_fullscreen = true
+            __fullscreen = __wl_fullscreen
+            if __wl_bar_on() and h > 0: h -= WL_BAR
+            __wl_pending_w = max(w, 0)
+            __wl_pending_h = max(h, 0)
+        else if op == 1: __win_close = true
+    else if kind == WLK_DECORATION and op == 0:
+        __wl_csd = __wl_u32(a, 0) != 2
+    else if kind == WLK_BUFFER and op == 0:
+        loop mut b in __wl_bufs:
+            if b.id == obj: b.busy = false
+        loop mut b in __wl_gbufs:
+            if b.id == obj: b.busy = false
+    else if kind == WLK_DMABUF and op == 1:
+        __wl_dmabuf_mods.push(__wl_u32(a, 0))
+        __wl_dmabuf_mods.push((__wl_u32(a, 4) << 32) | __wl_u32(a, 8))
+    else if kind == WLK_DMABUF_PARAMS:
+        if op == 0:
+            id = __wl_u32(a, 0)
+            loop __wl_srv_kind.len() <= id - 0xff000000: __wl_srv_kind.push(WLK_NONE)
+            __wl_srv_kind[id - 0xff000000] = WLK_BUFFER
+            __wl_params_result = id
+        else if op == 1: __wl_params_result = -1
+    else if kind == WLK_FRAC and op == 0: __wl_set_scale(f64(__wl_u32(a, 0)) / 120.0)
+    else if kind == WLK_DDEV:
+        if op == 0:
+            # a data offer (made by the compositor) that a selection event may name next
+            id = __wl_u32(a, 0)
+            loop __wl_srv_kind.len() <= id - 0xff000000: __wl_srv_kind.push(WLK_NONE)
+            __wl_srv_kind[id - 0xff000000] = WLK_DOFFER
+            __wl_offers.push(id)
+            __wl_offers.push(0)
+        else if op == 5: __wl_new_selection(__wl_u32(a, 0))
+    else if kind == WLK_DOFFER and op == 0:
+        mime, _ = __wl_str(a, 0)
+        if mime == "text/plain;charset=utf-8" or mime == "text/plain" or mime == "UTF8_STRING":
+            loop i in [0..__wl_offers.len() / 2):
+                if __wl_offers[2 * i] == obj: __wl_offers[2 * i + 1] = 1
+    else if kind == WLK_DSOURCE:
+        if op == 1:
+            # someone pastes: write our text to the pipe they sent
+            f = __wl_take_fd()
+            if f >= 0:
+                __wl_write_all(f, bytes(__wl_clip_text))
+                syscall(3, f)
+        else if op == 2 and obj == __wl_source:
+            __wl_begin(obj, 1)                 # destroy (another client owns the clipboard now)
+            __wl_end()
+            __wl_source = 0
+    else if kind == WLK_SURFACE and op == 2 and __wl_frac == 0: __wl_set_scale(f64(__wl_i32(a, 0)))
+    else if kind == WLK_SEAT and op == 0:
+        caps = __wl_u32(a, 0)
+        if caps & 1 != 0 and __wl_pointer == 0:
+            __wl_pointer = __wl_new(WLK_POINTER)
+            __wl_begin(__wl_seat, 0)
+            __wl_u(__wl_pointer)
+            __wl_end()
+            if __wl_cursor_mgr != 0:
+                __wl_cursor_dev = __wl_new(WLK_CURSOR_DEV)
+                __wl_begin(__wl_cursor_mgr, 1)         # get_pointer
+                __wl_u(__wl_cursor_dev)
+                __wl_u(__wl_pointer)
+                __wl_end()
+        if caps & 2 != 0 and __wl_keyboard == 0:
+            __wl_keyboard = __wl_new(WLK_KEYBOARD)
+            __wl_begin(__wl_seat, 1)
+            __wl_u(__wl_keyboard)
+            __wl_end()
+        __wl_flush()
+    else if kind == WLK_POINTER: __wl_pointer_event(op, a)
+    else if kind == WLK_RELPTR and op == 0:
+        # relative motion (unaccelerated), in the program's pixels
+        __mouse_dx += f64(__wl_i32(a, 16)) / 256.0 * f64(__win_w) / f64(max(__wl_lw, 1))
+        __mouse_dy += f64(__wl_i32(a, 20)) / 256.0 * f64(__win_h) / f64(max(__wl_lh, 1))
+    else if kind == WLK_KEYBOARD: __wl_keyboard_event(op, a)
+
+__wl_bind = (name: int, iface: str, ver: int, kind: int) -> int:
+    id = __wl_new(kind)
+    __wl_begin(__wl_registry, 0)
+    __wl_u(name)
+    __wl_s(iface)
+    __wl_u(ver)
+    __wl_u(id)
+    __wl_end()
+    id
+
+# a request and a sync round trip: everything sent before has been handled
+__wl_roundtrip = ():
+    cb = __wl_new(WLK_CALLBACK)
+    __wl_sync_done = false
+    __wl_begin(1, 0)
+    __wl_u(cb)
+    __wl_end()
+    __wl_flush()
+    tries = 0
+    loop not __wl_sync_done and len(__wl_failed) == 0 and tries < 200:
+        __wl_read(25)
+        tries += 1
+
+# ---- input ----
+__wl_pointer_event = (op: int, a: u8[]):
+    # (the pointer may be over a surface that is not ours: libdecor's decorations)
+    if op == 0: __wl_pointer_on = __wl_u32(a, 4) == __wl_surface
+    else if op == 1: __wl_pointer_on = false
+    if not __wl_pointer_on and op != 1: return
+    if op == 0 or op == 2:
+        o = 8
+        if op == 2: o = 4
+        if op == 0:
+            __wl_pointer_serial = __wl_u32(a, 0)
+            __wl_enter_serial = __wl_pointer_serial
+            __wl_cursor = 0
+        x = f64(__wl_i32(a, o)) / 256.0
+        y = f64(__wl_i32(a, o + 4)) / 256.0
+        __wl_edge = __wl_edges(x, y)
+        if __wl_lock_want or __cursor_hidden: __wl_hide_cursor()
+        else: __wl_set_cursor()
+        if __wl_bar_on(): y -= f64(WL_BAR)
+        __wl_pointer_x = x
+        __wl_pointer_y = y
+        __wl_pointer_in_bar = __wl_bar_on() and y < 0.0
+        if not __wl_pointer_in_bar:
+            # (the program sees pixels)
+            px = x * f64(__win_w) / f64(max(__wl_lw, 1))
+            py = y * f64(__win_h) / f64(max(__wl_lh, 1))
+            __mouse_dx += px - __mouse_x
+            __mouse_dy += py - __mouse_y
+            __mouse_x = px
+            __mouse_y = py
+    else if op == 3:
+        serial = __wl_u32(a, 0)
+        btn = __wl_u32(a, 8)
+        down = __wl_u32(a, 12) == 1
+        if __wl_edge != 0 and down and btn == 0x110:
+            __wl_begin(__wl_toplevel, 6)               # resize
+            __wl_u(__wl_seat)
+            __wl_u(serial)
+            __wl_u(__wl_edge)
+            __wl_end()
+            __wl_flush()
+            return
+        if __wl_pointer_in_bar:
+            if down and btn == 0x110:
+                if __wl_pointer_x >= f64(__wl_lw - WL_BAR): __win_close = true
+                else if time() - __wl_last_bar_click < 0.4:
+                    # double click: maximize, or back
+                    __wl_last_bar_click = -1.0
+                    op2 = 9
+                    if __wl_maximized: op2 = 10
+                    __wl_begin(__wl_toplevel, op2)
+                    __wl_end()
+                    __wl_flush()
+                else:
+                    __wl_last_bar_click = time()
+                    __wl_begin(__wl_toplevel, 5)       # move
+                    __wl_u(__wl_seat)
+                    __wl_u(serial)
+                    __wl_end()
+                    __wl_flush()
+            return
+        if btn == 0x110: __mouse_event(0, down)
+        else if btn == 0x112: __mouse_event(1, down)
+        else if btn == 0x111: __mouse_event(2, down)
+    else if op == 4 and __wl_u32(a, 4) == 0:
+        v = f64(__wl_i32(a, 8)) / 256.0
+        __mouse_wheel -= v / 10.0
+
+# which window edges (xdg_toplevel resize edges: top 1, bottom 2, left 4, right 8) are at surface
+# position (x, y): only with our own decorations, and not when maximized
+__wl_edges = (x: f64, y: f64) -> int:
+    if not __wl_bar_on() or __wl_maximized: return 0
+    w = f64(__wl_lw)
+    h = f64(__wl_lh + WL_BAR)
+    e = 0
+    b = f64(WL_EDGE)
+    if y < b: e |= 1
+    else if y >= h - b: e |= 2
+    if x < b: e |= 4
+    else if x >= w - b: e |= 8
+    e
+
+__wl_hide_cursor = ():
+    __wl_begin(__wl_pointer, 0)                # wl_pointer.set_cursor(serial, no surface)
+    __wl_u(__wl_enter_serial)
+    __wl_u(0)
+    __wl_u(0)
+    __wl_u(0)
+    __wl_end()
+    __wl_flush()
+
+# lock the pointer to the window and hide it (mouse look: motion arrives as mouse_delta)
+__wl_pointer_lock = (on: bool) -> bool:
+    __wl_lock_want = on
+    if __wl_pointer == 0: return false
+    if on:
+        if __wl_constraints == 0 or __wl_relmgr == 0: return false
+        if __wl_locked == 0:
+            __wl_locked = __wl_new(WLK_LOCKED)
+            __wl_begin(__wl_constraints, 1)    # lock_pointer
+            __wl_u(__wl_locked)
+            __wl_u(__wl_surface)
+            __wl_u(__wl_pointer)
+            __wl_u(0)
+            __wl_u(2)                          # persistent: locked again whenever focused
+            __wl_end()
+            __wl_relptr = __wl_new(WLK_RELPTR)
+            __wl_begin(__wl_relmgr, 1)         # get_relative_pointer
+            __wl_u(__wl_relptr)
+            __wl_u(__wl_pointer)
+            __wl_end()
+        __wl_hide_cursor()
+        return true
+    if __wl_locked != 0:
+        __wl_begin(__wl_locked, 0)
+        __wl_end()
+        __wl_begin(__wl_relptr, 0)
+        __wl_end()
+        __wl_locked = 0
+        __wl_relptr = 0
+    __wl_show_cursor(not __cursor_hidden)
+    true
+
+# the pointer shown (the compositor's for the edge under it) or hidden over the window
+__wl_show_cursor = (on: bool):
+    if __wl_pointer == 0 or __wl_locked != 0: return
+    if on:
+        __wl_cursor = -1
+        __wl_set_cursor()
+    else:
+        __wl_hide_cursor()
+        __wl_cursor = -1
+    __wl_flush()
+
+# the cursor for the edge under the pointer (where the compositor offers cursor shapes)
+__wl_set_cursor = ():
+    if __wl_cursor_dev == 0: return
+    shape = 1                                  # default
+    match __wl_edge:
+        1: shape = 19                          # n_resize
+        2: shape = 22                          # s_resize
+        4: shape = 25                          # w_resize
+        8: shape = 18                          # e_resize
+        5: shape = 21                          # nw_resize
+        9: shape = 20                          # ne_resize
+        6: shape = 24                          # sw_resize
+        10: shape = 23                         # se_resize
+        _: pass
+    if shape == __wl_cursor: return
+    __wl_cursor = shape
+    __wl_begin(__wl_cursor_dev, 1)             # set_shape
+    __wl_u(__wl_enter_serial)
+    __wl_u(shape)
+    __wl_end()
+    __wl_flush()
+
+# evdev key codes -> Key
+__wl_key = (code: int) -> int:
+    if code >= 2 and code <= 10: return int(Key.n1) + code - 2
+    if code == 11: return int(Key.n0)
+    if code >= 59 and code <= 68: return int(Key.f1) + code - 59
+    match code:
+        1: int(Key.escape)
+        12: int(Key.minus)
+        13: int(Key.equals)
+        14: int(Key.backspace)
+        15: int(Key.tab)
+        16: int(Key.q)
+        17: int(Key.w)
+        18: int(Key.e)
+        19: int(Key.r)
+        20: int(Key.t)
+        21: int(Key.y)
+        22: int(Key.u)
+        23: int(Key.i)
+        24: int(Key.o)
+        25: int(Key.p)
+        26: int(Key.lbracket)
+        27: int(Key.rbracket)
+        28, 96: int(Key.enter)
+        29, 97: int(Key.ctrl)
+        30: int(Key.a)
+        31: int(Key.s)
+        32: int(Key.d)
+        33: int(Key.f)
+        34: int(Key.g)
+        35: int(Key.h)
+        36: int(Key.j)
+        37: int(Key.k)
+        38: int(Key.l)
+        39: int(Key.semicolon)
+        40: int(Key.quote)
+        41: int(Key.grave)
+        42, 54: int(Key.shift)
+        43: int(Key.backslash)
+        44: int(Key.z)
+        45: int(Key.x)
+        46: int(Key.c)
+        47: int(Key.v)
+        48: int(Key.b)
+        49: int(Key.n)
+        50: int(Key.m)
+        51: int(Key.comma)
+        52: int(Key.period)
+        53: int(Key.slash)
+        56, 100: int(Key.alt)
+        57: int(Key.space)
+        87: int(Key.f11)
+        88: int(Key.f12)
+        71: int(Key.kp7)
+        72: int(Key.kp8)
+        73: int(Key.kp9)
+        74: int(Key.kp_minus)
+        75: int(Key.kp4)
+        76: int(Key.kp5)
+        77: int(Key.kp6)
+        78: int(Key.kp_plus)
+        79: int(Key.kp1)
+        80: int(Key.kp2)
+        81: int(Key.kp3)
+        82: int(Key.kp0)
+        83: int(Key.kp_period)
+        55: int(Key.kp_star)
+        98: int(Key.kp_slash)
+        102: int(Key.home)
+        103: int(Key.up)
+        104: int(Key.page_up)
+        105: int(Key.left)
+        106: int(Key.right)
+        107: int(Key.end)
+        108: int(Key.down)
+        109: int(Key.page_down)
+        110: int(Key.insert)
+        111: int(Key.delete)
+        125, 126: int(Key.super)
+        _: 0
+
+# ---- the keyboard's layout, from the keymap the compositor sends (XKB's text format) ----
+__wl_km: int[]                  # (evdev code * 4 + level -> the character it types; 0: none)
+__wl_caps = false
+__wl_altgr = false
+
+# what the key with this code types now: shift, caps lock (letters) and AltGr chose its level
+__wl_km_char = (code: int) -> int:
+    if code < 0 or code * 4 + 3 >= __wl_km.len(): return 0
+    k = code * 4
+    shift = __wl_shift
+    lo = __wl_km[k]
+    if __wl_caps and lo > 0 and __wl_km[k + 1] > 0 and lower(chr(__wl_km[k + 1])) == chr(lo) and lo != __wl_km[k + 1]: shift = not shift
+    lv = 0
+    if __wl_altgr: lv = 2
+    if shift: lv += 1
+    c = __wl_km[k + lv]
+    if c == 0 and lv == 1: c = __wl_km[k]
+    c
+
+# keycodes (<AC01> = 38) and each key's symbols (key <AC01> { [ q, Q, at, Greek_OMEGA ] };)
+__wl_read_keymap = (t: str):
+    codes: {str: int}
+    km = fill(0, 256 * 4)
+    n = len(t)
+    i = 0
+    found = false
+    loop i < n:
+        if t[i] != '<':
+            i += 1
+            continue
+        # (a line of keycodes: <NAME> = 38; aliases are skipped, as their names come later)
+        e = i
+        loop e < n and t[e] != '>': e += 1
+        if e >= n: break
+        name = t[i + 1..e)
+        j = e + 1
+        loop j < n and (t[j] == ' ' or t[j] == '\t'): j += 1
+        if j < n and t[j] == '=':
+            j += 1
+            loop j < n and (t[j] == ' ' or t[j] == '\t'): j += 1
+            v = 0
+            digits = 0
+            loop j < n and t[j] >= '0' and t[j] <= '9':
+                v = v * 10 + int(t[j]) - 48
+                digits += 1
+                j += 1
+            if digits > 0 and (i < 6 or t[i - 6..i) != "alias "): codes[name] = v
+            i = j
+            continue
+        # key <NAME> { ... [ sym, sym, ... ] ... };
+        if i >= 4 and t[i - 4..i) == "key ":
+            if let code = codes.get(name):
+                b = j
+                loop b < n and t[b] != '[' and t[b] != '}': b += 1
+                # (symbols[1]= [ q, Q ]: the group's number in brackets first)
+                if b >= 7 and b < n and t[b - 7..b) == "symbols":
+                    loop b < n and t[b] != ']': b += 1
+                    loop b < n and t[b] != '[' and t[b] != '}': b += 1
+                if b < n and t[b] == '[':
+                    c = b + 1
+                    loop c < n and t[c] != ']': c += 1
+                    syms = split(t[b + 1..c), ",")
+                    ev = code - 8
+                    loop l in 0.. and s in syms:
+                        if l < 4 and ev >= 0 and ev < 256:
+                            km[ev * 4 + l] = __keysym_char(trim(s))
+                            if km[ev * 4 + l] > 0: found = true
+                    j = c
+        i = j
+    if found: __wl_km = km
+
+# the character a keysym's name stands for (0: none, as Shift_L or a dead key)
+__keysym_char = (s: str) -> int:
+    if len(s) == 0: return 0
+    if char_count(s) == 1:
+        if len(s) == 1: return int(s[0])
+        return 0
+    # (U20AC: a code point in hex; Udiaeresis is a name)
+    if len(s) >= 5 and s[0] == 'U':
+        v = 0
+        loop c in s[1..]:
+            d = -1
+            if c >= '0' and c <= '9': d = int(c) - 48
+            else if c >= 'A' and c <= 'F': d = int(c) - 55
+            else if c >= 'a' and c <= 'f': d = int(c) - 87
+            if d < 0:
+                v = -1
+                break
+            v = v * 16 + d
+        if v >= 0: return v
+    if __keysym_names.len() == 0:
+        w = split(__KEYSYM_NAMES, " ")
+        k = 0
+        loop k + 1 < w.len():
+            __keysym_names[w[k]] = to_int(w[k + 1]) ?? 0
+            k += 2
+    __keysym_names.get(s) ?? 0
+
+__keysym_names: {str: int}
+const __KEYSYM_NAMES = "space 32 exclam 33 quotedbl 34 numbersign 35 dollar 36 percent 37 ampersand 38 apostrophe 39 parenleft 40 parenright 41 asterisk 42 plus 43 comma 44 minus 45 period 46 slash 47 colon 58 semicolon 59 less 60 equal 61 greater 62 question 63 at 64 bracketleft 91 backslash 92 bracketright 93 asciicircum 94 underscore 95 grave 96 braceleft 123 bar 124 braceright 125 asciitilde 126 nobreakspace 160 exclamdown 161 cent 162 sterling 163 currency 164 yen 165 brokenbar 166 section 167 diaeresis 168 copyright 169 ordfeminine 170 guillemotleft 171 guillemetleft 171 notsign 172 hyphen 173 registered 174 macron 175 degree 176 plusminus 177 twosuperior 178 threesuperior 179 acute 180 mu 181 paragraph 182 periodcentered 183 cedilla 184 onesuperior 185 masculine 186 ordmasculine 186 guillemotright 187 guillemetright 187 onequarter 188 onehalf 189 threequarters 190 questiondown 191 Agrave 192 Aacute 193 Acircumflex 194 Atilde 195 Adiaeresis 196 Aring 197 AE 198 Ccedilla 199 Egrave 200 Eacute 201 Ecircumflex 202 Ediaeresis 203 Igrave 204 Iacute 205 Icircumflex 206 Idiaeresis 207 ETH 208 Eth 208 Ntilde 209 Ograve 210 Oacute 211 Ocircumflex 212 Otilde 213 Odiaeresis 214 multiply 215 Oslash 216 Ooblique 216 Ugrave 217 Uacute 218 Ucircumflex 219 Udiaeresis 220 Yacute 221 THORN 222 Thorn 222 ssharp 223 agrave 224 aacute 225 acircumflex 226 atilde 227 adiaeresis 228 aring 229 ae 230 ccedilla 231 egrave 232 eacute 233 ecircumflex 234 ediaeresis 235 igrave 236 iacute 237 icircumflex 238 idiaeresis 239 eth 240 ntilde 241 ograve 242 oacute 243 ocircumflex 244 otilde 245 odiaeresis 246 division 247 oslash 248 ooblique 248 ugrave 249 uacute 250 ucircumflex 251 udiaeresis 252 yacute 253 thorn 254 ydiaeresis 255 EuroSign 8364 oe 339 OE 338 Aogonek 260 aogonek 261 Cacute 262 cacute 263 Ccaron 268 ccaron 269 Dcaron 270 dcaron 271 Dstroke 272 dstroke 273 Eogonek 280 eogonek 281 Ecaron 282 ecaron 283 Gbreve 286 gbreve 287 Iabovedot 304 idotless 305 Lstroke 321 lstroke 322 Nacute 323 nacute 324 Ncaron 327 ncaron 328 Odoubleacute 336 odoubleacute 337 Rcaron 344 rcaron 345 Sacute 346 sacute 347 Scedilla 350 scedilla 351 Scaron 352 scaron 353 Tcaron 356 tcaron 357 Uring 366 uring 367 Udoubleacute 368 udoubleacute 369 Zacute 377 zacute 378 Zabovedot 379 zabovedot 380 Zcaron 381 zcaron 382"
+
+# the character a key types on a US layout (0: none)
+const __WL_US_LOWER = "\0\x1b1234567890-=\0\0qwertyuiop[]\0\0asdfghjkl;'`\0\\zxcvbnm,./"
+const __WL_US_UPPER = "\0\x1b!@#$%^&*()_+\0\0QWERTYUIOP{{}}\0\0ASDFGHJKL:\"~\0|ZXCVBNM<>?"
+__wl_char = (code: int) -> int:
+    if code == 57: return 32
+    if __wl_km.len() > 0: return __wl_km_char(code)
+    t = __WL_US_LOWER
+    if __wl_shift: t = __WL_US_UPPER
+    if code < len(t): return int(t[code])
+    0
+
+__wl_keyboard_event = (op: int, a: u8[]):
+    if op == 0:
+        # the keymap (XKB's text): what each key types, on this keyboard's layout
+        f = __wl_take_fd()
+        if f >= 0:
+            size = __wl_u32(a, 4)
+            if __wl_u32(a, 0) == 1 and size > 0:
+                p = syscall(9, 0, size, 1, 2, f, 0)        # mmap, read-only
+                if p > 0:
+                    __wl_read_keymap(__cstr(p as *u8))
+                    syscall(11, p, size)
+            syscall(3, f)
+    else if op == 1:
+        __wl_key_serial = __wl_u32(a, 0)
+        __win_focused = true
+    else if op == 2:
+        __win_focused = false
+        loop mut kd in __key_down: kd = false
+        __wl_rep_code = -1
+    else if op == 3:
+        __wl_key_serial = __wl_u32(a, 0)
+        code = __wl_u32(a, 8)
+        down = __wl_u32(a, 12) == 1
+        __key_event(__wl_key(code), down)
+        if down:
+            __wl_type(code)
+            __wl_rep_code = code
+            __wl_rep_next = time() + f64(__wl_rep_delay) / 1000.0
+        else if code == __wl_rep_code: __wl_rep_code = -1
+    else if op == 4:
+        held = __wl_u32(a, 4) | __wl_u32(a, 8)
+        __wl_shift = held & 1 != 0
+        __wl_ctrl = held & 4 != 0
+        __wl_caps = __wl_u32(a, 12) & 2 != 0
+        __wl_altgr = (held | __wl_u32(a, 12)) & 0x80 != 0
+    else if op == 5:
+        __wl_rep_rate = __wl_i32(a, 0)
+        __wl_rep_delay = __wl_i32(a, 4)
+
+# the character a key press types, if any (not with ctrl held: those are shortcuts)
+__wl_type = (code: int):
+    ch = __wl_char(code)
+    if ch >= 32 and ch != 127 and not __wl_ctrl: __text_input += chr(ch)
+
+# a key held down repeats, at the rate the compositor asks for
+__wl_repeat = ():
+    if __wl_rep_code < 0 or __wl_rep_rate <= 0: return
+    now = time()
+    n = 0
+    loop now >= __wl_rep_next and n < 8:
+        __key_event(__wl_key(__wl_rep_code), true, true)
+        __wl_type(__wl_rep_code)
+        __wl_rep_next += 1.0 / f64(__wl_rep_rate)
+        n += 1
+    if now >= __wl_rep_next: __wl_rep_next = now + 1.0 / f64(__wl_rep_rate)
+
+# ---- setup ----
+__wl_connect = () -> str:
+    if __lw_connect():
+        __wl_kind = [WLK_NONE, WLK_DISPLAY]
+        return __wl_setup()
+    disp = env("WAYLAND_DISPLAY") ?? "wayland-0"
+    path = disp
+    if not starts_with(disp, "/"):
+        dir = env("XDG_RUNTIME_DIR") ?? ""
+        if len(dir) == 0: return "XDG_RUNTIME_DIR is not set"
+        path = "{dir}/{disp}"
+    fd = syscall(41, 1, 1 | 0x80000, 0)
+    if fd < 0: return "cannot create a socket"
+    addr = fill(u8(0), 110)
+    addr[0] = 1
+    loop k in [0..len(path)): addr[2 + k] = path[k]
+    if syscall(42, fd, data(addr), 2 + len(path) + 1) != 0:
+        syscall(3, fd)
+        return "cannot connect to the Wayland compositor at {path}"
+    __wl_fd = fd
+    __wl_kind = [WLK_NONE, WLK_DISPLAY]
+    __wl_setup()
+
+# the globals (connected)
+__wl_setup = () -> str:
+    __wl_registry = __wl_new(WLK_REGISTRY)
+    __wl_begin(1, 1)                           # get_registry
+    __wl_u(__wl_registry)
+    __wl_end()
+    __wl_roundtrip()
+    if len(__wl_failed) > 0: return __wl_failed
+    if __wl_compositor == 0 or __wl_shm == 0 or __wl_wm_base == 0: return "the compositor lacks wl_compositor, wl_shm or xdg_wm_base"
+    ""
+
+__wl_open = (title: str, w: int, h: int) -> str:
+    why = __wl_connect()
+    if len(why) > 0: return why
+    __wl_lw = w
+    __wl_lh = h
+    if __wl_ddm != 0 and __wl_seat != 0:
+        __wl_ddev = __wl_new(WLK_DDEV)
+        __wl_begin(__wl_ddm, 1)                # get_data_device
+        __wl_u(__wl_ddev)
+        __wl_u(__wl_seat)
+        __wl_end()
+    __wl_surface = __wl_new(WLK_SURFACE)
+    __wl_begin(__wl_compositor, 0)
+    __wl_u(__wl_surface)
+    __wl_end()
+    if __wl_viewporter != 0 and __wl_frac_mgr != 0:
+        # fractional scales: buffers of the real pixel size, shown at the logical size
+        __wl_viewport = __wl_new(WLK_VIEWPORT)
+        __wl_begin(__wl_viewporter, 1)         # get_viewport
+        __wl_u(__wl_viewport)
+        __wl_u(__wl_surface)
+        __wl_end()
+        __wl_frac = __wl_new(WLK_FRAC)
+        __wl_begin(__wl_frac_mgr, 1)           # get_fractional_scale
+        __wl_u(__wl_frac)
+        __wl_u(__wl_surface)
+        __wl_end()
+    __wl_flush()
+    if __lw_on and __ld_open(title):
+        # libdecor made the window (and its decorations, or asked the compositor for them)
+        __wl_csd = false
+        __wl_flush()
+        tries = 0
+        loop not __wl_configured and tries < 200 and len(__wl_failed) == 0:
+            __wl_read(20)
+            tries += 1
+        if len(__wl_failed) > 0: return __wl_failed
+        if not __wl_configured: return "the compositor did not configure the window"
+        __wl_apply_size()
+        __wl_flush()
+        return ""
+    __wl_xdg_surface = __wl_new(WLK_XDG_SURFACE)
+    __wl_begin(__wl_wm_base, 2)
+    __wl_u(__wl_xdg_surface)
+    __wl_u(__wl_surface)
+    __wl_end()
+    __wl_toplevel = __wl_new(WLK_TOPLEVEL)
+    __wl_begin(__wl_xdg_surface, 1)
+    __wl_u(__wl_toplevel)
+    __wl_end()
+    __wl_begin(__wl_toplevel, 2)
+    __wl_s(title)
+    __wl_end()
+    __wl_begin(__wl_toplevel, 3)
+    __wl_s(__program_name())
+    __wl_end()
+    if __wl_deco_mgr != 0:
+        deco = __wl_new(WLK_DECORATION)
+        __wl_begin(__wl_deco_mgr, 1)
+        __wl_u(deco)
+        __wl_u(__wl_toplevel)
+        __wl_end()
+        __wl_begin(deco, 1)                    # set_mode(server_side)
+        __wl_u(2)
+        __wl_end()
+    __wl_begin(__wl_surface, 6)                # commit (no buffer yet): ask for a configure
+    __wl_end()
+    __wl_roundtrip()
+    tries = 0
+    loop not __wl_configured and tries < 100 and len(__wl_failed) == 0:
+        __wl_read(20)
+        tries += 1
+    if len(__wl_failed) > 0: return __wl_failed
+    if not __wl_configured: return "the compositor did not configure the window"
+    __wl_apply_size()
+    __wl_flush()
+    ""
+
+# the window's pixel size from its logical size and the scale
+__wl_px = (v: int) -> int: int(f64(v) * __wl_scale + 0.5)
+__wl_apply_size = ():
+    bar = 0
+    if __wl_bar_on(): bar = WL_BAR
+    __wl_bar_px = __wl_px(bar)
+    __win_w = max(__wl_px(__wl_lw), 1)
+    __win_h = max(__wl_px(__wl_lh + bar) - __wl_bar_px, 1)
+
+__wl_set_scale = (preferred: f64):
+    s = preferred
+    # (SLOPPY_SCALE=1 renders at the logical size, scaled up by the compositor; a screenshot run
+    # does, so that its picture is the same size each time, whenever the compositor's scale
+    # comes)
+    if let f = to_float(env("SLOPPY_SCALE") ?? ""): s = f
+    else if env("SLOPPY_SCREENSHOT") != none: s = 1.0
+    if s <= 0.0 or s == __wl_scale: return
+    __wl_scale = s
+    __wl_apply_size()
+
+# before a commit: how the buffer maps to the window's logical size
+__wl_set_size = ():
+    if __wl_viewport != 0:
+        w = __wl_lw
+        h = __wl_lh
+        if __wl_bar_on(): h += WL_BAR
+        if w != __wl_dest_w or h != __wl_dest_h:
+            __wl_dest_w = w
+            __wl_dest_h = h
+            __wl_begin(__wl_viewport, 2)       # set_destination
+            __wl_u(w)
+            __wl_u(h)
+            __wl_end()
+    else if __wl_compositor_ver >= 3:
+        k = int(__wl_scale)
+        if k != __wl_set_buffer_scale:
+            __wl_set_buffer_scale = k
+            __wl_begin(__wl_surface, 8)        # set_buffer_scale
+            __wl_u(k)
+            __wl_end()
+
+__wl_set_title = (title: str):
+    if __ld_frame != null:
+        __ld_set_title(title)
+        __wl_flush()
+        return
+    if __wl_toplevel == 0: return
+    __wl_begin(__wl_toplevel, 2)
+    __wl_s(title)
+    __wl_end()
+    __wl_flush()
+
+__wl_poll = ():
+    loop __wl_read(0): pass
+    __wl_repeat()
+    __wl_flush()
+
+# ---- fullscreen ----
+__wl_set_fullscreen = (on: bool):
+    if __ld_frame != null:
+        __ld_set_fullscreen(on)
+        __wl_flush()
+        return
+    if __wl_toplevel == 0: return
+    if on:
+        __wl_begin(__wl_toplevel, 11)          # set_fullscreen (the output it is on)
+        __wl_u(0)
+    else: __wl_begin(__wl_toplevel, 12)        # unset_fullscreen
+    __wl_end()
+    __wl_flush()
+
+# ---- the clipboard ----
+__wl_write_all = (f: int, b: u8[]):
+    sent = 0
+    loop sent < b.len():
+        r = syscall(1, f, data(b) + sent, b.len() - sent)
+        if r <= 0: return
+        sent += r
+
+# the clipboard's contents changed: offer id (0: empty); other offers are no longer needed
+__wl_new_selection = (id: int):
+    keep: int[]
+    loop i in [0..__wl_offers.len() / 2):
+        o = __wl_offers[2 * i]
+        if o == id:
+            keep.push(o)
+            keep.push(__wl_offers[2 * i + 1])
+        else:
+            __wl_begin(o, 2)                   # wl_data_offer.destroy
+            __wl_end()
+    __wl_offers = keep
+    __wl_sel_offer = id
+
+__wl_get_clipboard = () -> str:
+    if __wl_source != 0: return __wl_clip_text
+    has_text = false
+    loop i in [0..__wl_offers.len() / 2):
+        if __wl_offers[2 * i] == __wl_sel_offer and __wl_offers[2 * i + 1] == 1: has_text = true
+    if __wl_sel_offer == 0 or not has_text: return ""
+    # ask for the text through a pipe, and read it until the owner closes its end
+    fds: i32[] = [-1, -1]
+    if syscall(293, data(fds), 0x80000) != 0: return ""          # pipe2(O_CLOEXEC)
+    __wl_begin(__wl_sel_offer, 1)              # receive
+    __wl_s("text/plain;charset=utf-8")
+    __wl_end()
+    __wl_out_fds.push(int(fds[1]))
+    __wl_flush()
+    syscall(3, int(fds[1]))
+    out: u8[]
+    buf = fill(u8(0), 4096)
+    t0 = time()
+    loop time() - t0 < 0.5:
+        pfd = fill(0, 1)
+        (data(pfd) as *i32)[0] = fds[0]
+        (data(pfd) as *i16)[2] = 1             # POLLIN
+        if syscall(7, data(pfd), 1, 50) <= 0:
+            __wl_read(0)
+            continue
+        r = syscall(0, int(fds[0]), data(buf), 4096)
+        if r <= 0: break
+        loop k in [0..r): out.push(buf[k])
+    syscall(3, int(fds[0]))
+    str_from_bytes(out)
+
+__wl_set_clipboard = (s: str):
+    if __wl_ddm == 0 or __wl_ddev == 0: return
+    __wl_clip_text = s
+    if __wl_source != 0:
+        __wl_begin(__wl_source, 1)             # destroy the old offer of ours
+        __wl_end()
+    __wl_source = __wl_new(WLK_DSOURCE)
+    __wl_begin(__wl_ddm, 0)                    # create_data_source
+    __wl_u(__wl_source)
+    __wl_end()
+    loop m in ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING"]:
+        __wl_begin(__wl_source, 0)             # offer
+        __wl_s(m)
+        __wl_end()
+    __wl_begin(__wl_ddev, 1)                   # set_selection
+    __wl_u(__wl_source)
+    __wl_u(__wl_key_serial)
+    __wl_end()
+    __wl_flush()
+
+# ---- presenting ----
+__wl_ensure_buffers = (w: int, h: int):
+    if __wl_buf_w == w and __wl_buf_h == h and __wl_bufs.len() > 0: return
+    loop b in __wl_bufs:
+        __wl_begin(b.id, 0)                    # wl_buffer.destroy
+        __wl_end()
+    __wl_bufs.clear()
+    if __wl_pool != 0:
+        __wl_begin(__wl_pool, 1)               # wl_shm_pool.destroy
+        __wl_end()
+        syscall(11, __wl_pool_mem, __wl_pool_size)
+        syscall(3, __wl_pool_fd)
+    one = w * h * 4
+    __wl_pool_size = one * 3
+    __wl_pool_fd = syscall(319, data("sloppy-wl\0"), 1)        # memfd_create(MFD_CLOEXEC)
+    syscall(77, __wl_pool_fd, __wl_pool_size)              # ftruncate
+    __wl_pool_mem = __mmap(null, __wl_pool_size, 3, 1, __wl_pool_fd, 0)
+    __wl_pool = __wl_new(WLK_POOL)
+    __wl_begin(__wl_shm, 0)
+    __wl_u(__wl_pool)
+    __wl_u(__wl_pool_size)
+    __wl_end()
+    __wl_out_fds.push(__wl_pool_fd)
+    loop k in [0..3):
+        id = __wl_new(WLK_BUFFER)
+        __wl_begin(__wl_pool, 0)
+        __wl_u(id)
+        __wl_u(one * k)
+        __wl_u(w)
+        __wl_u(h)
+        __wl_u(w * 4)
+        __wl_u(1)                              # XRGB8888
+        __wl_end()
+        __wl_bufs.push(__WlBuf(id, false, one * k))
+    __wl_buf_w = w
+    __wl_buf_h = h
+    __wl_flush()
+
+# show a frame: fill(pixels, width, height) writes the window's pixels (BGRX rows, top first)
+__wl_present = (fill: (*u8, int, int) -> void):
+    w = __win_w
+    ch = __win_h
+    h = ch + __wl_bar_px
+    __wl_ensure_buffers(w, h)
+    k = __wl_wait_buffer(false)
+    if k < 0: return
+    mem = __wl_pool_mem + __wl_bufs[k].offset
+    if __wl_bar_px > 0:
+        __wl_draw_bar(mem, w, false)
+        fill(mem + w * __wl_bar_px * 4, w, ch)
+    else: fill(mem, w, ch)
+    __wl_bufs[k].busy = true
+    __wl_commit(__wl_bufs[k].id)
+
+# show the GPU's frame without copying it through the CPU; false if that is not possible here
+__wl_present_gpu = () -> bool:
+    if __wl_gpu < 0: return false
+    w = __win_w
+    h = __win_h + __wl_bar_px
+    if not __wl_ensure_gpu_buffers(w, h):
+        __wl_gpu = -1
+        __swap_free()
+        return false
+    __wl_gpu = 1
+    if __wl_bar_px > 0:
+        key = "{w} {__wl_bar_px} {__wl_lw} {__win_title}"
+        if key != __wl_bar_key:
+            __wl_bar_key = key
+            bar = fill(u8(0), w * __wl_bar_px * 4)
+            __wl_draw_bar(data(bar), w, true)
+            __swap_bar(bar, w, __wl_bar_px)
+    k = __wl_wait_buffer(true)
+    if k < 0: return true
+    __swap_draw(k, w, __win_h, __wl_bar_px)
+    __wl_gbufs[k].busy = true
+    __wl_commit(__wl_gbufs[k].id)
+    true
+
+# wait for the previous frame to be shown (pacing) and for a free buffer; its index, or -1
+__wl_wait_buffer = (gpu: bool) -> int:
+    tries = 0
+    loop (__wl_frame_pending or __wl_free_buffer(gpu) < 0) and tries < 10 and not __win_close:
+        __wl_read(8)
+        tries += 1
+    __wl_free_buffer(gpu)
+
+__wl_commit = (buffer: int):
+    cb = __wl_new(WLK_FRAME)
+    __wl_begin(__wl_surface, 3)                # frame
+    __wl_u(cb)
+    __wl_end()
+    __wl_frame_pending = true
+    __wl_set_size()
+    __wl_begin(__wl_surface, 1)                # attach
+    __wl_u(buffer)
+    __wl_u(0)
+    __wl_u(0)
+    __wl_end()
+    __wl_begin(__wl_surface, 2)                # damage (all of it)
+    __wl_u(0)
+    __wl_u(0)
+    __wl_u(0x7FFFFFFF)
+    __wl_u(0x7FFFFFFF)
+    __wl_end()
+    __wl_begin(__wl_surface, 6)                # commit
+    __wl_end()
+    __wl_flush()
+
+# dma-buf buffers of w x h pixels, made once per size
+__wl_ensure_gpu_buffers = (w: int, h: int) -> bool:
+    if __wl_gbuf_w == w and __wl_gbuf_h == h and __wl_gbufs.len() > 0: return true
+    if __wl_dmabuf == 0 or (env("SLOPPY_PRESENT") ?? "") == "copy": return false
+    loop b in __wl_gbufs:
+        __wl_begin(b.id, 0)                    # wl_buffer.destroy
+        __wl_end()
+    __wl_gbufs.clear()
+    if not __swap_make(3, w, h): return false
+    loop k in 0.. and img in __swap:
+        # the same layout without alpha, where the compositor takes it (frames are opaque)
+        format = img.fourcc
+        if format == 0x34324241 and __wl_accepts(0x34324258, img.modifier): format = 0x34324258      # AB24 -> XB24
+        else if format == 0x34325241 and __wl_accepts(0x34325258, img.modifier): format = 0x34325258   # AR24 -> XR24
+        params = __wl_new(WLK_DMABUF_PARAMS)
+        __wl_begin(__wl_dmabuf, 1)             # create_params
+        __wl_u(params)
+        __wl_end()
+        __wl_begin(params, 1)                  # add (the fd travels alongside)
+        __wl_u(0)
+        __wl_u(img.offset)
+        __wl_u(img.stride)
+        __wl_u((img.modifier >> 32) & 0xFFFFFFFF)
+        __wl_u(img.modifier & 0xFFFFFFFF)
+        __wl_end()
+        __wl_out_fds.push(img.fd)
+        __wl_begin(params, 2)                  # create (answered by created or failed)
+        __wl_u(w)
+        __wl_u(h)
+        __wl_u(format)
+        __wl_u(0)
+        __wl_end()
+        __wl_params_result = 0
+        __wl_flush()
+        tries = 0
+        loop __wl_params_result == 0 and len(__wl_failed) == 0 and tries < 200:
+            __wl_read(10)
+            tries += 1
+        __wl_begin(params, 0)                  # destroy
+        __wl_end()
+        if __wl_params_result <= 0:
+            __wl_flush()
+            return false
+        __wl_gbufs.push(__WlBuf(__wl_params_result, false, k))
+    __wl_gbuf_w = w
+    __wl_gbuf_h = h
+    __wl_flush()
+    true
+
+__wl_accepts = (format: int, modifier: int) -> bool:
+    loop i in [0..__wl_dmabuf_mods.len() / 2):
+        if __wl_dmabuf_mods[2 * i] == format and __wl_dmabuf_mods[2 * i + 1] == modifier: return true
+    false
+
+__wl_free_buffer = (gpu: bool) -> int:
+    if gpu:
+        loop i in 0.. and b in __wl_gbufs:
+            if not b.busy: return i
+        return -1
+    loop i in 0.. and b in __wl_bufs:
+        if not b.busy: return i
+    -1
+
+# a plain title bar: the window's title in the middle, a close button at the right,
+# __wl_bar_px pixels tall and w wide (BGRX pixels, or RGBA with rgba)
+__wl_draw_bar = (mem: *u8, w: int, rgba: bool):
+    row = mem as *u32
+    sc = __wl_scale
+    bar = f64(WL_BAR)
+    left = f64(__wl_lw - WL_BAR)
+    loop y in [0..__wl_bar_px):
+        ly = (f64(y) + 0.5) / sc
+        loop x in [0..w):
+            c = u32(0x2B2B30)
+            lx = (f64(x) + 0.5) / sc
+            if y >= __wl_bar_px - max(int(sc + 0.5), 1): c = 0x1A1A1E
+            else if lx >= left:
+                # the close cross
+                cx = lx - left
+                if cx > 9.5 and cx < bar - 9.5 and ly > 9.5 and ly < bar - 9.5 and (abs(cx - ly) <= 1.0 or abs(cx + ly - bar) <= 1.0): c = 0xE0E0E0
+            row[y * w + x] = c
+    __wl_draw_title(row, w, f64(__wl_lw) / 2.0, left - 8.0)
+    if rgba:
+        loop i in [0..w * __wl_bar_px):
+            c = row[i]
+            row[i] = ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF) | 0xFF000000
+
+# the built-in font (a signed distance field atlas, see draw2d.jo), for the title
+__wl_font: Image = Image(0, 0, [])
+__wl_font_adv: f64[]
+__wl_font_meta: f64[]           # cell, base, spread, px
+
+# the title, centered at logical x center (ending before logical x right), in BGRX row
+__wl_draw_title = (row: *u32, w: int, center: f64, right: f64):
+    if __wl_font.width == 0:
+        __wl_font = load_image(embed("assets/font.png"))
+        meta = lines(str_from_bytes(embed("assets/font.txt")))
+        head = words(meta[0])
+        __wl_font_meta = [to_float(head[0]) ?? 48.0, to_float(head[3]) ?? 36.0, to_float(head[4]) ?? 6.0, to_float(head[5]) ?? 34.0]
+        loop a in words(meta[1]): __wl_font_adv.push(to_float(a) ?? 10.0)
+    if __wl_font.width == 0: return
+    sc = __wl_scale
+    cell = __wl_font_meta[0]
+    base = __wl_font_meta[1]
+    pad = __wl_font_meta[2]
+    k = 13.0 * sc / __wl_font_meta[3]              # 13 logical pixels
+    t = __win_title
+    tw = 0.0
+    loop ch in t:
+        if ch >= 32 and ch < 127: tw += __wl_font_adv[int(ch) - 32] * k
+    x = center * sc - tw / 2.0
+    x = max(8.0 * sc, min(x, right * sc - tw))
+    y = f64(__wl_bar_px) / 2.0 + 13.0 * sc * 0.32 - base * k
+    fw = __wl_font.width
+    px = __wl_font.pixels
+    loop ch in t:
+        c = int(ch)
+        if c < 32 or c >= 127: continue
+        gi = c - 32
+        if c != ' ' and x + __wl_font_adv[gi] * k <= right * sc:
+            gx = f64(gi % 16) * cell
+            gy = f64(gi / 16) * cell
+            x0 = x - pad * k
+            span = cell * k
+            loop py in [max(int(y), 0)..min(int(y + span) + 1, __wl_bar_px)):
+                loop qx in [max(int(x0), 0)..min(int(x0 + span) + 1, w)):
+                    # sample the distance field (bilinear) at the pixel's center
+                    u = (f64(qx) + 0.5 - x0) / k - 0.5
+                    v = (f64(py) + 0.5 - y) / k - 0.5
+                    if u < 0.0 or v < 0.0 or u >= cell - 1.0 or v >= cell - 1.0: continue
+                    iu = int(u)
+                    iv = int(v)
+                    fu = u - f64(iu)
+                    fv = v - f64(iv)
+                    o = (int(gy) + iv) * fw + int(gx) + iu
+                    d00 = f64(px[o * 4])
+                    d10 = f64(px[(o + 1) * 4])
+                    d01 = f64(px[(o + fw) * 4])
+                    d11 = f64(px[(o + fw + 1) * 4])
+                    d = ((d00 * (1.0 - fu) + d10 * fu) * (1.0 - fv) + (d01 * (1.0 - fu) + d11 * fu) * fv) / 255.0
+                    wd = max(0.07 / k, 0.02)
+                    a = clamp((d - (0.5 - wd)) / (2.0 * wd), 0.0, 1.0)
+                    if a <= 0.0: continue
+                    # blend light grey over the bar
+                    bg = row[py * w + qx]
+                    br = f64((bg >> 16) & 0xFF)
+                    bgc = f64((bg >> 8) & 0xFF)
+                    bb = f64(bg & 0xFF)
+                    fr = 0xE8
+                    r = int(br + (f64(fr) - br) * a)
+                    g = int(bgc + (f64(fr) - bgc) * a)
+                    b = int(bb + (f64(fr) - bb) * a)
+                    row[py * w + qx] = u32((r << 16) | (g << 8) | b)
+        x += __wl_font_adv[gi] * k

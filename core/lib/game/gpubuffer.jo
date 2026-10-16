@@ -1,0 +1,543 @@
+# GPU buffers and compute programs: arrays kept in GPU memory, and functions written in Sloppy
+# that run on the GPU once per element.
+#
+#   struct Particle: pos: vec2; vel: vec2
+#   struct Step: parts: GpuBuffer[Particle]; dt: f32
+#   step = (id: int, u: Step):                    # a compute function: (id, parameters)
+#       p = u.parts[id]
+#       p.pos += p.vel * u.dt
+#       u.parts[id] = p
+#   parts = gpu_buffer(particles)                 # upload (gpu_buffer[Particle](n): n zeros)
+#   stepper = compute(step)                       # the program (the compiler makes it)
+#   dispatch(stepper, len(parts), Step(parts, dt))    # step(id, ...) for each id in [0, len(parts))
+#   ps = cpu(parts)                               # download
+#
+# A compute function over a grid takes id: ivec2 (dispatch(k, ivec2(w, h), params)).
+#
+# Shaders read buffers among their uniforms (`u.parts[instance_id()]`); a buffer can also be a
+# mesh's vertices (gpu_mesh), a draw's instances (draw_instanced) and the counts of draws the GPU
+# decides (draw_indirect with DrawArgs; draw_indirect_count: how many draws, too). Only compute
+# functions write buffers; atomic_add() and the others change an element of a GpuBuffer[i32] or
+# GpuBuffer[u32] that many invocations change at once. What a dispatch writes is seen by every dispatch and draw after it.
+#
+# Through Vulkan a buffer is GPU memory read by its address and a compute function a compute
+# program (compiler/spirv.jo); elements are laid out as the CPU lays them out. Elsewhere (OpenGL,
+# the software renderer, the web) buffers are in CPU memory and compute functions run on the CPU,
+# on every core; shaders read buffers through a copy in an integer texture. So programs run
+# everywhere: gpu_compute() tells which way.
+
+struct GpuBuffer[T]:
+    addr: int             # its address in GPU memory (Vulkan): what GPU programs read
+    n: int
+    id: int               # its entry in __gb
+    host: *T              # its elements, when they are in CPU memory (else null)
+    token: u8[]           # shared by every copy of this value: see __gb_reclaim
+
+# a buffer's memory, and its copies for OpenGL: an RGBA32I texture (for shaders) and a vertex
+# buffer (vertices, instances), each made again when __gb_writes has moved past what it was
+struct __GpuBuf:
+    bytes: int
+    buffer: int           # (Vulkan) the buffer and its memory
+    mem: int
+    addr: int
+    host: *u8             # (elsewhere) the bytes
+    token: u8[]
+    live: bool
+    gl_tex: int
+    gl_tex_at: int
+    gl_buf: int
+    gl_buf_at: int
+
+__gb: __GpuBuf[]
+__gb_free_ids: int[]
+__gb_mode = 0             # 0: not chosen yet, 1: Vulkan, 2: CPU memory
+__gb_writes = 1           # counts the changes to buffers in CPU memory
+__gb_in_dispatch = false
+__gb_pipelines: {int: int} = {}
+
+# whether buffers are in GPU memory and compute functions run on the GPU (Vulkan: the window's, or
+# one with no window), or else in CPU memory and on the CPU
+gpu_compute = () -> bool:
+    if __gb_mode == 0:
+        __gb_mode = 2
+        when TARGET != "wasm":
+            off = (env("SLOPPY_SOFTWARE") ?? "") == "1" or (env("SLOPPY_NO_GPU") ?? "") == "1"
+            if not off and (__vk or (not __win_open and __vk_wanted() and len(__vk_open("", () -> int: 0)) == 0)): __gb_mode = 1
+    __gb_mode == 1
+
+# ---------------- making, reading and writing buffers ----------------
+# a buffer of n elements, all zero: gpu_buffer[Particle](1000). Elements are
+# plain data (numbers, bools, vectors and structs of them; no strings, arrays or functions)
+@plain
+gpu_buffer[T] = (n: int) -> GpuBuffer[T]:
+    if n < 0: panic("a GPU buffer cannot have {n} elements")
+    id = __gb_make(n * size_of(T), size_of(T), null)
+    GpuBuffer[T](__gb[id].addr, n, id, __gb[id].host as *T, __gb[id].token)
+
+# a buffer holding a copy of xs
+@plain
+gpu_buffer[T] = (xs: T[]) -> GpuBuffer[T]:
+    id = __gb_make(xs.len() * size_of(T), size_of(T), data(xs) as *u8)
+    GpuBuffer[T](__gb[id].addr, xs.len(), id, __gb[id].host as *T, __gb[id].token)
+
+len[T] = (b: GpuBuffer[T]) -> int: b.n
+
+# all the elements, or count of them from first (after what the GPU was given to do has run)
+cpu[T] = (b: GpuBuffer[T]) -> T[]: cpu(b, 0, b.n)
+cpu[T] = (b: GpuBuffer[T], first: int, count: int) -> T[]:
+    if first < 0 or count < 0 or first + count > b.n: panic("elements {first}..{first + count} are not all in a GPU buffer of {b.n}")
+    out: T[]
+    out.resize(count)
+    if count > 0: __gb_read(b.id, first * size_of(T), count * size_of(T), data(out) as *u8)
+    out
+
+# xs written into the buffer from element `at` on (before the dispatches and draws that follow)
+upload[T] = (b: GpuBuffer[T], xs: T[], at: int = 0):
+    if at < 0 or at + xs.len() > b.n: panic("{xs.len()} elements from {at} do not fit in a GPU buffer of {b.n}")
+    if xs.len() > 0: __gb_write(b.id, at * size_of(T), data(xs) as *u8, xs.len() * size_of(T))
+
+# one element (in GPU memory, outside compute functions: a slow round trip; cpu() reads many).
+# In compute functions, as on the GPU, reading past either end reads the nearest element and
+# writing there does nothing; elsewhere it is an error.
+([])[T] = (b: GpuBuffer[T], i: int) -> T:
+    if i < 0 or i >= b.n:
+        if not __gb_in_dispatch or b.n == 0: panic("index {i} is out of bounds for a GPU buffer of {b.n} elements")
+        return b.host[clamp(i, 0, b.n - 1)]
+    if b.host != null: return b.host[i]
+    cpu(b, i, 1)[0]
+
+([]=)[T] = (b: GpuBuffer[T], i: int, v: T):
+    if i < 0 or i >= b.n:
+        if not __gb_in_dispatch: panic("index {i} is out of bounds for a GPU buffer of {b.n} elements")
+        return
+    if b.host != null:
+        b.host[i] = v
+        if not __gb_in_dispatch: __gb_writes += 1
+        return
+    x = v
+    __gb_write(b.id, i * size_of(T), (&x) as *u8, size_of(T))
+
+# the same memory as 32-bit words, e.g. for atomic_add on a field of DrawArgs:
+# atomic_add(u.arg_words, 1, u32(1)) counts instances (u.arg_words: words(args))
+words[T] = (b: GpuBuffer[T]) -> GpuBuffer[u32]: GpuBuffer[u32](b.addr, b.n * size_of(T) / 4, b.id, b.host as *u32, b.token)
+
+__fmt[T] = (buf: mut u8[], b: GpuBuffer[T]):
+    __buf_append_str(buf, "gpu")
+    __fmt(buf, cpu(b))
+
+__gb_make = (bytes: int, elem: int, src: *u8) -> int:
+    __gb_reclaim()
+    b = __GpuBuf(bytes = bytes, token = fill(u8(0), 1), live = true)
+    # (room for an element at least: reads past an empty buffer's end read its first)
+    size = (max(max(bytes, elem), 16) + 3) / 4 * 4
+    if gpu_compute():
+        when TARGET != "wasm":
+            vb = __vk_buffer(size, u32(0x1 | 0x2 | 0x20 | 0x40 | 0x100 | 0x20000), u32(VK_MEM_DEVICE_LOCAL), 0)
+            b.buffer = vb.buffer
+            b.mem = vb.mem
+            b.addr = vb.addr
+            if src == null or bytes < size: __vk_fill_buffer(vb.buffer, size)
+            if src != null and bytes > 0: __vg_copy_to_buffer(vb.buffer, 0, src, bytes)
+    else:
+        b.host = __alloc(size)
+        if src != null and bytes > 0: mem_copy(b.host, src, bytes)
+        __gb_writes += 1
+    if __gb.len() == 0: __gb.push(__GpuBuf())
+    if __gb_free_ids.len() > 0:
+        id = __gb_free_ids.pop()
+        __gb[id] = b
+        return id
+    __gb.push(b)
+    __gb.len() - 1
+
+# buffers no value refers to any more (only __gb holds their token) are freed (GPU memory once
+# the frames that may still use it have finished)
+__gb_reclaim = ():
+    loop i in [1..__gb.len()):
+        if __gb[i].live and __gpu_unused(__gb[i].token):
+            b = __gb[i]
+            when TARGET != "wasm":
+                if b.buffer != 0: __vk_defer(0, b.buffer, b.mem)
+            if b.host != null: __free(b.host)
+            if b.gl_tex != 0: gl_delete_texture(b.gl_tex)
+            if b.gl_buf != 0: gl_delete_buffer(b.gl_buf)
+            __gb[i] = __GpuBuf()
+            __gb_free_ids.push(i)
+
+__gb_read = (id: int, off: int, n: int, out: *u8):
+    if __gb[id].host != null:
+        mem_copy(out, __gb[id].host + off, n)
+        return
+    when TARGET != "wasm": __vk_read_buffer(__gb[id].buffer, n, out, off)
+
+__gb_write = (id: int, off: int, p: *u8, n: int):
+    if __gb[id].host != null:
+        mem_copy(__gb[id].host + off, p, n)
+        __gb_writes += 1
+        return
+    when TARGET != "wasm": __vg_copy_to_buffer(__gb[id].buffer, off, p, n)
+
+# a buffer's bytes in CPU memory (read back from GPU memory if they are there)
+__gb_bytes = (id: int) -> u8[]:
+    out = fill(u8(0), __gb[id].bytes)
+    if out.len() > 0: __gb_read(id, 0, out.len(), data(out))
+    out
+
+# ---------------- compute programs ----------------
+# what compute(f) makes of a compute function f(id: int, params: P)
+struct Compute[P]:
+    spirv: str                # the program for Vulkan (compiler/spirv.jo; "" on the web)
+    textures: str             # where P holds Textures: byte offsets, "8,40" (Vulkan: given slots)
+    run: (int, P) -> void     # f itself, for the CPU
+
+__compute[P] = (spirv: str, textures: str, run: (int, P) -> void) -> Compute[P]: Compute[P](spirv, textures, run)
+
+# what compute(f) makes of a compute function over a grid, f(id: ivec2, params: P)
+struct Compute2[P]:
+    spirv: str
+    textures: str
+    run: (ivec2, P) -> void
+
+__compute2[P] = (spirv: str, textures: str, run: (ivec2, P) -> void) -> Compute2[P]: Compute2[P](spirv, textures, run)
+
+# ... and over a 3D grid, f(id: ivec3, params: P)
+struct Compute3[P]:
+    spirv: str
+    textures: str
+    run: (ivec3, P) -> void
+
+__compute3[P] = (spirv: str, textures: str, run: (ivec3, P) -> void) -> Compute3[P]: Compute3[P](spirv, textures, run)
+
+# k's function run for each id in [0, n) with these parameters, in any order and many at once;
+# the dispatches and draws after it see what it wrote
+dispatch[P] = (k: Compute[P], n: int, params: P):
+    if n < 0 or n > 0x7FFFFFFF: panic("dispatch over {n} elements")
+    if n == 0: return
+    p = params
+    if gpu_compute():
+        when TARGET != "wasm":
+            groups = (n + 63) / 64
+            gx = min(groups, 65535)
+            __gb_dispatch(k.spirv, k.textures, (&p) as *u8, size_of(P), gx, (groups + gx - 1) / gx, n, 0)
+            return
+    run = k.run
+    __gb_in_dispatch = true
+    # (a copy of the parameters for each run of ids: reading the captured one for every id would
+    # count references to its buffers on one shared line, slower with more threads)
+    __parallel_run(n, (lo: int, hi: int):
+        lp = p
+        f = run
+        loop id in [lo..hi): f(id, lp)
+    )
+    __gb_in_dispatch = false
+    __gb_writes += 1
+
+# k's function run for each cell of a size.x by size.y grid, id from ivec2(0, 0) to size - 1 (in
+# groups of 8 by 8 on the GPU), as dispatch(k, n, params) runs it for each id in [0, n)
+dispatch[P] = (k: Compute2[P], size: ivec2, params: P):
+    w = int(size.x)
+    h = int(size.y)
+    if w < 0 or h < 0 or w > 65535 * 8 or h > 65535 * 8: panic("dispatch over a grid of {w} by {h}")
+    if w == 0 or h == 0: return
+    p = params
+    if gpu_compute():
+        when TARGET != "wasm":
+            __gb_dispatch(k.spirv, k.textures, (&p) as *u8, size_of(P), (w + 7) / 8, (h + 7) / 8, w, h)
+            return
+    run = k.run
+    __gb_in_dispatch = true
+    __parallel_run(h, (lo: int, hi: int):
+        lp = p
+        f = run
+        loop y in [lo..hi):
+            loop x in [0..w): f(ivec2(i32(x), i32(y)), lp)
+    )
+    __gb_in_dispatch = false
+    __gb_writes += 1
+
+# k's function run for each cell of a size.x by size.y by size.z grid (in groups of 4 by 4 by 4
+# on the GPU)
+dispatch[P] = (k: Compute3[P], size: ivec3, params: P):
+    w = int(size.x)
+    h = int(size.y)
+    d = int(size.z)
+    if w < 0 or h < 0 or d < 0 or w > 65535 * 4 or h > 65535 * 4 or d > 65535 * 4: panic("dispatch over a grid of {w} by {h} by {d}")
+    if w == 0 or h == 0 or d == 0: return
+    p = params
+    if gpu_compute():
+        when TARGET != "wasm":
+            __gb_dispatch(k.spirv, k.textures, (&p) as *u8, size_of(P), (w + 3) / 4, (h + 3) / 4, w, h, (d + 3) / 4, d)
+            return
+    run = k.run
+    __gb_in_dispatch = true
+    __parallel_run(h * d, (lo: int, hi: int):
+        lp = p
+        f = run
+        loop r in [lo..hi):
+            loop x in [0..w): f(ivec3(i32(x), i32(r % h), i32(r / h)), lp)
+    )
+    __gb_in_dispatch = false
+    __gb_writes += 1
+
+when TARGET != "wasm":
+    # (Vulkan) a compute program run in gx by gy (by gz) groups, its parameters at p; a, b and c
+    # are the count of ids (or the grid's width, height and depth)
+    __gb_dispatch = (spirv: str, textures: str, p: *u8, psize: int, gx: int, gy: int, a: int, b: int, gz: int = 1, c: int = 0):
+        key = data(spirv) as int
+        pl = __gb_pipelines.get(key) ?? 0
+        if pl == 0:
+            pl = __vk_compute_pipeline(spirv)
+            __gb_pipelines[key] = pl
+        # (a Texture's GL name, as the program reads it: its slot of the bindless array)
+        if len(textures) > 0:
+            loop o in split(textures, ","):
+                q = (p + (to_int(o) ?? 0)) as *int
+                q[0] = __vg_slot_of(q[0])
+        __vk_dispatch(pl, p, psize, gx, gy, a, b, gz, c)
+
+# Atomic operations on element i of a buffer, for compute functions whose invocations change the
+# same element: each returns the element's old value (past the ends: does nothing, returns 0).
+atomic_add = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 0, v as u32, 0) as i32
+atomic_add = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 0, v, 0)
+atomic_sub = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 1, v as u32, 0) as i32
+atomic_sub = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 1, v, 0)
+atomic_and = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 2, v as u32, 0) as i32
+atomic_and = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 2, v, 0)
+atomic_or = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 3, v as u32, 0) as i32
+atomic_or = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 3, v, 0)
+atomic_xor = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 4, v as u32, 0) as i32
+atomic_xor = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 4, v, 0)
+atomic_exchange = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 5, v as u32, 0) as i32
+atomic_exchange = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 5, v, 0)
+atomic_min = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 6, v as u32, 0) as i32
+atomic_min = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 7, v, 0)
+atomic_max = (b: GpuBuffer[i32], i: int, v: i32) -> i32: __gb_atomic(b, i, 8, v as u32, 0) as i32
+atomic_max = (b: GpuBuffer[u32], i: int, v: u32) -> u32: __gb_atomic(b, i, 9, v, 0)
+# (the element becomes `desired` if it was `expected`)
+atomic_compare_exchange = (b: GpuBuffer[i32], i: int, expected: i32, desired: i32) -> i32: __gb_atomic(b, i, 10, desired as u32, expected as u32) as i32
+atomic_compare_exchange = (b: GpuBuffer[u32], i: int, expected: u32, desired: u32) -> u32: __gb_atomic(b, i, 10, desired, expected)
+
+# ---------------- subgroups ----------------
+# In a compute function, the invocations the GPU runs together (a subgroup: 32 of them on NVIDIA,
+# 64 on AMD, fewer on some; 1 on the CPU) combine values without going through memory:
+# subgroup_add(x) is the sum of x over those of them that reach the call together. A program
+# written for any size runs the same everywhere, e.g. one atomic for a subgroup's elements
+# instead of one each:
+#   n = subgroup_add(i32(keep))                       # how many of them keep theirs
+#   base = 0
+#   if subgroup_elect(): base = int(atomic_add(u.count, 0, n))
+#   slot = subgroup_broadcast_first(base) + int(subgroup_exclusive_add(i32(keep)))
+# These take numbers and vectors (and, or and xor integers and bools too).
+subgroup_size = () -> int: 1
+subgroup_invocation_id = () -> int: 0                 # this one's place in it, from 0
+subgroup_elect = () -> bool: true                     # true for one of them
+subgroup_all = (b: bool) -> bool: b
+subgroup_any = (b: bool) -> bool: b
+subgroup_broadcast_first[T] = (x: T) -> T: x          # x of the first of them
+subgroup_add[T] = (x: T) -> T: x
+subgroup_inclusive_add[T] = (x: T) -> T: x            # the sum over the ones before, and this one
+subgroup_exclusive_add[T] = (x: T) -> T:              # the sum over the ones before this one
+    zero: T
+    zero
+subgroup_min[T] = (x: T) -> T: x
+subgroup_max[T] = (x: T) -> T: x
+subgroup_and[T] = (x: T) -> T: x
+subgroup_or[T] = (x: T) -> T: x
+subgroup_xor[T] = (x: T) -> T: x
+
+# (in CPU memory: a compare-and-swap loop on the 8 bytes holding the element)
+__gb_atomic[T] = (b: GpuBuffer[T], i: int, op: int, v: u32, w: u32) -> u32:
+    if i < 0 or i >= b.n: return 0
+    if b.host == null:
+        old: u32[] = [0]
+        __gb_read(b.id, i * 4, 4, data(old) as *u8)
+        nw: u32[] = [__gb_op(op, old[0], v, w)]
+        __gb_write(b.id, i * 4, data(nw) as *u8, 4)
+        return old[0]
+    when TARGET == "wasm":
+        # (one thread)
+        e = (b.host as *u8 + i * 4) as *u32
+        cur = e[0]
+        e[0] = __gb_op(op, cur, v, w)
+        return cur
+    q = (b.host as *u8 + i * 4) as int
+    wp = (q & -8) as *int
+    sh = (q & 4) * 8
+    loop true:
+        old = wp[0]
+        cur = u32((old >> sh) & 0xFFFFFFFF)
+        nw = (old & ~(0xFFFFFFFF << sh)) | (int(__gb_op(op, cur, v, w)) << sh)
+        if __atomic_cas(wp, old, nw) == old: return cur
+    0
+
+__gb_op = (op: int, cur: u32, v: u32, w: u32) -> u32:
+    if op == 0: return u32((int(cur) + int(v)) & 0xFFFFFFFF)
+    if op == 1: return u32((int(cur) - int(v)) & 0xFFFFFFFF)
+    if op == 2: return cur & v
+    if op == 3: return cur | v
+    if op == 4: return cur xor v
+    if op == 5: return v
+    if op == 6:
+        if (cur as i32) < (v as i32): return cur
+        return v
+    if op == 7:
+        if cur < v: return cur
+        return v
+    if op == 8:
+        if (cur as i32) > (v as i32): return cur
+        return v
+    if op == 9:
+        if cur > v: return cur
+        return v
+    if cur == w: return v
+    cur
+
+# ---------------- drawing with buffers ----------------
+# a mesh whose vertices are a buffer's (a compute function may change them between draws)
+gpu_mesh[V] = (vertices: GpuBuffer[V], mode: int = GL_TRIANGLES) -> Mesh:
+    __gfx_init_gl_only()
+    Mesh(vao = gl_create_vertex_array(), mode = mode, count = vertices.n, stride = size_of(V), gbuf = vertices.id, keep = vertices.token)
+
+# instances drawn with their data in a buffer: count of them from first (count -1: to the end)
+draw_instanced[U, I] = (sh: Shader, m: Mesh, instances: GpuBuffer[I], params: U, first: int = 0, count: int = -1):
+    n = count
+    if n < 0: n = instances.n - first
+    if n <= 0 or first < 0 or first + n > instances.n: return
+    flush()
+    p = params
+    __draw_inst(sh, m, 0, size_of(I), first, n, (&p) as *u8, size_of(U), instances.id)
+
+# count instances with no data of their own (their shaders tell them apart with instance_id(),
+# e.g. reading a buffer among their uniforms: u.parts[instance_id()])
+draw_instanced[U] = (sh: Shader, m: Mesh, count: int, params: U):
+    if count <= 0: return
+    flush()
+    p = params
+    __draw_inst(sh, m, 0, 0, 0, count, (&p) as *u8, size_of(U))
+
+# what one draw of draw_indirect draws (as Vulkan's VkDrawIndexedIndirectCommand)
+struct DrawArgs:
+    count: u32            # how many vertices (or, for a mesh with indices, indices) are drawn
+    instances: u32 = 1
+    first: u32            # the first vertex (or index)
+    base_vertex: i32      # added to each vertex number
+    first_instance: u32   # where instance_id() starts (and the instances' data with it)
+
+# draws whose counts are in a buffer, where a compute function can decide them (GPU-driven
+# drawing): `draws` draws of mesh m, each as args[at + k] says
+draw_indirect[U] = (sh: Shader, m: Mesh, args: GpuBuffer[DrawArgs], params: U, at: int = 0, draws: int = 1):
+    p = params
+    __draw_ind(sh, m, 0, 0, args, at, draws, (&p) as *u8, size_of(U), 0, 0)
+
+# the same with instance data in a buffer
+draw_indirect[U, I] = (sh: Shader, m: Mesh, instances: GpuBuffer[I], args: GpuBuffer[DrawArgs], params: U, at: int = 0, draws: int = 1):
+    p = params
+    __draw_ind(sh, m, instances.id, size_of(I), args, at, draws, (&p) as *u8, size_of(U), 0, 0)
+
+# draws whose number is in a buffer too: as many as count[count_at] says (at most max_draws, -1:
+# all of args from at on), so a compute function can decide it, e.g. counting the draws it
+# writes with atomic_add(u.count, 0, u32(1))
+draw_indirect_count[U] = (sh: Shader, m: Mesh, args: GpuBuffer[DrawArgs], count: GpuBuffer[u32], params: U, at: int = 0, max_draws: int = -1, count_at: int = 0):
+    p = params
+    n = max_draws
+    if n < 0: n = args.n - at
+    if count_at < 0 or count_at >= count.n: panic("count_at {count_at} is not in the buffer of counts ({count.n} of them)")
+    __draw_ind(sh, m, 0, 0, args, at, n, (&p) as *u8, size_of(U), count.id, count_at)
+
+# the same with instance data in a buffer
+draw_indirect_count[U, I] = (sh: Shader, m: Mesh, instances: GpuBuffer[I], args: GpuBuffer[DrawArgs], count: GpuBuffer[u32], params: U, at: int = 0, max_draws: int = -1, count_at: int = 0):
+    p = params
+    n = max_draws
+    if n < 0: n = args.n - at
+    if count_at < 0 or count_at >= count.n: panic("count_at {count_at} is not in the buffer of counts ({count.n} of them)")
+    __draw_ind(sh, m, instances.id, size_of(I), args, at, n, (&p) as *u8, size_of(U), count.id, count_at)
+
+# (cid: a buffer of u32 whose element cat says how many of the draws are drawn; 0: all)
+__draw_ind = (sh: Shader, m: Mesh, igbuf: int, istride: int, args: GpuBuffer[DrawArgs], at: int, most: int, p: *u8, usize: int, cid: int, cat: int):
+    draws = most
+    if at < 0 or draws < 0 or at + draws > args.n: panic("draws {at}..{at + draws} are not all in a buffer of {args.n} DrawArgs")
+    if draws == 0: return
+    flush()
+    when TARGET != "wasm":
+        if __vk and __gb[args.id].buffer != 0:
+            insts = 0
+            if igbuf > 0: insts = __gb_vk_addr(igbuf)
+            cbuf = 0
+            if cid > 0:
+                if __vk_draw_count and __gb[cid].buffer != 0: cbuf = __gb[cid].buffer
+                else: draws = min(draws, __gb_count(cid, cat))
+                if draws == 0: return
+            __vk_draw_at(sh.prog, m.mode, __mesh_addr(m), m.stride, m.count, m.ibo, m.index_count, p, usize, insts, istride, 0, __gb[args.id].buffer, at * size_of(DrawArgs), draws, cbuf, cat * 4)
+            return
+    if cid > 0: draws = min(draws, __gb_count(cid, cat))
+    # (the counts are in CPU memory: a draw for each)
+    loop d in [at..at + draws):
+        a = args[d]
+        if a.count == 0 or a.instances == 0: continue
+        __draw_full(sh, m, 0, istride, int(a.first_instance), int(a.instances), p, usize, igbuf, int(a.first), int(a.count), int(a.base_vertex), int(a.first_instance))
+
+# the u32 at element i of buffer id (read back from GPU memory if it is there)
+__gb_count = (id: int, i: int) -> int:
+    v: u32 = 0
+    __gb_read(id, i * 4, 4, (&v) as *u8)
+    int(v)
+
+# a mesh as this backend draws it: one of a buffer's vertices (in CPU memory) with a vertex buffer
+# holding a copy of them
+__mesh_now = (m: Mesh) -> Mesh:
+    if m.gbuf == 0: return m
+    mm = m
+    mm.vbo = __gb_gl_buffer(m.gbuf)
+    mm
+
+when TARGET != "wasm":
+    # where Vulkan reads a mesh's vertices
+    __mesh_addr = (m: Mesh) -> int:
+        if m.gbuf > 0: return __gb_vk_addr(m.gbuf)
+        __vg_buffer_addr(m.vbo)
+
+    # a buffer's address (one in CPU memory, which Vulkan draws only when the window came after
+    # it: a copy in this frame's upload memory)
+    __gb_vk_addr = (id: int) -> int:
+        if __gb[id].addr != 0: return __gb[id].addr
+        if __gb[id].host == null: return 0
+        blk, off = __vk_upload(__gb[id].host, max(__gb[id].bytes, 4))
+        __vk_addr(blk, off)
+
+# (OpenGL) a vertex buffer holding a copy of a buffer's bytes
+__gb_gl_buffer = (id: int) -> int:
+    if __gb[id].gl_buf == 0: __gb[id].gl_buf = gl_create_buffer()
+    if __gb[id].gl_buf_at != __gb_writes or __gb[id].host == null:
+        bs = __gb_bytes(id)
+        glBindBuffer(GL_ARRAY_BUFFER, u32(__gb[id].gl_buf))
+        glBufferData(GL_ARRAY_BUFFER, max(bs.len(), 4), data(bs), GL_DYNAMIC_DRAW)
+        __gb[id].gl_buf_at = __gb_writes
+    __gb[id].gl_buf
+
+# (OpenGL) a buffer among a shader's uniforms (q: its bytes there): its copy in an RGBA32I texture
+# (compiler/glsl.jo reads it: four words to a texel, 1024 texels to a row) bound to a texture
+# unit, and its length; returns the next free unit
+__gb_bind_gl = (q: *u8, loc: int, loc2: int, unit: int) -> int:
+    n = (q as *int)[1]
+    id = (q as *int)[2]
+    if loc2 >= 0: glUniform1i(i32(loc2), i32(n))
+    if loc < 0 or id <= 0 or id >= __gb.len() or not __gb[id].live: return unit
+    if __gb[id].gl_tex == 0 or __gb[id].gl_tex_at != __gb_writes or __gb[id].host == null:
+        bs = __gb_bytes(id)
+        texels = max((bs.len() + 15) / 16, 1)
+        w = min(texels, 1024)
+        h = (texels + 1023) / 1024
+        if h > gl_max_texture_size(): panic("a GPU buffer of {bs.len()} bytes is too large for OpenGL here")
+        bs.resize(w * h * 16)
+        if __gb[id].gl_tex == 0:
+            __gb[id].gl_tex = gl_create_texture()
+            glBindTexture(GL_TEXTURE_2D, u32(__gb[id].gl_tex))
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(GL_NEAREST))
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(GL_NEAREST))
+        glBindTexture(GL_TEXTURE_2D, u32(__gb[id].gl_tex))
+        gl_tex_image(w, h, __GL_RGBA32I, __GL_RGBA_INTEGER, __GL_INT, data(bs), bs.len())
+        __gb[id].gl_tex_at = __gb_writes
+    glActiveTexture(GL_TEXTURE0 + u32(unit))
+    glBindTexture(GL_TEXTURE_2D, u32(__gb[id].gl_tex))
+    glUniform1i(i32(loc), i32(unit))
+    unit + 1

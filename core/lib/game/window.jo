@@ -1,0 +1,1901 @@
+# Windows, the frame loop and input. Linux: Wayland (or X11), drawn with Vulkan (or OpenGL ES 3,
+# or the software renderer: SLOPPY_SOFTWARE=1); Windows: Win32 and Vulkan or OpenGL; macOS: Cocoa
+# and OpenGL. The system's libraries are loaded at runtime. Web: a <canvas> with WebGL2.
+
+enum Key:
+    unknown, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
+    n0, n1, n2, n3, n4, n5, n6, n7, n8, n9,
+    space, enter, escape, tab, backspace, delete, insert, home, end, page_up, page_down,
+    left, right, up, down, shift, ctrl, alt, super,
+    f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+    minus, equals, comma, period, slash, semicolon, quote, lbracket, rbracket, backslash, grave,
+    kp0, kp1, kp2, kp3, kp4, kp5, kp6, kp7, kp8, kp9, kp_period, kp_plus, kp_minus, kp_star, kp_slash
+
+enum Mouse: left, middle, right
+
+const __NKEYS = 128
+
+__win_open = false
+__win_w = 1280
+__win_h = 720
+__win_title = ""                # "": the program's name
+__win_close = false
+__key_down: bool[]
+__key_pressed: bool[]
+__key_released: bool[]
+__key_typed: bool[]             # pressed, or repeated by holding it down
+__mouse_x = 0.0
+__mouse_y = 0.0
+__mouse_dx = 0.0
+__mouse_dy = 0.0
+__mouse_wheel = 0.0
+__mouse_btn: bool[]
+__mouse_pressed: bool[]
+__mouse_released: bool[]
+__text_input = ""
+# (screenshot runs: the input as the last frame left it, so that only SLOPPY_INPUT changes it)
+__kept_keys: bool[]
+__kept_btns: bool[]
+__kept_mouse = vec2(0, 0)
+__time0 = time()              # (from the start; from the window opening, once it has)
+__fixed_step = false          # screenshot runs advance exactly 1/60 s per frame
+__pace_real_time = false      # (and at 60 frames a second, not faster: a networked game's)
+# (SLOPPY_INPUT's punctuation keys: each name, then the character it types and shifted)
+const __SCRIPT_PUNCT = " minus -_ equals =+ comma ,< period .> slash /? semicolon ;: quote '\" lbracket [{{ rbracket ]}} backslash \\| grave `~ "
+__frame_count = 0
+__dt = 0.0
+__fps = 0.0
+
+__input_init = ():
+    if __key_down.len() == 0:
+        __key_down = fill(false, __NKEYS)
+        __key_pressed = fill(false, __NKEYS)
+        __key_released = fill(false, __NKEYS)
+        __key_typed = fill(false, __NKEYS)
+        __mouse_btn = fill(false, 8)
+        __mouse_pressed = fill(false, 8)
+        __mouse_released = fill(false, 8)
+
+# (repeat: the key was held down long enough to repeat, as in a text field)
+__key_event = (k: int, down: bool, repeat: bool = false):
+    if k <= 0 or k >= __NKEYS: return
+    if down:
+        if not __key_down[k]: __key_pressed[k] = true
+        if not __key_down[k] or repeat: __key_typed[k] = true
+        __key_down[k] = true
+    else:
+        if __key_down[k]: __key_released[k] = true
+        __key_down[k] = false
+
+__mouse_event = (b: int, down: bool):
+    if b < 0 or b >= 8: return
+    if down:
+        if not __mouse_btn[b]: __mouse_pressed[b] = true
+        __mouse_btn[b] = true
+    else:
+        if __mouse_btn[b]: __mouse_released[b] = true
+        __mouse_btn[b] = false
+
+__input_end_frame = ():
+    loop mut x in __key_pressed: x = false
+    loop mut x in __key_released: x = false
+    loop mut x in __key_typed: x = false
+    loop mut x in __mouse_pressed: x = false
+    loop mut x in __mouse_released: x = false
+    __mouse_dx = 0.0
+    __mouse_dy = 0.0
+    __mouse_wheel = 0.0
+    __text_input = ""
+    if __fixed_step:
+        __kept_keys = __key_down
+        __kept_btns = __mouse_btn
+        __kept_mouse = vec2(__mouse_x, __mouse_y)
+
+# (screenshot runs are the same each time: what the desktop sent since the last frame, keys,
+# buttons, the mouse, typing, is undone; SLOPPY_INPUT's events come after)
+__ignore_real_input = ():
+    if __kept_keys.len() == 0: return
+    __key_down = __kept_keys
+    __mouse_btn = __kept_btns
+    __mouse_x = f64(__kept_mouse.x)
+    __mouse_y = f64(__kept_mouse.y)
+    loop mut x in __key_pressed: x = false
+    loop mut x in __key_released: x = false
+    loop mut x in __key_typed: x = false
+    loop mut x in __mouse_pressed: x = false
+    loop mut x in __mouse_released: x = false
+    __mouse_dx = 0.0
+    __mouse_dy = 0.0
+    __mouse_wheel = 0.0
+    __text_input = ""
+
+# ---------------- public input API ----------------
+# true while the key is held
+key_down = (k: Key) -> bool:
+    __input_init()
+    __key_down[int(k)]
+# true only in the frame the key was pressed
+key_pressed = (k: Key) -> bool:
+    __input_init()
+    __key_pressed[int(k)]
+key_released = (k: Key) -> bool:
+    __input_init()
+    __key_released[int(k)]
+# true in the frame the key was pressed, and again each time it repeats while held down (for
+# moving through text or menus); characters typed arrive through text_input()
+key_typed = (k: Key) -> bool:
+    __input_init()
+    __key_typed[int(k)]
+# (in the 2D units of the screen: see screen_size and screen.jo)
+mouse_pos = () -> vec2: __to_units(__mouse_x, __mouse_y)
+mouse_delta = () -> vec2:
+    __screen_layout()
+    vec2(f32(__mouse_dx / __map_sx), f32(__mouse_dy / __map_sy))
+mouse_wheel = () -> f64: __mouse_wheel
+mouse_down = (b: Mouse) -> bool:
+    __input_init()
+    __mouse_btn[int(b)]
+mouse_pressed = (b: Mouse) -> bool:
+    __input_init()
+    __mouse_pressed[int(b)]
+mouse_released = (b: Mouse) -> bool:
+    __input_init()
+    __mouse_released[int(b)]
+# characters typed this frame
+text_input = () -> str: __text_input
+
+# arrows/WASD (or a gamepad's left stick and d-pad) as a direction vector (y down)
+input_axis = () -> vec2:
+    v = vec2(0, 0)
+    if key_down(.left) or key_down(.a) or gamepad_down(.left): v.x -= 1
+    if key_down(.right) or key_down(.d) or gamepad_down(.right): v.x += 1
+    if key_down(.up) or key_down(.w) or gamepad_down(.up): v.y -= 1
+    if key_down(.down) or key_down(.s) or gamepad_down(.down): v.y += 1
+    s = left_stick()
+    if length(s) > length(v): v = s
+    v
+
+# The screen's size in 2D drawing units: the size given to window() (the design size),
+# whatever the window's real size; screen.jo says how it maps to the window (screen_fit).
+# pixel_size() is the window's real size.
+screen_width = () -> int:
+    __screen_layout()
+    int(__units_w)
+screen_height = () -> int:
+    __screen_layout()
+    int(__units_h)
+screen_size = () -> vec2:
+    __screen_layout()
+    vec2(f32(__units_w), f32(__units_h))
+pixel_size = () -> vec2: vec2(f32(__win_w), f32(__win_h))
+# width / height of the picture 3D draws into (for a projection: perspective(fov, aspect_ratio(),
+# ...)): the window's, or the design area's when the screen fit shows just that (screen.jo)
+aspect_ratio = () -> f64:
+    __screen_layout()
+    if __canvas_on and __canvas_whole: return (__units_w * __map_sx) / max(__units_h * __map_sy, 1.0)
+    f64(__win_w) / f64(max(__win_h, 1))
+# the part of the 2D plane the screen shows, as a Rect (x, y, w, h): with screen_fit(.expand)
+# (the default) the design area centered in a window of any shape and what is around it (draw
+# backgrounds over this to fill the window); with bars, just the design area
+visible_rect = () -> Rect:
+    __screen_layout()
+    u = __screen_units()
+    Rect(u.x, u.y, u.z - u.x, u.w - u.y)
+
+__design_w = 1280
+__design_h = 720
+frame_time = () -> f64: __dt
+__time_scale = 1.0
+# how fast the game's time runs: update gets dt times this (0.5: slow motion, 0: paused, while
+# drawing, input and sound go on); frame_time() is the scaled dt, fps() and elapsed() are not
+time_scale = (s: f64): __time_scale = max(s, 0.0)
+# the scale set with time_scale (1 to start with)
+time_scale = () -> f64: __time_scale
+fps = () -> f64:
+    # (before the first half second is measured: what the frames so far say)
+    if __fps == 0.0 and __fps_n > 0 and __fps_acc > 0.0: return f64(__fps_n) / __fps_acc
+    __fps
+elapsed = () -> f64:
+    if __fixed_step: return f64(__frame_count) / 60.0
+    time() - __time0
+frame_number = () -> int: __frame_count
+# end the game (the window closes once this frame is done). A web page cannot close itself:
+# there it does nothing (can_quit() is false, so a menu can leave its Quit button out)
+quit = (): __win_close = true
+can_quit = () -> bool:
+    when TARGET == "wasm": return false
+    else: return true
+
+# fill the screen with the window (and back); also in a web page
+__fullscreen = false
+set_fullscreen = (on: bool = true):
+    if not __win_open or on == __fullscreen: return
+    __fullscreen = on
+    __platform_fullscreen(on)
+toggle_fullscreen = (): set_fullscreen(not __fullscreen)
+is_fullscreen = () -> bool: __fullscreen
+
+# the text on the system clipboard ("" if none, or not text). In a web page the browser lets a
+# page read it only as it is pasted: this is the text last pasted (ctrl+V, or a text field's
+# Paste button on a phone) into the page.
+clipboard = () -> str: __platform_clipboard()
+set_clipboard = (s: str): __platform_set_clipboard(s)
+
+# the system's menu for sending text to another app (a chat, Messages, mail), where there is one:
+# a web page on a phone, and in some desktop browsers. In a page the menu opens as the tap or
+# click that asked ends (browsers allow it only then)
+#   if can_share() and hud_button(r, "Share"): share(invite_link)
+can_share = () -> bool: __platform_can_share()
+share = (text: str): __platform_share(text)
+
+# lock the mouse pointer to the window and hide it, for mouse look: the pointer stays put and
+# its motion keeps arriving through mouse_delta(). false where the platform cannot. (A web
+# page gets the lock at the next click into it, as browsers require; Escape releases it there.)
+mouse_lock = (on: bool = true) -> bool:
+    __mouse_lock_want = on
+    if not __win_open: return true
+    __platform_mouse_lock(on)
+
+# (in a screenshot run, what the game asked for: the desktop's focus coming and going would make
+# the run differ from one time to the next)
+is_mouse_locked = () -> bool: __mouse_lock_want and (__fixed_step or __platform_mouse_locked())
+
+# the window (or the web page) has the keyboard's focus: false while the player is in another
+# window or tab, as after a click outside an itch.io frame (a game may pause then)
+window_focused = () -> bool: __fixed_step or __win_focused
+__win_focused = true
+
+# the fingers on a touch screen (a phone's, in a web page): where each is, in the screen's units
+# as mouse_pos, in the order they landed. The first finger also is the mouse, its left button
+# held while it is down, so a game made for the mouse works with one finger; more fingers (on
+# screen buttons: left, right, jump) are only here. Empty without a touch screen.
+touches = () -> vec2[]:
+    out: vec2[]
+    loop t in __touch_pos: out.push(__to_units(f64(t.x), f64(t.y)))
+    out
+
+# whether the pointer is a finger: the last pointer input was a touch, not the mouse (a finger
+# lifted leaves mouse_pos where it was: hover highlights mean nothing then)
+touch_input = () -> bool: __touch_last
+
+__touch_ids: int[]
+__touch_pos: vec2[]
+__touch_last = false
+
+# a finger (a web page's, or SLOPPY_INPUT's): kind 1 down, 0 moved, 2 up (or cancelled); 3: the
+# mouse was used (id -1); x, y in the window's pixels
+__touch_event = (id: int, kind: int, x: f32, y: f32):
+    if kind == 3:
+        __touch_last = false
+        return
+    __touch_last = true
+    k = __touch_ids.index_of(id)
+    if kind == 2:
+        if k >= 0:
+            __touch_ids.remove(k)
+            __touch_pos.remove(k)
+        return
+    if k < 0:
+        if kind != 1: return
+        __touch_ids.push(id)
+        __touch_pos.push(vec2(x, y))
+    else: __touch_pos[k] = vec2(x, y)
+
+__mouse_lock_want = false
+__cursor_hidden = false
+
+# show or hide the mouse pointer over the window (hidden: a game drawing its own crosshair or
+# cursor); unlike mouse_lock, it still moves and mouse_pos() follows it
+show_cursor = (on: bool):
+    __cursor_hidden = not on
+    if __win_open: __platform_show_cursor(on)
+
+# the program's name (shapes for shapes.jo, or the build block's name), for a window without a
+# title of its own
+__program_name = () -> str:
+    if len(PROGRAM_NAME) == 0: return "sloppy"
+    PROGRAM_NAME
+
+# the program's icon (the build block's) as X11's _NET_WM_ICON has it: for each of a few sizes,
+# the width, the height, then the pixels (ARGB), at most max_words of them; empty without one
+__icon_argb = (max_words: int) -> int[]:
+    out: int[]
+    if len(PROGRAM_ICON) == 0: return out
+    img = load_png(bytes(PROGRAM_ICON)) ?? image(0, 0)
+    w = img.width
+    if w == 0 or img.height != w: return out
+    sizes: int[]
+    loop s in [min(w, 128), 64, 48, 32, 16]:
+        if s <= w and not sizes.contains(s): sizes.push(s)
+    loop s in sizes:
+        if out.len() + 2 + s * s > max_words: continue
+        out.push(s)
+        out.push(s)
+        # (each pixel the average of the ones it covers, weighed by their alpha)
+        loop y in [0..s):
+            y0 = y * w / s
+            y1 = max((y + 1) * w / s, y0 + 1)
+            loop x in [0..s):
+                x0 = x * w / s
+                x1 = max((x + 1) * w / s, x0 + 1)
+                r = 0
+                g = 0
+                b = 0
+                a = 0
+                loop yy in [y0..y1):
+                    loop xx in [x0..x1):
+                        i = (yy * w + xx) * 4
+                        pa = int(img.pixels[i + 3])
+                        r += int(img.pixels[i]) * pa
+                        g += int(img.pixels[i + 1]) * pa
+                        b += int(img.pixels[i + 2]) * pa
+                        a += pa
+                n = (y1 - y0) * (x1 - x0)
+                v = 0
+                if a > 0: v = ((a / n) << 24) | ((r / a) << 16) | ((g / a) << 8) | (b / a)
+                out.push(v)
+    out
+
+# Open the game window (called automatically when the program defines update/draw).
+window = (title: str = "", width: int = 1280, height: int = 720):
+    __input_init()
+    name = title
+    if len(name) == 0: name = __program_name()
+    if __win_open and not __offscreen:
+        # already opened (e.g. by creating a mesh first): just take the new title
+        if name != __win_title:
+            __win_title = name
+            __platform_title()
+        return
+    # (pictures drawn before it, with no window: the software renderer, which has their textures)
+    if __offscreen:
+        __offscreen = false
+        __win_open = false
+        __soft_kept = true
+    __win_title = name
+    __win_w = width
+    __win_h = height
+    __design_w = width
+    __design_h = height
+    # a design that small is pixel art: the window opens a whole number of times larger
+    if width < 640 and height < 360 and width > 0 and height > 0:
+        k = max(1, min(1280 / width, 720 / height))
+        __win_w = width * k
+        __win_h = height * k
+    # (testing aid: SLOPPY_WINDOW=WxH opens the window at another size than the design size)
+    if let ws = env("SLOPPY_WINDOW"):
+        x = find(ws, "x")
+        if x > 0:
+            __win_w = to_int(ws[..x)) ?? width
+            __win_h = to_int(ws[x + 1..]) ?? height
+    # (sloppy test: the tests run with no window, and no display needed)
+    if __testing: return
+    __platform_open()
+    __win_open = true
+    __time0 = time()
+    if __mouse_lock_want: __platform_mouse_lock(true)
+    if __cursor_hidden: __platform_show_cursor(false)
+
+when TARGET == "wasm":
+    extern __web_canvas_open = (title: *u8, title_len: i32, w: i32, h: i32)
+    extern __web_canvas_size = (out: *i32)
+
+    extern __web_set_title = (title: *u8, title_len: i32)
+    extern __web_fullscreen = (on: i32)
+    extern __web_is_fullscreen = () -> i32
+    extern __web_pointer_lock = (on: i32) -> i32
+    extern __web_pointer_locked = () -> i32
+    extern __web_show_cursor = (on: i32)
+    extern __web_clipboard_get = (out: *u8, cap: i32) -> i32
+    extern __web_clipboard_set = (p: *u8, n: i32)
+    extern __web_keyboard = (on: i32)
+    extern __web_paste = ()
+    extern __web_can_share = () -> i32
+    extern __web_share = (p: *u8, n: i32)
+
+    __platform_fullscreen = (on: bool): __web_fullscreen(i32(int(on)))
+    __platform_mouse_lock = (on: bool) -> bool: __web_pointer_lock(i32(int(on))) != 0
+    __platform_mouse_locked = () -> bool: __web_pointer_locked() != 0
+    __platform_show_cursor = (on: bool): __web_show_cursor(i32(int(on)))
+    __platform_clipboard = () -> str:
+        buf = fill(u8(0), 4096)
+        n = int(__web_clipboard_get(data(buf), 4096))
+        if n > 4096:
+            buf = fill(u8(0), n)
+            __web_clipboard_get(data(buf), i32(n))
+        str_from_bytes(buf[..n))
+    __platform_set_clipboard = (s: str): __web_clipboard_set(data(s), i32(len(s)))
+    # (the browser asks the player first, and the text arrives a few frames later, as a paste)
+    __platform_paste = (): __web_paste()
+    __platform_pasted = () -> bool: __web_pasted_frame == frame_number()
+    __platform_can_share = () -> bool: __web_can_share() != 0
+    __platform_share = (s: str): __web_share(data(s), i32(len(s)))
+    __web_pasted_frame = -10
+    __web_keyboard_on = false
+
+    __platform_open = (): __web_canvas_open(data(__win_title), i32(len(__win_title)), i32(__win_w), i32(__win_h))
+    __platform_title = (): __web_set_title(data(__win_title), i32(len(__win_title)))
+
+    # the page calls this every animation frame
+    __web_update: (f64) -> void
+    __web_draw: () -> void
+    __web_last = -1.0
+
+    @export("__frame")
+    __web_frame = (now_ms: f64):
+        now = now_ms / 1000.0
+        dt = 0.016
+        if __web_last >= 0.0: dt = clamp(now - __web_last, 0.0, 0.1)
+        __web_last = now
+        sz: (i32, i32)
+        __web_canvas_size(&sz as *i32)
+        __win_w = int(sz.0)
+        __win_h = int(sz.1)
+        __fullscreen = __web_is_fullscreen() != 0          # (the browser leaves it on Escape)
+        __run_frame(dt, __web_update, __web_draw)
+        # a text field typed in with a finger: the phone's keyboard comes up (the page shows it
+        # at the end of the touch, as browsers allow it only then)
+        kb = ui_typing() and __touch_last
+        if kb != __web_keyboard_on:
+            __web_keyboard_on = kb
+            __web_keyboard(i32(int(kb)))
+
+    # down: 0 released, 1 pressed, 2 repeated (held down)
+    @export("__key")
+    __web_key = (k: i32, down: i32): __key_event(int(k), down != 0, down == 2)
+
+    @export("__focus")
+    __web_focus = (on: i32): __win_focused = on != 0
+
+    @export("__quit")
+    __web_quit = (): __game_quit()
+
+    @export("__mouse")
+    __web_mouse = (kind: i32, x: f32, y: f32, b: i32):
+        if kind == 0:
+            __mouse_dx += f64(x) - __mouse_x
+            __mouse_dy += f64(y) - __mouse_y
+            __mouse_x = f64(x)
+            __mouse_y = f64(y)
+        else if kind == 1: __mouse_event(int(b), true)
+        else if kind == 2: __mouse_event(int(b), false)
+        else if kind == 3: __mouse_wheel += f64(y)
+        else if kind == 4:
+            # motion while the pointer is locked: only how far it moved
+            __mouse_dx += f64(x)
+            __mouse_dy += f64(y)
+
+    @export("__char")
+    __web_char = (c: i32): __text_input += chr(int(c))
+
+    # text was pasted into the page (it is clipboard() now): in the coming frame
+    @export("__pasted")
+    __web_pasted = (): __web_pasted_frame = frame_number()
+
+    # a finger: kind 1 down, 0 moved, 2 up (or cancelled); 3: the mouse was used (id -1)
+    @export("__touch")
+    __web_touch = (id: i32, kind: i32, x: f32, y: f32): __touch_event(int(id), int(kind), x, y)
+
+    __game_run = (update: (f64) -> void, draw: () -> void):
+        window(__win_title, __win_w, __win_h)
+        __web_update = update
+        __web_draw = draw
+else when TARGET == "windows":
+    # ---------------- Windows: a Win32 window (lib/core/windows.jo has the rest) ----------------
+    # Frames are drawn by the software renderer and shown with StretchDIBits.
+    @lib("kernel32.dll")
+    extern GetModuleHandleW = (name: *u16) -> *u8
+    @lib("user32.dll")
+    extern RegisterClassExW = (wc: *u8) -> u16
+    @lib("user32.dll")
+    extern CreateWindowExW = (exstyle: u32, cls: *u16, title: *u16, style: u32, x: i32, y: i32, w: i32, h: i32, parent: *u8, menu: *u8, inst: *u8, param: *u8) -> *u8
+    @lib("user32.dll")
+    extern DefWindowProcW = (hwnd: *u8, msg: u32, wp: int, lp: int) -> int
+    @lib("user32.dll")
+    extern PeekMessageW = (msg: *u8, hwnd: *u8, lo: u32, hi: u32, remove: u32) -> i32
+    @lib("user32.dll")
+    extern TranslateMessage = (msg: *u8) -> i32
+    @lib("user32.dll")
+    extern DispatchMessageW = (msg: *u8) -> int
+    @lib("user32.dll")
+    extern ShowWindow = (hwnd: *u8, cmd: i32) -> i32
+    @lib("user32.dll")
+    extern SetWindowTextW = (hwnd: *u8, text: *u16) -> i32
+    @lib("user32.dll")
+    extern AdjustWindowRect = (rect: *i32, style: u32, menu: i32) -> i32
+    @lib("user32.dll")
+    extern GetClientRect = (hwnd: *u8, rect: *i32) -> i32
+    @lib("user32.dll")
+    extern GetWindowRect = (hwnd: *u8, rect: *i32) -> i32
+    @lib("user32.dll")
+    extern LoadCursorW = (inst: *u8, name: int) -> *u8
+    @lib("user32.dll")
+    extern LoadIconW = (inst: *u8, name: int) -> *u8
+    @lib("user32.dll")
+    extern GetDC = (hwnd: *u8) -> *u8
+    @lib("user32.dll")
+    extern SetProcessDPIAware = () -> i32
+    @lib("user32.dll")
+    extern GetWindowLongPtrW = (hwnd: *u8, index: i32) -> int
+    @lib("user32.dll")
+    extern SetWindowLongPtrW = (hwnd: *u8, index: i32, v: int) -> int
+    @lib("user32.dll")
+    extern SetWindowPos = (hwnd: *u8, after: *u8, x: i32, y: i32, w: i32, h: i32, flags: u32) -> i32
+    @lib("user32.dll")
+    extern MonitorFromWindow = (hwnd: *u8, flags: u32) -> *u8
+    @lib("user32.dll")
+    extern GetMonitorInfoW = (mon: *u8, info: *u8) -> i32
+    @lib("user32.dll")
+    extern ClientToScreen = (hwnd: *u8, pt: *i32) -> i32
+    @lib("user32.dll")
+    extern ClipCursor = (rect: *i32) -> i32
+    @lib("user32.dll")
+    extern ShowCursor = (show: i32) -> i32
+    @lib("user32.dll")
+    extern RegisterRawInputDevices = (devs: *u8, n: u32, size: u32) -> i32
+    @lib("user32.dll")
+    extern GetRawInputData = (h: *u8, cmd: u32, data: *u8, size: *u32, header: u32) -> u32
+    @lib("user32.dll")
+    extern OpenClipboard = (hwnd: *u8) -> i32
+    @lib("user32.dll")
+    extern CloseClipboard = () -> i32
+    @lib("user32.dll")
+    extern EmptyClipboard = () -> i32
+    @lib("user32.dll")
+    extern GetClipboardData = (format: u32) -> *u8
+    @lib("user32.dll")
+    extern SetClipboardData = (format: u32, h: *u8) -> *u8
+    @lib("kernel32.dll")
+    extern GlobalAlloc = (flags: u32, size: int) -> *u8
+    @lib("kernel32.dll")
+    extern GlobalLock = (h: *u8) -> *u8
+    @lib("kernel32.dll")
+    extern GlobalUnlock = (h: *u8) -> i32
+    @lib("gdi32.dll")
+    extern StretchDIBits = (hdc: *u8, x: i32, y: i32, w: i32, h: i32, sx: i32, sy: i32, sw: i32, sh: i32, bits: *u8, info: *u8, usage: u32, rop: u32) -> i32
+
+    @lib("opengl32.dll")
+    extern wglCreateContext = (dc: *u8) -> *u8
+    @lib("opengl32.dll")
+    extern wglMakeCurrent = (dc: *u8, ctx: *u8) -> i32
+    @lib("opengl32.dll")
+    extern wglDeleteContext = (ctx: *u8) -> i32
+    @lib("opengl32.dll")
+    extern wglGetProcAddress = (name: *u8) -> *u8
+    @lib("gdi32.dll")
+    extern ChoosePixelFormat = (dc: *u8, pfd: *u8) -> i32
+    @lib("gdi32.dll")
+    extern SetPixelFormat = (dc: *u8, fmt: i32, pfd: *u8) -> i32
+    @lib("gdi32.dll")
+    extern SwapBuffers = (dc: *u8) -> i32
+
+    __w32_hwnd: *u8 = null
+    __w32_dc: *u8 = null
+    __w32_gl: *u8 = null
+    __w32_msg: u8[]
+    __w32_pixels: u8[]
+    __w32_bmi: u8[]
+    __w32_locked = false
+    __w32_saved_style = 0
+    __w32_saved_rect: i32[] = [0, 0, 0, 0]
+    __w32_surrogate = 0
+
+    const __WS_OVERLAPPEDWINDOW = 0x00CF0000
+    const __WS_POPUP = 0x80000000
+    const __WS_VISIBLE = 0x10000000
+
+    __platform_open = ():
+        __soft = __soft_kept or (env("SLOPPY_SOFTWARE") ?? "") == "1"
+        __w32_any_size = env("SLOPPY_SCREENSHOT") != none
+        # (a screenshot run through Vulkan with SLOPPY_HEADLESS=1, as over ssh, where there is no
+        # desktop to show a window on: no window, frames are only drawn)
+        if not __soft and __vk_wanted() and __w32_any_size and env("SLOPPY_HEADLESS") != none:
+            why = __vk_open("", () -> int: 0)
+            if len(why) == 0:
+                __vk = true
+                return
+            __vk_note("{why}; using a window")
+        SetProcessDPIAware()
+        inst = GetModuleHandleW(null)
+        cls = __wide("SloppyWindow")
+        wc = fill(u8(0), 80)
+        p = data(wc)
+        (p as *u32)[0] = 80                                     # cbSize
+        (p as *u32)[1] = 0x23                                   # CS_OWNDC | CS_HREDRAW | CS_VREDRAW
+        wp: cfn(*u8, u32, int, int) -> int = __w32_wndproc
+        ((p + 8) as **u8)[0] = wp as *u8
+        ((p + 24) as **u8)[0] = inst
+        ((p + 32) as **u8)[0] = LoadIconW(inst, 1)              # the build block's icon (compiler/pe.jo), if any
+        ((p + 40) as **u8)[0] = LoadCursorW(null, 32512)        # IDC_ARROW
+        ((p + 64) as **u16)[0] = data(cls)
+        RegisterClassExW(p)
+        # the window's outer size for a client area of the size asked for
+        r: i32[] = [0, 0, i32(__win_w), i32(__win_h)]
+        AdjustWindowRect(data(r), u32(__WS_OVERLAPPEDWINDOW), 0)
+        title = __wide(__win_title)
+        cw = i32(0x80000000 as int)                             # CW_USEDEFAULT
+        __w32_hwnd = CreateWindowExW(0, data(cls), data(title), u32(__WS_OVERLAPPEDWINDOW | __WS_VISIBLE), cw, cw, r[2] - r[0], r[3] - r[1], null, null, inst, null)
+        __need(__w32_hwnd != null, "CreateWindowExW failed")
+        ShowWindow(__w32_hwnd, 1)
+        __w32_dc = GetDC(__w32_hwnd)
+        __w32_msg = fill(u8(0), 48)
+        cr: i32[] = [0, 0, 0, 0]
+        GetClientRect(__w32_hwnd, data(cr))
+        if cr[2] > 0 and cr[3] > 0 and not __w32_any_size:
+            __win_w = int(cr[2])
+            __win_h = int(cr[3])
+        if not __soft and __vk_wanted():
+            why = __vk_open("VK_KHR_win32_surface", __vk_win32_surface)
+            if len(why) == 0: __vk = true
+            else: __vk_note("{why}; using OpenGL")
+        if not __soft and not __vk:
+            why = __w32_gl_open()
+            if len(why) > 0:
+                eprint("note: {why}; using the software renderer")
+                __soft = true
+        if __soft: __sw_init_window(__win_w, __win_h)
+
+    __vk_win32_surface = () -> int:
+        info = VkWin32SurfaceCreateInfo(stype = 1000009000, hinstance = GetModuleHandleW(null), hwnd = __w32_hwnd)
+        s = 0
+        if vkCreateWin32SurfaceKHR(__vk_inst, (&info) as *u8, null, &s) != 0: return 0
+        s
+
+    # an OpenGL 4.3 core context (it takes the library's GLSL ES 3.00 shaders), with vsync
+    __w32_gl_open = () -> str:
+        pfd = fill(u8(0), 40)
+        p = data(pfd)
+        (p as *u16)[0] = 40
+        (p as *u16)[1] = 1
+        ((p + 4) as *u32)[0] = 0x25                             # draw to window, OpenGL, double buffered
+        p[9] = 32                                               # color bits
+        p[16] = 8                                               # alpha
+        p[23] = 24                                              # depth
+        p[24] = 8                                               # stencil
+        fmt = ChoosePixelFormat(__w32_dc, p)
+        if fmt == 0 or SetPixelFormat(__w32_dc, fmt, p) == 0: return "no OpenGL pixel format"
+        tmp = wglCreateContext(__w32_dc)
+        if tmp == null or wglMakeCurrent(__w32_dc, tmp) == 0: return "no OpenGL driver"
+        create = wglGetProcAddress(data("wglCreateContextAttribsARB"))
+        ctx: *u8 = null
+        if create != null:
+            f = create as cfn(*u8, *u8, *i32) -> *u8
+            attribs: i32[] = [0x2091, 4, 0x2092, 3, 0x9126, 1, 0]           # 4.3, core profile
+            ctx = f(__w32_dc, null, data(attribs))
+        if ctx == null:
+            wglDeleteContext(tmp)
+            return "OpenGL 4.3 is not available"
+        wglMakeCurrent(__w32_dc, ctx)
+        wglDeleteContext(tmp)
+        __w32_gl = ctx
+        swap = wglGetProcAddress(data("wglSwapIntervalEXT"))
+        if swap != null:
+            sf = swap as cfn(i32) -> i32
+            sf(1)
+        ""
+
+    # (lib/core/windows.jo: the GL functions gl.jo declares as libGLESv2's come from here)
+    __w32_gl_proc = (name: str) -> *u8:
+        p = wglGetProcAddress(data(__zstr(name)))
+        v = p as int
+        if v >= -1 and v <= 3: p = GetProcAddress(__w32_lib("opengl32.dll"), data(__zstr(name)))
+        p
+
+    __need = (ok: bool, what: str):
+        if not ok:
+            eprint("error: cannot open a window: {what}")
+            exit(1)
+
+    __platform_title = ():
+        if __w32_hwnd != null:
+            t = __wide(__win_title)
+            SetWindowTextW(__w32_hwnd, data(t))
+
+    __platform_poll = ():
+        if __w32_hwnd == null: return
+        m = data(__w32_msg)
+        loop PeekMessageW(m, null, 0, 0, 1) != 0:          # PM_REMOVE
+            TranslateMessage(m)
+            DispatchMessageW(m)
+
+    # (signed 16-bit parts of a message's parameter)
+    __w32_lo = (v: int) -> int: int(i16(v & 0xFFFF))
+    __w32_hi = (v: int) -> int: int(i16((v >> 16) & 0xFFFF))
+
+    __w32_any_size = false
+
+    @cabi
+    __w32_wndproc = (hwnd: *u8, msg: u32, wp: int, lp: int) -> int:
+        m = int(msg)
+        if m == 0x10:                                           # WM_CLOSE
+            __win_close = true
+            return 0
+        if m == 0x5:                                            # WM_SIZE
+            w = lp & 0xFFFF
+            h = (lp >> 16) & 0xFFFF
+            # (screenshots keep the size asked for: Windows shrinks a window to fit the screen)
+            if w > 0 and h > 0 and not __w32_any_size:
+                __win_w = w
+                __win_h = h
+            return 0
+        if m == 0x100 or m == 0x104 or m == 0x101 or m == 0x105:     # WM_(SYS)KEYDOWN / UP
+            down = m == 0x100 or m == 0x104
+            k = __w32_key(int(wp))
+            # (the number pad with NumLock off: Home and the arrows without the extended bit)
+            if (lp >> 24) & 1 == 0:
+                vk = int(wp)
+                if vk == 0x24: k = int(Key.kp7)
+                else if vk == 0x26: k = int(Key.kp8)
+                else if vk == 0x21: k = int(Key.kp9)
+                else if vk == 0x25: k = int(Key.kp4)
+                else if vk == 0x0C: k = int(Key.kp5)
+                else if vk == 0x27: k = int(Key.kp6)
+                else if vk == 0x23: k = int(Key.kp1)
+                else if vk == 0x28: k = int(Key.kp2)
+                else if vk == 0x22: k = int(Key.kp3)
+                else if vk == 0x2D: k = int(Key.kp0)
+                else if vk == 0x2E: k = int(Key.kp_period)
+            if k > 0: __key_event(k, down, down and (lp >> 30) & 1 == 1)
+            # (alt+F4 still closes; other system keys are the game's)
+            if m == 0x104 and int(wp) == 0x73: return DefWindowProcW(hwnd, msg, wp, lp)
+            return 0
+        if m == 0x102:                                          # WM_CHAR (UTF-16)
+            c = int(wp)
+            if c >= 0xD800 and c < 0xDC00:
+                __w32_surrogate = c
+                return 0
+            if c >= 0xDC00 and c < 0xE000 and __w32_surrogate != 0:
+                c = 0x10000 + ((__w32_surrogate - 0xD800) << 10) + (c - 0xDC00)
+                __w32_surrogate = 0
+            if c >= 32 and c != 127: __text_input += __w32_utf8(c)
+            return 0
+        if m == 0x200:                                          # WM_MOUSEMOVE
+            x = f64(__w32_lo(lp))
+            y = f64(__w32_hi(lp))
+            if not __w32_locked:
+                __mouse_dx += x - __mouse_x
+                __mouse_dy += y - __mouse_y
+            __mouse_x = x
+            __mouse_y = y
+            return 0
+        if m == 0x201 or m == 0x202:
+            __mouse_event(0, m == 0x201)
+            return 0
+        if m == 0x207 or m == 0x208:
+            __mouse_event(1, m == 0x207)
+            return 0
+        if m == 0x204 or m == 0x205:
+            __mouse_event(2, m == 0x204)
+            return 0
+        if m == 0x20A:                                          # WM_MOUSEWHEEL
+            __mouse_wheel += f64(__w32_hi(wp)) / 120.0
+            return 0
+        if m == 0xFF:                                           # WM_INPUT: raw mouse motion
+            if __w32_locked:
+                buf = fill(u8(0), 64)
+                size: u32[] = [64]
+                if int(GetRawInputData(lp as *u8, u32(0x10000003), data(buf), data(size), 24)) > 0:
+                    if (data(buf) as *u32)[0] == 0 and (data(buf) + 24)[0] & 1 == 0:    # a mouse, relative
+                        __mouse_dx += f64(((data(buf) + 36) as *i32)[0])
+                        __mouse_dy += f64(((data(buf) + 40) as *i32)[0])
+            return DefWindowProcW(hwnd, msg, wp, lp)
+        if m == 0x8:                                            # WM_KILLFOCUS
+            __win_focused = false
+            loop mut kd in __key_down: kd = false
+            if __w32_locked: __w32_lock(false)
+            return 0
+        if m == 0x7:                                            # WM_SETFOCUS
+            __win_focused = true
+            if __mouse_lock_want: __w32_lock(true)
+            return 0
+        if m == 0x14: return 1                                  # WM_ERASEBKGND: drawn whole anyway
+        DefWindowProcW(hwnd, msg, wp, lp)
+
+    __w32_utf8 = (c: int) -> str:
+        b: u8[]
+        if c < 0x80: b.push(u8(c))
+        else if c < 0x800:
+            b.push(u8(0xC0 | (c >> 6)))
+            b.push(u8(0x80 | (c & 63)))
+        else if c < 0x10000:
+            b.push(u8(0xE0 | (c >> 12)))
+            b.push(u8(0x80 | ((c >> 6) & 63)))
+            b.push(u8(0x80 | (c & 63)))
+        else:
+            b.push(u8(0xF0 | (c >> 18)))
+            b.push(u8(0x80 | ((c >> 12) & 63)))
+            b.push(u8(0x80 | ((c >> 6) & 63)))
+            b.push(u8(0x80 | (c & 63)))
+        str_from_bytes(b)
+
+    # virtual-key code -> Key
+    __w32_key = (vk: int) -> int:
+        if vk >= 0x41 and vk <= 0x5A: return int(Key.a) + vk - 0x41
+        if vk >= 0x30 and vk <= 0x39: return int(Key.n0) + vk - 0x30
+        if vk >= 0x70 and vk <= 0x7B: return int(Key.f1) + vk - 0x70
+        if vk >= 0x60 and vk <= 0x69: return int(Key.kp0) + vk - 0x60
+        match vk:
+            0x6E: int(Key.kp_period)
+            0x6B: int(Key.kp_plus)
+            0x6D: int(Key.kp_minus)
+            0x6A: int(Key.kp_star)
+            0x6F: int(Key.kp_slash)
+            0x20: int(Key.space)
+            0x0D: int(Key.enter)
+            0x1B: int(Key.escape)
+            0x09: int(Key.tab)
+            0x08: int(Key.backspace)
+            0x2E: int(Key.delete)
+            0x2D: int(Key.insert)
+            0x24: int(Key.home)
+            0x23: int(Key.end)
+            0x21: int(Key.page_up)
+            0x22: int(Key.page_down)
+            0x25: int(Key.left)
+            0x26: int(Key.up)
+            0x27: int(Key.right)
+            0x28: int(Key.down)
+            0x10: int(Key.shift)
+            0x11: int(Key.ctrl)
+            0x12: int(Key.alt)
+            0x5B, 0x5C: int(Key.super)
+            0xBD: int(Key.minus)
+            0xBB: int(Key.equals)
+            0xBC: int(Key.comma)
+            0xBE: int(Key.period)
+            0xBF: int(Key.slash)
+            0xBA: int(Key.semicolon)
+            0xDE: int(Key.quote)
+            0xDB: int(Key.lbracket)
+            0xDD: int(Key.rbracket)
+            0xDC: int(Key.backslash)
+            0xC0: int(Key.grave)
+            _: 0
+
+    __platform_present = ():
+        if __w32_dc == null: return
+        if __vk:
+            __vk_present()
+            return
+        if not __soft:
+            SwapBuffers(__w32_dc)
+            return
+        w = __win_w
+        h = __win_h
+        if __w32_pixels.len() != w * h * 4: __w32_pixels = fill(u8(0), w * h * 4)
+        __sw_present_pixels(data(__w32_pixels), w, h)
+        if __w32_bmi.len() == 0: __w32_bmi = fill(u8(0), 44)
+        b = data(__w32_bmi)
+        (b as *u32)[0] = 40                                     # BITMAPINFOHEADER
+        (b as *i32)[1] = i32(w)
+        (b as *i32)[2] = i32(-h)                                # (top row first)
+        ((b + 12) as *u16)[0] = 1
+        ((b + 14) as *u16)[0] = 32
+        StretchDIBits(__w32_dc, 0, 0, i32(w), i32(h), 0, 0, i32(w), i32(h), data(__w32_pixels), b, 0, u32(0x00CC0020))     # SRCCOPY
+
+    # borderless, over the whole monitor (and back)
+    __platform_fullscreen = (on: bool):
+        if __w32_hwnd == null: return
+        if on:
+            __w32_saved_style = GetWindowLongPtrW(__w32_hwnd, -16)
+            GetWindowRect(__w32_hwnd, data(__w32_saved_rect))
+            info = fill(u8(0), 40)
+            (data(info) as *u32)[0] = 40
+            GetMonitorInfoW(MonitorFromWindow(__w32_hwnd, 2), data(info))
+            r = (data(info) + 4) as *i32
+            SetWindowLongPtrW(__w32_hwnd, -16, __WS_POPUP | __WS_VISIBLE)
+            SetWindowPos(__w32_hwnd, null, r[0], r[1], r[2] - r[0], r[3] - r[1], u32(0x220))     # FRAMECHANGED, NOOWNERZORDER
+        else if __w32_saved_style != 0:
+            r = __w32_saved_rect
+            SetWindowLongPtrW(__w32_hwnd, -16, __w32_saved_style)
+            SetWindowPos(__w32_hwnd, null, r[0], r[1], r[2] - r[0], r[3] - r[1], u32(0x220))
+
+    # mouse look: the pointer hidden and kept in the window, motion from raw input
+    __w32_lock = (on: bool) -> bool:
+        if __w32_hwnd == null: return false
+        if on == __w32_locked: return true
+        if on:
+            dev = fill(u8(0), 16)
+            ((data(dev)) as *u16)[0] = 1                        # generic desktop controls
+            ((data(dev) + 2) as *u16)[0] = 2                    # mouse
+            ((data(dev) + 8) as **u8)[0] = __w32_hwnd
+            RegisterRawInputDevices(data(dev), 1, 16)
+            cr: i32[] = [0, 0, 0, 0]
+            GetClientRect(__w32_hwnd, data(cr))
+            ClientToScreen(__w32_hwnd, data(cr))
+            ClientToScreen(__w32_hwnd, data(cr) + 2)
+            ClipCursor(data(cr))
+        else: ClipCursor(null)
+        __w32_locked = on
+        __w32_cursor_update()
+        true
+
+    # (ShowCursor counts: called only when what is wanted changes)
+    __w32_cursor_shown = true
+    __w32_cursor_update = ():
+        v = not __w32_locked and not __cursor_hidden
+        if v == __w32_cursor_shown: return
+        ShowCursor(i32(int(v)))
+        __w32_cursor_shown = v
+
+    __platform_mouse_lock = (on: bool) -> bool: __w32_lock(on)
+    __platform_mouse_locked = () -> bool: __w32_locked
+    __platform_show_cursor = (on: bool): __w32_cursor_update()
+
+    __platform_clipboard = () -> str:
+        if OpenClipboard(__w32_hwnd) == 0: return ""
+        s = ""
+        h = GetClipboardData(13)                                # CF_UNICODETEXT
+        if h != null:
+            p = GlobalLock(h)
+            if p != null:
+                s = __narrow(p as *u16, -1)
+                GlobalUnlock(h)
+        CloseClipboard()
+        s
+
+    __platform_set_clipboard = (s: str):
+        if OpenClipboard(__w32_hwnd) == 0: return
+        EmptyClipboard()
+        w = __wide(s)
+        h = GlobalAlloc(2, w.len() * 2)                         # GMEM_MOVEABLE
+        if h != null:
+            p = GlobalLock(h)
+            mem_copy(p, data(w) as *u8, w.len() * 2)
+            GlobalUnlock(h)
+            SetClipboardData(13, h)
+        CloseClipboard()
+    __platform_paste = (): pass
+    __platform_pasted = () -> bool: (key_down(.ctrl) or key_down(.super)) and key_pressed(.v)
+    __platform_can_share = () -> bool: false
+    __platform_share = (s: str): pass
+
+    __game_run = (update: (f64) -> void, draw: () -> void):
+        window(__win_title, __win_w, __win_h)
+        __fixed_step = env("SLOPPY_SCREENSHOT") != none
+        when WATCH:
+            __watch_init()
+        last = time()
+        loop not __win_close:
+            when WATCH:
+                __watch_frame()
+            __platform_poll()
+            now = time()
+            dt = clamp(now - last, 0.0, 0.1)
+            last = now
+            if __fixed_step: dt = 1.0 / 60.0
+            if __soft: __sw_init_window(__win_w, __win_h)
+            __run_frame(dt, update, draw)
+            t0 = time()
+            __platform_present()
+            __last_present = time() - t0
+            __frame_present += __last_present
+            # (without vsync, software frames are paced to 60 per second)
+            if (__soft and not __fixed_step) or (__fixed_step and __pace_real_time):
+                left = 1.0 / 60.0 - (time() - now)
+                if left > 0.0: sleep(left)
+        __game_quit()
+        exit(0)
+else when TARGET == "linux":
+    # (macOS: cocoa.jo)
+    @lib("libX11.so.6")
+    extern XOpenDisplay = (name: *u8) -> *u8
+    @lib("libX11.so.6")
+    extern XDefaultScreen = (d: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XRootWindow = (d: *u8, screen: i32) -> int
+    @lib("libX11.so.6")
+    extern XCreateSimpleWindow = (d: *u8, parent: int, x: i32, y: i32, w: u32, h: u32, bw: u32, border: int, bg: int) -> int
+    @lib("libX11.so.6")
+    extern XStoreName = (d: *u8, w: int, name: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XSelectInput = (d: *u8, w: int, mask: int) -> i32
+    @lib("libX11.so.6")
+    extern XMapWindow = (d: *u8, w: int) -> i32
+    @lib("libX11.so.6")
+    extern XInternAtom = (d: *u8, name: *u8, only_if_exists: i32) -> int
+    @lib("libX11.so.6")
+    extern XSetWMProtocols = (d: *u8, w: int, protocols: *int, count: i32) -> i32
+    @lib("libX11.so.6")
+    extern XPending = (d: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XNextEvent = (d: *u8, ev: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XLookupKeysym = (ev: *u8, index: i32) -> int
+    @lib("libX11.so.6")
+    extern XLookupString = (ev: *u8, buf: *u8, n: i32, keysym: *int, status: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XFlush = (d: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XSetWMNormalHints = (d: *u8, w: int, hints: *u8)
+    @lib("libX11.so.6")
+    extern XDefaultVisual = (d: *u8, screen: i32) -> *u8
+    @lib("libX11.so.6")
+    extern XDefaultDepth = (d: *u8, screen: i32) -> i32
+    @lib("libX11.so.6")
+    extern XDefaultGC = (d: *u8, screen: i32) -> *u8
+    @lib("libX11.so.6")
+    extern XCreateImage = (d: *u8, visual: *u8, depth: u32, format: i32, offset: i32, data: *u8, w: u32, h: u32, pad: i32, bpl: i32) -> *u8
+    @lib("libX11.so.6")
+    extern XPutImage = (d: *u8, win: int, gc: *u8, img: *u8, sx: i32, sy: i32, dx: i32, dy: i32, w: u32, h: u32) -> i32
+    @lib("libX11.so.6")
+    extern XSync = (d: *u8, discard: i32) -> i32
+    @lib("libX11.so.6")
+    extern XFree = (p: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XkbSetDetectableAutoRepeat = (d: *u8, detectable: i32, supported: *i32) -> i32
+    @lib("libX11.so.6")
+    extern XSendEvent = (d: *u8, w: int, propagate: i32, mask: int, ev: *u8) -> i32
+    @lib("libX11.so.6")
+    extern XSetSelectionOwner = (d: *u8, selection: int, owner: int, time: int) -> i32
+    @lib("libX11.so.6")
+    extern XGetSelectionOwner = (d: *u8, selection: int) -> int
+    @lib("libX11.so.6")
+    extern XConvertSelection = (d: *u8, selection: int, target: int, property: int, requestor: int, time: int) -> i32
+    @lib("libX11.so.6")
+    extern XChangeProperty = (d: *u8, w: int, property: int, ty: int, format: i32, mode: i32, data: *u8, n: i32) -> i32
+    @lib("libX11.so.6")
+    extern XGetWindowProperty = (d: *u8, w: int, property: int, offset: int, length: int, delete: i32, req_type: int, actual_type: *int, actual_format: *i32, nitems: *int, bytes_after: *int, prop: **u8) -> i32
+
+    @lib("libEGL.so.1")
+    extern eglGetDisplay = (native: *u8) -> *u8
+    @lib("libEGL.so.1")
+    extern eglGetPlatformDisplay = (platform: u32, native: *u8, attribs: *int) -> *u8
+    @lib("libEGL.so.1")
+    extern eglInitialize = (d: *u8, major: *i32, minor: *i32) -> u32
+    @lib("libEGL.so.1")
+    extern eglBindAPI = (api: u32) -> u32
+    @lib("libEGL.so.1")
+    extern eglChooseConfig = (d: *u8, attribs: *i32, configs: **u8, size: i32, num: *i32) -> u32
+    @lib("libEGL.so.1")
+    extern eglCreateWindowSurface = (d: *u8, config: *u8, win: int, attribs: *i32) -> *u8
+    @lib("libEGL.so.1")
+    extern eglCreatePlatformWindowSurface = (d: *u8, config: *u8, win: *int, attribs: *int) -> *u8
+    @lib("libEGL.so.1")
+    extern eglCreateContext = (d: *u8, config: *u8, share: *u8, attribs: *i32) -> *u8
+    @lib("libEGL.so.1")
+    extern eglMakeCurrent = (d: *u8, draw: *u8, read: *u8, ctx: *u8) -> u32
+    @lib("libEGL.so.1")
+    extern eglSwapBuffers = (d: *u8, surf: *u8) -> u32
+    @lib("libEGL.so.1")
+    extern eglSwapInterval = (d: *u8, interval: i32) -> u32
+    @lib("libEGL.so.1")
+    extern eglGetError = () -> i32
+
+    __xdpy: *u8 = null
+    __xwin = 0
+    __wm_delete = 0
+    __egl_dpy: *u8 = null
+    __egl_surf: *u8 = null
+    __egl_ctx: *u8 = null
+    __xev: *u8 = null
+    __xscr: i32 = 0
+    __xproto = false             # connected through x11.jo instead of libX11
+    __wayland = false            # connected through wayland.jo
+
+    # a missing display or driver is an environment problem, not a program bug: say so and exit
+    __need = (ok: bool, what: str):
+        if not ok:
+            eprint("error: cannot open a window: {what}")
+            exit(1)
+
+    __platform_open = ():
+        __soft = __soft_kept or (env("SLOPPY_SOFTWARE") ?? "") == "1"
+        # (the software renderer with no display to show it on: frames drawn, no window, as for
+        # a benchmark with SLOPPY_FRAMES and SLOPPY_STATS)
+        no_display = env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none
+        headless = __soft and (env("SLOPPY_SCREENSHOT") != none or no_display)
+        # (a screenshot run through Vulkan needs no display: no window, frames are only drawn)
+        if not __soft and __vk_wanted() and env("SLOPPY_SCREENSHOT") != none and env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none:
+            why = __vk_open("", () -> int: 0)
+            if len(why) == 0:
+                __vk = true
+                return
+            __vk_note("{why}; using the software renderer")
+            __soft = true
+            headless = true
+        # Wayland first where it is running (SLOPPY_PLATFORM=x11 or wayland chooses)
+        plat = env("SLOPPY_PLATFORM") ?? ""
+        if plat != "x11" and (env("WAYLAND_DISPLAY") != none or plat == "wayland") and not headless:
+            why = __wl_open(__win_title, __win_w, __win_h)
+            if len(why) == 0:
+                __wayland = true
+                if not __soft and __lw_on and __vk_wanted():
+                    why2 = __vk_open("VK_KHR_wayland_surface", __vk_wayland_surface)
+                    if len(why2) == 0: __vk = true
+                    else: __vk_note("{why2}; using OpenGL")
+                if not __soft and not __vk:
+                    # (GPU arrays may have made the context already: keep it, their data lives there)
+                    why2 = ""
+                    if __egl_dpy == null: why2 = __egl_open_surfaceless()
+                    else: __gl_screen_resize(__win_w, __win_h)
+                    if len(why2) > 0:
+                        eprint("note: {why2}; using the software renderer")
+                        __soft = true
+                if __soft: __sw_init_window(__win_w, __win_h)
+                return
+            if plat == "wayland": __need(false, why)
+        if not lib_available("libX11.so.6") or (env("SLOPPY_X11") ?? "") == "protocol":
+            # no Xlib: talk to the X server directly and render in software
+            __soft = true
+            why = __xp_open(__win_title, __win_w, __win_h)
+            if len(why) == 0:
+                __xproto = true
+                # (the request must fit in the server's longest)
+                icon = __icon_argb(__xp_maxreq - 8)
+                if icon.len() > 0:
+                    v: u8[]
+                    loop x in icon: __put32(v, x)
+                    __xp_property(__xp_intern("_NET_WM_ICON"), 6, 32, v)     # CARDINAL
+            # a screenshot run can render without any display
+            else if not headless: __need(false, "libX11 is not available and {why}")
+            __sw_init_window(__win_w, __win_h)
+            return
+        __xdpy = XOpenDisplay(null)
+        if __xdpy == null and headless:
+            __sw_init_window(__win_w, __win_h)
+            return
+        __need(__xdpy != null, "cannot connect to the X server (is DISPLAY set?)")
+        __xscr = XDefaultScreen(__xdpy)
+        root = XRootWindow(__xdpy, __xscr)
+        __xwin = XCreateSimpleWindow(__xdpy, root, 0, 0, u32(__win_w), u32(__win_h), 0, 0, 0)
+        XStoreName(__xdpy, __xwin, data(__zstr(__win_title)))
+        icon = __icon_argb(1 << 20)
+        # (Xlib takes 32-bit values as C longs: ints)
+        if icon.len() > 0: XChangeProperty(__xdpy, __xwin, XInternAtom(__xdpy, data("_NET_WM_ICON"), 0), 6, 32, 0, data(icon) as *u8, i32(icon.len()))
+        # key, button, motion, structure and focus events
+        XSelectInput(__xdpy, __xwin, 0x1 | 0x2 | 0x4 | 0x8 | 0x40 | 0x20000 | 0x200000)
+        __wm_delete = XInternAtom(__xdpy, data("WM_DELETE_WINDOW"), 0)
+        XSetWMProtocols(__xdpy, __xwin, &__wm_delete, 1)
+        XkbSetDetectableAutoRepeat(__xdpy, 1, null)       # (a held key repeats presses only)
+        XMapWindow(__xdpy, __xwin)
+        XFlush(__xdpy)
+        __xev = __alloc(256)
+        if not __soft and __vk_wanted():
+            why = __vk_open("VK_KHR_xlib_surface", __vk_xlib_surface)
+            if len(why) == 0: __vk = true
+            else: __vk_note("{why}; using OpenGL")
+        if not __soft and not __vk:
+            why = __egl_open()
+            if len(why) > 0:
+                eprint("note: {why}; using the software renderer")
+                __soft = true
+        if __soft: __sw_init_window(__win_w, __win_h)
+
+    __platform_title = ():
+        if __wayland: __wl_set_title(__win_title)
+        else if __xproto: __xp_property(39, 31, 8, bytes(__win_title))         # WM_NAME, STRING
+        else if __xdpy != null:
+            XStoreName(__xdpy, __xwin, data(__zstr(__win_title)))
+            XFlush(__xdpy)
+
+    # OpenGL ES without a window surface: drawing goes to an offscreen framebuffer that is
+    # copied into the Wayland window's buffers
+    __egl_open_surfaceless = () -> str:
+        if not lib_available("libEGL.so.1") or not lib_available("libGLESv2.so.2"): return "no OpenGL ES driver (libEGL/libGLESv2) found"
+        __egl_dpy = eglGetPlatformDisplay(0x31DD, null, null)        # EGL_PLATFORM_SURFACELESS_MESA
+        if __egl_dpy == null: return "no surfaceless EGL display"
+        maj: i32 = 0
+        mn: i32 = 0
+        if eglInitialize(__egl_dpy, &maj, &mn) == 0: return "eglInitialize failed"
+        eglBindAPI(0x30A0)
+        attrs: i32[] = [0x3033, 0, 0x3040, 0x40, 0x3038]               # any surface type; ES3
+        cfg: *u8 = null
+        n: i32 = 0
+        if eglChooseConfig(__egl_dpy, data(attrs), &cfg, 1, &n) == 0 or n == 0: return "no suitable EGL config"
+        cattrs: i32[] = [0x3098, 3, 0x30FB, 0, 0x3038]
+        ctx = eglCreateContext(__egl_dpy, cfg, null, data(cattrs))
+        if ctx == null: return "eglCreateContext failed (OpenGL ES 3 needed)"
+        __egl_ctx = ctx
+        if eglMakeCurrent(__egl_dpy, null, null, ctx) == 0: return "the GL driver cannot render without a window surface"
+        __gl_screen_resize(__win_w, __win_h)
+        ""
+
+    # set up OpenGL ES on the window; returns why that is impossible, or ""
+    __egl_open = () -> str:
+        if not lib_available("libEGL.so.1") or not lib_available("libGLESv2.so.2"): return "no OpenGL ES driver (libEGL/libGLESv2) found"
+        __egl_dpy = eglGetPlatformDisplay(0x31D5, __xdpy, null)      # EGL_PLATFORM_X11_KHR
+        if __egl_dpy == null: __egl_dpy = eglGetDisplay(__xdpy)
+        if __egl_dpy == null: return "eglGetDisplay failed"
+        maj: i32 = 0
+        mn: i32 = 0
+        if eglInitialize(__egl_dpy, &maj, &mn) == 0: return "eglInitialize failed"
+        eglBindAPI(0x30A0)             # EGL_OPENGL_ES_API
+        attrs: i32[] = [0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3025, 24, 0x3040, 0x40, 0x3033, 4, 0x3038]
+        cfg: *u8 = null
+        n: i32 = 0
+        if eglChooseConfig(__egl_dpy, data(attrs), &cfg, 1, &n) == 0 or n == 0: return "no suitable EGL config"
+        __egl_surf = eglCreateWindowSurface(__egl_dpy, cfg, __xwin, null)
+        if __egl_surf == null:
+            # try the platform-specific entry point, which takes a pointer to the window id
+            __egl_surf = eglCreatePlatformWindowSurface(__egl_dpy, cfg, &__xwin, null)
+        if __egl_surf == null: return "eglCreateWindowSurface failed (EGL error 0x{eglGetError():x})"
+        cattrs: i32[] = [0x3098, 3, 0x30FB, 0, 0x3038]
+        ctx = eglCreateContext(__egl_dpy, cfg, null, data(cattrs))
+        if ctx == null: return "eglCreateContext failed (OpenGL ES 3 needed)"
+        if eglMakeCurrent(__egl_dpy, __egl_surf, __egl_surf, ctx) == 0: return "eglMakeCurrent failed"
+        eglSwapInterval(__egl_dpy, 1)
+        ""
+
+    __ximg: *u8 = null
+    __ximg_buf: u8[]
+    __ximg_w = 0
+    __ximg_h = 0
+
+    # show the software renderer's frame
+    __sw_present = ():
+        w = __win_w
+        h = __win_h
+        if __xproto:
+            if __ximg_buf.len() != w * h * 4: __ximg_buf = fill(u8(0), w * h * 4)
+            __sw_present_pixels(data(__ximg_buf), w, h)
+            __xp_put_image(__ximg_buf, w, h)
+            return
+        if __xdpy == null: return
+        if __ximg == null or __ximg_w != w or __ximg_h != h:
+            if __ximg != null: XFree(__ximg)       # frees the header only; the pixels are ours
+            __ximg_buf = fill(u8(0), w * h * 4)
+            __ximg = XCreateImage(__xdpy, XDefaultVisual(__xdpy, __xscr), u32(XDefaultDepth(__xdpy, __xscr)), 2, 0, data(__ximg_buf), u32(w), u32(h), 32, 0)
+            __ximg_w = w
+            __ximg_h = h
+        __sw_present_pixels(data(__ximg_buf), w, h)
+        XPutImage(__xdpy, __xwin, XDefaultGC(__xdpy, __xscr), __ximg, 0, 0, 0, 0, u32(w), u32(h))
+        XSync(__xdpy, 0)
+
+    __xkey = (sym: int) -> int:
+        if sym >= 0x61 and sym <= 0x7a: return int(Key.a) + sym - 0x61
+        if sym >= 0x41 and sym <= 0x5a: return int(Key.a) + sym - 0x41
+        if sym >= 0x30 and sym <= 0x39: return int(Key.n0) + sym - 0x30
+        if sym >= 0xffbe and sym <= 0xffc9: return int(Key.f1) + sym - 0xffbe
+        if sym >= 0xffb0 and sym <= 0xffb9: return int(Key.kp0) + sym - 0xffb0
+        match sym:
+            # (the number pad, its NumLock off or on: kp7 is 7 and Home)
+            0xff95: int(Key.kp7)
+            0xff96: int(Key.kp4)
+            0xff97: int(Key.kp8)
+            0xff98: int(Key.kp6)
+            0xff99: int(Key.kp2)
+            0xff9a: int(Key.kp9)
+            0xff9b: int(Key.kp3)
+            0xff9c: int(Key.kp1)
+            0xff9d: int(Key.kp5)
+            0xff9e: int(Key.kp0)
+            0xff9f, 0xffae: int(Key.kp_period)
+            0xffab: int(Key.kp_plus)
+            0xffad: int(Key.kp_minus)
+            0xffaa: int(Key.kp_star)
+            0xffaf: int(Key.kp_slash)
+            0x20: int(Key.space)
+            0xff0d: int(Key.enter)
+            0xff8d: int(Key.enter)
+            0xff1b: int(Key.escape)
+            0xff09: int(Key.tab)
+            0xff08: int(Key.backspace)
+            0xffff: int(Key.delete)
+            0xff63: int(Key.insert)
+            0xff50: int(Key.home)
+            0xff57: int(Key.end)
+            0xff55: int(Key.page_up)
+            0xff56: int(Key.page_down)
+            0xff51: int(Key.left)
+            0xff52: int(Key.up)
+            0xff53: int(Key.right)
+            0xff54: int(Key.down)
+            0xffe1, 0xffe2: int(Key.shift)
+            0xffe3, 0xffe4: int(Key.ctrl)
+            0xffe9, 0xffea: int(Key.alt)
+            0xffeb, 0xffec: int(Key.super)
+            0x2d: int(Key.minus)
+            0x3d: int(Key.equals)
+            0x2c: int(Key.comma)
+            0x2e: int(Key.period)
+            0x2f: int(Key.slash)
+            0x3b: int(Key.semicolon)
+            0x27: int(Key.quote)
+            0x5b: int(Key.lbracket)
+            0x5d: int(Key.rbracket)
+            0x5c: int(Key.backslash)
+            0x60: int(Key.grave)
+            _: 0
+
+    __platform_poll = ():
+        if __wayland:
+            __wl_poll()
+            # (a lock asked for before the seat had a pointer)
+            if __mouse_lock_want and __wl_locked == 0 and __wl_pointer != 0 and __wl_constraints != 0: __wl_pointer_lock(true)
+            return
+        if __xproto:
+            __xp_poll()
+            return
+        if __xdpy == null: return
+        loop XPending(__xdpy) > 0:
+            XNextEvent(__xdpy, __xev)
+            __x_event(__xev)
+
+    __x_event = (evp: *u8):
+        ev = evp as *i32
+        kind = int(ev[0])
+        if kind == 2 or kind == 3:
+            sym = XLookupKeysym(evp, 0)
+            k = __xkey(sym)
+            # (a press of a key already down: held, repeating)
+            __key_event(k, kind == 2, kind == 2 and k > 0 and __key_down[k])
+            if kind == 2 and int(ev[20]) & 4 == 0:
+                buf = __alloc(16)
+                ks = [0]
+                n = XLookupString(evp, buf, 15, data(ks), null)
+                # (the keysym the layout gives: Latin-1 as itself, others as 0x1000000 + Unicode)
+                c = 0
+                if (ks[0] >= 0x20 and ks[0] < 0x7F) or (ks[0] >= 0xA0 and ks[0] <= 0xFF): c = ks[0]
+                else if ks[0] >= 0x1000100 and ks[0] <= 0x110FFFF: c = ks[0] - 0x1000000
+                else if ks[0] == 0x20AC: c = 0x20AC
+                else if n == 1 and buf[0] >= 32 and buf[0] < 127: c = int(buf[0])
+                if c > 0: __text_input += chr(c)
+                __free(buf)
+        else if kind == 4 or kind == 5:
+            btn = int(ev[21])
+            if btn == 1: __mouse_event(0, kind == 4)
+            else if btn == 2: __mouse_event(1, kind == 4)
+            else if btn == 3: __mouse_event(2, kind == 4)
+            else if btn == 4 and kind == 4: __mouse_wheel += 1.0
+            else if btn == 5 and kind == 4: __mouse_wheel -= 1.0
+        else if kind == 6:
+            x = f64(ev[16])
+            y = f64(ev[17])
+            __mouse_dx += x - __mouse_x
+            __mouse_dy += y - __mouse_y
+            __mouse_x = x
+            __mouse_y = y
+            # (locked: back to the middle, so the motion never stops at the window's edge)
+            if __x_locked and (int(x) != __win_w / 2 or int(y) != __win_h / 2): __x_recenter()
+        else if kind == 22:
+            __win_w = int(ev[14])
+            __win_h = int(ev[15])
+        else if kind == 33:
+            if (evp as *int)[7] == __wm_delete: __win_close = true
+        else if kind == 10:
+            __win_focused = false
+            loop mut kd in __key_down: kd = false
+            # (focus elsewhere: the pointer is free there, and locked again on return)
+            if __x_locked:
+                XUngrabPointer(__xdpy, 0)
+                __x_locked = false
+        else if kind == 9:
+            __win_focused = true
+            if __mouse_lock_want and not __x_locked: __x_mouse_lock(true)
+        else if kind == 30: __x_selection_request(evp)
+        else if kind == 31:
+            __x_sel_done = true
+            __x_sel_prop = (evp as *int)[7]
+
+    # ---- fullscreen and the clipboard (libX11) ----
+    __x_atoms: {str: int} = {}
+    __x_atom = (name: str) -> int:
+        if let a = __x_atoms.get(name): return a
+        a = XInternAtom(__xdpy, data(__zstr(name)), 0)
+        __x_atoms[name] = a
+        a
+
+    __x_fullscreen = (on: bool):
+        ev = fill(0, 24)                       # an XClientMessageEvent to the root window
+        ev[0] = 33
+        ev[4] = __xwin
+        ev[5] = __x_atom("_NET_WM_STATE")
+        ev[6] = 32
+        ev[7] = int(on)
+        ev[8] = __x_atom("_NET_WM_STATE_FULLSCREEN")
+        ev[10] = 1
+        XSendEvent(__xdpy, XRootWindow(__xdpy, __xscr), 0, 0x180000, data(ev) as *u8)
+        XFlush(__xdpy)
+
+    __x_clip_text = ""
+    __x_sel_done = false
+    __x_sel_prop = 0
+
+    __x_set_clipboard = (s: str):
+        __x_clip_text = s
+        XSetSelectionOwner(__xdpy, __x_atom("CLIPBOARD"), __xwin, 0)
+        XFlush(__xdpy)
+
+    # another program asks for the clipboard we own: put the text on its window, and say so
+    __x_selection_request = (evp: *u8):
+        e = evp as *int
+        requestor = e[5]
+        target = e[7]
+        prop = e[8]
+        if prop == 0: prop = target
+        utf8 = __x_atom("UTF8_STRING")
+        if target == __x_atom("TARGETS"):
+            ts = [__x_atom("TARGETS"), utf8, 31]
+            XChangeProperty(__xdpy, requestor, prop, 4, 32, 0, data(ts) as *u8, 3)
+        else if target == utf8 or target == 31:
+            b = bytes(__x_clip_text)
+            XChangeProperty(__xdpy, requestor, prop, target, 8, 0, data(b), i32(b.len()))
+        else: prop = 0
+        r = fill(0, 24)                        # an XSelectionEvent
+        r[0] = 31
+        r[4] = requestor
+        r[5] = e[6]
+        r[6] = target
+        r[7] = prop
+        r[8] = e[9]
+        XSendEvent(__xdpy, requestor, 0, 0, data(r) as *u8)
+        XFlush(__xdpy)
+
+    __x_get_clipboard = () -> str:
+        cb = __x_atom("CLIPBOARD")
+        owner = XGetSelectionOwner(__xdpy, cb)
+        if owner == __xwin: return __x_clip_text
+        if owner == 0: return ""
+        prop = __x_atom("SLOPPY_CLIPBOARD")
+        __x_sel_done = false
+        XConvertSelection(__xdpy, cb, __x_atom("UTF8_STRING"), prop, __xwin, 0)
+        XFlush(__xdpy)
+        t0 = time()
+        loop not __x_sel_done and time() - t0 < 0.5:
+            if XPending(__xdpy) > 0:
+                XNextEvent(__xdpy, __xev)
+                __x_event(__xev)
+            else: sleep(0.002)
+        if not __x_sel_done or __x_sel_prop == 0: return ""
+        ty = 0
+        fmt: i32 = 0
+        n = 0
+        after = 0
+        p: *u8 = null
+        XGetWindowProperty(__xdpy, __xwin, prop, 0, 1 << 24, 1, 0, &ty, &fmt, &n, &after, &p)
+        if p == null: return ""
+        out = fill(u8(0), n)
+        mem_copy(data(out), p, n)
+        XFree(p)
+        str_from_bytes(out)
+
+    # the clipboard where the platform has none of its own (the X11 protocol path): this program's
+    __local_clip = ""
+    __platform_fullscreen = (on: bool):
+        if __wayland: __wl_set_fullscreen(on)
+        else if __xproto: __xp_fullscreen(on)
+        else if __xdpy != null: __x_fullscreen(on)
+    __platform_mouse_lock = (on: bool) -> bool:
+        if __wayland: return __wl_pointer_lock(on)
+        if __xdpy != null and not __xproto: return __x_mouse_lock(on)
+        false
+    __platform_mouse_locked = () -> bool:
+        if __wayland: return __wl_locked != 0
+        __x_locked
+    __platform_show_cursor = (on: bool):
+        if __wayland: __wl_show_cursor(on)
+        else if __xdpy != null and not __xproto: __x_show_cursor(on)
+
+    # ---- mouse lock (libX11): the pointer grabbed, hidden and put back in the middle ----
+    @lib("libX11.so.6")
+    extern XGrabPointer = (d: *u8, w: int, owner: i32, mask: u32, pmode: i32, kmode: i32, confine: int, cursor: int, time: int) -> i32
+    @lib("libX11.so.6")
+    extern XUngrabPointer = (d: *u8, time: int) -> i32
+    @lib("libX11.so.6")
+    extern XWarpPointer = (d: *u8, src: int, dst: int, sx: i32, sy: i32, sw: u32, sh: u32, dx: i32, dy: i32) -> i32
+    @lib("libX11.so.6")
+    extern XCreateBitmapFromData = (d: *u8, w: int, bits: *u8, width: u32, height: u32) -> int
+    @lib("libX11.so.6")
+    extern XCreatePixmapCursor = (d: *u8, src: int, mask: int, fg: *u8, bg: *u8, x: u32, y: u32) -> int
+    @lib("libX11.so.6")
+    extern XDefineCursor = (d: *u8, w: int, c: int) -> i32
+    @lib("libX11.so.6")
+    extern XUndefineCursor = (d: *u8, w: int) -> i32
+
+    __x_locked = false
+    __x_blank = 0
+
+    __x_mouse_lock = (on: bool) -> bool:
+        if not on:
+            if __x_locked: XUngrabPointer(__xdpy, 0)
+            __x_locked = false
+            __x_show_cursor(not __cursor_hidden)
+            return true
+        __x_make_blank()
+        XDefineCursor(__xdpy, __xwin, __x_blank)
+        # (pointer motion and buttons, both async, confined to the window)
+        __x_locked = XGrabPointer(__xdpy, __xwin, 1, 0x4 | 0x8 | 0x40, 1, 1, __xwin, __x_blank, 0) == 0
+        if __x_locked: __x_recenter()
+        XFlush(__xdpy)
+        __x_locked
+
+    # (an invisible cursor: a 1x1 bitmap with nothing in its mask)
+    __x_make_blank = ():
+        if __x_blank != 0: return
+        bits = fill(u8(0), 8)
+        color = fill(u8(0), 16)
+        bm = XCreateBitmapFromData(__xdpy, __xwin, data(bits), 1, 1)
+        __x_blank = XCreatePixmapCursor(__xdpy, bm, bm, data(color), data(color), 0, 0)
+
+    __x_show_cursor = (on: bool):
+        if __x_locked: return
+        if on: XUndefineCursor(__xdpy, __xwin)
+        else:
+            __x_make_blank()
+            XDefineCursor(__xdpy, __xwin, __x_blank)
+        XFlush(__xdpy)
+
+    __x_recenter = ():
+        XWarpPointer(__xdpy, 0, __xwin, 0, 0, 0, 0, i32(__win_w / 2), i32(__win_h / 2))
+        __mouse_x = f64(__win_w / 2)
+        __mouse_y = f64(__win_h / 2)
+    __platform_clipboard = () -> str:
+        if __wayland: return __wl_get_clipboard()
+        if __xdpy != null: return __x_get_clipboard()
+        __local_clip
+    __platform_set_clipboard = (s: str):
+        if __wayland: __wl_set_clipboard(s)
+        else if __xdpy != null: __x_set_clipboard(s)
+        else: __local_clip = s
+    __platform_paste = (): pass
+    __platform_pasted = () -> bool: (key_down(.ctrl) or key_down(.super)) and key_pressed(.v)
+    __platform_can_share = () -> bool: false
+    __platform_share = (s: str): pass
+
+    # (Vulkan surfaces for the window: the libX11 window, or the libwayland surface)
+    __vk_xlib_surface = () -> int:
+        info = VkXlibSurfaceCreateInfo(stype = 1000004000, dpy = __xdpy, window = __xwin)
+        s = 0
+        if vkCreateXlibSurfaceKHR(__vk_inst, (&info) as *u8, null, &s) != 0: return 0
+        s
+
+    __vk_wayland_surface = () -> int:
+        info = VkWaylandSurfaceCreateInfo(stype = 1000006000, display = __lw_display, surface = __lw_proxy(__wl_surface))
+        s = 0
+        if vkCreateWaylandSurfaceKHR(__vk_inst, (&info) as *u8, null, &s) != 0: return 0
+        s
+
+    __platform_present = ():
+        if __vk:
+            if __wayland:
+                # (the title bar the window draws itself, if it does; the viewport's size goes with
+                # the frame the swapchain commits)
+                __vk_bar_h = __wl_bar_px
+                if __wl_bar_px > 0:
+                    key = "{__win_w} {__wl_bar_px} {__wl_lw} {__win_title}"
+                    if key != __wl_bar_key:
+                        __wl_bar_key = key
+                        __vk_bar = fill(u8(0), __win_w * __wl_bar_px * 4)
+                        __wl_draw_bar(data(__vk_bar), __win_w, false)
+                        loop i in [0..__win_w * __wl_bar_px): __vk_bar[i * 4 + 3] = 255
+                __wl_set_size()
+                __wl_flush()
+            __vk_present()
+            return
+        if __wayland:
+            if __soft: __wl_present((out: *u8, w: int, h: int): __sw_present_pixels(out, w, h))
+            else if not __wl_present_gpu(): __wl_present((out: *u8, w: int, h: int): __gl_screen_copy(out, w, h))
+        else if __soft: __sw_present()
+        else: eglSwapBuffers(__egl_dpy, __egl_surf)
+
+    __game_run = (update: (f64) -> void, draw: () -> void):
+        window(__win_title, __win_w, __win_h)
+        __fixed_step = env("SLOPPY_SCREENSHOT") != none
+        when WATCH:
+            __watch_init()
+        last = time()
+        loop not __win_close:
+            when WATCH:
+                __watch_frame()
+            __platform_poll()
+            now = time()
+            dt = clamp(now - last, 0.0, 0.1)
+            last = now
+            if __fixed_step: dt = 1.0 / 60.0
+            if __soft: __sw_init_window(__win_w, __win_h)
+            else if __wayland and not __vk: __gl_screen_resize(__win_w, __win_h)
+            __run_frame(dt, update, draw)
+            t0 = time()
+            __platform_present()
+            __last_present = time() - t0
+            __frame_present += __last_present
+            # without vsync, software frames are paced to 60 per second
+            if (__soft and not __fixed_step) or (__fixed_step and __pace_real_time):
+                left = 1.0 / 60.0 - (time() - now)
+                if left > 0.0: sleep(left)
+        __game_quit()
+        exit(0)
+
+# (render_image before any window: the software renderer, with none)
+__is_game = false               # (set first thing by a program with update or draw)
+__offscreen = false
+__soft_kept = false
+__open_offscreen = ():
+    when TARGET != "wasm":
+        __input_init()
+        __offscreen = true
+        __soft = true
+        __soft_scale = 1.0
+        __win_w = 1
+        __win_h = 1
+        __design_w = 1
+        __design_h = 1
+        __sw_init_window(1, 1)
+        __win_open = true
+        __time0 = time()
+
+__no_update = (dt: f64): pass
+__no_draw = (): pass
+
+# the game's on_quit = (): run once as it ends: its window closed (or quit() called), or a
+# test's frames are done
+# (a page: as it is closed or left)
+__quit_fn: () -> void = __no_draw
+__quit_done = false
+__set_quit = (f: () -> void): __quit_fn = f
+__game_quit = ():
+    if __quit_done: return
+    __quit_done = true
+    __quit_fn()
+    # (a page closed does not reach the program's end: its goodbyes now)
+    when TARGET == "wasm": __run_end_fns()
+
+__fps_acc = 0.0
+__fps_n = 0
+
+# testing aid: SLOPPY_INPUT="5:space+,7:space-,10:right+" (commas or spaces between) presses (+) / releases (-) keys at
+# frames (the names of Key: a, n1, space, escape, left, shift...); mouse_left+ (and mouse_right,
+# mouse_middle) the mouse's buttons, 3:wheel=1 turns the wheel a notch (-1: back), and
+# 12:mouse=400x300 moves the mouse there (in the screen's
+# units, as mouse_pos); 5:touch1=400x300 puts finger 1 down there or moves it, 9:touch1- lifts it
+# (the first finger down is the mouse too, as on a phone); a letter, digit, space or punctuation key pressed is typed (text_input; with shift, as a US keyboard does), and 9:text=ACE types text;
+# a gamepad (pad 0): 5:pad_a+ and 9:pad_a- (PadButton's names: pad_start, pad_up...), 5:lstick=1x0
+# and rstick=XxY (x right, y down, -1 to 1), 5:lt=1 and rt=V (the triggers, 0 to 1)
+__script: (int, int, bool, vec2)[]          # (frame, key (-1 - button: a mouse button; -100: a move), down, where)
+__script_loaded = false
+__script_mouse_placed = false
+__script_text: (int, str)[]                 # (frame, text typed then: 5:text=ACE)
+# (SLOPPY_INPUT's gamepad, pad 0: there from the first item that uses it)
+__scripted_pad = ():
+    loop e in __script:
+        if e.0 != __frame_count or e.1 > -300 or e.1 <= -500: continue
+        if not __pad_on[0]:
+            __pad_on[0] = true
+            __pad_names[0] = "SLOPPY_INPUT"
+        if e.1 > -400:
+            __pad_down[-300 - e.1] = e.2
+        else:
+            ax = -400 - e.1
+            if ax == 0 or ax == 1:
+                __pad_axes[ax * 2] = f64(e.3.x)
+                __pad_axes[ax * 2 + 1] = f64(e.3.y)
+            else: __pad_axes[2 + ax] = f64(e.3.x)
+
+__scripted_input = ():
+    if __fixed_step: __ignore_real_input()
+    if not __script_loaded:
+        __script_loaded = true
+        # (a screenshot run's mouse starts in the middle of the window, as one resting there,
+        # not in the corner, where a game that scrolls at the screen's edge would scroll)
+        if __fixed_step:
+            __mouse_x = f64(__win_w) / 2.0
+            __mouse_y = f64(__win_h) / 2.0
+        if let s = env("SLOPPY_INPUT"):
+            # (items between commas or spaces; text=... runs on, spaces and all, to the next
+            # comma or the next word that starts with a frame number and a colon)
+            items: str[]
+            loop part in split(s, ","):
+                in_text = false
+                loop w in words(part):
+                    c0 = find(w, ":")
+                    starts_item = c0 > 0 and to_int(w[..c0)) != none
+                    if in_text and not starts_item:
+                        items[items.len() - 1] = items[items.len() - 1] + " " + w
+                        continue
+                    items.push(w)
+                    in_text = starts_item and starts_with(w[c0 + 1..], "text=")
+            loop item in items:
+                c = find(item, ":")
+                if c < 0 or len(item) < c + 3: continue
+                fr = to_int(item[..c)) ?? 0
+                if starts_with(item[c + 1..], "text="):
+                    __script_text.push((fr, item[c + 6..]))
+                    continue
+                if starts_with(item[c + 1..], "wheel="):
+                    if let wv = to_float(item[c + 7..]):
+                        __script.push((fr, -101, false, vec2(f32(wv), 0)))
+                        continue
+                # (5:touch1=400x300 puts finger 1 down there, or moves it; 9:touch1- lifts it)
+                if starts_with(item[c + 1..], "touch"):
+                    rest = item[c + 6..]
+                    eq = find(rest, "=")
+                    if eq > 0:
+                        xy = split(rest[eq + 1..], "x")
+                        if let fid = to_int(rest[..eq)):
+                            if xy.len() == 2:
+                                if let tx = to_float(xy[0]):
+                                    if let ty = to_float(xy[1]):
+                                        __script.push((fr, -200 - fid, true, vec2(f32(tx), f32(ty))))
+                                        continue
+                    else if ends_with(rest, "-"):
+                        if let fid = to_int(rest[..len(rest) - 1)):
+                            __script.push((fr, -200 - fid, false, vec2(0, 0)))
+                            continue
+                # (a gamepad, pad 0: its sticks and triggers set, its buttons pressed and let go)
+                pv = item[c + 1..]
+                ax = -1
+                if starts_with(pv, "lstick="): ax = 0
+                else if starts_with(pv, "rstick="): ax = 1
+                else if starts_with(pv, "lt="): ax = 2
+                else if starts_with(pv, "rt="): ax = 3
+                if ax >= 0:
+                    vs = pv[find(pv, "=") + 1..]
+                    if ax < 2:
+                        xy = split(vs, "x")
+                        if xy.len() == 2:
+                            if let sx = to_float(xy[0]):
+                                if let sy = to_float(xy[1]):
+                                    __script.push((fr, -400 - ax, false, vec2(f32(sx), f32(sy))))
+                                    continue
+                    else if let tv = to_float(vs):
+                        __script.push((fr, -400 - ax, false, vec2(f32(tv), 0)))
+                        continue
+                if starts_with(pv, "pad_") and len(pv) > 5 and (ends_with(pv, "+") or ends_with(pv, "-")):
+                    bn = pv[4..len(pv) - 1)
+                    bi = -1
+                    loop b in [0..15):
+                        if "{b as PadButton}" == bn: bi = b
+                    if bi >= 0:
+                        __script.push((fr, -300 - bi, ends_with(pv, "+"), vec2(0, 0)))
+                        continue
+                if starts_with(item[c + 1..], "mouse="):
+                    xy = split(item[c + 7..], "x")
+                    if xy.len() == 2:
+                        if let mx = to_float(xy[0]):
+                            if let my = to_float(xy[1]):
+                                __script.push((fr, -100, false, vec2(f32(mx), f32(my))))
+                                continue
+                name = item[c + 1..len(item) - 1)
+                down = item[len(item) - 1] == '+'
+                found = -1000
+                loop k in [0..__NKEYS):
+                    if "{k as Key}" == name: found = k
+                loop b in [0..3):
+                    if "mouse_{b as Mouse}" == name: found = -1 - b
+                if found == -1000 or (item[len(item) - 1] != '+' and item[len(item) - 1] != '-'):
+                    eprint("SLOPPY_INPUT: '{item}' is not frame:key+ or frame:key- (keys as Key names them: a, n1, space, enter, escape, left, shift; mouse_left), frame:mouse=XxY, frame:wheel=N, frame:text=..., frame:touch1=XxY or frame:touch1-, frame:pad_a+ (a gamepad's buttons), frame:lstick=XxY, rstick=XxY, lt=V nor rt=V")
+                    continue
+                __script.push((fr, found, down, vec2(0, 0)))
+    loop e in __script_text:
+        if e.0 == __frame_count: __text_input += e.1
+    loop e in __script:
+        if e.0 != __frame_count: continue
+        if e.1 >= 0:
+            __key_event(e.1, e.2)
+            # (a letter, digit, space or punctuation key pressed types it too, as a keyboard does; not with ctrl
+            # or alt held: a shortcut, ctrl+z, types nothing)
+            if e.2 and not key_down(.ctrl) and not key_down(.alt):
+                kn = "{e.1 as Key}"
+                if len(kn) == 1:
+                    if key_down(.shift): __text_input += upper(kn)
+                    else: __text_input += kn
+                else if len(kn) == 2 and kn[0] == 'n' and is_digit(kn[1]):
+                    # (shift+n1 is !, as on a US keyboard)
+                    if key_down(.shift): __text_input += ")!@#$%^&*("[int(kn[1]) - 48..int(kn[1]) - 47)
+                    else: __text_input += kn[1..]
+                else if kn == "space": __text_input += " "
+                else:
+                    # punctuation, shifted as on a US keyboard (shift+period is >)
+                    k = find(__SCRIPT_PUNCT, " {kn} ")
+                    if k >= 0:
+                        j = k + len(kn) + 2
+                        if key_down(.shift): __text_input += __SCRIPT_PUNCT[j + 1..j + 2)
+                        else: __text_input += __SCRIPT_PUNCT[j..j + 1)
+        else if e.1 <= -300 and e.1 > -500: pass       # (a gamepad's: __scripted_pad, after the pads are read)
+        else if e.1 == -101: __mouse_wheel += f64(e.3.x)
+        else if e.1 == -100: __script_move_mouse(e.3)
+        else if e.1 <= -200:
+            # a finger: as on a phone, the first one down is also the mouse, its left button held
+            fid = -200 - e.1
+            if e.2:
+                __screen_layout()
+                nx = f32(f64(e.3.x) * __map_sx + __map_x0)
+                ny = f32(f64(e.3.y) * __map_sy + __map_y0)
+                kind = 0
+                if __touch_ids.index_of(fid) < 0: kind = 1
+                __touch_event(fid, kind, nx, ny)
+                if kind == 1 and __script_finger < 0:
+                    __script_finger = fid
+                    __script_move_mouse(e.3)
+                    __mouse_event(0, true)
+                else if fid == __script_finger: __script_move_mouse(e.3)
+            else:
+                __touch_event(fid, 2, 0.0, 0.0)
+                if fid == __script_finger:
+                    __mouse_event(0, false)
+                    __script_finger = -1
+        else: __mouse_event(-1 - e.1, e.2)
+
+__script_finger = -1                        # (the finger that is the mouse)
+# move the mouse to p (in the screen's units), as a pointer moving there: mouse_delta, drags and
+# mouse look see it; the first move only says where it is, as a pointer that has been there all along
+__script_move_mouse = (p: vec2):
+    __screen_layout()
+    nx = f64(p.x) * __map_sx + __map_x0
+    ny = f64(p.y) * __map_sy + __map_y0
+    if __script_mouse_placed:
+        __mouse_dx += nx - __mouse_x
+        __mouse_dy += ny - __mouse_y
+    __script_mouse_placed = true
+    __mouse_x = nx
+    __mouse_y = ny
+
+__run_frame = (dt: f64, update: (f64) -> void, draw: () -> void):
+    __out_flush()                   # (what the last frame printed)
+    __scripted_input()
+    __pad_frame()
+    __scripted_pad()
+    __fps_acc += dt
+    __fps_n += 1
+    if __fps_acc >= 0.5:
+        __fps = f64(__fps_n) / __fps_acc
+        __fps_acc = 0.0
+        __fps_n = 0
+    sdt = dt * __time_scale
+    __dt = sdt
+    t0 = time()
+    __gfx_begin_frame()
+    when WATCH:
+        zone("update and draw")
+        __watch_update_draw(sdt, update, draw)
+        zone_end()
+    else:
+        zone("update")
+        update(sdt)
+        zone_end()
+        zone("draw")
+        draw()
+        zone_end()
+    __gfx_end_frame()
+    __audio_update()
+    __frame_cpu += time() - t0
+    __stats_record(time() - t0)
+    __stats_draw()
+    __maybe_screenshot()
+    __input_end_frame()
+    __frame_count += 1
+
+__frame_cpu = 0.0
+__frame_present = 0.0         # time spent handing frames to the screen (and waiting for vsync)
+
+# how frames reach the screen (for diagnostics)
+__present_how = () -> str:
+    when TARGET == "wasm": return "webgl"
+    else when TARGET == "windows":
+        if __soft: return "software renderer (StretchDIBits)"
+        if __vk: return "vulkan ({__vk_device_name})"
+        return "wgl"
+    else when TARGET == "macos":
+        if __soft: return "software renderer (layer contents)"
+        if __vk: return "metal ({__vk_device_name})"
+        return "opengl (nsopengl)"
+    else:
+        if __soft: return "software renderer"
+        if __vk: return "vulkan ({__vk_device_name})"
+        if __wayland:
+            how = "wayland"
+            if not __lw_on: how = "wayland protocol"
+            else if __ld_frame != null: how = "wayland+libdecor"
+            if __wl_gpu > 0: return "{how} dma-buf, scale {__wl_scale:.3}"
+            return "{how} shared memory copy, scale {__wl_scale:.3}"
+        "egl window surface"
+
+# testing aid: SLOPPY_SCREENSHOT=out.png [SLOPPY_FRAMES=n] saves frame n and exits (SLOPPY_WINDOW=WxH
+# for a window of another size)
+# (SLOPPY_FRAME_STATS=1 also reports the average CPU time of a frame: update + draw + submit)
+__maybe_screenshot = ():
+    when TARGET != "wasm":
+        if let path = env("SLOPPY_SCREENSHOT"):
+            n = to_int(env("SLOPPY_FRAMES") ?? "5") ?? 5
+            if __frame_count == n:
+                save_png(screenshot(), path)
+                if env("SLOPPY_FRAME_STATS") != none:
+                    eprint("frame cpu: {__frame_cpu * 1000.0 / f64(n + 1):.2} ms average over {n + 1} frames, present {__frame_present * 1000.0 / f64(n):.2} ms; {__win_w}x{__win_h} pixels, {__present_how()}")
+                __game_quit()
+                exit(0)
+        # (SLOPPY_FRAMES alone: that many frames, then the program ends, with no picture)
+        else if let fr = env("SLOPPY_FRAMES"):
+            if __frame_count == (to_int(fr) ?? -1):
+                __game_quit()
+                exit(0)

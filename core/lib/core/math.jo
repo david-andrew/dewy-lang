@@ -1,0 +1,800 @@
+# Math basics.
+
+const PI = 3.141592653589793
+const TAU = 6.283185307179586
+const E = 2.718281828459045
+const INF = 1e308 * 10.0
+const NAN = INF - INF       # not a number (is_nan(x) asks; NAN == NAN is false)
+const MAX_INT = 9223372036854775807
+const MIN_INT = -9223372036854775807 - 1
+
+abs = (x: int) -> int:
+    if x < 0: return -x
+    x
+abs = (x: f64) -> f64:
+    if x < 0.0: return -x
+    x
+abs = (x: f32) -> f32:
+    if x < 0.0: return -x
+    x
+
+min = (a: int, b: int) -> int:
+    if a < b: return a
+    b
+max = (a: int, b: int) -> int:
+    if a > b: return a
+    b
+min = (a: f64, b: f64) -> f64:
+    if a < b: return a
+    b
+max = (a: f64, b: f64) -> f64:
+    if a > b: return a
+    b
+min = (a: f32, b: f32) -> f32:
+    if a < b: return a
+    b
+max = (a: f32, b: f32) -> f32:
+    if a > b: return a
+    b
+__not = (b: bool) -> bool: not b
+
+# (of three: max(a, b, c))
+min = (a: int, b: int, c: int) -> int: min(min(a, b), c)
+max = (a: int, b: int, c: int) -> int: max(max(a, b), c)
+min = (a: f64, b: f64, c: f64) -> f64: min(min(a, b), c)
+max = (a: f64, b: f64, c: f64) -> f64: max(max(a, b), c)
+clamp = (x: int, lo: int, hi: int) -> int:
+    if x < lo: return lo
+    if x > hi: return hi
+    x
+clamp = (x: f64, lo: f64, hi: f64) -> f64:
+    if x < lo: return lo
+    if x > hi: return hi
+    x
+clamp = (x: f32, lo: f32, hi: f32) -> f32:
+    if x < lo: return lo
+    if x > hi: return hi
+    x
+# the other integer types keep their type (the int ones above take mixed ones: min(i8, u8))
+abs = (x: i32) -> i32: if x < 0: -x else: x
+abs = (x: i16) -> i16: if x < 0: -x else: x
+abs = (x: i8) -> i8: if x < 0: -x else: x
+min = (a: i32, b: i32) -> i32: if a < b: a else: b
+min = (a: u32, b: u32) -> u32: if a < b: a else: b
+min = (a: i16, b: i16) -> i16: if a < b: a else: b
+min = (a: u16, b: u16) -> u16: if a < b: a else: b
+min = (a: i8, b: i8) -> i8: if a < b: a else: b
+min = (a: u8, b: u8) -> u8: if a < b: a else: b
+min = (a: u64, b: u64) -> u64: if a < b: a else: b
+max = (a: i32, b: i32) -> i32: if a > b: a else: b
+max = (a: u32, b: u32) -> u32: if a > b: a else: b
+max = (a: i16, b: i16) -> i16: if a > b: a else: b
+max = (a: u16, b: u16) -> u16: if a > b: a else: b
+max = (a: i8, b: i8) -> i8: if a > b: a else: b
+max = (a: u8, b: u8) -> u8: if a > b: a else: b
+max = (a: u64, b: u64) -> u64: if a > b: a else: b
+clamp = (x: i32, lo: i32, hi: i32) -> i32: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: u32, lo: u32, hi: u32) -> u32: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: i16, lo: i16, hi: i16) -> i16: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: u16, lo: u16, hi: u16) -> u16: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: i8, lo: i8, hi: i8) -> i8: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: u8, lo: u8, hi: u8) -> u8: if x < lo: lo else if x > hi: hi else: x
+clamp = (x: u64, lo: u64, hi: u64) -> u64: if x < lo: lo else if x > hi: hi else: x
+
+sign = (x: f64) -> f64:
+    if x > 0.0: return 1.0
+    if x < 0.0: return -1.0
+    0.0
+sign = (x: int) -> int:
+    if x > 0: return 1
+    if x < 0: return -1
+    0
+
+floor = (x: f64) -> f64:
+    if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
+    i = f64(int(x))
+    if i > x: return i - 1.0
+    i
+ceil = (x: f64) -> f64:
+    if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
+    i = f64(int(x))
+    if i < x: return i + 1.0
+    i
+# the nearest whole number; halves go away from zero (round(2.5) is 3.0, round(-2.5) is -3.0;
+# Python's round goes to the even one, 2)
+round = (x: f64) -> f64:
+    t = trunc(x)
+    if abs(x - t) >= 0.5:
+        if x < 0.0: return t - 1.0
+        return t + 1.0
+    t
+trunc = (x: f64) -> f64:
+    if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
+    f64(int(x))
+fract = (x: f64) -> f64: x - floor(x)
+mod = (x: f64, y: f64) -> f64: x - y * floor(x / y)
+mod = (x: int, y: int) -> int:
+    r = x % y
+    if r < 0: return r + y
+    r
+is_nan = (x: f64) -> bool: x != x
+# an ordinary number: not infinite and not NaN
+is_finite = (x: f64) -> bool: x - x == 0.0
+is_inf = (x: f64) -> bool: x == x and x - x != 0.0
+lerp = (a: f64, b: f64, t: f64) -> f64: a + (b - a) * t
+mix = (a: f64, b: f64, t: f64) -> f64: a + (b - a) * t      # (GLSL's name for lerp)
+# where x is between a and b, from 0 (at a) to 1 (at b): lerp backwards
+inverse_lerp = (a: f64, b: f64, x: f64) -> f64: (x - a) / (b - a)
+# x moved from the range a..b to c..d, as p5's map: remap(mouse.x, 0, 1280, -1, 1)
+remap = (x: f64, a: f64, b: f64, c: f64, d: f64) -> f64: c + (x - a) / (b - a) * (d - c)
+smoothstep = (e0: f64, e1: f64, x: f64) -> f64:
+    t = clamp((x - e0) / (e1 - e0), 0.0, 1.0)
+    t * t * (3.0 - 2.0 * t)
+
+# reduce x to [-pi, pi]
+# Elementary functions follow fdlibm (Sun Microsystems): argument reduction with split
+# constants and minimax polynomials, accurate to about 1 ulp.
+
+# sin/cos kernels on [-pi/4, pi/4] for x + y (y: what the argument reduction could not fit in
+# x); the polynomials in Estrin's form, with shorter chains of dependent operations than Horner's
+__ksin = (x: f64, y: f64) -> f64:
+    z = x * x
+    w = z * z
+    v = z * x
+    r = (8.33333333332248946124e-03 + z * -1.98412698298579493134e-04) + w * ((2.75573137070700676789e-06 + z * -2.50507602534068634195e-08) + w * 1.58969099521155010221e-10)
+    x - ((z * (0.5 * y - v * r) - y) - v * -1.66666666666666324348e-01)
+
+__kcos = (x: f64, y: f64) -> f64:
+    z = x * x
+    w = z * z
+    r = z * ((4.16666666666666019037e-02 + z * -1.38888888888741095749e-03) + w * ((2.48015872894767294178e-05 + z * -2.75573143513906633035e-07) + w * (2.08757232129817482790e-09 + z * -1.13596475577881948265e-11)))
+    hz = 0.5 * z
+    w1 = 1.0 - hz
+    w1 + (((1.0 - w1) - hz) + (z * r - x * y))
+
+# x = n * pi/2 + (y0 + y1) with |y0 + y1| <= pi/4 (fdlibm's reduction: pi/2 in parts, as many
+# as the cancellation needs, so sin and cos are within an ulp for |x| < 2^20 * pi/2; beyond
+# that the error grows, to about |x| * 1e-16)
+struct __Reduced:
+    n: int
+    y0: f64
+    y1: f64
+
+__rem_pio2 = (x0: f64) -> __Reduced:
+    x = abs(x0)
+    fq = 0.0
+    if x < 1647099.3291652855:
+        fq = (x * 6.36619772367581382433e-01 + 6755399441055744.0) - 6755399441055744.0
+    else: fq = floor(x * 6.36619772367581382433e-01 + 0.5)
+    r = x - fq * 1.57079632673412561417e+00
+    w = fq * 6.07710050650619224932e-11
+    y0 = r - w
+    j = int((x as u64) >> 52)
+    if j - int(((y0 as u64) >> 52) & 0x7FF) > 16:
+        t = r
+        w = fq * 6.07710050630396597660e-11
+        r = t - w
+        w = fq * 2.02226624879595063154e-21 - ((t - r) - w)
+        y0 = r - w
+        if j - int(((y0 as u64) >> 52) & 0x7FF) > 49:
+            t = r
+            w = fq * 2.02226624871116645580e-21
+            r = t - w
+            w = fq * 8.47842766036889956997e-32 - ((t - r) - w)
+            y0 = r - w
+    y1 = (r - y0) - w
+    if x0 < 0.0: return __Reduced(-int(fq), -y0, -y1)
+    __Reduced(int(fq), y0, y1)
+
+sin = (x: f64) -> f64:
+    if x >= -0.7853981633974483 and x <= 0.7853981633974483: return __ksin(x, 0.0)
+    __sin_q(x, 0)
+
+cos = (x: f64) -> f64:
+    if x >= -0.7853981633974483 and x <= 0.7853981633974483: return __kcos(x, 0.0)
+    __sin_q(x, 1)
+
+# sin(x + q * pi/2) for |x| > pi/4 (the first step of __rem_pio2 inline: it nearly always suffices)
+__sin_q = (x: f64, q: int) -> f64:
+    if x - x != 0.0: return 0.0 / 0.0          # (infinite or not a number)
+    n = 0
+    y0 = 0.0
+    y1 = 0.0
+    a = abs(x)
+    done = false
+    if a < 1647099.3291652855:
+        fq = (a * 6.36619772367581382433e-01 + 6755399441055744.0) - 6755399441055744.0
+        r = a - fq * 1.57079632673412561417e+00
+        w = fq * 6.07710050650619224932e-11
+        y0 = r - w
+        if int((a as u64) >> 52) - int(((y0 as u64) >> 52) & 0x7FF) <= 16:
+            y1 = (r - y0) - w
+            n = int(fq)
+            if x < 0.0:
+                n = -n
+                y0 = -y0
+                y1 = -y1
+            done = true
+    if not done:
+        rd = __rem_pio2(x)
+        n = rd.n
+        y0 = rd.y0
+        y1 = rd.y1
+    # __ksin or __kcos of (y0, y1), written out here (no calls: this is the common path)
+    k = (n + q) & 3
+    z = y0 * y0
+    w = z * z
+    r = 0.0
+    if k & 1 == 0:
+        v = z * y0
+        p = (8.33333333332248946124e-03 + z * -1.98412698298579493134e-04) + w * ((2.75573137070700676789e-06 + z * -2.50507602534068634195e-08) + w * 1.58969099521155010221e-10)
+        r = y0 - ((z * (0.5 * y1 - v * p) - y1) - v * -1.66666666666666324348e-01)
+    else:
+        p = z * ((4.16666666666666019037e-02 + z * -1.38888888888741095749e-03) + w * ((2.48015872894767294178e-05 + z * -2.75573143513906633035e-07) + w * (2.08757232129817482790e-09 + z * -1.13596475577881948265e-11)))
+        hz = 0.5 * z
+        w1 = 1.0 - hz
+        r = w1 + (((1.0 - w1) - hz) + (z * p - y0 * y1))
+    if k & 2 != 0: return -r
+    r
+
+tan = (x: f64) -> f64: sin(x) / cos(x)
+
+atan = (x0: f64) -> f64:
+    x = x0
+    if x != x: return x
+    neg = x < 0.0
+    if neg: x = -x
+    if x > 1e300: x = 1e300
+    id = -1
+    if x >= 0.4375:
+        if x < 0.6875:
+            id = 0
+            x = (2.0 * x - 1.0) / (2.0 + x)
+        else if x < 1.1875:
+            id = 1
+            x = (x - 1.0) / (x + 1.0)
+        else if x < 2.4375:
+            id = 2
+            x = (x - 1.5) / (1.0 + 1.5 * x)
+        else:
+            id = 3
+            x = -1.0 / x
+    z = x * x
+    w = z * z
+    s1 = z * (3.33333333333329318027e-01 + w * (1.42857142725034663711e-01 + w * (9.09088713343650656196e-02 + w * (6.66107313738753120669e-02 + w * (4.97687799461593236017e-02 + w * 1.62858201153657823623e-02)))))
+    s2 = w * (-1.99999999998764832476e-01 + w * (-1.11111104054623557880e-01 + w * (-7.69187620504482999495e-02 + w * (-5.83357013379057348645e-02 + w * -3.65315727442169155270e-02))))
+    r = 0.0
+    if id < 0: r = x - x * (s1 + s2)
+    else:
+        hi = 4.63647609000806093515e-01
+        lo = 2.26987774529616870924e-17
+        if id == 1:
+            hi = 7.85398163397448278999e-01
+            lo = 3.06161699786838301793e-17
+        else if id == 2:
+            hi = 9.82793723247329054082e-01
+            lo = 1.39033110312309984516e-17
+        else if id == 3:
+            hi = 1.57079632679489655800e+00
+            lo = 6.12323399573676603587e-17
+        r = hi - ((x * (s1 + s2) - lo) - x)
+    if neg: return -r
+    r
+
+atan2 = (y: f64, x: f64) -> f64:
+    if x != x or y != y: return x + y
+    if x > 0.0: return atan(y / x)
+    if x < 0.0:
+        if y >= 0.0: return atan(y / x) + PI
+        return atan(y / x) - PI
+    if y > 0.0: return PI / 2.0
+    if y < 0.0: return -PI / 2.0
+    0.0
+
+asin = (x: f64) -> f64:
+    if x >= 1.0: return PI / 2.0
+    if x <= -1.0: return -PI / 2.0
+    atan2(x, sqrt(1.0 - x * x))
+acos = (x: f64) -> f64: PI / 2.0 - asin(x)
+
+exp = (x: f64) -> f64:
+    if x != x: return x
+    if x > 709.782712893384: return INF
+    if x < -745.1332191019411: return 0.0
+    # x = k*ln2 + r, |r| <= ln2/2; exp(r) by a rational minimax approximation
+    k = floor(x * 1.44269504088896338700 + 0.5)
+    hi = x - k * 6.93147180369123816490e-01
+    lo = k * 1.90821492927058770002e-10
+    r = hi - lo
+    t = r * r
+    c = r - t * (1.66666666666666019037e-01 + t * (-2.77777777770155933842e-03 + t * (6.61375632143793436117e-05 + t * (-1.65339022054652515390e-06 + t * 4.13813679705723846039e-08))))
+    y = 1.0 - ((lo - (r * c) / (2.0 - c)) - hi)
+    ki = int(k)
+    if ki > 1000:
+        y = y * __pow2(1000)
+        ki -= 1000
+    if ki < -1000:
+        y = y * __pow2(-1000)
+        ki += 1000
+    y * __pow2(ki)
+
+# the hyperbolic tangent: from -1 to 1, through 0 (a smooth limit: soft clipping, squashing)
+tanh = (x: f64) -> f64:
+    if x > 20.0: return 1.0
+    if x < -20.0: return -1.0
+    e = exp(2.0 * x)
+    (e - 1.0) / (e + 1.0)
+
+__pow2 = (k: int) -> f64:
+    if k < -1022: return __pow2(k + 60) / 1152921504606846976.0
+    if k > 1023: return INF
+    (u64(k + 1023) << 52) as f64
+
+log = (x: f64) -> f64:
+    if x != x or x < 0.0: return 0.0 / 0.0
+    if x == 0.0: return -INF
+    if x > 1.7976931348623157e308: return x
+    # x = m * 2^e with m in [sqrt(1/2), sqrt(2))
+    bits = x as u64
+    e = int((bits >> 52) & 0x7FF) - 1023
+    m = ((bits & 0x000FFFFFFFFFFFFF) | 0x3FF0000000000000) as f64
+    if e == -1023:
+        # subnormal
+        return log(x * 4503599627370496.0) - 36.04365338911715
+    if m > 1.4142135623730951:
+        m = m / 2.0
+        e += 1
+    f = m - 1.0
+    sq = f / (2.0 + f)
+    z = sq * sq
+    w = z * z
+    t1 = w * (3.999999999940941908e-01 + w * (2.222219843214978396e-01 + w * 1.531383769920937332e-01))
+    t2 = z * (6.666666666666735130e-01 + w * (2.857142874366239149e-01 + w * (1.818357216161805012e-01 + w * 1.479819860511658591e-01)))
+    rr = t2 + t1
+    hfsq = 0.5 * f * f
+    fe = f64(e)
+    fe * 6.93147180369123816490e-01 - ((hfsq - (sq * (hfsq + rr) + fe * 1.90821492927058770002e-10)) - f)
+
+log2 = (x: f64) -> f64:
+    # (a power of two: its exponent, exactly)
+    b = x as u64
+    e = int((b >> 52) & 0x7FF)
+    if b & 0xFFFFFFFFFFFFF == 0 and e > 0 and e < 0x7FF and b >> 63 == 0: return f64(e - 1023)
+    log(x) / 0.6931471805599453
+
+log10 = (x: f64) -> f64:
+    # (fdlibm's: x = 2^n * m, log10(x) = n * log10(2) in two parts + log(m) / log(10))
+    r = 0.0
+    b = x as u64
+    e = int((b >> 52) & 0x7FF)
+    if e == 0 or e == 0x7FF or b >> 63 != 0: r = log(x) / 2.302585092994046
+    else:
+        n = e - 1023
+        i = 0
+        if n < 0: i = 1
+        m = ((b & 0xFFFFFFFFFFFFF) | (u64(0x3FF - i) << 52)) as f64
+        y = f64(n + i)
+        r = y * 3.69423907715893078616e-13 + 4.34294481903251816668e-01 * log(m) + y * 3.01029995663611771306e-01
+    # (a power of ten, as 1000.0 or 1e300: its exponent, exactly, as C's and Python's give)
+    k = round(r)
+    if r == r and abs(r - k) < 1e-12 and abs(k) <= 323.0 and x == __pow10_nearest(int(k)): return k
+    r
+
+# the double nearest 10^k
+__pow10_nearest = (k: int) -> f64:
+    if k >= 0 and k <= 22: return __pow10(k)
+    if k < 0 and k >= -22: return 1.0 / __pow10(-k)
+    __float_correct([u8(1)], k, __scale10(1.0, k))
+
+# x to the power y, within an ulp (fdlibm's: log2(x) in extra precision, times y, then 2 to that)
+pow = (x: f64, y: f64) -> f64:
+    if y == 2.0: return x * x           # (the common square, as exact and much faster)
+    hx = __hi(x)
+    lx = __lo(x)
+    hy = __hi(y)
+    ly = __lo(y)
+    ix = hx & 0x7FFFFFFF
+    iy = hy & 0x7FFFFFFF
+    if iy | ly == 0: return 1.0
+    if hx == 0x3FF00000 and lx == 0: return 1.0
+    if ix > 0x7FF00000 or (ix == 0x7FF00000 and lx != 0) or iy > 0x7FF00000 or (iy == 0x7FF00000 and ly != 0): return x + y
+    # y an odd whole number (1), an even one (2), or neither (0), when x < 0
+    yisint = 0
+    if hx < 0:
+        if iy >= 0x43400000: yisint = 2
+        else if iy >= 0x3FF00000:
+            k = (iy >> 20) - 0x3FF
+            if k > 20:
+                j = ly >> (52 - k)
+                if (j << (52 - k)) & 0xFFFFFFFF == ly: yisint = 2 - (j & 1)
+            else if ly == 0:
+                j = iy >> (20 - k)
+                if (j << (20 - k)) == iy: yisint = 2 - (j & 1)
+    if ly == 0:
+        if iy == 0x7FF00000:
+            # y is +-inf
+            if (ix - 0x3FF00000) | lx == 0: return 1.0
+            if ix >= 0x3FF00000:
+                if hy >= 0: return y
+                return 0.0
+            if hy < 0: return -y
+            return 0.0
+        if iy == 0x3FF00000:
+            if hy < 0: return 1.0 / x
+            return x
+        if hy == 0x40000000: return x * x
+        if hy == 0x3FE00000 and hx >= 0: return sqrt(x)
+    ax = abs(x)
+    if lx == 0 and (ix == 0x7FF00000 or ix == 0 or ix == 0x3FF00000):
+        # x is +-0, +-inf, +-1
+        z = ax
+        if hy < 0: z = 1.0 / z
+        if hx < 0:
+            if (ix - 0x3FF00000) | yisint == 0: z = (z - z) / (z - z)
+            else if yisint == 1: z = -z
+        return z
+    n = -1
+    if hx < 0: n = 0
+    if n | yisint == 0: return (x - x) / (x - x)
+    sgn = 1.0
+    if n | (yisint - 1) == 0: sgn = -1.0
+    t1 = 0.0
+    t2 = 0.0
+    if iy > 0x41E00000:
+        # |y| > 2^31
+        if iy > 0x43F00000:
+            if ix <= 0x3FEFFFFF:
+                if hy < 0: return INF
+                return 0.0
+            if ix >= 0x3FF00000:
+                if hy > 0: return INF
+                return 0.0
+        if ix < 0x3FEFFFFF:
+            if hy < 0: return sgn * INF
+            return sgn * 0.0
+        if ix > 0x3FF00000:
+            if hy > 0: return sgn * INF
+            return sgn * 0.0
+        # |1 - x| <= 2^-20: log(x) by x - x^2/2 + x^3/3 - x^4/4
+        t = ax - 1.0
+        w = (t * t) * (0.5 - t * (3.3333333333333331e-01 - t * 0.25))
+        u = 1.44269502162933349609e+00 * t
+        v = t * 1.92596299112661746887e-08 - w * 1.44269504088896338700e+00
+        t1 = __lo0(u + v)
+        t2 = v - (t1 - u)
+    else:
+        n = 0
+        if ix < 0x00100000:
+            ax = ax * 9007199254740992.0
+            n -= 53
+            ix = __hi(ax)
+        n += (ix >> 20) - 0x3FF
+        j = ix & 0x000FFFFF
+        ix = j | 0x3FF00000
+        k = 0
+        if j <= 0x3988E: k = 0
+        else if j < 0xBB67A: k = 1
+        else:
+            k = 0
+            n += 1
+            ix -= 0x00100000
+        ax = __set_hi(ax, ix)
+        bp = 1.0
+        dp_h = 0.0
+        dp_l = 0.0
+        if k == 1:
+            bp = 1.5
+            dp_h = 5.84962487220764160156e-01
+            dp_l = 1.35003920212974897128e-08
+        # ss = s_h + s_l = (x - bp) / (x + bp)
+        u = ax - bp
+        v = 1.0 / (ax + bp)
+        ss = u * v
+        s_h = __lo0(ss)
+        t_h = __words(((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18), 0)
+        t_l = ax - (t_h - bp)
+        s_l = v * ((u - s_h * t_h) - s_h * t_l)
+        # log(ax)
+        s2 = ss * ss
+        r = s2 * s2 * (5.99999999999994648725e-01 + s2 * (4.28571428578550184252e-01 + s2 * (3.33333329818377432918e-01 + s2 * (2.72728123808534006489e-01 + s2 * (2.30660745775561754067e-01 + s2 * 2.06975017800338417784e-01)))))
+        r += s_l * (s_h + ss)
+        s2 = s_h * s_h
+        t_h = __lo0(3.0 + s2 + r)
+        t_l = r - ((t_h - 3.0) - s2)
+        u = s_h * t_h
+        v = s_l * t_h + t_l * ss
+        p_h = __lo0(u + v)
+        p_l = v - (p_h - u)
+        z_h = 9.61796700954437255859e-01 * p_h
+        z_l = -7.02846165095275826516e-09 * p_h + p_l * 9.61796693925975554329e-01 + dp_l
+        t = f64(n)
+        t1 = __lo0(((z_h + z_l) + dp_h) + t)
+        t2 = z_l - (((t1 - t) - dp_h) - z_h)
+    # (y1 + y2) * (t1 + t2)
+    y1 = __lo0(y)
+    p_l = (y - y1) * t1 + y * t2
+    p_h = y1 * t1
+    z = p_l + p_h
+    j = __hi(z)
+    i = __lo(z)
+    if j >= 0x40900000:
+        if (j - 0x40900000) | i != 0: return sgn * INF
+        if p_l + 8.0085662595372944372e-17 > z - p_h: return sgn * INF
+    else if j & 0x7FFFFFFF >= 0x4090CC00:
+        if (j - 0xC090CC00 + 0x100000000) & 0xFFFFFFFF | i != 0: return sgn * 0.0
+        if p_l <= z - p_h: return sgn * 0.0
+    # 2^(p_h + p_l)
+    i = j & 0x7FFFFFFF
+    k = (i >> 20) - 0x3FF
+    n = 0
+    if i > 0x3FE00000:
+        n = j + (0x00100000 >> (k + 1))
+        k = ((n & 0x7FFFFFFF) >> 20) - 0x3FF
+        tt = __words(n & ~(0x000FFFFF >> k), 0)
+        n = ((n & 0x000FFFFF) | 0x00100000) >> (20 - k)
+        if j < 0: n = -n
+        p_h -= tt
+    t = __lo0(p_l + p_h)
+    u = t * 6.93147182464599609375e-01
+    v = (p_l - (t - p_h)) * 6.93147180559945286227e-01 + t * -1.90465429995776804525e-09
+    z = u + v
+    w = v - (z - u)
+    t = z * z
+    t1 = z - t * (1.66666666666666019037e-01 + t * (-2.77777777770155933842e-03 + t * (6.61375632143793436117e-05 + t * (-1.65339022054652515390e-06 + t * 4.13813679705723846039e-08))))
+    r = (z * t1) / (t1 - 2.0) - (w + z * w)
+    z = 1.0 - (r - z)
+    j = __hi(z) + (n << 20)
+    if (j >> 20) <= 0:
+        # (a subnormal result)
+        if n < -1022: z = z * __pow2(-1022) * __pow2(n + 1022)
+        else: z = z * __pow2(n)
+    else: z = __set_hi(z, j)
+    sgn * z
+
+# (the high and low 32 bits of a double, as fdlibm takes them: the high one signed)
+__hi = (x: f64) -> int:
+    h = int((x as u64) >> 32)
+    if h >= 0x80000000: return h - 0x100000000
+    h
+__lo = (x: f64) -> int: int((x as u64) & 0xFFFFFFFF)
+__lo0 = (x: f64) -> f64: ((x as u64) & 0xFFFFFFFF00000000) as f64
+__words = (hi: int, lo: int) -> f64: ((u64(hi & 0xFFFFFFFF) << 32) | u64(lo & 0xFFFFFFFF)) as f64
+__set_hi = (x: f64, hi: int) -> f64: __words(hi, __lo(x))
+
+# f32 versions (shader code, games): computed in double with shorter polynomials, so they are
+# within an ulp of the f32 result at a fraction of the cost of the full-precision ones
+exp = (x: f32) -> f32:
+    if x != x: return x
+    f32(__exp_fast(f64(x)))
+
+log = (x: f32) -> f32:
+    if x != x or x < 0.0: return f32(0.0 / 0.0)
+    if x == 0.0: return f32(-INF)
+    if f64(x) > 3.4028234663852886e38: return x
+    f32(__log_fast(f64(x)))
+
+pow = (x: f32, y: f32) -> f32:
+    if y == 0.0 or x == 1.0: return 1.0
+    yi = int(y)
+    if f32(yi) == y and yi >= -64 and yi <= 64:
+        r = 1.0
+        b = f64(x)
+        n = yi
+        if n < 0: n = -n
+        loop n > 0:
+            if n & 1 == 1: r = r * b
+            b = b * b
+            n = n >> 1
+        if yi < 0: return f32(1.0 / r)
+        return f32(r)
+    if x == 0.0:
+        if y > 0.0: return 0.0
+        return f32(INF)
+    if x < 0.0 or x != x or y != y: return f32(0.0 / 0.0)
+    if f64(x) > 3.4028234663852886e38:
+        if y > 0.0: return x
+        return 0.0
+    f32(__exp_fast(f64(y) * __log_fast(f64(x))))
+
+sin = (x: f32) -> f32: f32(__sin_fast(f64(x), 0))
+cos = (x: f32) -> f32: f32(__sin_fast(f64(x), 1))
+
+# sin(x + q * pi/2) for an f32's x: pi/2 in two parts is enough for the f32 range of shader
+# arguments (the full reduction past 1e5), polynomials short of fdlibm's (relative error ~1e-13)
+__sin_fast = (x: f64, q: int) -> f64:
+    if x - x != 0.0: return 0.0 / 0.0
+    if abs(x) > 1e5:
+        if q == 0: return sin(x)
+        return cos(x)
+    fq = (x * 6.36619772367581382433e-01 + 6755399441055744.0) - 6755399441055744.0
+    r = (x - fq * 1.57079632673412561417e+00) - fq * 6.07710050650619224932e-11
+    k = (int(fq) + q) & 3
+    z = r * r
+    v = 0.0
+    if k & 1 == 0: v = r + r * z * (-1.66666666666666324348e-01 + z * (8.33333333332248946124e-03 + z * (-1.98412698298579493134e-04 + z * (2.75573137070700676789e-06 + z * -2.50507602534068634195e-08))))
+    else: v = 1.0 - 0.5 * z + z * z * (4.16666666666666019037e-02 + z * (-1.38888888888741095749e-03 + z * (2.48015872894767294178e-05 + z * -2.75573143513906633035e-07)))
+    if k & 2 != 0: return -v
+    v
+
+# e^t for results in the f32 range (relative error ~1e-12)
+__exp_fast = (t: f64) -> f64:
+    if t > 89.0: return INF
+    if t < -104.0: return 0.0
+    u = t * 1.4426950408889634 + 0.5
+    k = int(u)
+    if f64(k) > u: k -= 1
+    r = t - f64(k) * 0.6931471805599453
+    p = 1.0 + r * (1.0 + r * (0.5 + r * (0.16666666666666666 + r * (0.041666666666666664 + r * (0.008333333333333333 + r * (0.001388888888888889 + r * (0.0001984126984126984 + r * (2.48015873015873e-05 + r * 2.7557319223985893e-06))))))))
+    p * ((u64(k + 1023) << 52) as f64)
+
+# ln x for positive, finite, normal doubles (absolute error ~1e-12)
+__log_fast = (d: f64) -> f64:
+    bits = d as u64
+    e = int((bits >> 52) & 0x7FF) - 1023
+    m = ((bits & 0x000FFFFFFFFFFFFF) | 0x3FF0000000000000) as f64
+    if m > 1.4142135623730951:
+        m = m * 0.5
+        e += 1
+    s = (m - 1.0) / (m + 1.0)
+    z = s * s
+    f64(e) * 0.6931471805599453 + 2.0 * s * (1.0 + z * (0.3333333333333333 + z * (0.2 + z * (0.14285714285714285 + z * (0.1111111111111111 + z * (0.09090909090909091 + z * 0.07692307692307693))))))
+
+pow = (x: int, n: int) -> int:
+    # (a negative power is 1 / x ^ -n, truncated as integer division is: 0 unless x is 1 or -1)
+    if n < 0:
+        if x == 0: panic("0 to a negative power (a division by zero)")
+        if x == 1: return 1
+        if x == -1:
+            if n & 1 == 1: return -1
+            return 1
+        return 0
+    r = 1
+    b = x
+    e = n
+    loop e > 0:
+        if e & 1 == 1: r = r * b
+        b = b * b
+        e = e >> 1
+    r
+
+# a float's bits as an integer, and back (IEEE 754: f64_bits(1.0) is 0x3FF0000000000000)
+f64_bits = (x: f64) -> u64: x as u64
+f64_from_bits = (b: u64) -> f64: b as f64
+f32_bits = (x: f32) -> u32: x as u32
+f32_from_bits = (b: u32) -> f32: b as f32
+
+hypot = (x: f64, y: f64) -> f64: sqrt(x * x + y * y)
+radians = (deg: f64) -> f64: deg * PI / 180.0
+degrees = (rad: f64) -> f64: rad * 180.0 / PI
+
+# ---------------- random numbers (xoshiro256**) ----------------
+struct Rng:
+    s0: u64 = 0x9E3779B97F4A7C15
+    s1: u64 = 0xBF58476D1CE4E5B9
+    s2: u64 = 0x94D049BB133111EB
+    s3: u64 = 0x2545F4914F6CDD1D
+
+__rotl = (x: u64, k: int) -> u64: (x << u64(k)) | (x >> u64(64 - k))
+
+rng = (seed: int) -> Rng:
+    r = Rng()
+    z = u64(seed) + 0x9E3779B97F4A7C15
+    r.s0 = __splitmix(z)
+    r.s1 = __splitmix(r.s0)
+    r.s2 = __splitmix(r.s1)
+    r.s3 = __splitmix(r.s2)
+    r
+
+__splitmix = (x: u64) -> u64:
+    z = x + 0x9E3779B97F4A7C15
+    z = ((z xor (z >> 30))) * 0xBF58476D1CE4E5B9
+    z = ((z xor (z >> 27))) * 0x94D049BB133111EB
+    (z xor (z >> 31))
+
+next_u64 = (r: mut Rng) -> u64:
+    result = __rotl(r.s1 * 5, 7) * 9
+    t = r.s1 << 17
+    r.s2 = (r.s2 xor r.s0)
+    r.s3 = (r.s3 xor r.s1)
+    r.s1 = (r.s1 xor r.s2)
+    r.s0 = (r.s0 xor r.s3)
+    r.s2 = (r.s2 xor t)
+    r.s3 = __rotl(r.s3, 45)
+    result
+
+# uniform f64 in [0, 1)
+next_float = (r: mut Rng) -> f64: f64(next_u64(r) >> 11) * (1.0 / 9007199254740992.0)
+
+# normally distributed, from r: mean 0 and standard deviation 1 (as randn), or the ones given
+next_normal = (r: mut Rng, mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
+    u = 1.0 - next_float(r)
+    mean + sd * sqrt(-2.0 * log(u)) * cos(TAU * next_float(r))
+
+# uniform int in [lo, hi)
+next_int = (r: mut Rng, lo: int, hi: int) -> int:
+    if hi <= lo: return lo
+    lo + int(next_u64(r) % u64(hi - lo))
+
+# an element of xs (not empty), from r
+next_item[T] = (r: mut Rng, xs: T[]) -> T:
+    if xs.len() == 0: panic("next_item of an empty array")
+    xs[next_int(r, 0, xs.len())]
+
+# put xs in a random order from r
+shuffle[T] = (r: mut Rng, xs: mut T[]):
+    i = xs.len() - 1
+    loop i > 0:
+        j = next_int(r, 0, i + 1)
+        t = xs[i]
+        xs[i] = xs[j]
+        xs[j] = t
+        i -= 1
+
+# The random numbers differ from run to run: random() starts from the clock, the first time
+# it is used. seed_random(n) makes them the same every run (for a level made from a seed, a
+# replay, a test); so do SLOPPY_SEED=n and, for screenshots, SLOPPY_SCREENSHOT.
+__global_rng = rng(12345)
+__rng_seed = 12345
+__rng_ready = false
+
+__rng_start = ():
+    __rng_ready = true
+    seed = 0
+    if let s = env("SLOPPY_SEED"): seed = to_int(s) ?? 12345
+    else if env("SLOPPY_SCREENSHOT") != none: seed = 12345
+    else: seed = time_ns()
+    __rng_seed = seed
+    __global_rng = rng(seed)
+
+seed_random = (seed: int):
+    __rng_ready = true
+    __rng_seed = seed
+    __global_rng = rng(seed)
+    __thread_rngs.clear()
+
+# (parallel code: each thread draws from a generator of its own, made from the seed when a
+# parallel job first starts, so the numbers outside parallel code stay the same whatever ran in
+# it; the ones inside depend on which thread does what, so for the same ones each run, give
+# each piece of work its own: rng(seed + k))
+__thread_rngs: Rng[]
+__rng_in_job = false
+__rng_threads = ():
+    if __thread_rngs.len() > 0: return
+    if not __rng_ready: __rng_start()
+    base = __rng_seed xor 0x2545F4914F6CDD1D
+    # (each 128 bytes from the next: threads writing their own do not share a cache line)
+    loop t in [0..(__MAX_THREADS + 1) * 4): __thread_rngs.push(rng(base + t * 1000003))
+
+# random f64 in [0, 1)
+random = () -> f64:
+    t = __tid()
+    if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_float(__thread_rngs[t * 4])
+    if not __rng_ready: __rng_start()
+    next_float(__global_rng)
+# random f64 in [lo, hi)
+random = (lo: f64, hi: f64) -> f64: lo + (hi - lo) * random()
+# a random number from a bell curve around mean: about two in three within sd of it (p5's
+# randomGaussian; Rng's next_normal for a seeded one)
+random_normal = (mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
+    u = 1.0 - random()
+    mean + sd * sqrt(-2.0 * log(u)) * cos(TAU * random())
+# a random whole number from lo up to hi, hi left out (as in [lo..hi)): random_int(0, xs.len())
+# picks a position, and a die is random_int(1, 7)
+random_int = (lo: int, hi: int) -> int:
+    t = __tid()
+    if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_int(__thread_rngs[t * 4], lo, hi)
+    if not __rng_ready: __rng_start()
+    next_int(__global_rng, lo, hi)
+# a random element of xs (which must not be empty)
+random_item[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("random_item of an empty array")
+    xs[random_int(0, xs.len())]
+# put xs in a random order
+shuffle[T] = (xs: mut T[]):
+    i = xs.len() - 1
+    loop i > 0:
+        j = random_int(0, i + 1)
+        t = xs[i]
+        xs[i] = xs[j]
+        xs[j] = t
+        i -= 1

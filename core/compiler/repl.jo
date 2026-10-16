@@ -1,0 +1,924 @@
+use 'frontend.jo'
+# The interactive prompt: `sloppy` with no file.
+#
+# The program lives in a session process (lib/std/repl.jo): a program compiled at the start,
+# whose main waits for code. This process keeps the compiler's state; for each input it checks
+# and compiles just what is new (declarations, statements, the library functions they need for
+# the first time) to machine code that calls the session's functions and uses its globals where
+# they already are, and sends it there to run. So variables and functions persist, and code runs
+# at full speed. Before an input is compiled, a copy of this process's memory is taken
+# (lib/std/snapshot.jo): if it has errors, the copy is put back, and the compiler is as it was.
+# The session runs it the same way (on Linux: in a copy of itself, fork): if it panics or
+# crashes, the session is as it was.
+
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'x64.jo'
+use 'arm64.jo'
+use 'elf.jo'
+use 'macho.jo'
+use 'main.jo'
+use 'ide.jo'
+
+const REPL_REGION = 0x10000000          # where inputs' code goes in the session (within 2 GB of
+const REPL_REGION_SIZE = 0x10000000     # its globals: code reaches them by 32-bit offsets; arm64's
+                                        # ADRP reaches 4 GB, and calls further than BL's 128 MB
+                                        # go through veneers)
+const REPL_DATA_RESERVE = 64 << 20      # room for globals declared by inputs
+
+repl_mainm = -1
+repl_inputs = 0
+repl_next = 0                           # where the next input's code goes
+lf_abs: int[]                           # function (lfunc) -> its address in the session
+ro_segs: (int, int, int)[]              # read-only data: (from, to) offsets and their address
+ro_shipped = 0
+repl_inited: {int: bool} = {}           # library globals initialized in the session
+repl_cabi_abs: {int: int} = {}          # (Windows) function -> its @cabi adapter's address
+repl_to = -1                            # pipes to and from the session (Windows: handles)
+repl_from = -1
+repl_pid = -1                           # (Windows: the session's process handle)
+repl_exe = ""                           # (Windows: the session's program, deleted at the end)
+repl_jbuf: *u8 = null                   # where an error in an input goes (repl_try)
+
+# the session's main: __repl_main in the input module
+repl_set_main = ():
+    loop i in 0.. and m in modules:
+        if m.is_main: repl_mainm = i
+    if let s = modules[repl_mainm].names.get(intern("__repl_main")):
+        main_fn = get_fn_inst(int(syms[s].decl), [], 0)
+
+# ---- the session ----
+
+# (macOS: where the session is asked to put it, above the program, which starts at 4 GB with
+# nothing below it; the session says where it is, within 4 GB of its globals)
+repl_region = () -> int:
+    when TARGET == "macos":
+        return MACHO_BASE + 0x20000000
+    REPL_REGION
+
+# the session's first reply: where the region for inputs' code is (0: where it was asked to be)
+repl_started = () -> bool:
+    r = repl_wait_reply()
+    if r < 0: return false
+    if r > 0: repl_next = r
+    true
+
+repl_start = () -> str:
+    repl_next = repl_region()
+    src = "__repl_main = (): __repl_serve({repl_next}, {REPL_REGION_SIZE})\n"
+    cache = "/tmp/sloppy-cache"
+    when TARGET == "windows":
+        cache = os_path(temp_dir()) + "/sloppy-cache"
+    mkdir(cache)
+    me = 0
+    when TARGET == "windows":
+        me = int(GetCurrentProcessId())
+    else:
+        me = syscall(39)
+    path = "{cache}/repl-{me}.bin"
+    when TARGET == "windows":
+        path = "{cache}/repl-{me}.exe"
+    main_src = "{cache}/<input>"
+    ide_texts[main_src] = src
+    repl_image = true
+    bss_reserve = REPL_DATA_RESERVE
+    # (the session's module is the one the inputs add to)
+    built = compile(main_src, path)
+    if len(built) == 0: return "could not build the session program"
+    loop i in 0.. and m in modules:
+        if m.is_main: repl_mainm = i
+    late_binding = true
+    # (inputs `use` files relative to the current directory)
+    modules[repl_mainm].dir = cwd()
+    loop i in [0..lfuncs.len()):
+        a = 0
+        if i < fn_addr.len() and fn_addr[i] >= 0: a = img_text_addr + fn_addr[i]
+        lf_abs.push(a)
+    ro_segs.push((0, rodata.len(), img_ro_addr))
+    ro_shipped = rodata.len()
+    loop lf, off in cabi_adapter: repl_cabi_abs[lf] = img_text_addr + off
+    loop g in global_ids:
+        if modules[int(globals[g].mod)].is_prelude and global_off.get(g) != none: repl_inited[g] = true
+    when TARGET == "windows":
+        # start it with two pipes, their handles in SLOPPY_REPL_PIPES
+        sa = fill(0, 3)
+        sa[0] = 24
+        sa[2] = 1                                     # inheritable
+        to_r: *u8[] = [null]
+        to_w: *u8[] = [null]
+        from_r: *u8[] = [null]
+        from_w: *u8[] = [null]
+        CreatePipe(data(to_r), data(to_w), data(sa) as *u8, 0)
+        CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
+        SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
+        SetHandleInformation(from_r[0], 1, 0)
+        name = __wide("SLOPPY_REPL_PIPES")
+        val = __wide("{to_r[0] as int},{from_w[0] as int}")
+        SetEnvironmentVariableW(data(name), data(val))
+        wcmd = __wide(__w32_cmdline([path]))
+        wexe = __wide(path)
+        si = fill(0, 13)
+        si[0] = 104
+        pi = fill(0, 3)
+        ok = CreateProcessW(data(wexe), data(wcmd), null, null, 1, 0, null, null, data(si) as *u8, data(pi) as *u8) != 0
+        SetEnvironmentVariableW(data(name), null)
+        CloseHandle(to_r[0])
+        CloseHandle(from_w[0])
+        if not ok: return "could not start the session program"
+        CloseHandle(pi[1] as *u8)
+        repl_pid = pi[0]
+        repl_to = to_w[0] as int
+        repl_from = from_r[0] as int
+        repl_exe = path
+        if not repl_started(): return "the session program did not start"
+    else:
+        # start it, with its end of two pipes as fds 3 and 4
+        a: i32[] = [-1, -1]
+        b: i32[] = [-1, -1]
+        syscall(293, data(a), 0)
+        syscall(293, data(b), 0)
+        pid = syscall(57)
+        if pid == 0:
+            syscall(33, int(a[0]), 3)
+            syscall(33, int(b[1]), 4)
+            __exec_unslid(path, [path])
+            syscall(60, 127)
+        syscall(3, int(a[0]))
+        syscall(3, int(b[1]))
+        repl_to = int(a[1])
+        repl_from = int(b[0])
+        if not repl_started(): return "the session program did not start"
+        delete_file(path)
+    repl_jbuf = __alloc(192)                    # (arm64's __setjmp keeps 168 bytes)
+    ""
+
+repl_write = (p: *u8, n: int):
+    when TARGET == "windows":
+        k: u32[] = [0]
+        off = 0
+        loop off < n:
+            if WriteFile(repl_to as *u8, p + off, u32(min(n - off, 1 << 30)), data(k), null) == 0: return
+            off += int(k[0])
+    else:
+        __write_fd(repl_to, p, n)
+
+repl_send = (op: int, addr: int, bytes: u8[]):
+    h = [op, addr, bytes.len()]
+    repl_write(data(h) as *u8, 24)
+    if bytes.len() > 0: repl_write(data(bytes), bytes.len())
+
+# the session's reply to a run (-1: it is gone)
+repl_wait_reply = () -> int:
+    w = [0]
+    got = 0
+    loop got < 8:
+        r = 0
+        when TARGET == "windows":
+            k: u32[] = [0]
+            if ReadFile(repl_from as *u8, (data(w) as *u8) + got, u32(8 - got), data(k), null) != 0: r = int(k[0])
+        else:
+            r = syscall(0, repl_from, (data(w) as *u8) + got, 8 - got)
+        if r <= 0:
+            when TARGET == "windows":
+                # (gone: exit() in an input ends the prompt with its status)
+                WaitForSingleObject(repl_pid as *u8, u32(0xFFFFFFFF))
+                code: u32[] = [0]
+                GetExitCodeProcess(repl_pid as *u8, data(code))
+                c = int(code[0])
+                if c != 101 and c < 256: return 512 + c
+            return -1
+        got += r
+    when TARGET != "windows":
+        # (reap the processes the session left behind)
+        st = [0]
+        loop syscall(61, -1, data(st), 1, 0) > 0: pass
+    w[0]
+
+# the end of the session (Windows: then its program can be deleted)
+repl_end = ():
+    repl_send(3, 0, [])
+    when TARGET == "windows":
+        if repl_pid >= 0: WaitForSingleObject(repl_pid as *u8, u32(5000))
+        if len(repl_exe) > 0: delete_file(repl_exe)
+
+# ---- compiling an input ----
+
+struct ReplOut:
+    show: bool          # the input ends with an expression with a value: show it
+    expr_at: int        # (where that expression starts, in the input)
+    type: str           # (its type)
+    code: u8[]
+    entry: int          # the offset of the input's entry point in code
+    addr: int           # where the code goes in the session
+
+# compile input text (as input number n); fatal errors end the process (a copy, see repl_check)
+repl_compile = (text: str, n: int) -> ReplOut:
+    out = ReplOut()
+    m = repl_mainm
+    fi = files.len()
+    files.push(SrcFile("<input>", ".", text))
+    decls = source_declarations(fi)
+    # declaring a name again replaces it (code compiled already keeps the old one)
+    loop d in decls:
+        k = nodes[d].kind
+        if k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .const_ or k == .vardecl and nodes[d].nlist == 0:
+            nm = int(nodes[d].name)
+            if modules[m].names.get(nm) != none: modules[m].names.remove(nm)
+    n0 = modules[m].inits.len()
+    register_decls(m, decls)
+    stmts: int[]
+    loop i in [n0..modules[m].inits.len()): stmts.push(modules[m].inits[i])
+    # check: the statements as a function of their own, and the functions declared
+    fb = fns.len()
+    ci = new_inst(FK_INIT, m, "input_{n}")
+    body = mk(.block, mkpos(fi, 0))
+    set_list(body, stmts)
+    fns[ci].body = i32(body)
+    fns[ci].ret = i32(T_VOID)
+    cx = module_ctx[m]
+    fns[ci].state = 1
+    ctxs[cx].inst = i32(ci)
+    mark = scope_mark()
+    ctxs[cx].floor = i32(sc_names.len())
+    loop s in stmts: check_stmt(s)
+    scope_reset(mark)
+    zonk_tree(body)
+    loop l in fns[ci].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+    fns[ci].state = 2
+    cx = -1
+    loop d in decls:
+        if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
+    k = fb
+    loop k < fns.len():
+        if fns[k].state == 0 and fns[k].kind == FK_NORMAL: check_fn_body(k)
+        k += 1
+    # an expression with a value at the end: shown
+    if stmts.len() > 0:
+        last = stmts[stmts.len() - 1]
+        if nodes[last].kind == .exprstmt:
+            t = prune(ntype(int(nodes[last].a)))
+            if t != 0 and tkind(t) != .void_ and t != T_NEVER:
+                out.show = true
+                out.expr_at = pos_off(nodes[last].pos)
+                out.type = type_str(zonk(t))
+                if len(repl_sig) > 0: out.type = repl_sig
+    # lower and compile what is new
+    lf0 = lfuncs.len()
+    init_lf = lf_of_inst(ci)
+    code = []
+    call_fix = []
+    data_fix = []
+    stub_fix = []
+    cabi_fix = []
+    a_call_fix = []
+    a_stub_fix = []
+    a_faddr_fix = []
+    a_data_fix = []
+    elf_syms = []
+    pinits: int[]
+    i = lf0
+    loop true:
+        loop i < lfuncs.len():
+            if lfuncs[i].kind == LK_INST and fns[lfuncs[i].inst].decl != 0 and has_flag(int(fns[lfuncs[i].inst].decl), NF_EXTERN):
+                fx = lfuncs[i].inst
+                if len(fns[fx].clib) == 0: fatal(nodes[int(fns[fx].decl)].pos, "extern functions need @lib(\"library.so\") on native targets")
+                lower_extern_thunk(i, fx)
+                emit_function()
+            else:
+                lower_function(i)
+                emit_function()
+            i += 1
+        # library globals used for the first time: initialized before the input runs
+        decls2: int[]
+        loop g in global_ids:
+            if modules[int(globals[g].mod)].is_prelude and global_off.get(g) != none and repl_inited.get(g) == none:
+                repl_inited[g] = true
+                d = int(globals[g].decl)
+                if not decls2.contains(d): decls2.push(d)
+        if decls2.len() == 0: break
+        pi = new_inst(FK_INIT, 0, "input_{n}_lib")
+        pb = mk(.block, 0)
+        set_list(pb, decls2)
+        fns[pi].body = i32(pb)
+        fns[pi].ret = i32(T_VOID)
+        fns[pi].state = 2
+        zonk_tree(pb)
+        pinits.push(lf_of_inst(pi))
+    if target_arm64: return repl_place_arm64(out, pinits, init_lf, lf0)
+    # the entry: library globals first (in the order they were found), then the input
+    loop code.len() % 16 != 0: b(0xCC)
+    out.entry = code.len()
+    loop x in [0x48, 0x83, 0xEC, 0x08]: b(x)                     # sub rsp, 8
+    loop f in pinits:
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, f))
+    b(0xE8)
+    b32(0)
+    call_fix.push((code.len() - 4, init_lf))
+    loop x in [0x48, 0x83, 0xC4, 0x08, 0xC3]: b(x)               # add rsp, 8; ret
+    # place it: code, then the new read-only data
+    addr = repl_next
+    out.addr = addr
+    loop lf in [lf0..lfuncs.len()):
+        loop lf_abs.len() <= lf: lf_abs.push(0)
+        if lf < fn_addr.len() and fn_addr[lf] >= 0: lf_abs[lf] = addr + fn_addr[lf]
+    loop code.len() % 16 != 0: b(0)
+    ro_at = addr + code.len()
+    if rodata.len() > ro_shipped:
+        ro_segs.push((ro_shipped, rodata.len(), ro_at))
+        loop j in [ro_shipped..rodata.len()): code.push(rodata[j])
+        ro_shipped = rodata.len()
+    loop f in stub_fix: patch32(f.0, img_text_addr + stub_addr[f.1] - (addr + f.0 + 4))
+    # (Windows: a @cabi function's address is its adapter's)
+    loop lf in [lf0..lfuncs.len()):
+        if let off = cabi_adapter.get(lf): repl_cabi_abs[lf] = addr + off
+    loop f in cabi_fix:
+        t = repl_cabi_abs.get(f.1) ?? 0
+        if t == 0: ice("no adapter for {lfuncs[f.1].name}")
+        patch32(f.0, t - (addr + f.0 + 4))
+    loop f in call_fix:
+        t = lf_abs[f.1]
+        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
+        patch32(f.0, t - (addr + f.0 + 4))
+    loop f in data_fix:
+        t = img_data_addr + f.2
+        if f.1 == 0: t = repl_ro_addr(f.2)
+        patch32(f.0, t - (addr + f.0 + 4))
+    out.code = code
+    repl_next = (addr + code.len() + 4095) & ~4095
+    out
+
+# arm64: the entry, then the code placed at repl_next and linked to the session (calls beyond
+# BL's reach through veneers after the code), then the new read-only data
+repl_place_arm64 = (out0: ReplOut, pinits: int[], init_lf: int, lf0: int) -> ReplOut:
+    out = out0
+    out.entry = code.len()
+    w32(0xA9BF7BFD)                                             # stp x29, x30, [sp, #-16]!
+    w32(0x910003FD)                                             # mov x29, sp
+    loop f in pinits:
+        a_call_fix.push((code.len(), f))
+        a_bl()
+    a_call_fix.push((code.len(), init_lf))
+    a_bl()
+    w32(0xA8C17BFD)                                             # ldp x29, x30, [sp], #16
+    a_ret()
+    addr = repl_next
+    out.addr = addr
+    loop lf in [lf0..lfuncs.len()):
+        loop lf_abs.len() <= lf: lf_abs.push(0)
+        if lf < fn_addr.len() and fn_addr[lf] >= 0: lf_abs[lf] = addr + fn_addr[lf]
+    bls: (int, int)[]
+    loop f in a_call_fix:
+        t = lf_abs[f.1]
+        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
+        bls.push((f.0, t))
+    loop f in a_stub_fix: bls.push((f.0, img_text_addr + stub_addr[f.1]))
+    veneers: {int: int} = {}
+    loop f in bls:
+        t = f.1
+        if t - (addr + f.0) >= 1 << 27 or t - (addr + f.0) < -(1 << 27):
+            v = veneers.get(t) ?? -1
+            if v < 0:
+                v = code.len()
+                veneers[t] = v
+                w32(0x58000050)                                 # ldr x16, #8
+                a_br(16)
+                w32(t & 0xFFFFFFFF)
+                w32((t >> 32) & 0xFFFFFFFF)
+            t = addr + v
+        wr32(f.0, rd32(f.0) | (((t - (addr + f.0)) / 4) & 0x3FFFFFF))
+    loop f in a_faddr_fix:
+        t = lf_abs[f.1]
+        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
+        a_patch_adrp(f.0, addr, t)
+    loop code.len() % 16 != 0: w32(0)
+    ro_at = addr + code.len()
+    if rodata.len() > ro_shipped:
+        ro_segs.push((ro_shipped, rodata.len(), ro_at))
+        loop j in [ro_shipped..rodata.len()): code.push(rodata[j])
+        ro_shipped = rodata.len()
+    loop f in a_data_fix:
+        t = img_data_addr + f.2
+        if f.1 == 0: t = repl_ro_addr(f.2)
+        a_patch_adrp(f.0, addr, t)
+    out.code = code
+    repl_next = (addr + code.len() + 0x3FFF) & ~0x3FFF
+    out
+
+# the address of read-only data at offset off
+repl_ro_addr = (off: int) -> int:
+    loop s in ro_segs:
+        if off >= s.0 and off < s.1: return s.2 + off - s.0
+    ice("read-only data at {off} has no place")
+    0
+
+struct ReplTry:
+    ok: bool
+    show: bool
+    expr_at: int
+    type: str
+    out: ReplOut
+
+# compile text as the next input. What it adds stays (ready to send) with keep 1 if it compiles,
+# with keep 2 if it compiles and shows no value; else (and after errors, which it tells) the
+# compiler is as it was: its memory is put back as it was (lib/std/snapshot.jo).
+repl_try = (text: str, keep: int) -> ReplTry:
+    t = ReplTry()
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        s = __snap_take(lo, lo + n)
+        box = __os_raw_pages(4096) as *int          # (what it found: kept when memory is put back)
+        if __setjmp(repl_jbuf) == 0:
+            __repl_jmp = repl_jbuf
+            o = repl_compile(text, repl_inputs)
+            __repl_jmp = null
+            if keep == 1 or keep == 2 and not o.show:
+                __snap_drop(s)
+                __os_raw_free(box as *u8, 4096)
+                return ReplTry(true, o.show, o.expr_at, o.type, o)
+            box[0] = 1
+            if o.show: box[1] = 1
+            box[2] = o.expr_at
+            box[3] = __snap_keep(o.type) as int
+        __repl_jmp = null
+        __snap_restore(s)
+        __snap_drop(s)
+        if box[0] == 1:
+            t.ok = true
+            t.show = box[1] == 1
+            t.expr_at = box[2]
+            t.type = __snap_unkeep(box[3] as *u8)
+        __os_raw_free(box as *u8, 4096)
+    t
+
+# where the code of a line ends (before a comment)
+repl_code_end = (s: str) -> int:
+    q: u8 = 0
+    i = 0
+    loop i < len(s):
+        c = s[i]
+        if q != 0:
+            if c == '\\': i += 1
+            else if c == q: q = 0
+        else if c == '"' or c == '\'': q = c
+        else if c == '#': return i
+        i += 1
+    len(s)
+
+# run an input: compile, send, run; false if the session ended
+repl_run = (text: str) -> bool:
+    c = repl_try(text, 2)
+    if not c.ok: return true
+    if c.show:
+        # show the value: the last expression becomes __repl_show(expression)
+        e = trim_end(text)
+        last = e[c.expr_at..]
+        code_end = repl_code_end(last)
+        shown = e[..c.expr_at) + "__repl_show(" + trim_end(last[..code_end)) + ")\n"
+        c = repl_try(shown, 1)
+        if not c.ok: c = repl_try(text, 1)
+        if not c.ok: return true
+    o = c.out
+    repl_inputs += 1
+    repl_send(1, o.addr, o.code)
+    # (with the end of the globals: what the session copies before running it, on Windows)
+    h = [2, o.addr + o.entry, img_data_addr + data_size + 8]
+    repl_write(data(h) as *u8, 24)
+    r = repl_wait_reply()
+    if r < 0:
+        eprint("the session ended")
+        return false
+    if r >= 512:
+        if r - 512 == 101: return true          # a panic (it said why)
+        repl_end()
+        exit(r - 512)                          # exit() in the input
+    if r == 256 + 2: eprint("interrupted; the session is as it was before this input")
+    else if r >= 256: eprint("crashed (signal {r - 256}); the session is as it was before this input")
+    true
+
+# ---- reading input ----
+
+repl_tty = false
+repl_history: str[]
+repl_hist_path = ""
+__termios_saved: u8[]
+repl_mode_saved = -1                    # (Windows: the console's input mode)
+
+repl_raw = (on: bool):
+    if not repl_tty: return
+    when TARGET == "windows":
+        # (keys as the terminal sequences Linux has: ESC [ A for up...; ctrl-c a key, not a signal)
+        hin = GetStdHandle(u32(0xFFFFFFF6))
+        if on:
+            m: u32[] = [0]
+            GetConsoleMode(hin, data(m))
+            repl_mode_saved = int(m[0])
+            SetConsoleMode(hin, u32((repl_mode_saved & ~(0x1 | 0x2 | 0x4)) | 0x200))   # PROCESSED, LINE, ECHO off; VIRTUAL_TERMINAL_INPUT
+        else if repl_mode_saved >= 0: SetConsoleMode(hin, u32(repl_mode_saved))
+    else:
+        if on:
+            t = fill(u8(0), 64)
+            syscall(16, 0, 0x5401, data(t))         # TCGETS
+            __termios_saved = t
+            r = t
+            lflag = int(r[12]) | (int(r[13]) << 8)
+            lflag = lflag & ~(0x2 | 0x8 | 0x1)      # ICANON, ECHO, ISIG
+            r[12] = u8(lflag & 255)
+            r[13] = u8((lflag >> 8) & 255)
+            iflag = int(r[0]) | (int(r[1]) << 8)
+            iflag = iflag & ~(0x100 | 0x400)        # ICRNL, IXON
+            r[0] = u8(iflag & 255)
+            r[1] = u8((iflag >> 8) & 255)
+            r[17 + 6] = 1                           # VMIN
+            r[17 + 5] = 0                           # VTIME
+            syscall(16, 0, 0x5402, data(r))         # TCSETS
+        else if __termios_saved.len() > 0: syscall(16, 0, 0x5402, data(__termios_saved))
+
+repl_out = (s: str): __write_fd(1, data(s), len(s))
+
+repl_pending: u8[]                      # (Windows: the rest of a character read, in UTF-8)
+
+repl_getc = () -> int:
+    when TARGET == "windows":
+        if repl_tty:
+            if repl_pending.len() == 0:
+                # (the console gives UTF-16: a character, two units for one past U+FFFF)
+                w: u16[] = [0, 0]
+                k: u32[] = [0]
+                hin = GetStdHandle(u32(0xFFFFFFF6))
+                if ReadConsoleW(hin, data(w), 1, data(k), null) == 0 or k[0] == 0: return -1
+                c = int(w[0])
+                if c >= 0xD800 and c < 0xDC00:
+                    if ReadConsoleW(hin, data(w) + 1, 1, data(k), null) != 0 and k[0] == 1: c = 0x10000 + ((c - 0xD800) << 10) + (int(w[1]) - 0xDC00)
+                repl_pending = bytes(chr(c))
+            c = int(repl_pending[0])
+            repl_pending.remove(0)
+            return c
+    b: u8[] = [0]
+    if __read_fd(0, data(b), 1) != 1: return -1
+    int(b[0])
+
+# display width of a line's bytes (UTF-8: one column per character)
+repl_cols = (s: str, n: int) -> int:
+    c = 0
+    loop i in [0..min(n, len(s))):
+        if s[i] < 0x80 or s[i] >= 0xC0: c += 1
+    c
+
+# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end
+repl_edit = (prompt: str, initial: str) -> str?:
+    line = initial
+    cur = len(line)
+    hi = repl_history.len()
+    draft = ""
+    loop true:
+        repl_out("\r{prompt}{line}\x1b[K\r\x1b[{repl_cols(prompt, len(prompt)) + repl_cols(line, cur)}C")
+        if len(prompt) + cur == 0: repl_out("\r")
+        c = repl_getc()
+        if c < 0: return none
+        if c == 13 or c == 10:
+            repl_out("\r\n")
+            return line
+        if c == 4:                              # ctrl-d
+            if len(line) == 0:
+                repl_out("\r\n")
+                return none
+            if cur < len(line): line = line[..cur) + line[cur + 1..]
+        else if c == 3:                         # ctrl-c: drop the line
+            repl_out("^C\r\n")
+            return "\x03"
+        else if c == 127 or c == 8:
+            if cur > 0:
+                k = cur - 1
+                loop k > 0 and line[k] >= 0x80 and line[k] < 0xC0: k -= 1
+                line = line[..k) + line[cur..]
+                cur = k
+        else if c == 1: cur = 0
+        else if c == 5: cur = len(line)
+        else if c == 11: line = line[..cur)
+        else if c == 21:
+            line = line[cur..]
+            cur = 0
+        else if c == 23:                        # ctrl-w: the word before the cursor
+            k = cur
+            loop k > 0 and line[k - 1] == ' ': k -= 1
+            loop k > 0 and line[k - 1] != ' ': k -= 1
+            line = line[..k) + line[cur..]
+            cur = k
+        else if c == 12: repl_out("\x1b[H\x1b[2J")
+        else if c == 9:
+            if len(trim(line[..cur))) == 0:
+                # (at the start of a line: indent)
+                line = line[..cur) + "    " + line[cur..]
+                cur += 4
+            else:
+                cands = repl_completions(repl_before + line[..cur))
+                a = cur
+                loop a > 0 and (is_alnum(line[a - 1]) or line[a - 1] >= 0x80): a -= 1
+                typed = line[a..cur)
+                common = repl_common(cands)
+                if cands.len() == 1: common = cands[0]
+                if len(common) > len(typed):
+                    line = line[..a) + common + line[cur..]
+                    cur = a + len(common)
+                else if cands.len() > 1:
+                    # list them (in columns)
+                    w = 0
+                    loop x in cands: w = max(w, len(x))
+                    w += 2
+                    per = max(1, 78 / w)
+                    listing = "\r\n"
+                    loop i in 0.. and x in cands:
+                        if i >= 200:
+                            listing += "... ({cands.len()} in all)"
+                            break
+                        listing += x + repeat(" ", w - len(x))
+                        if i % per == per - 1: listing += "\r\n"
+                    repl_out(listing + "\r\n")
+        else if c == 27:
+            c2 = repl_getc()
+            c3 = repl_getc()
+            if c2 == '[' or c2 == 'O':
+                if c3 == 'D' and cur > 0:
+                    cur -= 1
+                    loop cur > 0 and line[cur] >= 0x80 and line[cur] < 0xC0: cur -= 1
+                else if c3 == 'C' and cur < len(line):
+                    cur += 1
+                    loop cur < len(line) and line[cur] >= 0x80 and line[cur] < 0xC0: cur += 1
+                else if c3 == 'H': cur = 0
+                else if c3 == 'F': cur = len(line)
+                else if c3 == 'A' and hi > 0:
+                    if hi == repl_history.len(): draft = line
+                    hi -= 1
+                    line = repl_history[hi]
+                    cur = len(line)
+                else if c3 == 'B' and hi < repl_history.len():
+                    hi += 1
+                    line = draft
+                    if hi < repl_history.len(): line = repl_history[hi]
+                    cur = len(line)
+                else if c3 >= '0' and c3 <= '9':
+                    c4 = repl_getc()
+                    if c4 == '~':
+                        if c3 == '1' or c3 == '7': cur = 0
+                        else if c3 == '4' or c3 == '8': cur = len(line)
+                        else if c3 == '3' and cur < len(line): line = line[..cur) + line[cur + 1..]
+        else if c >= 32:
+            line = line[..cur) + byte_str(c) + line[cur..]
+            cur += 1
+
+# a line from standard input without editing (not a terminal); none at the end
+repl_plain = () -> str?:
+    out: u8[]
+    loop true:
+        c = repl_getc()
+        if c < 0:
+            if out.len() == 0: return none
+            return str_from_bytes(out)
+        if c == 10: return str_from_bytes(out)
+        out.push(u8(c))
+    none
+
+# names that could go at the end of text (what is typed of the name being completed is dropped):
+# the checker, at a placeholder name (as the language server does), then the compiler's memory
+# put back as it was
+repl_completions = (text: str) -> str[]:
+    a = len(text)
+    loop a > 0 and (is_alnum(text[a - 1]) or text[a - 1] >= 0x80): a -= 1
+    probe = text[..a) + "__sloppy_complete__\n"
+    got = ""
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        s = __snap_take(lo, lo + n)
+        ide_on = true
+        ide_fd = -1
+        ide_out = ""
+        ide_sentinel = intern("__sloppy_complete__")
+        if __setjmp(repl_jbuf) == 0:
+            __repl_jmp = repl_jbuf
+            repl_compile(probe, repl_inputs)
+        __repl_jmp = null
+        k = __snap_keep(ide_out)
+        __snap_restore(s)
+        __snap_drop(s)
+        got = __snap_unkeep(k)
+    prefix = text[a..]
+    out: str[]
+    loop l in split(got, "\n"):
+        if not starts_with(l, "C\t"): continue
+        e = find_byte(l, '\t', 2)
+        if e < 0: e = len(l)
+        name = l[2..e)
+        if not starts_with(name, prefix) or out.contains(name): continue
+        if starts_with(name, "__") and not starts_with(prefix, "_"): continue
+        out.push(name)
+    out.sort()
+    out
+
+# the longest start all of xs share
+repl_common = (xs: str[]) -> str:
+    if xs.len() == 0: return ""
+    c = xs[0]
+    loop x in xs:
+        n = 0
+        loop n < len(c) and n < len(x) and c[n] == x[n]: n += 1
+        c = c[..n)
+    c
+
+repl_before = ""          # (the lines of the input typed so far, for completion)
+
+# brackets and strings still open at the end of text
+repl_open = (text: str) -> int:
+    depth = 0
+    q: u8 = 0
+    i = 0
+    loop i < len(text):
+        c = text[i]
+        if q != 0:
+            if c == '\\': i += 1
+            else if c == q: q = 0
+        else if c == '"' or c == '\'': q = c
+        else if c == '#':
+            loop i < len(text) and text[i] != '\n': i += 1
+            continue
+        else if c == '(' or c == '[' or c == '{{': depth += 1
+        else if c == ')' or c == ']' or c == '}}': depth -= 1
+        i += 1
+    if q != 0: return depth + 1
+    depth
+
+# one input: a line, or a block (a line ending with ':' and the indented lines after it, up to
+# an empty line), or lines with brackets still open
+repl_read = () -> str?:
+    text = ""
+    indent = ""
+    block = false
+    loop true:
+        prompt = ">>> "
+        if len(text) > 0: prompt = "... "
+        l: str? = none
+        if repl_tty: l = repl_edit(prompt, indent)
+        else: l = repl_plain()
+        if l == none:
+            if len(text) > 0: return text
+            return none
+        line = l!
+        if line == "\x03":
+            repl_before = ""
+            return ""
+        if len(text) == 0 and len(trim(line)) == 0: return ""
+        # (history keeps lines, as typed)
+        if repl_tty and len(trim(line)) > 0 and (repl_history.len() == 0 or repl_history[repl_history.len() - 1] != line): repl_history.push(line)
+        text += line + "\n"
+        repl_before = text
+        line_code = trim_end(line[..repl_code_end(line)))
+        if ends_with(line_code, ":"): block = true
+        if repl_open(text) > 0:
+            indent = ""
+            continue
+        if block:
+            if len(trim(line)) == 0:
+                repl_before = ""
+                return text
+            # (the next line indented like this one, or more after a ':')
+            k = 0
+            loop k < len(line) and line[k] == ' ': k += 1
+            indent = line[..k)
+            if ends_with(line_code, ":"): indent += "    "
+            continue
+        repl_before = ""
+        return text
+    none
+
+repl_load_history = ():
+    home = env("HOME") ?? ""
+    when TARGET == "windows":
+        if len(home) == 0: home = os_path(env("USERPROFILE") ?? "")
+    if len(home) == 0: return
+    repl_hist_path = "{home}/.sloppy_history"
+    if let h = read_file(repl_hist_path):
+        loop l in lines(h):
+            if len(l) > 0: repl_history.push(l)
+
+repl_save_history = ():
+    if len(repl_hist_path) == 0: return
+    keep: str[]
+    s = max(0, repl_history.len() - 1000)
+    loop i in [s..repl_history.len()): keep.push(repl_history[i])
+    write_file(repl_hist_path, join(keep, "\n") + "\n")
+
+# ---- the prompt ----
+
+repl_help = "Type Sloppy: declarations and statements run as you enter them, and the value of an
+expression at the end of an input is shown. A line ending with ':' starts a block (functions,
+loops, structs...), and an empty line ends it. Names you declare stay, and declaring one again
+replaces it. If an input panics or crashes, everything is as it was before it.
+  :type expr   the type of an expression (without running it); of a function, its versions
+  tab          complete a name (or indent, at the start of a line)
+  up, down     earlier lines
+  ctrl-c       drop the line, or stop what is running
+  ctrl-d, exit leave
+"
+
+repl_main = ():
+    when TARGET == "windows":
+        m: u32[] = [0]
+        repl_tty = GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
+        # (the prompt's line: drawn with terminal sequences)
+        hout = GetStdHandle(u32(0xFFFFFFF5))
+        if repl_tty and GetConsoleMode(hout, data(m)) != 0: SetConsoleMode(hout, m[0] | u32(0x4 | 0x1))   # VIRTUAL_TERMINAL_PROCESSING
+    else:
+        t = fill(u8(0), 64)
+        repl_tty = syscall(16, 0, 0x5401, data(t)) == 0
+        # (ctrl-c stops what an input is running, not the prompt)
+        act = [1, 0, 0, 0]                             # struct sigaction: SIG_IGN
+        syscall(13, 2, data(act), 0, 8)                # rt_sigaction(SIGINT)
+    why = repl_start()
+    if len(why) > 0:
+        eprint("sloppy: {why}")
+        exit(1)
+    when TARGET == "windows":
+        # (ctrl-c stops what an input is running, not the prompt; set after the session started,
+        # which would have this too)
+        SetConsoleCtrlHandler(null, 1)
+    if repl_tty:
+        repl_out("Sloppy (type an expression or a statement; a line ending with ':' starts a block, an empty line ends it; ctrl-d quits)\n")
+        repl_load_history()
+    loop true:
+        repl_raw(true)
+        text0 = repl_read()
+        repl_raw(false)
+        if text0 == none: break
+        text = text0!
+        if len(trim(text)) == 0: continue
+        t1 = trim(text)
+        if t1 == "exit" or t1 == "quit" or t1 == ":q" or t1 == ":quit" or t1 == ":exit": break
+        if t1 == ":help" or t1 == ":h" or t1 == "help":
+            repl_out(repl_help)
+            continue
+        if starts_with(t1, ":type ") or starts_with(t1, ":t ") or starts_with(t1, ":doc "):
+            what = trim(t1[find_byte(t1, ' ') + 1..])
+            # (built into the language: print, len of an array, ...: what they are, as API.md says)
+            bi = repl_builtin_doc(what)
+            if len(bi) > 0: repl_out(bi)
+            repl_sig_query = true
+            repl_sig = ""
+            quiet = len(bi) > 0
+            if quiet: quiet_errors = true
+            c = repl_try(what + "\n", 0)
+            quiet_errors = false
+            repl_sig_query = false
+            repl_sig = ""
+            if c.ok:
+                if c.show: repl_out(c.type + "\n")
+                else if not quiet: repl_out("void\n")
+            continue
+        if not repl_run(text): break
+    repl_save_history()
+    repl_end()
+    exit(0)
+
+when TARGET == "windows":
+    @lib("kernel32.dll")
+    extern SetConsoleMode = (h: *u8, mode: u32) -> i32
+    @lib("kernel32.dll")
+    extern ReadConsoleW = (h: *u8, buf: *u16, n: u32, got: *u32, ctl: *u8) -> i32
+    @lib("kernel32.dll")
+    extern SetConsoleCtrlHandler = (f: *u8, add: i32) -> i32
+
+# the language's own functions, which have no declaration to show (as docs/API.md's Built-in
+# functions and Arrays tell them)
+REPL_BUILTINS = ["print", "print(values...)    prints the values, separated by spaces, and a line break",
+    "assert", "assert(ok: bool, message: str = \"\")    stops the program, with the message, if ok is false",
+    "panic", "panic(message: str)    stops the program, with the message and where",
+    "fill", "fill(x: T, n: int) -> T[]    an array of n copies of x",
+    "sqrt", "sqrt(x: f64) -> f64, sqrt(x: f32) -> f32    the square root",
+    "len", "len(xs: T[]) -> int, len(s: str) -> int    how many elements (a string's: bytes)",
+    "push", "push(xs: mut T[], x: T)    adds x at the end",
+    "pop", "pop(xs: mut T[]) -> T    removes the last element and gives it back",
+    "insert", "insert(xs: mut T[], i: int, x: T)    puts x in at index i",
+    "remove", "remove(xs: mut T[], i: int) -> T    takes out the element at i and gives it back",
+    "extend", "extend(xs: mut T[], ys: T[])    adds all of ys at the end",
+    "clear", "clear(xs: mut T[])    removes every element",
+    "truncate", "truncate(xs: mut T[], n: int)    keeps the first n elements",
+    "resize", "resize(xs: mut T[], n: int)    makes it n long (new elements are zero)",
+    "str", "str(x) -> str    any value as text, as print shows it",
+    "int", "int(x) -> int    a number as a whole number (a float cut toward zero); text: to_int(s)",
+    "f64", "f64(x) -> f64    a number as a float; text: to_float(s)",
+    "embed", "embed(path: str) -> u8[]    a file's bytes, built into the program",
+    "bytes", "bytes(s: str) -> u8[]    a string's bytes (UTF-8)"]
+
+repl_builtin_doc = (name: str) -> str:
+    i = 0
+    loop i + 1 < REPL_BUILTINS.len():
+        if REPL_BUILTINS[i] == name: return REPL_BUILTINS[i + 1] + "\n"
+        i += 2
+    ""

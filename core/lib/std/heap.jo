@@ -1,0 +1,68 @@
+# A priority queue: values taken out smallest priority first, as A*'s open list or events by
+# time. Pushing and popping take time in proportion to the log of how many it holds.
+#
+#   open: Heap[int]
+#   open.push(start, 0.0)
+#   loop open.len() > 0:
+#       c = open.pop()                     # the one with the least priority
+#       ...open.push(next, cost + guess)
+#
+# (largest first: push with -priority)
+
+struct Heap[T]:
+    items: T[]
+    keys: f64[]
+
+# put x in with this priority
+push[T] = (h: mut Heap[T], x: T, priority: f64):
+    h.items.push(x)
+    h.keys.push(priority)
+    i = h.keys.len() - 1
+    loop i > 0:
+        p = (i - 1) / 2
+        if h.keys[p] <= h.keys[i]: break
+        __heap_swap(h, i, p)
+        i = p
+
+# take out the value with the least priority (the heap must not be empty)
+pop[T] = (h: mut Heap[T]) -> T:
+    if h.items.len() == 0: panic("pop from an empty Heap (ask h.len() > 0 first)")
+    top = h.items[0]
+    last = h.items.len() - 1
+    __heap_swap(h, 0, last)
+    h.items.pop()
+    h.keys.pop()
+    n = last
+    i = 0
+    loop true:
+        l = 2 * i + 1
+        r = l + 1
+        m = i
+        if l < n and h.keys[l] < h.keys[m]: m = l
+        if r < n and h.keys[r] < h.keys[m]: m = r
+        if m == i: break
+        __heap_swap(h, i, m)
+        i = m
+    top
+
+# the value pop would take out, and its priority (the heap must not be empty)
+peek[T] = (h: Heap[T]) -> T:
+    if h.items.len() == 0: panic("peek at an empty Heap (ask h.len() > 0 first)")
+    h.items[0]
+peek_priority[T] = (h: Heap[T]) -> f64:
+    if h.keys.len() == 0: panic("peek_priority of an empty Heap (ask h.len() > 0 first)")
+    h.keys[0]
+
+len[T] = (h: Heap[T]) -> int: h.items.len()
+clear[T] = (h: mut Heap[T]):
+    h.items.clear()
+    h.keys.clear()
+
+__heap_swap[T] = (h: mut Heap[T], a: int, b: int):
+    if a == b: return
+    t = h.items[a]
+    h.items[a] = h.items[b]
+    h.items[b] = t
+    k = h.keys[a]
+    h.keys[a] = h.keys[b]
+    h.keys[b] = k

@@ -1,0 +1,90 @@
+# Things that come and go (enemies, bullets, units), each found again by a Handle: an index into
+# an array points at another thing once things before it are removed, a handle stays its own,
+# and says so once its thing is gone. The things themselves are an ordinary array, `items`, in no
+# particular order, to loop over as any.
+#
+#   enemies: Pool[Enemy]
+#   h = enemies.add(Enemy(pos))
+#   bullet.target = h                     # (a homing bullet keeps its enemy)
+#   if enemies.has(bullet.target): aim = enemies[bullet.target].pos
+#   enemies[h].hp -= 10
+#   loop mut e in enemies.items: e.pos += e.vel * dt
+#   enemies.retain((e): e.hp > 0)         # (handles to those gone: has(h) is false)
+
+# a thing's handle in a Pool (Handle() is none: has(h) false)
+struct Handle:
+    slot = -1
+    gen = 0
+
+struct Pool[T]:
+    items: T[]                  # the things, in no particular order
+    handles: Handle[]           # items[i]'s handle
+    __where: int[]              # by slot: its thing's index in items (-1: free)
+    __gen: int[]                # by slot: how many times it was given out
+    __free: int[]               # slots free
+
+# add x: its handle
+add[T] = (p: mut Pool[T], x: T) -> Handle:
+    slot = 0
+    if p.__free.len() > 0: slot = p.__free.pop()
+    else:
+        slot = p.__where.len()
+        p.__where.push(-1)
+        p.__gen.push(0)
+    p.__gen[slot] += 1
+    p.__where[slot] = p.items.len()
+    h = Handle(slot, p.__gen[slot])
+    p.items.push(x)
+    p.handles.push(h)
+    h
+
+# whether h's thing is still there
+has[T] = (p: Pool[T], h: Handle) -> bool: h.slot >= 0 and h.slot < p.__where.len() and p.__gen[h.slot] == h.gen and p.__where[h.slot] >= 0
+
+# the index of h's thing in items now (-1 when it is gone)
+index_of[T] = (p: Pool[T], h: Handle) -> int: if has(p, h): p.__where[h.slot] else: -1
+
+# h's thing (panics when it is gone: has(h) first, or get)
+([])[T] = (p: Pool[T], h: Handle) -> T:
+    if not has(p, h): panic("this handle's thing is gone from the pool (removed, or never there): check `pool.has(h)` first, or use `pool.get(h)`")
+    p.items[p.__where[h.slot]]
+
+([]=)[T] = (p: mut Pool[T], h: Handle, x: T):
+    if not has(p, h): panic("this handle's thing is gone from the pool (removed, or never there): check `pool.has(h)` first")
+    p.items[p.__where[h.slot]] = x
+
+# h's thing, or none when it is gone
+get[T] = (p: Pool[T], h: Handle) -> T?:
+    if not has(p, h): return none
+    p.items[p.__where[h.slot]]
+
+# take h's thing out (false when it was gone already); the last thing moves into its place in items
+remove[T] = (p: mut Pool[T], h: Handle) -> bool:
+    if not has(p, h): return false
+    i = p.__where[h.slot]
+    last = p.items.len() - 1
+    if i != last:
+        p.items[i] = p.items[last]
+        p.handles[i] = p.handles[last]
+        p.__where[p.handles[i].slot] = i
+    p.items.pop()
+    p.handles.pop()
+    p.__where[h.slot] = -1
+    p.__free.push(h.slot)
+    true
+
+# keep the things keep says yes to; the others' handles are gone
+retain[T] = (p: mut Pool[T], keep: (T) -> bool):
+    i = 0
+    loop i < p.items.len():
+        if keep(p.items[i]): i += 1
+        else: remove(p, p.handles[i])
+
+len[T] = (p: Pool[T]) -> int: p.items.len()
+
+# everything out (every handle gone)
+clear[T] = (p: mut Pool[T]):
+    loop h in p.handles: p.__where[h.slot] = -1
+    loop h in p.handles: p.__free.push(h.slot)
+    p.items.clear()
+    p.handles.clear()

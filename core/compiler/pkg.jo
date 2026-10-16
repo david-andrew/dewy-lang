@@ -1,0 +1,305 @@
+# Packages: other people's Sloppy code, by git URL (or a directory), named in the build block:
+#
+#   build:
+#       physics = package("https://github.com/ann/sloppy-physics")
+#       tween = package("https://github.com/bob/tween", "v1.2")      # a tag, a branch or a commit
+#       shared = package("../shared")                                # a directory
+#
+# `import physics` loads the package's main file (the file at its root with the package's name,
+# or its only file there), `import 'physics/world.jo'` any other. A git package is pinned to a
+# commit in sloppy.lock beside the program (the first build writes it: commit it with the
+# program, and every build after uses the same code) and fetched once, with git, into a cache
+# (pkg_cache). The packages a package names in its own build block come along.
+
+use 'util.jo'
+use 'lex.jo'
+
+struct PkgSpec:
+    name: str
+    src: str        # a git URL, or a directory
+    ref: str        # (git) a tag, branch or commit; "": the default branch
+    dir: str        # where the build block naming it is (relative directories are from there)
+
+pkg_specs: PkgSpec[]
+pkg_dirs: {str: str} = {}       # package name -> its directory
+pkg_errs: {str: str} = {}       # package name -> why it has no directory
+pkg_fetch = false               # (sloppy build, run, test, watch: fetch what is missing; the language server does not)
+
+# the package specs in the build block of file path (text: read before the program is parsed)
+pkg_scan = (path: str, src: str): pkg_scan_at(path, src, pkg_block_at(src))
+
+# where the build block starts (-1: none)
+pkg_block_at = (src: str) -> int:
+    if starts_with(src, "build:"): return 0
+    k = find(src, "\nbuild:")
+    if k >= 0: return k + 1
+    -1
+
+pkg_scan_at = (path: str, src: str, at: int):
+    if at < 0: return
+    d = "."
+    s = max(rfind(path, "/"), rfind(path, "\\"))
+    if s >= 0: d = path[..s)
+    i = find_byte(src, '\n', at)
+    loop i >= 0 and i < len(src):
+        j = find_byte(src, '\n', i + 1)
+        if j < 0: j = len(src)
+        line = src[i + 1..j)
+        i = j
+        t = trim(line)
+        if len(t) == 0 or t[0] == '#': continue
+        if line[0] != ' ' and line[0] != '\t': break
+        eq = find(t, "=")
+        if eq < 0: continue
+        val = trim(t[eq + 1..])
+        if not starts_with(val, "package("): continue
+        args = pkg_strings(val[8..])
+        if args.len() == 0: continue
+        ref = ""
+        if args.len() > 1: ref = args[1]
+        pkg_add(PkgSpec(trim(t[..eq)), args[0], ref, d))
+
+# the "quoted" strings in s, up to its closing parenthesis
+pkg_strings = (s: str) -> str[]:
+    out: str[]
+    i = 0
+    loop i < len(s) and s[i] != ')':
+        if s[i] == '"':
+            e = find(s, "\"", i + 1)
+            if e < 0: break
+            out.push(s[i + 1..e))
+            i = e
+        i += 1
+    out
+
+pkg_add = (p: PkgSpec):
+    loop q in pkg_specs:
+        if q.name == p.name: return
+    pkg_specs.push(p)
+
+pkg_is_git = (src: str) -> bool: find(src, "://") >= 0 or starts_with(src, "git@") or starts_with(src, "github.com/") or starts_with(src, "gitlab.com/") or starts_with(src, "codeberg.org/")
+
+pkg_url = (src: str) -> str:
+    if find(src, "://") < 0 and not starts_with(src, "git@"): return "https://" + src
+    src
+
+# where fetched packages are kept: the user's cache directory
+pkg_cache = () -> str:
+    if let e = env("SLOPPY_PACKAGES"): return os_path(e)
+    when TARGET == "windows":
+        return os_path(env("LOCALAPPDATA") ?? temp_dir()) + "/sloppy/packages"
+    else when TARGET == "macos":
+        return (env("HOME") ?? "/tmp") + "/Library/Caches/sloppy/packages"
+    else:
+        if let x = env("XDG_CACHE_HOME"):
+            if len(x) > 0: return x + "/sloppy/packages"
+        return (env("HOME") ?? "/tmp") + "/.cache/sloppy/packages"
+
+# a directory and those above it, made where missing
+pkg_mkdirs = (d: str):
+    if len(d) == 0 or file_exists(d + "/."): return
+    s = rfind(d, "/")
+    if s > 0: pkg_mkdirs(d[..s))
+    mkdir(d)
+
+# a URL as a directory name
+pkg_dir_name = (url: str) -> str:
+    out = ""
+    u = url
+    k = find(u, "://")
+    if k >= 0: u = u[k + 3..]
+    loop c in u.bytes():
+        if is_ident_char(c) or c == '.' or c == '-': out = out + from_char(c)
+        else: out = out + "_"
+    out
+
+from_char = (c: u8) -> str: str_from_bytes([c])
+
+# git, run with these arguments: its exit code and output (-1: git is not there)
+pkg_git = (args: str[]) -> (int, str): run_program("git", args)
+
+# the commit ref names at url (ref "": the default branch), or "" (with the reason in pkg_why)
+pkg_why = ""
+pkg_resolve = (url: str, ref: str) -> str:
+    hex = len(ref) == 40
+    loop c in ref.bytes():
+        if not (c >= '0' and c <= '9' or c >= 'a' and c <= 'f'): hex = false
+    if hex: return ref
+    want = ref
+    if len(want) == 0: want = "HEAD"
+    code, out = pkg_git(["ls-remote", url, want])
+    if code < 0:
+        pkg_why = "fetching it needs git (https://git-scm.com), which is not on the PATH"
+        return ""
+    if code != 0:
+        pkg_why = "git could not reach {url}"
+        return ""
+    found = ""
+    loop line in split(out, "\n"):
+        tab = find(line, "\t")
+        if tab < 0: continue
+        sha = line[..tab)
+        name = trim(line[tab + 1..])
+        # (an annotated tag: the commit it names, ^{})
+        if ends_with(name, "^\{}"): return sha
+        if len(found) == 0: found = sha
+    if len(found) == 0:
+        pkg_why = "{url} has no '{want}' (a tag, a branch, or a whole 40-character commit)"
+    found
+
+# the commit's files, fetched into dir (a marker last: a half-fetched one is fetched again)
+pkg_get = (url: str, commit: str, dir: str) -> bool:
+    pkg_mkdirs(dir)
+    code, _ = pkg_git(["-C", dir, "init", "-q"])
+    if code != 0: return false
+    code2, _ = pkg_git(["-C", dir, "fetch", "-q", "--depth", "1", url, commit])
+    if code2 != 0:
+        # (a server that gives no single commits: all of it)
+        code3, _ = pkg_git(["-C", dir, "fetch", "-q", url])
+        if code3 != 0: return false
+        code4, _ = pkg_git(["-C", dir, "-c", "advice.detachedHead=false", "checkout", "-q", commit])
+        if code4 != 0: return false
+    else:
+        code4, _ = pkg_git(["-C", dir, "-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"])
+        if code4 != 0: return false
+    write_file(dir + "/.sloppy-fetched", commit)
+
+# the packages' directories (pkg_dirs), with sloppy.lock beside the program's main file: read,
+# and written when a package was pinned (fetch: get what is missing)
+pkg_resolve_all = (main_path: str):
+    if pkg_specs.len() == 0: return
+    d = "."
+    s = rfind(main_path, "/")
+    if s >= 0: d = main_path[..s)
+    lock_path = d + "/sloppy.lock"
+    locked: {str: str} = {}             # "name url ref" -> commit
+    if let text = read_file(lock_path):
+        loop line in split(text, "\n"):
+            t = trim(line)
+            if len(t) == 0 or t[0] == '#': continue
+            # (name, URL, tag/branch/commit asked for or -, the commit it is pinned to)
+            parts = split(t, " ")
+            if parts.len() == 4:
+                ref = parts[2]
+                if ref == "-": ref = ""
+                locked["{parts[0]} {parts[1]} {ref}"] = parts[3]
+    pins: str[]
+    changed = false
+    k = 0
+    loop k < pkg_specs.len():
+        p = pkg_specs[k]
+        k += 1
+        if not pkg_is_git(p.src):
+            if starts_with(p.src, "-"):
+                pkg_errs[p.name] = "package '{p.name}': '{p.src}' is not a directory or a git URL"
+                continue
+            dir = p.src
+            if not is_abs_path(dir): dir = "{p.dir}/{dir}"
+            if not file_exists(dir + "/."):
+                pkg_errs[p.name] = "package '{p.name}': there is no directory {dir}"
+                continue
+            pkg_dirs[p.name] = dir
+            pkg_scan_main(p.name, dir)
+            continue
+        url = pkg_url(p.src)
+        # (git takes what starts with - as an option: --upload-pack runs a command)
+        if starts_with(url, "-") or starts_with(p.ref, "-") or find(url, " ") >= 0 or find(p.ref, " ") >= 0:
+            pkg_errs[p.name] = "package '{p.name}': '{p.src}' is not a git URL (or the tag, branch or commit is not one)"
+            continue
+        key = "{p.name} {url} {p.ref}"
+        commit = locked.get(key) ?? ""
+        if len(commit) == 0:
+            if not pkg_fetch:
+                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`sloppy build` fetches it)"
+                continue
+            commit = pkg_resolve(url, p.ref)
+            if len(commit) == 0:
+                pkg_errs[p.name] = "package '{p.name}': {pkg_why}"
+                continue
+            changed = true
+        shown = p.ref
+        if len(shown) == 0: shown = "-"
+        pins.push("{p.name} {url} {shown} {commit}")
+        dir = "{pkg_cache()}/{pkg_dir_name(url)}@{commit[..min(len(commit), 12))}"
+        if not file_exists(dir + "/.sloppy-fetched"):
+            if not pkg_fetch:
+                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`sloppy build` fetches it)"
+                continue
+            eprint("fetching {p.name} ({url} at {commit[..min(len(commit), 12))})")
+            if not pkg_get(url, commit, dir):
+                pkg_errs[p.name] = "package '{p.name}': git could not fetch commit {commit} of {url}"
+                continue
+        pkg_dirs[p.name] = dir
+        pkg_scan_main(p.name, dir)
+    if changed and pkg_fetch:
+        pins.sort()
+        write_file(lock_path, "# the commits of the packages in this program's build block (sloppy build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n" + join(pins, "\n") + "\n")
+
+# a package's own packages: those in the build blocks of the files at its root
+pkg_scan_main = (name: str, dir: str):
+    loop f in list_dir(dir):
+        if ends_with(f, ".jo"):
+            if let src = read_file("{dir}/{f}"): pkg_scan("{dir}/{f}", src)
+
+# the main file of package name in dir: dir/name.jo, else the only .jo file at its root
+pkg_main = (name: str, dir: str) -> str?:
+    if file_exists("{dir}/{name}.jo"): return "{dir}/{name}.jo"
+    only = ""
+    n = 0
+    loop f in list_dir(dir):
+        if ends_with(f, ".jo"):
+            n += 1
+            only = f
+    if n == 1: return "{dir}/{only}"
+    none
+
+# sloppy add <url or directory> [name] [file.jo]: the package in the program's build block, pinned
+pkg_add_main = (a: str[]):
+    if a.len() < 3:
+        eprint("usage: sloppy add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)")
+        exit(2)
+    src = a[2]
+    name = ""
+    file = ""
+    loop x in a[3..):
+        if ends_with(x, ".jo"): file = x
+        else: name = x
+    if len(name) == 0:
+        # (from its last part: sloppy-physics.git -> physics)
+        n = src
+        loop ends_with(n, "/"): n = n[..len(n) - 1)
+        n = n[max(rfind(n, "/"), rfind(n, ":")) + 1..]
+        if ends_with(n, ".git"): n = n[..len(n) - 4)
+        if starts_with(n, "sloppy-"): n = n[7..]
+        name = n.replace("-", "_")
+    if len(file) == 0:
+        found: str[]
+        loop f in list_dir("."):
+            if ends_with(f, ".jo"): found.push(f)
+        if found.len() != 1:
+            eprint("error: say which program to add it to: sloppy add {src} {name} game.jo")
+            exit(1)
+        file = found[0]
+    text = read_file(file) ?? ""
+    if find(text, "\n    {name} = package(") >= 0 or find(text, "\n\t{name} = package(") >= 0:
+        eprint("error: {file} has a package named '{name}' already (give it another name: sloppy add {src} other_name)")
+        exit(1)
+    # (the file's own line ends: \r\n on Windows)
+    nl = "\n"
+    if find(text, "\r\n") >= 0: nl = "\r\n"
+    line = "    {name} = package(\"{src}\"){nl}"
+    at = pkg_block_at(text)
+    if at >= 0:
+        e = find_byte(text, '\n', at)
+        if e < 0: text = text + nl + line
+        else: text = text[..e + 1) + line + text[e + 1..]
+    else: text = "build:" + nl + line + nl + text
+    pkg_specs = []
+    pkg_scan(file, text)
+    pkg_fetch = true
+    pkg_resolve_all(file)
+    if let why = pkg_errs.get(name):
+        eprint("error: {why}")
+        exit(1)
+    write_file(file, text)
+    print("added {name} to {file}: import {name}")

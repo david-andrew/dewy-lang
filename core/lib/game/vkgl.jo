@@ -1,0 +1,669 @@
+# The part of OpenGL ES the library uses, on Vulkan (vk.jo): what softgl.jo is for the software
+# renderer. gl.jo's entry points come here when the library draws through Vulkan. GL's objects
+# become Vulkan's: a texture is an image in a slot of the bindless array (a new slot whenever
+# the image or its sampling changes; draws are given the slot their textures have when they
+# are recorded, in place of the GL name in their uniforms), a framebuffer a set of attachments rendered with dynamic rendering, a buffer a Vulkan
+# buffer read by address. GL's state (blending, depth, culling, color mask, viewport, scissor)
+# is kept here and chooses the pipeline and the dynamic state of each draw. Draws themselves come
+# from gpu.jo and draw2d.jo (__vk_draw_mesh, __vk_draw2d), which know the shader and its data.
+#
+# Images keep OpenGL's row order (row 0 at the bottom: what clip space y = -1 lands on, with no
+# turning over), so viewports, scissors and read pixels mean what they mean in GL. Every image
+# that is not being rendered to is kept ready for sampling (shader read-only layout).
+
+when TARGET != "wasm" and TARGET != "macos":
+    # ---------------- textures (and renderbuffers: images not sampled by the library) ----------------
+    struct __VgTex:
+        img: __VkImage
+        live: bool
+        linear: bool
+        repeat: bool
+        slot: int                  # in the bindless array
+        drawn: bool                # (a draw was given the slot)
+
+    __vgt: __VgTex[]               # by GL name (0: white, 1x1, in slot 0)
+    __vgt_free: int[]
+    __vg_bound: int[] = fill(0, 16)       # texture bound to each unit
+    __vg_unit = 0
+
+    # ---------------- framebuffers ----------------
+    struct __VgFb:
+        color: int                 # texture names (0: none)
+        depth: int
+
+    __vgf: __VgFb[]                # by GL name (0: the screen, whose images are vk.jo's)
+    __vg_fb = 0                    # bound
+    __vg_rb = 0                    # bound renderbuffer
+
+    # ---------------- buffers ----------------
+    struct __VgBuf:
+        buf: __VkBuffer            # its own memory, or else
+        block: int                 # (upload memory of the frame it was written in: streamed data)
+        off: int
+        size: int
+        frame: int                 # the frame number it was streamed in (-1: its own memory)
+
+    __vgb: __VgBuf[] = [__VgBuf(frame = -1)]
+    __vg_array = 0
+    __vg_elem = 0
+    __vg_frame_no = 0              # counts frames, for streamed buffers
+
+    # ---------------- state ----------------
+    __vg_blend = false
+    __vg_bf = (1, 0, 1, 0)         # GL blend factors: src, dst, src alpha, dst alpha
+    __vg_depth = false
+    __vg_depth_func = 0x201        # GL_LESS
+    __vg_depth_write = true
+    __vg_cull = false
+    __vg_cull_face = 0x405         # GL_BACK
+    __vg_front_cw = false          # GL_CW is front
+    __vg_cmask = 15
+    __vg_scissor_on = false
+    __vg_scissor = (0, 0, 0, 0)
+    __vg_viewport = (0, 0, 1, 1)
+    __vg_clear = vec4(0, 0, 0, 0)
+
+    # the framebuffer being rendered (with vkCmdBeginRendering), or -1
+    __vg_pass = -1
+    __vg_pipeline = 0              # bound in this pass
+
+    # ---------------- setup ----------------
+    __vg_init = ():
+        if __vgt.len() > 0: return
+        __vgt.push(__VgTex())
+        __vgf.push(__VgFb())
+        __vg_tex_alloc(0, 1, 1, u32(VK_FORMAT_R8G8B8A8_UNORM))
+        white: u8[] = [255, 255, 255, 255]
+        __vg_tex_upload(0, 0, 0, 1, 1, data(white), 4)
+
+    # ---------------- passes ----------------
+    # the color and depth images of framebuffer f (the screen's are vk.jo's)
+    __vg_fb_size = (f: int) -> (int, int):
+        if f == 0: return (__vk_screen.width, __vk_screen.height)
+        c = __vgf[f].color
+        if c > 0: return (__vgt[c].img.width, __vgt[c].img.height)
+        d = __vgf[f].depth
+        if d > 0: return (__vgt[d].img.width, __vgt[d].img.height)
+        (1, 1)
+
+    # stop rendering to the current framebuffer; its images become ready for sampling
+    __vg_end_pass = ():
+        if __vg_pass < 0: return
+        cb = __vk_cb()
+        vkCmdEndRendering(cb)
+        f = __vg_pass
+        __vg_pass = -1
+        if f == 0: return
+        c = __vgf[f].color
+        if c > 0: __vk_barrier(cb, __vgt[c].img, u32(VK_LAYOUT_SHADER_READ), VK_STAGE_COLOR_OUT, VK_ACCESS_COLOR_WRITE, VK_STAGE_VERTEX | VK_STAGE_FRAGMENT | VK_STAGE_COMPUTE | VK_STAGE_TRANSFER, VK_ACCESS_SHADER_READ | VK_ACCESS_TRANSFER_READ)
+        d = __vgf[f].depth
+        if d > 0: __vk_barrier(cb, __vgt[d].img, u32(VK_LAYOUT_SHADER_READ), VK_STAGE_EARLY_TESTS | VK_STAGE_LATE_TESTS, VK_ACCESS_DEPTH_WRITE, VK_STAGE_VERTEX | VK_STAGE_FRAGMENT | VK_STAGE_COMPUTE, VK_ACCESS_SHADER_READ)
+
+    # render to the bound framebuffer (what was drawn in it stays)
+    __vg_begin_pass = ():
+        __vk_begin_frame()
+        if __vg_pass == __vg_fb: return
+        __vg_end_pass()
+        cb = __vk_cb()
+        f = __vg_fb
+        color_view = 0
+        depth_view = 0
+        w, h = __vg_fb_size(f)
+        src_stages = VK_STAGE_ALL
+        src_access = VK_ACCESS_MEMORY_WRITE | VK_ACCESS_MEMORY_READ
+        resolve_view = 0
+        if f == 0:
+            __vk_barrier(cb, __vk_screen, u32(VK_LAYOUT_COLOR), src_stages, src_access, VK_STAGE_COLOR_OUT, VK_ACCESS_COLOR_WRITE | VK_ACCESS_COLOR_READ)
+            if __vk_samples > 1:
+                # (drawn with several samples a pixel, averaged into the screen as the pass ends)
+                __vk_barrier(cb, __vk_screen_ms, u32(VK_LAYOUT_COLOR), src_stages, src_access, VK_STAGE_COLOR_OUT, VK_ACCESS_COLOR_WRITE | VK_ACCESS_COLOR_READ)
+                __vk_barrier(cb, __vk_screen_ms_depth, u32(VK_LAYOUT_DEPTH), src_stages, src_access, VK_STAGE_EARLY_TESTS | VK_STAGE_LATE_TESTS, VK_ACCESS_DEPTH_WRITE | VK_ACCESS_DEPTH_READ)
+                color_view = __vk_screen_ms.view
+                depth_view = __vk_screen_ms_depth.view
+                resolve_view = __vk_screen.view
+            else:
+                __vk_barrier(cb, __vk_screen_depth, u32(VK_LAYOUT_DEPTH), src_stages, src_access, VK_STAGE_EARLY_TESTS | VK_STAGE_LATE_TESTS, VK_ACCESS_DEPTH_WRITE | VK_ACCESS_DEPTH_READ)
+                color_view = __vk_screen.view
+                depth_view = __vk_screen_depth.view
+        else:
+            c = __vgf[f].color
+            if c > 0:
+                __vk_barrier(cb, __vgt[c].img, u32(VK_LAYOUT_COLOR), src_stages, src_access, VK_STAGE_COLOR_OUT, VK_ACCESS_COLOR_WRITE | VK_ACCESS_COLOR_READ)
+                color_view = __vgt[c].img.view
+            d = __vgf[f].depth
+            if d > 0:
+                __vk_barrier(cb, __vgt[d].img, u32(VK_LAYOUT_DEPTH), src_stages, src_access, VK_STAGE_EARLY_TESTS | VK_STAGE_LATE_TESTS, VK_ACCESS_DEPTH_WRITE | VK_ACCESS_DEPTH_READ)
+                depth_view = __vgt[d].img.view
+        catt = VkRenderingAttachmentInfo(stype = 1000044001, view = color_view, layout = u32(VK_LAYOUT_COLOR), load_op = 0, store_op = 0)
+        if resolve_view != 0:
+            catt.resolve_mode = 2                       # (the samples' average)
+            catt.resolve_view = resolve_view
+            catt.resolve_layout = u32(VK_LAYOUT_COLOR)
+        datt = VkRenderingAttachmentInfo(stype = 1000044001, view = depth_view, layout = u32(VK_LAYOUT_DEPTH), load_op = 0, store_op = 0)
+        ri = VkRenderingInfo(stype = 1000044000, width = u32(w), height = u32(h), layers = 1)
+        if color_view != 0:
+            ri.ncolors = 1
+            ri.colors = (&catt) as *u8
+        if depth_view != 0: ri.depth = (&datt) as *u8
+        vkCmdBeginRendering(cb, (&ri) as *u8)
+        __vg_pass = f
+        __vg_pipeline = 0
+        vkCmdBindDescriptorSets(cb, 0, __vk_layout, 0, 1, &__vk_set, 0, null)
+
+    # the formats of framebuffer f's attachments (0: none)
+    __vg_fb_formats = (f: int) -> (u32, u32):
+        if f == 0: return (u32(VK_FORMAT_R8G8B8A8_UNORM), u32(VK_FORMAT_D32_SFLOAT))
+        cf: u32 = 0
+        df: u32 = 0
+        if __vgf[f].color > 0: cf = __vgt[__vgf[f].color].img.format
+        if __vgf[f].depth > 0: df = __vgt[__vgf[f].depth].img.format
+        (cf, df)
+
+    # ---------------- GL entry points ----------------
+    vgl_clear_color = (r: f32, g: f32, b: f32, a: f32): __vg_clear = vec4(r, g, b, a)
+
+    vgl_clear = (mask: u32):
+        __vg_begin_pass()
+        cf, df = __vg_fb_formats(__vg_fb)
+        atts: VkClearAttachment[]
+        if mask & u32(GL_COLOR_BUFFER_BIT) != 0 and cf != 0 and __vg_cmask != 0:
+            a = VkClearAttachment(aspect = 1)
+            a.clear[0] = __vg_clear.x
+            a.clear[1] = __vg_clear.y
+            a.clear[2] = __vg_clear.z
+            a.clear[3] = __vg_clear.w
+            atts.push(a)
+        if mask & u32(GL_DEPTH_BUFFER_BIT) != 0 and df != 0 and __vg_depth_write:
+            a = VkClearAttachment(aspect = 2)
+            a.clear[0] = 1.0
+            atts.push(a)
+        if atts.len() == 0: return
+        w, h = __vg_fb_size(__vg_fb)
+        r = VkClearRect(width = u32(w), height = u32(h), layers = 1)
+        if __vg_scissor_on:
+            x0 = clamp(__vg_scissor.0, 0, w)
+            y0 = clamp(__vg_scissor.1, 0, h)
+            x1 = clamp(__vg_scissor.0 + __vg_scissor.2, 0, w)
+            y1 = clamp(__vg_scissor.1 + __vg_scissor.3, 0, h)
+            if x1 <= x0 or y1 <= y0: return
+            r = VkClearRect(x = i32(x0), y = i32(y0), width = u32(x1 - x0), height = u32(y1 - y0), layers = 1)
+        vkCmdClearAttachments(__vk_cb(), u32(atts.len()), data(atts) as *u8, 1, (&r) as *u8)
+
+    vgl_viewport = (x: i32, y: i32, w: i32, h: i32): __vg_viewport = (int(x), int(y), int(w), int(h))
+    vgl_scissor = (x: i32, y: i32, w: i32, h: i32): __vg_scissor = (int(x), int(y), int(w), int(h))
+
+    vgl_enable = (cap: u32, on: bool):
+        c = int(cap)
+        if c == GL_BLEND: __vg_blend = on
+        else if c == GL_DEPTH_TEST: __vg_depth = on
+        else if c == GL_CULL_FACE: __vg_cull = on
+        else if c == GL_SCISSOR_TEST: __vg_scissor_on = on
+
+    vgl_blend_func = (s: u32, d: u32, sa: u32, da: u32): __vg_bf = (int(s), int(d), int(sa), int(da))
+    vgl_depth_func = (f: u32): __vg_depth_func = int(f)
+    vgl_depth_mask = (on: u32): __vg_depth_write = on != 0
+    vgl_color_mask = (r: u32, g: u32, b: u32, a: u32): __vg_cmask = int(r != 0) | (int(g != 0) << 1) | (int(b != 0) << 2) | (int(a != 0) << 3)
+    vgl_cull_face = (mode: u32): __vg_cull_face = int(mode)
+    vgl_front_face = (mode: u32): __vg_front_cw = int(mode) == GL_CW
+
+    # buffers
+    vgl_create_buffer = () -> int:
+        __vgb.push(__VgBuf(frame = -1))
+        __vgb.len() - 1
+
+    vgl_bind_buffer = (target: u32, b: u32):
+        if int(target) == GL_ARRAY_BUFFER: __vg_array = int(b)
+        else: __vg_elem = int(b)
+
+    # new contents (and size) for the bound buffer: streamed data (GL_STREAM_DRAW) goes into this
+    # frame's upload memory, the rest into a buffer of its own (the old one is freed once no frame
+    # uses it)
+    vgl_buffer_data = (target: u32, size: int, p: *u8, usage: u32):
+        b = __vg_array
+        if int(target) != GL_ARRAY_BUFFER: b = __vg_elem
+        if b <= 0 or b >= __vgb.len(): return
+        # (new contents that fit go into the same buffer: the copy waits for what read it before)
+        if int(usage) != GL_STREAM_DRAW and __vgb[b].frame < 0 and __vgb[b].buf.buffer != 0 and size <= __vgb[b].buf.size:
+            __vgb[b].size = size
+            if p != null and size > 0: __vg_copy_to_buffer(__vgb[b].buf.buffer, 0, p, size)
+            return
+        __vk_defer_buffer(__vgb[b].buf)
+        __vgb[b].buf = __VkBuffer()
+        __vgb[b].size = size
+        if int(usage) == GL_STREAM_DRAW and p != null:
+            blk, off = __vk_upload(p, size)
+            __vgb[b].block = blk
+            __vgb[b].off = off
+            __vgb[b].frame = __vg_frame_no
+            return
+        __vgb[b].frame = -1
+        nb = __vk_buffer(max(size, 16), u32(0x1 | 0x2 | 0x20 | 0x40 | 0x100 | 0x20000), u32(VK_MEM_DEVICE_LOCAL), 0)
+        __vgb[b].buf = nb
+        if p != null and size > 0: __vg_copy_to_buffer(nb.buffer, 0, p, size)
+
+    vgl_buffer_sub_data = (target: u32, off: int, size: int, p: *u8):
+        b = __vg_array
+        if int(target) != GL_ARRAY_BUFFER: b = __vg_elem
+        if b <= 0 or b >= __vgb.len() or size <= 0 or __vgb[b].frame >= 0: return
+        __vg_copy_to_buffer(__vgb[b].buf.buffer, off, p, size)
+
+    # copy bytes into a device buffer, through this frame's upload memory, before what is drawn next
+    __vg_copy_to_buffer = (dst: int, off: int, p: *u8, size: int):
+        blk, src = __vk_upload(p, size)
+        __vg_end_pass()
+        cb = __vk_cb()
+        __vk_memory_barrier(cb, VK_STAGE_ALL, VK_ACCESS_MEMORY_READ | VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE)
+        r = VkBufferCopy(src = u64(src), dst = u64(off), size = u64(size))
+        vkCmdCopyBuffer(cb, __vk_blocks[blk].buffer, dst, 1, (&r) as *u8)
+        __vk_memory_barrier(cb, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_ALL, VK_ACCESS_MEMORY_READ)
+
+    # a buffer's device address (0: none, or streamed in an earlier frame)
+    __vg_buffer_addr = (b: int) -> int:
+        if b <= 0 or b >= __vgb.len(): return 0
+        if __vgb[b].frame >= 0:
+            if __vgb[b].frame != __vg_frame_no: return 0
+            return __vk_addr(__vgb[b].block, __vgb[b].off)
+        __vgb[b].buf.addr
+
+    # textures
+    vgl_create_texture = () -> int:
+        __vg_init()
+        if __vgt_free.len() > 0:
+            t = __vgt_free.pop()
+            __vgt[t] = __VgTex(live = true, linear = true)
+            return t
+        if __vgt.len() >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        __vgt.push(__VgTex(live = true, linear = true))
+        __vgt.len() - 1
+
+    vgl_delete_texture = (t: int):
+        if t <= 0 or t >= __vgt.len() or not __vgt[t].live: return
+        __vk_defer_image(__vgt[t].img)
+        __vk_defer(4, __vgt[t].slot, 0)
+        __vgt[t] = __VgTex()
+        __vgt_free.push(t)
+
+    # texture t sampled from a new slot (the old one free once the GPU is done with it)
+    __vg_tex_slot = (t: int):
+        if t > 0 and (__vgt[t].slot == 0 or __vgt[t].drawn):
+            __vk_defer(4, __vgt[t].slot, 0)
+            __vgt[t].slot = __vk_slot_new()
+            __vgt[t].drawn = false
+        depth = __vgt[t].img.aspect != 1
+        __vk_set_texture(__vgt[t].slot, __vgt[t].img.view, __vgt[t].linear and not depth, __vgt[t].repeat)
+
+    # the slot a draw samples texture t from (white for no texture)
+    __vg_slot_of = (t: int) -> int:
+        if t <= 0 or t >= __vgt.len() or __vgt[t].img.image == 0: return 0
+        __vgt[t].drawn = true
+        __vgt[t].slot
+
+    vgl_active_texture = (unit: u32): __vg_unit = clamp(int(unit) - GL_TEXTURE0, 0, 15)
+    vgl_bind_texture = (t: u32): __vg_bound[__vg_unit] = int(t)
+
+    # the Vulkan format for a GL internal format (and whether it is depth)
+    __vg_format = (internal: int, format: int, ty: int) -> u32:
+        if format == GL_DEPTH_COMPONENT or internal == GL_DEPTH_COMPONENT24: return u32(VK_FORMAT_D32_SFLOAT)
+        if internal == GL_RGBA16F: return 97
+        if internal == 0x8814: return 109                   # GL_RGBA32F
+        if internal == 0x8D82: return 108                   # GL_RGBA32I
+        if internal == GL_R8: return 9
+        u32(VK_FORMAT_R8G8B8A8_UNORM)
+
+    # (re)make the image of texture t
+    __vg_tex_alloc = (t: int, w: int, h: int, format: u32):
+        __vk_defer_image(__vgt[t].img)
+        depth = format == u32(VK_FORMAT_D32_SFLOAT)
+        usage = u32(VK_USAGE_SAMPLED | VK_USAGE_TRANSFER_DST | VK_USAGE_TRANSFER_SRC)
+        aspect = u32(1)
+        if depth:
+            usage = usage | u32(VK_USAGE_DEPTH)
+            aspect = 2
+        else: usage = usage | u32(VK_USAGE_COLOR)
+        img = __vk_image(max(w, 1), max(h, 1), format, usage, aspect)
+        # (ready for sampling at once; zeroed by its first clear or upload)
+        __vk_begin_frame()
+        __vg_end_pass()
+        __vk_barrier(__vk_cb(), img, u32(VK_LAYOUT_SHADER_READ), VK_STAGE_TOP, 0, VK_STAGE_ALL, VK_ACCESS_SHADER_READ)
+        __vgt[t].img = img
+        __vgt[t].live = true
+        __vg_tex_slot(t)
+
+    # copy pixels into part of texture t (bytes_per_pixel: of the data given)
+    __vg_tex_upload = (t: int, x: int, y: int, w: int, h: int, pixels: *u8, bpp: int):
+        if pixels == null or w <= 0 or h <= 0: return
+        n = w * h * bpp
+        blk, off = __vk_upload(pixels, n)
+        __vk_begin_frame()
+        __vg_end_pass()
+        cb = __vk_cb()
+        __vk_barrier(cb, __vgt[t].img, u32(VK_LAYOUT_TRANSFER_DST), VK_STAGE_ALL, VK_ACCESS_SHADER_READ, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE)
+        reg = VkBufferImageCopy(offset = u64(off), aspect = __vgt[t].img.aspect, layers = 1, x = i32(x), y = i32(y), width = u32(w), height = u32(h), depth = 1)
+        vkCmdCopyBufferToImage(cb, __vk_blocks[blk].buffer, __vgt[t].img.image, u32(VK_LAYOUT_TRANSFER_DST), 1, (&reg) as *u8)
+        __vk_barrier(cb, __vgt[t].img, u32(VK_LAYOUT_SHADER_READ), VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE, VK_STAGE_ALL, VK_ACCESS_SHADER_READ)
+
+    __vg_bpp = (format: u32) -> int:
+        if format == 97: return 8
+        if format == 108 or format == 109: return 16
+        if format == 9: return 1
+        4
+
+    # (GL_RGB bytes as RGBA: Vulkan drivers rarely sample 3-byte formats)
+    __vg_rgb_to_rgba = (p: *u8, n: int) -> u8[]:
+        out = fill(u8(255), n * 4)
+        loop i in [0..n):
+            out[i * 4] = p[i * 3]
+            out[i * 4 + 1] = p[i * 3 + 1]
+            out[i * 4 + 2] = p[i * 3 + 2]
+        out
+
+    vgl_tex_image = (w: int, h: int, internal: int, format: int, ty: int, pixels: *u8):
+        __vg_init()
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len(): return
+        f = __vg_format(internal, format, ty)
+        __vg_tex_alloc(t, w, h, f)
+        if pixels == null: return
+        if format == GL_RGB and ty == GL_UNSIGNED_BYTE:
+            px = __vg_rgb_to_rgba(pixels, w * h)
+            __vg_tex_upload(t, 0, 0, w, h, data(px), 4)
+        else: __vg_tex_upload(t, 0, 0, w, h, pixels, __vg_bpp(f))
+
+    vgl_tex_sub_image = (x: int, y: int, w: int, h: int, format: int, ty: int, pixels: *u8):
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len() or __vgt[t].img.image == 0: return
+        if format == GL_RGB and ty == GL_UNSIGNED_BYTE:
+            px = __vg_rgb_to_rgba(pixels, w * h)
+            __vg_tex_upload(t, x, y, w, h, data(px), 4)
+        else: __vg_tex_upload(t, x, y, w, h, pixels, __vg_bpp(__vgt[t].img.format))
+
+    vgl_tex_parameter = (pname: u32, v: i32):
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len(): return
+        p = int(pname)
+        if p == GL_TEXTURE_MAG_FILTER: __vgt[t].linear = int(v) != GL_NEAREST
+        else if p == GL_TEXTURE_WRAP_S or p == GL_TEXTURE_WRAP_T: __vgt[t].repeat = int(v) == GL_REPEAT or int(v) == GL_MIRRORED_REPEAT
+        else: return
+        if __vgt[t].img.image != 0: __vg_tex_slot(t)
+
+    # framebuffers
+    vgl_create_framebuffer = () -> int:
+        __vg_init()
+        __vgf.push(__VgFb())
+        __vgf.len() - 1
+
+    vgl_delete_framebuffer = (f: int):
+        if f <= 0 or f >= __vgf.len(): return
+        if __vg_pass == f: __vg_end_pass()
+        __vgf[f] = __VgFb()
+
+    vgl_bind_framebuffer = (f: u32):
+        __vg_init()
+        __vg_fb = int(f)
+        if __vg_fb >= __vgf.len(): __vg_fb = 0
+
+    vgl_framebuffer_texture = (attachment: u32, tex: u32):
+        if __vg_fb <= 0: return
+        if __vg_pass == __vg_fb: __vg_end_pass()
+        if int(attachment) == GL_DEPTH_ATTACHMENT: __vgf[__vg_fb].depth = int(tex)
+        else: __vgf[__vg_fb].color = int(tex)
+
+    vgl_create_renderbuffer = () -> int: vgl_create_texture()
+    vgl_bind_renderbuffer = (r: u32): __vg_rb = int(r)
+    vgl_renderbuffer_storage = (format: u32, w: i32, h: i32):
+        if __vg_rb <= 0 or __vg_rb >= __vgt.len(): return
+        __vg_tex_alloc(__vg_rb, int(w), int(h), __vg_format(int(format), 0, 0))
+    vgl_framebuffer_renderbuffer = (attachment: u32, r: u32): vgl_framebuffer_texture(attachment, r)
+
+    # pixels of the bound framebuffer's color image (rows bottom first, as GL); bpp: 4 or 16
+    vgl_read_pixels = (x: int, y: int, w: int, h: int, out: *u8, bpp: int):
+        __vk_begin_frame()
+        __vg_end_pass()
+        if __vg_fb == 0:
+            __vk_read_pixels(__vk_screen, out)
+            return
+        c = __vgf[__vg_fb].color
+        if c <= 0: return
+        __vk_read_pixels(__vgt[c].img, out)
+        # (the image ends up ready for transfers: back to sampling)
+        __vk_begin_frame()
+        __vk_barrier(__vk_cb(), __vgt[c].img, u32(VK_LAYOUT_SHADER_READ), VK_STAGE_TRANSFER, 0, VK_STAGE_ALL, VK_ACCESS_SHADER_READ)
+
+    # ---------------- programs and pipelines ----------------
+    struct __VgProg:
+        vs: int
+        fs: int
+        pipelines: {int: int}      # state key -> pipeline
+        tex_offs: int[]            # where its uniforms hold a Texture's id (GL name)
+
+    __vgp: __VgProg[] = [__VgProg()]
+
+    # uniforms uploaded to address p for program prog, its textures' GL names made their slots
+    __vg_tex_slots = (prog: int, p: *u8):
+        loop o in __vgp[prog].tex_offs:
+            q = (p + o) as *int
+            q[0] = __vg_slot_of(q[0])
+
+    # a program from a ShaderSource's SPIR-V (its GL name)
+    __vk_program = (src: ShaderSource) -> int:
+        offs: int[]
+        halves = split(src.layout, "|")
+        if halves.len() > 1:
+            loop part in split(halves[1], ";"):
+                f = split(part, ",")
+                if f.len() < 3 or f[1] != "t": continue
+                o = to_int(f[2]) ?? 0
+                n = 1
+                stride = 0
+                if f.len() > 4:
+                    n = to_int(f[3]) ?? 0
+                    stride = to_int(f[4]) ?? 0
+                loop i in [0..n): offs.push(o + i * stride)
+        __vgp.push(__VgProg(__vk_module(src.vs_spirv), __vk_module(src.fs_spirv), {}, offs))
+        __vgp.len() - 1
+
+    # GL blend factors as Vulkan's
+    __vg_factor = (f: int) -> u32:
+        if f == 0: return 0
+        if f == 1: return 1
+        if f == 0x300: return 2
+        if f == 0x301: return 3
+        if f == 0x306: return 4
+        if f == 0x307: return 5
+        if f == 0x302: return 6
+        if f == 0x303: return 7
+        if f == 0x304: return 8
+        if f == 0x305: return 9
+        1
+
+    # GL modes as Vulkan topologies, and their class (point, line, triangle: one pipeline each)
+    __vg_topology = (mode: int) -> u32:
+        if mode == GL_POINTS: return 0
+        if mode == GL_LINES: return 1
+        if mode == GL_LINE_STRIP: return 2
+        if mode == GL_TRIANGLE_STRIP: return 4
+        if mode == GL_TRIANGLE_FAN: return 5
+        3
+
+    __vg_class = (topo: u32) -> int:
+        if topo == 0: return 0
+        if topo <= 2: return 1
+        2
+
+    __vg_format_code = (f: u32) -> int:
+        if f == 0: return 0
+        if f == 37: return 1
+        if f == 97: return 2
+        if f == 109: return 3
+        if f == 108: return 4
+        if f == 9: return 5
+        6
+
+    # the pipeline for program p as the state is now (made the first time it is needed)
+    __vg_pipeline_for = (p: int, topo: u32) -> int:
+        cf, df = __vg_fb_formats(__vg_fb)
+        blend_on = __vg_blend and cf != 0
+        samples = if __vg_fb == 0: __vk_samples else: 1
+        key = __vg_class(topo) | (__vg_format_code(cf) << 2) | (int(df != 0) << 5) | (__vg_cmask << 6) | (int(samples > 1) << 60)
+        if blend_on: key = key | (1 << 10) | (__vg_bf.0 << 11) | (__vg_bf.1 << 23) | (__vg_bf.2 << 35) | (__vg_bf.3 << 47)
+        if let pl = __vgp[p].pipelines.get(key): return pl
+        pl = __vg_make_pipeline(p, topo, cf, df, blend_on, samples)
+        __vgp[p].pipelines[key] = pl
+        pl
+
+    __vg_make_pipeline = (p: int, topo: u32, cf: u32, df: u32, blend_on: bool, samples: int) -> int:
+        name = "main"
+        stages: VkPipelineShaderStageCreateInfo[] = [
+            VkPipelineShaderStageCreateInfo(stype = 18, stage = 1, module = __vgp[p].vs, name = data(name)),
+            VkPipelineShaderStageCreateInfo(stype = 18, stage = 0x10, module = __vgp[p].fs, name = data(name))]
+        vin = VkPipelineVertexInputStateCreateInfo(stype = 19)
+        ia = VkPipelineInputAssemblyStateCreateInfo(stype = 20, topology = topo)
+        vp = VkPipelineViewportStateCreateInfo(stype = 22, nviewports = 1, nscissors = 1)
+        rs = VkPipelineRasterizationStateCreateInfo(stype = 23, line_width = 1.0)
+        pv: u32[] = [1000254001, 0, 0, 0, 1, 0]               # the last vertex provokes (as GL)
+        if __vk_provoking_last: rs.next = data(pv) as *u8
+        ms = VkPipelineMultisampleStateCreateInfo(stype = 24, samples = u32(samples))
+        ds = VkPipelineDepthStencilStateCreateInfo(stype = 25, max_bounds = 1.0)
+        att = VkPipelineColorBlendAttachmentState(mask = u32(__vg_cmask))
+        if blend_on:
+            att.on = 1
+            att.src = __vg_factor(__vg_bf.0)
+            att.dst = __vg_factor(__vg_bf.1)
+            att.src_a = __vg_factor(__vg_bf.2)
+            att.dst_a = __vg_factor(__vg_bf.3)
+        cb = VkPipelineColorBlendStateCreateInfo(stype = 26)
+        if cf != 0:
+            cb.natts = 1
+            cb.atts = (&att) as *u8
+        dyn: u32[] = [0, 1, 1000267000, 1000267001, 1000267002, 1000267006, 1000267007, 1000267008]
+        dy = VkPipelineDynamicStateCreateInfo(stype = 27, nstates = u32(dyn.len()), states = data(dyn))
+        rinfo = VkPipelineRenderingCreateInfo(stype = 1000044002, depth = df)
+        cfv = cf
+        if cf != 0:
+            rinfo.ncolors = 1
+            rinfo.colors = &cfv
+        gi = VkGraphicsPipelineCreateInfo(stype = 28, next = (&rinfo) as *u8, nstages = 2, stages = data(stages) as *u8, vertex_input = (&vin) as *u8,
+            input_assembly = (&ia) as *u8, viewport = (&vp) as *u8, raster = (&rs) as *u8, multisample = (&ms) as *u8, depth = (&ds) as *u8,
+            blend = (&cb) as *u8, dynamic = (&dy) as *u8, layout = __vk_layout, base_index = -1)
+        pl = 0
+        __vk_check(vkCreateGraphicsPipelines(__vk_dev, __vk_pcache, 1, (&gi) as *u8, null, &pl), "vkCreateGraphicsPipelines")
+        __vk_pcache_dirty = true
+        pl
+
+    # ---------------- draws ----------------
+    # the push constants of a draw (see compiler/spirv.jo)
+    struct __VgPush:
+        params: int
+        verts: int
+        insts: int
+        vstride: i32
+        istride: i32
+        flip: f32
+        pad: f32
+
+    # bind program p's pipeline and the dynamic state for a draw of the given GL mode
+    __vg_prepare = (p: int, mode: int):
+        __vg_begin_pass()
+        cb = __vk_cb()
+        topo = __vg_topology(mode)
+        pl = __vg_pipeline_for(p, topo)
+        if pl != __vg_pipeline:
+            vkCmdBindPipeline(cb, 0, pl)
+            __vg_pipeline = pl
+        vx, vy, vw, vh = __vg_viewport
+        v = VkViewport(x = f32(vx), y = f32(vy), width = f32(max(vw, 1)), height = f32(max(vh, 1)), max_depth = 1.0)
+        vkCmdSetViewport(cb, 0, 1, (&v) as *u8)
+        w, h = __vg_fb_size(__vg_fb)
+        r = VkRect2D(width = u32(w), height = u32(h))
+        if __vg_scissor_on:
+            x0 = clamp(__vg_scissor.0, 0, w)
+            y0 = clamp(__vg_scissor.1, 0, h)
+            x1 = clamp(__vg_scissor.0 + __vg_scissor.2, x0, w)
+            y1 = clamp(__vg_scissor.1 + __vg_scissor.3, y0, h)
+            r = VkRect2D(x = i32(x0), y = i32(y0), width = u32(x1 - x0), height = u32(y1 - y0))
+        vkCmdSetScissor(cb, 0, 1, (&r) as *u8)
+        cull: u32 = 0
+        if __vg_cull:
+            if __vg_cull_face == GL_FRONT: cull = 1
+            else if __vg_cull_face == GL_BACK: cull = 2
+            else: cull = 3
+        vkCmdSetCullMode(cb, cull)
+        # (GL's counter-clockwise is clockwise here: rows count the other way in the formula)
+        front = u32(1)
+        if __vg_front_cw: front = 0
+        vkCmdSetFrontFace(cb, front)
+        vkCmdSetPrimitiveTopology(cb, topo)
+        vkCmdSetDepthTestEnable(cb, u32(int(__vg_depth)))
+        vkCmdSetDepthWriteEnable(cb, u32(int(__vg_depth and __vg_depth_write)))
+        vkCmdSetDepthCompareOp(cb, u32(__vg_depth_func - 0x200))
+
+    # a mesh drawn with program prog (as __sw_draw_mesh: the GL names of its buffers; uni: the
+    # uniforms' bytes, usize of them)
+    __vk_draw_mesh = (prog: int, mode: int, vbo: int, stride: int, nverts: int, ibo: int, nidx: int, uni: *u8, usize: int, ibuf: int, istride: int, ninst: int, ioff: int):
+        insts = 0
+        if ibuf > 0: insts = __vg_buffer_addr(ibuf) + ioff
+        __vk_draw_at(prog, mode, __vg_buffer_addr(vbo), stride, nverts, ibo, nidx, uni, usize, insts, istride, ninst)
+
+    # the same with the vertices and instances at addresses (GPU buffers: lib/game/gpubuffer.jo);
+    # with ind (a buffer) the draws' counts are read from there instead: ndraws of them from byte
+    # ind_off, shaped as VkDrawIndexedIndirectCommand (DrawArgs), also for meshes without indices
+    # (drawn through indices 0, 1, 2...); with cnt (a buffer; where __vk_draw_count) as many of
+    # them as the u32 at byte cnt_off says, at most ndraws
+    __vk_draw_at = (prog: int, mode: int, verts: int, stride: int, nverts: int, ibo: int, nidx: int, uni: *u8, usize: int, insts: int, istride: int, ninst: int, ind: int = 0, ind_off: int = 0, ndraws: int = 0, cnt: int = 0, cnt_off: int = 0):
+        if prog <= 0: return
+        if verts == 0 and nverts > 0: return
+        indexed = nidx > 0 and ibo > 0 and ibo < __vgb.len()
+        seq = 0
+        if ind != 0 and not indexed: seq = __vg_sequence(nverts)
+        blk, off = __vk_upload(uni, usize)
+        __vg_tex_slots(prog, __vk_blocks[blk].ptr + off)
+        pc = __VgPush(params = __vk_addr(blk, off), verts = verts, insts = insts, vstride = i32(stride), istride = i32(istride))
+        __vg_prepare(prog, mode)
+        cb = __vk_cb()
+        vkCmdPushConstants(cb, __vk_layout, 0x7FFFFFFF, 0, u32(__VK_PUSH_SIZE), (&pc) as *u8)
+        if indexed:
+            ib = __vgb[ibo]
+            if ib.frame >= 0: vkCmdBindIndexBuffer(cb, __vk_blocks[ib.block].buffer, u64(ib.off), 1)
+            else: vkCmdBindIndexBuffer(cb, ib.buf.buffer, 0, 1)
+        if ind != 0:
+            if ndraws <= 0: return
+            if not indexed: vkCmdBindIndexBuffer(cb, seq, 0, 1)
+            if cnt != 0: vkCmdDrawIndexedIndirectCount(cb, ind, u64(ind_off), cnt, u64(cnt_off), u32(ndraws), 20)
+            else if ndraws == 1 or __vk_multi_draw: vkCmdDrawIndexedIndirect(cb, ind, u64(ind_off), u32(ndraws), 20)
+            else:
+                loop d in [0..ndraws): vkCmdDrawIndexedIndirect(cb, ind, u64(ind_off + 20 * d), 1, 20)
+            return
+        n = max(ninst, 1)
+        if indexed: vkCmdDrawIndexed(cb, u32(nidx), u32(n), 0, 0, 0)
+        else: vkCmdDraw(cb, u32(nverts), u32(n), 0, 0)
+
+    # a buffer of the indices 0, 1, 2... (at least n of them), for indirect draws of meshes without
+    # indices; made again, larger, when more are needed
+    __vg_seq = __VkBuffer()
+    __vg_seq_n = 0
+    __vg_sequence = (n: int) -> int:
+        if n > __vg_seq_n:
+            m = max(max(n, __vg_seq_n * 2), 1024)
+            __vk_defer_buffer(__vg_seq)
+            __vg_seq = __vk_buffer(m * 4, u32(0x1 | 0x2 | 0x40), u32(VK_MEM_DEVICE_LOCAL), 0)
+            __vg_seq_n = m
+            idx: u32[]
+            loop i in [0..m): idx.push(u32(i))
+            __vg_copy_to_buffer(__vg_seq.buffer, 0, data(idx) as *u8, m * 4)
+        __vg_seq.buffer
+
+    # vertices already in upload memory (at address verts): the 2D batch
+    __vk_draw_batch = (prog: int, verts: int, stride: int, nverts: int, uni: *u8, usize: int):
+        blk, off = __vk_upload(uni, usize)
+        __vg_tex_slots(prog, __vk_blocks[blk].ptr + off)
+        pc = __VgPush(params = __vk_addr(blk, off), verts = verts, vstride = i32(stride))
+        __vg_prepare(prog, GL_TRIANGLES)
+        cb = __vk_cb()
+        vkCmdPushConstants(cb, __vk_layout, 0x7FFFFFFF, 0, u32(__VK_PUSH_SIZE), (&pc) as *u8)
+        vkCmdDraw(cb, u32(nverts), 1, 0, 0)
+
+    # ---------------- frames ----------------
+    # what the library does at the end of a frame, before it is shown
+    __vg_end_frame = ():
+        __vg_end_pass()
+        __vg_frame_no += 1

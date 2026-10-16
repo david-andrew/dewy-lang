@@ -1,0 +1,3347 @@
+use 'frontend.jo'
+# Semantic analysis: modules, scopes, declarations, function instances, statements.
+
+use 'util.jo'
+use 'pkg.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'ide.jo'
+
+enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_
+
+struct Sym:
+    name: i32
+    kind: SK
+    ref: i32
+    decl: i32
+    next: i32
+
+struct Module:
+    name: i32
+    file: i32
+    dir: str
+    names: {int: int}
+    uses: int[]
+    decls: int[]
+    is_prelude: bool
+    is_main: bool
+    inits: int[]
+    init_fn: i32
+
+const LF_PARAM = 1
+const LF_MUTPARAM = 2
+const LF_CAPTURE = 4
+const LF_ALIAS = 8
+const LF_ASSIGNED = 16
+const LF_BYREF = 32
+const LF_ADDR = 64     # address is taken (must live in memory)
+const LF_RESIZED = 128 # the variable itself is written (not just its elements or fields)
+const LF_CAPTURED = 256 # a closure captures this variable
+const LF_DECL = 512     # declared by `x = value` / `x: T`
+const LF_UNNARROWED = 2048  # a narrowed name (alias) whose variable was assigned another type
+const LF_SOAELEM = 4096     # loop p in ps (ps a soa array): p stands for ps[i] (see soa_loop)
+const LF_SOAMUT = 8192      # ... and the loop is `loop mut`
+const LF_ELEMALIAS = 16384  # `mut x in xs` in a combined loop: x stands for xs[k] (writes to x write xs)
+const LF_READ = 32768       # its value is read somewhere (not only the base of a write: v.f = 1)
+const LF_QUIET = 65536      # a loop counter or part of `a, b = f()`: not warned about when unused
+assign_root = 0                 # (the variable an assignment being checked writes through)
+copy_writes: {int: int} = {}    # local -> where its fields or elements are first written
+gcopy_writes: {int: int} = {}   # the same for globals
+global_read: bool[]             # by global: its value is read somewhere
+open_globals: int[]             # globals made empty (`xs = []`) whose element type is still open
+
+const LF_SHARED = 1024  # modified after a closure captured it, or by the closure: closures and
+                        # the function share it by reference (it lives in a heap cell, see lower.jo)
+
+struct Local:
+    name: i32
+    type: i32
+    flags: i32
+    alias: i32
+    owner: i32
+    pos: int
+    offset: i32
+    env_off: i32
+    vreg: i32
+    outer: i32      # LF_CAPTURE: the enclosing function's variable this one captures
+    dloops: i32     # loops being checked when it was declared
+    soa: i32        # LF_SOAELEM: the (unchecked) ps[i] it stands for
+    wloop: i32      # outermost loop (inside its scope) that modifies it before any capture
+
+struct Global:
+    name: i32
+    type: i32
+    decl: i32
+    mod: i32
+    sym: str
+    state: i32
+    is_const: bool
+    init: i32
+    addr: i32
+    fn_written: bool    # some function (not top-level code) changes it
+
+struct Capture:
+    outer: i32
+    inner: i32
+
+const FK_NORMAL = 0
+const FK_LAMBDA = 1
+const FK_THUNK = 2
+const FK_PARTIAL = 3
+const FK_INIT = 4
+
+struct FnInst:
+    decl: i32
+    body: i32
+    targs: int[]
+    ptypes: int[]
+    params: int[]
+    ret: i32
+    sym: str
+    state: i32
+    kind: i32
+    has_env: bool
+    caps: Capture[]
+    env_size: i32
+    mod: i32
+    partial: i32
+    target: i32
+    locals: int[]
+    fntype: i32
+    cabi: bool
+    parallel: bool      # @parallel: the functions it is given run on many threads at once
+    noinline: bool      # @noinline: release builds call it, not copy it into its callers
+    gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
+    export_name: str
+    aux_void: bool
+    clib: str
+    csym: str
+    cvariadic: i32      # @variadic(n): a C function with n fixed parameters, then C's `...` (0: none)
+    use_pos: int        # generic instances: the call that made it (for errors inside it) ...
+    made_in: i32        # ... in the body of this instance (0: none)
+
+struct FnSig:
+    ntp: i32
+    nexplicit: i32
+    params: int[]
+    ret: i32
+    mutmask: i32
+    generic: bool
+    done: bool
+
+struct DeclInfo:
+    insts: int[]
+    sig: FnSig
+
+struct FnCtx:
+    inst: i32
+    parent: i32
+    ret: i32
+    infer_ret: bool
+    loop_depth: i32
+    mod: i32
+    floor: i32
+
+syms: Sym[] = [Sym()]
+modules: Module[]
+universe: {int: int} = {}
+prelude: {int: int} = {}
+locals: Local[] = [Local()]
+globals: Global[] = [Global()]
+fns: FnInst[] = [FnInst()]
+decl_infos: DeclInfo[] = [DeclInfo()]
+ctxs: FnCtx[]
+cx = -1
+sc_names: int[]
+sc_syms: int[]
+inst_counter = 0
+lib_dir = ""
+target_wasm = false
+target_windows = false        # (Windows x64: compiler/pe.jo)
+target_arm64 = false          # (Linux on arm64: compiler/arm64.jo)
+target_macos = false          # (macOS on arm64: compiler/arm64.jo, compiler/macho.jo)
+main_fn = 0
+test_mode = false        # `sloppy test`: run the main file's test blocks instead of main()
+check_all = false        # (sloppy check: the tests and the game loop both checked; nothing runs)
+test_decls: int[]
+update_fn = 0
+draw_fn = 0
+init_fns: int[]
+build_node = 0
+program_icon: u8[] = []         # the build block's icon (a PNG), for Windows programs and web pages
+program_js = ""                 # the build block's js file's text: in a web page, before the program starts
+icon_node = 0                   # PROGRAM_ICON's value: the icon's bytes (Linux windows show it)
+program_name = ""               # PROGRAM_NAME: the build block's name, else the main file's (set in check_program)
+global_ids: int[]
+
+new_sym = (name: int, kind: SK, r: int, decl: int) -> int:
+    syms.push(Sym(i32(name), kind, i32(r), i32(decl), 0))
+    syms.len() - 1
+
+own_consts: bool[]            # by name: a constant of the program's own (not the library's)
+
+scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
+    # (look the name up in place: holding a copy of the table would make the insert below copy it)
+    found: int? = none
+    if modules[m].is_prelude: found = prelude.get(name)
+    else: found = modules[m].names.get(name)
+    if let ex = found:
+        if syms[ex].kind == .fns and kind == .fns:
+            s = new_sym(name, kind, r, decl)
+            e = ex
+            loop syms[e].next != 0: e = int(syms[e].next)
+            syms[e].next = i32(s)
+            return ex
+        if decl != 0 and syms[ex].decl != 0:
+            if syms[ex].kind == .const_ and kind == .global: fatal(nodes[decl].pos, "'{name_of(name)}' is a constant ({pos_str(nodes[int(syms[ex].decl)].pos)}): it cannot change")
+            fatal(nodes[decl].pos, "'{name_of(name)}' is already defined at {pos_str(nodes[int(syms[ex].decl)].pos)}")
+    s = new_sym(name, kind, r, decl)
+    if modules[m].is_prelude: prelude[name] = s
+    else:
+        modules[m].names[name] = s
+        if kind == .const_:
+            loop own_consts.len() <= name: own_consts.push(false)
+            own_consts[name] = true
+    s
+
+# Scopes are one stack of (name, symbol); each name also links its bindings, newest first, so
+# a lookup is one step instead of a scan: sc_top[name] -> newest index, sc_prev[i] -> older one.
+sc_prev: int[]
+sc_top: int[]
+
+push_scope_sym = (name: int, sym: int):
+    loop sc_top.len() <= name: sc_top.push(-1)
+    sc_prev.push(sc_top[name])
+    sc_top[name] = sc_names.len()
+    sc_names.push(name)
+    sc_syms.push(sym)
+
+scope_mark = () -> int: sc_names.len()
+scope_reset = (mark: int):
+    i = sc_names.len() - 1
+    loop i >= mark:
+        sc_top[sc_names[i]] = sc_prev[i]
+        i -= 1
+    sc_names.truncate(mark)
+    sc_syms.truncate(mark)
+    sc_prev.truncate(mark)
+
+module_lookup = (m: int, name: int) -> int:
+    user = m >= 0 and not modules[m].is_prelude
+    if m >= 0:
+        if modules[m].is_prelude:
+            if let s = prelude.get(name): return s
+        else:
+            if let s = modules[m].names.get(name): return s
+            loop u in modules[m].uses:
+                if modules[u].is_prelude:
+                    if let s = prelude.get(name):
+                        if not lib_private(name): return s
+                else:
+                    if let s = modules[u].names.get(name):
+                        if not is_private(name): return s
+    if let s = prelude.get(name):
+        if not user or not lib_private(name): return s
+    if let s = universe.get(name): return s
+    0
+
+# names starting with _ stay in their module: `use` does not bring them (`import m` reaches
+# them as m._x, `from m import _x` by name). The library's are hidden from programs; its __
+# names are the runtime's, which code the compiler writes calls
+is_private = (name: int) -> bool:
+    s = name_of(name)
+    len(s) > 0 and s[0] == '_'
+
+lib_private = (name: int) -> bool:
+    s = name_of(name)
+    len(s) > 1 and s[0] == '_' and s[1] != '_'
+
+# from m import a, b as c: each name bound in the importing module (functions join any of its
+# own with that name, as overloads)
+from_imports: int[]
+
+bind_from_imports = ():
+    loop d in from_imports:
+        m = int(nodes[d].mod)
+        im = int(nodes[d].sym)
+        loop i in [0..nkids(d)):
+            id = kid(d, i)
+            nm = int(nodes[id].name)
+            if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_module(im)
+            alias = nm
+            if nodes[id].aux != 0:
+                alias = int(nodes[id].aux)
+                if ide_on: ide_alias_of[alias] = nm
+            s = 0
+            if modules[im].is_prelude: s = prelude.get(nm) ?? 0
+            else: s = modules[im].names.get(nm) ?? 0
+            if s == 0 or syms[s].kind == .module:
+                cands: int[]
+                if not modules[im].is_prelude:
+                    loop k, v in modules[im].names: cands.push(k)
+                fatal(nodes[id].pos, "'{name_of(int(nodes[d].sval))}' has no '{name_of(nm)}'{suggestion(name_of(nm), cands)}")
+            if ide_on:
+                if syms[s].kind == .fns and syms[s].decl != 0: ide_ref(nodes[id].pos, nm, IK_FN, nodes[int(syms[s].decl)].pos, 0, 0)
+                else: ide_sym_ref(id, s)
+            if syms[s].kind == .fns:
+                if let ex = modules[m].names.get(alias):
+                    if syms[ex].kind != .fns: fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' (at {pos_str(nodes[int(syms[ex].decl)].pos)}); import it with another name: {name_of(nm)} as ...")
+                o = s
+                loop o != 0:
+                    scope_add_module(m, alias, .fns, int(syms[o].ref), int(syms[o].decl))
+                    o = int(syms[o].next)
+            else:
+                if let ex = modules[m].names.get(alias):
+                    where = "at {pos_str(nodes[d].pos)}"
+                    if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
+                    fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
+                modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
+
+# look up a name from the current context
+lookup = (name: int) -> int:
+    floor = 0
+    m = -1
+    if cx >= 0:
+        floor = int(ctxs[cx].floor)
+        m = int(ctxs[cx].mod)
+    if name < sc_top.len():
+        i = sc_top[name]
+        if i >= floor: return sc_syms[i]
+    module_lookup(m, name)
+
+# ---------------- "did you mean" ----------------
+# edit distance where swapping two neighbors counts once (optimal string alignment)
+edit_distance = (a: str, b: str, limit: int) -> int:
+    n = len(a)
+    m = len(b)
+    if abs(n - m) > limit: return limit + 1
+    pp = fill(0, m + 1)
+    prev = fill(0, m + 1)
+    cur = fill(0, m + 1)
+    loop j in [0..m + 1): prev[j] = j
+    loop i in [1..n + 1):
+        cur[0] = i
+        best = i
+        loop j in [1..m + 1):
+            c = 1
+            if fold_case(a[i - 1]) == fold_case(b[j - 1]): c = 0
+            v = min(min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + c)
+            if i > 1 and j > 1 and fold_case(a[i - 1]) == fold_case(b[j - 2]) and fold_case(a[i - 2]) == fold_case(b[j - 1]): v = min(v, pp[j - 2] + 1)
+            cur[j] = v
+            if v < best: best = v
+        if best > limit: return limit + 1
+        tmp = pp
+        pp = prev
+        prev = cur
+        cur = tmp
+    prev[m]
+
+# the closest of the candidate names (" (did you mean 'x'?)"), or ""; ties go to the longest
+# common prefix, and a short name that starts the misspelling (len / lenght) counts as close
+suggestion = (name: str, candidates: int[]) -> str:
+    h = habit_name(name)
+    if len(h) > 0:
+        # (`push` only where there is one: a texture's size is not its len)
+        w = h
+        if w[0] == '`': w = w[1..len(w) - 1)
+        if find(w, "(") > 0 and find(w, " ") < 0: w = w[..find(w, "("))     # (`random_item(xs)`: random_item)
+        if find(w, ".") > 0: w = w[find(w, ".") + 1..]                       # (`xs.remove(0)`: remove)
+        known = w == "true" or w == "false" or w == "none" or find(w, " ") >= 0 or find(w, "`") >= 0
+        loop c in candidates:
+            if known: break
+            if name_of(c) == w: known = true
+        if known:
+            if starts_with(h, "nothing: "): return " (none is needed: {h[9..]})"
+            return " (use {h})"
+    # (Score for score: the same but for its capitals)
+    loop c in candidates:
+        cn = name_of(c)
+        if cn != name and len(cn) == len(name) and lower(cn) == lower(name): return " (did you mean '{cn}'? names care about capital letters)"
+    # (BROWN, SKYBLUE: a color's name in capitals; only names in capitals are near it)
+    caps = len(name) >= 3
+    loop ch in name:
+        if ch >= 'a' and ch <= 'z': caps = false
+    limit = 1
+    if len(name) > 4: limit = 2
+    # (a one- or two-letter name is close to too many: only another case of it)
+    if len(name) <= 2: limit = 0
+    best = ""
+    bs = 1000000
+    loop c in candidates:
+        cn = name_of(c)
+        if caps and cn != upper(cn): continue
+        if cn == name or len(cn) == 0 or cn[0] == '_': continue
+        d = edit_distance(name, cn, limit)
+        pre = 0
+        loop pre < len(cn) and pre < len(name) and fold_case(cn[pre]) == fold_case(name[pre]): pre += 1
+        if d > limit and pre == len(cn) and pre >= 3: d = limit
+        # (poly for polygon: the start of a longer name)
+        longer = 0
+        # (save for save_data: the first word of a longer name, before all others)
+        if pre == len(name) and pre >= 3 and len(cn) > pre and cn[pre] == '_':
+            d = 0
+            longer = len(cn)
+        else if d > limit and pre == len(name) and pre >= 4 and len(cn) <= 2 * len(name):
+            d = limit
+            longer = len(cn)          # (the shortest such: polygon before polyline)
+        if d > limit: continue
+        score = d * 100 - pre + longer
+        if score < bs:
+            bs = score
+            best = cn
+    if len(best) > 0: return " (did you mean '{best}'?)"
+    if caps: return " (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)"
+    ""
+
+# what Sloppy calls a name from another language ("`push`"), or ""
+repl_sig_query = false          # (the REPL's `:type name`: a function's versions go to repl_sig)
+repl_sig = ""
+
+HABITS = ["index", "`find(s, x)` for text (-1 when it is not there), `index_of(xs, x)` for an array", "path_exists", "`file_exists(path)`", "exists", "`file_exists(path)`", "stat", "`file_size(path)`, `file_time(path)`, `is_dir(path)`",
+    "sys_exit", "`exit(code)`", "stderr", "`eprint(...)`", "realpath", "`abs_path(path)`", "abspath", "`abs_path(path)`",
+    "getenv", "`env(name)` (none when it is not set)", "sprintf", "a string with `\{x}` in it (`\"\{n:5.2}\"` formats)", "remove_file", "`delete_file(path)`", "split_whitespace", "`words(s)`", "strptime", "`parse_date(\"2026-10-14 08:15\")` (ISO dates and times)", "fromisoformat", "`parse_date(text)`", "parse_datetime", "`parse_date(text)`", "hexdigest", "`sha256(bytes or text)` (64 hex digits)", "errno", "`file_error()` (why the last file operation failed)", "strerror", "`file_error()` (why the last file operation failed)", "last_error", "`file_error()` (why the last file operation failed)",
+    "mkdir_all", "`make_dirs(path)`", "makedirs", "`make_dirs(path)`", "read_lines", "`lines(read_file(path) ?? \"\")` (or `read_line()` for standard input, a line at a time)",
+    "has_point", "`contains(r, p)`", "rect_contains", "`contains(r, p)`", "point_in_rect", "`contains(r, p)`",
+    "mouse_scroll", "`mouse_wheel()`", "text_size", "`text_width(s, size)`", "measure_text", "`text_width(s, size)`",
+    "get_ticks", "`time()` (or `elapsed()`, the game's clock)", "str_to_int", "`to_int(s)`", "parse_int", "`to_int(s)`",
+    "list_files", "`list_dir(path)`", "erase", "`remove(i)`", "input_text", "`hud_text_field(r, value)` (or `ui_text_field` in a menu)",
+    "ui_input_text", "`hud_text_field(r, value)` (or `ui_text_field` in a menu)", "deep_copy", "nothing: `ys = xs` copies (arrays and structs are values)",
+    "mouse_button_pressed", "`mouse_pressed(.left)`", "mouse_button_down", "`mouse_down(.left)`", "get_mouse_position", "`mouse_pos()`", "mouse_position", "`mouse_pos()`",
+    "is_key_down", "`key_down(.space)`", "is_key_pressed", "`key_pressed(.space)`", "IsKeyDown", "`key_down(.space)`",
+    "delta_time", "`dt`, what update is given: `update = (dt: f64):`", "deltaTime", "`dt`, what update is given: `update = (dt: f64):`", "get_frame_time", "`dt`, what update is given: `update = (dt: f64):`",
+    "mtof", "`midi_freq(n)`", "midi_to_freq", "`midi_freq(n)`", "midiToFreq", "`midi_freq(n)`", "load_sound", "`load_wav(embed(\"x.wav\"))` (or `load_ogg`)",
+    "play_sound", "`play(s)`", "loadSound", "`load_wav(embed(\"x.wav\"))`",
+    "save", "`save_data(key, text)`: kept between runs (`save_value` keeps a struct)", "load", "`load_data(key)`: what save_data kept (`load_texture`, `load_sound` read files)",
+    "window_visible", "`window_focused()`", "is_focused", "`window_focused()`", "has_focus", "`window_focused()`",
+    "touch_pos", "`touches()` (each finger's place)", "get_touches", "`touches()`", "touch_count", "`touches().len()`",
+    "is_touch", "`touch_input()`", "is_mobile", "`touch_input()` (the last input was a finger)",
+    "True", "`true`", "False", "`false`", "None", "`none`", "nil", "`none`", "undefined", "`none`",
+    "self", "a parameter: functions take what they work on first (`move = (p: mut Player, dt: f64): ...`, called as `p.move(dt)`)",
+    "this", "a parameter: functions take what they work on first (`move = (p: mut Player, dt: f64): ...`, called as `p.move(dt)`)",
+    "float", "`f64` (and `to_float(s)` for text)", "double", "`f64`", "float64", "`f64`", "float32", "`f32`", "number", "`f64`",
+    "string", "`str`", "String", "`str`", "boolean", "`bool`", "Boolean", "`bool`", "char", "`u8` (a character is its code: 'a' == 97)",
+    "Int", "`int`", "integer", "`int`", "long", "`int`", "int64", "`int`", "int32", "`i32`",
+    "list", "`T[]` (an array: `int[]`)", "List", "`T[]` (an array: `int[]`)", "vector", "`T[]` (an array: `int[]`)", "Vec", "`T[]` (an array: `int[]`)",
+    "dict", "`\{K: V}` (a map: `\{str: int}`)", "Dict", "`\{K: V}` (a map: `\{str: int}`)", "HashMap", "`\{K: V}` (a map: `\{str: int}`)",
+    "append", "`push`", "push_back", "`push`", "add", "`push`", "delete", "`remove(i)`", "remove_at", "`remove(i)`", "length", "`len`", "size", "`len`",
+    "strip", "`trim`", "lstrip", "`trim_start`", "rstrip", "`trim_end`", "startswith", "`starts_with`", "startsWith", "`starts_with`",
+    "endswith", "`ends_with`", "endsWith", "`ends_with`", "indexOf", "`index_of` or `find`", "toUpperCase", "`upper`", "toLowerCase", "`lower`",
+    "to_upper", "`upper`", "to_lower", "`lower`", "includes", "`contains` or `x in xs`", "isEmpty", "`is_empty`",
+    "toString", "`str(x)`", "to_string", "`str(x)`", "substring", "a slice: `s[a..b)`", "substr", "a slice: `s[a..b)`",
+    "parseInt", "`to_int` (it gives an `int?`: none when the text is not a number)", "parse_int", "`to_int` (it gives an `int?`: none when the text is not a number)",
+    "atoi", "`to_int`", "parseFloat", "`to_float`", "forEach", "`each` or `loop x in xs:`", "items", "`loop k, v in m:`", "entries", "`loop k, v in m:`",
+    "range", "a range: `[0..n)` counts from 0 to n - 1",
+    "draw_text", "`text(s, pos, size, color)`", "draw_circle", "`circle(center, radius, color)`", "draw_rect", "`rect(x, y, w, h, color)`",
+    "fill_rect", "`rect(x, y, w, h, color)`", "draw_line", "`line(a, b, width, color)`", "blit", "`sprite(texture, pos)`",
+    "circle_outline", "`ring(center, radius, thickness, color)`", "draw_circle_lines", "`ring(center, radius, thickness, color)`",
+    "stroke_circle", "`ring(center, radius, thickness, color)`", "circle_lines", "`ring(center, radius, thickness, color)`",
+    "rect_lines", "`rect_outline(x, y, w, h, thickness, color)`", "draw_rect_lines", "`rect_outline(x, y, w, h, thickness, color)`",
+    "copy", "nothing: `ys = xs` copies (arrays and structs are values)", "clone", "nothing: `ys = xs` copies (arrays and structs are values)",
+    "raw_input", "`input(prompt)`", "readline", "`read_line()`",
+    "choice", "`random_item(xs)`", "sample", "`random_item(xs)` or `shuffle(xs)`", "randint", "`random_int(lo, hi)` (hi is left out)", "uniform", "`random(lo, hi)`",
+    "draw_cube", "`draw_mesh(cube_mesh(), transform(pos))` (a mesh made once, drawn each frame)", "draw_sphere", "`draw_mesh(sphere_mesh(), transform(pos))` (a mesh made once, drawn each frame)",
+    "light", "`sun(direction)` or `point_light(pos, color)`", "directional_light", "`sun(direction)`",
+    "console", "`print(x)`, and `eprint(x)` for errors", "Math", "the plain functions: `random()`, `sqrt(x)`, `floor(x)`, `max(a, b)`",
+    "ljust", "`pad_end(s, n)` or \"\{s:<10}\"", "rjust", "`pad_start(s, n)` or \"\{s:>10}\"", "padStart", "`pad_start(s, n)`", "padEnd", "`pad_end(s, n)`",
+    "zfill", "`pad_start(s, n, \"0\")` or \"\{x:05}\"", "center", "\"\{s:^10}\"", "title", "`capitalize` (the first letter)",
+    "basename", "`file_name(path)`", "dirname", "`dir_name(path)`", "splitext", "`extension(path)` and `without_extension(path)`",
+    "datetime", "`now()` (a Date: year, month, day, hour...) or `unix_time()`", "strftime", "`date_text(d)` or a string with d's fields",
+    "randf", "`random()` (0 to 1)", "randi", "`random_int(lo, hi)`", "randi_range", "`random_int(lo, hi + 1)` (hi is left out)", "randf_range", "`random(lo, hi)`",
+    "Color", "`rgb(r, g, b)` or `rgba(r, g, b, a)` (0 to 1)", "Vector2", "`vec2`", "Vector3", "`vec3`", "Vector2i", "`ivec2`", "Vector3i", "`ivec3`", "Vector4", "`vec4`",
+    "deg2rad", "`radians(x)` or `90deg`", "deg_to_rad", "`radians(x)` or `90deg`", "rad2deg", "`degrees(x)`", "rad_to_deg", "`degrees(x)`",
+    "Basis", "`mat4` (`rotation_y(a)`, `look_at`) or a quaternion (vec4)", "Transform3D", "`mat4` (`translation(p) * rotation_y(a)`)", "Quaternion", "`quat_euler(pitch, yaw, roll)` or `quat_axis_angle(axis, angle)` (a quaternion is a vec4), or a matrix: `rotation_y(45deg)`",
+    "lerp_angle", "`approach_angle` or `turn_toward`",
+    "free", "nothing: memory is given back when the last use of it is gone", "malloc", "an array (`fill(u8(0), n)`, given back by itself)",
+    "memcpy", "`mem_copy(dst, src, n)`", "memmove", "`mem_copy(dst, src, n)`", "memset", "`fill(u8(0), n)` for a new array, or a loop",
+    "tostring", "`str(x)`", "tonumber", "`to_int(s)` or `to_float(s)` (an optional: none when it is not a number)", "ipairs", "`loop i in 0.. and x in xs:`", "pairs", "`loop k, v in m:`",
+    "math", "the plain functions: `floor(x)`, `sqrt(x)`, `random()`", "table", "an array (`T[]`) or a map (`\{K: V}`)", "require", "`import name` (a library module) or `use 'file.jo'`",
+    "set", "a map to `bool` (`\{str: bool}`) or `unique(xs)`", "Set", "a map to `bool` (`\{str: bool}`) or `unique(xs)`",
+    "every", "`all(xs, f)`", "some", "`any(xs, f)`", "at", "`xs[i]` (the last: `xs[end]`)", "slice", "a slice: `xs[a..b)`",
+    "concat", "`xs + ys`", "splice", "`xs.insert(i, x)` or `xs.remove(i)`", "shift", "`xs.remove(0)`", "unshift", "`xs.insert(0, x)`",
+    "flatMap", "`flatten(map(xs, f))`", "flat_map", "`flatten(map(xs, f))`", "findIndex", "`find_index(xs, f)`", "toFixed", "\"\{x:.2}\" (two decimals)",
+    "reverse", "`reversed(xs)`",
+    "Mathf", "the plain functions: `clamp(x, lo, hi)`, `lerp(a, b, t)`, `sin(x)`, `abs(x)`, `PI`", "Debug", "`print(x)`",
+    "GameObject", "`struct Enemy:` for each kind of thing, kept in an array (`enemies: Enemy[]`; docs/START.md, Coming from Unity)",
+    "SceneManager", "an enum saying which screen or level is on (`screen = .play`), and a function that sets one up",
+    "Physics", "`import physics3d` (2D: `import physics`), then `w = physics3d.World()` and `w.raycast(a, b)`",
+    "Rigidbody", "`import physics3d`, then a body of its world: `ball = w.add_sphere(pos, 0.5)`",
+    "Instantiate", "`enemies.push(make_enemy(pos))`, with a function of yours that makes the struct",
+    "Destroy", "`enemies.remove(i)` (taking it out of its array), or `enemies.retain((e): e.hp > 0)`",
+    "GetComponent", "the field itself, `player.health` (there are no components: a struct holds what it has)",
+    "Collision", "`w.contacts(b)`, read each frame (`c.new`: it just began); nothing is called when bodies touch",
+    "Time", "the `dt` update is given (the seconds since the last frame), or `time()` (since the start)",
+    "wait", "a timer counted down in update (`wait -= dt`, then act when it is below 0), `every(1, 2.0)`, or `Actions`: `steps.then(1.0, (): ...)`",
+    "create_clone", "a list of things: `apples.push(Apple(pos))` makes one more (Scratch's clones)", "clone", "a list of things: `apples.push(Apple(pos))` makes one more (Scratch's clones)",
+    "delete_this_clone", "mark it in its loop (`a.gone = true`), then `apples.retain((a): not a.gone)`",
+    "broadcast", "a function of your own, called where the message is sent: `level_up()`",
+    "switch_costume", "a variable saying which picture to draw (`costume = 1`), and `sprite(costumes[costume], pos)` in draw", "next_costume", "a variable saying which picture to draw (`costume = (costume + 1) % costumes.len()`)",
+    "go_to", "`pos = vec2(100, 200)` (the position is a variable)", "goto", "`pos = vec2(100, 200)` (the position is a variable)",
+    "hide", "a variable saying whether it shows (`shown = false`), and `if shown:` around its drawing", "show", "a variable saying whether it shows (`shown = true`), and `if shown:` around its drawing",
+    "touching", "`overlaps(Rect(...), Rect(...))` or `circles_overlap(a, 20, b, 20)`", "pick_random", "`random_int(1, 11)` (1 to 10: the top is left out)",
+    "say", "`text(\"Hello!\", pos + vec2(30, -40))` in draw, while a timer for it is running", "think", "`text(\"Hmm...\", pos + vec2(30, -40))` in draw, while a timer for it is running",
+    "glide", "`move = tween(pos, vec2(600, 300), 1.0)`, then `move.update(dt)` and `pos = move.value()` each frame",
+    "stop_all", "`quit()`", "when_flag_clicked", "nothing: the lines at the top of the file run first, once", "Add", "`push`", "Remove", "`remove(i)` (by position)", "Insert", "`insert(i, x)`", "Contains", "`contains`",
+    "Clear", "`clear`", "IndexOf", "`index_of`",
+    "Counter", "`counts: \{str: int} = \{}`, then `counts[w] += 1` (a map: a missing key starts at 0)",
+    "defaultdict", "a plain map: a missing key starts at its type's zero (`m[k] += 1`, `m[k].push(x)`)",
+    "open", "`read_file(path)` (a `str?`: none when it cannot be read), `write_file(path, s)`, `append_file(path, s)`",
+    "sys", "`args()` (the command line), `exit(code)`, `eprint(s)`", "isinstance", "`x is T` (which member of a union x holds)",
+    "index", "`index_of`", "isdigit", "`to_int(s) != none`, or `is_digit(c)` for one character", "partition", "`split(s, \"=\", 1)` (at most two parts)",
+    "splitlines", "`lines(s)`", "loads", "`parse_json(s)` (a Json), or `from_json[T](s)` into a struct", "dumps", "`to_json(x)`",
+    "json", "`parse_json(s)` and `to_json(x)` (there, without an import)", "os", "the plain functions: `read_file`, `list_dir`, `join_path`, `run_program`, `env`", "normalized", "`normalize(v)`", "magnitude", "`length(v)`", "sqrMagnitude", "`length_sq(v)`",
+    "TWO_PI", "`TAU`", "HALF_PI", "`PI / 2.0`", "QUARTER_PI", "`PI / 4.0`",
+    "width", "`screen_width()` (the screen's, in 2D units)", "height", "`screen_height()` (the screen's, in 2D units)",
+    "color", "`rgb(1, 0, 0)` (each from 0 to 1) or `hex(0xff0000)`",
+    "stroke", "the color given to each shape: `line(a, b, 2, RED)`, `ring(center, radius, 2, RED)`",
+    "strokeWeight", "the thickness given to each shape: `line(a, b, 4, c)`, `ring(center, radius, 4, c)`",
+    "noStroke", "nothing: a shape has no outline unless drawn with one (`rect_outline`, `ring`)", "noFill", "an outline: `rect_outline`, `ring`, `polyline(points, width, c, closed = true)`",
+    "background", "`clear(color)` at the top of draw", "createCanvas", "`window(\"title\", w, h)` at the top of the file", "size", "`window(\"title\", w, h)`",
+    "mouseX", "`mouse_pos().x`", "mouseY", "`mouse_pos().y`", "pmouseX", "`(mouse_pos() - mouse_delta()).x`", "pmouseY", "`(mouse_pos() - mouse_delta()).y`",
+    "mouseIsPressed", "`mouse_down(.left)` (held) or `mouse_pressed(.left)` (just pressed)", "keyIsPressed", "`key_down(.space)` for a key, `text_input()` for what was typed", "keyIsDown", "`key_down(.a)`",
+    "frameCount", "`frame_number()`", "millis", "`elapsed()` (in seconds)", "constrain", "`clamp(x, lo, hi)`",
+    "beginShape", "a list of points, `pts.push(vec2(x, y))`, then `polygon(pts, color)` or `polyline(pts, width, color)`", "vertex", "`pts.push(vec2(x, y))`, then `polygon(pts, color)` or `polyline(pts, width, color)`", "endShape", "`polygon(pts, color)` or `polyline(pts, width, color, closed = true)`",
+    "noLoop", "a flag that stops changing things in update (draw runs every frame), or `quit()`", "frameRate", "`fps()` (frames a second, measured)",
+    "saveCanvas", "`save_png(screenshot(), \"art.png\")`", "loadImage", "`load_texture(embed(\"cat.png\"))`", "textSize", "text's size argument: `text(s, pos, 32)`", "textAlign", "`text_centered(s, center, size)`",
+    "colorMode", "`hsv(h, s, v)`, each from 0 to 1 (a hue of 200 degrees is `200.0 / 360.0`)", "lerpColor", "`lerp(a, b, t)` (colors are vec4s)",
+    "randomGaussian", "`random_normal(mean, sd)`", "randomSeed", "`seed_random(n)`",
+    "LEFT", "`.left` (keys and mouse buttons are written with a dot)", "RIGHT", "`.right` (keys and mouse buttons are written with a dot)",
+    "iTime", "a field of the uniforms struct, given at each draw (`u.time`, with `elapsed()` passed in)", "iResolution", "a field of the uniforms struct (`u.resolution`, with `pixel_size()` passed in)", "iMouse", "a field of the uniforms struct (`u.mouse`, with `mouse_pos()` passed in)",
+    "gl_FragColor", "what the fragment function gives back (its last line, a vec4)", "gl_FragCoord", "a position the vertex function passes on (`i.uv * u.resolution`)", "fragColor", "what the fragment function gives back (its last line, a vec4)",
+    "JSON", "`to_json(x)`, `parse_json(s)`, and `from_json[T](s)` into a struct", "localStorage", "`save_value(name, x)` and `load_value(name, default)`",
+    "btoa", "`base64_encode(bytes(s))`", "atob", "`base64_decode(s)` (bytes; an optional: none when it is not base64)", "isFinite", "`is_finite(x)`", "isNaN", "`is_nan(x)`",
+    "Number", "`to_float(s)` (an optional: none when it is not a number) or `f64(x)`", "toExponential", "\"\{x:.2e}\"", "toLocaleString", "\"\{x:,}\" (thousands with commas)",
+    "Phaser", "the plain functions: `random_int(lo, hi)` (hi left out), `tween(from, to, seconds)`, `clamp`, `distance`", "Promise", "`Actions` (`steps.then(0.3, (): drop())`), or a state changed a little in update each frame",
+    "scene", "an enum of screens (`screen = Screen.play`), with a `match screen:` in update and in draw", "Array", "`fill(0, 8)` (eight zeros), `fill(fill(0, 8), 8)` (eight rows of them), or `[a, b, c]`",
+    "Object", "a map's `m.keys()` and `m.values()`, or a struct for named fields", "setInterval", "`every(1, 30.0)` in update: true once each 30 seconds (the 1 tells timers apart)", "setTimeout", "`Actions`: `later.then(2.0, (): ...)`, and `later.update(dt)` in update"]
+
+# names from other languages for maps' operations
+MAP_HABITS = ["set", "`m[k] = v`", "size", "`m.len()`", "length", "`m.len()`", "delete", "`m.remove(k)`", "has_key", "`m.has(k)` or `k in m`",
+    "containsKey", "`m.has(k)` or `k in m`", "put", "`m[k] = v`", "items", "`loop k, v in m:`", "forEach", "`loop k, v in m:`"]
+
+map_habit_name = (name: str) -> str:
+    i = 0
+    loop i + 1 < MAP_HABITS.len():
+        if MAP_HABITS[i] == name: return MAP_HABITS[i + 1]
+        i += 2
+    ""
+
+habit_name = (name: str) -> str:
+    i = 0
+    loop i < HABITS.len():
+        if HABITS[i] == name: return HABITS[i + 1]
+        i += 2
+    ""
+
+# an example of the annotation for an empty array or map
+empty_hint = (nm: str, t0: int) -> str:
+    t = prune(t0)
+    if types[t].kind == .array:
+        et = pushed_type(nm)
+        if len(et) > 0: return " (`{nm}: {et}[] = []`: an array of {et}s, as pushed later)"
+        return " (`{nm}: int[] = []` for an array of ints)"
+    if is_map_type(t): return " (`{nm}: \{str: int} = \{}` for a map from text to ints)"
+    ""
+
+# enemies = [] and later enemies.push(vec2(...)): the type of what goes in, as written
+pushed_type = (nm: str) -> str:
+    id = intern(nm)
+    loop i in [1..nodes.len()):
+        if nodes[i].kind != .call or nkids(i) != 1: continue
+        f = int(nodes[i].a)
+        if f == 0 or nodes[f].kind != .field or name_of(int(nodes[f].name)) != "push": continue
+        r = int(nodes[f].a)
+        if r == 0 or nodes[r].kind != .ident or int(nodes[r].name) != id: continue
+        x = kid(i, 0)
+        xk = nodes[x].kind
+        if xk == .str_lit: return "str"
+        if xk == .int_lit: return "int"
+        if xk == .float_lit: return "f64"
+        if xk == .call and nodes[int(nodes[x].a)].kind == .ident:
+            cn = name_of(int(nodes[int(nodes[x].a)].name))
+            if cn == "rgb" or cn == "rgba" or cn == "hex": return "vec4"
+            if cn == "vec2" or cn == "vec3" or cn == "vec4" or cn == "ivec2" or cn == "ivec3" or (len(cn) > 0 and cn[0] >= 'A' and cn[0] <= 'Z'): return cn
+    ""
+
+# a variable of this name was declared earlier in the function, in a block that has ended
+gone_local_hint = (nm: int, at: int) -> str:
+    if cx < 0: return ""
+    inst = int(ctxs[cx].inst)
+    l = locals.len() - 1
+    loop l > 0:
+        if int(locals[l].name) == nm and int(locals[l].owner) == inst and locals[l].pos < at and pos_file(locals[l].pos) == pos_file(at):
+            ln, c = line_col(locals[l].pos)
+            return " (the '{name_of(nm)}' made on line {ln} is inside a block that has ended; give it a value before that block to use it here)"
+        l -= 1
+    # (pos made in update, used in draw: each function's variables are its own)
+    l = locals.len() - 1
+    loop l > 0:
+        o = int(locals[l].owner)
+        if int(locals[l].name) == nm and o != inst and int(locals[l].flags) & LF_DECL != 0 and o > 0 and o < fns.len() and fns[o].decl != 0 and not pos_in_lib(locals[l].pos):
+            fname = name_of(int(nodes[int(fns[o].decl)].name))
+            ln, c = line_col(locals[l].pos)
+            return " (the '{name_of(nm)}' made on line {ln} belongs to {fname}; for both to use it, give it its first value at the top level, outside the functions)"
+        l -= 1
+    ""
+
+fold_case = (c: u8) -> u8:
+    if c >= 'A' and c <= 'Z': return c + 32
+    c
+
+# names visible from the current scope: locals, the module, the standard library, built-ins
+visible_names = () -> int[]:
+    out = sc_names
+    loop k, v in modules[cur_mod()].names: out.push(k)
+    loop k, v in prelude: out.push(k)
+    loop k, v in universe: out.push(k)
+    out
+
+type_names = () -> int[]:
+    out: int[]
+    loop tbl in [modules[cur_mod()].names, prelude, universe]:
+        loop k, s in tbl:
+            sk = syms[s].kind
+            if sk == .type_ or sk == .struct_ or sk == .enum_: out.push(k)
+    out
+
+# functions that could be called as recv.f(...): their first parameter has the receiver's kind
+method_names = (recv: int) -> int[]:
+    out: int[]
+    rt = prune(recv)
+    loop tbl in [modules[cur_mod()].names, prelude]:
+        loop k, s0 in tbl:
+            s = s0
+            loop s != 0:
+                if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
+                    sig = fn_sig(int(syms[s].decl))
+                    if sig.params.len() > 0:
+                        p0 = prune(sig.params[0])
+                        if types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt)):
+                            out.push(k)
+                            break
+                s = int(syms[s].next)
+    out
+
+cur_mod = () -> int:
+    if cx >= 0: return int(ctxs[cx].mod)
+    0
+
+# (the game loop's functions and main keep their own kind of result)
+__never_skip = (decl: int) -> bool:
+    if nodes[decl].c != 0: return true          # (attributes: @cabi, @export... keep their types)
+    nm = name_of(int(nodes[decl].name))
+    nm == "main" or nm == "update" or nm == "draw"
+
+# ---------------- modules ----------------
+find_module = (path: str) -> int:
+    loop i in 0.. and m in modules:
+        if files[int(m.file)].path == path: return i
+    -1
+
+load_module = (path: str, is_prelude: bool, from: int) -> int:
+    ex = find_module(path)
+    if ex >= 0: return ex
+    src = read_source(path)
+    if src == none: fatal(from, "cannot read '{path}'")
+    d = "."
+    slash = rfind(path, "/")
+    if slash >= 0: d = path[..slash)
+    files.push(SrcFile(path, d, src!))
+    fi = files.len() - 1
+    base = path
+    if slash >= 0: base = path[slash + 1..]
+    base = strip_ext(base)
+    m = Module(name = i32(intern(base)), file = i32(fi), dir = d, is_prelude = is_prelude)
+    modules.push(m)
+    mi = modules.len() - 1
+    p_lazy = is_prelude and not ide_on
+    decls = source_declarations(fi)
+    p_lazy = false
+    modules[mi].decls = decls
+    mi
+
+eval_when_toplevel = (m: int, w: int):
+    saved = cx
+    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, i32(m), i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    cond = const_eval_bool(int(nodes[w].a))
+    ctxs.pop()
+    cx = saved
+    blk = int(nodes[w].c)
+    if cond: blk = int(nodes[w].b)
+    if blk == 0: return
+    register_decls(m, kids(blk))
+
+# `x = value` where no variable x exists yet is a declaration
+# (m >= 0: at the top level of module m, where only that module's globals count)
+assign_declares = (s: int, m: int) -> bool:
+    if nodes[s].kind != .assign or nodes[s].op != i32(int(Tok.assign)): return false
+    lhs = int(nodes[s].a)
+    lk = nodes[lhs].kind
+    if lk == .ident: return not name_assignable(int(nodes[lhs].name), m)
+    if lk != .tuple: return false
+    any = false
+    loop i in [0..nkids(lhs)):
+        c = kid(lhs, i)
+        ck = nodes[c].kind
+        if ck == .hole: continue
+        if ck != .ident: return false
+        if name_assignable(int(nodes[c].name), m): return false
+        any = true
+    any
+
+# (at the top level: the module's own variables, and those of the modules it `use`s and of the
+# library, as in a function: `ui_style = ...` there changes the library's, not a new one)
+# Another module's __ name (its own state) is not changed so: the line makes one of this module's
+# (and in the library, whose modules share their names, it is an error to have two)
+name_assignable = (nm: int, m: int) -> bool:
+    if m < 0: return var_visible(nm)
+    s = module_lookup(m, nm)
+    if s == 0 or syms[s].kind != .global: return false
+    if is_private(nm) and int(globals[int(syms[s].ref)].mod) != m: return false
+    true
+
+assign_to_decl = (s: int):
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind == .ident and cx >= 0 and int(nodes[lhs].name) < own_consts.len() and own_consts[int(nodes[lhs].name)]:
+        # (MAX = 4 would make a variable hiding the program's constant MAX)
+        cs = lookup(int(nodes[lhs].name))
+        if cs != 0 and syms[cs].kind == .const_ and syms[cs].decl != 0 and not decl_in_prelude(int(syms[cs].decl)):
+            cn = name_of(int(nodes[lhs].name))
+            cp = nodes[int(syms[cs].decl)].pos
+            if pos_in_lib(cp): fatal(nodes[lhs].pos, "'{cn}' is a constant of the library: it cannot change (`let {cn} = ...` makes a variable of that name)")
+            ln, cc = line_col(cp)
+            fatal(nodes[lhs].pos, "'{cn}' is a constant (`const` on line {ln}): it cannot change; to change it as the game runs, make it a variable there, without `const`")
+    nodes[s].kind = .vardecl
+    nodes[s].a = 0
+    if nodes[lhs].kind == .ident:
+        nodes[s].name = nodes[lhs].name
+        nodes[s].pos = nodes[lhs].pos
+    else:
+        nodes[s].list = nodes[lhs].list
+        nodes[s].nlist = nodes[lhs].nlist
+
+# (a module `use`d by another is registered first, so that a top-level `x = ...` there sees the
+# used module's x: name_assignable)
+registered: bool[]
+register_module = (m: int):
+    loop registered.len() <= m: registered.push(false)
+    if registered[m]: return
+    registered[m] = true
+    register_decls(m, modules[m].decls)
+
+register_decls = (m: int, decls: int[]):
+    loop d in decls:
+        nodes[d].mod = i32(m)
+        if nodes[d].kind == .assign and assign_declares(d, m): assign_to_decl(d)
+        k = nodes[d].kind
+        nm = int(nodes[d].name)
+        # (on_hit = (n: int): ... after `on_hit: (int) -> void = ...`: a new value for that variable)
+        if k == .fn_ and not modules[m].is_prelude and not has_flag(d, NF_EXTERN):
+            if let ex = modules[m].names.get(nm):
+                if syms[ex].kind == .global:
+                    lam = mk(.lambda, nodes[d].pos)
+                    nodes[lam] = nodes[d]
+                    nodes[lam].kind = .lambda
+                    nodes[lam].name = 0
+                    nodes[d] = nodes[bc_assign(bc_ident(name_of(nm), nodes[d].pos), lam, nodes[d].pos)]
+                    nodes[d].mod = i32(m)
+                    modules[m].inits.push(d)
+                    continue
+        if k == .fn_:
+            scope_add_module(m, nm, .fns, 0, d)
+            if nodes[d].c != 0:
+                loop ai in [0..nkids(int(nodes[d].c))):
+                    if name_of(int(nodes[kid(int(nodes[d].c), ai)].name)) == "export": export_decls.push(d)
+        else if k == .struct_: scope_add_module(m, nm, .struct_, d, d)
+        else if k == .enum_: scope_add_module(m, nm, .enum_, d, d)
+        else if k == .typealias: scope_add_module(m, nm, .alias_, d, d)
+        else if k == .const_:
+            globals.push(Global(name = i32(nm), decl = i32(d), mod = i32(m), is_const = true))
+            scope_add_module(m, nm, .const_, globals.len() - 1, d)
+        else if k == .import_:
+            rel = name_of(int(nodes[d].sval))
+            path = "{modules[m].dir}/{rel}.jo"
+            if nodes[d].aux2 == 1:
+                # use 'file.jo': relative to the importing file
+                path = rel
+                if not is_abs_path(rel): path = "{modules[m].dir}/{rel}"
+                if len(modules[m].dir) == 0: path = rel
+                # ('package/file.jo': a file of a package)
+                sl = find(rel, "/")
+                if not file_exists(path) and sl > 0:
+                    pn = rel[..sl)
+                    if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
+                    if let pd = pkg_dirs.get(pn): path = "{pd}/{rel[sl + 1..]}"
+                if not file_exists(path): fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
+            else if pkg_dirs.get(rel) != none or pkg_errs.get(rel) != none:
+                # a package (pkg.jo): its main file
+                if let why = pkg_errs.get(rel): fatal(nodes[d].pos, why)
+                pd = pkg_dirs[rel]
+                path = pkg_main(rel, pd) ?? ""
+                if len(path) == 0: fatal(nodes[d].pos, "package '{rel}' has no main file ({rel}.jo, or only one .jo file at its root): import one of its files, as import '{rel}/file.jo'")
+            else:
+                # a standard-library module by name: lib/NAME.jo or lib/{std,game,core}/NAME.jo (a
+                # file of that name beside the program first, unless it is this one: physics.jo's
+                # own `import physics` is the library's)
+                if path == files[int(modules[m].file)].path or rfind(files[int(modules[m].file)].path, "/{rel}.jo") == len(files[int(modules[m].file)].path) - len(rel) - 4: path = ""
+                # (a file beside it with a library module's name: that file, said once)
+                if file_exists(path) and not pos_in_lib(nodes[d].pos) and file_exists("{lib_dir}/{rel}.jo"):
+                    warn(nodes[d].pos, "this imports {path}, not the library's {rel} (a file beside this one has its name)")
+                if not file_exists(path): path = "{lib_dir}/{rel}.jo"
+                if not file_exists(path): path = "{lib_dir}/std/{rel}.jo"
+                if not file_exists(path): path = "{lib_dir}/game/{rel}.jo"
+                if not file_exists(path): path = "{lib_dir}/core/{rel}.jo"
+                if not file_exists(path):
+                    pym = ""
+                    if rel == "re": pym = ": regular expressions are there without an import, `regex(r\"\\d+\")`"
+                    else if rel == "sys": pym = ": `args()` is the command line, `exit(code)` ends the program"
+                    else if rel == "json": pym = ": `parse_json(s)` and `to_json(x)` are there without an import"
+                    else if rel == "os" or rel == "shutil" or rel == "pathlib" or rel == "glob": pym = ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+                    else if rel == "time" or rel == "datetime": pym = ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
+                    else if rel == "random" or rel == "math": pym = ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
+                    else if rel == "csv": pym = ": `csv_rows(text)` is there without an import"
+                    else if rel == "collections": pym = ": maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`"
+                    else if rel == "subprocess": pym = ": `run_program(\"ls\", [\"-l\"])` (its exit code and output)"
+                    else if rel == "argparse": pym = ": a struct of the options (`verbose = false`, `out = \"a.txt\"`, `files: str[]`), then `opts = parse_args[Options](\"what it does\")`"
+                    else if rel == "hashlib": pym = ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
+                    fatal(nodes[d].pos, "cannot find module '{rel}'{pym}")
+            im = load_module(path, false, nodes[d].pos)
+            if nodes[d].aux == 1:
+                modules[m].uses.push(im)
+                register_module(im)
+            else if nodes[d].aux == 2:
+                # from x import a, b: bound once every module's names are known (bind_from_imports)
+                nodes[d].sym = i32(im)
+                from_imports.push(d)
+            else: scope_add_module(m, nm, .module, im, d)
+        else if k == .when_: eval_when_toplevel(m, d)
+        else if k == .build_:
+            if modules[m].is_main: build_node = d
+        else if k == .test_:
+            if test_mode and modules[m].is_main: test_decls.push(d)
+        else if k == .vardecl:
+            if nodes[d].nlist > 0:
+                loop i in [0..nkids(d)):
+                    id = kid(d, i)
+                    if nodes[id].kind == .hole: continue
+                    g = new_global(int(nodes[id].name), d, m)
+                    nodes[id].sym = i32(g)
+                    add_flag(id, NF_GLOBAL)
+                    scope_add_module(m, int(nodes[id].name), .global, g, id)
+            else:
+                g = new_global(nm, d, m)
+                nodes[d].sym = i32(g)
+                scope_add_module(m, nm, .global, g, d)
+            add_flag(d, NF_GLOBAL)
+            if not modules[m].is_prelude: modules[m].inits.push(d)
+        else:
+            if modules[m].is_prelude: fatal(nodes[d].pos, "statements are not allowed at the top level of library modules")
+            modules[m].inits.push(d)
+
+
+# is there a variable of this name in scope (assigning to it changes it)?
+var_visible = (nm: int) -> bool:
+    s = lookup(nm)
+    if s == 0: return false
+    k = syms[s].kind
+    k == .local or k == .global
+
+new_global = (name: int, decl: int, m: int) -> int:
+    inst_counter += 1
+    globals.push(Global(name = i32(name), decl = i32(decl), mod = i32(m), sym = "g_{name_of(name)}_{inst_counter}"))
+    g = globals.len() - 1
+    global_ids.push(g)
+    g
+
+# ---------------- type resolution ----------------
+resolve_type = (tn: int) -> int:
+    if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
+    k = nodes[tn].kind
+    if k == .tname:
+        nm = int(nodes[tn].name)
+        s = 0
+        if nodes[tn].sval != 0:
+            ms = lookup(int(nodes[tn].sval))
+            if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
+            s = module_lookup(int(syms[ms].ref), nm)
+        else:
+            if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
+            s = lookup(nm)
+        if s == 0:
+            if name_of(nm) == "none": return T_NONE
+            # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
+            tn_s = name_of(nm)
+            if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
+                fatal(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)")
+            fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
+        sk = syms[s].kind
+        # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
+        # still the type)
+        if sk == .fns:
+            if let u = universe.get(nm):
+                s = u
+                sk = syms[s].kind
+        if ide_on: ide_sym_ref(tn, s)
+        if sk == .alias_:
+            targs: int[]
+            loop i in [0..nkids(tn)): targs.push(resolve_type(kid(tn, i)))
+            return resolve_alias(int(syms[s].ref), targs, nodes[tn].pos)
+        if sk == .type_:
+            if nodes[tn].nlist > 0:
+                if fixed_size_arg(tn): return mk_fixed_checked(int(syms[s].ref), fixed_size(kid(tn, 0)), nodes[tn].pos)
+                fatal(nodes[tn].pos, "type '{name_of(nm)}' takes no type arguments")
+            return int(syms[s].ref)
+        if sk == .struct_ or sk == .enum_:
+            d = int(syms[s].ref)
+            ntp = nkids2(d)
+            if ntp == 0 and fixed_size_arg(tn):
+                return mk_fixed_checked(get_struct_inst(d, []), fixed_size(kid(tn, 0)), nodes[tn].pos)
+            if nkids(tn) != ntp: fatal(nodes[tn].pos, "type '{name_of(nm)}' expects {ntp} type argument(s), got {nkids(tn)}")
+            targs: int[]
+            loop i in [0..ntp): targs.push(resolve_type(kid(tn, i)))
+            return get_struct_inst(d, targs)
+        h = habit_name(name_of(nm))
+        if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
+        fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
+    if k == .tarray:
+        if nodes[tn].b != 0: return mk_fixed_checked(resolve_type(int(nodes[tn].a)), fixed_size(int(nodes[tn].b)), nodes[tn].pos)
+        if nodes[tn].aux >= 2: return nd_of(resolve_type(int(nodes[tn].a)), nodes[tn].pos)
+        if has_flag(tn, NF_SOA):
+            et = resolve_type(int(nodes[tn].a))
+            # (soa T[] of a generic function's T: a struct once it is known)
+            if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(nodes[tn].pos, "soa T[] needs a struct type T, not {type_str(et)}")
+            if soa_decl == 0: soa_decl = mk(.struct_, 0)
+            return soa_inst(et)
+        return mk_array(resolve_type(int(nodes[tn].a)))
+    if k == .tmap:
+        s = prelude.get(intern("Map")) ?? 0
+        if s == 0: fatal(nodes[tn].pos, "Map type is not available")
+        return get_struct_inst(int(syms[s].ref), [resolve_type(int(nodes[tn].a)), resolve_type(int(nodes[tn].b))])
+    if k == .ttuple:
+        el: int[]
+        loop i in [0..nkids(tn)): el.push(resolve_type(kid(tn, i)))
+        if el.len() == 0: return T_VOID
+        return mk_tuple(el)
+    if k == .topt: return mk_opt(resolve_type(int(nodes[tn].a)))
+    if k == .tunion:
+        ms: int[]
+        loop i in [0..nkids(tn)): ms.push(resolve_type(kid(tn, i)))
+        return mk_union(ms)
+    if k == .tptr: return mk_ptr(resolve_type(int(nodes[tn].a)))
+    if k == .tfn:
+        ps: int[]
+        mm = 0
+        loop i in [0..nkids(tn)):
+            ps.push(resolve_type(kid(tn, i)))
+            if has_flag(kid(tn, i), NF_MUT): mm |= 1 << i
+        ret = T_VOID
+        if nodes[tn].a != 0: ret = resolve_type(int(nodes[tn].a))
+        if has_flag(tn, NF_CABI): return mk_cfn(ps, ret)
+        return mk_fn(ps, ret, mm)
+    fatal(nodes[tn].pos, "invalid type")
+    0
+
+# T[N] written as a type name with one argument (the parser cannot tell `int[N]` from a generic
+# type's argument): the argument is a constant's name
+fixed_size_arg = (tn: int) -> bool:
+    if nkids(tn) != 1: return false
+    a = kid(tn, 0)
+    if nodes[a].kind != .tname or nodes[a].nlist > 0 or nodes[a].sval != 0: return false
+    s = lookup(int(nodes[a].name))
+    s != 0 and syms[s].kind == .const_
+
+# the size of a fixed-size array type: a number or a compile-time constant
+fixed_size = (n: int) -> int:
+    v = 0
+    if nodes[n].kind == .tname:
+        e = mk(.ident, nodes[n].pos)
+        nodes[e].name = nodes[n].name
+        v = ceval(e).i
+    else: v = ceval(n).i
+    if v < 1: fatal(nodes[n].pos, "the size of a fixed-size array must be at least 1 (found {v})")
+    if v > (1 << 28): fatal(nodes[n].pos, "fixed-size array too large ({v} elements; use T[] for big arrays)")
+    v
+
+mk_fixed_checked = (e: int, n: int, pos: int) -> int:
+    if tkind(e) == .void_: fatal(pos, "an array of void")
+    mk_fixed(e, n)
+
+# T[,], T[,,] ...: n-dimensional arrays (lib/std/nd.jo)
+nd_of = (t: int, pos: int) -> int:
+    s = prelude.get(intern("NDArray")) ?? 0
+    if s == 0: fatal(pos, "n-dimensional arrays are not available (lib/std/nd.jo is missing)")
+    get_struct_inst(int(syms[s].ref), [t])
+
+# type Name[T] = ...: the type it stands for, given its type arguments
+resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
+    ntp = nkids2(d)
+    nm = name_of(int(nodes[d].name))
+    if targs.len() != ntp: fatal(use_pos, "type '{nm}' expects {ntp} type argument(s), got {targs.len()}")
+    if ntp == 0 and nodes[d].type != 0: return int(nodes[d].type)
+    if nodes[d].aux == 1: fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
+    nodes[d].aux = 1
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    push_type_params(d, targs)
+    t = resolve_type(int(nodes[d].a))
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+    nodes[d].aux = 0
+    if ntp == 0: nodes[d].type = i32(t)
+    t
+
+subst = (t0: int, targs: int[]) -> int:
+    t = prune(t0)
+    if t == 0 or not has_var(t): return t
+    k = types[t].kind
+    if k == .param:
+        id = int(types[t].id)
+        if id < targs.len() and targs[id] != 0: return targs[id]
+        return t
+    if k == .var: return t
+    if k == .array: return mk_array(subst(int(types[t].elem), targs))
+    if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
+    if k == .ptr: return mk_ptr(subst(int(types[t].elem), targs))
+    if k == .opt: return mk_opt(subst(int(types[t].elem), targs))
+    if k == .fn_ or k == .tuple or k == .cfn:
+        a: int[]
+        loop i in [0..int(types[t].nargs)): a.push(subst(targ(t, i), targs))
+        if k == .tuple: return mk_tuple(a)
+        if k == .cfn: return mk_cfn(a, subst(int(types[t].elem), targs))
+        return mk_fn(a, subst(int(types[t].elem), targs), int(types[t].mutmask))
+    if k == .struct_ or k == .enum_:
+        si = int(types[t].st)
+        a: int[]
+        loop i in [0..int(structs[si].ntargs)): a.push(subst(struct_targ(si, i), targs))
+        return get_struct_inst(int(structs[si].decl), a)
+    t
+
+push_type_params = (decl: int, targs: int[]):
+    loop i in [0..nkids2(decl)):
+        if i < targs.len(): push_scope_sym(int(nodes[kid2(decl, i)].name), new_sym(int(nodes[kid2(decl, i)].name), .type_, targs[i], 0))
+
+check_struct_fields = (si: int):
+    if structs[si].resolved: return
+    structs[si].resolved = true
+    d = int(structs[si].decl)
+    targs: int[]
+    loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "fielddef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    push_type_params(d, targs)
+    if nodes[d].kind == .struct_:
+        n = nkids(d)
+        structs[si].fields = i32(fields.len())
+        structs[si].nfields = i32(n)
+        loop i in [0..n): fields.push(Field())
+        loop i in [0..n):
+            f = kid(d, i)
+            fi = int(structs[si].fields) + i
+            fields[fi].name = nodes[f].name
+            fields[fi].defval = nodes[f].b
+            if nodes[f].a != 0: fields[fi].type = i32(resolve_type(int(nodes[f].a)))
+            else if nodes[f].b != 0:
+                cl = clone(int(nodes[f].b))
+                t = check_expr(cl, 0)
+                if has_flag(cl, NF_LITERAL):
+                    if nodes[cl].kind == .float_lit: t = T_FLOAT
+                    else: t = T_INT
+                fields[fi].type = i32(zonk(t))
+            else: fatal(nodes[f].pos, "field needs a type")
+            loop k in [0..i):
+                if fields[int(structs[si].fields) + k].name == nodes[f].name: fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
+    else:
+        nv = nkids(d)
+        structs[si].variants = i32(variants.len())
+        structs[si].nvariants = i32(nv)
+        loop v in [0..nv): variants.push(Variant())
+        next_val = 0
+        loop v in [0..nv):
+            vn = kid(d, v)
+            vi = int(structs[si].variants) + v
+            variants[vi].name = nodes[vn].name
+            variants[vi].tag = i32(v)
+            if nodes[vn].a != 0:
+                if nodes[int(nodes[vn].a)].kind != .int_lit: fatal(nodes[vn].pos, "enum value must be an integer literal")
+                next_val = nodes[int(nodes[vn].a)].ival
+            variants[vi].value = next_val
+            next_val += 1
+            nf = nkids(vn)
+            variants[vi].fields = i32(fields.len())
+            variants[vi].nfields = i32(nf)
+            loop i in [0..nf): fields.push(Field())
+            loop i in [0..nf):
+                fn_ = kid(vn, i)
+                fi = int(variants[vi].fields) + i
+                fields[fi].name = nodes[fn_].name
+                fields[fi].type = i32(resolve_type(int(nodes[fn_].a)))
+            loop k in [0..v):
+                if variants[int(structs[si].variants) + k].name == nodes[vn].name: fatal(nodes[vn].pos, "duplicate variant '{name_of(int(nodes[vn].name))}'")
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+
+module_of_type = (t0: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if (k == .struct_ or k == .enum_) and types[t].st != 0 or (k == .struct_ or k == .enum_): return int(nodes[int(structs[int(types[t].st)].decl)].mod)
+    -1
+
+# ---------------- functions ----------------
+decl_info = (decl: int) -> int:
+    if nodes[decl].sym == 0:
+        decl_infos.push(DeclInfo())
+        nodes[decl].sym = i32(decl_infos.len() - 1)
+    int(nodes[decl].sym)
+
+fn_sig = (decl: int) -> FnSig:
+    di = decl_info(decl)
+    if decl_infos[di].sig.done: return decl_infos[di].sig
+    sig = FnSig(done = true)
+    sig.nexplicit = i32(nkids2(decl))
+    saved = cx
+    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    ntp = nkids2(decl)
+    loop i in [0..ntp):
+        nm = int(nodes[kid2(decl, i)].name)
+        push_scope_sym(nm, new_sym(nm, .type_, mk_param(i), 0))
+    mm = 0
+    loop i in [0..nkids(decl)):
+        p = kid(decl, i)
+        if nodes[p].a != 0: sig.params.push(resolve_type(int(nodes[p].a)))
+        else:
+            sig.params.push(mk_param(ntp))
+            ntp += 1
+        if has_flag(p, NF_MUT): mm |= 1 << i
+    sig.mutmask = i32(mm)
+    sig.ntp = i32(ntp)
+    sig.generic = ntp > 0
+    if nodes[decl].a != 0: sig.ret = i32(resolve_type(int(nodes[decl].a)))
+    else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+    decl_infos[di].sig = sig
+    sig
+
+# (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
+OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]
+
+sanitize = (s: str) -> str:
+    if len(s) > 0 and not is_alnum(s[0]) and s[0] != '_':
+        i = 0
+        loop i < OP_NAMES.len():
+            if OP_NAMES[i] == s: return "op_{OP_NAMES[i + 1]}"
+            i += 2
+        return "op"
+    b: u8[]
+    loop c in s:
+        if is_alnum(c): b.push(c)
+        else: b.push('X')
+        if b.len() > 40: break
+    str_from_bytes(b)
+
+new_inst = (kind: int, m: int, base: str) -> int:
+    inst_counter += 1
+    fns.push(FnInst(kind = i32(kind), mod = i32(m), sym = "f_{base}_{inst_counter}"))
+    fns.len() - 1
+
+has_value_return = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .return_: return nodes[n].a != 0
+    if k == .lambda: return false
+    if has_value_return(int(nodes[n].a)) or has_value_return(int(nodes[n].b)): return true
+    if k != .for_ and has_value_return(int(nodes[n].c)): return true
+    loop i in [0..nkids(n)):
+        if has_value_return(kid(n, i)): return true
+    false
+
+syntactic_void = (body: int) -> bool:
+    if body == 0 or nkids(body) == 0: return true
+    if has_value_return(body): return false
+    last = kid(body, nkids(body) - 1)
+    k = nodes[last].kind
+    if k == .exprstmt: return false
+    if k == .if_ or k == .iflet: return nodes[last].c == 0
+    true
+
+# (@no_web("why"): a function that does nothing in a browser, said where a web build's program
+# calls it)
+no_web_warned: {int: bool}
+no_web_check = (decl: int, use_pos: int):
+    if use_pos <= 0 or pos_in_lib(use_pos) or no_web_warned.has(use_pos): return
+    ab = int(nodes[decl].c)
+    loop i in [0..nkids(ab)):
+        at = kid(ab, i)
+        if name_of(int(nodes[at].name)) != "no_web" or nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .str_lit: continue
+        no_web_warned[use_pos] = true
+        warn(use_pos, "{name_of(int(nodes[decl].name))} {name_of(int(nodes[int(nodes[at].a)].sval))}")
+
+get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
+    di = decl_info(decl)
+    sig = fn_sig(decl)
+    loop f in decl_infos[di].insts:
+        same = fns[f].targs.len() == targs.len()
+        loop k in [0..targs.len()):
+            if not same: break
+            if not type_eq(fns[f].targs[k], targs[k]):
+                same = false
+                break
+        if same:
+            ensure_ret(f, use_pos)
+            return f
+    f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
+    fns[f].decl = i32(decl)
+    fns[f].use_pos = use_pos
+    if cx >= 0: fns[f].made_in = ctxs[cx].inst
+    zt: int[]
+    loop t in targs:
+        z = zonk(t)
+        if has_var(prune(z)):
+            fname = name_of(int(nodes[decl].name))
+            pz = prune(z)
+            # (an empty [] or {} argument: nothing says what it holds)
+            if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, `scores: int[] = {fname}(...)`, or pass a variable of a known type")
+            if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty `\{}` says nothing): write the type where the result goes, `m: \{str: int} = {fname}(...)`, or pass a variable of a known type")
+            if starts_with(fname, "__fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, `xs: int[] = []`, or put something in it first")
+            fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes (`x: T = {fname}(...)`) or give the argument a type")
+        # (a generic function that calls itself with bigger type arguments would expand without end)
+        zt.push(z)
+    fns[f].targs = zt
+    # (made while checking another generic instance: one more link of a chain of them, which a
+    # function calling itself with ever bigger types makes without end)
+    if cx >= 0 and int(ctxs[cx].inst) > 0 and fns[int(ctxs[cx].inst)].targs.len() > 0:
+        fns[f].gdepth = fns[int(ctxs[cx].inst)].gdepth + 1
+        if fns[f].gdepth > 500: fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
+    loop i in [0..nkids(decl)): fns[f].ptypes.push(subst(sig.params[i], zt))
+    ensure_body(decl)
+    if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
+    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
+    if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
+    else: fns[f].body = nodes[decl].b
+    if has_flag(decl, NF_EXTERN) and fns[f].ret == 0: fns[f].ret = i32(T_VOID)
+    # attributes
+    if nodes[decl].c != 0:
+        ab = int(nodes[decl].c)
+        loop i in [0..nkids(ab)):
+            at = kid(ab, i)
+            an = name_of(int(nodes[at].name))
+            if an == "cabi": fns[f].cabi = true
+            else if an == "parallel": fns[f].parallel = true
+            else if an == "noinline": fns[f].noinline = true
+            else if an == "plain":
+                # (its type arguments are copied as bytes, e.g. to the GPU)
+                loop z in zt:
+                    p = plain_problem(z)
+                    if p != "":
+                        held = ""
+                        if p != type_str(z): held = " (it holds a {p})"
+                        fatal(use_pos, "'{name_of(int(nodes[decl].name))}' takes plain data (numbers, bools, vectors and structs of them), not {type_str(z)}{held}")
+            else if an == "lib":
+                la = int(nodes[at].a)
+                # (or a constant naming it: const SQLITE = "libsqlite3.so.0", then @lib(SQLITE))
+                if la != 0 and nodes[la].kind == .ident:
+                    cs = lookup(int(nodes[la].name))
+                    if cs != 0 and syms[cs].kind == .const_:
+                        g = int(syms[cs].ref)
+                        ci = int(globals[g].init)
+                        if ci == 0 and globals[g].decl != 0: ci = int(nodes[int(globals[g].decl)].b)
+                        if ci != 0 and nodes[ci].kind == .str_lit: la = ci
+                if la == 0 or nodes[la].kind != .str_lit: fatal(nodes[at].pos, "@lib needs a library name, e.g. @lib(\"libGL.so.1\") or a constant holding one")
+                fns[f].clib = name_of(int(nodes[la].sval))
+            else if an == "symbol":
+                if nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .str_lit: fatal(nodes[at].pos, "@symbol needs the C name, e.g. @symbol(\"glClear\")")
+                fns[f].csym = name_of(int(nodes[int(nodes[at].a)].sval))
+            else if an == "variadic":
+                if not has_flag(decl, NF_EXTERN) or nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .int_lit or nodes[int(nodes[at].a)].ival < 0 or nodes[int(nodes[at].a)].ival > fns[f].ptypes.len():
+                    fatal(nodes[at].pos, "@variadic needs the number of the C function's fixed parameters, e.g. @variadic(1) for printf (an extern's)")
+                fns[f].cvariadic = i32(nodes[int(nodes[at].a)].ival + 1)
+            else if an == "export":
+                fns[f].cabi = true
+                if nodes[at].a != 0: fns[f].export_name = name_of(int(nodes[int(nodes[at].a)].sval))
+                else: fns[f].export_name = name_of(int(nodes[decl].name))
+            else if an != "no_web":
+                why = ""
+                if an == "inline" or an == "always_inline" or an == "forceinline": why = " (release builds put small functions inline by themselves; @noinline keeps one out)"
+                fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @plain, @cabi, @export, @no_web(\"why\"), and for externs @lib, @symbol, @variadic")
+    decl_infos[di].insts.push(f)
+    ensure_ret(f, use_pos)
+    f
+
+ensure_ret = (f: int, use_pos: int):
+    if fns[f].ret != 0: return
+    if fns[f].decl != 0: ensure_body(int(fns[f].decl))
+    if fns[f].state == 1 and fns[f].decl != 0 and not has_value_return(int(nodes[int(fns[f].decl)].b)):
+        fns[f].ret = i32(T_VOID)
+        fns[f].aux_void = true
+        return
+    if fns[f].state == 1: fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add `-> Type`)")
+    check_fn_body(f)
+
+new_local = (name: int, t: int, pos: int) -> int:
+    inst = int(ctxs[cx].inst)
+    locals.push(Local(name = i32(name), type = i32(t), owner = i32(inst), pos = pos, dloops = i32(loop_serials.len())))
+    l = locals.len() - 1
+    fns[inst].locals.push(l)
+    if name != 0 and name_of(name) != "_": push_scope_sym(name, new_sym(name, .local, l, 0))
+    l
+
+ctx_for_inst = (inst: int) -> int:
+    c = cx
+    loop c >= 0:
+        if int(ctxs[c].inst) == inst: return c
+        c = int(ctxs[c].parent)
+    -1
+
+capture_in = (c: int, l: int) -> int:
+    inst = int(ctxs[c].inst)
+    if int(locals[l].owner) == inst or ctxs[c].parent < 0: return l
+    outer = capture_in(int(ctxs[c].parent), l)
+    loop cap in fns[inst].caps:
+        if int(cap.outer) == outer: return int(cap.inner)
+    locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(LF_CAPTURE), pos = locals[l].pos, outer = i32(outer)))
+    capture_root(l)
+    inner = locals.len() - 1
+    fns[inst].caps.push(Capture(i32(outer), i32(inner)))
+    fns[inst].locals.push(inner)
+    inner
+
+capture_local = (l: int) -> int: capture_in(cx, l)
+
+# Closures capture variables by reference. A variable that is never modified once captured
+# behaves the same when copied, so only the others are shared (LF_SHARED). A modification that
+# comes before the capture in the source still counts when a loop around both repeats it.
+loop_serials: int[]     # the loops being checked (innermost last)
+loop_serial_next = 0
+
+enter_loop = ():
+    loop_serial_next += 1
+    loop_serials.push(loop_serial_next)
+
+capture_root = (l: int):
+    f = int(locals[l].flags) | LF_CAPTURED
+    w = int(locals[l].wloop)
+    d = int(locals[l].dloops)
+    if w != 0 and loop_serials.len() > d and loop_serials[d] == w: f |= LF_SHARED
+    locals[l].flags = i32(f)
+    if f & LF_SHARED != 0: check_shareable(l, locals[l].pos)
+
+# root variable r is modified (inside a closure if via_closure)
+note_write = (r: int, via_closure: bool, pos: int):
+    f = int(locals[r].flags)
+    if via_closure or f & LF_CAPTURED != 0:
+        locals[r].flags = i32(f | LF_SHARED)
+        check_shareable(r, pos)
+    else:
+        d = int(locals[r].dloops)
+        if loop_serials.len() > d: locals[r].wloop = i32(loop_serials[d])
+
+check_shareable = (r: int, pos: int):
+    if int(locals[r].flags) & LF_DECL != 0: return
+    nm = name_of(int(locals[r].name))
+    # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
+    if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")
+    fatal(pos, "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
+
+module_ctx: int[]
+
+# global g is changed here: in a function, that is something a call may do
+note_global_write = (g: int):
+    if globals[g].fn_written or cx < 0: return
+    if fns[int(ctxs[cx].inst)].kind != i32(FK_INIT): globals[g].fn_written = true
+
+# the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
+alias_global = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: return -1
+    n = int(locals[l].alias)
+    loop nodes[n].kind == .field or nodes[n].kind == .index or nodes[n].kind == .narrow or nodes[n].kind == .unwrap or nodes[n].kind == .conv: n = int(nodes[n].a)
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.global)): return int(nodes[n].sym)
+    -1
+
+# (in_flow: its declaration reached among the top-level statements, after what they narrowed,
+# `if r == none: panic(...)` say, which it then sees; elsewhere it is checked on its own)
+ensure_global = (g: int, use_pos: int, in_flow: bool = false):
+    if globals[g].state == 2: return
+    if globals[g].state == 1:
+        gn = name_of(int(globals[g].name))
+        fatal(use_pos, "'{gn}' is used in its own first value, before it has one: give it one first (`{gn} = 0` on a line above), then change it")
+    globals[g].state = 1
+    saved = cx
+    m = int(globals[g].mod)
+    flow = in_flow and cx == module_ctx[m]
+    cx = module_ctx[m]
+    saved_floor = ctxs[cx].floor
+    if not flow: ctxs[cx].floor = i32(sc_names.len())
+    d = int(globals[g].decl)
+    if globals[g].is_const:
+        t = 0
+        if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
+        cl = clone(int(nodes[d].b))
+        et = check_expr(cl, t)
+        cl = last_checked
+        if t != 0: cl = coerce(cl, t)
+        else if has_flag(cl, NF_LITERAL):
+            if nodes[cl].kind == .float_lit: t = T_FLOAT
+            else: t = T_INT
+        else: t = et
+        globals[g].type = i32(zonk(t))
+        globals[g].init = nodes[d].b      # unchecked original: each use checks a fresh copy
+    else if nodes[d].nlist > 0:
+        if not has_flag(d, NF_CHECKED):
+            t = prune(check_expr(int(nodes[d].b), 0))
+            nodes[d].b = i32(last_checked)
+            t = unpack_array(int(nodes[d].b), t, nkids(d), nodes[d].pos)
+            nodes[d].b = i32(last_checked)
+            if types[t].kind != .tuple or int(types[t].nargs) != nkids(d): fatal(nodes[d].pos, "expected a tuple with {nkids(d)} elements (or an array), found {type_str(t)}")
+            loop k in [0..nkids(d)):
+                id = kid(d, k)
+                if nodes[id].kind == .hole: continue
+                gg = int(nodes[id].sym)
+                globals[gg].type = i32(zonk(targ(t, k)))
+                globals[gg].state = 2
+            add_flag(d, NF_CHECKED)
+            nodes[d].type = i32(t)
+    else:
+        t = 0
+        if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
+        # (x: T, a struct with default field values: it starts with them)
+        if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
+        if nodes[d].b != 0:
+            et = check_expr(int(nodes[d].b), t)
+            nodes[d].b = i32(last_checked)
+            if quat_nodes.has(int(nodes[d].b)): quat_globals[g] = true
+            if t != 0: nodes[d].b = i32(coerce(int(nodes[d].b), t))
+            else:
+                t = et
+                if has_flag(int(nodes[d].b), NF_LITERAL):
+                    t = lit_default(int(nodes[d].b))
+                    nodes[d].b = i32(coerce(int(nodes[d].b), t))
+        t = zonk(t)
+        if t == 0: fatal(nodes[d].pos, "global needs a type or a value")
+        if has_var(prune(t)):
+            # (enemies = [] at the top level: its elements' type comes from a function that pushes
+            # one, as a local's does; settled once everything is checked)
+            vk = nodes[int(nodes[d].b)].kind
+            if nodes[d].a == 0 and vk == .array and nkids(int(nodes[d].b)) == 0 and tkind(t) == .array: open_globals.push(g)
+            else: fatal(nodes[d].pos, "cannot infer the type of '{name_of(int(globals[g].name))}'; add a type annotation{empty_hint(name_of(int(globals[g].name)), t)}")
+        if tkind(t) == .void_: fatal(nodes[d].pos, "cannot assign a value of type void")
+        if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: `{name_of(int(globals[g].name))}: Enemy? = none`")
+        if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
+        globals[g].type = i32(t)
+        add_flag(d, NF_CHECKED)
+    globals[g].state = 2
+    ctxs[cx].floor = saved_floor
+    cx = saved
+
+# xs.sorted(), s.trim() as a statement: a library function that gives a new value of its first
+# argument's type, changing none of its arguments, called for nothing (it changes nothing)
+unused_result = (x: int, pos: int):
+    if discarding: return
+    if nodes[x].kind != .call or nodes[x].a != 0 or nodes[x].sym <= 0 or nkids(x) == 0: return
+    f = int(nodes[x].sym)
+    d = int(fns[f].decl)
+    # (the library's: a program's own may well do more, as writing files, and give back something)
+    if d == 0 or not modules[int(nodes[d].mod)].is_prelude: return
+    if fns[f].ptypes.len() == 0 or nkids(d) != fns[f].ptypes.len() or has_flag(d, NF_EXTERN): return
+    r = prune(int(fns[f].ret))
+    if tkind(r) == .void_ or r == T_NEVER or not type_eq(r, prune(fns[f].ptypes[0])): return
+    # (values: a number or a flag given back is as often a handle or how it went)
+    rk = tkind(r)
+    if rk != .str_ and rk != .array and rk != .vec and rk != .struct_ and rk != .fixed: return
+    if starts_with(name_of(int(nodes[d].name)), "__"): return
+    loop i in [0..nkids(d)):
+        if has_flag(kid(d, i), NF_MUT): return
+    # (at the interactive prompt the value is shown: that is what it is for)
+    if files[pos_file(pos)].path == "<input>": return
+    fname = name_of(int(nodes[d].name))
+    a0 = kid(x, 0)
+    how = ""
+    if nodes[a0].kind == .ident:
+        v = name_of(int(nodes[a0].name))
+        how = " (`{v} = {v}.{fname}(...)` keeps it)"
+    warn(pos, "{fname} gives a new {type_str(r)} and leaves its argument as it was: this does nothing{how}")
+
+# `x == 6`, `speed + 1`, `true` as a statement: a value made and dropped, which changes nothing
+# (written for `=`, `+=` or `return true`)
+discarding = false        # (checking `_ = value`: dropped on purpose, no warning)
+
+unused_value = (raw: Node, t: int):
+    if discarding: return
+    if pos_in_lib(raw.pos) or files[pos_file(raw.pos)].path == "<input>": return
+    if tkind(prune(t)) == .void_ or t == T_NEVER: return
+    k = raw.kind
+    name = ""
+    if (k == .binary or k == .and_ or k == .or_) and nodes[int(raw.a)].kind == .ident: name = name_of(int(nodes[int(raw.a)].name))
+    if k == .binary:
+        op = raw.op as Tok
+        if op == .eq:
+            if len(name) > 0: warn(raw.pos, "`==` compares, and the answer is not used: to change '{name}', write `{name} = ...`")
+            else: warn(raw.pos, "`==` compares, and the answer is not used (`=` changes a value)")
+            return
+        if op == .ne or op == .lt or op == .gt or op == .le or op == .ge:
+            warn(raw.pos, "this comparison's answer is not used (`if ...:` acts on it)")
+            return
+        if op == .plus or op == .minus or op == .star or op == .slash or op == .percent:
+            if len(name) > 0: warn(raw.pos, "this value is not used: to change '{name}', write `{name} = ...` (or `{name} {tok_text(op)}= ...`)")
+            else: warn(raw.pos, "this value is not used: it changes nothing")
+            return
+        return
+    if k == .and_ or k == .or_ or k == .not_:
+        warn(raw.pos, "this condition's answer is not used (`if ...:` acts on it)")
+        return
+    if k == .bool_lit or k == .int_lit or k == .float_lit or k == .ident or k == .none_lit:
+        if tkind(prune(int(ctxs[cx].ret))) != .void_:
+            warn(raw.pos, "this value is not used: `return` gives it back from the function")
+        else:
+            warn(raw.pos, "this value is not used: it changes nothing")
+
+# ---------------- statements ----------------
+stmt_terminates = (s: int) -> bool:
+    if s == 0: return false
+    k = nodes[s].kind
+    if k == .return_ or k == .break_ or k == .continue_: return true
+    if k == .block: return nkids(s) > 0 and stmt_terminates(kid(s, nkids(s) - 1))
+    if k == .if_: return nodes[s].c != 0 and stmt_terminates(int(nodes[s].b)) and stmt_terminates(int(nodes[s].c))
+    if k == .exprstmt:
+        e = int(nodes[s].a)
+        if int(nodes[e].type) == T_NEVER: return true
+        # (the library's exit(code): the program ends there)
+        if nodes[e].kind == .call and nodes[e].sym > 0 and int(nodes[e].sym) < fns.len():
+            d = int(fns[int(nodes[e].sym)].decl)
+            if d != 0 and name_of(int(nodes[d].name)) == "exit" and pos_in_lib(nodes[d].pos): return true
+        if nodes[e].kind == .match_:
+            all = true
+            wild = false
+            loop i in [0..nkids(e)):
+                arm = kid(e, i)
+                if not stmt_terminates(int(nodes[arm].b)): all = false
+                loop j in [0..nkids(arm)):
+                    if nodes[kid(arm, j)].kind == .pwild: wild = true
+            return all and (wild or nodes[e].aux2 != 0)
+        if nodes[e].kind == .if_: return nodes[e].c != 0 and stmt_terminates(int(nodes[e].b)) and stmt_terminates(int(nodes[e].c))
+        return false
+    if k == .while_: return nodes[int(nodes[s].a)].kind == .bool_lit and nodes[int(nodes[s].a)].ival != 0 and not has_break(int(nodes[s].b))
+    false
+
+has_break = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .break_: return true
+    if k == .while_ or k == .for_ or k == .lambda: return false
+    if has_break(int(nodes[n].a)) or has_break(int(nodes[n].b)): return true
+    if k != .for_ and has_break(int(nodes[n].c)): return true
+    loop i in [0..nkids(n)):
+        if has_break(kid(n, i)): return true
+    false
+
+value_capable = (s: int) -> bool:
+    k = nodes[s].kind
+    if k == .exprstmt: return true
+    if (k == .if_ or k == .iflet) and nodes[s].c != 0: return true
+    false
+
+expand_when = (out: mut int[], s: int):
+    if nodes[s].kind != .when_:
+        out.push(s)
+        return
+    blk = int(nodes[s].c)
+    if const_eval_bool(int(nodes[s].a)): blk = int(nodes[s].b)
+    if blk == 0: return
+    loop i in [0..nkids(blk)): expand_when(out, kid(blk, i))
+
+check_block = (b: int, expected: int, want_value: bool) -> int:
+    has_when = false
+    loop i in [0..nkids(b)):
+        if nodes[kid(b, i)].kind == .when_: has_when = true
+    if has_when:
+        nl: int[]
+        loop i in [0..nkids(b)): expand_when(nl, kid(b, i))
+        set_list(b, nl)
+    mark = scope_mark()
+    result = T_VOID
+    nodes[b].aux = 0
+    n = nkids(b)
+    loop i in [0..n):
+        s = kid(b, i)
+        if i == n - 1 and want_value and value_capable(s):
+            if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
+                es = mk(.exprstmt, nodes[s].pos)
+                nodes[es].a = i32(s)
+                clear_flag(s, NF_STMT)
+                set_kid(b, i, es)
+                s = es
+            e = int(nodes[s].a)
+            if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
+            result = check_expr(e, expected)
+            nodes[s].a = i32(last_checked)
+            if tkind(result) != .void_: nodes[b].aux = 1
+            if result == T_NEVER: nodes[b].aux = 0
+            add_flag(s, NF_CHECKED)
+            continue
+        check_stmt(s)
+    if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
+    # (an array built by pushing has a solved inference variable inside its type: the plain type
+    # matches overloads exactly)
+    if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
+    nodes[b].type = i32(result)
+    scope_reset(mark)
+    result
+
+# the value expression of a value block
+block_value = (b: int) -> int: int(nodes[kid(b, nkids(b) - 1)].a)
+set_block_value = (b: int, e: int): nodes[kid(b, nkids(b) - 1)].a = i32(e)
+
+# loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
+soa_loop = (s: int):
+    it = int(nodes[s].a)
+    if nodes[it].kind == .range: return
+    t = prune(check_expr(it, 0))
+    it = last_checked
+    nodes[s].a = i32(it)
+    if not is_soa(t): return
+    pos = nodes[s].pos
+    ik = nodes[it].kind
+    if ik != .ident and ik != .field: fatal(pos, "a loop over a soa array needs the array in a variable")
+    nv = nkids(s)
+    if nv == 2 and nodes[s].ival != 1: fatal(pos, "`loop a, b in` unpacks pairs; to count the elements write `loop i in 0.. and p in ps`")
+    pv = kid(s, nv - 1)
+    ixn = "__sl{bc_count}"
+    bc_count += 1
+    if nv == 2: ixn = name_of(int(nodes[kid(s, 0)].name))
+    r = mk(.range, pos)
+    nodes[r].a = i32(bc_int(0, pos))
+    nodes[r].b = i32(bc_call("len", [clone(it)], pos))
+    ix = mk(.index, pos)
+    nodes[ix].a = i32(clone(it))
+    nodes[ix].b = i32(bc_ident(ixn, pos))
+    body = int(nodes[s].b)
+    # p stands for ps[i]: p.x is ps.x[i]; only a use of p as a whole reads every field
+    el = bc_let(name_of(int(nodes[pv].name)), ix, pos)
+    add_flag(el, NF_SOA)
+    if has_flag(s, NF_MUT): add_flag(el, NF_MUT)
+    clear_flag(s, NF_MUT)
+    stmts = [el]
+    loop x in kids(body): stmts.push(x)
+    set_list(body, stmts)
+    set_list(s, [bc_ident(ixn, pos)])
+    nodes[s].a = i32(r)
+
+# the element alias of a loop over a soa array (see soa_loop)
+soa_alias = (s: int):
+    tmpl = clone(int(nodes[s].b))
+    check_expr(int(nodes[s].b), 0)
+    v = last_checked
+    l = new_local(int(nodes[s].name), ntype(v), nodes[s].pos)
+    f = LF_ALIAS | LF_SOAELEM
+    if has_flag(s, NF_MUT): f |= LF_SOAMUT
+    locals[l].flags = i32(f)
+    locals[l].alias = i32(v)
+    locals[l].soa = i32(tmpl)
+    nodes[s].kind = .block
+    nodes[s].nlist = 0
+
+# the soa element alias local a name stands for here, or 0
+soa_alias_of = (e: int) -> int:
+    if nodes[e].kind != .ident: return 0
+    s = lookup(int(nodes[e].name))
+    if s == 0 or syms[s].kind != .local: return 0
+    l = int(syms[s].ref)
+    if int(locals[l].flags) & LF_SOAELEM == 0: return 0
+    l
+
+# p.x for a soa element alias p: ps.x[i]
+soa_alias_field = (n: int, l: int) -> int:
+    t = int(locals[l].soa)
+    f = mk(.field, nodes[n].pos)
+    nodes[f].a = i32(clone(int(nodes[t].a)))
+    nodes[f].name = nodes[n].name
+    ix = mk(.index, nodes[n].pos)
+    nodes[ix].a = i32(f)
+    nodes[ix].b = i32(clone(int(nodes[t].b)))
+    if int(locals[l].flags) & LF_SOAMUT == 0:
+        add_flag(ix, NF_RDONLY)
+        nodes[ix].name = locals[l].name
+    ix
+
+# loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
+unpack_loop = (s: int):
+    if nkids(s) != 2 or nodes[s].ival == 1: return
+    it = int(nodes[s].a)
+    if nodes[it].kind == .range: fatal(nodes[s].pos, "`loop a, b in` unpacks pairs; a range has single numbers")
+    t = prune(check_expr(it, 0))
+    nodes[s].a = i32(last_checked)
+    if types[t].kind != .array: return
+    pos = nodes[s].pos
+    et = prune(int(types[t].elem))
+    if types[et].kind != .tuple or int(types[et].nargs) != 2: fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {type_str(et)}; to count them write `loop i in 0.. and x in xs`")
+    if has_flag(s, NF_MUT): fatal(pos, "`loop mut` cannot unpack pairs")
+    tn = "__lt{bc_count}"
+    bc_count += 1
+    d = mk(.vardecl, pos)
+    set_list(d, kids(s))
+    nodes[d].b = i32(bc_ident(tn, pos))
+    body = int(nodes[s].b)
+    stmts = [d]
+    loop x in kids(body): stmts.push(x)
+    set_list(body, stmts)
+    set_list(s, [bc_ident(tn, pos)])
+
+# `loop mut k, v in m` over a map: { __map_tidy(m); the loop } (nothing in it gone, so that the
+# loop's indexes are its entries'); true when s was made that block, and checked
+map_tidy_first = (s: int) -> bool:
+    if not has_flag(s, NF_MUT) or map_tidied.has(s): return false
+    it = int(nodes[s].a)
+    if nodes[it].kind == .range: return false
+    t = prune(check_expr(it, 0))
+    nodes[s].a = i32(last_checked)
+    if not is_map_type(t): return false
+    pos = nodes[s].pos
+    l = nodes.len()
+    nodes.push(nodes[s])
+    map_tidied[l] = true
+    mc = copy_place(int(nodes[s].a))
+    add_flag(mc, NF_MUT)
+    tidy = synth_call("__map_tidy", [mc], pos)
+    b = mk(.block, pos)
+    set_list(b, [tidy, l])
+    nodes[s] = nodes[b]
+    check_stmt(s)
+    true
+
+# (loops made by map_tidy_first: the map is tidied already)
+map_tidied: {int: bool} = {}
+
+check_for = (s: int):
+    soa_loop(s)
+    unpack_loop(s)
+    if map_tidy_first(s): return
+    mark = scope_mark()
+    enter_loop()
+    it = int(nodes[s].a)
+    is_mut = has_flag(s, NF_MUT)
+    nv = nkids(s)
+    n1 = int(nodes[kid(s, 0)].name)
+    n2 = 0
+    if nv > 1: n2 = int(nodes[kid(s, 1)].name)
+    pos = nodes[s].pos
+    if nodes[it].kind == .range:
+        if nodes[it].a == 0: fatal(nodes[it].pos, "a loop range needs a start")
+        t = check_expr(int(nodes[it].a), 0)
+        nodes[it].a = i32(last_checked)
+        la = has_flag(int(nodes[it].a), NF_LITERAL)
+        lb = true
+        if nodes[it].b != 0:
+            check_expr(int(nodes[it].b), 0)
+            nodes[it].b = i32(last_checked)
+            lb = has_flag(int(nodes[it].b), NF_LITERAL)
+            if la and not lb: t = int(nodes[int(nodes[it].b)].type)
+        if has_flag(it, NF_STEP):
+            check_expr(int(nodes[it].c), 0)
+            nodes[it].c = i32(last_checked)
+            if la and lb and not has_flag(int(nodes[it].c), NF_LITERAL): t = int(nodes[int(nodes[it].c)].type)
+        if la and lb and (not has_flag(it, NF_STEP) or has_flag(int(nodes[it].c), NF_LITERAL)): t = T_INT
+        if tkind(t) == .str_: fatal(nodes[it].pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
+        if not is_int(t) or nodes[int(nodes[it].a)].kind == .float_lit or nodes[int(nodes[it].b)].kind == .float_lit:
+            if is_int(t): t = T_FLOAT
+            fatal(nodes[it].pos, "a range counts in whole numbers, not {type_str(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: `loop i in [0..10): x = f64(i) / 10.0`)")
+        nodes[it].a = i32(coerce(int(nodes[it].a), t))
+        if nodes[it].b != 0: nodes[it].b = i32(coerce(int(nodes[it].b), t))
+        if has_flag(it, NF_STEP): nodes[it].c = i32(coerce(int(nodes[it].c), t))
+        if nv != 1: fatal(pos, "a range loop has one loop variable")
+        if is_mut: fatal(pos, "`loop mut` needs an array (a range's numbers are not stored anywhere)")
+        l = new_local(n1, t, pos)
+        nodes[s].sym = i32(l)
+        nodes[s].aux = 0
+    else:
+        t = prune(check_expr(it, 0))
+        it = last_checked
+        nodes[s].a = i32(it)
+        # (a map with entries removed has them still in place, marked gone: the loop goes over a
+        # copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
+        if is_map_type(t) and not is_mut:
+            add_flag(it, NF_CHECKED)
+            lv = int(nodes[synth_call("__map_live", [it], pos)].a)
+            check_expr(lv, 0)
+            it = last_checked
+            nodes[s].a = i32(it)
+        k = types[t].kind
+        if k == .range:
+            l = new_local(n1, T_INT, pos)
+            nodes[s].sym = i32(l)
+            nodes[s].aux = 4
+        else if k == .array or k == .str_ or k == .fixed:
+            et = T_U8
+            if k == .array or k == .fixed: et = int(types[t].elem)
+            idxname = 0
+            if nv == 2: idxname = n1
+            idx = new_local(idxname, T_INT, pos)
+            snap = new_local(0, t, pos)
+            elname = n1
+            if nv == 2: elname = n2
+            el = 0
+            if is_mut:
+                if k == .str_: fatal(pos, "strings are immutable; 'for mut' needs an array")
+                cp_inner += 1                  # only the elements change, not the array's length
+                check_place(it, true)
+                cp_inner -= 1
+                el = new_local(elname, et, pos)
+                locals[el].flags = i32(int(locals[el].flags) | LF_ALIAS)
+                ix = mk(.index, pos)
+                # (it is checked; m[k] of a map was made the place in it by check_place)
+                base = copy_place(it)
+                nodes[ix].a = i32(base)
+                nodes[ix].b = i32(mk_ident_local(idx, pos))
+                nodes[ix].type = i32(et)
+                add_flag(ix, NF_CHECKED)
+                if k == .fixed: add_flag(ix, NF_INBOUNDS)
+                locals[el].alias = i32(ix)
+                nodes[s].aux = 2
+            else:
+                el = new_local(elname, et, pos)
+                locals[el].flags = i32(int(locals[el].flags) | LF_BYREF)
+                nodes[s].aux = 1
+            nodes[s].sym = i32(el)
+            nodes[s].c = i32(idx)
+            nodes[s].d = i32(snap)
+        else if k == .struct_ and structs[int(types[t].st)].name == "Map":
+            si = int(types[t].st)
+            check_struct_fields(si)
+            kt = int(fields[int(structs[si].fields)].type)
+            vt = int(fields[int(structs[si].fields) + 1].type)
+            idx = new_local(0, T_INT, pos)
+            snap = new_local(0, t, pos)
+            kl = new_local(n1, telem(kt), pos)
+            locals[kl].flags = i32(int(locals[kl].flags) | LF_BYREF)
+            vl = 0
+            if nv == 2:
+                if is_mut:
+                    check_place(it, true)
+                    vl = new_local(n2, telem(vt), pos)
+                    locals[vl].flags = i32(int(locals[vl].flags) | LF_ALIAS)
+                    f = mk(.field, pos)
+                    nodes[f].a = i32(clone(it))
+                    nodes[f].name = i32(intern("vals"))
+                    ix = mk(.index, pos)
+                    nodes[ix].a = i32(f)
+                    nodes[ix].b = i32(mk_ident_local(idx, pos))
+                    check_expr(ix, 0)
+                    locals[vl].alias = i32(last_checked)
+                else:
+                    vl = new_local(n2, telem(vt), pos)
+                    locals[vl].flags = i32(int(locals[vl].flags) | LF_BYREF)
+            else if is_mut: fatal(pos, "'for mut' over a map needs key and value variables")
+            nodes[s].aux = 3
+            nodes[s].sym = i32(kl)
+            nodes[s].c = i32(idx)
+            nodes[s].d = i32(snap)
+            nodes[s].aux2 = i32(vl)
+        else: fatal(nodes[it].pos, "cannot iterate over a value of type {type_str(t)}")
+    ctxs[cx].loop_depth += 1
+    check_block(int(nodes[s].b), 0, false)
+    loop_serials.pop()
+    ctxs[cx].loop_depth -= 1
+    scope_reset(mark)
+
+const ASSIGN_OPS = 0
+
+compound_op = (op: int) -> int:
+    k = op as Tok
+    match k:
+        pluseq: int(Tok.plus)
+        minuseq: int(Tok.minus)
+        stareq: int(Tok.star)
+        slasheq: int(Tok.slash)
+        percenteq: int(Tok.percent)
+        ampeq: int(Tok.amp)
+        pipeeq: int(Tok.pipe)
+        careteq: int(Tok.caret)
+        shleq: int(Tok.shl)
+        shreq: int(Tok.shr)
+        _: 0
+
+# the variable a narrowing alias (see narrow_var) stands for, or 0
+narrowed_var = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0: return 0
+    e = int(locals[l].alias)
+    if nodes[e].kind != .narrow and nodes[e].kind != .unwrap and (nodes[e].kind != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
+    a = int(nodes[e].a)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
+    int(nodes[a].sym)
+
+# a closure using a narrowed name of the function around it: it captures the variable itself
+# (so that it sees later changes, as with any captured variable) and narrows it again inside
+capture_narrowed = (l: int, pos: int) -> int:
+    u = narrowed_var(l)
+    inner = 0
+    # (a name narrowed twice: its variable's narrowing first)
+    if narrowed_var(u) != 0: inner = capture_narrowed(u, pos)
+    else: inner = capture_local(u)
+    al = int(locals[l].alias)
+    e = mk(nodes[al].kind, pos)
+    nodes[e].aux = nodes[al].aux
+    nodes[e].type = nodes[al].type
+    nodes[e].a = i32(mk_ident_local(inner, pos))
+    add_flag(e, NF_CHECKED)
+    nl = new_local(0, int(locals[l].type), pos)
+    locals[nl].name = locals[l].name
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(e)
+    nl
+
+# x = v where x is narrowed (by `is`) and v is not of the narrowed type: x is the whole variable again
+unnarrow_assign = (s: int):
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .ident: return
+    sy = lookup(int(nodes[lhs].name))
+    if sy == 0 or syms[sy].kind != .local: return
+    l = int(syms[sy].ref)
+    u = narrowed_var(l)
+    if u == 0: return
+    rt = prune(check_expr(int(nodes[s].b), 0))
+    nodes[s].b = i32(last_checked)
+    add_flag(int(nodes[s].b), NF_CHECKED)
+    # (a member assigned to a variable narrowed to that member is stored in place; a variable
+    # narrowed to several members is always assigned as a whole)
+    al = int(locals[l].alias)
+    in_place = nodes[al].kind != .conv
+    if in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(int(nodes[s].b), rt, int(locals[l].type)): return
+    locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
+    nm = int(nodes[lhs].name)
+    push_scope_sym(nm, new_sym(nm, .local, u, 0))
+
+# returns the (possibly replaced) statement node
+# `x = ...` in a function, where x is a global declared below the function in the same file:
+# that reads like a new local variable, but changes the global, so it gets a warning (a loop
+# counter `k` in a helper quietly being the script's `k` further down). Declaring the global
+# above the function says it is meant.
+late_warned: {int: bool}
+check_late_global = (s: int):
+    if cx < 0 or nodes[s].op != i32(int(Tok.assign)): return
+    if ctxs[cx].mod >= 0 and modules[int(ctxs[cx].mod)].is_prelude: return
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .ident: return
+    inst = int(ctxs[cx].inst)
+    if inst <= 0 or inst >= fns.len(): return
+    fd = int(fns[inst].decl)
+    if fd == 0: return
+    nm = int(nodes[lhs].name)
+    sym = lookup(nm)
+    if sym == 0 or syms[sym].kind != .global or syms[sym].decl == 0: return
+    gpos = nodes[int(syms[sym].decl)].pos
+    fpos = nodes[fd].pos
+    if pos_file(gpos) != pos_file(fpos) or pos_off(gpos) <= pos_off(fpos): return
+    # (an error, not a warning: a global added further down would quietly change what the
+    # function does)
+    fatal(nodes[lhs].pos, "'{name_of(nm)}' is the global variable declared below this function (at {pos_str(gpos)}), so this would change it: for a variable of the function's own, write `let {name_of(nm)} = ...` (or use another name); to mean the global, declare it above the function")
+
+# b[i].f = v (also b[i].f.g += v...) where b's type defines [] and []= (a GpuBuffer...): there
+# is no place b[i] to change in, so the element is read, changed and written back,
+#     e = b[i]; e.f = v; b[i] = e
+# with the index computed once. 0 when the assignment is not of that kind.
+elem_tmp_n = 0
+elem_field_assign = (s: int) -> int:
+    lhs = int(nodes[s].a)
+    ix = lhs
+    loop nodes[ix].kind == .field: ix = int(nodes[ix].a)
+    # (b[f(x)] += v alone: the index once, b[i] = b[i] + v then does the rest)
+    whole = ix == lhs
+    if nodes[ix].kind != .index or nodes[ix].b == 0: return 0
+    recv = int(nodes[ix].a)
+    if has_flag(recv, NF_CHECKED): return 0
+    bt = prune(check_expr(recv, 0))
+    nodes[ix].a = i32(last_checked)
+    if types[bt].kind != .struct_ or is_map_type(bt) or is_soa(bt) or is_part_index(ix): return 0
+    # (the receiver again, unchecked, for reading and for writing back)
+    r0 = clone(int(nodes[ix].a))
+    r1 = clone(int(nodes[ix].a))
+    pos = nodes[s].pos
+    elem_tmp_n += 1
+    stmts: int[]
+    # (the index, once)
+    iname = intern("__index{elem_tmp_n}")
+    di = mk(.vardecl, pos)
+    nodes[di].name = i32(iname)
+    nodes[di].b = nodes[ix].b
+    stmts.push(di)
+    if whole:
+        nodes[lhs].b = i32(comp_ident(iname, pos))
+        c0 = nodes.len()
+        nodes.push(nodes[s])
+        blk0 = mk(.block, pos)
+        set_list(blk0, [di, c0])
+        check_stmt(blk0)
+        return blk0
+    ename = intern("__elem{elem_tmp_n}")
+    rd = mk(.index, pos)
+    nodes[rd].a = i32(r0)
+    nodes[rd].b = i32(comp_ident(iname, pos))
+    de = mk(.vardecl, pos)
+    nodes[de].name = i32(ename)
+    nodes[de].b = i32(rd)
+    stmts.push(de)
+    # (the field path, from the element instead)
+    f = lhs
+    loop int(nodes[f].a) != ix: f = int(nodes[f].a)
+    nodes[f].a = i32(comp_ident(ename, pos))
+    stmts.push(s)
+    wr = mk(.index, pos)
+    nodes[wr].a = i32(r1)
+    nodes[wr].b = i32(comp_ident(iname, pos))
+    back = mk(.assign, pos)
+    nodes[back].op = i32(int(Tok.assign))
+    nodes[back].a = i32(wr)
+    nodes[back].b = i32(comp_ident(ename, pos))
+    stmts.push(back)
+    blk = mk(.block, pos)
+    # (the original statement, now e.f = v, is checked inside the block)
+    c = nodes.len()
+    nodes.push(nodes[s])
+    stmts[2] = c
+    set_list(blk, stmts)
+    check_stmt(blk)
+    blk
+
+# s = s + x on text or an array: s += x, which adds to the end in place; the other copies all of
+# s each time, and a loop of them takes time growing with the square of the length
+append_assign = (s: int):
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .ident: return
+    spine: int[]
+    n = int(nodes[s].b)
+    loop nodes[n].kind == .binary and nodes[n].op == i32(int(Tok.plus)):
+        spine.push(n)
+        n = int(nodes[n].a)
+    if spine.len() == 0 or nodes[n].kind != .ident or nodes[n].name != nodes[lhs].name: return
+    sy = lookup(int(nodes[lhs].name))
+    if sy == 0 or (syms[sy].kind != .local and syms[sy].kind != .global): return
+    t = prune(check_expr(clone(lhs), 0))
+    if tkind(t) != .str_ and tkind(t) != .array: return
+    # (s + a + b is (s + a) + b: s, then the rest in order, appended)
+    rest = int(nodes[spine[spine.len() - 1]].b)
+    if spine.len() == 1: nodes[s].b = i32(rest)
+    else: nodes[spine[spine.len() - 2]].a = i32(rest)
+    nodes[s].op = i32(int(Tok.pluseq))
+
+check_assign = (s: int) -> int:
+    if nodes[s].op == i32(int(Tok.assign)):
+        unnarrow_assign(s)
+        append_assign(s)
+    sl = soa_alias_of(int(nodes[s].a))
+    if sl != 0:
+        # p = value in `loop mut p in ps`: ps[i] = value
+        if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `loop mut`)")
+        nodes[s].a = i32(clone(int(locals[sl].soa)))
+    lhs = int(nodes[s].a)
+    op = int(nodes[s].op)
+    if nodes[lhs].kind == .tuple:
+        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
+        t = prune(check_expr(int(nodes[s].b), 0))
+        nodes[s].b = i32(last_checked)
+        t = unpack_array(int(nodes[s].b), t, nkids(lhs), nodes[s].pos)
+        nodes[s].b = i32(last_checked)
+        if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {type_str(t)}")
+        loop i in [0..nkids(lhs)):
+            tp = kid(lhs, i)
+            if nodes[tp].kind == .hole: continue
+            tt = check_expr(tp, 0)
+            set_kid(lhs, i, last_checked)
+            check_place(last_checked, false)
+            if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {type_str(targ(t, i))} to {type_str(tt)}")
+        nodes[s].aux = 1
+        return s
+    if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and op != int(Tok.assign) and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .ident and nodes[int(nodes[lhs].b)].kind != .int_lit):
+        r = elem_field_assign(s)
+        if r != 0: return r
+    if nodes[lhs].kind == .index:
+        bt = prune(check_expr(int(nodes[lhs].a), 0))
+        nodes[lhs].a = i32(last_checked)
+        if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
+        if types[bt].kind == .array and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .int_lit and nodes[int(nodes[lhs].b)].kind != .range:
+            put = index_array_fn(int(nodes[lhs].b), "__put")
+            if len(put) > 0:
+                # xs[mask] = v, xs[idxs] = vs: sets the elements picked
+                if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")
+                recv = int(nodes[lhs].a)
+                add_flag(recv, NF_MUT)
+                call = bc_call(put, [recv, int(nodes[lhs].b), int(nodes[s].b)], nodes[s].pos)
+                es = mk(.exprstmt, nodes[s].pos)
+                check_expr(call, 0)
+                nodes[es].a = i32(last_checked)
+                return es
+        if types[bt].kind == .struct_ and is_part_index(lhs):
+            # m[.., j] = xs: writes into a part of m
+            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
+            recv = int(nodes[lhs].a)
+            add_flag(recv, NF_MUT)
+            call = bc_call("__nd_slice_set", [recv, part_spec(lhs), int(nodes[s].b)], nodes[s].pos)
+            es = mk(.exprstmt, nodes[s].pos)
+            check_expr(call, 0)
+            nodes[es].a = i32(last_checked)
+            return es
+        # (m[k] += x for a map changes the value in place: see map_elem_place)
+        if types[bt].kind == .struct_ and not (op != int(Tok.assign) and is_map_type(bt) and nodes[lhs].b != 0):
+            call = mk(.call, nodes[s].pos)
+            callee = mk(.ident, nodes[s].pos)
+            nodes[callee].name = i32(intern("[]="))
+            nodes[call].a = i32(callee)
+            recv = int(nodes[lhs].a)
+            add_flag(recv, NF_MUT)
+            val = int(nodes[s].b)
+            # (m[i, j] = v has several indexes)
+            ixs = kids(lhs)
+            if nodes[lhs].b != 0: ixs = [int(nodes[lhs].b)]
+            if op != int(Tok.assign):
+                get = mk(.index, nodes[s].pos)
+                ga = clone(recv)
+                clear_flag(ga, NF_MUT)
+                nodes[ga].type = 0
+                nodes[get].a = i32(ga)
+                if nodes[lhs].b != 0: nodes[get].b = i32(clone(int(nodes[lhs].b)))
+                else:
+                    cl: int[]
+                    loop x in ixs: cl.push(clone(x))
+                    set_list(get, cl)
+                bin = mk(.binary, nodes[s].pos)
+                nodes[bin].op = i32(compound_op(op))
+                nodes[bin].a = i32(get)
+                nodes[bin].b = i32(val)
+                val = bin
+            set_list(call, [recv] + ixs + [val])
+            # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
+            if nodes[recv].kind != .call: clear_flag(recv, NF_CHECKED)
+            es = mk(.exprstmt, nodes[s].pos)
+            check_expr(call, 0)
+            nodes[es].a = i32(last_checked)
+            return es
+    # (assigning a narrowed field or global assigns the whole of it)
+    plain = op == int(Tok.assign) and nodes[lhs].kind != .ident or op == int(Tok.assign) and path_narrows > 0
+    if plain: no_narrow_at = lhs
+    cur_assign = s
+    # (the variable at the bottom of v.f = 1 or v[i] += 1 is written, not read)
+    saved_root = assign_root
+    assign_root = place_root(lhs)
+    lt = check_expr(lhs, 0)
+    assign_root = saved_root
+    cur_assign = 0
+    no_narrow_at = 0
+    lhs = last_checked
+    nodes[s].a = i32(lhs)
+    check_place(lhs, false)
+    # (a local written through and never read: see copy_write_warnings)
+    if nodes[lhs].kind == .field or nodes[lhs].kind == .index:
+        r = place_root(lhs)
+        if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.local)):
+            wl = int(nodes[r].sym)
+            if not copy_writes.has(wl): copy_writes[wl] = nodes[s].pos
+        else if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.global)):
+            wg = int(nodes[r].sym)
+            if not gcopy_writes.has(wg): gcopy_writes[wg] = nodes[s].pos
+    if op == int(Tok.assign):
+        rt = prune(check_expr(int(nodes[s].b), lt))
+        if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
+        nodes[s].b = i32(coerce(last_checked, lt))
+        if path_narrows > 0 and nodes[lhs].kind != .ident or path_narrows > 0 and nodes[lhs].aux == i32(int(SK.global)):
+            key = path_key(lhs)
+            path_forget(key)
+            # x.f = 5 where x.f is int | str: x.f is an int from here on
+            if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0: narrow_expr(copy_path(lhs), [rt], nodes[s].pos, intern(key))
+            # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
+            else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
+        else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
+        return s
+    l = prune(lt)
+    if types[l].kind == .str_ and op == int(Tok.pluseq):
+        srt = prune(check_expr(int(nodes[s].b), T_STR))
+        if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
+        nodes[s].b = i32(coerce(last_checked, T_STR))
+        nodes[s].aux = 2
+        return s
+    bop = compound_op(op)
+    if types[l].kind == .ptr:
+        check_expr(int(nodes[s].b), T_INT)
+        nodes[s].b = i32(coerce(last_checked, T_INT))
+        nodes[s].aux = 3
+        return s
+    if not is_numeric(l) and types[l].kind != .bool_:
+        # operator overload (and vectors): x = x op y. An index that is not a name or a number
+        # is computed once, before (xs[f(0)].v += d calls f once); x, checked, is read as it is
+        pos = nodes[s].pos
+        pre: int[]
+        x = lhs
+        loop nodes[x].kind == .field or nodes[x].kind == .index:
+            if nodes[x].kind == .index and nodes[x].b != 0:
+                ib = int(nodes[x].b)
+                ik = nodes[ib].kind
+                if ik != .ident and ik != .int_lit:
+                    elem_tmp_n += 1
+                    nm = intern("__index{elem_tmp_n}")
+                    d = mk(.vardecl, pos)
+                    nodes[d].name = i32(nm)
+                    nodes[d].b = i32(ib)
+                    add_flag(ib, NF_CHECKED)
+                    check_stmt(d)
+                    pre.insert(0, d)
+                    idn = mk(.ident, pos)
+                    nodes[idn].name = i32(nm)
+                    check_expr(idn, 0)
+                    nodes[x].b = i32(last_checked)
+            x = int(nodes[x].a)
+        rd = clone(lhs)
+        add_flag(rd, NF_CHECKED)
+        bin = mk(.binary, pos)
+        nodes[bin].op = i32(bop)
+        nodes[bin].a = i32(rd)
+        nodes[bin].b = nodes[s].b
+        check_expr(bin, 0)
+        nodes[s].b = i32(coerce(last_checked, lt))
+        nodes[s].op = i32(int(Tok.assign))
+        if pre.len() == 0: return s
+        # (the statement, moved, after the index's variables)
+        c = nodes.len()
+        nodes.push(nodes[s])
+        blk = mk(.block, pos)
+        set_list(blk, pre + [c])
+        return blk
+    is_shift = bop == int(Tok.shl) or bop == int(Tok.shr)
+    hint = l
+    if is_int(l) and is_shift: hint = 0
+    # (score += "1": a one-character text is that character's code, 49)
+    rb = int(nodes[s].b)
+    if is_int(l) and nodes[rb].kind == .str_lit and nodes[rb].aux == 0 and len(name_of(int(nodes[rb].sval))) == 1 and not pos_in_lib(nodes[s].pos):
+        ch = name_of(int(nodes[rb].sval))
+        warn(nodes[rb].pos, "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
+    rt = check_expr(int(nodes[s].b), hint)
+    nodes[s].b = i32(last_checked)
+    if is_shift:
+        if not is_int(rt): fatal(nodes[int(nodes[s].b)].pos, "shift amount must be an integer")
+        if has_flag(int(nodes[s].b), NF_LITERAL): nodes[s].b = i32(coerce(int(nodes[s].b), T_INT))
+    else:
+        if is_int(l) and is_float(rt):
+            if nodes[lhs].kind == .ident: var_type_error(lhs, l, rt, nodes[s].pos)
+            fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {type_str(l)} and {type_str(rt)} (int(...) makes the value an int, or make the field a float)")
+        nodes[s].b = i32(coerce(int(nodes[s].b), l))
+    s
+
+# a function another engine would call, which nothing here does: one warning, saying what is
+# called instead (not also that it is never called)
+callback_warn = (gs: int, msg: str):
+    d = int(syms[gs].decl)
+    fn_used[d] = true
+    warn(nodes[d].pos, msg)
+
+# x = value where x is a variable of another type: where x was made, and the ways out
+var_type_error = (lhs: int, lt: int, rt: int, at: int):
+    nm = name_of(int(nodes[lhs].name))
+    made = ""
+    p = 0
+    if nodes[lhs].aux == i32(int(SK.local)) and nodes[lhs].sym > 0: p = locals[int(nodes[lhs].sym)].pos
+    else if nodes[lhs].sym > 0 and globals[int(nodes[lhs].sym)].decl > 0: p = nodes[int(globals[int(nodes[lhs].sym)].decl)].pos
+    if p > 0 and pos_file(p) == pos_file(at):
+        ln, c = line_col(p)
+        made = " (made on line {ln})"
+    how = "`let {nm} = ...` makes a new variable"
+    if is_int(lt) and is_float(rt):
+        # (time_left = 30, then time_left -= dt: 30.0 holds fractions)
+        start = "0.0"
+        if nodes[lhs].aux != i32(int(SK.local)) and nodes[lhs].sym > 0 and globals[int(nodes[lhs].sym)].decl > 0:
+            gd = int(globals[int(nodes[lhs].sym)].decl)
+            if nodes[gd].b != 0 and nodes[int(nodes[gd].b)].kind == .int_lit: start = "{nodes[int(nodes[gd].b)].ival}.0"
+        how = "write its first value with a decimal point (`{nm} = {start}`), so it holds fractions too, or make this a whole number with int(...)"
+        fatal(at, "'{nm}' holds whole numbers{made}, and this is a number with a fraction: {how}")
+    # (score = "0", then score += 1: a number in quotes is text)
+    if tkind(lt) == .str_ and is_numeric(rt):
+        fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
+    fatal(at, "'{nm}' has type {type_str(lt)}{made} and cannot hold this {type_str(rt)}: {how}")
+
+check_vardecl = (s: int):
+    if has_flag(s, NF_SOA):
+        soa_alias(s)
+        return
+    if has_flag(s, NF_ALIASDECL):
+        # (the element of a `mut x in xs` in a combined loop: a name for xs[k] itself)
+        arr0 = 0
+        if nodes[int(nodes[s].b)].kind == .index: arr0 = int(nodes[int(nodes[s].b)].a)
+        check_expr(int(nodes[s].b), 0)
+        ix = last_checked
+        if arr0 != 0 and nodes[arr0].type != 0 and is_soa(ntype(arr0)): fatal(nodes[s].pos, "a soa array's `mut` elements go in a loop of their own, `loop mut p in ps:`; with a count beside them, by index: `loop i in [0..ps.len()): ps[i].x += ...`")
+        check_place(ix, true)
+        l = new_local(int(nodes[s].name), ntype(ix), nodes[s].pos)
+        locals[l].flags = i32(LF_ALIAS | LF_ELEMALIAS)
+        locals[l].alias = i32(ix)
+        nodes[s].kind = .block
+        nodes[s].nlist = 0
+        return
+    if nodes[s].nlist > 0:
+        if has_flag(s, NF_GLOBAL):
+            loop i in [0..nkids(s)):
+                if nodes[kid(s, i)].kind != .hole:
+                    ensure_global(int(nodes[kid(s, i)].sym), nodes[s].pos, true)
+                    break
+            return
+        t = prune(check_expr(int(nodes[s].b), 0))
+        nodes[s].b = i32(last_checked)
+        t = unpack_array(int(nodes[s].b), t, nkids(s), nodes[s].pos)
+        nodes[s].b = i32(last_checked)
+        if types[t].kind != .tuple or int(types[t].nargs) != nkids(s): fatal(nodes[s].pos, "expected a tuple with {nkids(s)} elements (or an array), found {type_str(t)}")
+        loop i in [0..nkids(s)):
+            id = kid(s, i)
+            if nodes[id].kind == .hole: continue
+            l = new_local(int(nodes[id].name), targ(t, i), nodes[id].pos)
+            locals[l].flags = i32(LF_DECL | LF_QUIET)
+            nodes[id].sym = i32(l)
+        nodes[s].type = i32(t)
+        return
+    if has_flag(s, NF_GLOBAL):
+        ensure_global(int(nodes[s].sym), nodes[s].pos, true)
+        return
+    t = 0
+    if nodes[s].a != 0: t = resolve_type(int(nodes[s].a))
+    nm = name_of(int(nodes[s].name))
+    # (x: T, a struct with default field values: it starts with them, as T() would)
+    if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
+    if nodes[s].b != 0:
+        et = check_expr(int(nodes[s].b), t)
+        nodes[s].b = i32(last_checked)
+        if t != 0: nodes[s].b = i32(coerce(int(nodes[s].b), t))
+        else:
+            t = et
+            if has_flag(int(nodes[s].b), NF_LITERAL):
+                t = lit_default(int(nodes[s].b))
+                nodes[s].b = i32(coerce(int(nodes[s].b), t))
+            if tkind(t) == .none_lit: fatal(nodes[s].pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
+    if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
+    tk = tkind(t)
+    if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'")
+    if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: `{nm}: Enemy? = none`")
+    if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
+    l = new_local(int(nodes[s].name), t, nodes[s].pos)
+    if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
+    locals[l].flags = i32(LF_DECL)
+    if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
+    nodes[s].sym = i32(l)
+    if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
+
+check_stmt = (s: int):
+    k = nodes[s].kind
+    if k == .vardecl and has_flag(s, NF_CHECKED): return
+    if k == .vardecl: check_vardecl(s)
+    else if k == .const_:
+        g = Global(name = nodes[s].name, decl = 0, mod = i32(cur_mod()), is_const = true, state = 2)
+        t = 0
+        if nodes[s].a != 0: t = resolve_type(int(nodes[s].a))
+        cl = clone(int(nodes[s].b))
+        et = check_expr(cl, t)
+        cl = last_checked
+        if t != 0: cl = coerce(cl, t)
+        else if has_flag(cl, NF_LITERAL): t = lit_default(cl)
+        else: t = et
+        g.type = i32(t)
+        g.init = nodes[s].b
+        globals.push(g)
+        push_scope_sym(int(nodes[s].name), new_sym(int(nodes[s].name), .const_, globals.len() - 1, 0))
+        nodes[s].kind = .block
+        nodes[s].nlist = 0
+    else if k == .assign and nodes[int(nodes[s].a)].kind == .hole and nodes[s].op == i32(int(Tok.assign)):
+        # (_ = f(): the value made, and dropped on purpose)
+        e = int(nodes[s].b)
+        nodes[s] = Node(kind = .exprstmt, pos = nodes[s].pos, a = i32(e))
+        discarding = true
+        check_stmt(s)
+        discarding = false
+    else if k == .assign and assign_declares(s, -1):
+        assign_to_decl(s)
+        check_vardecl(s)
+    else if k == .assign:
+        check_late_global(s)
+        r = check_assign(s)
+        if r != s:
+            nodes[s] = nodes[r]
+    else if k == .exprstmt:
+        if has_flag(s, NF_CHECKED): return
+        e = int(nodes[s].a)
+        if repl_sig_query and nodes[e].kind == .ident:
+            # (`:type name` at the REPL, for a function: its versions as written, with their notes)
+            sy = lookup(int(nodes[e].name))
+            if sy != 0 and syms[sy].kind == .fns:
+                ds: int[]
+                collect_fns(int(nodes[e].name), ds)
+                loop d in ds:
+                    if len(repl_sig) > 0: repl_sig += "\n"
+                    repl_sig += ide_fn_header(d)
+                    doc = ide_doc_of(nodes[d].pos)
+                    if len(doc) > 0: repl_sig += "\n    " + replace(doc, "\n", "\n    ")
+                nodes[e] = Node(kind = .int_lit, pos = nodes[e].pos)
+        if nodes[e].kind == .match_: add_flag(e, NF_STMT)
+        named = nodes[e].kind == .ident or nodes[e].kind == .field
+        raw = nodes[e]
+        t = check_expr(e, 0)
+        if named and (tkind(t) == .fn_ or tkind(t) == .cfn):
+            nm = name_of(int(nodes[e].name))
+            fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
+        nodes[s].a = i32(last_checked)
+        unused_result(last_checked, nodes[e].pos)
+        unused_value(raw, t)
+    else if k == .if_ or k == .iflet:
+        add_flag(s, NF_STMT)
+        check_expr(s, 0)
+        if last_checked != s: nodes[s] = nodes[last_checked]
+    else if k == .while_:
+        mark = scope_mark()
+        enter_loop()
+        if nodes[s].aux == 1:
+            t = prune(check_expr(int(nodes[s].a), 0))
+            nodes[s].a = i32(last_checked)
+            if types[t].kind != .opt: fatal(nodes[int(nodes[s].a)].pos, "'loop let x = value' needs an optional value, found {type_str(t)}")
+            nodes[s].sym = i32(new_local(int(nodes[s].name), int(types[t].elem), nodes[s].pos))
+        else:
+            ct = check_expr(int(nodes[s].a), T_BOOL)
+            if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)")
+            nodes[s].a = i32(coerce(last_checked, T_BOOL))
+        ctxs[cx].loop_depth += 1
+        check_block(int(nodes[s].b), 0, false)
+        ctxs[cx].loop_depth -= 1
+        loop_serials.pop()
+        scope_reset(mark)
+    else if k == .for_: check_for(s)
+    else if k == .return_:
+        inst = int(ctxs[cx].inst)
+        if fns[inst].kind == FK_INIT and ctxs[cx].parent < 0: fatal(nodes[s].pos, "'return' outside of a function")
+        ret = int(ctxs[cx].ret)
+        if nodes[s].a != 0:
+            if ctxs[cx].infer_ret and tkind(ret) == .var:
+                t = check_expr(int(nodes[s].a), 0)
+                nodes[s].a = i32(last_checked)
+                if has_flag(int(nodes[s].a), NF_LITERAL):
+                    t = lit_default(int(nodes[s].a))
+                    nodes[s].a = i32(coerce(int(nodes[s].a), t))
+                unify(ret, t)
+            else:
+                rt = prune(ret)
+                if tkind(rt) == .void_: fatal(nodes[s].pos, "this function does not return a value")
+                check_expr(int(nodes[s].a), rt)
+                nodes[s].a = i32(coerce(last_checked, rt))
+        else:
+            rt = prune(ret)
+            if tkind(rt) == .var: unify(rt, T_VOID)
+            else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {type_str(rt)})")
+    else if k == .break_ or k == .continue_:
+        if ctxs[cx].loop_depth == 0:
+            w = "continue"
+            if k == .break_: w = "break"
+            fatal(nodes[s].pos, "'{w}' outside of a loop")
+    else if k == .defer_:
+        d = int(nodes[s].a)
+        if nodes[d].kind == .block: check_block(d, 0, false)
+        else: check_stmt(d)
+    else if k == .when_:
+        blk = int(nodes[s].c)
+        if const_eval_bool(int(nodes[s].a)): blk = int(nodes[s].b)
+        if blk == 0:
+            nodes[s].kind = .block
+            nodes[s].nlist = 0
+            return
+        loop i in [0..nkids(blk)): check_stmt(kid(blk, i))
+        nodes[s].kind = .block
+        nodes[s].list = nodes[blk].list
+        nodes[s].nlist = nodes[blk].nlist
+        nodes[s].aux = 5
+    else if k == .block: check_block(s, 0, false)
+    else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: fatal(nodes[s].pos, "declarations are only allowed at the top level")
+    else if k == .test_ or k == .build_: pass
+    else: fatal(nodes[s].pos, "invalid statement")
+
+# (a generic instance's body: an error in the library's code is reported at the program's call)
+check_fn_body = (f: int):
+    if fns[f].state != 0: return
+    if fns[f].targs.len() == 0 or fns[f].decl == 0:
+        # (an ordinary function's body: not part of the generic instance that led to it)
+        if err_trail.len() == 0: __check_fn_body(f)
+        else:
+            trail = err_trail
+            tnames = err_trail_names
+            fs = err_trail_fns
+            err_trail = []
+            err_trail_names = []
+            err_trail_fns = []
+            __check_fn_body(f)
+            err_trail = trail
+            err_trail_names = tnames
+            err_trail_fns = fs
+        return
+    # (the calls that led here, outermost first, even when this body is checked later)
+    chain: int[]
+    g = f
+    loop g > 0 and chain.len() < 32 and fns[g].targs.len() > 0 and fns[g].decl != 0:
+        chain.insert(0, g)
+        g = int(fns[g].made_in)
+    loop g2 in chain:
+        err_trail.push(fns[g2].use_pos)
+        err_trail_names.push(name_of(int(nodes[int(fns[g2].decl)].name)))
+        err_trail_fns.push(g2)
+    __check_fn_body(f)
+    loop _ in chain:
+        err_trail.pop()
+        err_trail_names.pop()
+        err_trail_fns.pop()
+
+__check_fn_body = (f: int):
+    if fns[f].state != 0: return
+    fns[f].state = 1
+    decl = int(fns[f].decl)
+    saved = cx
+    ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    if decl != 0 and nodes[decl].kind == .fn_:
+        push_type_params(decl, fns[f].targs)
+        loop i in [0..fns[f].ptypes.len()):
+            p = kid(decl, i)
+            l = new_local(int(nodes[p].name), fns[f].ptypes[i], nodes[p].pos)
+            fl = LF_PARAM
+            if has_flag(p, NF_MUT): fl |= LF_MUTPARAM
+            locals[l].flags = i32(fl)
+            fns[f].params.push(l)
+    if decl != 0 and (has_flag(decl, NF_EXTERN) or ide_skip.len() > 0 and ide_skip.get(nodes[decl].pos) != none):
+        if fns[f].ret == 0: fns[f].ret = i32(T_NEVER)
+        fns[f].state = 2
+        scope_reset(mark)
+        ctxs.pop()
+        cx = saved
+        return
+    if fns[f].ret != 0: ctxs[cx].ret = fns[f].ret
+    else:
+        ctxs[cx].ret = i32(mk_var())
+        ctxs[cx].infer_ret = true
+    body = int(fns[f].body)
+    if fns[f].kind == FK_INIT:
+        loop i in [0..nkids(body)): check_stmt(kid(body, i))
+        fns[f].ret = i32(T_VOID)
+    else:
+        infer = ctxs[cx].infer_ret
+        want = infer or tkind(int(ctxs[cx].ret)) != .void_
+        exp = 0
+        if not infer: exp = int(ctxs[cx].ret)
+        bt = check_block(body, exp, want)
+        r = prune(int(ctxs[cx].ret))
+        n = nkids(body)
+        if infer:
+            if types[r].kind == .var:
+                if nodes[body].aux != 0:
+                    v = block_value(body)
+                    if has_flag(v, NF_LITERAL):
+                        bt = lit_default(v)
+                        set_block_value(body, coerce(v, bt))
+                    unify(r, bt)
+                # (die = (msg: str): eprint(msg); exit(2): no return, its last line never
+                # returns: neither does it, so a call ends its branch as exit's does)
+                else if n > 0 and decl != 0 and nodes[decl].kind == .fn_ and stmt_terminates(kid(body, n - 1)) and not __never_skip(decl): unify(r, T_NEVER)
+                else: unify(r, T_VOID)
+            else if types[r].kind == .void_: nodes[body].aux = 0
+            else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
+            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
+                fatal(nodes[decl].pos, "function must return a value of type {type_str(r)} on all paths")
+            fns[f].ret = i32(zonk(int(ctxs[cx].ret)))
+            if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
+            if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type (`-> Type`)")
+        else if want:
+            if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
+            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
+                p = nodes[body].pos
+                if decl != 0: p = nodes[decl].pos
+                # (total = a + b as the last line: total is made, and not given back)
+                if n > 0:
+                    ls = kid(body, n - 1)
+                    vn = ""
+                    if nodes[ls].kind == .vardecl and nodes[ls].name > 0: vn = name_of(int(nodes[ls].name))
+                    else if nodes[ls].kind == .assign and nodes[ls].a != 0 and nodes[int(nodes[ls].a)].kind == .ident: vn = name_of(int(nodes[int(nodes[ls].a)].name))
+                    if len(vn) > 0:
+                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
+                    # (if n > 0: x, with no else: nothing when it does not hold)
+                    if (nodes[ls].kind == .if_ or nodes[ls].kind == .iflet) and nodes[ls].c == 0:
+                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add `else:` and the value then")
+                    fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
+                fatal(p, "missing return value: function returns {type_str(r)}")
+    zonk_tree(body)
+    loop l in fns[f].locals:
+        locals[l].type = i32(zonk(int(locals[l].type)))
+        if has_var(prune(int(locals[l].type))):
+            ln = name_of(int(locals[l].name))
+            # (a variable the compiler made, as for a loop: said of what it holds)
+            if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as `xs: int[] = []`")
+            fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
+    copy_write_warnings(f)
+    fns[f].state = 2
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+
+
+# the variable at the bottom of a place (v in v.f[2].g), or 0
+place_root = (n: int) -> int:
+    r = n
+    loop r != 0 and (nodes[r].kind == .field or nodes[r].kind == .index): r = int(nodes[r].a)
+    if r != 0 and nodes[r].kind == .ident: return r
+    0
+
+# a function's variables whose fields or elements it changes but whose value it never reads: a
+# copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
+copy_write_warnings = (f: int):
+    unused_local_warnings(f)
+    if copy_writes.len() == 0: return
+    skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED
+    loop l in fns[f].locals:
+        if not copy_writes.has(l) or int(locals[l].flags) & skip != 0: continue
+        nm = name_of(int(locals[l].name))
+        if starts_with(nm, "#") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
+        warn(copy_writes[l], "'{nm}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop mut e in xs`)")
+
+# how many times w appears in src as a whole word
+word_count = (src: str, w: str) -> int:
+    n = 0
+    i = find(src, w)
+    loop i >= 0:
+        before = i == 0 or not (is_alnum(src[i - 1]) or src[i - 1] == '_')
+        e = i + len(w)
+        after = e >= len(src) or not (is_alnum(src[e]) or src[e] == '_')
+        if before and after and not in_comment(src, i): n += 1
+        i = find(src, w, i + 1)
+    n
+
+# (a `#` before i on its line, outside quotes)
+in_comment = (src: str, i: int) -> bool:
+    s = i
+    loop s > 0 and src[s - 1] != '\n': s -= 1
+    quoted = false
+    loop k in [s..i):
+        if src[k] == '"': quoted = not quoted
+        else if src[k] == '#' and not quoted: return true
+    false
+
+# (scor = 1 in a function, for the global score: a variable of its own, made and never read)
+unused_local_warnings = (f: int):
+    skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
+    loop l in fns[f].locals:
+        fl = int(locals[l].flags)
+        if fl & LF_DECL == 0 or fl & skip != 0 or copy_writes.has(l): continue
+        nm = name_of(int(locals[l].name))
+        if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or pos_in_lib(locals[l].pos): continue
+        near = ""
+        loop gi in [0..globals.len()):
+            gn = name_of(int(globals[gi].name))
+            lim = 1
+            if len(nm) >= 6: lim = 2
+            if gn != nm and len(nm) >= 3 and len(gn) > 0 and gn[0] == nm[0] and not globals[gi].is_const and not modules[int(globals[gi].mod)].is_prelude and gn != upper(gn) and lower(gn) != lower(nm) and edit_distance(gn, nm, lim) <= lim:
+                near = " (did you mean the variable '{gn}'? that one is changed by writing its name exactly)"
+                break
+            # (the global of a file this one does not use: the assignment made a variable of the
+            # function's own instead of changing it)
+            gf = int(modules[int(globals[gi].mod)].file)
+            lf = pos_file(locals[l].pos)
+            if gn == nm and not modules[int(globals[gi].mod)].is_prelude and gf >= 0 and lf >= 0 and gf != lf:
+                # (as `use` would name it from here)
+                shown = files[gf].path
+                if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
+                near = ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
+                break
+        # (score = 0 in update, then score += 1: it starts again each frame, and nothing reads it)
+        fnm = ""
+        if fns[f].decl != 0 and nodes[int(fns[f].decl)].kind == .fn_: fnm = name_of(int(nodes[int(fns[f].decl)].name))
+        if fl & LF_ASSIGNED != 0 and len(near) == 0 and (fnm == "update" or fnm == "draw"):
+            warn(locals[l].pos, "'{nm}' starts again here each frame, as a variable made in {fnm} belongs to that one run, and is never read: to keep it from frame to frame, give it its first value at the top of the file, outside the functions")
+        else if fl & LF_ASSIGNED != 0 and len(near) == 0: warn(locals[l].pos, "'{nm}' is given a value here, and changed, but never read")
+        else: warn(locals[l].pos, "'{nm}' is given a value here but never used{near}")
+
+check_lambda_body = (f: int, lam: int, ret_hint: int):
+    fns[f].state = 1
+    parent = cx
+    ctxs.push(FnCtx(i32(f), i32(parent), 0, false, 0, ctxs[parent].mod, ctxs[parent].floor))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    loop i in [0..fns[f].ptypes.len()):
+        p = kid(lam, i)
+        l = new_local(int(nodes[p].name), fns[f].ptypes[i], nodes[p].pos)
+        fl = LF_PARAM
+        if has_flag(p, NF_MUT): fl |= LF_MUTPARAM
+        locals[l].flags = i32(fl)
+        fns[f].params.push(l)
+    declared = 0
+    if nodes[lam].a != 0: declared = resolve_type(int(nodes[lam].a))
+    else if has_flag(lam, NF_VOID): declared = T_VOID
+    if declared != 0: ctxs[cx].ret = i32(declared)
+    else if ret_hint != 0 and not has_var(prune(ret_hint)): ctxs[cx].ret = i32(ret_hint)
+    else:
+        if ret_hint != 0: ctxs[cx].ret = i32(ret_hint)
+        else: ctxs[cx].ret = i32(mk_var())
+        ctxs[cx].infer_ret = true
+    body = int(fns[f].body)
+    infer = ctxs[cx].infer_ret
+    want = infer or tkind(int(ctxs[cx].ret)) != .void_
+    exp = 0
+    if not infer: exp = int(ctxs[cx].ret)
+    bt = check_block(body, exp, want)
+    r = prune(int(ctxs[cx].ret))
+    if infer:
+        if types[r].kind == .var:
+            if nodes[body].aux != 0:
+                v = block_value(body)
+                if has_flag(v, NF_LITERAL):
+                    bt = lit_default(v)
+                    set_block_value(body, coerce(v, bt))
+                if not unify(r, bt): fatal(nodes[body].pos, "lambda returns {type_str(bt)}, expected {type_str(r)}")
+            else: unify(r, T_VOID)
+        else if types[r].kind == .void_: nodes[body].aux = 0
+        else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
+        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {type_str(r)}")
+    else if want:
+        if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
+        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {type_str(r)}")
+    else: nodes[body].aux = 0
+    fns[f].ret = ctxs[cx].ret
+    fns[f].state = 2
+    scope_reset(mark)
+    ctxs.pop()
+    cx = parent
+
+# a call of the function `name` with no arguments, anywhere in n but inside function literals
+calls_named = (n: int, name: str) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return false
+    if k == .call and nkids(n) == 0 and nodes[n].a != 0 and nodes[int(nodes[n].a)].kind == .ident and name_of(int(nodes[int(nodes[n].a)].name)) == name: return true
+    if calls_named(int(nodes[n].a), name) or calls_named(int(nodes[n].b), name): return true
+    if k != .for_ and calls_named(int(nodes[n].c), name): return true
+    loop i in [0..nkids(n)):
+        if calls_named(kid(n, i), name): return true
+    false
+
+# (enemies = [] at the top level, filled by a function: that function is checked first, so the
+# type of what it pushes is known where enemies is read)
+check_pushers_first = ():
+    names: {int: bool}
+    loop m in modules:
+        if m.is_prelude: continue
+        loop d in m.decls:
+            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and nodes[int(nodes[d].b)].kind == .array and nkids(int(nodes[d].b)) == 0: names[int(nodes[d].name)] = true
+    if names.len() == 0: return
+    loop m in modules:
+        if m.is_prelude: continue
+        loop d in m.decls:
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and nodes[d].b != 0 and pushes_into(int(nodes[d].b), names) and not fn_sig(d).generic:
+                f = get_fn_inst(d, [], nodes[d].pos)
+                # (before the top level's code, too, which may read it)
+                if fns[f].state == 0: check_fn_body(f)
+
+pushes_into = (n: int, names: {int: bool}) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .call and nkids(n) == 1:
+        f = int(nodes[n].a)
+        if f != 0 and nodes[f].kind == .field and name_of(int(nodes[f].name)) == "push":
+            r = int(nodes[f].a)
+            if r != 0 and nodes[r].kind == .ident and names.has(int(nodes[r].name)): return true
+    if pushes_into(int(nodes[n].a), names) or pushes_into(int(nodes[n].b), names): return true
+    if k != .for_ and pushes_into(int(nodes[n].c), names): return true
+    loop i in [0..nkids(n)):
+        if pushes_into(kid(n, i), names): return true
+    false
+
+# the open globals' types, now that every function is checked: each is settled, or an error;
+# what was checked before it was settled sees its type now
+settle_open_globals = ():
+    loop g in open_globals:
+        t = zonk(int(globals[g].type))
+        if has_var(t):
+            nm = name_of(int(globals[g].name))
+            fatal(nodes[int(globals[g].decl)].pos, "cannot infer the type of '{nm}' (nothing is put in it); add a type annotation{empty_hint(nm, t)}")
+        globals[g].type = i32(t)
+    loop fi in [1..fns.len()):
+        if fns[fi].state != 2: continue
+        zonk_tree(int(fns[fi].body))
+        loop l in fns[fi].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+        loop mut x in fns[fi].ptypes: x = zonk(x)
+        loop mut x in fns[fi].targs: x = zonk(x)
+        if fns[fi].ret != 0: fns[fi].ret = i32(zonk(int(fns[fi].ret)))
+        if fns[fi].fntype != 0: fns[fi].fntype = i32(zonk(int(fns[fi].fntype)))
+    loop g in [0..globals.len()):
+        if globals[g].type != 0: globals[g].type = i32(zonk(int(globals[g].type)))
+        if globals[g].decl != 0: zonk_tree(int(globals[g].decl))
+
+zonk_tree = (n: int):
+    if n == 0: return
+    if nodes[n].type != 0: nodes[n].type = i32(zonk(int(nodes[n].type)))
+    k = nodes[n].kind
+    if k == .lambda: return
+    zonk_tree(int(nodes[n].a))
+    zonk_tree(int(nodes[n].b))
+    if k != .for_:
+        zonk_tree(int(nodes[n].c))
+        if k != .partial: zonk_tree(int(nodes[n].d))
+    loop i in [0..nkids(n)): zonk_tree(kid(n, i))
+    loop i in [0..nkids2(n)): zonk_tree(kid2(n, i))
+
+# ---------------- compile-time evaluation ----------------
+struct CVal:
+    is_str: bool
+    i: int
+    s: str
+
+ceval = (e: int) -> CVal:
+    k = nodes[e].kind
+    if k == .bool_lit or k == .int_lit: return CVal(false, nodes[e].ival, "")
+    if k == .str_lit: return CVal(true, 0, name_of(int(nodes[e].sval)))
+    if k == .ident:
+        s = lookup(int(nodes[e].name))
+        if s == 0 or syms[s].kind != .const_: fatal(nodes[e].pos, "'{name_of(int(nodes[e].name))}' is not a compile-time constant")
+        g = int(syms[s].ref)
+        if globals[g].init != 0 and globals[g].decl == 0: return ceval(int(globals[g].init))
+        return ceval(int(nodes[int(globals[g].decl)].b))
+    if k == .not_:
+        v = ceval(int(nodes[e].a))
+        r = 0
+        if v.i == 0: r = 1
+        return CVal(false, r, "")
+    if k == .and_:
+        a = ceval(int(nodes[e].a))
+        if a.i == 0: return a
+        return ceval(int(nodes[e].b))
+    if k == .or_:
+        a = ceval(int(nodes[e].a))
+        if a.i != 0: return a
+        return ceval(int(nodes[e].b))
+    if k == .binary:
+        a = ceval(int(nodes[e].a))
+        b = ceval(int(nodes[e].b))
+        op = nodes[e].op as Tok
+        if a.is_str or b.is_str:
+            eq = a.is_str == b.is_str and a.s == b.s
+            if op == .eq: return CVal(false, int(eq), "")
+            if op == .ne: return CVal(false, int(not eq), "")
+            fatal(nodes[e].pos, "invalid operator on strings in compile-time expression")
+        r = 0
+        if op == .eq: r = int(a.i == b.i)
+        else if op == .ne: r = int(a.i != b.i)
+        else if op == .lt: r = int(a.i < b.i)
+        else if op == .le: r = int(a.i <= b.i)
+        else if op == .gt: r = int(a.i > b.i)
+        else if op == .ge: r = int(a.i >= b.i)
+        else if op == .plus: r = a.i + b.i
+        else if op == .minus: r = a.i - b.i
+        else if op == .star: r = a.i * b.i
+        else if op == .slash and b.i != 0: r = a.i / b.i
+        else if op == .shl: r = a.i << b.i
+        else: fatal(nodes[e].pos, "unsupported operator in compile-time expression")
+        return CVal(false, r, "")
+    fatal(nodes[e].pos, "expression is not a compile-time constant")
+    CVal(false, 0, "")
+
+const_eval_bool = (e: int) -> bool: ceval(e).i != 0
+
+# the build: block of the main file, checked (main.jo's scan_build_block read it before checking
+# began, to know the target: here its mistakes are errors with places)
+check_build_block = ():
+    if build_node == 0: return
+    b = int(nodes[build_node].b)
+    seen: str[]
+    loop i in [0..nkids(b)):
+        s = kid(b, i)
+        if nodes[s].kind != .assign or nodes[int(nodes[s].a)].kind != .ident:
+            fatal(nodes[s].pos, "a build option is `name = value` (target, opt or output)")
+        key = name_of(int(nodes[int(nodes[s].a)].name))
+        v = int(nodes[s].b)
+        word = ""
+        if nodes[v].kind == .ident: word = name_of(int(nodes[v].name))
+        else if nodes[v].kind == .str_lit and nodes[v].aux == 0: word = name_of(int(nodes[v].sval))
+        if seen.contains(key): fatal(nodes[s].pos, "build option '{key}' is set twice")
+        seen.push(key)
+        if nodes[v].kind == .call and nodes[int(nodes[v].a)].kind == .ident and name_of(int(nodes[int(nodes[v].a)].name)) == "package":
+            # name = package("git URL or directory"[, "tag, branch or commit"]): pkg.jo
+            if nkids(v) < 1 or nkids(v) > 2: fatal(nodes[v].pos, "a package is package(\"git URL or directory\") or package(\"git URL\", \"tag, branch or commit\")")
+            loop k in [0..nkids(v)):
+                if nodes[kid(v, k)].kind != .str_lit or nodes[kid(v, k)].aux != 0: fatal(nodes[kid(v, k)].pos, "package() takes strings in quotes")
+            continue
+        if key == "target":
+            if word != "native" and word != "linux" and word != "linux-arm64" and word != "macos" and word != "windows" and word != "wasm":
+                fatal(nodes[v].pos, "build option 'target' is native, linux, linux-arm64, macos, windows or wasm")
+        else if key == "opt":
+            if word != "debug" and word != "release": fatal(nodes[v].pos, "build option 'opt' is debug or release")
+        else if key == "output":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'output' is a file name in quotes: output = \"game\"")
+        else if key == "icon":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'icon' is a PNG file in quotes: icon = \"icon.png\"")
+            path = word
+            d = files[pos_file(nodes[v].pos)].dir
+            if not is_abs_path(path) and len(d) > 0: path = "{d}/{path}"
+            b: u8[]
+            if let got = read_bytes(path): b = got
+            if b.len() == 0: fatal(nodes[v].pos, "cannot read the icon '{path}'")
+            if b.len() < 24 or b[0] != 0x89 or b[1] != 'P' or b[2] != 'N' or b[3] != 'G': fatal(nodes[v].pos, "the icon must be a PNG file ('{path}' is not one)")
+            w = (int(b[16]) << 24) | (int(b[17]) << 16) | (int(b[18]) << 8) | int(b[19])
+            h = (int(b[20]) << 24) | (int(b[21]) << 16) | (int(b[22]) << 8) | int(b[23])
+            if w != h or w > 256: fatal(nodes[v].pos, "the icon must be square and at most 256 pixels wide ('{path}' is {w}x{h})")
+            program_icon = b
+            nodes[icon_node].sval = i32(intern(str_from_bytes(b)))
+        else if key == "js":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'js' is a JavaScript file in quotes: js = \"glue.js\" (for web builds: it gives their `extern` functions)")
+            path = word
+            d = files[pos_file(nodes[v].pos)].dir
+            if not is_abs_path(path) and len(d) > 0: path = "{d}/{path}"
+            if let t = read_file(path): program_js = t
+            else: fatal(nodes[v].pos, "cannot read the JavaScript file '{path}'")
+        else if key == "name":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'name' is the program's name in quotes: name = \"Star Garden\"")
+            loop c in word:
+                if c == '/' or c == '\\' or c == ':' or c < ' ': fatal(nodes[v].pos, "the program's name is also its save folder's: it cannot contain / \\ or :")
+        else:
+            fatal(nodes[int(nodes[s].a)].pos, "unknown build option '{key}' (the options are target, opt, output, name and icon, and packages: name = package(\"git URL\"))")
+
+# ---------------- program ----------------
+want_cpu_flag = false           # (release builds for x86-64: the vectorizer may use __cpu_avx2)
+want_loop_watch = false         # (debug web builds: loops count down to __loop_watchdog)
+watch_build = false             # (built for `sloppy watch`: WATCH is true in the program)
+runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_unwrap", "__free_obj", "__arr_clone", "__arr_push_slot",
+    "__arr_reserve", "__arr_insert_slot", "__arr_remove_slot", "__arr_slice", "__arr_concat", "__str_concat", "__str_eq",
+    "__str_cmp", "__str_slice", "__str_append", "__buf_finish", "__buf_append_str", "__arr_resize", "__arr_repeat", "__arr_filled",
+    "__print_str", "__str_from_bytes", "__assert_fail", "__hash_bytes", "__str_hash", "__div_zero", "__rc_inc", "__rc_dec",
+    "__arr_extend", "__rc_dec_test", "__out_flush", "__end_flush"]
+optional_runtime = ["__c_str", "__mat4_mul", "__mat4_mul_vec4", "__fmt_i32", "__fmt_f32", "__ffi_resolve", "__panic_narrow", "__ffi_missing", "__mac_syscall"]
+runtime_insts: {str: int} = {}
+
+runtime_fn = (name: str) -> int:
+    if let f = runtime_insts.get(name): return f
+    s = prelude.get(intern(name)) ?? 0
+    if s == 0 or syms[s].kind != .fns: ice("missing runtime function {name}")
+    f = get_fn_inst(int(syms[s].decl), [], nodes[int(syms[s].decl)].pos)
+    runtime_insts[name] = f
+    f
+
+add_universe = ():
+    tys = [("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
+        ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
+        ("bool", T_BOOL), ("str", T_STR), ("void", T_VOID), ("vec2", T_VEC2), ("vec3", T_VEC3), ("vec4", T_VEC4),
+        ("mat4", T_MAT4), ("ivec2", T_IVEC2), ("ivec3", T_IVEC3), ("ivec4", T_IVEC4)]
+    loop t in tys:
+        nm = intern(t.0)
+        universe[nm] = new_sym(nm, .type_, t.1, 0)
+    tv = mk(.str_lit, 0)
+    tgt = "linux"
+    if target_wasm: tgt = "wasm"
+    if target_windows: tgt = "windows"
+    if target_macos: tgt = "macos"
+    nodes[tv].sval = i32(intern(tgt))
+    # (the processor: x86_64, arm64 or wasm32)
+    av = mk(.str_lit, 0)
+    arch = "x86_64"
+    if target_wasm: arch = "wasm32"
+    if target_arm64: arch = "arm64"
+    nodes[av].sval = i32(intern(arch))
+    tr = mk(.bool_lit, 0)
+    nodes[tr].ival = 1
+    fl = mk(.bool_lit, 0)
+    wv = mk(.bool_lit, 0)
+    if watch_build: nodes[wv].ival = 1
+    pn = mk(.str_lit, 0)
+    nodes[pn].sval = i32(intern(program_name))
+    # (the icon's bytes: set by check_build_block)
+    icon_node = mk(.str_lit, 0)
+    nodes[icon_node].sval = i32(intern(""))
+    consts = [("TARGET", tv, T_STR), ("ARCH", av, T_STR), ("DEBUG", tr, T_BOOL), ("BOOTSTRAP", fl, T_BOOL), ("WATCH", wv, T_BOOL), ("PROGRAM_NAME", pn, T_STR),
+        ("PROGRAM_ICON", icon_node, T_STR)]
+    loop c in consts:
+        nm = intern(c.0)
+        globals.push(Global(name = i32(nm), is_const = true, init = i32(c.1), state = 2, type = i32(c.2)))
+        universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)
+    register_intrinsics()
+
+load_prelude = ():
+    # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
+    # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
+    loop sub in ["core", "std", "game"]:
+        names_ = list_dir("{lib_dir}/{sub}")
+        names_.sort()
+        loop n in names_:
+            if ends_with(n, ".jo"): load_module("{lib_dir}/{sub}/{n}", true, -1)
+
+dfs_state: bool[]
+skip_main = false
+export_decls: int[]
+export_fns: int[]
+order_modules = (m: int, out: mut int[]):
+    if dfs_state[m]: return
+    dfs_state[m] = true
+    loop d in modules[m].decls:
+        if nodes[d].kind == .import_:
+            if nodes[d].aux == 2: order_modules(int(nodes[d].sym), out)
+            else if nodes[d].aux == 1:
+                loop u in modules[m].uses: order_modules(u, out)
+            else if let s = modules[m].names.get(int(nodes[d].name)):
+                if syms[s].kind == .module: order_modules(int(syms[s].ref), out)
+    out.push(m)
+
+# statement calling a prelude function with the given argument nodes
+# a, b = xs with an array: its elements, as a tuple (__unpack2(xs): the length checked)
+unpack_array = (e: int, t: int, n: int, pos: int) -> int:
+    if types[t].kind != .array or n < 2 or n > 4: return t
+    add_flag(e, NF_CHECKED)
+    c = int(nodes[synth_call("__unpack{n}", [e], pos)].a)
+    r = prune(check_expr(c, 0))
+    last_checked = c
+    r
+
+synth_call = (name: str, args: int[], pos: int) -> int:
+    c = mk(.call, pos)
+    id = mk(.ident, pos)
+    nodes[id].name = i32(intern(name))
+    nodes[c].a = i32(id)
+    set_list(c, args)
+    st = mk(.exprstmt, pos)
+    nodes[st].a = i32(c)
+    st
+
+synth_str = (s: str, pos: int) -> int:
+    n = mk(.str_lit, pos)
+    nodes[n].sval = i32(intern(s))
+    n
+
+program_named = false         # (the build block gave the name)
+
+check_program = (main_path: str):
+    if len(program_name) > 0: program_named = true
+    if len(program_name) == 0:
+        program_name = main_path
+        s = rfind(program_name, "/")
+        if s >= 0: program_name = program_name[s + 1..]
+        program_name = strip_ext(program_name)
+    add_universe()
+    load_prelude()
+    mainm = load_module(main_path, false, -1)
+    if stop_after == "lex" or stop_after == "parse": exit(0)
+    modules[mainm].is_main = true
+    i = 0
+    loop i < modules.len():
+        register_module(i)
+        i += 1
+    bind_from_imports()
+    check_build_block()
+    # (native programs report crashes as they do panics: lib/std/backtrace.jo)
+    if not target_wasm and prelude.get(intern("__crash_install")) != none: modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))
+    # programs with update()/draw() run the game loop after main()
+    has_upd = modules[mainm].names.get(intern("update")) != none
+    has_drw = modules[mainm].names.get(intern("draw")) != none
+    # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
+    loop gname in ["update", "draw", "main"]:
+        first = 0
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != gname: continue
+            if first == 0: first = d
+            else:
+                what = "runs every frame"
+                if gname == "draw": what = "draws every frame"
+                else if gname == "main": what = "runs once, after the top of the file"
+                fl, fc = line_col(nodes[first].pos)
+                fatal(nodes[d].pos, "a second {gname} (the first is on line {fl}): a program has one {gname}, which {what}; put the lines of both in it, or make each a function of its own that {gname} calls")
+    # (a top-level `loop:` in a game, as Scratch's forever: the frames start after the top level ends)
+    if has_upd or has_drw:
+        loop d in modules[mainm].decls:
+            if nodes[d].kind == .while_ and nodes[int(nodes[d].a)].kind == .bool_lit and nodes[int(nodes[d].a)].ival != 0 and not has_break(int(nodes[d].b)):
+                upd = "update"
+                if not has_upd: upd = "draw"
+                warn(nodes[d].pos, "this loop never ends, so the game never starts: {upd} runs after the lines at the top of the file are done. What repeats each frame goes in {upd}, which is the game's forever loop")
+    # (the game ignores what update and draw give back: their last line is a statement, as
+    # `world.step(dt)` or a mistaken `pos == pos + v`, which then gets its warning)
+    loop gn in ["update", "draw"]:
+        if let gs = modules[mainm].names.get(intern(gn)):
+            gd = int(syms[gs].decl)
+            if syms[gs].kind == .fns and gd != 0 and nodes[gd].kind == .fn_ and nodes[gd].a == 0: add_flag(gd, NF_VOID)
+    # (Godot's callbacks, which nothing here calls)
+    if not has_upd and not has_drw:
+        loop gn in ["_process", "_physics_process", "_ready", "_draw", "_input", "Awake", "FixedUpdate", "LateUpdate", "OnGUI"]:
+            if let gs = modules[mainm].names.get(intern(gn)):
+                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is `update = (dt: f64): ...`, called each frame, and `draw = (): ...` after it; what runs once goes at the top level")
+    # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
+    loop want in ["draw", "update"]:
+        if modules[mainm].names.get(intern(want)) != none: continue
+        lim = 1
+        if want == "update": lim = 2
+        loop nm, gs in modules[mainm].names:
+            if syms[gs].kind != .fns or syms[gs].decl == 0: continue
+            s = name_of(nm)
+            # (a game's: no main, and the parameters the game would give it)
+            gd = int(syms[gs].decl)
+            np = 0
+            if want == "update": np = 1
+            if modules[mainm].names.get(intern("main")) != none or nodes[gd].kind != .fn_ or nkids(gd) != np: continue
+            if abs(len(s) - len(want)) <= 1 and edit_distance(s, want, lim) <= lim:
+                callback_warn(gs, "nothing calls {s}: the game calls `{want}` each frame (did you mean `{want}`?)")
+    # (a quit hook under another name: on_close, Unity's OnApplicationQuit)
+    if modules[mainm].names.get(intern("on_quit")) == none:
+        loop gn in ["on_close", "onClose", "onQuit", "on_exit", "onExit", "OnApplicationQuit", "on_quit_game", "at_exit", "atexit", "_exit_tree", "beforeunload"]:
+            if let gs = modules[mainm].names.get(intern(gn)):
+                if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: when the game closes, it calls `on_quit = (): ...` (did you mean `on_quit`?)")
+    # (Unity's collision callbacks: contacts are read, each frame)
+    loop gn in ["OnCollisionEnter", "OnCollisionStay", "OnCollisionExit", "OnTriggerEnter", "OnTriggerStay", "OnTriggerExit"]:
+        if let gs = modules[mainm].names.get(intern(gn)):
+            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: read `w.contacts(b)` in update, each frame (`if c.new:` for a touch that just began; sensors' are there too)")
+    # (LÖVE's input callbacks: input is asked for, each frame)
+    loop gn in ["keypressed", "keyreleased", "mousepressed", "mousereleased", "textinput", "wheelmoved"]:
+        if let gs = modules[mainm].names.get(intern(gn)):
+            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: in update, ask each frame (`key_pressed(.space)`, `mouse_pressed(.left)`, `text_input()`, `mouse_wheel()`)")
+    if test_mode and test_decls.len() == 0 and not check_all and not ide_on:
+        # (pytest's test_ functions, or no tests at all: "0 tests passed" would say all is well)
+        pyt = ""
+        loop nm, gs in modules[mainm].names:
+            if starts_with(name_of(nm), "test_") and syms[gs].kind == .fns and len(pyt) == 0: pyt = name_of(nm)
+        if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: a test is written `test \"{pyt[5..]}\":` with its lines below it (`assert(...)` in them)")
+        fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
+    if test_mode:
+        # top-level code runs first (it may set up globals), then each test in order
+        skip_main = true
+        loop d in test_decls:
+            nm = name_of(int(nodes[d].sval))
+            if len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
+            # if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
+            body = int(nodes[d].b)
+            kids: int[]
+            loop i in [0..nkids(body)): kids.push(kid(body, i))
+            kids.push(synth_call("__test_end", [], nodes[d].pos))
+            set_list(body, kids)
+            cond = int(nodes[synth_call("__test_begin", [synth_str(nm, nodes[d].pos)], nodes[d].pos)].a)
+            ifn = mk(.if_, nodes[d].pos)
+            nodes[ifn].a = i32(cond)
+            nodes[ifn].b = i32(body)
+            modules[mainm].inits.push(ifn)
+        cnt = mk(.int_lit, 0)
+        nodes[cnt].ival = test_decls.len()
+        modules[mainm].inits.push(synth_call("__test_done", [cnt], 0))
+        # (first of all: a test run, where window(...) at the top opens no window)
+        modules[mainm].inits.insert(0, synth_call("__test_run_begin", [], 0))
+    # (sloppy check: the tests, and the game loop's update and draw too)
+    if (not test_mode or check_all) and (has_upd or has_drw):
+        user_main = false
+        loop st0 in modules[mainm].inits:
+            if calls_named(st0, "main"): user_main = true
+        if user_main: skip_main = true
+        else if let s = modules[mainm].names.get(intern("main")):
+            mc = mk(.call, 0)
+            mid = mk(.ident, 0)
+            nodes[mid].name = i32(intern("main"))
+            nodes[mc].a = i32(mid)
+            st = mk(.exprstmt, 0)
+            nodes[st].a = i32(mc)
+            modules[mainm].inits.push(st)
+            skip_main = true
+        # (before the program's own code: it is a game, so a texture made at the top opens the
+        # window; a script's opens none)
+        isg = mk(.assign, 0)
+        nodes[isg].op = i32(int(Tok.assign))
+        isgl = mk(.ident, 0)
+        nodes[isgl].name = i32(intern("__is_game"))
+        nodes[isg].a = i32(isgl)
+        isgv = mk(.bool_lit, 0)
+        nodes[isgv].ival = 1
+        nodes[isg].b = i32(isgv)
+        modules[mainm].inits.insert(0, isg)
+        gc = mk(.call, 0)
+        gid = mk(.ident, 0)
+        nodes[gid].name = i32(intern("__game_run"))
+        nodes[gc].a = i32(gid)
+        # (at the program's update and draw: a mismatch is reported there)
+        ua = mk(.ident, 0)
+        if has_upd:
+            nodes[ua].name = i32(intern("update"))
+            nodes[ua].pos = nodes[int(syms[modules[mainm].names[intern("update")]].decl)].pos
+        else: nodes[ua].name = i32(intern("__no_update"))
+        da = mk(.ident, 0)
+        if has_drw:
+            nodes[da].name = i32(intern("draw"))
+            nodes[da].pos = nodes[int(syms[modules[mainm].names[intern("draw")]].decl)].pos
+        else: nodes[da].name = i32(intern("__no_draw"))
+        set_list(gc, [ua, da])
+        # (quit = (): the game's own, in place of the library's that closes the window)
+        if let qq = modules[mainm].names.get(intern("quit")):
+            qd2 = int(syms[qq].decl)
+            if syms[qq].kind == .fns and qd2 != 0 and nodes[qd2].kind == .fn_ and nkids(qd2) == 0: warn(nodes[qd2].pos, "this quit takes the place of the library's quit(), which closes the window: for what runs as the game ends (to save), write `on_quit = ():`")
+        # (on_quit = (): what the game does as it ends: its window closed; quit() closes it)
+        if let qs = modules[mainm].names.get(intern("on_quit")):
+            qd = int(syms[qs].decl)
+            if syms[qs].kind == .fns and qd != 0 and nodes[qd].kind == .fn_ and nkids(qd) == 0:
+                # (what its last line gives, on_quit = (): save_value(...)'s bool, is dropped)
+                add_flag(qd, NF_VOID)
+                qc = mk(.call, 0)
+                qf = mk(.ident, 0)
+                nodes[qf].name = i32(intern("__set_quit"))
+                nodes[qc].a = i32(qf)
+                qa = mk(.ident, nodes[qd].pos)
+                nodes[qa].name = i32(intern("on_quit"))
+                set_list(qc, [qa])
+                qst = mk(.exprstmt, 0)
+                nodes[qst].a = i32(qc)
+                modules[mainm].inits.push(qst)
+        st2 = mk(.exprstmt, 0)
+        nodes[st2].a = i32(gc)
+        modules[mainm].inits.push(st2)
+    prelude_init = new_inst(FK_INIT, 0, "init_prelude")
+    fns[prelude_init].body = i32(mk(.block, 0))
+    fns[prelude_init].ret = i32(T_VOID)
+    fns[prelude_init].state = 2
+    module_ctx = []
+    loop mi in [0..modules.len()):
+        inst = prelude_init
+        if not modules[mi].is_prelude:
+            inst = new_inst(FK_INIT, mi, "init_{sanitize(name_of(int(modules[mi].name)))}")
+            b = mk(.block, mkpos(int(modules[mi].file), 0))
+            set_list(b, modules[mi].inits)
+            fns[inst].body = i32(b)
+        modules[mi].init_fn = i32(inst)
+        ctxs.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
+        module_ctx.push(ctxs.len() - 1)
+    dfs_state = fill(false, modules.len())
+    order: int[]
+    order_modules(mainm, order)
+    init_fns = [prelude_init]
+    loop m in order:
+        if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
+    cx = -1
+    check_pushers_first()
+    # (a struct of the program's that holds itself, a: A, is an error used or not)
+    loop m in order:
+        if modules[m].is_prelude: continue
+        loop nm, s in modules[m].names:
+            if syms[s].kind == .struct_ and syms[s].decl != 0 and nkids2(int(syms[s].decl)) == 0 and nodes[int(syms[s].decl)].kind == .struct_:
+                layout(get_struct_inst(int(syms[s].decl), []))
+    if let s = modules[mainm].names.get(intern("main")):
+        # (main() at the end of the file, as in Python: it runs once, there)
+        calls_main = false
+        loop st in modules[mainm].inits:
+            if calls_named(st, "main"): calls_main = true
+        if syms[s].kind == .fns and not skip_main and not calls_main: main_fn = get_fn_inst(int(syms[s].decl), [], 0)
+    if let s = modules[mainm].names.get(intern("update")):
+        if syms[s].kind == .fns:
+            # (update = (dt): ..., its parameter untyped: the seconds the game loop gives it)
+            ud = int(syms[s].decl)
+            if fn_sig(ud).generic and int(fn_sig(ud).ntp) == 1 and nkids(ud) == 1: update_fn = get_fn_inst(ud, [T_FLOAT], 0)
+            else: update_fn = get_fn_inst(ud, [], 0)
+    if let s = modules[mainm].names.get(intern("draw")):
+        if syms[s].kind == .fns: draw_fn = get_fn_inst(int(syms[s].decl), [], 0)
+    loop d in export_decls:
+        if not modules[int(nodes[d].mod)].is_prelude: export_fns.push(get_fn_inst(d, [], nodes[d].pos))
+    # the program's own functions are all checked, called or not (errors should not hide in
+    # unused code); only what is reachable is compiled
+    if ide_on: ide_force = ide_find_file(ide_doc)
+    loop m in modules:
+        if m.is_prelude and int(m.file) != ide_force: continue
+        loop d in m.decls:
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
+    loop nm in runtime_names: runtime_fn(nm)
+    loop nm in optional_runtime:
+        if prelude.get(intern(nm)) != none: runtime_fn(nm)
+    # (@cabi functions set __c_threads: lib/core/rt.jo)
+    if let ct = prelude.get(intern("__c_threads")):
+        if syms[ct].kind == .global: ensure_global(int(syms[ct].ref), 0)
+    # (vectorized code reads __cpu_avx2: its initializer must be checked with the rest)
+    if want_cpu_flag:
+        if let cs = prelude.get(intern("__cpu_avx2")):
+            if syms[cs].kind == .global: ensure_global(int(syms[cs].ref), 0)
+    # (a web page's loops count down to the watchdog, which stops one that never ends)
+    if want_loop_watch:
+        if let ls = prelude.get(intern("__loop_budget")):
+            if syms[ls].kind == .global:
+                ensure_global(int(syms[ls].ref), 0)
+                runtime_fn("__loop_watchdog")
+    # check everything reachable; library exports join once their module is in use
+    k = 0
+    exp_added: bool[] = fill(false, export_decls.len())
+    loop true:
+        loop k < fns.len():
+            if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
+                if fns[k].kind == FK_INIT:
+                    m = int(fns[k].mod)
+                    cx = module_ctx[m]
+                    fns[k].state = 1
+                    mark = scope_mark()
+                    ctxs[cx].floor = i32(sc_names.len())
+                    body = int(fns[k].body)
+                    loop j in [0..nkids(body)): check_stmt(kid(body, j))
+                    scope_reset(mark)
+                    zonk_tree(body)
+                    loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+                    copy_write_warnings(k)
+                    fns[k].ret = i32(T_VOID)
+                    fns[k].state = 2
+                    cx = -1
+                else: check_fn_body(k)
+            k += 1
+
+        used: {int: bool} = {}
+        loop fi in [1..fns.len()):
+            if fns[fi].state == 2 and fns[fi].decl != 0: used[int(nodes[int(fns[fi].decl)].mod)] = true
+        more = false
+        loop ei in 0.. and d in export_decls:
+            if exp_added[ei] or not modules[int(nodes[d].mod)].is_prelude: continue
+            if used.get(int(nodes[d].mod)) != none:
+                exp_added[ei] = true
+                export_fns.push(get_fn_inst(d, [], nodes[d].pos))
+                more = true
+        if not more: break
+    if open_globals.len() > 0: settle_open_globals()
+    # (make_world written and never called: nothing runs it. A file of definitions alone, with
+    # no main, update or draw and no statement at its top that does something, is a module that
+    # others use: checked by itself, nothing in it is called)
+    runs = false
+    loop i0 in modules[mainm].inits:
+        ik = nodes[i0].kind
+        # (statements the file has, not ones made for it: they have no place in it)
+        if nodes[i0].pos <= 0 or pos_in_lib(nodes[i0].pos): continue
+        if ik != .vardecl and ik != .assign and ik != .const_: runs = true
+    loop nm0 in ["main", "update", "draw"]:
+        if modules[mainm].names.get(intern(nm0)) != none: runs = true
+    # (a const nothing uses is checked too: `const X = no_such(3)` is an error, used or not)
+    loop mi in [0..modules.len()):
+        if modules[mi].is_prelude: continue
+        loop cn, cs in modules[mi].names:
+            if syms[cs].kind == .const_ and syms[cs].decl != 0:
+                cg = int(syms[cs].ref)
+                if globals[cg].decl != 0: ensure_global(cg, nodes[int(syms[cs].decl)].pos)
+    loop ci, at in draw_to_at:
+        if not back_to_screen.has(ci): warn(at, "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")
+    # (nothing runs at all: one word for the whole file, as a module or a program not finished)
+    if not ide_on and not test_mode and not runs and not check_all and not ends_with(main_path, "<input>"):
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
+            fnm = name_of(int(nodes[d].name))
+            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's `update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)")
+            break
+    if not ide_on and (not test_mode or check_all) and runs:
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
+            dn = name_of(int(nodes[d].name))
+            if dn == "main" or dn == "update" or dn == "draw" or starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_"): continue
+            # (its name written anywhere else in the file: an overload used under it, or a use in
+            # code for another target, as in `when TARGET == "windows":`)
+            if word_count(files[pos_file(nodes[d].pos)].src, dn) > 1: continue
+            how = "`{dn}()`"
+            if nkids(d) > 0: how = "`{dn}(...)`"
+            warn(nodes[d].pos, "'{dn}' is never called: nothing runs it (call it, as {how} where it should run)")
+    # (globals of the program whose fields or elements are changed and that are never read)
+    loop g, wp in gcopy_writes:
+        if g < global_read.len() and global_read[g]: continue
+        if modules[int(globals[g].mod)].is_prelude or pos_in_lib(wp): continue
+        nm = name_of(int(globals[g].name))
+        warn(wp, "'{nm}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop mut e in xs`)")
+    # prelude init: referenced prelude globals in declaration order
+    pl: int[]
+    loop g in global_ids:
+        if modules[int(globals[g].mod)].is_prelude and globals[g].state == 2: pl.push(int(globals[g].decl))
+    set_list(int(fns[prelude_init].body), pl)
+    zonk_tree(int(fns[prelude_init].body))

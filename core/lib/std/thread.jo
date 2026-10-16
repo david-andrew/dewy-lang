@@ -1,0 +1,338 @@
+# Data parallelism on a pool of worker threads (fork-join).
+#
+#   squares = parallel_map(nums, (x): x * x)
+#   parallel_update(particles, (p): step(p, dt))      # xs[i] = f(xs[i]), in place
+#   rows = parallel_range(height, (y): render_row(y))
+#
+# The function runs on several threads at once: it may read anything, but it must not change
+# globals or the variables it captured (that would be a data race); return results instead.
+# On the web target everything runs on the calling thread.
+
+# job control block (shared between threads, accessed atomically)
+const __C_GEN = 0          # bumped to start a job (futex word for sleeping workers)
+const __C_NEXT = 1         # next chunk to claim
+const __C_DONE = 2         # chunks finished
+const __C_ACK = 3          # workers finished with the current job (futex word for the caller)
+const __C_CHUNKS = 4       # chunks in the current job
+__pool_ctl: *int = null
+__pool_workers = 0
+__job_idle_c: (int, int) -> void = __job_idle      # (made once: converting a function to a closure allocates)
+__job: (int, int) -> void = __job_idle_c
+__job_total = 0
+__job_chunk = 1
+
+__job_idle = (lo: int, hi: int): pass
+
+# number of hardware threads available to this process
+cpu_count = () -> int:
+    when TARGET == "wasm":
+        return 1
+    else when TARGET == "windows":
+        return max(int(GetActiveProcessorCount(u16(0xFFFF))), 1)
+    else when TARGET == "macos":
+        return max(int(__mac_sysconf(i32(58))), 1)                  # _SC_NPROCESSORS_ONLN
+    else:
+        mask = fill(0, 16)
+        r = syscall(204, 0, 128, data(mask))           # sched_getaffinity
+        if r <= 0: return 1
+        n = 0
+        loop w in mask:
+            x = w
+            loop x != 0:
+                n += x & 1
+                x = (x >> 1) & 0x7FFFFFFFFFFFFFFF
+        if n < 1: n = 1
+        n
+
+when TARGET == "windows":
+    @lib("kernel32.dll")
+    extern GetActiveProcessorCount = (group: u16) -> u32
+    @lib("kernelbase.dll")
+    extern WaitOnAddress = (p: *u8, compare: *u8, size: int, ms: u32) -> i32
+    @lib("kernelbase.dll")
+    extern WakeByAddressAll = (p: *u8)
+    @lib("kernel32.dll")
+    extern CreateThread = (sec: *u8, stack: int, start: *u8, param: *u8, flags: u32, id: *u32) -> *u8
+
+    # (no allocation: a worker sleeps in here)
+    __futex_wait = (p: *int, v: int):
+        cmp = v
+        WaitOnAddress(p as *u8, (&cmp) as *u8, 8, u32(0xFFFFFFFF))
+    __futex_wake = (p: *int): WakeByAddressAll(p as *u8)
+
+    # a worker starts on a small stack of Windows' and moves to its own in __tstack_base (where
+    # __tid finds which worker it is), entering __w32_worker as if called
+    @cabi
+    __w32_thread_start = (id: int) -> int:
+        top = __tstack_base + (id << __TSTACK_SHIFT) - 16
+        (top as *int)[1] = 0
+        entry: cfn() = __w32_worker
+        __jump(entry as *u8, top + 8)
+        0
+
+    @cabi
+    __w32_worker = (): __worker_main(__tid())
+else when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("sysconf")
+    extern __mac_sysconf = (name: i32) -> int
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pthread_create")
+    extern __mac_pthread_create = (t: *u8, attr: *u8, start: *u8, arg: *u8) -> i32
+    # (macOS's futex: UL_COMPARE_AND_WAIT64, waking all with ULF_WAKE_ALL)
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("__ulock_wait")
+    extern __mac_ulock_wait = (op: u32, p: *u8, v: int, us: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("__ulock_wake")
+    extern __mac_ulock_wake = (op: u32, p: *u8, v: int) -> i32
+
+    __futex_wait = (p: *int, v: int): __mac_ulock_wait(u32(5), p as *u8, v, u32(0))
+    __futex_wake = (p: *int): __mac_ulock_wake(u32(5 | 0x100), p as *u8, 0)
+
+    # as on Windows: a worker starts on a stack of the system's and moves to its own
+    @cabi
+    __mac_thread_start = (id: *u8) -> *u8:
+        top = __tstack_base + ((id as int) << __TSTACK_SHIFT) - 16
+        entry: cfn() = __mac_worker
+        __jump(entry as *u8, top)
+        null
+
+    @cabi
+    __mac_worker = (): __worker_main(__tid())
+else:
+    __futex_wait = (p: *int, v: int): syscall(202, p, 128, v, 0)      # FUTEX_WAIT_PRIVATE
+    __futex_wake = (p: *int): syscall(202, p, 129, 0x7FFFFFFF)        # FUTEX_WAKE_PRIVATE (all)
+
+# claim and run chunks of the current job until none are left
+__run_chunks = ():
+    c = __pool_ctl
+    loop true:
+        k = __atomic_add(c + __C_NEXT, 1)
+        if k >= c[__C_CHUNKS]: return
+        __run_chunk(k)
+        # (the last chunk wakes the caller, waiting for them all)
+        if __atomic_add(c + __C_DONE, 1) + 1 == c[__C_CHUNKS]: __futex_wake(c + __C_DONE)
+
+# (a function of its own, kept out of line: the reference to the job's function it takes is
+# dropped before the chunk is counted done, while refcounts are still atomic; after the last
+# one the caller drops its own, and two drops at once would lose one)
+@noinline
+__run_chunk = (k: int):
+    lo = k * __job_chunk
+    hi = lo + __job_chunk
+    if hi > __job_total: hi = __job_total
+    f = __job
+    f(lo, hi)
+
+@cabi
+__worker_main = (id: int):
+    c = __pool_ctl
+    seen = 0
+    loop true:
+        # wait for the next job: spin briefly (frames come quickly), then sleep
+        spins = 0
+        loop __atomic_add(c + __C_GEN, 0) == seen:
+            spins += 1
+            if spins > 20000: __futex_wait(c + __C_GEN, seen)
+        seen = __atomic_add(c + __C_GEN, 0)
+        __run_chunks()
+        __atomic_add(c + __C_ACK, 1)
+        __futex_wake(c + __C_ACK)
+
+__pool_start = ():
+    when TARGET != "wasm":
+        n = cpu_count() - 1
+        if let t = env("SLOPPY_THREADS"): n = (to_int(t) ?? (n + 1)) - 1      # SLOPPY_THREADS caps the threads used
+        if n > __MAX_THREADS: n = __MAX_THREADS
+        if n < 1: return
+        __pool_ctl = __alloc(64) as *int
+        loop i in [0..8): __pool_ctl[i] = 0
+        # one reserved region for all worker stacks (pages are only touched as needed)
+        size = __MAX_THREADS << __TSTACK_SHIFT
+        when TARGET == "windows":
+            # (what the workers call, looked up here first)
+            __futex_wake(__pool_ctl)
+            __futex_wait(__pool_ctl, 1)
+            base = VirtualAlloc(null, size, u32(0x2000), 4)               # MEM_RESERVE
+            if base == null: return
+            __tstack_base = base
+            start: cfn(int) -> int = __w32_thread_start
+            loop i in [0..n):
+                # (a worker's stack is committed whole: no guard pages to grow it)
+                if VirtualAlloc(base + (i << __TSTACK_SHIFT), 1 << __TSTACK_SHIFT, u32(0x1000), 4) == null: break
+                if CreateThread(null, 65536, start as *u8, (i + 1) as *u8, 0, null) == null: break
+                __pool_workers += 1
+        else when TARGET == "macos":
+            base = syscall(9, 0, size, 3, 0x22 | 0x4000, -1, 0)
+            if base < 0 and base > -4096: return
+            __tstack_base = base as *u8
+            start: cfn(*u8) -> *u8 = __mac_thread_start
+            th = [0]
+            loop i in [0..n):
+                if __mac_pthread_create(data(th) as *u8, null, start as *u8, (i + 1) as *u8) != 0: break
+                __pool_workers += 1
+        else:
+            base = syscall(9, 0, size, 3, 0x22 | 0x4000, -1, 0)       # MAP_PRIVATE|ANON|NORESERVE
+            if base < 0 and base > -4096: return
+            __tstack_base = base as *u8
+            entry: cfn(int) = __worker_main
+            loop i in [0..n):
+                top = __tstack_base + ((i + 1) << __TSTACK_SHIFT)
+                if __clone_thread(entry as *u8, i + 1, top) < 0: break
+                __pool_workers += 1
+
+# (set by library code around a parallel call whose work is too little to share: waking the
+# workers and waiting for them costs more than doing it here)
+__par_serial = false
+
+# run f(lo, hi) over 0..total split into chunks, on all threads; returns when everything is done
+@parallel
+__parallel_run = (total: int, f: (int, int) -> void):
+    if total <= 0: return
+    # (random() in a job: each thread its own generator, the main thread too, so the numbers
+    # outside parallel code are the same whether it ran on workers or here)
+    __rng_threads()
+    if __rng_in_job:
+        __parallel_run_job(total, f)
+        return
+    __rng_in_job = true
+    __parallel_run_job(total, f)
+    __rng_in_job = false
+
+@parallel
+__parallel_run_job = (total: int, f: (int, int) -> void):
+    when TARGET == "wasm":
+        f(0, total)
+    else:
+        if __pool_ctl == null and __tstack_base == null: __pool_start()
+        if __pool_workers == 0 or total == 1 or __mt_active or __par_serial:
+            f(0, total)                       # no workers (or nested): run here
+            return
+        c = __pool_ctl
+        threads = __pool_workers + 1
+        chunk = total / (threads * 4)
+        if chunk < 1: chunk = 1
+        __job = f
+        __job_total = total
+        __job_chunk = chunk
+        c[__C_CHUNKS] = (total + chunk - 1) / chunk
+        c[__C_DONE] = 0
+        c[__C_ACK] = 0
+        __out_flush()
+        __out_direct = true                 # (prints from the threads: written at once)
+        __mt_active = true
+        # (the chunks opened last, atomically, a barrier after everything above: a worker that
+        # wakes late and claims one sees this job's function and sizes, and __mt_active, so its
+        # refcounts are atomic and a parallel call inside runs in place. Swapped, not stored, so
+        # that a late claim on the closed count in between is not lost)
+        loop true:
+            o = __atomic_add(c + __C_NEXT, 0)
+            if __atomic_cas(c + __C_NEXT, o, 0) == o: break
+        __atomic_add(c + __C_GEN, 1)
+        __futex_wake(c + __C_GEN)
+        __run_chunks()
+        # wait until every chunk is done, not for every worker: one the system has not woken
+        # yet (on a busy machine) would hold each call up by milliseconds. A worker that wakes
+        # late finds no chunk to claim (the count is closed below until the next job is set up)
+        # or helps with the next one.
+        chunks = c[__C_CHUNKS]
+        spins = 0
+        loop true:
+            d = __atomic_add(c + __C_DONE, 0)
+            if d >= chunks: break
+            spins += 1
+            if spins > 2000: __futex_wait(c + __C_DONE, d)
+        __atomic_add(c + __C_NEXT, 1 << 40)
+        __mt_active = false
+        __out_direct = false
+        __job = __job_idle_c
+
+# [loop x in xs: f(x)], computed in parallel (f must not change globals or what it captured)
+@parallel
+parallel_map[T, U] = (xs: T[], f: (T) -> U) -> U[]:
+    out: U[]
+    n = xs.len()
+    if n == 0: return out
+    out.resize(n)
+    op = data(out)
+    ip = data(xs)
+    __parallel_run(n, (lo: int, hi: int):
+        loop i in [lo..hi): op[i] = f(ip[i])
+    )
+    out
+
+# xs[i] = f(xs[i]) for every element, in parallel
+@parallel
+parallel_update[T] = (xs: mut T[], f: (T) -> T):
+    n = xs.len()
+    if n == 0: return
+    xs.reserve(n)                      # make the storage unique before sharing it
+    p = data(xs)
+    __parallel_run(n, (lo: int, hi: int):
+        loop i in [lo..hi): p[i] = f(p[i])
+    )
+
+# [loop i in [0..n): f(i)], computed in parallel
+@parallel
+parallel_range[U] = (n: int, f: (int) -> U) -> U[]:
+    out: U[]
+    if n <= 0: return out
+    out.resize(n)
+    op = data(out)
+    __parallel_run(n, (lo: int, hi: int):
+        loop i in [lo..hi): op[i] = f(i)
+    )
+    out
+
+# ---------------- atomics ----------------
+# A whole number threads change together: parallel code may change it (and no other variable),
+# as a count of work done or a flag that tells the other threads to stop. Copies of an Atomic
+# are the same number.
+#   found = atomic(-1)
+#   parallel_range(n, (i: int) -> int:
+#       if found.get() >= 0: return 0          # another thread found it: skip the rest
+#       if is_answer(i): found.compare_swap(-1, i)
+#       0
+#   )
+struct Atomic:
+    __cell: int[]
+    __p: *int
+
+atomic = (v: int = 0) -> Atomic:
+    cell = fill(v, 1)
+    # (the pointer is taken while the array is this one's alone: copies share it from then on)
+    p = data(cell)
+    Atomic(cell, p)
+
+# its value now
+get = (a: Atomic) -> int:
+    when TARGET == "wasm": return a.__p[0]
+    else: return __atomic_add(a.__p, 0)
+
+# add v (negative: subtract) and give the value after
+add = (a: Atomic, v: int) -> int:
+    when TARGET == "wasm":
+        a.__p[0] += v
+        return a.__p[0]
+    else: return __atomic_add(a.__p, v) + v
+
+# set it to v
+set = (a: Atomic, v: int):
+    loop:
+        old = get(a)
+        if compare_swap(a, old, v): return
+
+# set it to v if it is `expected` (true), or leave it (false): one thread wins
+compare_swap = (a: Atomic, expected: int, v: int) -> bool:
+    when TARGET == "wasm":
+        if a.__p[0] != expected: return false
+        a.__p[0] = v
+        return true
+    else: return __atomic_cas(a.__p, expected, v) == expected
+
+# make it at least v (the largest of what the threads give)
+set_max = (a: Atomic, v: int):
+    loop:
+        old = get(a)
+        if old >= v or compare_swap(a, old, v): return

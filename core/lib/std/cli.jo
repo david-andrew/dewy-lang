@@ -1,0 +1,280 @@
+# A command line's options, read into a struct: its fields are the options, their defaults what
+# an option left out keeps.
+#
+#   struct Options:
+#       verbose = false         # a flag: --verbose (or -v)
+#       out = "report.txt"      # --out file.txt, --out=file.txt, -o file.txt
+#       jobs = 4                # --jobs 8 (a whole number)
+#       files: str[]            # the arguments that are not options (the last list field)
+#
+#   opts = parse_args[Options]("count lines in files")
+#
+# `--help` (or -h) prints what the options are and ends the program; a mistake (an option it
+# does not have, a word where a number goes) is said with the same help, and ends it with exit
+# code 2. A field `dry_run` is --dry-run; -x is the one field starting with x (when only one
+# does). A list field given as an option takes it each time (--tag a --tag b). Enums take a
+# variant's name (--mode slow), optionals a value or nothing. After `--` all are arguments.
+
+# the program's command line (after its name) read into a T, as above. about: one line on what
+# the program does, for --help
+parse_args[T] = (about: str = "") -> T:
+    a = args()
+    words: str[]
+    loop i in [1..a.len()): words.push(a[i])
+    name = "program"
+    if a.len() > 0: name = file_name(a[0])
+    loop w in words:
+        if w == "--": break
+        if w == "--help" or w == "-h":
+            print(args_help[T](name, about))
+            exit(0)
+    r = read_args[T](words)
+    if r is str:
+        eprint("{name}: {r}")
+        eprint(args_help[T](name, about))
+        exit(2)
+    r
+
+# words of a command line read into a T, or what is wrong with them (parse_args without its
+# --help, messages and exit: for tests, or a program's own handling)
+read_args[T] = (words: str[]) -> T | str:
+    x: T
+    __default_init(x)
+    fs = __arg_fields(to_text(x))
+    rest = -1
+    loop i in 0.. and f in fs:
+        if f.kind == 'l': rest = i
+    given: str[] = fill("", fs.len())
+    positional: str[]
+    only_args = false
+    i = 0
+    loop i < words.len():
+        w = words[i]
+        i += 1
+        if only_args or len(w) < 2 or w[0] != '-' or __arg_number(w):
+            positional.push(w)
+            continue
+        if w == "--":
+            only_args = true
+            continue
+        # --name, --name=value, -n, -n value, -nvalue
+        nm = ""
+        val: str? = none
+        if starts_with(w, "--"):
+            nm = w[2..]
+            eq = find(nm, "=")
+            if eq >= 0:
+                val = nm[eq + 1..]
+                nm = nm[..eq)
+        else:
+            nm = w[1..2)
+            if len(w) > 2: val = w[2..]
+        k = __arg_find(fs, nm, starts_with(w, "--"))
+        neg = false
+        if k < 0 and starts_with(nm, "no-") and val == none:
+            k = __arg_find(fs, nm[3..], true)
+            neg = k >= 0 and fs[k].kind == 'b'
+            if not neg: k = -1
+        if k < 0:
+            what = "--{nm}"
+            if not starts_with(w, "--"): what = "-{nm}"
+            return "there is no option {what} (the options: {__arg_list(fs)})"
+        f = fs[k]
+        opt = "--{__arg_dashed(f.name)}"
+        if f.kind == 'b':
+            v = "true"
+            if neg: v = "false"
+            if let s = val:
+                if s != "true" and s != "false":
+                    if starts_with(w, "--"): return "{opt} is on or off: it takes no value ('{s}')"
+                    # (-vq: two flags at once)
+                    loop j in [0..len(s)):
+                        k2 = __arg_find(fs, s[j..j + 1), false)
+                        if k2 < 0 or fs[k2].kind != 'b': return "{opt} takes no value ('{s}'), and -{s[j..j + 1)} is not a flag to give with it"
+                        given[k2] = "true"
+                    s = "true"
+                v = s
+            given[k] = v
+            continue
+        if val == none:
+            if i >= words.len(): return "{opt} needs a value after it ({__arg_what(f.kind)})"
+            val = words[i]
+            i += 1
+        s = val ?? ""
+        v = __arg_value(f, s)
+        if len(v) == 0: return "{opt} takes {__arg_what(f.kind)}, not '{s}'"
+        if f.kind == 'l':
+            if len(given[k]) > 0: given[k] = given[k] + ", "
+            given[k] = given[k] + v
+        else: given[k] = v
+    if positional.len() > 0:
+        if rest < 0:
+            return "this program takes no arguments, only options ('{positional[0]}' is not one: the options: {__arg_list(fs)})"
+        loop p in positional:
+            if len(given[rest]) > 0: given[rest] = given[rest] + ", "
+            given[rest] = given[rest] + to_text(p)
+    text = ""
+    loop k in [0..fs.len()):
+        if len(given[k]) == 0: continue
+        if len(text) > 0: text = text + ", "
+        v = given[k]
+        if fs[k].kind == 'l': v = "[{v}]"
+        text = text + "{fs[k].name}={v}"
+    head = to_text(x)
+    p = find(head, "(")
+    if p < 0: return "read_args: {head} is not a struct"
+    r = from_text[T](head[..p) + "(" + text + ")")
+    if r is TextError:
+        # (mode: expected a Mode (fast, slow) -> --mode takes fast|slow, not 'medium')
+        m = r.message
+        c = find(m, ":")
+        if c > 0 and find(m[..c), " ") < 0:
+            loop k in 0.. and f in fs:
+                if f.name == m[..c) and len(given[k]) > 0:
+                    return "--{__arg_dashed(f.name)} takes {__arg_short_what[T](f)}, not {given[k]}"
+            m = "--{__arg_dashed(m[..c))}{m[c..]}"
+        return m
+    r
+
+# what --help shows: the usage line, about, and each option with its default
+args_help[T] = (program: str, about: str = "") -> str:
+    x: T
+    __default_init(x)
+    fs = __arg_fields(to_text(x))
+    rest = ""
+    loop f in fs:
+        if f.kind == 'l': rest = f.name
+    out = "usage: {program} [options]"
+    if len(rest) > 0: out = out + " [{rest}...]"
+    if len(about) > 0: out = out + "\n" + about
+    out = out + "\n\noptions:"
+    rows: (str, str)[]
+    loop f in fs:
+        if f.name == rest: continue
+        left = "--{__arg_dashed(f.name)}"
+        sh = __arg_short(fs, f.name)
+        if len(sh) > 0: left = "-{sh}, {left}"
+        else: left = "    {left}"
+        right = ""
+        if f.kind != 'b':
+            left = left + " <{__arg_short_what[T](f)}>"
+            if f.default != "none" and f.default != "\"\"" and f.default != "[]": right = "(default: {f.default})"
+        rows.push((left, right))
+    rows.push(("-h, --help", "(this)"))
+    w = 0
+    loop r in rows: w = max(w, char_count(r.0))
+    loop r in rows:
+        line = "  " + pad_end(r.0, w)
+        if len(r.1) > 0: line = line + "   " + r.1
+        out = out + "\n" + trim_end(line)
+    out
+
+struct __ArgField:
+    name: str
+    kind: u8           # b: a flag, s: text, i: whole number, f: number, l: a list, e: other (an enum, optional...)
+    default: str
+
+# a struct's fields, from its text: Options(verbose=false, out="a.out", files=[])
+__arg_fields = (text: str) -> __ArgField[]:
+    out: __ArgField[]
+    i = find(text, "(")
+    if i < 0: return out
+    i += 1
+    n = len(text) - 1           # (before the last ")")
+    loop i < n:
+        e = i
+        loop e < n and text[e] != '=': e += 1
+        name = trim(text[i..e))
+        j = e + 1
+        depth = 0
+        loop j < n:
+            c = text[j]
+            if c == '"':
+                j += 1
+                loop j < n and text[j] != '"':
+                    if text[j] == '\\': j += 1
+                    j += 1
+            else if c == '(' or c == '[' or c == '{': depth += 1
+            else if c == ')' or c == ']' or c == '}': depth -= 1
+            else if c == ',' and depth == 0: break
+            j += 1
+        v = trim(text[e + 1..j))
+        kind: u8 = 'e'
+        if v == "true" or v == "false": kind = 'b'
+        else if len(v) > 0 and v[0] == '"': kind = 's'
+        else if len(v) > 0 and v[0] == '[': kind = 'l'
+        else if __arg_number(v):
+            kind = 'i'
+            if find(v, ".") >= 0 or find(v, "e") >= 0 or v == "inf" or v == "nan": kind = 'f'
+        out.push(__ArgField(name, kind, v))
+        i = j + 1
+    out
+
+__arg_number = (s: str) -> bool: to_float(s) != none and len(s) > 0 and (s[0] == '-' or s[0] == '.' or (s[0] >= '0' and s[0] <= '9'))
+
+# a value as the struct's text has it (a text in quotes, a number checked); "" when it is not one
+__arg_value = (f: __ArgField, s: str) -> str:
+    if f.kind == 's' or f.kind == 'l': return to_text(s)
+    if f.kind == 'i':
+        if to_int(s) == none: return ""
+        return s
+    if f.kind == 'f':
+        if to_float(s) == none: return ""
+        return s
+    # (an enum's variant, a number, none: as it is; else text, for an optional str)
+    if len(s) > 0 and (__arg_number(s) or __arg_ident(s[0])) and find(s, " ") < 0: return s
+    to_text(s)
+
+__arg_ident = (c: u8) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+
+__arg_what = (k: u8) -> str:
+    if k == 's': return "text"
+    if k == 'i': return "a whole number"
+    if k == 'f': return "a number"
+    if k == 'l': return "text, once for each"
+    "a value"
+
+# (for --help: an enum's variants, from what from_text says of a name it does not have)
+__arg_short_what[T] = (f: __ArgField) -> str:
+    if f.kind == 's': return "text"
+    if f.kind == 'i': return "whole number"
+    if f.kind == 'f': return "number"
+    if f.kind == 'e' and len(f.default) > 0 and __arg_ident(f.default[0]) and f.default != "none":
+        x: T
+        __default_init(x)
+        head = to_text(x)
+        r = from_text[T](head[..find(head, "(")) + "({f.name}=__no_such_variant__)")
+        if r is TextError:
+            a = find(r.message, "(")
+            if a >= 0 and ends_with(r.message, ")"): return replace(r.message[a + 1..len(r.message) - 1), ", ", "|")
+    "value"
+
+__arg_dashed = (name: str) -> str: replace(name, "_", "-")
+
+# the field an option names: --dry-run is dry_run; -d the one field that starts with d
+__arg_find = (fs: __ArgField[], nm: str, long: bool) -> int:
+    loop i in 0.. and f in fs:
+        if long and (f.name == nm or __arg_dashed(f.name) == nm): return i
+    if long: return -1
+    loop i in 0.. and f in fs:
+        if __arg_short(fs, f.name) == nm: return i
+    -1
+
+# a field's one-letter name: its first letter, when no other field starts with it (h is help's)
+__arg_short = (fs: __ArgField[], name: str) -> str:
+    if len(name) == 0 or name[0] == 'h' or name[0] == '_': return ""
+    c = name[..1)
+    loop f in fs:
+        if f.name != name and starts_with(f.name, c): return ""
+    c
+
+__arg_list = (fs: __ArgField[]) -> str:
+    out = ""
+    rest = -1
+    loop i in 0.. and f in fs:
+        if f.kind == 'l': rest = i
+    loop i in 0.. and f in fs:
+        if i == rest: continue
+        if len(out) > 0: out = out + ", "
+        out = out + "--" + __arg_dashed(f.name)
+    out

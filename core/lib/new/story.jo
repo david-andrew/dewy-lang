@@ -1,0 +1,110 @@
+# __TITLE__: a story told in lines and choices (a visual novel). The script below is the story:
+# write it as Ren'Py's (see `story` in the library reference); the code after it shows it.
+# Run it with `sloppy watch __NAME__.jo`; a longer story goes in a file of its own:
+# script = str_from_bytes(embed("story.txt")).
+
+build:
+    name = "__TITLE__"
+
+window("__TITLE__", 1280, 720)
+
+script = r"""
+character m "Mira" #f4a6c6
+character r "Ren" #8fc7ff
+
+label start:
+    scene square
+    "The bell rang twice across the empty square."
+    show mira at left
+    m "You came! I wasn't sure you would."
+    show ren at right
+    r "Neither was I. [i]Somebody[/i] said it would rain."
+    menu:
+        "\"I wouldn't miss it.\"":
+            $ mira += 1
+            m "Good. Then let's go [color=yellow]up the tower[/color]."
+        "\"I almost didn't.\"":
+            $ ren += 1
+            r "Honest. I like that."
+    scene tower
+    if mira > ren:
+        m "See? The whole town, all at once."
+    else:
+        r "Not bad, for a bell tower."
+    hide ren
+    "And the bell rang again."
+"""
+
+# what each scene and person looks like (put pictures here: load_texture(embed("cafe.png")))
+SCENES = {"square": rgb(0.32, 0.38, 0.5), "tower": rgb(0.55, 0.42, 0.36)}
+PEOPLE = {"mira": rgb(0.96, 0.65, 0.78), "ren": rgb(0.56, 0.78, 1.0)}
+
+st = story(script)
+if len(st.error) > 0: print(st.error)
+step = StoryStep(.end)
+background = rgb(0.1, 0.1, 0.14)
+shown: {str: str} = {}             # who is on screen, and where
+typed = 0.0                         # how many characters of the line are out so far
+SPEED = 45.0                        # characters a second
+
+# take the next step: commands are done at once; a line or a choice waits for the player
+advance = ():
+    loop true:
+        step = st.next()
+        typed = 0.0
+        if step.kind != .command: return
+        w = step.words
+        if w[0] == "scene" and w.len() > 1:
+            background = SCENES.get(w[1]) ?? rgb(0.2, 0.2, 0.25)
+            shown.clear()
+        else if w[0] == "show" and w.len() > 1:
+            at = "center"
+            if w.len() > 3 and w[w.len() - 2] == "at": at = w[w.len() - 1]
+            shown[w[1]] = at
+        else if w[0] == "hide" and w.len() > 1: shown.remove(w[1])
+
+# (where the player was last time: the story picks up there; at the start, the first time)
+st.load(load_value("place", st.save()))
+advance()
+
+on_quit = (): save_value("place", st.save())
+
+update = (dt: f64):
+    if key_pressed(.escape): quit()
+    if step.kind == .line:
+        typed += dt * SPEED
+        if key_pressed(.space) or key_pressed(.enter) or mouse_pressed(.left):
+            # (the first press shows all of the line; the next goes on)
+            if typed < f64(char_count(step.text)): typed = 1e9
+            else: advance()
+    else if step.kind == .choice:
+        loop i in [0..step.choices.len()):
+            if key_pressed(Key(int(Key.n1) + i)):
+                st.choose(i)
+                advance()
+
+draw = ():
+    clear(background)
+    loop who, at in shown:
+        x = 640.0
+        if at == "left": x = 300.0
+        else if at == "right": x = 980.0
+        circle(vec2(x, 330), 130, PEOPLE.get(who) ?? GRAY)
+        text_centered(who, vec2(x, 330), 32, rgba(0, 0, 0, 0.6))
+    if step.kind == .line:
+        hud_panel(Rect(60, 470, 1160, 220))
+        if len(step.speaker) > 0:
+            name_color = WHITE
+            if len(step.color) > 0: name_color = hex(step.color)
+            text(step.speaker, vec2(90, 486), 28, name_color)
+        text_rich(step.text, vec2(90, 530), 28, WHITE, width = 1100, chars = int(typed))
+    else if step.kind == .choice:
+        loop i in 0.. and c in step.choices:
+            if hud_button(Rect(340, 220 + f32(i) * 80, 600, 64), "{i + 1}. {c}"):
+                st.choose(i)
+                advance()
+    else:
+        text_centered("The end", vec2(640, 360), 48, WHITE)
+        if hud_button(Rect(540, 440, 200, 56), "Again"):
+            st = story(script)
+            advance()

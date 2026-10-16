@@ -1,0 +1,161 @@
+# __TITLE__: a small arcade game. Take the gold, keep away from the rocks: they come faster
+# and more often the longer you last.
+# Move with the arrows, W A S D or a gamepad's stick; Escape (or Start) pauses, as does leaving
+# the window.
+# Run it with `sloppy watch __NAME__.jo` and change it while it runs: each save reloads the code,
+# and the game goes on where it was.
+
+build:
+    name = "__TITLE__"
+
+# ---------------- tuning ----------------
+const SPEED = 420.0             # the player's top speed (the screen is 1280 x 720)
+const PLAYER_R = 16.0
+const GOLD_R = 12.0
+const ROCK_SPEED = 150.0        # the rocks at first ...
+const ROCK_SPEED_MAX = 420.0    # ... and at their fastest
+const ROCK_GAP = 1.0            # seconds between rocks at first ...
+const ROCK_GAP_MIN = 0.25       # ... and at the end
+
+window("__TITLE__", 1280, 720)
+
+struct Rock:
+    pos: vec2
+    vel: vec2
+    r: f64
+    angle = 0.0
+    spin = 0.0
+
+enum Screen: title, playing, paused, over
+
+screen = Screen.title
+player = vec2(640, 360)
+vel = vec2(0, 0)
+gold = vec2(900, 360)
+rocks: Rock[]
+sparks = Particles(gravity = vec2(0, 0), drag = 2.5)
+score = 0
+best = to_int(load_data("best") ?? "0") ?? 0
+run_time = 0.0
+rock_wait = 1.0
+shake = Shake()                 # (a screen shake: shake.add on a crash)
+t = 0.0
+
+snd_gold = sfx_coin()
+snd_crash = sfx_explosion()
+
+new_gold = ():
+    # somewhere on the screen, not too close to the player
+    loop:
+        gold = vec2(random(80.0, 1200.0), random(100.0, 660.0))
+        if length(gold - player) > 260.0: break
+
+start = ():
+    player = vec2(640, 360)
+    vel = vec2(0, 0)
+    rocks.clear()
+    score = 0
+    run_time = 0.0
+    rock_wait = 1.0
+    new_gold()
+    screen = .playing
+
+# a rock from beyond one edge of the screen, headed across it, near the player
+spawn_rock = ():
+    side = random_int(0, 4)
+    p = vec2(random(0.0, 1280.0), -60)
+    if side == 1: p = vec2(random(0.0, 1280.0), 780)
+    else if side == 2: p = vec2(-60, random(0.0, 720.0))
+    else if side == 3: p = vec2(1340, random(0.0, 720.0))
+    aim = player + vec2(random(-200.0, 200.0), random(-200.0, 200.0))
+    speed = min(ROCK_SPEED + run_time * 6.0, ROCK_SPEED_MAX) * random(0.8, 1.2)
+    rocks.push(Rock(pos = p, vel = normalize(aim - p) * speed, r = random(16.0, 42.0), spin = random(-2.0, 2.0)))
+
+crash = ():
+    sparks.emit(player, 60, 420, rgb(1.0, 0.5, 0.2), life = 1.2, size = 5)
+    play(snd_crash, 0.8)
+    shake.add(0.9)
+    if score > best:
+        best = score
+        save_data("best", "{best}")
+    screen = .over
+
+update = (dt: f64):
+    t += dt
+    shake.update(dt)
+    sparks.update(dt)
+    if screen != .playing: return
+    # (paused too when the window loses the focus: a click outside a web page's frame)
+    if key_pressed(.escape) or gamepad_pressed(.start) or not window_focused():
+        screen = .paused
+        return
+    run_time += dt
+    # the player: a little momentum, kept on the screen
+    vel = approach(vel, input_axis() * SPEED, 12.0, dt)
+    player = clamp(player + vel * dt, vec2(PLAYER_R, PLAYER_R), vec2(1280.0 - PLAYER_R, 720.0 - PLAYER_R))
+    # the gold
+    if circles_overlap(player, PLAYER_R, gold, GOLD_R):
+        score += 1
+        sparks.emit(gold, 24, 220, rgb(1.0, 0.85, 0.3), life = 0.6)
+        play(snd_gold, 0.5, pitch = 1.0 + 0.02 * min(score, 30))
+        new_gold()
+    # the rocks: a new one now and then, sooner as time goes on
+    rock_wait -= dt
+    if rock_wait <= 0.0:
+        spawn_rock()
+        rock_wait = max(ROCK_GAP - run_time * 0.01, ROCK_GAP_MIN)
+    loop mut r in rocks:
+        r.pos += r.vel * dt
+        r.angle += r.spin * dt
+    rocks = rocks.filter((r: Rock): r.pos.x > -100 and r.pos.x < 1380 and r.pos.y > -100 and r.pos.y < 820)
+    loop r in rocks:
+        if circles_overlap(player, PLAYER_R * 0.8, r.pos, r.r * 0.9):
+            crash()
+            return
+
+draw_rock = (r: Rock):
+    pts: vec2[]
+    loop i in [0..7):
+        a = r.angle + i / 7.0 * TAU
+        k = 0.8 + 0.2 * sin(i * 2.7 + r.r)        # (bumpy, the same each frame)
+        pts.push(r.pos + from_angle(a) * r.r * k)
+    polygon(pts, rgb(0.42, 0.38, 0.4))
+    polyline(pts, 3, rgb(0.62, 0.58, 0.6), closed = true)
+
+draw = ():
+    clear(rgb(0.06, 0.07, 0.11))
+    # the shake moves everything but the text on top
+    camera2d(vec2(640, 360) + shake.offset())
+    loop x in [0..33):
+        loop y in [0..19): circle(vec2(x * 40, y * 40), 1.5, rgba(1, 1, 1, 0.06))
+    if screen != .title:
+        pulse = 1.0 + 0.15 * sin(t * 6.0)
+        circle_gradient(gold, GOLD_R * 3.0 * pulse, rgba(1, 0.8, 0.2, 0.35), rgba(1, 0.6, 0.1, 0))
+        circle(gold, GOLD_R, rgb(1.0, 0.82, 0.25))
+        loop r in rocks: draw_rock(r)
+        if screen != .over:
+            circle_gradient(player, PLAYER_R * 2.5, rgba(0.3, 0.7, 1.0, 0.3), rgba(0.3, 0.7, 1.0, 0))
+            circle(player, PLAYER_R, rgb(0.55, 0.85, 1.0))
+    sparks.draw()
+    camera2d(vec2(640, 360))
+    if screen == .playing or screen == .paused: text("{score}", vec2(30, 20), 48)
+    text("best {best}", vec2(1110, 30), 24, rgba(1, 1, 1, 0.5))
+    if screen == .title:
+        text_centered("__TITLE__", vec2(640, 230), 96, rgb(1.0, 0.82, 0.25))
+        ui_begin("title", vec2(640, 360))
+        if ui_button("Play"): start()
+        if can_quit() and ui_button("Quit"): quit()           # (a web page has nothing to quit to)
+        ui_end()
+    else if screen == .paused:
+        text_centered("Paused", vec2(640, 260), 64)
+        ui_begin("pause", vec2(640, 340))
+        if ui_button("Resume") or ui_back(): screen = .playing
+        if ui_button("Quit to the title"): screen = .title
+        ui_end()
+    else if screen == .over:
+        text_centered("{score}", vec2(640, 230), 96, rgb(1.0, 0.82, 0.25))
+        if score == best and score > 0: text_centered("a new best", vec2(640, 300), 32)
+        ui_begin("over", vec2(640, 360))
+        if ui_button("Play again"): start()
+        if ui_button("Title"): screen = .title
+        ui_end()

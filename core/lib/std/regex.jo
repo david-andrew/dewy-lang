@@ -1,0 +1,591 @@
+# Regular expressions: patterns to find in text, test it against, take apart and replace in.
+#   date = regex(r"(\d{4})-(\d\d)-(\d\d)")
+#   if let m = "due 2026-10-14!".find(date): print(m.text, m.groups[0])   # 2026-10-14 2026
+#   "2026-10-14".matches(date)                       # true: all of the text matches
+#   "a1b22c333".find_all(regex(r"\d+")).map((m): m.text)   # ["1", "22", "333"]
+#   "x = 1, y = 2".replace(regex(r"(\w) = (\d)"), "$2=$1")  # "1=x, 2=y"
+#   "a, b;c".split(regex(r"[,;]\s*"))                       # ["a", "b", "c"]
+# Patterns: . (any character but a line break) [abc] [a-z] [^0-9] \d \w \s (and \D \W \S) ^ $
+# \b \B, x* x+ x? x{2} x{2,} x{2,5} (and lazy x*? x+? x?? x{2,5}?), a|b, (group) (?:group),
+# \ before any of .[]{}()*+?^$|\ for itself, \n \t \r; (?i) at the start ignores case (in ASCII).
+# \w takes letters of any script ("Zürich" is one word). A pattern a user typed is checked first
+# with regex_error(pattern) (regex(pattern) stops the program when it is wrong).
+# Matching takes time in proportion to the text's length times the pattern's (it never
+# backtracks without end), and works on characters (code points), not bytes.
+
+struct Regex:
+    pattern: str
+    prog: __ReIns[]
+    classes: __ReClass[]
+    groups: int             # how many ( ) groups it has
+    icase = false
+    first = -1              # (an ASCII character every match starts with, or -1: skipped to with memchr)
+    first_pc = -1           # (the instruction that reads every match's first character, or -1)
+
+# one match: where it is (byte offsets), its text, and the text of each ( ) group ("" for a
+# group that took no part)
+struct Match:
+    start: int
+    end: int
+    text: str
+    groups: str[]
+
+struct __ReIns:
+    op: int                 # (__RE_CHAR ...)
+    x = 0
+    y = 0
+
+struct __ReClass:
+    neg = false
+    ranges: int[]           # lo, hi, lo, hi ...
+
+const __RE_CHAR = 0
+const __RE_ANY = 1
+const __RE_CLASS = 2
+const __RE_SPLIT = 3        # x first, then y (x is preferred)
+const __RE_JMP = 4
+const __RE_SAVE = 5
+const __RE_MATCH = 6
+const __RE_BOL = 7
+const __RE_EOL = 8
+const __RE_WORDB = 9
+const __RE_NWORDB = 10
+
+# ---------------- using one ----------------
+
+# what is wrong with a pattern, or none when regex() can read it: for a pattern a user typed,
+# asked before regex(), which stops the program at one it cannot read
+#   if let why = regex_error(pat): fail("bad pattern: {why}")
+regex_error = (pattern: str) -> str?:
+    p = __ReParser(pattern, chars(pattern), soft = true)
+    p.nodes.push(__ReNode(0))         # (a node for what a failure gives back to point at)
+    if p.cs.len() >= 4 and p.cs[0] == '(' and p.cs[1] == '?' and p.cs[2] == 'i' and p.cs[3] == ')': p.i = 4
+    __re_alt(p)
+    if len(p.err) == 0 and p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
+    if len(p.err) == 0: return none
+    p.err
+
+# a pattern made ready to match (a pattern it cannot read panics, saying where: regex_error
+# asks first)
+regex = (pattern: str) -> Regex:
+    p = __ReParser(pattern, chars(pattern))
+    r = Regex(pattern, [], [], 0)
+    if p.cs.len() >= 4 and p.cs[0] == '(' and p.cs[1] == '?' and p.cs[2] == 'i' and p.cs[3] == ')':
+        r.icase = true
+        p.i = 4
+    ast = __re_alt(p)
+    if p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
+    r.groups = p.groups
+    r.classes = p.classes
+    # (where the whole match starts and ends is kept with each thread, not in its captures)
+    prog: __ReIns[]
+    __re_emit(p, ast, prog)
+    prog.push(__ReIns(__RE_MATCH))
+    r.prog = prog
+    # (the first character read, when it is always the same one)
+    pc = 0
+    loop pc < prog.len():
+        op = prog[pc].op
+        if op == __RE_SAVE or op == __RE_BOL or op == __RE_EOL or op == __RE_WORDB or op == __RE_NWORDB: pc += 1
+        else if op == __RE_JMP: pc = prog[pc].x
+        else:
+            if op == __RE_CHAR and prog[pc].x < 128 and not (r.icase and is_alpha(u8(prog[pc].x))): r.first = prog[pc].x
+            if op == __RE_CHAR or op == __RE_CLASS or op == __RE_ANY: r.first_pc = pc
+            break
+    r
+
+# the first match in s (from byte offset `from` on), or none
+find = (s: str, r: Regex, from: int = 0) -> Match?:
+    vm = __re_vm(r)
+    caps = __re_run(r, s, from, false, false, vm)
+    if caps.len() == 0: return none
+    __re_match(s, r, caps)
+
+# every match in s, from left to right, not overlapping
+find_all = (s: str, r: Regex) -> Match[]:
+    out: Match[]
+    at = 0
+    vm = __re_vm(r)
+    loop at <= len(s):
+        caps = __re_run(r, s, at, false, false, vm)
+        if caps.len() == 0: break
+        out.push(__re_match(s, r, caps))
+        # (an empty match: go on from the next character)
+        if caps[1] == caps[0]: at = caps[1] + max(__re_cp_len(s, caps[1]), 1)
+        else: at = caps[1]
+    out
+
+# the whole of s matches r (not only a part of it)
+matches = (s: str, r: Regex) -> bool:
+    vm = __re_vm(r)
+    __re_run(r, s, 0, true, true, vm).len() > 0
+
+# r matches somewhere in s
+contains = (s: str, r: Regex) -> bool:
+    vm = __re_vm(r)
+    __re_run(r, s, 0, false, false, vm).len() > 0
+
+# s with each match of r replaced by `with`, where $0 is the match and $1, $2 ... its groups
+# ($$ for a $)
+replace = (s: str, r: Regex, with: str) -> str:
+    out = ""
+    last = 0
+    loop m in find_all(s, r):
+        out += s[last..m.start)
+        out += __re_expand(with, m)
+        last = m.end
+    out + s[last..]
+
+# s with each match of r replaced by what f makes of it
+replace = (s: str, r: Regex, f: (Match) -> str) -> str:
+    out = ""
+    last = 0
+    loop m in find_all(s, r):
+        out += s[last..m.start)
+        out += f(m)
+        last = m.end
+    out + s[last..]
+
+# the parts of s between the matches of r
+split = (s: str, r: Regex) -> str[]:
+    out: str[]
+    last = 0
+    loop m in find_all(s, r):
+        if m.end == m.start and (m.start == 0 or m.start == len(s)): continue
+        out.push(s[last..m.start))
+        last = m.end
+    out.push(s[last..])
+    out
+
+__re_match = (s: str, r: Regex, caps: int[]) -> Match:
+    gs: str[]
+    loop g in [1..r.groups]:
+        a = caps[g * 2]
+        b = caps[g * 2 + 1]
+        if a >= 0 and b >= a: gs.push(s[a..b))
+        else: gs.push("")
+    Match(caps[0], caps[1], s[caps[0]..caps[1]), gs)
+
+__re_expand = (with: str, m: Match) -> str:
+    out = ""
+    i = 0
+    n = len(with)
+    loop i < n:
+        c = with[i]
+        if c == '$' and i + 1 < n and with[i + 1] == '$':
+            out += "$"
+            i += 2
+        else if c == '$' and i + 1 < n and is_digit(with[i + 1]):
+            k = int(with[i + 1]) - 48
+            i += 2
+            if k == 0: out += m.text
+            else if k <= m.groups.len(): out += m.groups[k - 1]
+        else:
+            out += with[i..i + 1)
+            i += 1
+    out
+
+# ---------------- matching: a Pike VM (every thread of the program in step, one character at a time) ----------------
+
+# the capture positions of the first match (leftmost, preferring what the pattern prefers) at or
+# after byte `from`; empty: none. anchored: only at `from`; whole: only one that ends at the end
+# (the threads at this position and at the next: lists [k] for k = cur and 1 - cur; on[pc] is the
+# generation in which pc was reached, a new one for each list filled)
+struct __ReVM:
+    on: int[]
+    gen = 0
+    gens: int[]                 # (each list's generation)
+    pcs: int[][]                # (the threads, in the order the pattern prefers them)
+    starts: int[][]             # (where each one's match started)
+    caps: int[][][]             # (its groups' starts and ends; slots 0 and 1 unused)
+    empty: int[]
+
+__re_vm = (r: Regex) -> __ReVM:
+    __ReVM(fill(0, r.prog.len()), 0, [1, 2], [[], []], [[], []], [[], []], fill(-1, 2 * (r.groups + 1)))
+
+__re_run = (r: Regex, s: str, from: int, anchored: bool, whole: bool, vm: mut __ReVM) -> int[]:
+    found: int[]                # (the best match's captures so far, and where it starts and ends)
+    found_at = -1
+    found_end = -1
+    pos = from
+    n = len(s)
+    cur = 0
+    __re_clear(vm, 0)
+    __re_clear(vm, 1)
+    loop true:
+        if found_at < 0 and (not anchored or pos == from):
+            # (nothing running: on to where the first character is)
+            if vm.pcs[cur].len() == 0 and not anchored:
+                if r.first >= 0:
+                    pos = __memchr(data(s), pos, n, u8(r.first))
+                    if pos < 0: break
+                else if r.first_pc >= 0:
+                    # (past the characters no match can start with)
+                    fi = r.prog[r.first_pc]
+                    loop pos < n:
+                        fc = int(s[pos])
+                        if fc >= 0x80 or __re_step(r, fi, fc): break
+                        pos += 1
+                    if pos >= n: break
+            __re_add(r, s, vm, cur, 0, pos, pos, vm.empty)
+        # (none left: done, unless a match may still start further on)
+        if vm.pcs[cur].len() == 0 and (found_at >= 0 or anchored): break
+        c = -1
+        clen = 0
+        if pos < n:
+            c, clen = __re_cp(s, pos)
+        nx = 1 - cur
+        i = 0
+        loop i < vm.pcs[cur].len():
+            pc = vm.pcs[cur][i]
+            ins = r.prog[pc]
+            if ins.op == __RE_MATCH:
+                if not whole or pos == n:
+                    found = vm.caps[cur][i]
+                    found_at = vm.starts[cur][i]
+                    found_end = pos
+                    # (the rest are threads the pattern likes less)
+                    break
+            else if c >= 0 and __re_step(r, ins, c): __re_add(r, s, vm, nx, pc + 1, pos + clen, vm.starts[cur][i], vm.caps[cur][i])
+            i += 1
+        if pos >= n: break
+        pos += clen
+        __re_clear(vm, cur)
+        cur = nx
+    if found_at < 0: return []
+    found[0] = found_at
+    found[1] = found_end
+    found
+
+# list k emptied, for a new position
+__re_clear = (vm: mut __ReVM, k: int):
+    vm.pcs[k].clear()
+    vm.starts[k].clear()
+    vm.caps[k].clear()
+    vm.gen += 1
+    vm.gens[k] = vm.gen
+
+__re_step = (r: Regex, ins: __ReIns, c: int) -> bool:
+    if ins.op == __RE_CHAR:
+        if c == ins.x: return true
+        return r.icase and __re_fold(c) == __re_fold(ins.x)
+    if ins.op == __RE_ANY: return c != 10
+    if ins.op == __RE_CLASS:
+        k = r.classes[ins.x]
+        hit = __re_in(k, c)
+        if not hit and r.icase: hit = __re_in(k, __re_fold(c)) or __re_in(k, __re_upper(c))
+        return hit != k.neg
+    false
+
+__re_in = (k: __ReClass, c: int) -> bool:
+    i = 0
+    loop i < k.ranges.len():
+        if c >= k.ranges[i] and c <= k.ranges[i + 1]: return true
+        i += 2
+    false
+
+__re_fold = (c: int) -> int:
+    if c >= 'A' and c <= 'Z': return c + 32
+    c
+__re_upper = (c: int) -> int:
+    if c >= 'a' and c <= 'z': return c - 32
+    c
+
+# a thread at pc, following jumps, splits, saves and assertions to the instructions that read a
+# character (or match), into list k
+__re_add = (r: Regex, s: str, vm: mut __ReVM, k: int, pc: int, pos: int, start: int, caps: int[]):
+    if vm.on[pc] == vm.gens[k]: return
+    vm.on[pc] = vm.gens[k]
+    ins = r.prog[pc]
+    op = ins.op
+    if op == __RE_JMP:
+        __re_add(r, s, vm, k, ins.x, pos, start, caps)
+        return
+    if op == __RE_SPLIT:
+        __re_add(r, s, vm, k, ins.x, pos, start, caps)
+        __re_add(r, s, vm, k, ins.y, pos, start, caps)
+        return
+    if op == __RE_SAVE:
+        c2 = caps
+        c2[ins.x] = pos
+        __re_add(r, s, vm, k, pc + 1, pos, start, c2)
+        return
+    if op == __RE_BOL:
+        if pos == 0 or s[pos - 1] == '\n': __re_add(r, s, vm, k, pc + 1, pos, start, caps)
+        return
+    if op == __RE_EOL:
+        if pos == len(s) or s[pos] == '\n': __re_add(r, s, vm, k, pc + 1, pos, start, caps)
+        return
+    if op == __RE_WORDB or op == __RE_NWORDB:
+        a = pos > 0 and __re_word(int(s[pos - 1]))
+        b = pos < len(s) and __re_word(int(s[pos]))
+        if (a != b) == (op == __RE_WORDB): __re_add(r, s, vm, k, pc + 1, pos, start, caps)
+        return
+    vm.pcs[k].push(pc)
+    vm.starts[k].push(start)
+    vm.caps[k].push(caps)
+
+# (a byte of a word, for \b: every byte of a character past ASCII counts, as \w takes letters
+# of other scripts)
+__re_word = (c: int) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c >= 128
+
+# the code point at byte i, and how many bytes it takes
+__re_cp = (s: str, i: int) -> (int, int):
+    c = int(s[i])
+    n = len(s)
+    if c < 0x80: return (c, 1)
+    if c < 0xE0 and i + 1 < n: return (((c & 0x1F) << 6) | (int(s[i + 1]) & 0x3F), 2)
+    if c < 0xF0 and i + 2 < n: return (((c & 0x0F) << 12) | ((int(s[i + 1]) & 0x3F) << 6) | (int(s[i + 2]) & 0x3F), 3)
+    if i + 3 < n: return (((c & 0x07) << 18) | ((int(s[i + 1]) & 0x3F) << 12) | ((int(s[i + 2]) & 0x3F) << 6) | (int(s[i + 3]) & 0x3F), 4)
+    (0xFFFD, 1)
+
+__re_cp_len = (s: str, i: int) -> int:
+    if i >= len(s): return 1
+    c, k = __re_cp(s, i)
+    k
+
+# ---------------- reading a pattern ----------------
+struct __ReParser:
+    src: str
+    cs: int[]
+    i = 0
+    soft = false        # (regex_error: a failure is kept in err, not a panic)
+    err = ""
+    groups = 0
+    nodes: __ReNode[]
+    classes: __ReClass[]
+
+# kinds: 0 char (c), 1 any, 2 class (c), 3 concat (kids), 4 alt (kids), 5 repeat (kids[0], lo, hi
+# (-1: no limit), greedy), 6 group (kids[0], c: its number, 0: not captured), 7 assertion (c: op)
+struct __ReNode:
+    kind: int
+    c = 0
+    kids: int[]
+    lo = 0
+    hi = 0
+    greedy = true
+
+__re_fail = (p: mut __ReParser, why: str):
+    if p.soft:
+        # (the first failure is what is wrong; the rest of the pattern is skipped)
+        if len(p.err) == 0: p.err = "{why} (at character {p.i + 1})"
+        p.i = p.cs.len()
+        return
+    panic("regex \"{p.src}\": {why} (at character {p.i + 1})")
+
+__re_new = (p: mut __ReParser, nd: __ReNode) -> int:
+    p.nodes.push(nd)
+    p.nodes.len() - 1
+
+__re_alt = (p: mut __ReParser) -> int:
+    kids = [__re_concat(p)]
+    loop p.i < p.cs.len() and p.cs[p.i] == '|':
+        p.i += 1
+        kids.push(__re_concat(p))
+    if kids.len() == 1: return kids[0]
+    __re_new(p, __ReNode(4, kids = kids))
+
+__re_concat = (p: mut __ReParser) -> int:
+    kids: int[]
+    loop p.i < p.cs.len() and p.cs[p.i] != '|' and p.cs[p.i] != ')': kids.push(__re_repeat(p))
+    __re_new(p, __ReNode(3, kids = kids))
+
+__re_repeat = (p: mut __ReParser) -> int:
+    at = p.i
+    a = __re_atom(p)
+    loop p.i < p.cs.len():
+        c = p.cs[p.i]
+        lo = 0
+        hi = -1
+        if c == '*': p.i += 1
+        else if c == '+':
+            lo = 1
+            p.i += 1
+        else if c == '?':
+            hi = 1
+            p.i += 1
+        else if c == '{{' and p.i + 1 < p.cs.len() and __re_digit(p.cs[p.i + 1]):
+            p.i += 1
+            lo = __re_num(p)
+            hi = lo
+            if p.i < p.cs.len() and p.cs[p.i] == ',':
+                p.i += 1
+                hi = -1
+                if p.i < p.cs.len() and __re_digit(p.cs[p.i]): hi = __re_num(p)
+            if p.i >= p.cs.len() or p.cs[p.i] != '}}': __re_fail(p, "a {{ repeat needs its }}")
+            p.i += 1
+            if hi >= 0 and hi < lo: __re_fail(p, "{{m,n}} with n below m")
+            if lo > 1000 or hi > 1000: __re_fail(p, "a repeat over 1000")
+        else: break
+        if p.nodes[a].kind == 7: __re_fail(p, "nothing to repeat")
+        greedy = true
+        if p.i < p.cs.len() and p.cs[p.i] == '?':
+            greedy = false
+            p.i += 1
+        a = __re_new(p, __ReNode(5, kids = [a], lo = lo, hi = hi, greedy = greedy))
+    if p.i == at: __re_fail(p, "nothing to repeat")
+    a
+
+__re_digit = (c: int) -> bool: c >= '0' and c <= '9'
+
+__re_num = (p: mut __ReParser) -> int:
+    v = 0
+    loop p.i < p.cs.len() and __re_digit(p.cs[p.i]):
+        v = v * 10 + p.cs[p.i] - 48
+        p.i += 1
+    v
+
+__re_atom = (p: mut __ReParser) -> int:
+    if p.i >= p.cs.len(): return 0
+    c = p.cs[p.i]
+    if c == '*' or c == '+' or c == '?':
+        __re_fail(p, "nothing to repeat")
+        return 0
+    p.i += 1
+    if c == '.': return __re_new(p, __ReNode(1))
+    if c == '^': return __re_new(p, __ReNode(7, c = __RE_BOL))
+    if c == '$': return __re_new(p, __ReNode(7, c = __RE_EOL))
+    if c == '(':
+        num = 0
+        if p.i + 1 < p.cs.len() and p.cs[p.i] == '?' and p.cs[p.i + 1] == ':': p.i += 2
+        else if p.i < p.cs.len() and p.cs[p.i] == '?': __re_fail(p, "(? is only (?: (a group not kept) or (?i) at the start")
+        else:
+            p.groups += 1
+            num = p.groups
+        inner = __re_alt(p)
+        if p.i >= p.cs.len() or p.cs[p.i] != ')': __re_fail(p, "a ( without its )")
+        p.i += 1
+        return __re_new(p, __ReNode(6, c = num, kids = [inner]))
+    if c == '[': return __re_class(p)
+    if c == '\\':
+        if p.i >= p.cs.len():
+            __re_fail(p, "a \\ at the end")
+            return 0
+        e = p.cs[p.i]
+        p.i += 1
+        if e == 'b': return __re_new(p, __ReNode(7, c = __RE_WORDB))
+        if e == 'B': return __re_new(p, __ReNode(7, c = __RE_NWORDB))
+        k = __ReClass()
+        if __re_class_escape(e, k):
+            p.classes.push(k)
+            return __re_new(p, __ReNode(2, c = p.classes.len() - 1))
+        return __re_new(p, __ReNode(0, c = __re_escape_char(e)))
+    __re_new(p, __ReNode(0, c = c))
+
+# \d \w \s \D \W \S into k (false: e is not one of them)
+__re_class_escape = (e: int, k: mut __ReClass) -> bool:
+    lower = __re_fold(e)
+    if lower == 'd': k.ranges = ['0', '9']
+    # (\w: letters of other scripts too, as Python's: accented Latin, Greek, Cyrillic, kana,
+    # Chinese and Korean)
+    else if lower == 'w': k.ranges = ['a', 'z', 'A', 'Z', '0', '9', '_', '_', 0xC0, 0xD6, 0xD8, 0xF6, 0xF8, 0x2AF, 0x370, 0x3FF, 0x400, 0x52F, 0x3040, 0x30FF, 0x4E00, 0x9FFF, 0xAC00, 0xD7AF]
+    else if lower == 's': k.ranges = [' ', ' ', 9, 13]
+    else: return false
+    k.neg = e != lower
+    true
+
+__re_escape_char = (e: int) -> int:
+    if e == 'n': return 10
+    if e == 't': return 9
+    if e == 'r': return 13
+    if e == '0': return 0
+    e
+
+__re_class = (p: mut __ReParser) -> int:
+    k = __ReClass()
+    if p.i < p.cs.len() and p.cs[p.i] == '^':
+        k.neg = true
+        p.i += 1
+    first = true
+    loop true:
+        if p.i >= p.cs.len():
+            __re_fail(p, "a [ without its ]")
+            return 0
+        c = p.cs[p.i]
+        if c == ']' and not first:
+            p.i += 1
+            break
+        first = false
+        p.i += 1
+        lo = c
+        if c == '\\':
+            if p.i >= p.cs.len():
+                __re_fail(p, "a \\ at the end")
+                return 0
+            e = p.cs[p.i]
+            p.i += 1
+            sub = __ReClass()
+            if __re_class_escape(e, sub):
+                if sub.neg: __re_fail(p, "\\D, \\W and \\S are not taken inside [ ]: use [^...]")
+                loop x in sub.ranges: k.ranges.push(x)
+                continue
+            lo = __re_escape_char(e)
+        hi = lo
+        if p.i + 1 < p.cs.len() and p.cs[p.i] == '-' and p.cs[p.i + 1] != ']':
+            p.i += 1
+            hi = p.cs[p.i]
+            p.i += 1
+            if hi == '\\' and p.i < p.cs.len():
+                hi = __re_escape_char(p.cs[p.i])
+                p.i += 1
+            if hi < lo: __re_fail(p, "a range from a higher character to a lower one")
+        k.ranges.push(lo)
+        k.ranges.push(hi)
+    p.classes.push(k)
+    __re_new(p, __ReNode(2, c = p.classes.len() - 1))
+
+# ---------------- the program ----------------
+__re_emit = (p: __ReParser, n: int, prog: mut __ReIns[]):
+    nd = p.nodes[n]
+    k = nd.kind
+    if k == 0: prog.push(__ReIns(__RE_CHAR, nd.c))
+    else if k == 1: prog.push(__ReIns(__RE_ANY))
+    else if k == 2: prog.push(__ReIns(__RE_CLASS, nd.c))
+    else if k == 7: prog.push(__ReIns(nd.c))
+    else if k == 3:
+        loop kid in nd.kids: __re_emit(p, kid, prog)
+    else if k == 6:
+        if nd.c > 0: prog.push(__ReIns(__RE_SAVE, nd.c * 2))
+        __re_emit(p, nd.kids[0], prog)
+        if nd.c > 0: prog.push(__ReIns(__RE_SAVE, nd.c * 2 + 1))
+    else if k == 4:
+        # split L1, next; L1: a; jmp end; next: split L2, ... last: z; end:
+        jumps: int[]
+        loop i in 0.. and kid in nd.kids:
+            if i < nd.kids.len() - 1:
+                sp = prog.len()
+                prog.push(__ReIns(__RE_SPLIT, sp + 1, 0))
+                __re_emit(p, kid, prog)
+                jumps.push(prog.len())
+                prog.push(__ReIns(__RE_JMP))
+                prog[sp].y = prog.len()
+            else: __re_emit(p, kid, prog)
+        loop j in jumps: prog[j].x = prog.len()
+    else if k == 5:
+        sub = nd.kids[0]
+        loop _ in [0..nd.lo): __re_emit(p, sub, prog)
+        if nd.hi < 0:
+            # L: split body, end; body; jmp L
+            l = prog.len()
+            prog.push(__ReIns(__RE_SPLIT))
+            __re_emit(p, sub, prog)
+            prog.push(__ReIns(__RE_JMP, l))
+            __re_order(prog, l, l + 1, prog.len(), nd.greedy)
+        else:
+            # up to hi - lo more, each optional
+            ends: int[]
+            loop _ in [nd.lo..nd.hi):
+                l = prog.len()
+                prog.push(__ReIns(__RE_SPLIT))
+                ends.push(l)
+                __re_emit(p, sub, prog)
+            loop l in ends: __re_order(prog, l, l + 1, prog.len(), nd.greedy)
+
+# the split at l: to `more` first when greedy, to `done` first when lazy
+__re_order = (prog: mut __ReIns[], l: int, more: int, done: int, greedy: bool):
+    if greedy:
+        prog[l].x = more
+        prog[l].y = done
+    else:
+        prog[l].x = done
+        prog[l].y = more

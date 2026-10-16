@@ -1,0 +1,7 @@
+# requires: sloppy
+# combined loops unpack tuples into several names
+items = [("drone", 10.0), ("probe", 25.5)]
+loop i in 0.. and name, cost in items: print(i, name, cost)
+loop i in [1..9] and n, c in items and z in [7, 8]: print(i, n, c, z)
+trip = [(1, 2, 3)]
+loop k in 0.. and a, b, c in trip: print(k, a + b + c)

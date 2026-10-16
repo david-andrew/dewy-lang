@@ -1,0 +1,523 @@
+# Menus: a column of buttons, sliders, switches and choices, worked with the keyboard, a gamepad or the
+# mouse. Immediate mode: describe the menu every frame (in draw), and each item says what was
+# done to it then.
+#
+#   draw = ():
+#       ...
+#       ui_begin("title", vec2(640, 320))
+#       if ui_button("Play"): start()
+#       music = ui_slider("Music", music)
+#       fullscreen = ui_switch("Fullscreen", fullscreen)
+#       level = ui_choice("Level", ["forest", "cave", "tower"], level)
+#       if ui_button("Quit"): quit()
+#       ui_end()
+#
+# Up/down (arrows, W/S, d-pad, left stick) move between items, enter/space/A or a click choose,
+# left/right change sliders, switches and choices; ui_back() is true when escape or B was pressed.
+# A menu ignores input in the frame it opens (the key that opened it is still pressed then);
+# ui_ready() says whether that frame is over, for a game's own keys in a menu.
+
+# how the ui_ menus look: set ui_style's fields (ui_style.size = 28.0, ui_style.focus_color =
+# rgb(0.4, 0.8, 1)), for every menu drawn after
+struct UiStyle:
+    size: f64 = 34.0                        # text size of the items
+    spacing: f64 = 58.0                     # from one item to the next
+    width: f64 = 440.0                      # of a slider or switch row
+    color: vec4 = vec4(1, 1, 1, 0.72)
+    focus_color: vec4 = vec4(1, 0.9, 0.55, 1)
+    disabled_color: vec4 = vec4(1, 1, 1, 0.28)
+    bar_color: vec4 = vec4(1, 1, 1, 0.2)
+
+ui_style = UiStyle()
+
+__ui_menu = ""
+__ui_open_frame = -1            # the frame the menu opened in
+__ui_drawn_frame = -10          # the last frame a menu was drawn in
+__ui_focus = 0
+__ui_count = 0                  # items so far in this frame's menu
+__ui_last_count = 0             # in the last frame's
+__ui_pos = vec2(0, 0)
+__ui_frame = -1
+__ui_stick_y = 0.0
+__ui_stick_x = 0.0
+__ui_mouse_last = vec2(-1, -1)
+__ui_mouse_moved = false
+__ui_nav = 0                    # -1 up, 1 down: this frame
+__ui_side = 0                   # -1 left, 1 right
+__ui_ok = false
+__ui_typing = -1                # the text field that had the focus last frame (its letters are text)
+__ui_open = false               # between ui_begin and ui_end
+__ui_unended = 0                # menus begun in a row without ui_end
+# (each menu's own: several may be drawn in a frame)
+struct __UiMenu:
+    focus = 0
+    open_frame = -1
+    drawn_frame = -10
+    last_count = 0
+__ui_menus: {str: __UiMenu}
+__ui_in_frame = -1              # (this frame's input, read once for all its menus)
+__ui_in_nav = 0
+__ui_in_side = 0
+__ui_in_ok = false
+
+# start a menu: items go in a column centered on x, from y down. A menu starts with its first
+# item chosen; shown again (back from its Settings), with the item it was left on.
+ui_begin = (name: str, top_center: vec2):
+    f = frame_number()
+    # (a menu without its ui_end, frame after frame: one skipped by an early return is fine)
+    if __ui_open:
+        __ui_unended += 1
+        if __ui_unended >= 3: panic("the menu '{__ui_menu}' needs `ui_end()` after its items (before the next ui_begin)")
+    else: __ui_unended = 0
+    __ui_open = true
+    # (this menu's own state; shown again after frames without it, it opens now, on the item it
+    # was left on)
+    st = __ui_menus.get(name) ?? __UiMenu()
+    if st.drawn_frame < f - 1:
+        st.open_frame = f
+        st.last_count = 0
+    st.drawn_frame = f
+    __ui_menus[name] = st
+    __ui_menu = name
+    __ui_focus = st.focus
+    __ui_last_count = st.last_count
+    __ui_open_frame = st.open_frame
+    __ui_drawn_frame = f
+    __ui_pos = top_center
+    __ui_count = 0
+    # (what the player did this frame, read once for every menu drawn in it)
+    if __ui_in_frame != f:
+        __ui_in_frame = f
+        m = mouse_pos()
+        # (where the pointer happens to be when the menu first shows is not a move onto an item)
+        __ui_mouse_moved = m != __ui_mouse_last and __ui_mouse_last != vec2(-1, -1)
+        __ui_mouse_last = m
+        sy = gamepad_axis(1)
+        sx = gamepad_axis(0)
+        # (letters and space are typed into a text field that has the focus, not menu keys)
+        letters = __ui_typing != __ui_focus
+        __ui_typing = -1
+        __ui_in_nav = 0
+        if key_typed(.up) or (letters and key_typed(.w)) or gamepad_pressed(.up) or (sy < -0.6 and __ui_stick_y >= -0.6): __ui_in_nav = -1
+        if key_typed(.down) or (letters and key_typed(.s)) or gamepad_pressed(.down) or (sy > 0.6 and __ui_stick_y <= 0.6): __ui_in_nav = 1
+        __ui_in_side = 0
+        if key_typed(.left) or (letters and key_typed(.a)) or gamepad_pressed(.left) or (sx < -0.6 and __ui_stick_x >= -0.6): __ui_in_side = -1
+        if key_typed(.right) or (letters and key_typed(.d)) or gamepad_pressed(.right) or (sx > 0.6 and __ui_stick_x <= 0.6): __ui_in_side = 1
+        __ui_stick_y = sy
+        __ui_stick_x = sx
+        __ui_in_ok = key_pressed(.enter) or (letters and key_pressed(.space)) or gamepad_pressed(.a)
+    __ui_nav = __ui_in_nav
+    __ui_side = __ui_in_side
+    __ui_ok = __ui_in_ok
+    # (nor while ui_controls waits for a new key: controls.jo)
+    if not ui_ready() or rebinding():
+        __ui_nav = 0
+        __ui_side = 0
+        __ui_ok = false
+    if __ui_last_count > 0 and __ui_nav != 0:
+        __ui_focus = (__ui_focus + __ui_nav + __ui_last_count) % __ui_last_count
+
+ui_end = ():
+    __ui_open = false
+    __ui_last_count = __ui_count
+    if __ui_focus >= __ui_count and __ui_count > 0: __ui_focus = __ui_count - 1
+    st = __ui_menus.get(__ui_menu) ?? __UiMenu()
+    st.focus = __ui_focus
+    st.last_count = __ui_count
+    __ui_menus[__ui_menu] = st
+
+# escape or the B button: go back (close the menu)
+ui_back = () -> bool: ui_ready() and not rebinding() and (key_pressed(.escape) or gamepad_pressed(.b))
+
+# false in the frame the menu opened in: input then belongs to whatever opened it
+ui_ready = () -> bool: frame_number() != __ui_open_frame
+
+# (the next item: its row, whether it has the focus, whether the mouse is on it)
+__ui_item = (w: f64) -> (int, vec2, bool):
+    i = __ui_count
+    __ui_count += 1
+    c = __ui_pos + vec2(0, f32(f64(i) * ui_style.spacing))
+    m = mouse_pos()
+    over = abs(f64(m.x - c.x)) < w / 2.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0
+    # (the mouse takes the focus when it moves onto an item)
+    if over and __ui_mouse_moved: __ui_focus = i
+    (i, c, __ui_focus == i)
+
+__ui_label = (s: str, c: vec2, focused: bool, enabled: bool):
+    col = ui_style.color
+    if focused: col = ui_style.focus_color
+    if not enabled: col = ui_style.disabled_color
+    shown = s
+    if focused and enabled: shown = "> {s} <"
+    text_centered(shown, c, ui_style.size, col)
+
+# a button: true in the frame it is chosen
+ui_button = (label: str, enabled: bool = true) -> bool:
+    w = text_width(label, ui_style.size) + 80.0
+    r = __ui_item(w)
+    over = abs(f64(mouse_pos().x - r.1.x)) < w / 2.0 and abs(f64(mouse_pos().y - r.1.y)) < ui_style.spacing / 2.0
+    __ui_label(label, r.1, r.2, enabled)
+    if not enabled: return false
+    (r.2 and __ui_ok) or (over and mouse_pressed(.left) and ui_ready())
+
+# a value from 0 to 1, changed in steps of `step` (left/right, or dragging with the mouse)
+ui_slider = (label: str, value: f64, step: f64 = 0.1) -> f64:
+    w = ui_style.width
+    r = __ui_item(w)
+    c = r.1
+    v = value
+    # (to the nearest step: 0.8 - 0.1 - 0.1 is 0.6, not 0.6000000000000001)
+    if r.2 and __ui_side != 0: v = clamp(round((v + f64(__ui_side) * step) / step) * step, 0.0, 1.0)
+    if abs(v - round(v * 1e9) / 1e9) < 1e-12: v = round(v * 1e9) / 1e9
+    # the bar: right half of the row
+    bx = f64(c.x) + 10.0
+    bw = w / 2.0 - 10.0
+    by = f64(c.y) - 4.0
+    m = mouse_pos()
+    if mouse_down(.left) and ui_ready() and f64(m.x) >= bx - 10.0 and f64(m.x) <= bx + bw + 10.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0:
+        v = clamp((f64(m.x) - bx) / bw, 0.0, 1.0)
+    col = ui_style.color
+    if r.2: col = ui_style.focus_color
+    text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+    rect(bx, by, bw, 8, ui_style.bar_color)
+    rect(bx, by, bw * v, 8, col)
+    circle(vec2(f32(bx + bw * v), f32(by + 4.0)), 10, col)
+    v
+
+# on or off (left/right, enter, or a click)
+ui_switch = (label: str, on: bool) -> bool:
+    w = ui_style.width
+    r = __ui_item(w)
+    c = r.1
+    v = on
+    over = abs(f64(mouse_pos().x - c.x)) < w / 2.0 and abs(f64(mouse_pos().y - c.y)) < ui_style.spacing / 2.0
+    if (r.2 and (__ui_ok or __ui_side != 0)) or (over and mouse_pressed(.left) and ui_ready()): v = not v
+    col = ui_style.color
+    if r.2: col = ui_style.focus_color
+    text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+    state = "off"
+    if v: state = "on"
+    text_centered(state, vec2(f32(f64(c.x) + w / 4.0), c.y), ui_style.size, col)
+    v
+
+# one of several (left/right, or a click on either side, goes to the one before or after):
+# `difficulty = ui_choice("Difficulty", ["easy", "normal", "hard"], difficulty)`
+ui_choice = (label: str, options: str[], index: int) -> int:
+    w = ui_style.width
+    r = __ui_item(w)
+    c = r.1
+    n = max(options.len(), 1)
+    v = index
+    if r.2: v += __ui_side
+    if r.2 and __ui_ok: v += 1
+    m = mouse_pos()
+    over = abs(f64(m.x - c.x)) < w / 2.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0
+    if over and mouse_pressed(.left) and ui_ready() and f64(m.x) > f64(c.x):
+        if f64(m.x) < f64(c.x) + w / 4.0: v -= 1
+        else: v += 1
+    v = ((v % n) + n) % n
+    col = ui_style.color
+    if r.2: col = ui_style.focus_color
+    text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+    shown = ""
+    if v < options.len(): shown = options[v]
+    text_centered("< {shown} >", vec2(f32(f64(c.x) + w / 4.0), c.y), ui_style.size, col)
+    v
+
+# a line of text typed in, up to max_chars characters: what is typed while it has the focus is
+# added, backspace takes the last character away, enter (like down) goes on to the next item;
+# `name = ui_text_field("Name", name)`
+ui_text_field = (label: str, value: str, max_chars: int = 24) -> str:
+    w = ui_style.width
+    r = __ui_item(w)
+    c = r.1
+    v = value
+    if r.2:
+        __ui_typing = r.0
+        __typing_frame = frame_number()
+        if ui_ready() and not rebinding():
+            loop ch in chars(text_input()):
+                if ch >= 32 and char_count(v) < max_chars: v += chr(ch)
+            if __platform_pasted(): v = __paste_line(v, max_chars)
+            if key_typed(.backspace): v = without_last_char(v)
+            if key_pressed(.enter): __ui_focus = r.0 + 1
+    col = ui_style.color
+    if r.2: col = ui_style.focus_color
+    text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+    # the box: right half of the row, the text in it, and where typing goes when it has the focus
+    bx = f64(c.x) + 10.0
+    bw = w / 2.0 - 10.0
+    rect(bx, f64(c.y) + ui_style.size * 0.55, bw, 2, col)
+    shown = v
+    if r.2 and int(elapsed() * 2.0) % 2 == 0: shown += "|"
+    # (a long text shows its end, cut at the box's left edge)
+    tw = text_width(shown, ui_style.size)
+    tx = bx
+    if tw > bw: tx = bx + bw - tw
+    clip(vec2(f32(bx), f32(f64(c.y) - ui_style.size)), vec2(f32(bw), f32(ui_style.size * 2.0)))
+    text(shown, vec2(f32(tx), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
+    no_clip()
+    v
+
+# whether a text field (a menu's ui_text_field with the focus, or a hud_text_field clicked into)
+# takes the keyboard: the game's own letter keys are better left alone then (ImGui's
+# WantCaptureKeyboard)
+ui_typing = () -> bool: frame_number() - __typing_frame <= 1
+__typing_frame = -10
+
+# a line of text in the column (not an item: it cannot be chosen)
+ui_text = (s: str, size: f64 = 24.0, color: vec4 = vec4(1, 1, 1, 0.6)):
+    c = __ui_pos + vec2(0, f32(f64(__ui_count) * ui_style.spacing))
+    text_centered(s, c, size, color)
+    __ui_pos = __ui_pos + vec2(0, f32(ui_style.spacing))
+
+# ---------------- a game's own interface: boxes placed anywhere ----------------
+# Buttons, panels and bars where the game puts them (an RTS's command panel, a toolbar), worked
+# with the mouse or a finger. Call them in draw, in screen units (after reset_transform() if a
+# camera is set), each frame:
+#
+#   hud_panel(Rect(0, 600, 1280, 120))
+#   if hud_button(Rect(20, 620, 160, 44), "Train worker", enabled = food >= 50): train()
+#   hud_bar(Rect(20, 680, 160, 12), hp / max_hp, rgb(0.3, 0.9, 0.4))
+#   ...and in update: if mouse_pressed(.left) and not hud_hovered(): give_order()
+#
+# (hud_hovered: whether the mouse was over any of them in the last frame drawn, so a click on
+# a button is not also a click on the world behind it)
+
+# how hud_button, hud_panel, hud_bar, hud_text_field and hud_checkbox look: set hud_style's
+# fields (hud_style.text_size = 16.0, hud_style.button = rgb(0.2, 0.3, 0.5)); a change holds for
+# what is drawn after it, so a game can style one button and set it back
+struct HudStyle:
+    accent: vec4 = vec4(1, 0.82, 0.4, 1)    # a selected button's edge, a field being typed in
+    panel: vec4 = vec4(0.06, 0.07, 0.09, 0.85)
+    button: vec4 = vec4(0.18, 0.2, 0.24, 1)
+    hover: vec4 = vec4(0.26, 0.3, 0.36, 1)
+    pressed: vec4 = vec4(0.12, 0.13, 0.16, 1)
+    border: vec4 = vec4(1, 1, 1, 0.18)
+    text: vec4 = vec4(1, 1, 1, 0.92)
+    disabled: vec4 = vec4(1, 1, 1, 0.35)
+    text_size: f64 = 20.0
+
+hud_style = HudStyle()
+
+__hud_boxes: Rect[]             # the boxes drawn this frame (as much of each as is not clipped away)
+__hud_boxes_last: Rect[]        # ... and in the last frame
+__hud_frame = -1
+
+__hud_touch = (r: Rect) -> bool:
+    if __hud_frame != frame_number():
+        __hud_boxes_last = __hud_boxes
+        __hud_boxes = []
+        __hud_frame = frame_number()
+    box = r
+    # (a box clipped away, a row of a scrolling list out of view: not there to click)
+    if __clip_on and __cur_target < 0:
+        x0 = max(r.x, __clip.x)
+        y0 = max(r.y, __clip.y)
+        x1 = min(r.x + r.w, __clip.x + __clip.z)
+        y1 = min(r.y + r.h, __clip.y + __clip.w)
+        box = Rect(x0, y0, max(x1 - x0, 0), max(y1 - y0, 0))
+    __hud_boxes.push(box)
+    contains(box, mouse_pos())
+
+# whether the mouse (or a finger) is over the interface now: over a hud_ box drawn in the last
+# frame or this one, where it is now (a tap on the world just after one on a button is the
+# world's; a tap landing on a button is the button's from that frame on)
+hud_hovered = () -> bool:
+    m = mouse_pos()
+    if __hud_frame != frame_number():
+        loop b in __hud_boxes:
+            if contains(b, m): return true
+        return false
+    loop b in __hud_boxes_last:
+        if contains(b, m): return true
+    loop b in __hud_boxes:
+        if contains(b, m): return true
+    false
+
+# (a box under the pointer looks hovered, but not under a finger lifted away)
+__hud_lit = (over: bool) -> bool: over and (not touch_input() or mouse_down(.left))
+
+# a box behind other parts (it also keeps clicks on it from the world)
+hud_panel = (r: Rect, color: vec4 = vec4(0, 0, 0, 0)):
+    __hud_touch(r)
+    c = color
+    if c.w == 0.0: c = hud_style.panel
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
+
+# a button with a label: true in the frame it is clicked (or tapped); selected: drawn as the
+# one chosen of several (a tool, a tab)
+hud_button = (r: Rect, label: str, enabled: bool = true, selected: bool = false) -> bool:
+    over = __hud_touch(r)
+    c = hud_style.button
+    if selected: c = hud_style.hover
+    if enabled and __hud_lit(over):
+        c = hud_style.hover
+        if mouse_down(.left): c = hud_style.pressed
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
+    edge = hud_style.border
+    if selected: edge = hud_style.accent
+    rect_outline(f64(r.x), f64(r.y), f64(r.w), f64(r.h), 1.0, edge)
+    tc = hud_style.text
+    if not enabled: tc = hud_style.disabled
+    size = min(hud_style.text_size, f64(r.h) * 0.6)
+    # (a label wider than the button: smaller, to fit)
+    tw = text_width(label, size)
+    if tw > f64(r.w) - 8.0 and tw > 0.0: size = max(size * (f64(r.w) - 8.0) / tw, 6.0)
+    text_centered(label, center(r), size, tc)
+    enabled and over and mouse_pressed(.left)
+
+# a bar filled to `amount` (0 to 1): health, progress, a cooldown
+hud_bar = (r: Rect, amount: f64, color: vec4, back: vec4 = vec4(0, 0, 0, 0.5)):
+    __hud_touch(r)
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), back)
+    rect(f64(r.x), f64(r.y), f64(r.w) * clamp(amount, 0.0, 1.0), f64(r.h), color)
+
+# a box to type text in: clicking it gives it the keyboard, Enter, Escape or a click elsewhere
+# takes it away; returns the text as it is now. Tapped on a phone, it brings up the phone's
+# keyboard, and a Paste button at its right end. `id` tells fields with the same place apart
+# (their rectangle names them otherwise); `hint` is shown dimmed while it is empty ("seed")
+hud_text_field = (r: Rect, value: str, id: str = "", max_chars: int = 64, hint: str = "") -> str:
+    over = __hud_touch(r)
+    key = id
+    if len(key) == 0: key = "{r.x},{r.y}"
+    if mouse_pressed(.left):
+        if over: __hud_focus = key
+        else if __hud_focus == key: __hud_focus = ""
+    focused = __hud_focus == key
+    v = value
+    if focused:
+        __typing_frame = frame_number()
+        loop ch in chars(text_input()):
+            if ch >= 32 and char_count(v) < max_chars: v += chr(ch)
+        # (ctrl+V, cmd+V on a Mac, or the Paste button: the clipboard's first line)
+        if __platform_pasted(): v = __paste_line(v, max_chars)
+        if key_typed(.backspace): v = without_last_char(v)
+        if key_pressed(.enter) or key_pressed(.escape): __hud_focus = ""
+    c = hud_style.button
+    if __hud_lit(over) or focused: c = hud_style.hover
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
+    edge = hud_style.border
+    if focused: edge = hud_style.accent
+    rect_outline(f64(r.x), f64(r.y), f64(r.w), f64(r.h), 1.0, edge)
+    size = min(hud_style.text_size, f64(r.h) * 0.6)
+    # (typed in with a finger: a Paste button at its right end, as a phone has no ctrl+V)
+    paste_w = 0.0
+    if focused and touch_input(): paste_w = text_width("Paste", size) + 16.0
+    shown = v
+    if focused and int(elapsed() * 2.0) % 2 == 0: shown += "|"
+    # (a long text shows its end, cut at the box's left edge)
+    pad = 6.0
+    tw = text_width(shown, size)
+    tx = f64(r.x) + pad
+    if tw > f64(r.w) - paste_w - 2.0 * pad: tx = f64(r.x + r.w) - paste_w - pad - tw
+    # (inside the clip already on, as a scrolling list's: that one comes back after)
+    was_on = __clip_on
+    was = __clip
+    cx0 = f64(r.x)
+    cy0 = f64(r.y)
+    cx1 = f64(r.x + r.w) - paste_w
+    cy1 = f64(r.y + r.h)
+    if was_on:
+        cx0 = max(cx0, f64(was.x))
+        cy0 = max(cy0, f64(was.y))
+        cx1 = min(cx1, f64(was.x + was.z))
+        cy1 = min(cy1, f64(was.y + was.w))
+    clip(vec2(f32(cx0), f32(cy0)), vec2(f32(max(cx1 - cx0, 0.0)), f32(max(cy1 - cy0, 0.0))))
+    ty = f32(f64(r.y) + (f64(r.h) - size) / 2.0)
+    # (empty: the hint, dimmed, saying what goes in it)
+    if len(v) == 0 and len(hint) > 0 and not focused: text(hint, vec2(f32(tx), ty), size, hud_style.disabled)
+    else: text(shown, vec2(f32(tx), ty), size, hud_style.text)
+    if was_on: clip(vec2(was.x, was.y), vec2(was.z, was.w))
+    else: no_clip()
+    if paste_w > 0.0:
+        pr = Rect(r.x + r.w - f32(paste_w) - 3, r.y + 3, f32(paste_w), r.h - 6)
+        if hud_button(pr, "Paste"): __platform_paste()
+    v
+__hud_focus = ""
+
+# v with the clipboard's first line added, as much as fits in max_chars
+__paste_line = (v: str, max_chars: int) -> str:
+    out = v
+    loop ch in chars(clipboard()):
+        if ch == 10 or ch == 13: break
+        if ch >= 32 and char_count(out) < max_chars: out += chr(ch)
+    out
+
+# a list taller than its box: how far it is scrolled, from 0, moved by the wheel over the box and
+# by dragging the bar drawn at its right edge (when there is more than fits). The rows go at
+# their y minus that, inside clip(...) of the box: rows scrolled out of it take no clicks
+#   off = hud_scroll(r, f64(items.len()) * 44.0, "shop")
+#   clip(vec2(r.x, r.y), vec2(r.w, r.h))
+#   loop i in 0.. and it in items:
+#       if hud_button(Rect(r.x, r.y + f32(f64(i) * 44.0 - off), r.w - 14, 40), it.name): buy(i)
+#   no_clip()
+hud_scroll = (r: Rect, content_height: f64, id: str = "") -> f64:
+    key = id
+    if len(key) == 0: key = "{r.x},{r.y}"
+    off = __hud_scrolls.get(key) ?? 0.0
+    room = max(content_height - f64(r.h), 0.0)
+    m = mouse_pos()
+    over = contains(r, m)
+    if over: off -= mouse_wheel() * 44.0
+    bw = 8.0
+    bx = f64(r.x + r.w) - bw
+    th = max(f64(r.h) * f64(r.h) / max(content_height, 1.0), 24.0)
+    track = f64(r.h) - th
+    if room > 0.0 and mouse_pressed(.left) and f64(m.x) >= bx - 4.0 and over:
+        __hud_drag = key
+        ty = f64(r.y) + track * off / room
+        __hud_grab = f64(m.y) - ty
+        if __hud_grab < 0.0 or __hud_grab > th: __hud_grab = th / 2.0     # (a click on the track: the bar's middle there)
+    if __hud_drag == key:
+        if mouse_down(.left) and track > 0.0: off = (f64(m.y) - __hud_grab - f64(r.y)) / track * room
+        else: __hud_drag = ""
+    off = clamp(off, 0.0, room)
+    __hud_scrolls[key] = off
+    if room > 0.0:
+        rect(bx, f64(r.y), bw, f64(r.h), hud_style.pressed)
+        c = hud_style.button
+        if __hud_drag == key or (__hud_lit(over) and f64(m.x) >= bx - 4.0): c = hud_style.hover
+        rect(bx, f64(r.y) + track * off / room, bw, th, c)
+    off
+__hud_scrolls: {str: f64} = {}
+__hud_drag = ""
+__hud_grab = 0.0
+
+# a box of text beside the mouse, kept on the screen: what the thing under the mouse is or does.
+# Draw it after the rest of the interface, so nothing covers it (`if hovered: tip = "..."`, then
+# at the end of draw, `if len(tip) > 0: hud_tooltip(tip)`); lines break at "\n"
+hud_tooltip = (s: str):
+    size = hud_style.text_size * 0.8
+    pad = 7.0
+    ls = split(s, "\n")
+    w = 0.0
+    loop l in ls: w = max(w, text_width(l, size))
+    w += pad * 2.0
+    h = f64(ls.len()) * size * 1.25 + pad * 2.0
+    m = mouse_pos()
+    x = f64(m.x) + 16.0
+    y = f64(m.y) + 18.0
+    if x + w > f64(screen_width()): x = f64(m.x) - w - 8.0
+    if y + h > f64(screen_height()): y = f64(m.y) - h - 8.0
+    x = max(x, 0.0)
+    y = max(y, 0.0)
+    rect(x, y, w, h, vec4(hud_style.panel.x, hud_style.panel.y, hud_style.panel.z, 0.96))
+    rect_outline(x, y, w, h, 1.0, hud_style.border)
+    loop i in 0.. and l in ls: text(l, vec2(f32(x + pad), f32(y + pad + f64(i) * size * 1.25)), size, hud_style.text)
+
+# a box ticked or not, with its label to the right: the new state (flipped in the frame it is
+# clicked)
+hud_checkbox = (r: Rect, label: str, on: bool) -> bool:
+    over = __hud_touch(r)
+    v = on
+    if over and mouse_pressed(.left): v = not v
+    b = f64(r.h)
+    c = hud_style.button
+    if __hud_lit(over): c = hud_style.hover
+    rect(f64(r.x), f64(r.y), b, b, c)
+    rect_outline(f64(r.x), f64(r.y), b, b, 1.0, hud_style.border)
+    if v: rect(f64(r.x) + b * 0.25, f64(r.y) + b * 0.25, b * 0.5, b * 0.5, hud_style.accent)
+    size = min(hud_style.text_size, b * 0.7)
+    text(label, vec2(f32(f64(r.x) + b * 1.3), f32(f64(r.y) + (b - size) / 2.0)), size, hud_style.text)
+    v

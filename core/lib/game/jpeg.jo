@@ -1,0 +1,602 @@
+# JPEG images: load_jpeg (and load_image, which tells PNG and JPEG apart). Baseline and
+# progressive JPEGs (Huffman coded, 8-bit), any sampling (4:4:4, 4:2:2, 4:2:0...), grayscale,
+# RGB and Adobe's CMYK, restart markers. As libjpeg decodes them by default: its integer inverse
+# DCT, smooth upsampling of halved color, its color conversion. Not read: arithmetic coding,
+# lossless and 12-bit JPEGs (rare): none, as for a damaged file.
+
+struct __JpComp:
+    id: int
+    h: int                      # sampling factors
+    v: int
+    tq: int                     # quantization table
+    td: int                     # Huffman tables of the scan: DC, AC
+    ta: int
+    bw: int                     # blocks across and down (the MCUs' whole)
+    bh: int
+    pred: int                   # the last DC value
+    coefs: i16[]                # (progressive: every block's coefficients, natural order)
+    px: u8[]                    # the samples (bw * 8 wide)
+
+struct __JpHuff:
+    fast: int[]                 # the next 9 bits -> (length << 8) | symbol, or -1
+    maxcode: int[]              # by length: the largest code (-1: none)
+    mincode: int[]
+    valptr: int[]
+    vals: u8[]
+    ok: bool
+
+__jp_zz: int[] = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]
+
+# the entropy-coded bits: the file, where the next byte is, the bits read ahead (msb first), a
+# marker met (no data after it: zeros)
+__jp_d: u8[]
+__jp_p = 0
+__jp_acc = 0
+__jp_n = 0
+__jp_mark = 0
+__jp_bad = false
+
+__jp_fill = ():
+    loop __jp_n <= 48:
+        c = 0
+        if __jp_mark == 0 and __jp_p < __jp_d.len():
+            c = int(__jp_d[__jp_p])
+            if c == 0xFF:
+                nx = 0
+                if __jp_p + 1 < __jp_d.len(): nx = int(__jp_d[__jp_p + 1])
+                if nx == 0: __jp_p += 2
+                else:
+                    __jp_mark = nx
+                    c = 0
+            else: __jp_p += 1
+        __jp_acc = (__jp_acc << 8) | c
+        __jp_n += 8
+
+__jp_bits = (k: int) -> int:
+    if k == 0: return 0
+    if __jp_n < k: __jp_fill()
+    __jp_n -= k
+    v = (__jp_acc >> __jp_n) & ((1 << k) - 1)
+    __jp_acc = __jp_acc & ((1 << __jp_n) - 1)
+    v
+
+# k bits as a signed value (JPEG's EXTEND)
+__jp_signed = (k: int) -> int:
+    if k == 0: return 0
+    v = __jp_bits(k)
+    if v < (1 << (k - 1)): v += 1 - (1 << k)
+    v
+
+__jp_decode = (h: __JpHuff) -> int:
+    if not h.ok:
+        __jp_bad = true
+        return 0
+    if __jp_n < 16: __jp_fill()
+    f = h.fast[(__jp_acc >> (__jp_n - 9)) & 511]
+    if f >= 0:
+        __jp_n -= f >> 8
+        __jp_acc = __jp_acc & ((1 << __jp_n) - 1)
+        return f & 255
+    code = 0
+    loop l in [1..17):
+        code = (code << 1) | __jp_bits(1)
+        if code <= h.maxcode[l]:
+            i = h.valptr[l] + code - h.mincode[l]
+            if i < 0 or i >= h.vals.len(): break
+            return int(h.vals[i])
+    __jp_bad = true
+    0
+
+# the size of a DC difference (at most 15 bits: more is a damaged file)
+__jp_dc_size = (h: __JpHuff) -> int:
+    t = __jp_decode(h)
+    if t > 15:
+        __jp_bad = true
+        return 0
+    t
+
+__jp_huff = (counts: int[], vals: u8[]) -> __JpHuff:
+    h = __JpHuff(fill(-1, 512), fill(-1, 18), fill(0, 18), fill(0, 18), vals, true)
+    code = 0
+    k = 0
+    loop l in [1..17):
+        h.valptr[l] = k
+        h.mincode[l] = code
+        loop i in [0..counts[l - 1]):
+            # (more codes of a length than it has: a damaged table)
+            if code >= 1 << l:
+                h.ok = false
+                return h
+            if l <= 9 and k < vals.len():
+                s = code << (9 - l)
+                loop j in [0..1 << (9 - l)): h.fast[s + j] = (l << 8) | int(vals[k])
+            code += 1
+            k += 1
+        if counts[l - 1] > 0: h.maxcode[l] = code - 1
+        code = code << 1
+    h
+
+__jp_be16 = (d: u8[], i: int) -> int:
+    if i + 1 >= d.len(): return 0
+    (int(d[i]) << 8) | int(d[i + 1])
+
+# decode a JPEG file into RGBA pixels; none if it is not one (or one of the kinds not read)
+load_jpeg = (file: u8[]) -> Image?:
+    if file.len() < 4 or file[0] != 0xFF or file[1] != 0xD8: return none
+    __jp_d = file
+    __jp_bad = false
+    q: int[][] = [fill(1, 64), fill(1, 64), fill(1, 64), fill(1, 64)]
+    dc: __JpHuff[]
+    ac: __JpHuff[]
+    loop i in [0..4):
+        dc.push(__JpHuff([], [], [], [], [], false))
+        ac.push(__JpHuff([], [], [], [], [], false))
+    comps: __JpComp[]
+    w = 0
+    h = 0
+    progressive = false
+    restart = 0
+    adobe = -1
+    framed = false
+    hmax = 1
+    vmax = 1
+    mcux = 0
+    mcuy = 0
+    eobrun = 0
+    pos = 2
+    loop true:
+        # the next marker
+        loop pos < file.len() and file[pos] != 0xFF: pos += 1
+        loop pos + 1 < file.len() and file[pos + 1] == 0xFF: pos += 1
+        if pos + 1 >= file.len(): break
+        m = int(file[pos + 1])
+        pos += 2
+        if m == 0xD9: break
+        if m == 0 or m == 0xD8 or m >= 0xD0 and m <= 0xD7 or m == 0x01: continue
+        n = __jp_be16(file, pos)
+        if n < 2 or pos + n > file.len(): return none
+        s = pos + 2
+        e = pos + n
+        pos = e
+        if m == 0xDB:
+            # quantization tables
+            k = s
+            loop k < e:
+                pq = int(file[k]) >> 4
+                t = int(file[k]) & 3
+                k += 1
+                loop i in [0..64):
+                    if pq == 0:
+                        if k >= e: return none
+                        q[t][i] = int(file[k])
+                        k += 1
+                    else:
+                        if k + 1 >= e: return none
+                        q[t][i] = __jp_be16(file, k)
+                        k += 2
+        else if m == 0xC4:
+            # Huffman tables
+            k = s
+            loop k + 17 <= e:
+                tc = int(file[k]) >> 4
+                th = int(file[k]) & 3
+                counts = fill(0, 16)
+                total = 0
+                loop i in [0..16):
+                    counts[i] = int(file[k + 1 + i])
+                    total += counts[i]
+                k += 17
+                if k + total > e or total > 256: return none
+                hv = __jp_huff(counts, file[k..k + total))
+                k += total
+                if tc == 0: dc[th] = hv
+                else: ac[th] = hv
+        else if m == 0xC0 or m == 0xC1 or m == 0xC2:
+            if framed or n < 8 or file[s] != 8: return none
+            framed = true
+            progressive = m == 0xC2
+            h = __jp_be16(file, s + 1)
+            w = __jp_be16(file, s + 3)
+            nc = int(file[s + 5])
+            if w == 0 or h == 0 or nc == 0 or nc > 4 or n < 8 + 3 * nc: return none
+            if w * h > (1 << 28): return none
+            loop i in [0..nc):
+                c = s + 6 + 3 * i
+                hs = int(file[c + 1]) >> 4
+                vs = int(file[c + 1]) & 15
+                if hs < 1 or hs > 4 or vs < 1 or vs > 4: return none
+                comps.push(__JpComp(int(file[c]), hs, vs, int(file[c + 2]) & 3, 0, 0, 0, 0, 0, [], []))
+                hmax = max(hmax, hs)
+                vmax = max(vmax, vs)
+            mcux = (w + 8 * hmax - 1) / (8 * hmax)
+            mcuy = (h + 8 * vmax - 1) / (8 * vmax)
+            loop c in [0..comps.len()):
+                comps[c].bw = mcux * comps[c].h
+                comps[c].bh = mcuy * comps[c].v
+                comps[c].px = fill(u8(0), comps[c].bw * comps[c].bh * 64)
+                if progressive: comps[c].coefs = fill(i16(0), comps[c].bw * comps[c].bh * 64)
+        else if m == 0xDD:
+            restart = __jp_be16(file, s)
+        else if m == 0xEE:
+            # Adobe: how the color is coded (0: RGB or CMYK, 1: YCbCr, 2: YCCK)
+            if n >= 14 and file[s] == 'A' and file[s + 1] == 'd': adobe = int(file[s + 11])
+        else if m == 0xDA:
+            if not framed: return none
+            ns = int(file[s])
+            if ns < 1 or ns > 4 or n < 6 + 2 * ns: return none
+            sc: int[]
+            loop i in [0..ns):
+                id = int(file[s + 1 + 2 * i])
+                ci = -1
+                loop j in [0..comps.len()):
+                    if comps[j].id == id: ci = j
+                if ci < 0: return none
+                comps[ci].td = (int(file[s + 2 + 2 * i]) >> 4) & 3
+                comps[ci].ta = int(file[s + 2 + 2 * i]) & 3
+                sc.push(ci)
+            k = s + 1 + 2 * ns
+            ss = int(file[k])
+            se = int(file[k + 1])
+            ah = int(file[k + 2]) >> 4
+            al = int(file[k + 2]) & 15
+            if se > 63 or ss > se or al > 13: return none
+            if progressive and ss > 0 and ns != 1: return none
+            # the coded data, from here to the next marker
+            __jp_p = pos
+            __jp_acc = 0
+            __jp_n = 0
+            __jp_mark = 0
+            eobrun = 0
+            loop c in sc: comps[c].pred = 0
+            # (one component: its blocks over the image's part; several: MCU by MCU)
+            units = mcux * mcuy
+            cw = 0
+            if ns == 1:
+                c = comps[sc[0]]
+                cw = ((w * c.h + hmax - 1) / hmax + 7) / 8
+                units = cw * (((h * c.v + vmax - 1) / vmax + 7) / 8)
+            loop u in [0..units):
+                if restart > 0 and u > 0 and u % restart == 0:
+                    __jp_restart()
+                    loop c in sc: comps[c].pred = 0
+                    eobrun = 0
+                if ns == 1:
+                    ci = sc[0]
+                    eobrun = __jp_unit(comps[ci], u % cw, u / cw, progressive, ss, se, ah, al, q[comps[ci].tq], dc[comps[ci].td], ac[comps[ci].ta], eobrun)
+                else:
+                    mx = u % mcux
+                    my = u / mcux
+                    loop ci in sc:
+                        loop by in [0..comps[ci].v):
+                            loop bx in [0..comps[ci].h):
+                                eobrun = __jp_unit(comps[ci], mx * comps[ci].h + bx, my * comps[ci].v + by, progressive, ss, se, ah, al, q[comps[ci].tq], dc[comps[ci].td], ac[comps[ci].ta], eobrun)
+                if __jp_bad: return none
+            # (the next marker: where the bits stopped, or further)
+            pos = __jp_p
+        else if m >= 0xC3 and m <= 0xCF and m != 0xC4 and m != 0xC8 and m != 0xCC:
+            return none                         # lossless, hierarchical, arithmetic coding
+    if not framed or comps.len() == 0: return none
+    if progressive:
+        loop c in [0..comps.len()):
+            qn = fill(0, 64)
+            loop k in [0..64): qn[__jp_zz[k]] = q[comps[c].tq][k]
+            blk = fill(0, 64)
+            loop b in [0..comps[c].bw * comps[c].bh):
+                loop k in [0..64): blk[k] = int(comps[c].coefs[b * 64 + k]) * qn[k]
+                __jp_idct(blk, comps[c].px, (b / comps[c].bw) * 8 * comps[c].bw * 8 + (b % comps[c].bw) * 8, comps[c].bw * 8)
+    __jp_image(comps, w, h, hmax, vmax, adobe)
+
+# (at a restart marker: the bits before it are dropped, and it is passed)
+__jp_restart = ():
+    __jp_acc = 0
+    __jp_n = 0
+    if __jp_mark >= 0xD0 and __jp_mark <= 0xD7:
+        __jp_p += 2
+        __jp_mark = 0
+        return
+    if __jp_mark != 0: return
+    loop __jp_p + 1 < __jp_d.len():
+        if __jp_d[__jp_p] == 0xFF and __jp_d[__jp_p + 1] >= 0xD0 and __jp_d[__jp_p + 1] <= 0xD7:
+            __jp_p += 2
+            return
+        __jp_p += 1
+
+# one block of a scan (at block bx, by of the component); the EOB run left
+__jp_unit = (c: mut __JpComp, bx: int, by: int, progressive: bool, ss: int, se: int, ah: int, al: int, q: int[], hd: __JpHuff, ha: __JpHuff, eobrun0: int) -> int:
+    if bx >= c.bw or by >= c.bh: return eobrun0
+    b = by * c.bw + bx
+    eobrun = eobrun0
+    if not progressive:
+        blk = fill(0, 64)
+        c.pred += __jp_signed(__jp_dc_size(hd))
+        blk[0] = c.pred * q[0]
+        k = 1
+        loop k < 64:
+            rs = __jp_decode(ha)
+            r = rs >> 4
+            s = rs & 15
+            if s == 0:
+                if r != 15: break
+                k += 16
+            else:
+                k += r
+                if k > 63:
+                    __jp_bad = true
+                    break
+                blk[__jp_zz[k]] = __jp_signed(s) * q[k]
+                k += 1
+        __jp_idct(blk, c.px, by * 8 * c.bw * 8 + bx * 8, c.bw * 8)
+        return 0
+    at = b * 64
+    if ss == 0:
+        # DC: first (the value, scaled up) or a bit more of it
+        if ah == 0:
+            c.pred += __jp_signed(__jp_dc_size(hd))
+            c.coefs[at] = i16(c.pred << al)
+        else if __jp_bits(1) != 0: c.coefs[at] = i16(int(c.coefs[at]) | (1 << al))
+        return 0
+    if ah == 0:
+        # AC, first: values from ss to se, or a run of blocks with none
+        if eobrun > 0: return eobrun - 1
+        k = ss
+        loop k <= se:
+            rs = __jp_decode(ha)
+            r = rs >> 4
+            s = rs & 15
+            if s == 0:
+                if r < 15:
+                    eobrun = (1 << r) - 1
+                    if r > 0: eobrun += __jp_bits(r)
+                    break
+                k += 16
+            else:
+                k += r
+                if k > 63:
+                    __jp_bad = true
+                    break
+                c.coefs[at + __jp_zz[k]] = i16(__jp_signed(s) * (1 << al))
+                k += 1
+        return eobrun
+    # AC, refining: a bit more of the values already there, new ones of +-1 (scaled)
+    bit = 1 << al
+    if eobrun > 0:
+        loop k in [ss..se + 1): __jp_refine(c, at + __jp_zz[k], bit)
+        return eobrun - 1
+    k = ss
+    loop k <= se:
+        rs = __jp_decode(ha)
+        r = rs >> 4
+        s = rs & 15
+        v = 0
+        if s == 0:
+            if r < 15:
+                eobrun = (1 << r) - 1
+                if r > 0: eobrun += __jp_bits(r)
+                r = 64
+        else:
+            if __jp_bits(1) != 0: v = bit
+            else: v = -bit
+        loop k <= se:
+            z = at + __jp_zz[k]
+            k += 1
+            if c.coefs[z] != 0: __jp_refine(c, z, bit)
+            else:
+                if r == 0:
+                    if v != 0: c.coefs[z] = i16(v)
+                    break
+                r -= 1
+        if __jp_bad: break
+    eobrun
+
+__jp_refine = (c: mut __JpComp, z: int, bit: int):
+    x = int(c.coefs[z])
+    if x == 0: return
+    if __jp_bits(1) != 0 and x & bit == 0:
+        if x > 0: c.coefs[z] = i16(x + bit)
+        else: c.coefs[z] = i16(x - bit)
+
+# libjpeg's integer inverse DCT (jidctint, as stb_image has it): blk (dequantized, natural
+# order) -> 8x8 samples at px[at..] (rows stride apart)
+__jp_idct = (blk: mut int[], px: mut u8[], at: int, stride: int):
+    # columns
+    loop i in [0..8):
+        if blk[8 + i] == 0 and blk[16 + i] == 0 and blk[24 + i] == 0 and blk[32 + i] == 0 and blk[40 + i] == 0 and blk[48 + i] == 0 and blk[56 + i] == 0:
+            d = blk[i] * 4
+            loop j in [0..8): blk[8 * j + i] = d
+            continue
+        p2 = blk[16 + i]
+        p3 = blk[48 + i]
+        p1 = (p2 + p3) * 2217
+        t2 = p1 + p3 * -7567
+        t3 = p1 + p2 * 3135
+        p2 = blk[i]
+        p3 = blk[32 + i]
+        t0 = (p2 + p3) * 4096
+        t1 = (p2 - p3) * 4096
+        x0 = t0 + t3 + 512
+        x3 = t0 - t3 + 512
+        x1 = t1 + t2 + 512
+        x2 = t1 - t2 + 512
+        t0 = blk[56 + i]
+        t1 = blk[40 + i]
+        t2 = blk[24 + i]
+        t3 = blk[8 + i]
+        p3 = t0 + t2
+        p4 = t1 + t3
+        p1 = t0 + t3
+        p2 = t1 + t2
+        p5 = (p3 + p4) * 4816
+        t0 = t0 * 1223
+        t1 = t1 * 8410
+        t2 = t2 * 12586
+        t3 = t3 * 6149
+        p1 = p5 + p1 * -3685
+        p2 = p5 + p2 * -10497
+        p3 = p3 * -8034
+        p4 = p4 * -1597
+        t3 += p1 + p4
+        t2 += p2 + p3
+        t1 += p2 + p4
+        t0 += p1 + p3
+        blk[i] = (x0 + t3) >> 10
+        blk[56 + i] = (x0 - t3) >> 10
+        blk[8 + i] = (x1 + t2) >> 10
+        blk[48 + i] = (x1 - t2) >> 10
+        blk[16 + i] = (x2 + t1) >> 10
+        blk[40 + i] = (x2 - t1) >> 10
+        blk[24 + i] = (x3 + t0) >> 10
+        blk[32 + i] = (x3 - t0) >> 10
+    # rows (and +128, and the scale taken out)
+    loop r in [0..8):
+        b = r * 8
+        p2 = blk[b + 2]
+        p3 = blk[b + 6]
+        p1 = (p2 + p3) * 2217
+        t2 = p1 + p3 * -7567
+        t3 = p1 + p2 * 3135
+        p2 = blk[b]
+        p3 = blk[b + 4]
+        t0 = (p2 + p3) * 4096
+        t1 = (p2 - p3) * 4096
+        x0 = t0 + t3 + 65536 + (128 << 17)
+        x3 = t0 - t3 + 65536 + (128 << 17)
+        x1 = t1 + t2 + 65536 + (128 << 17)
+        x2 = t1 - t2 + 65536 + (128 << 17)
+        t0 = blk[b + 7]
+        t1 = blk[b + 5]
+        t2 = blk[b + 3]
+        t3 = blk[b + 1]
+        p3 = t0 + t2
+        p4 = t1 + t3
+        p1 = t0 + t3
+        p2 = t1 + t2
+        p5 = (p3 + p4) * 4816
+        t0 = t0 * 1223
+        t1 = t1 * 8410
+        t2 = t2 * 12586
+        t3 = t3 * 6149
+        p1 = p5 + p1 * -3685
+        p2 = p5 + p2 * -10497
+        p3 = p3 * -8034
+        p4 = p4 * -1597
+        t3 += p1 + p4
+        t2 += p2 + p3
+        t1 += p2 + p4
+        t0 += p1 + p3
+        o = at + r * stride
+        px[o] = __jp_clamp((x0 + t3) >> 17)
+        px[o + 7] = __jp_clamp((x0 - t3) >> 17)
+        px[o + 1] = __jp_clamp((x1 + t2) >> 17)
+        px[o + 6] = __jp_clamp((x1 - t2) >> 17)
+        px[o + 2] = __jp_clamp((x2 + t1) >> 17)
+        px[o + 5] = __jp_clamp((x2 - t1) >> 17)
+        px[o + 3] = __jp_clamp((x3 + t0) >> 17)
+        px[o + 4] = __jp_clamp((x3 - t0) >> 17)
+
+__jp_clamp = (v: int) -> u8:
+    if v < 0: return 0
+    if v > 255: return 255
+    u8(v)
+
+# a component's samples at the image's size: halved ones smoothly (libjpeg's "fancy"
+# upsampling), others repeated
+__jp_full = (c: __JpComp, w: int, h: int, hmax: int, vmax: int) -> u8[]:
+    stride = c.bw * 8
+    if c.h == hmax and c.v == vmax:
+        if stride == w: return c.px[..w * h)
+        out = fill(u8(0), w * h)
+        loop y in [0..h): mem_copy(data(out) + y * w, data(c.px) + y * stride, w)
+        return out
+    out = fill(u8(0), w * h)
+    # (the component's own size)
+    cw = (w * c.h + hmax - 1) / hmax
+    ch = (h * c.v + vmax - 1) / vmax
+    if hmax == 2 * c.h and vmax == c.v and cw >= 2:
+        loop y in [0..h):
+            row = y * stride
+            loop x in [0..w):
+                i = x / 2
+                near = int(c.px[row + i]) * 3
+                v = 0
+                if x % 2 == 0:
+                    if i == 0: v = (near + int(c.px[row]) + 1) / 4
+                    else: v = (near + int(c.px[row + i - 1]) + 1) / 4
+                else:
+                    if i + 1 >= cw: v = (near + int(c.px[row + i]) + 2) / 4
+                    else: v = (near + int(c.px[row + i + 1]) + 2) / 4
+                if x == 0: v = int(c.px[row])
+                if x == 2 * cw - 1: v = int(c.px[row + cw - 1])
+                out[y * w + x] = u8(v)
+        return out
+    if hmax == 2 * c.h and vmax == 2 * c.v and cw >= 2:
+        loop y in [0..h):
+            r0 = y / 2
+            r1 = r0 - 1
+            if y % 2 == 1: r1 = r0 + 1
+            r1 = clamp(r1, 0, ch - 1)
+            a = r0 * stride
+            b = r1 * stride
+            loop x in [0..w):
+                i = x / 2
+                this = int(c.px[a + i]) * 3 + int(c.px[b + i])
+                v = 0
+                if x % 2 == 0:
+                    if i == 0: v = (this * 4 + 8) >> 4
+                    else: v = (this * 3 + int(c.px[a + i - 1]) * 3 + int(c.px[b + i - 1]) + 8) >> 4
+                else:
+                    if i + 1 >= cw: v = (this * 4 + 7) >> 4
+                    else: v = (this * 3 + int(c.px[a + i + 1]) * 3 + int(c.px[b + i + 1]) + 7) >> 4
+                out[y * w + x] = u8(v)
+        return out
+    loop y in [0..h):
+        sy = y * c.v / vmax
+        loop x in [0..w): out[y * w + x] = c.px[sy * stride + x * c.h / hmax]
+    out
+
+# the pixels, in RGBA
+__jp_image = (comps: __JpComp[], w: int, h: int, hmax: int, vmax: int, adobe: int) -> Image:
+    img = Image(w, h, fill(u8(255), w * h * 4))
+    planes: u8[][]
+    loop c in comps: planes.push(__jp_full(c, w, h, hmax, vmax))
+    p = img.pixels
+    n = w * h
+    if comps.len() < 3:
+        y = planes[0]
+        loop i in [0..n):
+            p[4 * i] = y[i]
+            p[4 * i + 1] = y[i]
+            p[4 * i + 2] = y[i]
+    else:
+        # (YCbCr unless Adobe says otherwise, or the components are named R, G, B)
+        ycc = adobe != 0
+        if adobe < 0 and comps.len() == 3 and comps[0].id == 'R' and comps[1].id == 'G' and comps[2].id == 'B': ycc = false
+        a = planes[0]
+        b = planes[1]
+        c = planes[2]
+        loop i in [0..n):
+            r = int(a[i])
+            g = int(b[i])
+            bl = int(c[i])
+            if ycc:
+                yy = r
+                cb = g - 128
+                cr = bl - 128
+                r = yy + ((91881 * cr + 32768) >> 16)
+                g = yy + ((-22554 * cb - 46802 * cr + 32768) >> 16)
+                bl = yy + ((116130 * cb + 32768) >> 16)
+            if comps.len() == 4:
+                # CMYK (Adobe's: inverted), YCCK when it was YCbCr
+                k = int(planes[3][i])
+                if adobe == 2:
+                    r = 255 - clamp(r, 0, 255)
+                    g = 255 - clamp(g, 0, 255)
+                    bl = 255 - clamp(bl, 0, 255)
+                r = clamp(r, 0, 255) * k / 255
+                g = clamp(g, 0, 255) * k / 255
+                bl = clamp(bl, 0, 255) * k / 255
+            p[4 * i] = __jp_clamp(r)
+            p[4 * i + 1] = __jp_clamp(g)
+            p[4 * i + 2] = __jp_clamp(bl)
+    img.pixels = p
+    img

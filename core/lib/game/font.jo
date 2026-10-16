@@ -1,0 +1,871 @@
+# Fonts: load_font reads a TrueType or OpenType font (.ttf, .otf, or the first font of a .ttc)
+# and makes the characters text() draws with, sharp at any size (signed distance fields).
+# set_font chooses the font text() and text_width() use; set_font() goes back to the built-in one.
+#
+#   title_font = load_font(embed("PressStart2P.ttf"))
+#   draw = ():
+#       set_font(title_font)
+#       text_centered("GAME OVER", vec2(640, 300), 64)
+#       set_font()
+#
+# It has the printable ASCII characters, Latin-1 and Latin Extended-A (accented letters), common
+# punctuation (quotes, dashes, the euro sign), and any others listed in `extra`. A character the
+# font does not have is drawn with the built-in one (Latin in a Japanese font), else as ?.
+#
+# Japanese, Chinese or Korean text needs a font with them (Noto Sans CJK, which most systems
+# have), and its characters in `extra`: give it all the text that will be shown
+# (load_font(file, extra = story)). wrap_text breaks lines between their characters. (Variable
+# fonts with CFF2 outlines are not read: a static .otf or .ttf of the same font is.)
+
+struct Font:
+    texture: Texture
+    slots: {int: int}           # a character (its code point) -> its cell in the atlas
+    ascii: int[]                # (the same for the first 128, faster; -1: none)
+    adv: f64[]                  # each cell's advance, in pixels at `px`
+    cols: int                   # cells in a row of the atlas
+    cell: f64                   # a cell's size, in atlas pixels
+    px: f64                     # the size the characters were made at
+    base: f64                   # the baseline's height in a cell
+    spread: f64                 # distance (in atlas pixels) the field fades over
+
+const __FONT_CELL = 48
+const __FONT_PX = 34.0
+const __FONT_SPREAD = 6.0
+const __FONT_BASE = 36
+
+__FONT_CHARS = "‘’‚“”„†‡•…‰‹›€™−–—"
+
+# ---------------- reading TrueType ----------------
+struct __Ttf:
+    d: u8[]
+    error = ""
+    head = 0
+    loca = 0
+    glyf = 0
+    hmtx = 0
+    cmap = 0
+    nglyphs = 0
+    nhmetrics = 0
+    upem = 1000
+    long_loca = false
+    # (OpenType with PostScript outlines: the CFF table's pieces)
+    cff = 0
+    cs_index = 0                # the charstrings
+    gsubrs = 0                  # the global subroutines
+    lsubrs: int[]               # each font dict's local subroutines (0: none)
+    fdselect = 0                # (CID fonts) which font dict each glyph uses
+
+__u8at = (d: u8[], o: int) -> int:
+    if o < 0 or o >= d.len(): return 0
+    int(d[o])
+__u16 = (d: u8[], o: int) -> int: (__u8at(d, o) << 8) | __u8at(d, o + 1)
+__i16 = (d: u8[], o: int) -> int:
+    v = __u16(d, o)
+    if v >= 32768: return v - 65536
+    v
+__u32 = (d: u8[], o: int) -> int: (__u16(d, o) << 16) | __u16(d, o + 2)
+
+__ttf_open = (d: u8[]) -> __Ttf:
+    t = __Ttf(d)
+    start = 0
+    tag = __u32(d, 0)
+    if tag == 0x74746366: start = __u32(d, 12)          # 'ttcf': a collection, its first font
+    tag = __u32(d, start)
+    otto = tag == 0x4F54544F                            # 'OTTO': PostScript outlines (CFF)
+    if tag != 0x00010000 and tag != 0x74727565 and not otto:
+        t.error = "not a TrueType font"
+        return t
+    n = __u16(d, start + 4)
+    maxp = 0
+    hhea = 0
+    loop i in [0..n):
+        r = start + 12 + 16 * i
+        tg = __u32(d, r)
+        off = __u32(d, r + 8)
+        if tg == 0x68656164: t.head = off               # head
+        else if tg == 0x6C6F6361: t.loca = off          # loca
+        else if tg == 0x676C7966: t.glyf = off          # glyf
+        else if tg == 0x686D7478: t.hmtx = off          # hmtx
+        else if tg == 0x636D6170: t.cmap = off          # cmap
+        else if tg == 0x6D617870: maxp = off            # maxp
+        else if tg == 0x68686561: hhea = off            # hhea
+        else if tg == 0x43464620: t.cff = off           # 'CFF '
+    if otto and t.cff == 0:
+        t.error = "an OpenType font with no CFF table (CFF2, a variable font, is not read: use a .ttf or a static .otf)"
+        return t
+    if t.head == 0 or (not otto and (t.loca == 0 or t.glyf == 0)) or t.hmtx == 0 or t.cmap == 0 or maxp == 0 or hhea == 0:
+        t.error = "the font is missing a table it needs (head, loca, glyf, hmtx, cmap, maxp, hhea)"
+        return t
+    if otto:
+        why = __cff_open(t)
+        if len(why) > 0:
+            t.error = why
+            return t
+    t.upem = max(__u16(d, t.head + 18), 1)
+    t.long_loca = __i16(d, t.head + 50) == 1
+    t.nglyphs = __u16(d, maxp + 4)
+    t.nhmetrics = max(__u16(d, hhea + 34), 1)
+    t
+
+# the glyph for a character (0: the font has none)
+__ttf_glyph_index = (t: __Ttf, c: int) -> int:
+    d = t.d
+    n = __u16(d, t.cmap + 2)
+    best4 = -1
+    best12 = -1
+    loop i in [0..n):
+        r = t.cmap + 4 + 8 * i
+        plat = __u16(d, r)
+        enc = __u16(d, r + 2)
+        sub = t.cmap + __u32(d, r + 4)
+        fmt = __u16(d, sub)
+        if fmt == 12 and (plat == 3 or plat == 0): best12 = sub
+        if fmt == 4 and (plat == 0 or (plat == 3 and (enc == 1 or enc == 0))): best4 = sub
+    if best12 >= 0:
+        groups = __u32(d, best12 + 12)
+        lo = 0
+        hi = groups - 1
+        loop lo <= hi:
+            mid = (lo + hi) / 2
+            g = best12 + 16 + mid * 12
+            s = __u32(d, g)
+            e = __u32(d, g + 4)
+            if c < s: hi = mid - 1
+            else if c > e: lo = mid + 1
+            else: return __u32(d, g + 8) + (c - s)
+        return 0
+    if best4 >= 0 and c < 0x10000:
+        segs = __u16(d, best4 + 6) / 2
+        ends = best4 + 14
+        starts = ends + segs * 2 + 2
+        deltas = starts + segs * 2
+        ranges = deltas + segs * 2
+        loop i in [0..segs):
+            if __u16(d, ends + i * 2) >= c:
+                s = __u16(d, starts + i * 2)
+                if s > c: return 0
+                ro = __u16(d, ranges + i * 2)
+                if ro == 0: return (c + __u16(d, deltas + i * 2)) & 0xFFFF
+                gi = __u16(d, ranges + i * 2 + ro + (c - s) * 2)
+                if gi == 0: return 0
+                return (gi + __u16(d, deltas + i * 2)) & 0xFFFF
+        return 0
+    0
+
+__ttf_advance = (t: __Ttf, g: int) -> int:
+    i = min(g, t.nhmetrics - 1)
+    __u16(t.d, t.hmtx + i * 4)
+
+# a glyph's outline as line segments (x0, y0, x1, y1 in font units, y up), curves flattened;
+# composite glyphs are their parts, moved and scaled
+__ttf_outline = (t: __Ttf, g: int, segs: mut f64[], m: (f64, f64, f64, f64, f64, f64), depth: int):
+    if g < 0 or g >= t.nglyphs or depth > 8: return
+    if t.cff != 0:
+        __cff_outline(t, g, segs, m)
+        return
+    d = t.d
+    o0 = 0
+    o1 = 0
+    if t.long_loca:
+        o0 = __u32(d, t.loca + g * 4)
+        o1 = __u32(d, t.loca + g * 4 + 4)
+    else:
+        o0 = __u16(d, t.loca + g * 2) * 2
+        o1 = __u16(d, t.loca + g * 2 + 2) * 2
+    if o1 <= o0: return                                  # (an empty glyph: a space)
+    p = t.glyf + o0
+    nc = __i16(d, p)
+    if nc < 0:
+        # a composite: parts, each with an offset and maybe a scale
+        q = p + 10
+        loop true:
+            flags = __u16(d, q)
+            part = __u16(d, q + 2)
+            q += 4
+            dx = 0.0
+            dy = 0.0
+            if flags & 1 != 0:
+                dx = f64(__i16(d, q))
+                dy = f64(__i16(d, q + 2))
+                q += 4
+            else:
+                dx = f64(__u8at(d, q))
+                dy = f64(__u8at(d, q + 1))
+                if dx >= 128.0: dx -= 256.0
+                if dy >= 128.0: dy -= 256.0
+                q += 2
+            if flags & 2 == 0:
+                dx = 0.0                                 # (point matching: not supported, kept in place)
+                dy = 0.0
+            a = 1.0
+            b = 0.0
+            c = 0.0
+            e = 1.0
+            if flags & 8 != 0:
+                a = f64(__i16(d, q)) / 16384.0
+                e = a
+                q += 2
+            else if flags & 0x40 != 0:
+                a = f64(__i16(d, q)) / 16384.0
+                e = f64(__i16(d, q + 2)) / 16384.0
+                q += 4
+            else if flags & 0x80 != 0:
+                a = f64(__i16(d, q)) / 16384.0
+                b = f64(__i16(d, q + 2)) / 16384.0
+                c = f64(__i16(d, q + 4)) / 16384.0
+                e = f64(__i16(d, q + 6)) / 16384.0
+                q += 8
+            # (this part's transform, then the parent's)
+            mm = (m.0 * a + m.2 * b, m.1 * a + m.3 * b, m.0 * c + m.2 * e, m.1 * c + m.3 * e, m.0 * dx + m.2 * dy + m.4, m.1 * dx + m.3 * dy + m.5)
+            __ttf_outline(t, part, segs, mm, depth + 1)
+            if flags & 0x20 == 0: break
+            if q >= d.len(): break
+        return
+    ends: int[]
+    loop i in [0..nc): ends.push(__u16(d, p + 10 + i * 2))
+    if nc == 0: return
+    npts = ends[nc - 1] + 1
+    if npts <= 0 or npts > 20000: return
+    q = p + 10 + nc * 2
+    q += 2 + __u16(d, q)                                 # (skip the hinting instructions)
+    flags = fill(0, npts)
+    i = 0
+    loop i < npts:
+        f = __u8at(d, q)
+        q += 1
+        flags[i] = f
+        i += 1
+        if f & 8 != 0:
+            r = __u8at(d, q)
+            q += 1
+            loop k in [0..r):
+                if i < npts:
+                    flags[i] = f
+                    i += 1
+    xs = fill(0.0, npts)
+    ys = fill(0.0, npts)
+    v = 0
+    loop k in [0..npts):
+        f = flags[k]
+        if f & 2 != 0:
+            dv = __u8at(d, q)
+            q += 1
+            if f & 16 == 0: dv = -dv
+            v += dv
+        else if f & 16 == 0:
+            v += __i16(d, q)
+            q += 2
+        xs[k] = f64(v)
+    v = 0
+    loop k in [0..npts):
+        f = flags[k]
+        if f & 4 != 0:
+            dv = __u8at(d, q)
+            q += 1
+            if f & 32 == 0: dv = -dv
+            v += dv
+        else if f & 32 == 0:
+            v += __i16(d, q)
+            q += 2
+        ys[k] = f64(v)
+    # (transformed)
+    loop k in [0..npts):
+        x = xs[k]
+        y = ys[k]
+        xs[k] = m.0 * x + m.2 * y + m.4
+        ys[k] = m.1 * x + m.3 * y + m.5
+    s = 0
+    loop ci in [0..nc):
+        e = ends[ci]
+        if e < s or e >= npts: break
+        n = e - s + 1
+        # start at an on-curve point (or the middle of two off-curve ones)
+        first = -1
+        loop k in [0..n):
+            if flags[s + k] & 1 != 0:
+                first = k
+                break
+        sx = 0.0
+        sy = 0.0
+        if first < 0:
+            sx = (xs[s] + xs[s + min(1, n - 1)]) / 2.0
+            sy = (ys[s] + ys[s + min(1, n - 1)]) / 2.0
+            first = 0
+        else:
+            sx = xs[s + first]
+            sy = ys[s + first]
+        px = sx
+        py = sy
+        cx = 0.0
+        cy = 0.0
+        has_ctrl = false
+        loop k in [1..n]:
+            j = s + (first + k) % n
+            x = xs[j]
+            y = ys[j]
+            if flags[j] & 1 != 0:
+                if has_ctrl: __quad_segs(segs, px, py, cx, cy, x, y)
+                else: __push4(segs, px, py, x, y)
+                px = x
+                py = y
+                has_ctrl = false
+            else:
+                if has_ctrl:
+                    # two off-curve points: an on-curve one between them
+                    mx = (cx + x) / 2.0
+                    my = (cy + y) / 2.0
+                    __quad_segs(segs, px, py, cx, cy, mx, my)
+                    px = mx
+                    py = my
+                cx = x
+                cy = y
+                has_ctrl = true
+        if has_ctrl: __quad_segs(segs, px, py, cx, cy, sx, sy)
+        else if px != sx or py != sy: __push4(segs, px, py, sx, sy)
+        s = e + 1
+
+__push4 = (xs: mut f64[], a: f64, b: f64, c: f64, d: f64):
+    xs.push(a)
+    xs.push(b)
+    xs.push(c)
+    xs.push(d)
+
+# a cubic curve as a few lines
+__cubic_segs = (segs: mut f64[], x0: f64, y0: f64, ax: f64, ay: f64, bx: f64, by: f64, x1: f64, y1: f64):
+    n = 8
+    lx = x0
+    ly = y0
+    loop i in [1..n]:
+        t = f64(i) / f64(n)
+        u = 1.0 - t
+        x = u * u * u * x0 + 3.0 * u * u * t * ax + 3.0 * u * t * t * bx + t * t * t * x1
+        y = u * u * u * y0 + 3.0 * u * u * t * ay + 3.0 * u * t * t * by + t * t * t * y1
+        __push4(segs, lx, ly, x, y)
+        lx = x
+        ly = y
+
+# ---------------- reading CFF (OpenType's PostScript outlines) ----------------
+# (an INDEX at o: its count, and where element i starts and ends)
+__cff_count = (d: u8[], o: int) -> int: __u16(d, o)
+__cff_elem = (d: u8[], o: int, i: int) -> (int, int):
+    n = __u16(d, o)
+    if i < 0 or i >= n: return (0, 0)
+    osz = __u8at(d, o + 2)
+    base = o + 3 + (n + 1) * osz - 1
+    (base + __cff_off(d, o + 3 + i * osz, osz), base + __cff_off(d, o + 3 + (i + 1) * osz, osz))
+__cff_off = (d: u8[], o: int, sz: int) -> int:
+    v = 0
+    loop k in [0..sz): v = (v << 8) | __u8at(d, o + k)
+    v
+# (where the INDEX at o ends: the next thing starts there)
+__cff_skip = (d: u8[], o: int) -> int:
+    n = __u16(d, o)
+    if n == 0: return o + 2
+    osz = __u8at(d, o + 2)
+    o + 3 + (n + 1) * osz - 1 + __cff_off(d, o + 3 + n * osz, osz)
+
+# (a DICT from a to b: each operator, 12 x as 1200 + x, with its operands)
+__cff_dict = (d: u8[], a: int, b: int) -> {int: f64[]}:
+    out: {int: f64[]}
+    ops: f64[]
+    i = a
+    loop i < b:
+        c = __u8at(d, i)
+        if c <= 21:
+            op = c
+            i += 1
+            if c == 12:
+                op = 1200 + __u8at(d, i)
+                i += 1
+            out[op] = ops
+            ops = []
+        else if c == 28:
+            ops.push(f64(__i16(d, i + 1)))
+            i += 3
+        else if c == 29:
+            v = __u32(d, i + 1)
+            if v >= 0x80000000: v -= 0x100000000
+            ops.push(f64(v))
+            i += 5
+        else if c == 30:
+            # a real: its digits two to a byte
+            s = ""
+            i += 1
+            done = false
+            loop i < b and not done:
+                byte = __u8at(d, i)
+                i += 1
+                loop nib in [byte >> 4, byte & 15]:
+                    if done: continue
+                    if nib <= 9: s += "{nib}"
+                    else if nib == 10: s += "."
+                    else if nib == 11: s += "E"
+                    else if nib == 12: s += "E-"
+                    else if nib == 14: s += "-"
+                    else if nib == 15: done = true
+            ops.push(to_float(s) ?? 0.0)
+        else if c >= 32 and c <= 246:
+            ops.push(f64(c - 139))
+            i += 1
+        else if c >= 247 and c <= 250:
+            ops.push(f64((c - 247) * 256 + __u8at(d, i + 1) + 108))
+            i += 2
+        else if c >= 251 and c <= 254:
+            ops.push(f64(-(c - 251) * 256 - __u8at(d, i + 1) - 108))
+            i += 2
+        else: i += 1
+    out
+
+# (the CFF table's charstrings, subroutines and font dicts; "" when all is well)
+__cff_open = (t: mut __Ttf) -> str:
+    d = t.d
+    c = t.cff
+    names = c + __u8at(d, c + 2)
+    tops = __cff_skip(d, names)
+    strs = __cff_skip(d, tops)
+    t.gsubrs = __cff_skip(d, strs)
+    ta, tb = __cff_elem(d, tops, 0)
+    top = __cff_dict(d, ta, tb)
+    if let cs = top.get(17): t.cs_index = c + int(cs[0])
+    else: return "the CFF table has no charstrings"
+    if top.has(1236) and top.has(1237):
+        # (a CID font: each glyph's font dict, each with its own private dict)
+        fda = c + int(top[1236][0])
+        t.fdselect = c + int(top[1237][0])
+        loop k in [0..__cff_count(d, fda)):
+            fa, fb = __cff_elem(d, fda, k)
+            fd = __cff_dict(d, fa, fb)
+            t.lsubrs.push(__cff_private_subrs(d, c, fd))
+    else: t.lsubrs.push(__cff_private_subrs(d, c, top))
+    t.nglyphs = min(t.nglyphs, __cff_count(d, t.cs_index))
+    ""
+
+__cff_private_subrs = (d: u8[], c: int, dict: {int: f64[]}) -> int:
+    if let p = dict.get(18):
+        if p.len() >= 2:
+            pa = c + int(p[1])
+            pd = __cff_dict(d, pa, pa + int(p[0]))
+            if let s = pd.get(19): return pa + int(s[0])
+    0
+
+# (the font dict glyph g uses)
+__cff_fd = (t: __Ttf, g: int) -> int:
+    if t.fdselect == 0: return 0
+    d = t.d
+    f = __u8at(d, t.fdselect)
+    if f == 0: return __u8at(d, t.fdselect + 1 + g)
+    if f == 3:
+        n = __u16(d, t.fdselect + 1)
+        loop k in [0..n):
+            r = t.fdselect + 3 + k * 3
+            if g >= __u16(d, r) and g < __u16(d, r + 3): return __u8at(d, r + 2)
+    0
+
+__cff_bias = (n: int) -> int:
+    if n < 1240: return 107
+    if n < 33900: return 1131
+    32768
+
+struct __Cs:
+    st: f64[]
+    x = 0.0
+    y = 0.0
+    sx = 0.0                    # (the contour's start)
+    sy = 0.0
+    open = false
+    stems = 0
+    width_seen = false
+    done = false
+    m: (f64, f64, f64, f64, f64, f64)
+
+# glyph g's charstring run: its outline as line segments, as __ttf_outline gives them
+__cff_outline = (t: __Ttf, g: int, segs: mut f64[], m: (f64, f64, f64, f64, f64, f64)):
+    d = t.d
+    a, b = __cff_elem(d, t.cs_index, g)
+    fd = __cff_fd(t, g)
+    ls = 0
+    if fd < t.lsubrs.len(): ls = t.lsubrs[fd]
+    cs = __Cs(m = m)
+    __cff_run(t, a, b, ls, cs, segs, 0)
+    __cs_close(cs, segs)
+
+__cs_pt = (cs: __Cs, x: f64, y: f64) -> (f64, f64): (cs.m.0 * x + cs.m.2 * y + cs.m.4, cs.m.1 * x + cs.m.3 * y + cs.m.5)
+
+__cs_line = (cs: mut __Cs, segs: mut f64[], x: f64, y: f64):
+    p0x, p0y = __cs_pt(cs, cs.x, cs.y)
+    p1x, p1y = __cs_pt(cs, x, y)
+    __push4(segs, p0x, p0y, p1x, p1y)
+    cs.x = x
+    cs.y = y
+
+__cs_curve = (cs: mut __Cs, segs: mut f64[], ax: f64, ay: f64, bx: f64, by: f64, x: f64, y: f64):
+    p0x, p0y = __cs_pt(cs, cs.x, cs.y)
+    pax, pay = __cs_pt(cs, ax, ay)
+    pbx, pby = __cs_pt(cs, bx, by)
+    p1x, p1y = __cs_pt(cs, x, y)
+    __cubic_segs(segs, p0x, p0y, pax, pay, pbx, pby, p1x, p1y)
+    cs.x = x
+    cs.y = y
+
+# (the contour closed with a line back to its start; the pen stays where it was: the next move
+# goes from there)
+__cs_close = (cs: mut __Cs, segs: mut f64[]):
+    if cs.open and (cs.x != cs.sx or cs.y != cs.sy):
+        x = cs.x
+        y = cs.y
+        __cs_line(cs, segs, cs.sx, cs.sy)
+        cs.x = x
+        cs.y = y
+    cs.open = false
+
+__cs_move = (cs: mut __Cs, segs: mut f64[], dx: f64, dy: f64):
+    __cs_close(cs, segs)
+    cs.x += dx
+    cs.y += dy
+    cs.sx = cs.x
+    cs.sy = cs.y
+    cs.open = true
+
+# (the first operator that clears the stack may have the glyph's width first: dropped)
+__cs_width = (cs: mut __Cs, wanted: int):
+    if cs.width_seen: return
+    cs.width_seen = true
+    if wanted >= 0 and cs.st.len() > wanted: cs.st.remove(0)
+    else if wanted < 0 and cs.st.len() % 2 == 1: cs.st.remove(0)
+
+__cff_run = (t: __Ttf, a: int, b: int, ls: int, cs: mut __Cs, segs: mut f64[], depth: int):
+    if depth > 10: return
+    d = t.d
+    i = a
+    loop i < b and not cs.done:
+        v = __u8at(d, i)
+        if v >= 32 or v == 28:
+            if v == 28:
+                cs.st.push(f64(__i16(d, i + 1)))
+                i += 3
+            else if v <= 246:
+                cs.st.push(f64(v - 139))
+                i += 1
+            else if v <= 250:
+                cs.st.push(f64((v - 247) * 256 + __u8at(d, i + 1) + 108))
+                i += 2
+            else if v <= 254:
+                cs.st.push(f64(-(v - 251) * 256 - __u8at(d, i + 1) - 108))
+                i += 2
+            else:
+                # 16.16 fixed
+                x = __u32(d, i + 1)
+                if x >= 0x80000000: x -= 0x100000000
+                cs.st.push(f64(x) / 65536.0)
+                i += 5
+            continue
+        i += 1
+        s = cs.st
+        if v == 1 or v == 3 or v == 18 or v == 23:
+            __cs_width(cs, -1)
+            cs.stems += cs.st.len() / 2
+            cs.st.clear()
+        else if v == 19 or v == 20:
+            __cs_width(cs, -1)
+            cs.stems += cs.st.len() / 2
+            cs.st.clear()
+            i += (cs.stems + 7) / 8
+        else if v == 21:
+            __cs_width(cs, 2)
+            __cs_move(cs, segs, cs.st.get(0) ?? 0.0, cs.st.get(1) ?? 0.0)
+            cs.st.clear()
+        else if v == 22:
+            __cs_width(cs, 1)
+            __cs_move(cs, segs, cs.st.get(0) ?? 0.0, 0.0)
+            cs.st.clear()
+        else if v == 4:
+            __cs_width(cs, 1)
+            __cs_move(cs, segs, 0.0, cs.st.get(0) ?? 0.0)
+            cs.st.clear()
+        else if v == 5:
+            k = 0
+            loop k + 1 < s.len():
+                __cs_line(cs, segs, cs.x + s[k], cs.y + s[k + 1])
+                k += 2
+            cs.st.clear()
+        else if v == 6 or v == 7:
+            # (lines alternately across and up, or up and across)
+            h = v == 6
+            loop k in [0..s.len()):
+                if h: __cs_line(cs, segs, cs.x + s[k], cs.y)
+                else: __cs_line(cs, segs, cs.x, cs.y + s[k])
+                h = not h
+            cs.st.clear()
+        else if v == 8:
+            k = 0
+            loop k + 5 < s.len():
+                __cs_rr(cs, segs, s, k)
+                k += 6
+            cs.st.clear()
+        else if v == 24:
+            # (curves, then a line)
+            k = 0
+            loop k + 5 < s.len() - 2:
+                __cs_rr(cs, segs, s, k)
+                k += 6
+            if k + 1 < s.len(): __cs_line(cs, segs, cs.x + s[k], cs.y + s[k + 1])
+            cs.st.clear()
+        else if v == 25:
+            # (lines, then a curve)
+            k = 0
+            loop k + 1 < s.len() - 6:
+                __cs_line(cs, segs, cs.x + s[k], cs.y + s[k + 1])
+                k += 2
+            if k + 5 < s.len(): __cs_rr(cs, segs, s, k)
+            cs.st.clear()
+        else if v == 26 or v == 27:
+            # vvcurveto, hhcurveto: [dx1 (dy1)] then fours
+            k = 0
+            first = 0.0
+            if s.len() % 4 == 1:
+                first = s[0]
+                k = 1
+            loop k + 3 < s.len():
+                if v == 26:
+                    ax = cs.x + first
+                    ay = cs.y + s[k]
+                    bx = ax + s[k + 1]
+                    by = ay + s[k + 2]
+                    __cs_curve(cs, segs, ax, ay, bx, by, bx, by + s[k + 3])
+                else:
+                    ax = cs.x + s[k]
+                    ay = cs.y + first
+                    bx = ax + s[k + 1]
+                    by = ay + s[k + 2]
+                    __cs_curve(cs, segs, ax, ay, bx, by, bx + s[k + 3], by)
+                first = 0.0
+                k += 4
+            cs.st.clear()
+        else if v == 30 or v == 31:
+            # vhcurveto, hvcurveto: curves that start up and end across, or the other way, by turns
+            h = v == 31
+            k = 0
+            loop k + 3 < s.len():
+                last = k + 4 == s.len() - 1
+                extra = 0.0
+                if last: extra = s[k + 4]
+                if h:
+                    ax = cs.x + s[k]
+                    ay = cs.y
+                    bx = ax + s[k + 1]
+                    by = ay + s[k + 2]
+                    __cs_curve(cs, segs, ax, ay, bx, by, bx + extra, by + s[k + 3])
+                else:
+                    ax = cs.x
+                    ay = cs.y + s[k]
+                    bx = ax + s[k + 1]
+                    by = ay + s[k + 2]
+                    __cs_curve(cs, segs, ax, ay, bx, by, bx + s[k + 3], by + extra)
+                h = not h
+                k += 4
+                if last: break
+            cs.st.clear()
+        else if v == 10 or v == 29:
+            # a subroutine: local or global, its number biased
+            if s.len() == 0: return
+            idx = int(cs.st.pop())
+            base = ls
+            if v == 29: base = t.gsubrs
+            if base == 0: return
+            n = __cff_count(d, base)
+            sa, sb = __cff_elem(d, base, idx + __cff_bias(n))
+            __cff_run(t, sa, sb, ls, cs, segs, depth + 1)
+        else if v == 11: return
+        else if v == 14:
+            __cs_width(cs, 0)
+            cs.st.clear()
+            __cs_close(cs, segs)
+            cs.done = true
+        else if v == 12:
+            e = __u8at(d, i)
+            i += 1
+            # flex and its kinds: two curves
+            if e == 35 and s.len() >= 12:
+                __cs_rr(cs, segs, s, 0)
+                __cs_rr(cs, segs, s, 6)
+            else if e == 34 and s.len() >= 7:
+                y0 = cs.y
+                __cs_curve(cs, segs, cs.x + s[0], cs.y, cs.x + s[0] + s[1], cs.y + s[2], cs.x + s[0] + s[1] + s[3], cs.y + s[2])
+                __cs_curve(cs, segs, cs.x + s[4], cs.y, cs.x + s[4] + s[5], y0, cs.x + s[4] + s[5] + s[6], y0)
+            else if e == 36 and s.len() >= 9:
+                y0 = cs.y
+                __cs_curve(cs, segs, cs.x + s[0], cs.y + s[1], cs.x + s[0] + s[2], cs.y + s[1] + s[3], cs.x + s[0] + s[2] + s[4], cs.y + s[1] + s[3])
+                __cs_curve(cs, segs, cs.x + s[5], cs.y, cs.x + s[5] + s[6], cs.y + s[7], cs.x + s[5] + s[6] + s[8], y0)
+            else if e == 37 and s.len() >= 11:
+                x0 = cs.x
+                y0 = cs.y
+                dx = s[0] + s[2] + s[4] + s[6] + s[8]
+                dy = s[1] + s[3] + s[5] + s[7] + s[9]
+                __cs_rr(cs, segs, s, 0)
+                ax = cs.x + s[6]
+                ay = cs.y + s[7]
+                bx = ax + s[8]
+                by = ay + s[9]
+                if abs(dx) > abs(dy): __cs_curve(cs, segs, ax, ay, bx, by, bx + s[10], y0)
+                else: __cs_curve(cs, segs, ax, ay, bx, by, x0, by + s[10])
+            cs.st.clear()
+        else: cs.st.clear()
+
+# (rrcurveto's six numbers from s[k])
+__cs_rr = (cs: mut __Cs, segs: mut f64[], s: f64[], k: int):
+    ax = cs.x + s[k]
+    ay = cs.y + s[k + 1]
+    bx = ax + s[k + 2]
+    by = ay + s[k + 3]
+    __cs_curve(cs, segs, ax, ay, bx, by, bx + s[k + 4], by + s[k + 5])
+
+# a quadratic curve as a few lines
+__quad_segs = (segs: mut f64[], x0: f64, y0: f64, cx: f64, cy: f64, x1: f64, y1: f64):
+    n = 6
+    lx = x0
+    ly = y0
+    loop i in [1..n]:
+        t = f64(i) / f64(n)
+        u = 1.0 - t
+        x = u * u * x0 + 2.0 * u * t * cx + t * t * x1
+        y = u * u * y0 + 2.0 * u * t * cy + t * t * y1
+        __push4(segs, lx, ly, x, y)
+        lx = x
+        ly = y
+
+# ---------------- making the atlas ----------------
+# a cell's signed distance field: 128 on the outline, more inside (segments in cell pixels, y down)
+__sdf_cell = (segs: f64[], img: mut Image, ox: int, oy: int):
+    v = __sdf_values(segs)
+    n = __FONT_CELL
+    loop y in [0..n):
+        loop x in [0..n):
+            b = v[y * n + x]
+            i = ((oy + y) * img.width + ox + x) * 4
+            img.pixels[i] = b
+            img.pixels[i + 1] = b
+            img.pixels[i + 2] = b
+            img.pixels[i + 3] = 255
+
+# a glyph's distance field, a cell's values row by row (128 on the outline): what __sdf_cell puts
+# in the atlas, made apart from it so glyphs can be made at once on several threads
+__sdf_values = (segs: f64[]) -> u8[]:
+    n = __FONT_CELL
+    sp = __FONT_SPREAD
+    out = fill(u8(0), n * n)
+    dist = fill(sp, n * n)
+    k = 0
+    loop k + 3 < segs.len():
+        x0 = segs[k]
+        y0 = segs[k + 1]
+        x1 = segs[k + 2]
+        y1 = segs[k + 3]
+        k += 4
+        # only the pixels this segment can be nearest to, within the spread
+        bx0 = max(int(floor(min(x0, x1) - sp)), 0)
+        bx1 = min(int(ceil(max(x0, x1) + sp)), n - 1)
+        by0 = max(int(floor(min(y0, y1) - sp)), 0)
+        by1 = min(int(ceil(max(y0, y1) + sp)), n - 1)
+        dx = x1 - x0
+        dy = y1 - y0
+        ll = dx * dx + dy * dy
+        loop y in [by0..by1]:
+            py = f64(y) + 0.5
+            loop x in [bx0..bx1]:
+                px = f64(x) + 0.5
+                t = 0.0
+                if ll > 0.0: t = clamp(((px - x0) * dx + (py - y0) * dy) / ll, 0.0, 1.0)
+                ex = px - (x0 + t * dx)
+                ey = py - (y0 + t * dy)
+                dd = sqrt(ex * ex + ey * ey)
+                if dd < dist[y * n + x]: dist[y * n + x] = dd
+    # inside or out: the winding of the outline along each row
+    xs: f64[]
+    ws: int[]
+    loop y in [0..n):
+        py = f64(y) + 0.5
+        xs.clear()
+        ws.clear()
+        k = 0
+        loop k + 3 < segs.len():
+            x0 = segs[k]
+            y0 = segs[k + 1]
+            x1 = segs[k + 2]
+            y1 = segs[k + 3]
+            k += 4
+            if (y0 <= py and y1 > py) or (y1 <= py and y0 > py):
+                xs.push(x0 + (py - y0) / (y1 - y0) * (x1 - x0))
+                if y1 > y0: ws.push(1)
+                else: ws.push(-1)
+        # (sorted by x, carrying their windings)
+        loop i in [1..xs.len()):
+            j = i
+            loop j > 0 and xs[j - 1] > xs[j]:
+                tx = xs[j]
+                xs[j] = xs[j - 1]
+                xs[j - 1] = tx
+                tw = ws[j]
+                ws[j] = ws[j - 1]
+                ws[j - 1] = tw
+                j -= 1
+        wind = 0
+        ci = 0
+        loop x in [0..n):
+            px = f64(x) + 0.5
+            loop ci < xs.len() and xs[ci] <= px:
+                wind += ws[ci]
+                ci += 1
+            # (as the built-in atlas: 128 on the outline, +127 at `spread` inside)
+            sd = -dist[y * n + x]
+            if wind != 0: sd = dist[y * n + x]
+            v = clamp((128.0 + sd / sp * 127.0) / 255.0, 0.0, 1.0)
+            out[y * n + x] = u8(clamp(int(f32(v) * 255.0 + 0.5), 0, 255))
+    out
+
+# a font from a TrueType file (it stops the program with a message if it cannot read it)
+load_font = (file: u8[], extra: str = "") -> Font:
+    t = __ttf_open(file)
+    if t.error != "": panic("load_font: {t.error}")
+    codes: int[]
+    loop c in [32..126]: codes.push(c)
+    loop c in [160..383]: codes.push(c)
+    loop c in chars(__FONT_CHARS): codes.push(c)
+    loop c in chars(extra):
+        if not codes.contains(c): codes.push(c)
+    cols = 16
+    rows = (codes.len() + cols - 1) / cols
+    img = image(cols * __FONT_CELL, rows * __FONT_CELL, vec4(0, 0, 0, 1))
+    scale = __FONT_PX / f64(t.upem)
+    f = Font(Texture(0, 1, 1), {}, fill(-1, 128), [], cols, f64(__FONT_CELL), __FONT_PX, f64(__FONT_BASE), __FONT_SPREAD)
+    outlines: f64[][]
+    loop c in codes:
+        g = __ttf_glyph_index(t, c)
+        if g == 0 and c != 32: continue
+        slot = f.adv.len()
+        f.slots[c] = slot
+        if c < 128: f.ascii[c] = slot
+        f.adv.push(f64(__ttf_advance(t, g)) * scale)
+        segs: f64[]
+        __ttf_outline(t, g, segs, (1.0, 0.0, 0.0, 1.0, 0.0, 0.0), 0)
+        # (to the cell: the pen at x = spread on the baseline, y down)
+        k = 0
+        loop k + 1 < segs.len():
+            segs[k] = __FONT_SPREAD + segs[k] * scale
+            segs[k + 1] = f64(__FONT_BASE) - segs[k + 1] * scale
+            k += 2
+        outlines.push(segs)
+    # (each glyph's distance field on a thread of its own, then put in the atlas)
+    cells = parallel_map(outlines, __sdf_values)
+    n = __FONT_CELL
+    loop slot in 0.. and v in cells:
+        ox = (slot % cols) * n
+        oy = (slot / cols) * n
+        loop y in [0..n):
+            loop x in [0..n):
+                b = v[y * n + x]
+                i = ((oy + y) * img.width + ox + x) * 4
+                img.pixels[i] = b
+                img.pixels[i + 1] = b
+                img.pixels[i + 2] = b
+    f.texture = texture(img, true)
+    f

@@ -309,10 +309,10 @@ dw_expr = (id: int) -> int:
             return n
         if op == "=>": return dw_function(id, "")
         if op == "//" or op == "%":
-            fn = mk(.ident, pos)
-            nodes[fn].name = i32(intern(if op == "//": "__floor_div" else: "__floor_mod"))
+            callee = mk(.ident, pos)
+            nodes[callee].name = i32(intern(if op == "//": "__floor_div" else: "__floor_mod"))
             n = mk(.call, pos)
-            nodes[n].a = i32(fn)
+            nodes[n].a = i32(callee)
             set_list(n, [dw_expr(left), dw_expr(right)])
             return n
         if op == ".":

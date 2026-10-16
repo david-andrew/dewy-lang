@@ -1,0 +1,99 @@
+# Smooth paths through points (vec2 or vec3): a road, a race track, a rail for a camera or a
+# moving platform. A path is its points in order; closed, it goes back to the first (a track).
+#
+#   track = spline_points(corners, per_segment = 12, closed = true)    # the smooth track, as points
+#   d, at = nearest_on_path(track, kart.pos, closed = true)            # how far round, and where
+#   lap_progress = d / path_length(track, closed = true)
+#   ahead = point_along(track, d + 8.0, closed = true)                 # a point to steer for
+
+# the point at t, from 0 (the first point) to 1 (the last; a closed path's first again), on the
+# smooth curve through the points (Catmull-Rom: through each point, with no corners)
+spline[T] = (points: T[], t: f64, closed: bool = false) -> T:
+    n = points.len()
+    if n == 0: panic("spline: give it points to go through")
+    if n == 1: return points[0]
+    segs = if closed: n else: n - 1
+    x = clamp(t, 0.0, 1.0) * f64(segs)
+    i = min(int(floor(x)), segs - 1)
+    __catmull(points, i, x - f64(i), closed)
+
+# the smooth curve through the points as points: per_segment from each point to the next (for
+# drawing it, or as a path to follow; the last point is there too, unless it is closed)
+spline_points[T] = (points: T[], per_segment: int = 8, closed: bool = false) -> T[]:
+    out: T[]
+    n = points.len()
+    if n < 2: return points
+    segs = if closed: n else: n - 1
+    k = max(per_segment, 1)
+    loop i in [0..segs):
+        loop j in [0..k): out.push(__catmull(points, i, f64(j) / f64(k), closed))
+    if not closed: out.push(points[n - 1])
+    out
+
+# (the segment from point i to the next, at u from 0 to 1)
+__catmull[T] = (p: T[], i: int, u: f64, closed: bool) -> T:
+    n = p.len()
+    at = (k: int) -> T:
+        if closed: return p[((k % n) + n) % n]
+        p[clamp(k, 0, n - 1)]
+    p0 = at(i - 1)
+    p1 = at(i)
+    p2 = at(i + 1)
+    p3 = at(i + 2)
+    u2 = u * u
+    u3 = u2 * u
+    (p1 * 2.0 + (p2 - p0) * f32(u) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * f32(u2) + (p1 * 3.0 - p0 - p2 * 3.0 + p3) * f32(u3)) * 0.5
+
+# how long the path is (closed: back to the start too)
+path_length[T] = (path: T[], closed: bool = false) -> f64:
+    total = 0.0
+    loop i in [1..path.len()): total += f64(length(path[i] - path[i - 1]))
+    if closed and path.len() > 1: total += f64(length(path[0] - path[path.len() - 1]))
+    total
+
+# where p is nearest to the path: how far along it that is (from its start) and the point there
+nearest_on_path[T] = (path: T[], p: T, closed: bool = false) -> (f64, T):
+    n = path.len()
+    if n == 0: panic("nearest_on_path: the path has no points")
+    if n == 1: return (0.0, path[0])
+    best = 1e300
+    best_d = 0.0
+    best_at = path[0]
+    along = 0.0
+    segs = if closed: n else: n - 1
+    loop i in [0..segs):
+        a = path[i]
+        b = path[(i + 1) % n]
+        ab = b - a
+        l2 = f64(dot(ab, ab))
+        t = 0.0
+        if l2 > 0.0: t = clamp(f64(dot(p - a, ab)) / l2, 0.0, 1.0)
+        q = a + ab * f32(t)
+        d2 = f64(dot(p - q, p - q))
+        if d2 < best:
+            best = d2
+            best_d = along + t * sqrt(l2)
+            best_at = q
+        along += sqrt(l2)
+    (best_d, best_at)
+
+# the point `distance` along the path from its start (a closed one goes round again; an open
+# one stops at its ends)
+point_along[T] = (path: T[], distance: f64, closed: bool = false) -> T:
+    n = path.len()
+    if n == 0: panic("point_along: the path has no points")
+    if n == 1: return path[0]
+    total = path_length(path, closed)
+    d = distance
+    if closed and total > 0.0: d = d - floor(d / total) * total
+    else: d = clamp(d, 0.0, total)
+    segs = if closed: n else: n - 1
+    loop i in [0..segs):
+        a = path[i]
+        b = path[(i + 1) % n]
+        l = f64(length(b - a))
+        if d <= l or i == segs - 1:
+            if l <= 0.0: return a
+            return a + (b - a) * f32(min(d / l, 1.0))
+        d -= l
+    path[n - 1]

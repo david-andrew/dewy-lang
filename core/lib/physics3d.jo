@@ -1,0 +1,1749 @@
+# 3D physics: rigid bodies (spheres, boxes, capsules) that fall, collide, slide, roll and stack,
+# a level's triangles to stand on, joints, rays, and a character controller for walking.
+# `import physics3d`, then:
+#
+#   w = physics3d.World()                                   # meters, y up, gravity 9.81 down
+#   w.add_box(vec3(0, -0.5, 0), vec3(40, 1, 40), kind = .fixed)        # (a size: full lengths)
+#   crate = w.add_box(vec3(0, 3, 0), vec3(1, 1, 1))
+#   ball = w.add_sphere(vec3(0.3, 6, 0), 0.5, bounce = 0.4)
+#   update = (dt: f64): w.step(dt)
+#   draw = (): draw_mesh(cube, w.transform(crate))         # (position and turn, as a mat4)
+#
+# Masses come from sizes and `density` (kilograms per cubic meter: 1000 is water's, so a ball of
+# radius 0.5 weighs 524 kg), or are given: `w.add_sphere(pos, 0.5, mass = 1)`, `w.set_mass(b, 2)`.
+# Bodies are `.dynamic`, `.fixed` or `.moving` (moved only by the velocity the game gives them),
+# with one shape each; `w.add_mesh(triangles)` adds fixed triangles (a level, from a model:
+# physics3d.triangles(model_data); a terrain_mesh: physics3d.terrain_triangles). Joints:
+# `w.ball(a, b, at)` (a ball and socket), `w.hinge(a, b, at, axis)`, `w.rod(a, b, at_a, at_b)`
+# (a distance, or a spring, or a rope). Rays: `w.raycast`.
+# A character: `w.character(pos, radius, height)` and `w.walk(c, velocity, dt)`, a capsule that
+# walks up slopes and steps, slides down steeper ones, and is pushed by nothing but the level.
+# Contacts: `w.contacts(b)` after a step, each with `.new` on the step they met; a sensor
+# (`sensor = true`: a pickup, a trigger zone) collides with nothing but is in them too.
+# As in 2D, stepping is the same for the same inputs (for replays and rollback). A small, fast
+# body can pass through a thin wall in one step (there is no continuous collision yet): for
+# bullets, use w.raycast from where they were to where they are.
+
+enum BodyKind: dynamic, fixed, moving
+enum Shape: none, sphere, box, capsule, triangles
+
+# (a handle: a body's place, and which body has had it: a removed body's handle is not taken
+# for the next one put there)
+struct Body:
+    id: int
+    gen: int
+
+struct Joint:
+    id: int
+    gen: int
+
+struct Contact:
+    a: Body
+    b: Body
+    point: vec3
+    normal: vec3            # from a toward b
+    impulse: f32
+    new: bool
+
+struct Hit:
+    body: Body
+    point: vec3
+    normal: vec3
+    fraction: f32
+
+# the world itself, for joints to it: w.ball(ground, lamp, at) hangs a lamp from a fixed point
+ground = Body(0)
+
+# ---------------- small 3x3 matrices (rows) ----------------
+struct __M3:
+    r0: vec3
+    r1: vec3
+    r2: vec3
+
+__mv = (m: __M3, v: vec3) -> vec3: vec3(dot(m.r0, v), dot(m.r1, v), dot(m.r2, v))
+# (the rotation of a quaternion as rows)
+__qm = (q: vec4) -> __M3:
+    x = q.x
+    y = q.y
+    z = q.z
+    w = q.w
+    __M3(vec3(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
+         vec3(2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
+         vec3(2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)))
+# R diag(d) Rᵀ
+__rdr = (r: __M3, d: vec3) -> __M3: __M3(__rdr_row(r.r0, d, r), __rdr_row(r.r1, d, r), __rdr_row(r.r2, d, r))
+__rdr_row = (ri: vec3, d: vec3, r: __M3) -> vec3:
+    x = ri * d
+    vec3(dot(x, r.r0), dot(x, r.r1), dot(x, r.r2))
+__col = (m: __M3, i: int) -> vec3:
+    if i == 0: return vec3(m.r0.x, m.r1.x, m.r2.x)
+    if i == 1: return vec3(m.r0.y, m.r1.y, m.r2.y)
+    vec3(m.r0.z, m.r1.z, m.r2.z)
+__comp = (v: vec3, i: int) -> f32:
+    if i == 0: return v.x
+    if i == 1: return v.y
+    v.z
+
+# ---------------- the world ----------------
+struct __B3:
+    gen: int                # (bumped when it is removed)
+    kind = BodyKind.dynamic
+    shape = -1              # 0 sphere, 1 box, 2 capsule, 3 triangles (-1: none)
+    pos: vec3
+    rot = vec4(0, 0, 0, 1)
+    vel: vec3
+    spin: vec3              # radians a second, about each axis (world)
+    inv_mass: f32
+    inv_i: vec3             # 1 / inertia about the body's own axes
+    iw: __M3                # the inverse inertia in the world (each step)
+    radius: f32             # sphere, capsule
+    half: vec3              # box: half its size; capsule: half the length of its middle in y
+    mesh = -1               # triangles: its mesh
+    friction = 0.5
+    bounce = 0.0
+    damping: f32
+    layer = 1
+    mask = -1
+    sensor = false
+    alive = true
+    fixed_rotation = false
+    tag: int
+    force: vec3
+    torque: vec3
+    lo: vec3
+    hi: vec3
+    m: __M3                 # (its rotation as a matrix, each step)
+    asleep = false          # still for a while, with all it touches: left out until woken
+    still: f32              # (how long it has been nearly still)
+
+struct __C3:
+    point: vec3
+    normal: vec3
+    sep: f32
+    feature: int
+    pn: f32
+    pt1: f32
+    pt2: f32
+    t1: vec3
+    t2: vec3
+    mass_n: f32
+    mass_t1: f32
+    mass_t2: f32
+    bias: f32
+    ra: vec3
+    rb: vec3
+
+struct __Arb3:
+    a: int
+    b: int
+    contacts: __C3[]
+    friction: f32
+    bounce: f32
+    sensor: bool
+
+struct __J3:
+    gen: int
+    kind: int               # 0 ball, 1 hinge, 2 rod
+    a: int
+    b: int
+    la: vec3
+    lb: vec3
+    axis_a: vec3            # hinge: its axis in each body's frame
+    axis_b: vec3
+    length: f32
+    hz: f32
+    damping: f32
+    rope: bool
+    alive = true
+    on = false              # (this step: one of its bodies is awake)
+    acc: vec3
+    acc_ang: vec3
+    acc1: f32
+    # (a hinge's limits and motor: the angle about its axis, from where it was when made; ref_a and
+    # ref_b, at right angles to the axis in each body's frame, show it)
+    ref_a: vec3
+    ref_b: vec3
+    lower = -1e9
+    upper = 1e9
+    motor_speed: f32
+    max_torque: f32
+    acc_motor: f32
+    acc_lower: f32
+    acc_upper: f32
+    angle: f32
+    axial: f32
+    axis_w: vec3
+    ra: vec3
+    rb: vec3
+    u: vec3
+    mass1: f32
+    bias1: f32
+    gamma: f32
+
+struct __Mesh3:
+    tris: vec3[]            # three corners each
+    nodes: __Node3[]        # a tree of boxes around them
+    order: int[]            # the triangles, as the tree's leaves hold them
+
+struct __Node3:
+    lo: vec3
+    hi: vec3
+    left = -1               # (-1: a leaf, with triangles order[first..first + count))
+    right = -1
+    first: int
+    count: int
+
+struct World:
+    gravity = vec3(0, -9.81, 0)
+    iterations = 10
+    sleep = true            # bodies that have come to rest are left out until something touches them
+    substep = 1.0 / 120.0
+    bodies: __B3[] = [__B3(kind = .fixed)]
+    joints: __J3[]
+    meshes: __Mesh3[]
+    arbs: __Arb3[]
+    arb_index: {int: int}
+    free: int[]
+    events: Contact[]
+
+# ---------------- making bodies ----------------
+add_sphere = (w: mut World, pos: vec3, radius: f64, kind: BodyKind = .dynamic, density: f64 = 1000, friction: f64 = 0.5, bounce: f64 = 0.0, sensor: bool = false, mass: f64 = 0) -> Body:
+    b = __B3(kind = kind, shape = 0, pos = pos, radius = f32(radius), friction = f32(friction), bounce = f32(bounce), sensor = sensor)
+    m = density * 4.0 / 3.0 * PI * radius * radius * radius
+    ii = 0.4 * m * radius * radius
+    __set_mass(b, m, vec3(f32(ii), f32(ii), f32(ii)), mass)
+    __add3(w, b)
+
+# size: the box's full width, height and depth
+add_box = (w: mut World, pos: vec3, size: vec3, rot: vec4 = vec4(0, 0, 0, 1), kind: BodyKind = .dynamic, density: f64 = 1000, friction: f64 = 0.5, bounce: f64 = 0.0, sensor: bool = false, mass: f64 = 0) -> Body:
+    b = __B3(kind = kind, shape = 1, pos = pos, rot = normalize(rot), half = size * 0.5, friction = f32(friction), bounce = f32(bounce), sensor = sensor)
+    m = density * f64(size.x * size.y * size.z)
+    k = m / 12.0
+    __set_mass(b, m, vec3(f32(k * f64(size.y * size.y + size.z * size.z)), f32(k * f64(size.x * size.x + size.z * size.z)), f32(k * f64(size.x * size.x + size.y * size.y))), mass)
+    __add3(w, b)
+
+# a capsule standing up: height from the bottom to the top of its round ends
+add_capsule = (w: mut World, pos: vec3, radius: f64, height: f64, rot: vec4 = vec4(0, 0, 0, 1), kind: BodyKind = .dynamic, density: f64 = 1000, friction: f64 = 0.5, bounce: f64 = 0.0, sensor: bool = false, mass: f64 = 0) -> Body:
+    hh = max(height / 2.0 - radius, 0.0)
+    b = __B3(kind = kind, shape = 2, pos = pos, rot = normalize(rot), radius = f32(radius), half = vec3(0, f32(hh), 0), friction = f32(friction), bounce = f32(bounce), sensor = sensor)
+    m = density * PI * radius * radius * (2.0 * hh + 4.0 / 3.0 * radius)
+    iy = 0.5 * m * radius * radius
+    ix = m * (3.0 * radius * radius + 4.0 * hh * hh) / 12.0 + 0.4 * m * radius * radius * 0.5
+    __set_mass(b, m, vec3(f32(ix), f32(iy), f32(ix)), mass)
+    __add3(w, b)
+
+# fixed triangles (three corners each, in the world): a level, the ground
+add_mesh = (w: mut World, triangles: vec3[], friction: f64 = 0.6) -> Body:
+    if triangles.len() < 3: panic("add_mesh needs at least one triangle (three corners)")
+    w.meshes.push(__build_mesh(triangles))
+    __add3(w, __B3(kind = .fixed, shape = 3, mesh = w.meshes.len() - 1, friction = f32(friction)))
+
+# a model's triangles, where its parts are (for add_mesh)
+triangles = (md: ModelData) -> vec3[]:
+    out: vec3[]
+    loop m in md.meshes:
+        if m.indices.len() > 0:
+            loop i in m.indices: out.push(transform_point(m.transform, m.vertices[int(i)].pos))
+        else:
+            loop v in m.vertices: out.push(transform_point(m.transform, v.pos))
+    out
+
+# the triangles of terrain_mesh(size, divisions, height, ...), for add_mesh: the ground of the
+# terrain drawn with the same size, divisions and height
+terrain_triangles = (size: f64, divisions: int, height: (f64, f64) -> f64) -> vec3[]:
+    n = divisions
+    step = size / f64(n)
+    half = size / 2.0
+    corners: vec3[]
+    loop zi in [0..n + 1):
+        loop xi in [0..n + 1):
+            x = -half + f64(xi) * step
+            z = -half + f64(zi) * step
+            corners.push(vec3(f32(x), f32(height(x, z)), f32(z)))
+    out: vec3[]
+    loop zi in [0..n):
+        loop xi in [0..n):
+            a = zi * (n + 1) + xi
+            b = a + n + 1
+            out.push(corners[a])
+            out.push(corners[b])
+            out.push(corners[a + 1])
+            out.push(corners[a + 1])
+            out.push(corners[b])
+            out.push(corners[b + 1])
+    out
+
+# (want > 0: that mass instead of the density's, spread the same way)
+__set_mass = (b: mut __B3, m0: f64, inertia0: vec3, want: f64):
+    m = m0
+    inertia = inertia0
+    if want > 0.0 and m0 > 0.0:
+        inertia = inertia0 * f32(want / m0)
+        m = want
+    if b.kind != .dynamic or m <= 0.0: return
+    b.inv_mass = f32(1.0 / m)
+    b.inv_i = vec3(1.0 / inertia.x, 1.0 / inertia.y, 1.0 / inertia.z)
+
+# give a dynamic body another mass, in kilograms (its turning inertia changes with it)
+set_mass = (w: mut World, b: Body, m: f64):
+    if m <= 0.0: panic("a mass must be more than 0 (a body that never moves is `kind = .fixed`)")
+    i = __id(w, b)
+    if w.bodies[i].kind != .dynamic or w.bodies[i].inv_mass == 0.0: return
+    k = f32(1.0 / (f64(w.bodies[i].inv_mass) * m))
+    w.bodies[i].inv_mass = f32(1.0 / m)
+    w.bodies[i].inv_i *= k
+
+__add3 = (w: mut World, b: __B3) -> Body:
+    id = w.bodies.len()
+    if w.free.len() > 0:
+        id = w.free.pop()
+        g = w.bodies[id].gen
+        w.bodies[id] = b
+        w.bodies[id].gen = g
+    else: w.bodies.push(b)
+    __update3(w.bodies[id], w.meshes)
+    __body(w, id)
+
+# take b out of the world (and the joints it is in); its handle then means nothing (a handle
+# used after this panics; removing twice does nothing)
+remove = (w: mut World, b: Body):
+    if b.id <= 0 or b.id >= w.bodies.len() or w.bodies[b.id].gen != b.gen or not w.bodies[b.id].alive: return
+    id = b.id
+    # (what rested on it, or hung from it, wakes up: near it, asleep, they keep no contacts)
+    lo = w.bodies[id].lo - vec3(0.05, 0.05, 0.05)
+    hi = w.bodies[id].hi + vec3(0.05, 0.05, 0.05)
+    near: int[]
+    loop i in 0.. and o in w.bodies:
+        if o.asleep and o.lo.x <= hi.x and o.hi.x >= lo.x and o.lo.y <= hi.y and o.hi.y >= lo.y and o.lo.z <= hi.z and o.hi.z >= lo.z: near.push(i)
+    loop i in near: __wake(w, i)
+    loop j in w.joints:
+        if j.alive and j.a == id: __wake(w, j.b)
+        else if j.alive and j.b == id: __wake(w, j.a)
+    w.bodies[id].alive = false
+    w.bodies[id].gen += 1
+    __unshape(w.bodies[id])
+    w.free.push(id)
+    # (the contacts from the last step forget it: what is read from them is still there)
+    w.events.retain((c): c.a.id != id and c.b.id != id)
+    loop mut j in w.joints:
+        if j.alive and (j.a == id or j.b == id):
+            j.alive = false
+            j.gen += 1
+
+remove = (w: mut World, j: Joint):
+    if j.id < 0 or j.id >= w.joints.len() or w.joints[j.id].gen != j.gen or not w.joints[j.id].alive: return
+    w.joints[j.id].alive = false
+    w.joints[j.id].gen += 1
+
+# (a body's place, from its handle: one removed since panics)
+__id = (w: World, b: Body) -> int:
+    if b.id < 0 or b.id >= w.bodies.len() or w.bodies[b.id].gen != b.gen:
+        panic("this body was removed from its world (or is from another world)")
+    b.id
+__body = (w: World, id: int) -> Body: Body(id, w.bodies[id].gen)
+# (a joint's place, -1 for one removed: what is asked of it does nothing)
+__jid = (w: World, j: Joint) -> int:
+    if j.id < 0 or j.id >= w.joints.len() or w.joints[j.id].gen != j.gen or not w.joints[j.id].alive: return -1
+    j.id
+__joint_h = (w: World, id: int) -> Joint: Joint(id, w.joints[id].gen)
+
+# the joint is still there (not removed, nor one of its bodies)
+joint_alive = (w: World, j: Joint) -> bool: __jid(w, j) >= 0
+
+# ---------------- asking and changing ----------------
+bodies = (w: World) -> Body[]:
+    out: Body[]
+    loop i in [1..w.bodies.len()):
+        if w.bodies[i].alive and w.bodies[i].shape >= 0: out.push(__body(w, i))
+    out
+# its shape, and (for drawing it) its size: a box's full width, height and depth, a sphere's or
+# a capsule's width (and a capsule's height, end to end, in y)
+shape = (w: World, b: Body) -> Shape:
+    s = w.bodies[__id(w, b)].shape
+    if s == 0: return .sphere
+    if s == 1: return .box
+    if s == 2: return .capsule
+    if s == 3: return .triangles
+    .none
+size = (w: World, b: Body) -> vec3:
+    bd = w.bodies[__id(w, b)]
+    if bd.shape == 0: return vec3(bd.radius, bd.radius, bd.radius) * 2.0
+    if bd.shape == 1: return bd.half * 2.0
+    if bd.shape == 2: return vec3(bd.radius * 2.0, (bd.half.y + bd.radius) * 2.0, bd.radius * 2.0)
+    vec3(0, 0, 0)
+radius = (w: World, b: Body) -> f64: f64(w.bodies[__id(w, b)].radius)
+pos = (w: World, b: Body) -> vec3: w.bodies[__id(w, b)].pos
+rotation = (w: World, b: Body) -> vec4: w.bodies[__id(w, b)].rot
+velocity = (w: World, b: Body) -> vec3: w.bodies[__id(w, b)].vel
+spin = (w: World, b: Body) -> vec3: w.bodies[__id(w, b)].spin
+mass = (w: World, b: Body) -> f64:
+    im = w.bodies[__id(w, b)].inv_mass
+    if im == 0.0: return 0.0
+    1.0 / f64(im)
+kind = (w: World, b: Body) -> BodyKind: w.bodies[__id(w, b)].kind
+alive = (w: World, b: Body) -> bool: b.id > 0 and b.id < w.bodies.len() and w.bodies[b.id].gen == b.gen and w.bodies[b.id].alive
+tag = (w: World, b: Body) -> int: w.bodies[__id(w, b)].tag
+set_tag = (w: mut World, b: Body, t: int): w.bodies[__id(w, b)].tag = t
+# where and how it is turned, as a matrix for drawing (a box's or capsule's size not included)
+transform = (w: World, b: Body) -> mat4: translation(w.bodies[__id(w, b)].pos) * quat_to_mat4(w.bodies[__id(w, b)].rot)
+to_world = (w: World, b: Body, local: vec3) -> vec3: w.bodies[__id(w, b)].pos + quat_rotate(w.bodies[__id(w, b)].rot, local)
+to_local = (w: World, b: Body, p: vec3) -> vec3:
+    q = w.bodies[__id(w, b)].rot
+    quat_rotate(vec4(-q.x, -q.y, -q.z, q.w), p - w.bodies[__id(w, b)].pos)
+
+set_pos = (w: mut World, b: Body, p: vec3):
+    w.bodies[__id(w, b)].pos = p
+    __update3(w.bodies[__id(w, b)], w.meshes)
+    __wake(w, __id(w, b))
+set_rotation = (w: mut World, b: Body, q: vec4):
+    w.bodies[__id(w, b)].rot = normalize(q)
+    __update3(w.bodies[__id(w, b)], w.meshes)
+    __wake(w, __id(w, b))
+set_velocity = (w: mut World, b: Body, v: vec3):
+    w.bodies[__id(w, b)].vel = v
+    __wake(w, __id(w, b))
+set_spin = (w: mut World, b: Body, s: vec3):
+    w.bodies[__id(w, b)].spin = s
+    __wake(w, __id(w, b))
+# it is asleep: at rest with all it touches, left out of each step until something touches it
+sleeping = (w: World, b: Body) -> bool: w.bodies[__id(w, b)].asleep
+
+__wake = (w: mut World, id: int):
+    if w.bodies[id].asleep:
+        w.bodies[id].asleep = false
+        w.bodies[id].still = 0
+set_damping = (w: mut World, b: Body, d: f64): w.bodies[__id(w, b)].damping = f32(d)
+# it never turns, whatever hits it (an upright enemy, a character's body)
+set_fixed_rotation = (w: mut World, b: Body, on: bool):
+    w.bodies[__id(w, b)].fixed_rotation = on
+    if on: w.bodies[__id(w, b)].spin = vec3(0, 0, 0)
+set_friction = (w: mut World, b: Body, f: f64): w.bodies[__id(w, b)].friction = f32(f)
+set_bounce = (w: mut World, b: Body, f: f64): w.bodies[__id(w, b)].bounce = f32(f)
+# which layer a body is on (a bit: 1, 2, 4, 8...; every body starts on 1) and which layers it
+# touches (mask: bits or'ed together; -1, the start: all). Two bodies touch when each one's layer
+# is in the other's mask; rays, casts and overlaps take a mask too. For a collider only the
+# camera sees: `w.set_layers(crown, 4)` and `w.sphere_cast(a, b, r, mask = 1 | 4)`, the player
+# kept out of it with `player.mask = 1 | 2` (a character's mask is its own)
+set_layers = (w: mut World, b: Body, layer: int, mask: int = -1):
+    w.bodies[__id(w, b)].layer = layer
+    w.bodies[__id(w, b)].mask = mask
+
+push = (w: mut World, b: Body, impulse: vec3):
+    w.bodies[__id(w, b)].vel += impulse * w.bodies[__id(w, b)].inv_mass
+    __wake(w, __id(w, b))
+push = (w: mut World, b: Body, impulse: vec3, at: vec3):
+    w.bodies[__id(w, b)].vel += impulse * w.bodies[__id(w, b)].inv_mass
+    w.bodies[__id(w, b)].spin += __mv(w.bodies[__id(w, b)].iw, cross(at - w.bodies[__id(w, b)].pos, impulse))
+    __wake(w, __id(w, b))
+apply_force = (w: mut World, b: Body, f: vec3):
+    w.bodies[__id(w, b)].force += f
+    __wake(w, __id(w, b))
+apply_torque = (w: mut World, b: Body, t: vec3):
+    w.bodies[__id(w, b)].torque += t
+    __wake(w, __id(w, b))
+
+# ---------------- joints ----------------
+# a ball and socket at the point at (in the world, now)
+ball = (w: mut World, a: Body, b: Body, at: vec3) -> Joint:
+    __joint3(w, __J3(kind = 0, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at), lb = w.to_local(b, at)))
+
+# a hinge at at, turning about axis (in the world, now); lower, upper: how far b may turn
+# against a (radians, from how they are now; about axis, by the right hand); motor_speed: b
+# turned against a at that many radians a second, with up to max_torque (0: no motor)
+hinge = (w: mut World, a: Body, b: Body, at: vec3, axis: vec3, lower: f64 = -1e9, upper: f64 = 1e9, motor_speed: f64 = 0, max_torque: f64 = 0) -> Joint:
+    qa = w.bodies[a.id].rot
+    qb = w.bodies[__id(w, b)].rot
+    n = normalize(axis)
+    ia = vec4(-qa.x, -qa.y, -qa.z, qa.w)
+    ib = vec4(-qb.x, -qb.y, -qb.z, qb.w)
+    r, r2 = __tangents(n)
+    __joint3(w, __J3(kind = 1, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at), lb = w.to_local(b, at),
+                     axis_a = quat_rotate(ia, n), axis_b = quat_rotate(ib, n), ref_a = quat_rotate(ia, r), ref_b = quat_rotate(ib, r),
+                     lower = f32(lower), upper = f32(upper), motor_speed = f32(motor_speed), max_torque = f32(max_torque)))
+
+# change a hinge's motor: b turns against a at speed radians a second, with up to max_torque (0: no motor)
+set_motor = (w: mut World, j: Joint, speed: f64, max_torque: f64):
+    k = __jid(w, j)
+    if k < 0: return
+    w.joints[k].motor_speed = f32(speed)
+    w.joints[k].max_torque = f32(max_torque)
+    __wake(w, w.joints[k].a)
+    __wake(w, w.joints[k].b)
+# change how far a hinge lets b turn against a: from lower to upper radians
+set_limits = (w: mut World, j: Joint, lower: f64, upper: f64):
+    k = __jid(w, j)
+    if k < 0: return
+    w.joints[k].lower = f32(lower)
+    w.joints[k].upper = f32(upper)
+    __wake(w, w.joints[k].a)
+    __wake(w, w.joints[k].b)
+# how far b has turned against a since the joint was made, in radians
+joint_angle = (w: World, j: Joint) -> f64:
+    k = __jid(w, j)
+    if k < 0: return 0
+    f64(__hinge_angle(w.joints[k], w.bodies))
+
+__hinge_angle = (j: __J3, bs: __B3[]) -> f32:
+    ax = quat_rotate(bs[j.a].rot, j.axis_a)
+    ra = quat_rotate(bs[j.a].rot, j.ref_a)
+    rb = quat_rotate(bs[j.b].rot, j.ref_b)
+    f32(atan2(f64(dot(cross(ra, rb), ax)), f64(dot(ra, rb))))
+
+# the points at_a of a and at_b of b kept as far apart as they are (spring: a spring of that
+# many oscillations a second; rope: only as far at most)
+rod = (w: mut World, a: Body, b: Body, at_a: vec3, at_b: vec3, spring: f64 = 0, damping: f64 = 0.5, rope: bool = false) -> Joint:
+    __joint3(w, __J3(kind = 2, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at_a), lb = w.to_local(b, at_b), length = length(at_b - at_a),
+                     hz = f32(spring), damping = f32(damping), rope = rope))
+
+ends = (w: World, j: Joint) -> (vec3, vec3):
+    k = __jid(w, j)
+    if k < 0: return (vec3(0, 0, 0), vec3(0, 0, 0))
+    jd = w.joints[k]
+    (w.bodies[jd.a].pos + quat_rotate(w.bodies[jd.a].rot, jd.la), w.bodies[jd.b].pos + quat_rotate(w.bodies[jd.b].rot, jd.lb))
+
+__joint3 = (w: mut World, j: __J3) -> Joint:
+    loop i in [0..w.joints.len()):
+        if not w.joints[i].alive:
+            g = w.joints[i].gen
+            w.joints[i] = j
+            w.joints[i].gen = g
+            return __joint_h(w, i)
+    w.joints.push(j)
+    __joint_h(w, w.joints.len() - 1)
+
+# ---------------- stepping ----------------
+step = (w: mut World, dt: f64):
+    if dt <= 0.0: return
+    n = clamp(int(ceil(dt / w.substep - 1e-9)), 1, 16)
+    h = f32(dt / f64(n))
+    was: {int: bool}
+    loop a in w.arbs: was[a.a * 1000003 + a.b] = true
+    loop _ in [0..n): __step3(w, h)
+    w.events.clear()
+    loop a in w.arbs:
+        if a.contacts.len() == 0: continue
+        imp: f32 = 0
+        loop c in a.contacts: imp += c.pn
+        w.events.push(Contact(__body(w, a.a), __body(w, a.b), a.contacts[0].point, a.contacts[0].normal, imp, not was.has(a.a * 1000003 + a.b)))
+    loop mut b in w.bodies:
+        b.force = vec3(0, 0, 0)
+        b.torque = vec3(0, 0, 0)
+
+contacts = (w: World) -> Contact[]: w.events
+contacts = (w: World, b: Body) -> Contact[]:
+    out: Contact[]
+    loop c in w.events:
+        if c.a == b: out.push(c)
+        else if c.b == b: out.push(Contact(c.b, c.a, c.point, -c.normal, c.impulse, c.new))
+    out
+
+__unshape = (b: mut __B3): b.shape = -1
+
+# its rotation matrix, inertia in the world and bounds
+__update3 = (b: mut __B3, meshes: __Mesh3[]):
+    b.m = __qm(b.rot)
+    # (a fixed rotation: no impulse turns it)
+    if b.fixed_rotation: b.iw = __rdr(b.m, vec3(0, 0, 0))
+    else: b.iw = __rdr(b.m, b.inv_i)
+    if b.shape == 0:
+        r = vec3(b.radius, b.radius, b.radius)
+        b.lo = b.pos - r
+        b.hi = b.pos + r
+    else if b.shape == 1:
+        e = vec3(abs(b.m.r0.x) * b.half.x + abs(b.m.r0.y) * b.half.y + abs(b.m.r0.z) * b.half.z,
+                 abs(b.m.r1.x) * b.half.x + abs(b.m.r1.y) * b.half.y + abs(b.m.r1.z) * b.half.z,
+                 abs(b.m.r2.x) * b.half.x + abs(b.m.r2.y) * b.half.y + abs(b.m.r2.z) * b.half.z)
+        b.lo = b.pos - e
+        b.hi = b.pos + e
+    else if b.shape == 2:
+        a = __col(b.m, 1) * b.half.y
+        r = vec3(b.radius, b.radius, b.radius)
+        b.lo = min(b.pos - a, b.pos + a) - r
+        b.hi = max(b.pos - a, b.pos + a) + r
+    else if b.shape == 3:
+        b.lo = meshes[b.mesh].nodes[0].lo
+        b.hi = meshes[b.mesh].nodes[0].hi
+
+__step3 = (w: mut World, h: f32):
+    g = w.gravity
+    loop mut b in w.bodies:
+        if b.kind != .dynamic or not b.alive or b.asleep: continue
+        b.vel += (g + b.force * b.inv_mass) * h
+        b.spin += __mv(b.iw, b.torque) * h
+        if b.damping > 0.0:
+            k = max(1.0 - b.damping * h, 0.0)
+            b.vel *= k
+            b.spin *= k
+        if b.fixed_rotation: b.spin = vec3(0, 0, 0)
+    __collide3(w)
+    inv_h = 1.0 / h
+    loop mut a in w.arbs:
+        if not a.sensor: __arb3_prepare(a, w.bodies, inv_h)
+    # (a joint with one end awake wakes the other; one with neither is left out)
+    wake: int[]
+    loop mut j in w.joints:
+        j.on = j.alive and (__active(w.bodies[j.a]) or __active(w.bodies[j.b]))
+        if j.on:
+            wake.push(j.a)
+            wake.push(j.b)
+    loop i in wake: __wake(w, i)
+    loop mut j in w.joints:
+        if j.on: __j3_prepare(j, w.bodies, h)
+    loop _ in [0..w.iterations):
+        # (joints are few, and pull on each other through the bodies: solved a few times each pass)
+        loop _ in [0..3):
+            loop mut j in w.joints:
+                if j.on and j.kind == 1 and j.axial > 0.0: __hinge_turning(j, w.bodies, h)
+                if j.on: __j3_solve(j, w.bodies)
+        loop mut a in w.arbs:
+            if not a.sensor: __arb3_solve(a, w.bodies)
+    loop mut b in w.bodies:
+        if b.kind == .fixed or not b.alive or b.shape < 0 or b.asleep: continue
+        b.pos += b.vel * h
+        s = b.spin * (0.5 * h)
+        q = b.rot
+        dq = quat_mul(vec4(s.x, s.y, s.z, 0), q)
+        b.rot = normalize(q + dq)
+        __update3(b, w.meshes)
+    if w.sleep: __sleep3(w, h)
+
+# moving: awake and dynamic, or moving and given a velocity
+__active = (b: __B3) -> bool: b.alive and (b.kind == .dynamic and not b.asleep or b.kind == .moving and (length_sq(b.vel) > 0.0 or length_sq(b.spin) > 0.0))
+
+# bodies still for half a second, with all they touch (an island: through contacts and joints),
+# go to sleep together
+__sleep3 = (w: mut World, h: f32):
+    n = w.bodies.len()
+    loop mut b in w.bodies:
+        if b.kind != .dynamic or not b.alive or b.asleep: continue
+        if length_sq(b.vel) < 0.0025 and length_sq(b.spin) < 0.0025: b.still += h
+        else: b.still = 0
+    root = [loop i in [0..n): i]
+    loop a in w.arbs:
+        if not a.sensor and w.bodies[a.a].kind == .dynamic and w.bodies[a.b].kind == .dynamic: __union(root, a.a, a.b)
+        # (on something moving: awake)
+        if w.bodies[a.a].kind == .moving: w.bodies[a.b].still = 0
+        if w.bodies[a.b].kind == .moving: w.bodies[a.a].still = 0
+    loop j in w.joints:
+        if j.alive and w.bodies[j.a].kind == .dynamic and w.bodies[j.b].kind == .dynamic: __union(root, j.a, j.b)
+    least = fill(f32(1e9), n)
+    loop i in [1..n):
+        b = w.bodies[i].still
+        if w.bodies[i].kind == .dynamic and w.bodies[i].alive and not w.bodies[i].asleep:
+            r = __find(root, i)
+            least[r] = min(least[r], b)
+    loop i in [1..n):
+        if w.bodies[i].kind != .dynamic or not w.bodies[i].alive or w.bodies[i].asleep: continue
+        if least[__find(root, i)] >= 0.5:
+            w.bodies[i].asleep = true
+            w.bodies[i].vel = vec3(0, 0, 0)
+            w.bodies[i].spin = vec3(0, 0, 0)
+
+__find = (root: mut int[], i0: int) -> int:
+    r = i0
+    loop root[r] != r: r = root[r]
+    i = i0
+    loop root[i] != r:
+        nx = root[i]
+        root[i] = r
+        i = nx
+    r
+
+__union = (root: mut int[], a: int, b: int):
+    ra = __find(root, a)
+    rb = __find(root, b)
+    if ra < rb: root[rb] = ra
+    else if rb < ra: root[ra] = rb
+
+# ---------------- finding contacts ----------------
+__collide3 = (w: mut World):
+    bs = w.bodies
+    order: int[]
+    loop i in [1..bs.len()):
+        if bs[i].alive and bs[i].shape >= 0: order.push(i)
+    order.sort_with((i, j): bs[i].lo.x < bs[j].lo.x or bs[i].lo.x == bs[j].lo.x and i < j)
+    pairs: int[]
+    wake: int[]
+    # (bodies joined by a joint do not collide with each other: links of a chain overlap where
+    # they are joined, and pushing apart there would fight the joint)
+    joined: {int: bool}
+    loop jt in w.joints:
+        if jt.alive and jt.a != jt.b: joined[min(jt.a, jt.b) * 1000003 + max(jt.a, jt.b)] = true
+    loop k in [0..order.len()):
+        i = order[k]
+        ilo = bs[i].lo
+        ihi = bs[i].hi
+        loop m in [k + 1..order.len()):
+            j = order[m]
+            if bs[j].lo.x > ihi.x: break
+            if bs[j].lo.y > ihi.y or bs[j].hi.y < ilo.y or bs[j].lo.z > ihi.z or bs[j].hi.z < ilo.z: continue
+            if bs[i].kind != .dynamic and bs[j].kind != .dynamic: continue
+            if joined.len() > 0 and joined.has(min(i, j) * 1000003 + max(i, j)): continue
+            # (two at rest, or at rest against something fixed: nothing to do)
+            ai = __active(bs[i])
+            aj = __active(bs[j])
+            # (a sensor keeps seeing what sleeps in it, and does not wake it)
+            sensor = bs[i].sensor or bs[j].sensor
+            if not ai and not aj and not sensor: continue
+            if bs[i].layer & bs[j].mask == 0 or bs[j].layer & bs[i].mask == 0: continue
+            if not sensor:
+                if bs[i].asleep: wake.push(i)
+                if bs[j].asleep: wake.push(j)
+            pairs.push(min(i, j) * 1000003 + max(i, j))
+    loop i in wake: __wake(w, i)
+    pairs.sort()
+    arbs: __Arb3[]
+    index: {int: int}
+    loop key in pairs:
+        a = key / 1000003
+        b = key % 1000003
+        cs = __collide_pair(bs[a], bs[b], w.meshes)
+        if cs.len() == 0: continue
+        arb = __Arb3(a, b, cs, sqrt(bs[a].friction * bs[b].friction), max(bs[a].bounce, bs[b].bounce), bs[a].sensor or bs[b].sensor)
+        if let old = w.arb_index.get(key):
+            loop mut c in arb.contacts:
+                loop oc in w.arbs[old].contacts:
+                    if oc.feature == c.feature:
+                        c.pn = oc.pn
+                        c.pt1 = oc.pt1
+                        c.pt2 = oc.pt2
+        index[key] = arbs.len()
+        arbs.push(arb)
+    w.arbs = arbs
+    w.arb_index = index
+
+__c3 = (p: vec3, n: vec3, sep: f32, feature: int) -> __C3: __C3(point = p, normal = n, sep = sep, feature = feature)
+
+# the contacts of a pair (a's id below b's): normals from a toward b
+__collide_pair = (a: __B3, b: __B3, meshes: __Mesh3[]) -> __C3[]:
+    sa = a.shape
+    sb = b.shape
+    if sa > sb: return __flip(__collide_pair_ordered(b, a, meshes))
+    __collide_pair_ordered(a, b, meshes)
+
+__flip = (cs: __C3[]) -> __C3[]:
+    out = cs
+    loop mut c in out: c.normal = -c.normal
+    out
+
+# (a's shape number is not above b's)
+__collide_pair_ordered = (a: __B3, b: __B3, meshes: __Mesh3[]) -> __C3[]:
+    out: __C3[]
+    sa = a.shape
+    sb = b.shape
+    if sa == 0 and sb == 0: return __spheres(a.pos, a.radius, b.pos, b.radius, 0)
+    if sa == 0 and sb == 1: return __flip(__box_sphere(b, a.pos, a.radius, 0))
+    if sa == 0 and sb == 2:
+        p = __closest_on_seg(a.pos, __seg0(b), __seg1(b))
+        return __spheres(a.pos, a.radius, p, b.radius, 0)
+    if sa == 1 and sb == 1: return __boxes(a, b)
+    if sa == 1 and sb == 2: return __flip(__capsule_box(b, a))
+    if sa == 2 and sb == 2: return __capsules(a, b)
+    if sb == 3: return __shape_mesh(a, meshes[b.mesh])
+    out
+
+__spheres = (pa: vec3, ra: f32, pb: vec3, rb: f32, feature: int) -> __C3[]:
+    out: __C3[]
+    d = pb - pa
+    dist = length(d)
+    if dist >= ra + rb: return out
+    n = vec3(0, 1, 0)
+    if dist > 1e-6: n = d * (1.0 / dist)
+    pen = ra + rb - dist
+    out.push(__c3(pa + n * (ra - pen * 0.5), n, -pen, feature))
+    out
+
+# a box and a sphere: normals from the box toward the sphere
+__box_sphere = (b: __B3, c: vec3, r: f32, feature: int) -> __C3[]:
+    out: __C3[]
+    d = c - b.pos
+    l = vec3(dot(__col(b.m, 0), d), dot(__col(b.m, 1), d), dot(__col(b.m, 2), d))
+    q = clamp(l, -b.half, b.half)
+    inside = q == l
+    if inside:
+        # (the center inside: out through the nearest face)
+        best = 1e30
+        ax = 0
+        sg: f32 = 1
+        loop i in [0..3):
+            gap = __comp(b.half, i) - abs(__comp(l, i))
+            if gap < best:
+                best = gap
+                ax = i
+                sg = 1
+                if __comp(l, i) < 0.0: sg = -1
+        n = __col(b.m, ax) * sg
+        out.push(__c3(c - n * r, n, -(best + r), feature))
+        return out
+    p = b.pos + __col(b.m, 0) * q.x + __col(b.m, 1) * q.y + __col(b.m, 2) * q.z
+    dd = c - p
+    dist = length(dd)
+    if dist >= r: return out
+    n = dd * (1.0 / max(dist, 1e-6))
+    out.push(__c3(p, n, dist - r, feature))
+    out
+
+__seg0 = (b: __B3) -> vec3: b.pos - __col(b.m, 1) * b.half.y
+__seg1 = (b: __B3) -> vec3: b.pos + __col(b.m, 1) * b.half.y
+
+__closest_on_seg = (p: vec3, a: vec3, b: vec3) -> vec3:
+    ab = b - a
+    l2 = dot(ab, ab)
+    if l2 <= 1e-12: return a
+    a + ab * clamp(dot(p - a, ab) / l2, 0.0, 1.0)
+
+# the closest points of two segments
+__seg_seg = (p1: vec3, q1: vec3, p2: vec3, q2: vec3) -> (vec3, vec3):
+    d1 = q1 - p1
+    d2 = q2 - p2
+    r = p1 - p2
+    a = dot(d1, d1)
+    e = dot(d2, d2)
+    f = dot(d2, r)
+    s: f32 = 0
+    t: f32 = 0
+    if a <= 1e-12 and e <= 1e-12: return (p1, p2)
+    if a <= 1e-12: t = clamp(f / e, 0.0, 1.0)
+    else:
+        c = dot(d1, r)
+        if e <= 1e-12: s = clamp(-c / a, 0.0, 1.0)
+        else:
+            b = dot(d1, d2)
+            den = a * e - b * b
+            if den != 0.0: s = clamp((b * f - c * e) / den, 0.0, 1.0)
+            t = (b * s + f) / e
+            if t < 0.0:
+                t = 0
+                s = clamp(-c / a, 0.0, 1.0)
+            else if t > 1.0:
+                t = 1
+                s = clamp((b - c) / a, 0.0, 1.0)
+    (p1 + d1 * s, p2 + d2 * t)
+
+__capsules = (a: __B3, b: __B3) -> __C3[]:
+    a0 = __seg0(a)
+    a1 = __seg1(a)
+    b0 = __seg0(b)
+    b1 = __seg1(b)
+    da = a1 - a0
+    db = b1 - b0
+    # (side by side: a contact at each end of where they overlap, so they lie still)
+    if length_sq(da) > 1e-8 and length_sq(db) > 1e-8 and abs(dot(normalize(da), normalize(db))) > 0.99:
+        out: __C3[]
+        loop k in 0.. and p in [a0, a1]:
+            q = __closest_on_seg(p, b0, b1)
+            loop c in __spheres(p, a.radius, q, b.radius, k): out.push(c)
+        loop k in 0.. and p in [b0, b1]:
+            q = __closest_on_seg(p, a0, a1)
+            loop c in __spheres(q, a.radius, p, b.radius, k + 2): out.push(c)
+        if out.len() > 0: return out
+    pa, pb = __seg_seg(a0, a1, b0, b1)
+    __spheres(pa, a.radius, pb, b.radius, 0)
+
+# a capsule and a box: its ends, and its nearest point, as spheres (normals from the capsule)
+__capsule_box = (c: __B3, b: __B3) -> __C3[]:
+    out: __C3[]
+    s0 = __seg0(c)
+    s1 = __seg1(c)
+    loop k in 0.. and p in [s0, s1]:
+        loop x in __box_sphere(b, p, c.radius, k): out.push(x)
+    if out.len() == 0:
+        # (the middle: the segment's point nearest the box, by halving)
+        lo: f32 = 0
+        hi: f32 = 1
+        loop _ in [0..20):
+            m1 = lo + (hi - lo) / 3.0
+            m2 = hi - (hi - lo) / 3.0
+            if __box_dist(b, s0 + (s1 - s0) * m1) < __box_dist(b, s0 + (s1 - s0) * m2): hi = m2
+            else: lo = m1
+        loop x in __box_sphere(b, s0 + (s1 - s0) * ((lo + hi) * 0.5), c.radius, 2): out.push(x)
+    __flip(out)
+
+__box_dist = (b: __B3, p: vec3) -> f32:
+    d = p - b.pos
+    l = vec3(dot(__col(b.m, 0), d), dot(__col(b.m, 1), d), dot(__col(b.m, 2), d))
+    length(l - clamp(l, -b.half, b.half))
+
+# ---------------- box and box ----------------
+# the axes that could separate them (faces of each, then each pair of edges): the one they are
+# most apart along, faces before edges when nearly as good; then the contact points
+__boxes = (a: __B3, b: __B3) -> __C3[]:
+    out: __C3[]
+    t = b.pos - a.pos
+    best = -1e30
+    best_axis = vec3(0, 0, 0)
+    kind = -1                       # 0..2 a's faces, 3..5 b's, 6.. edges (3 * i + j)
+    loop k in [0..15):
+        l = vec3(0, 0, 0)
+        if k < 3: l = __col(a.m, k)
+        else if k < 6: l = __col(b.m, k - 3)
+        else:
+            l = cross(__col(a.m, (k - 6) / 3), __col(b.m, (k - 6) % 3))
+            ll = length(l)
+            if ll < 1e-5: continue
+            l = l * (1.0 / ll)
+        ra = abs(dot(l, __col(a.m, 0))) * a.half.x + abs(dot(l, __col(a.m, 1))) * a.half.y + abs(dot(l, __col(a.m, 2))) * a.half.z
+        rb = abs(dot(l, __col(b.m, 0))) * b.half.x + abs(dot(l, __col(b.m, 1))) * b.half.y + abs(dot(l, __col(b.m, 2))) * b.half.z
+        sep = abs(dot(t, l)) - ra - rb
+        if sep > 0.0: return out
+        # (an edge only when clearly better than the faces, which come first: faces give
+        # steadier contacts)
+        if k >= 6 and sep <= best * 0.95 + 0.01: continue
+        if sep > best:
+            best = sep
+            best_axis = l
+            kind = k
+    if kind < 0: return out
+    n = best_axis
+    if dot(n, t) < 0.0: n = -n
+    if kind < 6:
+        if kind < 3: return __box_face(a, b, kind, n, false)
+        return __box_face(b, a, kind - 3, -n, true)
+    # edge and edge: the closest points of the two edges that reach furthest toward each other
+    i = (kind - 6) / 3
+    j = (kind - 6) % 3
+    pa = a.pos
+    pb = b.pos
+    loop k in [0..3):
+        if k != i:
+            ax = __col(a.m, k)
+            sg: f32 = 1
+            if dot(ax, n) < 0.0: sg = -1
+            pa += ax * (__comp(a.half, k) * sg)
+        if k != j:
+            bx = __col(b.m, k)
+            sg: f32 = 1
+            if dot(bx, n) > 0.0: sg = -1
+            pb += bx * (__comp(b.half, k) * sg)
+    ea = __col(a.m, i) * __comp(a.half, i)
+    eb = __col(b.m, j) * __comp(b.half, j)
+    ca, cb = __seg_seg(pa - ea, pa + ea, pb - eb, pb + eb)
+    out.push(__c3((ca + cb) * 0.5, n, best, 1000 + kind))
+    out
+
+# a face of box r (its axis ax, the normal n toward box i) and the face of i most against it,
+# clipped to r's face (normals from the first body toward the second: flip when r is the second)
+__box_face = (r: __B3, i: __B3, ax: int, n: vec3, flip: bool) -> __C3[]:
+    out: __C3[]
+    # the incident face: i's face whose normal is most against n
+    fi = 0
+    fs: f32 = 1
+    low = 1e30
+    loop k in [0..3):
+        d = dot(__col(i.m, k), n)
+        if d < low:
+            low = d
+            fi = k
+            fs = 1
+        if -d < low:
+            low = -d
+            fi = k
+            fs = -1
+    u = (fi + 1) % 3
+    v = (fi + 2) % 3
+    c = i.pos + __col(i.m, fi) * (__comp(i.half, fi) * fs)
+    cu = __col(i.m, u) * __comp(i.half, u)
+    cv = __col(i.m, v) * __comp(i.half, v)
+    poly = [c + cu + cv, c - cu + cv, c - cu - cv, c + cu - cv]
+    # clipped to the sides of r's face
+    r1 = (ax + 1) % 3
+    r2 = (ax + 2) % 3
+    loop side in [0..4):
+        k = r1
+        if side >= 2: k = r2
+        dir = __col(r.m, k)
+        if side % 2 == 1: dir = -dir
+        poly = __clip_poly(poly, dir, dot(dir, r.pos) + __comp(r.half, k))
+        if poly.len() == 0: return out
+    face = dot(n, r.pos) + __comp(r.half, ax)
+    nn = n
+    if flip: nn = -n
+    loop k in 0.. and p in poly:
+        sep = dot(n, p) - face
+        if sep <= 0.0: out.push(__c3(p - n * (sep * 0.5), nn, sep, ax * 64 + fi * 16 + k))
+    if out.len() > 4: out = __four(out)
+    out
+
+# the polygon's part where dot(n, x) <= off
+__clip_poly = (poly: vec3[], n: vec3, off: f32) -> vec3[]:
+    out: vec3[]
+    loop k in [0..poly.len()):
+        p = poly[k]
+        q = poly[(k + 1) % poly.len()]
+        dp = dot(n, p) - off
+        dq = dot(n, q) - off
+        if dp <= 0.0: out.push(p)
+        if dp * dq < 0.0: out.push(p + (q - p) * (dp / (dp - dq)))
+    out
+
+# four of the contacts that span them best: the deepest, the furthest from it, then those that
+# widen the shape most
+__four = (cs: __C3[]) -> __C3[]:
+    pick: int[]
+    d = 0
+    loop k in [1..cs.len()):
+        if cs[k].sep < cs[d].sep: d = k
+    pick.push(d)
+    f = d
+    loop k in [0..cs.len()):
+        if length_sq(cs[k].point - cs[d].point) > length_sq(cs[f].point - cs[d].point): f = k
+    if f != d: pick.push(f)
+    loop _ in [0..2):
+        bk = -1
+        ba: f32 = -1
+        loop k in [0..cs.len()):
+            if k in pick: continue
+            area: f32 = 1e30
+            loop pi in pick: area = min(area, length_sq(cs[k].point - cs[pi].point))
+            if area > ba:
+                ba = area
+                bk = k
+        if bk >= 0: pick.push(bk)
+    out: __C3[]
+    loop k in pick: out.push(cs[k])
+    out
+
+# ---------------- triangles ----------------
+__build_mesh = (tris: vec3[]) -> __Mesh3:
+    m = __Mesh3(tris = tris)
+    n = tris.len() / 3
+    loop i in [0..n): m.order.push(i)
+    __node3(m, 0, n)
+    m
+
+# a node over order[first..first + count): split at the middle of its longest side
+__node3 = (m: mut __Mesh3, first: int, count: int) -> int:
+    lo = vec3(1e30, 1e30, 1e30)
+    hi = vec3(-1e30, -1e30, -1e30)
+    loop k in [first..first + count):
+        t = m.order[k] * 3
+        loop c in [0..3):
+            lo = min(lo, m.tris[t + c])
+            hi = max(hi, m.tris[t + c])
+    id = m.nodes.len()
+    m.nodes.push(__Node3(lo = lo, hi = hi, first = first, count = count))
+    if count <= 4: return id
+    size = hi - lo
+    ax = 0
+    if size.y > size.x and size.y >= size.z: ax = 1
+    else if size.z > size.x and size.z > size.y: ax = 2
+    sub = m.order[first..first + count)
+    tr = m.tris
+    sub.sort_by((t): __comp(tr[t * 3] + tr[t * 3 + 1] + tr[t * 3 + 2], ax))
+    loop k in [0..count): m.order[first + k] = sub[k]
+    half = count / 2
+    l = __node3(m, first, half)
+    r = __node3(m, first + half, count - half)
+    m.nodes[id].left = l
+    m.nodes[id].right = r
+    id
+
+# the triangles whose bounds meet lo..hi
+__tris_in = (m: __Mesh3, lo: vec3, hi: vec3) -> int[]:
+    out: int[]
+    stack = [0]
+    loop stack.len() > 0:
+        k = stack.pop()
+        nd = m.nodes[k]
+        if nd.lo.x > hi.x or nd.hi.x < lo.x or nd.lo.y > hi.y or nd.hi.y < lo.y or nd.lo.z > hi.z or nd.hi.z < lo.z: continue
+        if nd.left < 0:
+            loop i in [nd.first..nd.first + nd.count): out.push(m.order[i])
+        else:
+            stack.push(nd.left)
+            stack.push(nd.right)
+    out
+
+# the point of triangle a b c nearest p
+__closest_on_tri = (p: vec3, a: vec3, b: vec3, c: vec3) -> vec3:
+    ab = b - a
+    ac = c - a
+    ap = p - a
+    d1 = dot(ab, ap)
+    d2 = dot(ac, ap)
+    if d1 <= 0.0 and d2 <= 0.0: return a
+    bp = p - b
+    d3 = dot(ab, bp)
+    d4 = dot(ac, bp)
+    if d3 >= 0.0 and d4 <= d3: return b
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0: return a + ab * (d1 / (d1 - d3))
+    cp = p - c
+    d5 = dot(ab, cp)
+    d6 = dot(ac, cp)
+    if d6 >= 0.0 and d5 <= d6: return c
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0: return a + ac * (d2 / (d2 - d6))
+    va = d3 * d6 - d5 * d4
+    if va <= 0.0 and d4 - d3 >= 0.0 and d5 - d6 >= 0.0: return b + (c - b) * ((d4 - d3) / (d4 - d3 + d5 - d6))
+    den = 1.0 / (va + vb + vc)
+    a + ab * (vb * den) + ac * (vc * den)
+
+# a sphere and a triangle: normal from the sphere toward the triangle (none when behind it);
+# faces: whether each is on the triangle's face (not an edge or corner)
+__sphere_tri = (c: vec3, r: f32, a: vec3, b: vec3, cc: vec3, feature: int, faces: mut bool[]) -> __C3[]:
+    out: __C3[]
+    q = __closest_on_tri(c, a, b, cc)
+    d = q - c
+    dist = length(d)
+    if dist >= r: return out
+    face = normalize(cross(b - a, cc - a))
+    n = face * -1.0
+    if dist > 1e-6:
+        n = d * (1.0 / dist)
+        # (an edge or corner nearly along the face's normal: the face's, so seams between
+        # triangles do not bump what rolls over them)
+        if dot(n, -face) > 0.7: n = -face
+    if dot(c - a, face) < -r * 0.5 and dot(n, -face) > 0.0: return out
+    out.push(__c3(q, n, dist - r, feature))
+    faces.push(length(q - (c - face * dot(c - a, face))) < 1e-4)
+    out
+
+# a shape against the triangles near it: normals from the shape toward the triangles
+__shape_mesh = (s: __B3, m: __Mesh3) -> __C3[]:
+    out: __C3[]
+    faces: bool[]
+    loop t in __tris_in(m, s.lo, s.hi):
+        a = m.tris[t * 3]
+        b = m.tris[t * 3 + 1]
+        c = m.tris[t * 3 + 2]
+        if s.shape == 0:
+            loop x in __sphere_tri(s.pos, s.radius, a, b, c, t * 4, faces): out.push(x)
+        else if s.shape == 2:
+            s0 = __seg0(s)
+            s1 = __seg1(s)
+            n0 = out.len()
+            loop k in 0.. and p in [s0, s1]:
+                loop x in __sphere_tri(p, s.radius, a, b, c, t * 4 + k, faces): out.push(x)
+            # (its middle, where the segment comes nearest the triangle)
+            if out.len() == n0:
+                loop x in __sphere_tri(__closest_on_seg(__closest_on_tri((s0 + s1) * 0.5, a, b, c), s0, s1), s.radius, a, b, c, t * 4 + 2, faces): out.push(x)
+        else if s.shape == 1:
+            loop x in __box_tri(s, a, b, c, t):
+                out.push(x)
+                faces.push(true)
+    # (an edge or corner of one triangle where another's face already touches, nearly the same
+    # way: the seam between them, left out so that what rolls across it is not knocked aside)
+    kept: __C3[]
+    loop k in 0.. and x in out:
+        seam = false
+        if not faces[k]:
+            loop j in 0.. and y in out:
+                if faces[j] and dot(x.normal, y.normal) > 0.7: seam = true
+        if not seam: kept.push(x)
+    out = kept
+    if out.len() > 8:
+        # (the deepest eight)
+        out.sort_with((x, y): x.sep < y.sep)
+        out.truncate(8)
+    out
+
+# a box and a triangle: the box's corners below the triangle (inside it, seen along its normal),
+# and the triangle's corners inside the box
+__box_tri = (bx: __B3, a: vec3, b: vec3, c: vec3, t: int) -> __C3[]:
+    out: __C3[]
+    face = normalize(cross(b - a, c - a))
+    off = dot(face, a)
+    # (only a box reaching the triangle from its front)
+    if dot(face, bx.pos) - off < 0.0: return out
+    loop k in [0..8):
+        p = bx.pos
+        loop i in [0..3):
+            sg: f32 = 1
+            if (k >> i) & 1 == 1: sg = -1
+            p += __col(bx.m, i) * (__comp(bx.half, i) * sg)
+        sep = dot(face, p) - off
+        if sep >= 0.0 or sep < -__max3(bx.half) * 2.0: continue
+        q = p - face * sep
+        if __in_tri(q, a, b, c, face): out.push(__c3(p - face * (sep * 0.5), -face, sep, t * 16 + k))
+    loop k in 0.. and p in [a, b, c]:
+        d = p - bx.pos
+        l = vec3(dot(__col(bx.m, 0), d), dot(__col(bx.m, 1), d), dot(__col(bx.m, 2), d))
+        if abs(l.x) < bx.half.x and abs(l.y) < bx.half.y and abs(l.z) < bx.half.z:
+            # (pushed out along the triangle's normal: how far the box reaches below the corner)
+            reach = abs(dot(face, __col(bx.m, 0))) * bx.half.x + abs(dot(face, __col(bx.m, 1))) * bx.half.y + abs(dot(face, __col(bx.m, 2))) * bx.half.z
+            sep = dot(face, bx.pos) - reach - dot(face, p)
+            out.push(__c3(p, -face, sep, t * 16 + 8 + k))
+    out
+
+__max3 = (v: vec3) -> f32: max(v.x, max(v.y, v.z))
+
+__in_tri = (q: vec3, a: vec3, b: vec3, c: vec3, n: vec3) -> bool:
+    dot(cross(b - a, q - a), n) >= 0.0 and dot(cross(c - b, q - b), n) >= 0.0 and dot(cross(a - c, q - c), n) >= 0.0
+
+# ---------------- solving ----------------
+__x = (w: vec3, r: vec3) -> vec3: cross(w, r)
+
+# two directions across a normal
+__tangents = (n: vec3) -> (vec3, vec3):
+    t1 = vec3(0, 0, 0)
+    if abs(n.x) >= 0.57735: t1 = normalize(vec3(n.y, -n.x, 0))
+    else: t1 = normalize(vec3(0, n.z, -n.y))
+    (t1, cross(n, t1))
+
+__kmass = (ma: f32, mb: f32, ia: __M3, ib: __M3, ra: vec3, rb: vec3, d: vec3) -> f32:
+    xa = cross(ra, d)
+    xb = cross(rb, d)
+    k = ma + mb + dot(xa, __mv(ia, xa)) + dot(xb, __mv(ib, xb))
+    if k <= 0.0: return 0
+    1.0 / k
+
+__arb3_prepare = (a: mut __Arb3, bs: mut __B3[], inv_h: f32):
+    pa = bs[a.a].pos
+    pb = bs[a.b].pos
+    va = bs[a.a].vel
+    vb = bs[a.b].vel
+    wa = bs[a.a].spin
+    wb = bs[a.b].spin
+    ma = bs[a.a].inv_mass
+    mb = bs[a.b].inv_mass
+    ia = bs[a.a].iw
+    ib = bs[a.b].iw
+    loop mut c in a.contacts:
+        c.ra = c.point - pa
+        c.rb = c.point - pb
+        t1, t2 = __tangents(c.normal)
+        c.t1 = t1
+        c.t2 = t2
+        c.mass_n = __kmass(ma, mb, ia, ib, c.ra, c.rb, c.normal)
+        c.mass_t1 = __kmass(ma, mb, ia, ib, c.ra, c.rb, t1)
+        c.mass_t2 = __kmass(ma, mb, ia, ib, c.ra, c.rb, t2)
+        c.bias = -0.2 * inv_h * min(0.0, c.sep + 0.005)
+        vn = dot(vb + cross(wb, c.rb) - va - cross(wa, c.ra), c.normal)
+        if vn < -1.0: c.bias = max(c.bias, -a.bounce * vn)
+        p = c.normal * c.pn + t1 * c.pt1 + t2 * c.pt2
+        va -= p * ma
+        wa -= __mv(ia, cross(c.ra, p))
+        vb += p * mb
+        wb += __mv(ib, cross(c.rb, p))
+    bs[a.a].vel = va
+    bs[a.a].spin = wa
+    bs[a.b].vel = vb
+    bs[a.b].spin = wb
+
+__arb3_solve = (a: mut __Arb3, bs: mut __B3[]):
+    va = bs[a.a].vel
+    vb = bs[a.b].vel
+    wa = bs[a.a].spin
+    wb = bs[a.b].spin
+    ma = bs[a.a].inv_mass
+    mb = bs[a.b].inv_mass
+    ia = bs[a.a].iw
+    ib = bs[a.b].iw
+    loop mut c in a.contacts:
+        # friction first (limited by the push of the last pass), then the push
+        lim = a.friction * c.pn
+        dv = vb + cross(wb, c.rb) - va - cross(wa, c.ra)
+        p1 = c.pt1
+        c.pt1 = clamp(p1 - c.mass_t1 * dot(dv, c.t1), -lim, lim)
+        p2 = c.pt2
+        c.pt2 = clamp(p2 - c.mass_t2 * dot(dv, c.t2), -lim, lim)
+        p = c.t1 * (c.pt1 - p1) + c.t2 * (c.pt2 - p2)
+        va -= p * ma
+        wa -= __mv(ia, cross(c.ra, p))
+        vb += p * mb
+        wb += __mv(ib, cross(c.rb, p))
+        dv = vb + cross(wb, c.rb) - va - cross(wa, c.ra)
+        pn0 = c.pn
+        c.pn = max(pn0 + c.mass_n * (c.bias - dot(dv, c.normal)), 0.0)
+        p = c.normal * (c.pn - pn0)
+        va -= p * ma
+        wa -= __mv(ia, cross(c.ra, p))
+        vb += p * mb
+        wb += __mv(ib, cross(c.rb, p))
+    bs[a.a].vel = va
+    bs[a.a].spin = wa
+    bs[a.b].vel = vb
+    bs[a.b].spin = wb
+
+__apply3 = (bs: mut __B3[], a: int, b: int, ra: vec3, rb: vec3, p: vec3):
+    bs[a].vel -= p * bs[a].inv_mass
+    bs[a].spin -= __mv(bs[a].iw, cross(ra, p))
+    bs[b].vel += p * bs[b].inv_mass
+    bs[b].spin += __mv(bs[b].iw, cross(rb, p))
+
+__rel3 = (bs: __B3[], a: int, b: int, ra: vec3, rb: vec3) -> vec3:
+    bs[b].vel + cross(bs[b].spin, rb) - bs[a].vel - cross(bs[a].spin, ra)
+
+__j3_prepare = (j: mut __J3, bs: mut __B3[], h: f32):
+    j.ra = quat_rotate(bs[j.a].rot, j.la)
+    j.rb = quat_rotate(bs[j.b].rot, j.lb)
+    if j.kind == 2:
+        d = bs[j.b].pos + j.rb - bs[j.a].pos - j.ra
+        l = length(d)
+        j.u = vec3(0, 0, 0)
+        if l > 1e-6: j.u = d * (1.0 / l)
+        k0 = __kmass(bs[j.a].inv_mass, bs[j.b].inv_mass, bs[j.a].iw, bs[j.b].iw, j.ra, j.rb, j.u)
+        j.mass1 = k0
+        cc = l - j.length
+        j.gamma = 0
+        j.bias1 = 0.2 / h * cc
+        if j.hz > 0.0 and k0 > 0.0:
+            om = 2.0 * f32(PI) * j.hz
+            sk = k0 * om * om
+            sd = 2.0 * k0 * j.damping * om
+            j.gamma = 1.0 / (h * (sd + h * sk))
+            j.bias1 = cc * h * sk * j.gamma
+            j.mass1 = 1.0 / (1.0 / k0 + j.gamma)
+        if j.rope and cc < 0.0:
+            j.gamma = 0
+            j.bias1 = cc / h
+            j.mass1 = k0
+        __apply3(bs, j.a, j.b, j.ra, j.rb, j.u * j.acc1)
+        return
+    # a point (ball, hinge): solved along each axis in turn, and for a hinge, the turning
+    # across its axis held back
+    j.u = (bs[j.b].pos + j.rb - bs[j.a].pos - j.ra) * (0.2 / h)
+    __apply3(bs, j.a, j.b, j.ra, j.rb, j.acc)
+    if j.kind == 1:
+        bs[j.a].spin -= __mv(bs[j.a].iw, j.acc_ang)
+        bs[j.b].spin += __mv(bs[j.b].iw, j.acc_ang)
+        # (turning about the axis: motor and limits, warm started)
+        j.axis_w = quat_rotate(bs[j.a].rot, j.axis_a)
+        k = dot(j.axis_w, __mv(bs[j.a].iw, j.axis_w)) + dot(j.axis_w, __mv(bs[j.b].iw, j.axis_w))
+        j.axial = 0
+        if k > 0.0: j.axial = 1.0 / k
+        j.angle = __hinge_angle(j, bs)
+        if j.max_torque <= 0.0: j.acc_motor = 0
+        if j.lower < -1e8: j.acc_lower = 0
+        if j.upper > 1e8: j.acc_upper = 0
+        t = j.axis_w * (j.acc_motor + j.acc_lower - j.acc_upper)
+        bs[j.a].spin -= __mv(bs[j.a].iw, t)
+        bs[j.b].spin += __mv(bs[j.b].iw, t)
+
+# a hinge's motor and limits: on the turning of b against a about the axis
+__hinge_turning = (j: mut __J3, bs: mut __B3[], h: f32):
+    ax = j.axis_w
+    if j.max_torque > 0.0:
+        cdot = dot(bs[j.b].spin - bs[j.a].spin, ax) - j.motor_speed
+        old = j.acc_motor
+        j.acc_motor = clamp(old - j.axial * cdot, -j.max_torque * h, j.max_torque * h)
+        __turn3(bs, j, ax * (j.acc_motor - old))
+    if j.lower > -1e8:
+        c = j.angle - j.lower
+        bias = c / h
+        if c < 0.0: bias = 0.2 * c / h
+        imp = -j.axial * (dot(bs[j.b].spin - bs[j.a].spin, ax) + bias)
+        old = j.acc_lower
+        j.acc_lower = max(old + imp, 0.0)
+        __turn3(bs, j, ax * (j.acc_lower - old))
+    if j.upper < 1e8:
+        c = j.upper - j.angle
+        bias = c / h
+        if c < 0.0: bias = 0.2 * c / h
+        imp = -j.axial * (dot(bs[j.a].spin - bs[j.b].spin, ax) + bias)
+        old = j.acc_upper
+        j.acc_upper = max(old + imp, 0.0)
+        __turn3(bs, j, ax * -(j.acc_upper - old))
+
+__turn3 = (bs: mut __B3[], j: __J3, t: vec3):
+    bs[j.a].spin -= __mv(bs[j.a].iw, t)
+    bs[j.b].spin += __mv(bs[j.b].iw, t)
+
+__j3_solve = (j: mut __J3, bs: mut __B3[]):
+    if j.kind == 2:
+        if j.mass1 == 0.0: return
+        cdot = dot(__rel3(bs, j.a, j.b, j.ra, j.rb), j.u)
+        imp = -j.mass1 * (cdot + j.bias1 + j.gamma * j.acc1)
+        if j.rope:
+            a0 = j.acc1
+            j.acc1 = min(a0 + imp, 0.0)
+            imp = j.acc1 - a0
+        else: j.acc1 += imp
+        __apply3(bs, j.a, j.b, j.ra, j.rb, j.u * imp)
+        return
+    loop ax in [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]:
+        k = __kmass(bs[j.a].inv_mass, bs[j.b].inv_mass, bs[j.a].iw, bs[j.b].iw, j.ra, j.rb, ax)
+        if k == 0.0: continue
+        imp = -k * (dot(__rel3(bs, j.a, j.b, j.ra, j.rb), ax) + dot(j.u, ax))
+        j.acc += ax * imp
+        __apply3(bs, j.a, j.b, j.ra, j.rb, ax * imp)
+    if j.kind == 1:
+        # (the hinge: the two bodies turn alike except about the axis; their axes kept together)
+        axw = quat_rotate(bs[j.a].rot, j.axis_a)
+        bxw = quat_rotate(bs[j.b].rot, j.axis_b)
+        err = cross(axw, bxw)
+        t1, t2 = __tangents(axw)
+        loop d in [t1, t2]:
+            kk = dot(d, __mv(bs[j.a].iw, d)) + dot(d, __mv(bs[j.b].iw, d))
+            if kk <= 0.0: continue
+            rel = dot(bs[j.b].spin - bs[j.a].spin, d) + dot(err, d) * 6.0
+            imp = -rel / kk
+            j.acc_ang += d * imp
+            bs[j.a].spin -= __mv(bs[j.a].iw, d * imp)
+            bs[j.b].spin += __mv(bs[j.b].iw, d * imp)
+
+# ---------------- overlaps ----------------
+# the bodies (sensors too) a sphere, a box or a character overlaps: the trigger zones and pickups
+# a character is in (it is not a body, so it makes no contacts), what an explosion reaches
+#   loop b in w.overlaps(hero): if w.tag(b) == COIN: w.remove(b)
+overlap_sphere = (w: World, center: vec3, radius: f64, mask: int = -1) -> Body[]:
+    __overlap(w, __B3(shape = 0, pos = center, radius = f32(radius)), mask)
+overlap_box = (w: World, center: vec3, size: vec3, rot: vec4 = vec4(0, 0, 0, 1), mask: int = -1) -> Body[]:
+    __overlap(w, __B3(shape = 1, pos = center, rot = normalize(rot), half = size * 0.5), mask)
+overlaps = (w: World, c: Character) -> Body[]:
+    hh = max(c.height / 2.0 - c.radius, 0.0)
+    __overlap(w, __B3(shape = 2, pos = c.feet + vec3(0, f32(c.height / 2.0), 0), radius = f32(c.radius), half = vec3(0, f32(hh), 0)), c.mask)
+
+__overlap = (w: World, probe0: __B3, mask: int) -> Body[]:
+    probe = probe0
+    __update3(probe, w.meshes)
+    out: Body[]
+    loop i in [1..w.bodies.len()):
+        bd = w.bodies[i]
+        if not bd.alive or bd.shape < 0 or bd.layer & mask == 0: continue
+        if bd.lo.x > probe.hi.x or bd.hi.x < probe.lo.x or bd.lo.y > probe.hi.y or bd.hi.y < probe.lo.y or bd.lo.z > probe.hi.z or bd.hi.z < probe.lo.z: continue
+        loop c in __collide_pair(probe, bd, w.meshes):
+            if c.sep <= 0.0:
+                out.push(__body(w, i))
+                break
+    out
+
+# ---------------- rays ----------------
+# the first body a ray from a to b meets (only those whose layer & mask is not 0; sensors are
+# passed through)
+raycast = (w: World, a: vec3, b: vec3, mask: int = -1) -> Hit?:
+    best: Hit? = none
+    bf: f32 = 1
+    d = b - a
+    loop i in [1..w.bodies.len()):
+        bd = w.bodies[i]
+        if not bd.alive or bd.shape < 0 or bd.layer & mask == 0 or bd.sensor: continue
+        if bd.shape == 3:
+            m = w.meshes[bd.mesh]
+            loop t in __tris_in(m, min(a, b), max(a, b)):
+                p0 = m.tris[t * 3]
+                p1 = m.tris[t * 3 + 1]
+                p2 = m.tris[t * 3 + 2]
+                f = __ray_tri(a, d, p0, p1, p2)
+                if f >= 0.0 and f < bf:
+                    bf = f
+                    n = normalize(cross(p1 - p0, p2 - p0))
+                    if dot(n, d) > 0.0: n = -n
+                    best = Hit(__body(w, i), a + d * f, n, f)
+            continue
+        f, n = __ray_shape(bd, a, d)
+        if f >= 0.0 and f < bf:
+            bf = f
+            best = Hit(__body(w, i), a + d * f, n, f)
+    best
+
+# a ray against a sphere, box or capsule: how far along (-1: not) and the normal there
+__ray_shape = (bd: __B3, a: vec3, d: vec3) -> (f32, vec3):
+    if bd.shape == 0: return __ray_sphere(a, d, bd.pos, bd.radius)
+    q = bd.rot
+    inv = vec4(-q.x, -q.y, -q.z, q.w)
+    la = quat_rotate(inv, a - bd.pos)
+    ld = quat_rotate(inv, d)
+    if bd.shape == 1:
+        lo: f32 = 0
+        hi: f32 = 1
+        nax = -1
+        nsg: f32 = 1
+        loop i in [0..3):
+            o = __comp(la, i)
+            dd = __comp(ld, i)
+            h = __comp(bd.half, i)
+            if abs(dd) < 1e-9:
+                if abs(o) > h: return (-1, vec3(0, 0, 0))
+                continue
+            t1 = (-h - o) / dd
+            t2 = (h - o) / dd
+            sg: f32 = -1
+            if t1 > t2:
+                tmp = t1
+                t1 = t2
+                t2 = tmp
+                sg = 1
+            if t1 > lo:
+                lo = t1
+                nax = i
+                nsg = sg
+            hi = min(hi, t2)
+            if lo > hi: return (-1, vec3(0, 0, 0))
+        if nax < 0: return (-1, vec3(0, 0, 0))
+        return (lo, __col(bd.m, nax) * nsg)
+    # a capsule: its ends' spheres and its middle's cylinder (along its y)
+    best: f32 = -1
+    bn = vec3(0, 0, 0)
+    loop p in [__seg0(bd), __seg1(bd)]:
+        f, n = __ray_sphere(a, d, p, bd.radius)
+        if f >= 0.0 and (best < 0.0 or f < best):
+            best = f
+            bn = n
+    qa = ld.x * ld.x + ld.z * ld.z
+    if qa > 1e-12:
+        qb = la.x * ld.x + la.z * ld.z
+        qc = la.x * la.x + la.z * la.z - bd.radius * bd.radius
+        disc = qb * qb - qa * qc
+        if disc >= 0.0:
+            t = (-qb - sqrt(disc)) / qa
+            y = la.y + ld.y * t
+            if t >= 0.0 and t <= 1.0 and abs(y) <= bd.half.y and (best < 0.0 or t < best):
+                best = t
+                bn = quat_rotate(q, normalize(vec3(la.x + ld.x * t, 0, la.z + ld.z * t)))
+    (best, bn)
+
+__ray_sphere = (a: vec3, d: vec3, c: vec3, r: f32) -> (f32, vec3):
+    m = a - c
+    qa = dot(d, d)
+    if qa == 0.0: return (-1, vec3(0, 0, 0))
+    qb = dot(m, d)
+    qc = dot(m, m) - r * r
+    disc = qb * qb - qa * qc
+    if disc < 0.0: return (-1, vec3(0, 0, 0))
+    t = (-qb - sqrt(disc)) / qa
+    if t < 0.0 or t > 1.0: return (-1, vec3(0, 0, 0))
+    p = a + d * t
+    (t, normalize(p - c))
+
+# the first body a ball of radius r, moved from a to b, would touch: the hit's point is where it
+# touches, and fraction how far along the ball's center is then (a thick ray: bullets that are
+# not points, a camera kept out of walls, what is under a character's feet)
+sphere_cast = (w: World, a: vec3, b: vec3, r: f64, mask: int = -1) -> Hit?:
+    rr = f32(r)
+    best: Hit? = none
+    bf: f32 = 1
+    d = b - a
+    lo = min(a, b) - vec3(rr, rr, rr)
+    hi = max(a, b) + vec3(rr, rr, rr)
+    loop i in [1..w.bodies.len()):
+        bd = w.bodies[i]
+        if not bd.alive or bd.shape < 0 or bd.layer & mask == 0 or bd.sensor: continue
+        if bd.lo.x > hi.x or bd.hi.x < lo.x or bd.lo.y > hi.y or bd.hi.y < lo.y or bd.lo.z > hi.z or bd.hi.z < lo.z: continue
+        if bd.shape == 3:
+            m = w.meshes[bd.mesh]
+            loop t in __tris_in(m, lo, hi):
+                f, n = __sweep_tri(a, d, rr, m.tris[t * 3], m.tris[t * 3 + 1], m.tris[t * 3 + 2])
+                if f >= 0.0 and f < bf:
+                    bf = f
+                    best = Hit(__body(w, i), a + d * f - n * rr, n, f)
+            continue
+        # (the shape grown by r: a ray against that)
+        g = bd
+        if g.shape == 1: g.half = g.half + vec3(rr, rr, rr)
+        else: g.radius = g.radius + rr
+        f, n = __ray_shape(g, a, d)
+        if f >= 0.0 and f < bf:
+            bf = f
+            best = Hit(__body(w, i), a + d * f - n * rr, n, f)
+    best
+
+# a ball of radius r moved along d from a, against a triangle: its face pushed out by r, its
+# edges grown into capsules, its corners into balls
+__sweep_tri = (a: vec3, d: vec3, r: f32, p0: vec3, p1: vec3, p2: vec3) -> (f32, vec3):
+    n = normalize(cross(p1 - p0, p2 - p0))
+    if dot(n, d) > 0.0: n = -n
+    off = n * r
+    best: f32 = -1
+    bn = vec3(0, 0, 0)
+    f = __ray_tri(a, d, p0 + off, p1 + off, p2 + off)
+    if f >= 0.0:
+        best = f
+        bn = n
+    loop k in [0..3):
+        e0 = [p0, p1, p2][k]
+        e1 = [p1, p2, p0][k]
+        g, gn = __ray_capsule_seg(a, d, e0, e1, r)
+        if g >= 0.0 and (best < 0.0 or g < best):
+            best = g
+            bn = gn
+    (best, bn)
+
+# a ray against the points within r of the segment e0 e1
+__ray_capsule_seg = (a: vec3, d: vec3, e0: vec3, e1: vec3, r: f32) -> (f32, vec3):
+    best: f32 = -1
+    bn = vec3(0, 0, 0)
+    loop p in [e0, e1]:
+        f, n = __ray_sphere(a, d, p, r)
+        if f >= 0.0 and (best < 0.0 or f < best):
+            best = f
+            bn = n
+    # (the side: the ray's closest approach to the line, on the segment)
+    ax = e1 - e0
+    l = length(ax)
+    if l < 1e-6: return (best, bn)
+    u = ax * (1.0 / l)
+    ao = a - e0
+    dp = d - u * dot(d, u)
+    op = ao - u * dot(ao, u)
+    qa = dot(dp, dp)
+    if qa < 1e-12: return (best, bn)
+    qb = dot(op, dp)
+    qc = dot(op, op) - r * r
+    disc = qb * qb - qa * qc
+    if disc < 0.0: return (best, bn)
+    t = (-qb - sqrt(disc)) / qa
+    if t < 0.0 or t > 1.0: return (best, bn)
+    p = a + d * t
+    s = dot(p - e0, u)
+    if s < 0.0 or s > l: return (best, bn)
+    if best < 0.0 or t < best:
+        best = t
+        bn = normalize(p - (e0 + u * s))
+    (best, bn)
+
+# Möller–Trumbore: how far along d the ray from a meets the triangle (-1: not)
+__ray_tri = (a: vec3, d: vec3, p0: vec3, p1: vec3, p2: vec3) -> f32:
+    e1 = p1 - p0
+    e2 = p2 - p0
+    pv = cross(d, e2)
+    det = dot(e1, pv)
+    if abs(det) < 1e-12: return -1
+    inv = 1.0 / det
+    tv = a - p0
+    u = dot(tv, pv) * inv
+    if u < 0.0 or u > 1.0: return -1
+    qv = cross(tv, e1)
+    v = dot(d, qv) * inv
+    if v < 0.0 or u + v > 1.0: return -1
+    t = dot(e2, qv) * inv
+    if t < 0.0 or t > 1.0: return -1
+    t
+
+# ---------------- a character ----------------
+# A capsule that walks: it stands on what it can (slopes up to max_slope, steps up to step high),
+# slides down steeper slopes, stops at walls, and keeps to the ground going down slopes and
+# steps. It is not a body: the level and fixed and moving bodies stop it, and it shoves dynamic
+# ones out of its way (as hard as its mass against theirs, times push), which stops it as much
+# as they do not give way.
+struct Character:
+    feet: vec3                      # the bottom of the capsule
+    radius = 0.3
+    height = 1.8
+    velocity: vec3                  # as it moves (falling builds up here)
+    on_ground = false
+    ground_normal = vec3(0, 1, 0)
+    standing_on = Body(0, 0)        # the body it stands on (a moving platform carries it)
+    max_slope = 50deg
+    step = 0.35
+    layer = 1
+    mask = -1
+    mass = 80.0                     # (kilograms: what it shoves)
+    push = 1.0
+
+character = (w: World, feet: vec3, radius: f64 = 0.3, height: f64 = 1.8) -> Character:
+    Character(feet = feet, radius = f32(radius), height = f32(height))
+
+# move c for dt seconds, at the velocity `move` along the ground (its y is not used), and
+# jumping at `jump` meters a second when on the ground and jump > 0
+walk = (w: mut World, c: mut Character, move: vec3, dt: f64, jump: f64 = 0):
+    h = f32(dt)
+    # (on something that moves, a platform or a lift: carried along, and turned with it)
+    if c.on_ground and alive(w, c.standing_on):
+        pb = w.bodies[c.standing_on.id]
+        if pb.kind != .fixed:
+            c.feet += (pb.vel + cross(pb.spin, c.feet - pb.pos)) * h
+    vy = c.velocity.y
+    if c.on_ground and jump > 0.0: vy = f32(jump)
+    else if c.on_ground and vy <= 0.0: vy = 0
+    else: vy += w.gravity.y * h
+    was_ground = c.on_ground and jump <= 0.0
+    d = vec3(move.x, vy, move.z) * h
+    n = clamp(int(ceil(f64(length(d) / (c.radius * 0.5)))), 1, 32)
+    flat = vec3(d.x, 0, d.z) * (1.0 / f32(n))
+    c.on_ground = false
+    loop _ in [0..n):
+        c.feet.y += d.y / f32(n)
+        vy = __char_resolve(w, c, vy)
+        grounded = c.on_ground or was_ground
+        start = c.feet
+        c.feet += flat
+        vy = __char_resolve(w, c, vy)
+        # (held back while on the ground: a step, tried from step high and set down again)
+        gone = dot(c.feet - start, flat)
+        if grounded and length_sq(flat) > 0.0 and gone < dot(flat, flat) * 0.5:
+            first = c.feet
+            first_ground = c.on_ground
+            c.feet = start + vec3(0, c.step, 0)
+            if not __char_hits(w, c):
+                c.feet += flat
+                __char_resolve(w, c, 0)
+                c.on_ground = false
+                __char_down(w, c, c.step)
+                if not (c.on_ground and dot(c.feet - start, flat) > gone + 1e-4 and c.feet.y >= start.y - 1e-4):
+                    c.feet = first
+                    c.on_ground = first_ground
+            else:
+                c.feet = first
+                c.on_ground = first_ground
+    # (going down a slope or a step: kept on the ground)
+    if was_ground and not c.on_ground and vy <= 0.0:
+        before = c.feet
+        __char_down(w, c, c.step)
+        if not c.on_ground: c.feet = before
+    if c.on_ground and vy < 0.0: vy = 0
+    c.velocity = vec3(move.x, vy, move.z)
+
+# pushed out of what it overlaps; on the ground when something under it can be stood on
+__char_resolve = (w: mut World, c: mut Character, vy0: f32) -> f32:
+    vy = vy0
+    cos_slope = f32(cos(c.max_slope))
+    loop _ in [0..4):
+        cap = __char_body(c)
+        moved = false
+        loop i in [1..w.bodies.len()):
+            bd = w.bodies[i]
+            if not bd.alive or bd.shape < 0 or bd.sensor: continue
+            if bd.layer & c.mask == 0 or c.layer & bd.mask == 0: continue
+            if bd.lo.x > cap.hi.x or bd.hi.x < cap.lo.x or bd.lo.y > cap.hi.y or bd.hi.y < cap.lo.y or bd.lo.z > cap.hi.z or bd.hi.z < cap.lo.z: continue
+            cs = __collide_pair_ordered(cap, bd, w.meshes)
+            if bd.shape < 2: cs = __flip(__collide_pair_ordered(bd, cap, w.meshes))
+            loop ct in cs:
+                if ct.sep >= -1e-4: continue
+                up = -ct.normal             # (pointing from what it stands on toward the character)
+                if bd.kind == .dynamic and bd.inv_mass > 0.0:
+                    # (shoved along the ground, as fast as the character comes, less as it is heavier)
+                    n = vec3(ct.normal.x, 0, ct.normal.z)
+                    if length(n) > 1e-4:
+                        n = normalize(n)
+                        into = dot(vec3(c.velocity.x, 0, c.velocity.z), n)
+                        m = 1.0 / bd.inv_mass
+                        want = into * c.push * c.mass / (c.mass + m)
+                        gain = want - dot(w.bodies[i].vel, n)
+                        if into > 0.0 and gain > 0.0:
+                            w.bodies[i].vel += n * gain
+                            __wake(w, i)
+                low = ct.point.y < c.feet.y + c.step
+                if up.y >= cos_slope or low and up.y > 0.05 and c.velocity.y <= 0.0:
+                    # (stood on, or a step: lifted straight up, so it does not slide)
+                    c.feet.y += -ct.sep / max(up.y, 0.3)
+                    c.on_ground = true
+                    c.ground_normal = up
+                    c.standing_on = __body(w, i)
+                    if vy < 0.0: vy = 0
+                else:
+                    c.feet += up * (-ct.sep)
+                    if up.y < -0.5 and vy > 0.0: vy = 0          # (a ceiling)
+                moved = true
+                break
+            if moved: break
+        if not moved: break
+    vy
+
+# down by up to `by`, a little at a time, until it stands on something
+__char_down = (w: mut World, c: mut Character, by: f32):
+    k = clamp(int(ceil(f64(by / (c.radius * 0.25)))), 1, 16)
+    loop _ in [0..k):
+        c.feet.y -= by / f32(k)
+        __char_resolve(w, c, 0)
+        if c.on_ground: return
+
+# it overlaps something
+__char_hits = (w: World, c: Character) -> bool:
+    cap = __char_body(c)
+    loop i in [1..w.bodies.len()):
+        bd = w.bodies[i]
+        if not bd.alive or bd.shape < 0 or bd.sensor: continue
+        if bd.layer & c.mask == 0 or c.layer & bd.mask == 0: continue
+        if bd.lo.x > cap.hi.x or bd.hi.x < cap.lo.x or bd.lo.y > cap.hi.y or bd.hi.y < cap.lo.y or bd.lo.z > cap.hi.z or bd.hi.z < cap.lo.z: continue
+        cs = __collide_pair_ordered(cap, bd, w.meshes)
+        if bd.shape < 2: cs = __collide_pair_ordered(bd, cap, w.meshes)
+        loop ct in cs:
+            if ct.sep < -1e-3: return true
+    false
+
+__char_body = (c: Character) -> __B3:
+    hh = max(c.height / 2.0 - c.radius, 0.0)
+    b = __B3(kind = .moving, shape = 2, pos = c.feet + vec3(0, c.height / 2.0, 0), radius = c.radius, half = vec3(0, hh, 0))
+    __update3(b, [])
+    b

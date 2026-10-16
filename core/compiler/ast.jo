@@ -1,0 +1,146 @@
+# Abstract syntax tree. Nodes live in one global array and refer to each other by index.
+# Node 0 is the "no node" sentinel.
+
+use 'util.jo'
+
+enum NK:
+    nil,
+    # expressions
+    int_lit, float_lit, str_lit, bool_lit, none_lit, null_lit, ident, field, dotname, call, index,
+    unary, binary, and_, or_, not_, coalesce, unwrap, lambda, array, map_lit, tuple, if_, match_, cast,
+    range, addr, hole, namedarg, pair, block, iflet,
+    # produced by the checker
+    conv, fnref, partial, intrinsic,
+    # statements
+    vardecl, assign, exprstmt, while_, for_, return_, break_, continue_, defer_, when_, arm,
+    # declarations
+    fn_, param, struct_, enum_, variant, const_, import_, test_, build_,
+    # type expressions
+    tname, tarray, tmap, ttuple, topt, tptr, tfn,
+    # patterns
+    pwild, plit, prange, pvariant,
+    # added with syntax revision 2
+    tunion, istype, loopx, lhead,
+    narrow,         # a: a union (or optional) value known to hold member aux (type is the member's)
+    typealias,      # type Name[T] = a
+    matrix          # [1 2; 3 4]: the elements row by row; ival = elements per row
+
+# node flags
+const NF_MUT = 1
+const NF_INCLUSIVE = 2
+const NF_EXTERN = 4
+const NF_STMT = 16
+const NF_TERMINATED = 32
+const NF_GENERIC = 64
+const NF_CHECKED = 128
+const NF_LITERAL = 256
+const NF_GLOBAL = 2048
+const NF_FNREF_ARG = 4096
+const NF_CABI = 8192
+const NF_SQUOTE = 8          # a one-character literal in single quotes ('a': a character more than text)
+const NF_CHARLIKE = 512       # a one-character string literal (an integer where one is expected)
+const NF_SPREAD = 1024        # array literal element `xs...`
+const NF_BROADCAST = 16384    # f.(x): applied elementwise
+const NF_STEP = 32768         # range `a,b..c`: c holds the second value
+const NF_BARE = 65536         # a range written without brackets (while parsing)
+const NF_SOA = 131072         # array type `soa T[]`: stored as one array per field of T
+                              # (on a vardecl: the element alias of a loop over a soa array)
+const NF_RDONLY = 262144      # an element of a soa array reached through a read-only loop variable
+const NF_INBOUNDS = 524288    # an index the compiler generated knowing it is in bounds
+const NF_TYPE_EXPR = 1048576  # `T[]` written where an expression goes: a type (a type argument)
+const NF_U64 = 2097152        # an integer literal above the i64 range (written so, or computed from one)
+const NF_VOID = 4194304       # a function written `-> void` (it returns nothing, whatever its body says)
+const NF_ALIASDECL = 8388608  # a vardecl whose name stands for the place b (`mut x in xs` in a combined loop)
+const NF_LAZY = 16777216      # a library function's body not parsed yet: tokens from ival in lazy_toks[aux] (parse.jo)
+const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused
+
+struct Node:
+    kind: NK
+    op: i32
+    flags: i32
+    pos: int
+    a: i32
+    b: i32
+    c: i32
+    d: i32
+    list: i32
+    nlist: i32
+    list2: i32
+    nlist2: i32
+    name: i32
+    sval: i32
+    ival: int
+    fval: f64
+    type: i32
+    sym: i32
+    aux: i32
+    aux2: i32
+    mod: i32
+
+nodes: Node[] = [Node()]
+lists: i32[]
+
+mk = (kind: NK, pos: int) -> int:
+    nodes.push(Node(kind = kind, pos = pos))
+    nodes.len() - 1
+
+mklist = (xs: int[]) -> int:
+    start = lists.len()
+    loop x in xs: lists.push(i32(x))
+    start
+
+set_list = (n: int, xs: int[]):
+    nodes[n].list = i32(mklist(xs))
+    nodes[n].nlist = i32(xs.len())
+
+set_list2 = (n: int, xs: int[]):
+    nodes[n].list2 = i32(mklist(xs))
+    nodes[n].nlist2 = i32(xs.len())
+
+kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
+kid2 = (n: int, i: int) -> int: int(lists[int(nodes[n].list2) + i])
+nkids = (n: int) -> int: int(nodes[n].nlist)
+nkids2 = (n: int) -> int: int(nodes[n].nlist2)
+set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
+set_kid2 = (n: int, i: int, v: int): lists[int(nodes[n].list2) + i] = i32(v)
+
+kids = (n: int) -> int[]:
+    out: int[]
+    s = int(nodes[n].list)
+    loop i in [0..int(nodes[n].nlist)): out.push(int(lists[s + i]))
+    out
+
+kids2 = (n: int) -> int[]:
+    out: int[]
+    s = int(nodes[n].list2)
+    loop i in [0..int(nodes[n].nlist2)): out.push(int(lists[s + i]))
+    out
+
+has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
+add_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) | f)
+clear_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) & ~f)
+
+# deep copy of a subtree (used to instantiate generic functions)
+clone = (n: int) -> int:
+    if n == 0: return 0
+    c = nodes.len()
+    nodes.push(nodes[n])
+    k = nodes[n].kind
+    nodes[c].a = i32(clone(int(nodes[n].a)))
+    nodes[c].b = i32(clone(int(nodes[n].b)))
+    nodes[c].c = i32(clone(int(nodes[n].c)))
+    nodes[c].d = i32(clone(int(nodes[n].d)))
+    nl = int(nodes[n].nlist)
+    if nl > 0:
+        xs: int[]
+        loop i in [0..nl): xs.push(clone(kid(n, i)))
+        set_list(c, xs)
+    nl2 = int(nodes[n].nlist2)
+    if nl2 > 0:
+        xs: int[]
+        loop i in [0..nl2): xs.push(clone(kid2(n, i)))
+        set_list2(c, xs)
+    if k != .fn_ and k != .struct_ and k != .enum_: nodes[c].sym = 0
+    if k != .conv: nodes[c].type = 0
+    clear_flag(c, NF_CHECKED)
+    c

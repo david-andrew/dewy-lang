@@ -1,0 +1,54 @@
+# arrays: value semantics / copy-on-write, nested arrays, slicing, sorting, mutation in loops
+# requires: sloppy (uses features the C bootstrap compiler does not implement)
+a = [1, 2, 3]
+b = a
+b.push(4)
+b[0] = 100
+print(a, b)
+grid = fill(fill(0, 3), 3)
+grid[1][1] = 5
+row = grid[1]
+row[0] = 7
+print(grid, row)
+bump = (xs: mut int[]):
+    loop mut x in xs: x += 1
+    xs.push(0)
+c = [10, 20, 30]
+bump(c)
+print(c)
+s = [5, 2, 8, 1, 9, 3]
+s.sort()
+print(s, s[1..4), s[..2), s[4..])
+s.insert(0, 42)
+s.remove(3)
+print(s, s.index_of(8), s.contains(9), s.contains(77))
+s.reverse()
+print(s)
+words = ["kiwi", "fig", "banana", "apple"]
+words.sort()
+print(words)
+struct P:
+    x: int
+    y: int
+ps = [P(1, 2), P(3, 4)]
+loop mut p in ps: p.x *= 10
+qs = ps
+qs[0].y = -1
+print(ps[0].x, ps[0].y, qs[0].y, ps[1].x)
+big: int[]
+loop i in [0..100000): big.push(i * 2)
+sum = 0
+loop v in big: sum += v
+print(big.len(), sum, big[99999])
+cat = [1, 2] + [3] + []
+print(cat)
+z = fill(0.5, 4)
+z[2] = 1.5
+print(z)
+empty: str[]
+print(empty.len(), empty)
+nested = [["a"], ["b", "c"]]
+nested[1].push("d")
+copyn = nested
+copyn[0][0] = "z"
+print(nested, copyn)

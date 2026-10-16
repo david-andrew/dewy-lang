@@ -1,0 +1,1161 @@
+# The GPU through Metal (macOS): what vk.jo and vkgl.jo are on Linux and Windows, under their
+# names, so that gl.jo, gpu.jo, draw2d.jo, gpubuffer.jo and gpuarray.jo draw and compute the same
+# way (`__vk` says the library uses the GPU's own API, here Metal). The shaders are compiler/msl.jo's
+# translation, made with the same data model as the SPIR-V: one small block of constants per draw
+# (the uniforms', vertices' and instances' addresses, strides, depth), and every texture in one
+# argument buffer of (texture, sampler) entries, a Texture being its index.
+#
+# Memory comes from heaps (shared: buffers the CPU writes; private: textures), each made resident
+# for every encoder with useHeap, since shaders reach buffers by address and textures through the
+# argument buffer. Each frame records into a command buffer of its own; its data (uniforms, 2D
+# vertices, staging copies) goes into upload blocks reused when the frame comes around again.
+# Frames are drawn into an image of their own ("the screen", rows bottom first as in OpenGL), then
+# drawn, turned over, into the window's drawable. Objective-C results the API autoreleases are
+# retained inside a short autorelease pool (the game's loop has none).
+
+when TARGET == "macos":
+    @lib("/System/Library/Frameworks/Metal.framework/Metal")
+    extern MTLCreateSystemDefaultDevice = () -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_ii = (o: *u8, s: *u8, a: int, b: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_iii = (o: *u8, s: *u8, a: int, b: int, c: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_iiii = (o: *u8, s: *u8, a: int, b: int, c: int, d: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_pi = (o: *u8, s: *u8, p: *u8, a: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_pii = (o: *u8, s: *u8, p: *u8, a: int, b: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_piii = (o: *u8, s: *u8, p: *u8, a: int, b: int, c: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_ppp = (o: *u8, s: *u8, a: *u8, b: *u8, c: *u8) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_ipi = (o: *u8, s: *u8, a: int, p: *u8, b: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_iiipii = (o: *u8, s: *u8, a: int, b: int, c: int, p: *u8, d: int, e: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_iipipi = (o: *u8, s: *u8, a: int, b: int, p: *u8, c: int, q: *u8, d: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_pipii = (o: *u8, s: *u8, p: *u8, a: int, q: *u8, b: int, c: int) -> *u8
+    # (copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:)
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_buf_to_tex = (o: *u8, s: *u8, buf: *u8, off: int, row: int, img: int, size: *u8, tex: *u8, slice: int, level: int, origin: *u8) -> *u8
+    # (copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:)
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_tex_to_buf = (o: *u8, s: *u8, tex: *u8, slice: int, level: int, origin: *u8, size: *u8, buf: *u8, off: int, row: int, img: int) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_4d = (o: *u8, s: *u8, a: f64, b: f64, c: f64, d: f64) -> *u8
+    @lib("/usr/lib/libobjc.A.dylib")
+    @symbol("objc_msgSend")
+    extern __mo_d = (o: *u8, s: *u8, a: f64) -> *u8
+
+    # (the names vk.jo's callers use; most mean nothing here)
+    const VK_MEM_DEVICE_LOCAL = 0x1
+    const VK_MEM_HOST_VISIBLE = 0x2
+    const VK_MEM_HOST_COHERENT = 0x4
+    const VK_MEM_HOST_CACHED = 0x8
+    const __VK_MAX_TEXTURES = 16384
+
+    __vk = false                   # the library draws through Metal
+    __vk_device_name = ""
+    __vk_headless = false
+    __vk_draw_count = false        # (no draw counts read from buffers)
+    __vk_multi_draw = false
+    __vk_subgroups = true
+    __vk_ts_pool = 0               # (no GPU timestamps yet)
+    __vk_ts_session = 0
+    __vk_bar: u8[]
+    __vk_bar_h = 0
+    __vk_inst: *u8 = null
+
+    # (opt-in while it is new: SLOPPY_METAL=1)
+    __vk_wanted = () -> bool: (env("SLOPPY_METAL") ?? "") == "1"
+    __vk_note = (msg: str):
+        if (env("SLOPPY_VULKAN") ?? "") == "1" or (env("SLOPPY_METAL") ?? "") == "1": eprint("note: {msg}")
+    __vk_ts_want = (): pass
+    __vk_ts_mark = () -> int: 0
+    __vk_ts_pair = (what: int, q0: int, session: int): pass
+
+    __mg_dev: *u8 = null
+    __mg_queue: *u8 = null
+    __mg_layer: *u8 = null
+
+    # retain an object the API autoreleased (inside the caller's pool)
+    __mg_keep = (o: *u8) -> *u8:
+        if o != null: __oc(o, __sel("retain"))
+        o
+    __mg_release = (o: *u8):
+        if o != null: __oc(o, __sel("release"))
+
+    __mg_err_text = (err: *u8) -> str:
+        if err == null: return "unknown error"
+        d = __oc(err, __sel("localizedDescription"))
+        if d == null: return "unknown error"
+        __cstr(__oc(d, __sel("UTF8String")))
+
+    # set up Metal (the window's layer is made by cocoa.jo); "" or why not. surface_ext, make_surface:
+    # as vk.jo's (no window: "")
+    __vk_open = (surface_ext: str, make_surface: () -> int) -> str:
+        if __mg_dev != null:
+            __vk_headless = len(surface_ext) == 0
+            return ""
+        if dl_open("/System/Library/Frameworks/Metal.framework/Metal") == null: return "Metal is missing"
+        dl_open("/System/Library/Frameworks/QuartzCore.framework/QuartzCore")
+        pool = objc_autoreleasePoolPush()
+        __mg_dev = MTLCreateSystemDefaultDevice()
+        if __mg_dev == null:
+            objc_autoreleasePoolPop(pool)
+            return "no Metal device"
+        # (Metal 3: buffers by address, textures by resource id in argument buffers)
+        if (__oc_i(__mg_dev, __sel("supportsFamily:"), 5001) as int) & 255 == 0:
+            objc_autoreleasePoolPop(pool)
+            __mg_dev = null
+            return "the Metal device lacks Metal 3"
+        nm = __oc(__mg_dev, __sel("name"))
+        if nm != null: __vk_device_name = __cstr(__oc(nm, __sel("UTF8String")))
+        __mg_queue = __oc(__mg_dev, __sel("newCommandQueue"))
+        objc_autoreleasePoolPop(pool)
+        __vk_headless = len(surface_ext) == 0
+        __mg_make_frames()
+        __mg_make_textures()
+        ""
+
+    # ---------------- heaps ----------------
+    struct __MgHeap:
+        heap: *u8
+        shared: bool
+
+    __mg_heaps: __MgHeap[]
+    const __MG_HEAP = 64 << 20
+
+    __mg_new_heap = (size: int, shared: bool) -> int:
+        pool = objc_autoreleasePoolPush()
+        d = __oc(__oc(__cls("MTLHeapDescriptor"), __sel("alloc")), __sel("init"))
+        __oc_i(d, __sel("setSize:"), size)
+        # (shared: the CPU writes it; private: textures. Tracked: Metal orders the encoders that use it)
+        mode = 2
+        if shared: mode = 0
+        __oc_i(d, __sel("setStorageMode:"), mode)
+        __oc_i(d, __sel("setHazardTrackingMode:"), 2)
+        h = __oc_p(__mg_dev, __sel("newHeapWithDescriptor:"), d)
+        __mg_release(d)
+        objc_autoreleasePoolPop(pool)
+        if h == null: panic("Metal: a heap of {size >> 20} MB could not be made")
+        __mg_heaps.push(__MgHeap(h, shared))
+        __mg_heaps.len() - 1
+
+    # a buffer of n bytes the CPU can write (and the GPU reach by address)
+    __mg_buffer = (n: int) -> *u8:
+        size = max(n, 16)
+        loop h in __mg_heaps:
+            if not h.shared: continue
+            b = __mo_ii(h.heap, __sel("newBufferWithLength:options:"), size, 0)
+            if b != null: return b
+        k = __mg_new_heap(max(__MG_HEAP, size * 2), true)
+        b = __mo_ii(__mg_heaps[k].heap, __sel("newBufferWithLength:options:"), size, 0)
+        if b == null: panic("Metal: a buffer of {size} bytes could not be made")
+        b
+
+    # a private texture from a descriptor
+    __mg_texture_of = (desc: *u8) -> *u8:
+        loop h in __mg_heaps:
+            if h.shared: continue
+            t = __oc_p(h.heap, __sel("newTextureWithDescriptor:"), desc)
+            if t != null: return t
+        # (how much the texture needs, for the heap's size)
+        sa = __oc_p(__mg_dev, __sel("heapTextureSizeAndAlignWithDescriptor:"), desc) as int
+        k = __mg_new_heap(max(__MG_HEAP, sa * 2), false)
+        t = __oc_p(__mg_heaps[k].heap, __sel("newTextureWithDescriptor:"), desc)
+        if t == null: panic("Metal: a texture could not be made")
+        t
+
+    # every heap resident for what an encoder does
+    __mg_use_heaps = (enc: *u8):
+        loop h in __mg_heaps: __oc_p(enc, __sel("useHeap:"), h.heap)
+
+    # ---------------- buffers (as vk.jo's) ----------------
+    struct __VkBuffer:
+        buffer: int                # the MTLBuffer
+        mem: int
+        size: int
+        ptr: *u8                   # its contents (every buffer is the CPU's to write)
+        addr: int                  # its GPU address
+
+    __vk_buffer = (size: int, usage: u32, want: u32, like: u32) -> __VkBuffer:
+        b = __mg_buffer(size)
+        __VkBuffer(b as int, 0, size, __oc(b, __sel("contents")), __oc_int(b, __sel("gpuAddress")))
+
+    __vk_free_buffer = (b: __VkBuffer):
+        if b.buffer != 0: __mg_release(b.buffer as *u8)
+
+    # ---------------- frames ----------------
+    const __VK_FRAMES = 2
+    struct __MgFrame:
+        cb: *u8                    # the command buffer recorded (then committed), or null
+        arena: int[]               # its upload blocks (indices into __vk_blocks), used in order
+        block: int
+        used: int
+        dead: *u8[]                # objects to release once its commands have run
+
+    __mg_frames: __MgFrame[]
+    __vk_frame = 0
+    __vk_recording = false
+
+    __mg_make_frames = ():
+        loop _ in [0..__VK_FRAMES): __mg_frames.push(__MgFrame())
+
+    __vk_cb = () -> *u8: __mg_frames[__vk_frame].cb
+
+    # start recording this frame's commands (after its previous use has finished)
+    __vk_begin_frame = ():
+        if __vk_recording: return
+        f = __mg_frames[__vk_frame]
+        if f.cb != null:
+            __oc(f.cb, __sel("waitUntilCompleted"))
+            __mg_release(f.cb)
+        loop o in f.dead: __mg_release(o)
+        __mg_frames[__vk_frame].dead.clear()
+        # (texture slots the GPU is done with: free again, pointing at the white texture)
+        if __vgt.len() > 0:
+            loop sl in __mg_dead_slots[__vk_frame]:
+                __mg_set_slot(sl, __vgt[0].tex, false, false)
+                __vk_slot_free.push(sl)
+        __mg_dead_slots[__vk_frame].clear()
+        __mg_frames[__vk_frame].block = 0
+        __mg_frames[__vk_frame].used = 0
+        pool = objc_autoreleasePoolPush()
+        __mg_frames[__vk_frame].cb = __mg_keep(__oc(__mg_queue, __sel("commandBuffer")))
+        objc_autoreleasePoolPop(pool)
+        __vk_recording = true
+        __vk_resize_screen(__win_w, __win_h)
+
+    # run what this frame has recorded so far and wait for it (for reading results back)
+    __vk_submit_and_wait = ():
+        __vg_end_pass()
+        cb = __vk_cb()
+        __oc(cb, __sel("commit"))
+        __oc(cb, __sel("waitUntilCompleted"))
+        __mg_release(cb)
+        __mg_frames[__vk_frame].cb = null
+        __vk_recording = false
+
+    # release o once the GPU is done with what has been recorded
+    __mg_defer = (o: *u8):
+        if o == null: return
+        f = __vk_frame
+        if not __vk_recording: f = (__vk_frame + __VK_FRAMES - 1) % __VK_FRAMES
+        __mg_frames[f].dead.push(o)
+
+    __vk_defer_buffer = (b: __VkBuffer): __mg_defer(b.buffer as *u8)
+    __vk_defer = (kind: int, a: int, b: int):
+        if kind == 4:
+            __mg_defer_slot(a)
+            return
+        __mg_defer(a as *u8)
+
+    # ---------------- per-frame upload memory ----------------
+    const __VK_BLOCK = 8 << 20
+    __vk_blocks: __VkBuffer[]
+
+    # room for n bytes (aligned to `align`) in this frame's upload memory: (block, offset)
+    __vk_upload_room = (n: int, align: int) -> (int, int):
+        __vk_begin_frame()
+        fi = __vk_frame
+        loop true:
+            f = __mg_frames[fi]
+            if f.block < f.arena.len():
+                b = f.arena[f.block]
+                off = (f.used + align - 1) / align * align
+                if off + n <= __vk_blocks[b].size:
+                    __mg_frames[fi].used = off + n
+                    return (b, off)
+                __mg_frames[fi].block += 1
+                __mg_frames[fi].used = 0
+                continue
+            __vk_blocks.push(__vk_buffer(max(__VK_BLOCK, n), 0, 0, 0))
+            __mg_frames[fi].arena.push(__vk_blocks.len() - 1)
+        (0, 0)
+
+    __vk_upload = (p: *u8, n: int, align: int = 16) -> (int, int):
+        b, off = __vk_upload_room(max(n, 4), align)
+        if n > 0: mem_copy(__vk_blocks[b].ptr + off, p, n)
+        (b, off)
+
+    __vk_addr = (b: int, off: int) -> int: __vk_blocks[b].addr + off
+
+    # ---------------- textures and their slots ----------------
+    # The argument buffer holds an entry per slot: the texture's and the sampler's resource ids. A
+    # texture takes a new slot whenever its image or sampling changes; the old one is free again
+    # once the frames that may use it have run, so draws already recorded keep what they had.
+    struct __MgTex:
+        tex: *u8
+        live: bool
+        linear: bool
+        repeat: bool
+        slot: int
+        drawn: bool
+        width: int
+        height: int
+        format: int                # MTLPixelFormat
+
+    __vgt: __MgTex[]               # by GL name (0: white, 1x1, in slot 0)
+    __vgt_free: int[]
+    __vg_bound: int[] = fill(0, 16)
+    __vg_unit = 0
+    __mg_args: *u8 = null          # the argument buffer (an MTLBuffer)
+    __mg_args_p: *u8 = null
+    __mg_samplers: *u8[]           # nearest clamp, nearest repeat, linear clamp, linear repeat
+    __vk_slot_free: int[]
+    __vk_slot_next = 1
+
+    __mg_make_textures = ():
+        __mg_args = __mg_buffer(__VK_MAX_TEXTURES * 16)
+        __mg_args_p = __oc(__mg_args, __sel("contents"))
+        pool = objc_autoreleasePoolPush()
+        loop linear in [0, 1]:
+            loop rep in [0, 1]:
+                d = __oc(__oc(__cls("MTLSamplerDescriptor"), __sel("alloc")), __sel("init"))
+                __oc_i(d, __sel("setMinFilter:"), linear)
+                __oc_i(d, __sel("setMagFilter:"), linear)
+                mode = 0                                    # clamp to edge
+                if rep == 1: mode = 2                       # repeat
+                __oc_i(d, __sel("setSAddressMode:"), mode)
+                __oc_i(d, __sel("setTAddressMode:"), mode)
+                __oc_i(d, __sel("setSupportArgumentBuffers:"), 1)
+                __mg_samplers.push(__oc_p(__mg_dev, __sel("newSamplerStateWithDescriptor:"), d))
+                __mg_release(d)
+        objc_autoreleasePoolPop(pool)
+        __vg_init()
+
+    __vg_init = ():
+        if __vgt.len() > 0: return
+        __vgt.push(__MgTex(live = true))
+        __vgf.push(__MgFb())
+        __vg_tex_alloc(0, 1, 1, 70)
+        white: u8[] = [255, 255, 255, 255]
+        __vg_tex_upload(0, 0, 0, 1, 1, data(white), 4)
+
+    __vk_slot_new = () -> int:
+        if __vk_slot_free.len() > 0: return __vk_slot_free.pop()
+        if __vk_slot_next >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        __vk_slot_next += 1
+        __vk_slot_next - 1
+
+    # point slot `slot` at texture t (sampled with the given filter and wrapping)
+    __mg_set_slot = (slot: int, t: *u8, linear: bool, repeat: bool):
+        k = 0
+        if linear: k += 2
+        if repeat: k += 1
+        q = (__mg_args_p + slot * 16) as *int
+        q[0] = __oc_int(t, __sel("gpuResourceID"))
+        q[1] = __oc_int(__mg_samplers[k], __sel("gpuResourceID"))
+
+    __mg_defer_slot = (slot: int):
+        if slot <= 0: return
+        f = __vk_frame
+        if not __vk_recording: f = (__vk_frame + __VK_FRAMES - 1) % __VK_FRAMES
+        __mg_dead_slots[f].push(slot)
+    __mg_dead_slots: int[][] = [[], []]
+
+    # texture t sampled from a new slot (the old one free once the GPU is done with it)
+    __vg_tex_slot = (t: int):
+        if t > 0 and (__vgt[t].slot == 0 or __vgt[t].drawn):
+            __mg_defer_slot(__vgt[t].slot)
+            __vgt[t].slot = __vk_slot_new()
+            __vgt[t].drawn = false
+        depth = __vgt[t].format == 252
+        __mg_set_slot(__vgt[t].slot, __vgt[t].tex, __vgt[t].linear and not depth, __vgt[t].repeat)
+
+    # the slot a draw samples texture t from (white for no texture)
+    __vg_slot_of = (t: int) -> int:
+        if t <= 0 or t >= __vgt.len() or __vgt[t].tex == null: return 0
+        __vgt[t].drawn = true
+        __vgt[t].slot
+
+    # (re)make the image of texture t (format: an MTLPixelFormat)
+    __vg_tex_alloc = (t: int, w: int, h: int, format: int):
+        if __vgt[t].tex != null: __mg_defer(__vgt[t].tex)
+        pool = objc_autoreleasePoolPush()
+        d = __mo_iiii(__cls("MTLTextureDescriptor"), __sel("texture2DDescriptorWithPixelFormat:width:height:mipmapped:"), format, max(w, 1), max(h, 1), 0)
+        __oc_i(d, __sel("setStorageMode:"), 2)
+        __oc_i(d, __sel("setUsage:"), 1 | 4)                        # shader read, render target
+        tex = __mg_texture_of(d)
+        objc_autoreleasePoolPop(pool)
+        __vgt[t].tex = tex
+        __vgt[t].live = true
+        __vgt[t].width = max(w, 1)
+        __vgt[t].height = max(h, 1)
+        __vgt[t].format = format
+        __vg_tex_slot(t)
+
+    __mg_bpp = (format: int) -> int:
+        if format == 115: return 8
+        if format == 124 or format == 125: return 16
+        if format == 10: return 1
+        4
+
+    # copy pixels into part of texture t (rows bottom first, as OpenGL: the image keeps that order)
+    __vg_tex_upload = (t: int, x: int, y: int, w: int, h: int, pixels: *u8, bpp: int):
+        if pixels == null or w <= 0 or h <= 0: return
+        n = w * h * bpp
+        blk, off = __vk_upload(pixels, n, 256)
+        enc = __mg_blit()
+        size: int[] = [w, h, 1]
+        origin: int[] = [x, y, 0]
+        __mo_buf_to_tex(enc, __sel("copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:"),
+            __vk_blocks[blk].buffer as *u8, off, w * bpp, n, data(size) as *u8, __vgt[t].tex, 0, 0, data(origin) as *u8)
+        __mg_end_blit(enc)
+
+    # ---------------- framebuffers ----------------
+    struct __MgFb:
+        color: int                 # texture names (0: none)
+        depth: int
+
+    __vgf: __MgFb[]                # by GL name (0: the screen)
+    __vg_fb = 0
+    __vg_rb = 0
+
+    # the screen: what a frame is drawn into before it is shown
+    __mg_screen: *u8 = null
+    __mg_screen_depth: *u8 = null
+    __mg_screen_w = 0
+    __mg_screen_h = 0
+
+    __vk_resize_screen = (w: int, h: int):
+        if __mg_screen != null and __mg_screen_w == max(w, 1) and __mg_screen_h == max(h, 1): return
+        __mg_defer(__mg_screen)
+        __mg_defer(__mg_screen_depth)
+        __mg_screen_w = max(w, 1)
+        __mg_screen_h = max(h, 1)
+        pool = objc_autoreleasePoolPush()
+        d = __mo_iiii(__cls("MTLTextureDescriptor"), __sel("texture2DDescriptorWithPixelFormat:width:height:mipmapped:"), 70, __mg_screen_w, __mg_screen_h, 0)
+        __oc_i(d, __sel("setStorageMode:"), 2)
+        __oc_i(d, __sel("setUsage:"), 1 | 4)
+        __mg_screen = __mg_texture_of(d)
+        dd = __mo_iiii(__cls("MTLTextureDescriptor"), __sel("texture2DDescriptorWithPixelFormat:width:height:mipmapped:"), 252, __mg_screen_w, __mg_screen_h, 0)
+        __oc_i(dd, __sel("setStorageMode:"), 2)
+        __oc_i(dd, __sel("setUsage:"), 1 | 4)
+        __mg_screen_depth = __mg_texture_of(dd)
+        objc_autoreleasePoolPop(pool)
+
+    __vg_fb_size = (f: int) -> (int, int):
+        if f == 0: return (__mg_screen_w, __mg_screen_h)
+        c = __vgf[f].color
+        if c > 0: return (__vgt[c].width, __vgt[c].height)
+        d = __vgf[f].depth
+        if d > 0: return (__vgt[d].width, __vgt[d].height)
+        (1, 1)
+
+    # the pixel formats of framebuffer f's attachments (0: none)
+    __vg_fb_formats = (f: int) -> (int, int):
+        if f == 0: return (70, 252)
+        cf = 0
+        df = 0
+        if __vgf[f].color > 0: cf = __vgt[__vgf[f].color].format
+        if __vgf[f].depth > 0: df = __vgt[__vgf[f].depth].format
+        (cf, df)
+
+    __mg_fb_textures = (f: int) -> (*u8, *u8):
+        if f == 0: return (__mg_screen, __mg_screen_depth)
+        c: *u8 = null
+        d: *u8 = null
+        if __vgf[f].color > 0: c = __vgt[__vgf[f].color].tex
+        if __vgf[f].depth > 0: d = __vgt[__vgf[f].depth].tex
+        (c, d)
+
+    # ---------------- passes ----------------
+    __vg_pass = -1                 # the framebuffer being rendered, or -1
+    __mg_enc: *u8 = null           # its render encoder
+    __vg_pipeline: *u8 = null
+    __mg_depth_state: *u8 = null
+    # a clear asked for and not yet done: the next pass on that framebuffer starts with it
+    __mg_clear_fb = -1
+    __mg_clear_color = false
+    __mg_clear_depth = false
+
+    __vg_end_pass = ():
+        if __vg_pass < 0: return
+        __oc(__mg_enc, __sel("endEncoding"))
+        __mg_release(__mg_enc)
+        __mg_enc = null
+        __vg_pass = -1
+
+    __vg_begin_pass = ():
+        __vk_begin_frame()
+        if __vg_pass == __vg_fb and __mg_clear_fb != __vg_fb: return
+        __vg_end_pass()
+        f = __vg_fb
+        ct, dt = __mg_fb_textures(f)
+        pool = objc_autoreleasePoolPush()
+        rp = __oc(__cls("MTLRenderPassDescriptor"), __sel("renderPassDescriptor"))
+        clearing = __mg_clear_fb == f
+        if ct != null:
+            a = __oc_i(__oc(rp, __sel("colorAttachments")), __sel("objectAtIndexedSubscript:"), 0)
+            __oc_p(a, __sel("setTexture:"), ct)
+            __oc_i(a, __sel("setStoreAction:"), 1)
+            if clearing and __mg_clear_color:
+                __oc_i(a, __sel("setLoadAction:"), 2)
+                __mo_4d(a, __sel("setClearColor:"), f64(__vg_clear.x), f64(__vg_clear.y), f64(__vg_clear.z), f64(__vg_clear.w))
+            else: __oc_i(a, __sel("setLoadAction:"), 1)
+        if dt != null:
+            a = __oc(rp, __sel("depthAttachment"))
+            __oc_p(a, __sel("setTexture:"), dt)
+            __oc_i(a, __sel("setStoreAction:"), 1)
+            if clearing and __mg_clear_depth:
+                __oc_i(a, __sel("setLoadAction:"), 2)
+                __mo_d(a, __sel("setClearDepth:"), 1.0)
+            else: __oc_i(a, __sel("setLoadAction:"), 1)
+        __mg_enc = __mg_keep(__oc_p(__vk_cb(), __sel("renderCommandEncoderWithDescriptor:"), rp))
+        objc_autoreleasePoolPop(pool)
+        if clearing: __mg_clear_fb = -1
+        __vg_pass = f
+        __vg_pipeline = null
+        __mg_depth_state = null
+        __mg_use_heaps(__mg_enc)
+        __mo_pii(__mg_enc, __sel("setVertexBuffer:offset:atIndex:"), __mg_args, 0, 1)
+        __mo_pii(__mg_enc, __sel("setFragmentBuffer:offset:atIndex:"), __mg_args, 0, 1)
+
+    # a blit encoder (after the pass being rendered), and its end
+    __mg_blit = () -> *u8:
+        __vk_begin_frame()
+        __vg_end_pass()
+        pool = objc_autoreleasePoolPush()
+        enc = __mg_keep(__oc(__vk_cb(), __sel("blitCommandEncoder")))
+        objc_autoreleasePoolPop(pool)
+        enc
+    __mg_end_blit = (enc: *u8):
+        __oc(enc, __sel("endEncoding"))
+        __mg_release(enc)
+
+    # ---------------- GL state ----------------
+    __vg_blend = false
+    __vg_bf = (1, 0, 1, 0)
+    __vg_depth = false
+    __vg_depth_func = 0x201
+    __vg_depth_write = true
+    __vg_cull = false
+    __vg_cull_face = 0x405
+    __vg_front_cw = false
+    __vg_cmask = 15
+    __vg_scissor_on = false
+    __vg_scissor = (0, 0, 0, 0)
+    __vg_viewport = (0, 0, 1, 1)
+    __vg_clear = vec4(0, 0, 0, 0)
+
+    vgl_clear_color = (r: f32, g: f32, b: f32, a: f32): __vg_clear = vec4(r, g, b, a)
+
+    # (a clear of the whole framebuffer: the pass starts again with it; the library turns the
+    # scissor off for its clears)
+    vgl_clear = (mask: u32):
+        __vk_begin_frame()
+        cf, df = __vg_fb_formats(__vg_fb)
+        __mg_clear_color = mask & u32(GL_COLOR_BUFFER_BIT) != 0 and cf != 0 and __vg_cmask != 0
+        __mg_clear_depth = mask & u32(GL_DEPTH_BUFFER_BIT) != 0 and df != 0 and __vg_depth_write
+        if not __mg_clear_color and not __mg_clear_depth: return
+        __mg_clear_fb = __vg_fb
+        __vg_begin_pass()
+
+    vgl_viewport = (x: i32, y: i32, w: i32, h: i32): __vg_viewport = (int(x), int(y), int(w), int(h))
+    vgl_scissor = (x: i32, y: i32, w: i32, h: i32): __vg_scissor = (int(x), int(y), int(w), int(h))
+
+    vgl_enable = (cap: u32, on: bool):
+        c = int(cap)
+        if c == GL_BLEND: __vg_blend = on
+        else if c == GL_DEPTH_TEST: __vg_depth = on
+        else if c == GL_CULL_FACE: __vg_cull = on
+        else if c == GL_SCISSOR_TEST: __vg_scissor_on = on
+
+    vgl_blend_func = (s: u32, d: u32, sa: u32, da: u32): __vg_bf = (int(s), int(d), int(sa), int(da))
+    vgl_depth_func = (f: u32): __vg_depth_func = int(f)
+    vgl_depth_mask = (on: u32): __vg_depth_write = on != 0
+    vgl_color_mask = (r: u32, g: u32, b: u32, a: u32): __vg_cmask = int(r != 0) | (int(g != 0) << 1) | (int(b != 0) << 2) | (int(a != 0) << 3)
+    vgl_cull_face = (mode: u32): __vg_cull_face = int(mode)
+    vgl_front_face = (mode: u32): __vg_front_cw = int(mode) == GL_CW
+
+    # ---------------- buffers ----------------
+    struct __VgBuf:
+        buf: __VkBuffer            # its own memory, or else
+        block: int                 # (upload memory of the frame it was written in: streamed data)
+        off: int
+        size: int
+        frame: int                 # the frame number it was streamed in (-1: its own memory)
+
+    __vgb: __VgBuf[] = [__VgBuf(frame = -1)]
+    __vg_array = 0
+    __vg_elem = 0
+    __vg_frame_no = 0
+
+    vgl_create_buffer = () -> int:
+        __vgb.push(__VgBuf(frame = -1))
+        __vgb.len() - 1
+
+    vgl_bind_buffer = (target: u32, b: u32):
+        if int(target) == GL_ARRAY_BUFFER: __vg_array = int(b)
+        else: __vg_elem = int(b)
+
+    vgl_buffer_data = (target: u32, size: int, p: *u8, usage: u32):
+        b = __vg_array
+        if int(target) != GL_ARRAY_BUFFER: b = __vg_elem
+        if b <= 0 or b >= __vgb.len(): return
+        if int(usage) != GL_STREAM_DRAW and __vgb[b].frame < 0 and __vgb[b].buf.buffer != 0 and size <= __vgb[b].buf.size:
+            __vgb[b].size = size
+            if p != null and size > 0: __vg_copy_to_buffer(__vgb[b].buf.buffer, 0, p, size)
+            return
+        __vk_defer_buffer(__vgb[b].buf)
+        __vgb[b].buf = __VkBuffer()
+        __vgb[b].size = size
+        if int(usage) == GL_STREAM_DRAW and p != null:
+            blk, off = __vk_upload(p, size)
+            __vgb[b].block = blk
+            __vgb[b].off = off
+            __vgb[b].frame = __vg_frame_no
+            return
+        __vgb[b].frame = -1
+        nb = __vk_buffer(max(size, 16), 0, 0, 0)
+        __vgb[b].buf = nb
+        if p != null and size > 0: mem_copy(nb.ptr, p, size)
+
+    vgl_buffer_sub_data = (target: u32, off: int, size: int, p: *u8):
+        b = __vg_array
+        if int(target) != GL_ARRAY_BUFFER: b = __vg_elem
+        if b <= 0 or b >= __vgb.len() or size <= 0 or __vgb[b].frame >= 0: return
+        __vg_copy_to_buffer(__vgb[b].buf.buffer, off, p, size)
+
+    # copy bytes into a buffer, through this frame's upload memory, before what is drawn next
+    __vg_copy_to_buffer = (dst: int, off: int, p: *u8, size: int):
+        if size <= 0: return
+        blk, src = __vk_upload(p, size)
+        enc = __mg_blit()
+        __mo_pipii(enc, __sel("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:"), __vk_blocks[blk].buffer as *u8, src, dst as *u8, off, size)
+        __mg_end_blit(enc)
+
+    __vg_buffer_addr = (b: int) -> int:
+        if b <= 0 or b >= __vgb.len(): return 0
+        if __vgb[b].frame >= 0:
+            if __vgb[b].frame != __vg_frame_no: return 0
+            return __vk_addr(__vgb[b].block, __vgb[b].off)
+        __vgb[b].buf.addr
+
+    # the MTLBuffer and offset of buffer b (for index buffers)
+    __mg_buffer_at = (b: int) -> (*u8, int):
+        if __vgb[b].frame >= 0: return (__vk_blocks[__vgb[b].block].buffer as *u8, __vgb[b].off)
+        (__vgb[b].buf.buffer as *u8, 0)
+
+    # ---------------- textures (GL) ----------------
+    vgl_create_texture = () -> int:
+        __vg_init()
+        if __vgt_free.len() > 0:
+            t = __vgt_free.pop()
+            __vgt[t] = __MgTex(live = true, linear = true)
+            return t
+        if __vgt.len() >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        __vgt.push(__MgTex(live = true, linear = true))
+        __vgt.len() - 1
+
+    vgl_delete_texture = (t: int):
+        if t <= 0 or t >= __vgt.len() or not __vgt[t].live: return
+        __mg_defer(__vgt[t].tex)
+        __mg_defer_slot(__vgt[t].slot)
+        __vgt[t] = __MgTex()
+        __vgt_free.push(t)
+
+    vgl_active_texture = (unit: u32): __vg_unit = clamp(int(unit) - GL_TEXTURE0, 0, 15)
+    vgl_bind_texture = (t: u32): __vg_bound[__vg_unit] = int(t)
+
+    # the Metal pixel format for a GL internal format
+    __vg_format = (internal: int, format: int, ty: int) -> int:
+        if format == GL_DEPTH_COMPONENT or internal == GL_DEPTH_COMPONENT24: return 252
+        if internal == GL_RGBA16F: return 115
+        if internal == 0x8814: return 125                  # GL_RGBA32F
+        if internal == 0x8D82: return 124                  # GL_RGBA32I
+        if internal == GL_R8: return 10
+        70
+
+    __vg_rgb_to_rgba = (p: *u8, n: int) -> u8[]:
+        out = fill(u8(255), n * 4)
+        loop i in [0..n):
+            out[i * 4] = p[i * 3]
+            out[i * 4 + 1] = p[i * 3 + 1]
+            out[i * 4 + 2] = p[i * 3 + 2]
+        out
+
+    vgl_tex_image = (w: int, h: int, internal: int, format: int, ty: int, pixels: *u8):
+        __vg_init()
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len(): return
+        f = __vg_format(internal, format, ty)
+        __vg_tex_alloc(t, w, h, f)
+        if pixels == null: return
+        if format == GL_RGB and ty == GL_UNSIGNED_BYTE:
+            px = __vg_rgb_to_rgba(pixels, w * h)
+            __vg_tex_upload(t, 0, 0, w, h, data(px), 4)
+        else: __vg_tex_upload(t, 0, 0, w, h, pixels, __mg_bpp(f))
+
+    vgl_tex_sub_image = (x: int, y: int, w: int, h: int, format: int, ty: int, pixels: *u8):
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len() or __vgt[t].tex == null: return
+        if format == GL_RGB and ty == GL_UNSIGNED_BYTE:
+            px = __vg_rgb_to_rgba(pixels, w * h)
+            __vg_tex_upload(t, x, y, w, h, data(px), 4)
+        else: __vg_tex_upload(t, x, y, w, h, pixels, __mg_bpp(__vgt[t].format))
+
+    vgl_tex_parameter = (pname: u32, v: i32):
+        t = __vg_bound[__vg_unit]
+        if t <= 0 or t >= __vgt.len(): return
+        p = int(pname)
+        if p == GL_TEXTURE_MAG_FILTER: __vgt[t].linear = int(v) != GL_NEAREST
+        else if p == GL_TEXTURE_WRAP_S or p == GL_TEXTURE_WRAP_T: __vgt[t].repeat = int(v) == GL_REPEAT or int(v) == GL_MIRRORED_REPEAT
+        else: return
+        if __vgt[t].tex != null: __vg_tex_slot(t)
+
+    # ---------------- framebuffers (GL) ----------------
+    vgl_create_framebuffer = () -> int:
+        __vg_init()
+        __vgf.push(__MgFb())
+        __vgf.len() - 1
+
+    vgl_delete_framebuffer = (f: int):
+        if f <= 0 or f >= __vgf.len(): return
+        if __vg_pass == f: __vg_end_pass()
+        __vgf[f] = __MgFb()
+
+    vgl_bind_framebuffer = (f: u32):
+        __vg_init()
+        __vg_fb = int(f)
+        if __vg_fb >= __vgf.len(): __vg_fb = 0
+
+    vgl_framebuffer_texture = (attachment: u32, tex: u32):
+        if __vg_fb <= 0: return
+        if __vg_pass == __vg_fb: __vg_end_pass()
+        if int(attachment) == GL_DEPTH_ATTACHMENT: __vgf[__vg_fb].depth = int(tex)
+        else: __vgf[__vg_fb].color = int(tex)
+
+    vgl_create_renderbuffer = () -> int: vgl_create_texture()
+    vgl_bind_renderbuffer = (r: u32): __vg_rb = int(r)
+    vgl_renderbuffer_storage = (format: u32, w: i32, h: i32):
+        if __vg_rb <= 0 or __vg_rb >= __vgt.len(): return
+        __vg_tex_alloc(__vg_rb, int(w), int(h), __vg_format(int(format), 0, 0))
+    vgl_framebuffer_renderbuffer = (attachment: u32, r: u32): vgl_framebuffer_texture(attachment, r)
+
+    __vk_readback = __VkBuffer()
+
+    # pixels of the bound framebuffer's color image (rows bottom first, as GL); bpp: 4 or 16
+    vgl_read_pixels = (x: int, y: int, w: int, h: int, out: *u8, bpp: int):
+        __vk_begin_frame()
+        ct, _ = __mg_fb_textures(__vg_fb)
+        if ct == null: return
+        tw, th = __vg_fb_size(__vg_fb)
+        cf, _ = __vg_fb_formats(__vg_fb)
+        pb = __mg_bpp(cf)
+        n = tw * th * pb
+        if __vk_readback.size < n:
+            __vk_free_buffer(__vk_readback)
+            __vk_readback = __vk_buffer(n, 0, 0, 0)
+        enc = __mg_blit()
+        size: int[] = [tw, th, 1]
+        origin: int[] = [0, 0, 0]
+        __mo_tex_to_buf(enc, __sel("copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:destinationOffset:destinationBytesPerRow:destinationBytesPerImage:"),
+            ct, 0, 0, data(origin) as *u8, data(size) as *u8, __vk_readback.buffer as *u8, 0, tw * pb, n)
+        __mg_end_blit(enc)
+        __vk_submit_and_wait()
+        # (the part asked for)
+        loop r in [0..h):
+            sy = y + r
+            if sy < 0 or sy >= th: continue
+            mem_copy(out + r * w * bpp, __vk_readback.ptr + (sy * tw + x) * pb, min(w, tw - x) * min(bpp, pb))
+
+    # ---------------- programs and pipelines ----------------
+    struct __VgProg:
+        vs: *u8                    # MTLFunctions
+        fs: *u8
+        pipelines: {int: *u8}      # state key -> MTLRenderPipelineState
+        tex_offs: int[]            # where its uniforms hold a Texture's id (GL name)
+
+    __vgp: __VgProg[] = [__VgProg()]
+    __mg_depth_states: {int: *u8}
+
+    # an MTLFunction from Metal source (entry point name)
+    __mg_function = (src: str, name: str) -> *u8:
+        pool = objc_autoreleasePoolPush()
+        err: *u8 = null
+        lib = __mo_ppp(__mg_dev, __sel("newLibraryWithSource:options:error:"), __nsstr_tmp(src), null, (&err) as *u8)
+        if lib == null:
+            eprint(src)
+            panic("Metal: a shader did not compile: {__mg_err_text(err)}")
+        f = __oc_p(lib, __sel("newFunctionWithName:"), __nsstr(name))
+        __mg_release(lib)
+        objc_autoreleasePoolPop(pool)
+        if f == null: panic("Metal: no function {name} in a shader")
+        f
+
+    # an NSString not kept (autoreleased in the caller's pool)
+    __nsstr_tmp = (s: str) -> *u8:
+        __oc_pi_p(__cls("NSString"), __sel("stringWithUTF8String:"), data(__zstr(s)), 0)
+
+    __vk_program = (src: ShaderSource) -> int:
+        offs: int[]
+        halves = split(src.layout, "|")
+        if halves.len() > 1:
+            loop part in split(halves[1], ";"):
+                f = split(part, ",")
+                if f.len() < 3 or f[1] != "t": continue
+                o = to_int(f[2]) ?? 0
+                n = 1
+                stride = 0
+                if f.len() > 4:
+                    n = to_int(f[3]) ?? 0
+                    stride = to_int(f[4]) ?? 0
+                loop i in [0..n): offs.push(o + i * stride)
+        __vgp.push(__VgProg(__mg_function(src.vs_spirv, "sl_vs"), __mg_function(src.fs_spirv, "sl_fs"), {}, offs))
+        __vgp.len() - 1
+
+    __vg_tex_slots = (prog: int, p: *u8):
+        loop o in __vgp[prog].tex_offs:
+            q = (p + o) as *int
+            q[0] = __vg_slot_of(q[0])
+
+    # GL blend factors as Metal's
+    __vg_factor = (f: int) -> int:
+        if f == 0: return 0
+        if f == 1: return 1
+        if f == 0x300: return 2
+        if f == 0x301: return 3
+        if f == 0x302: return 4
+        if f == 0x303: return 5
+        if f == 0x304: return 8
+        if f == 0x305: return 9
+        if f == 0x306: return 6
+        if f == 0x307: return 7
+        1
+
+    # the pipeline for program p as the state is now (made the first time it is needed)
+    __vg_pipeline_for = (p: int, cls: int) -> *u8:
+        cf, df = __vg_fb_formats(__vg_fb)
+        blend_on = __vg_blend and cf != 0
+        key = cls | (cf << 2) | (df << 12) | (__vg_cmask << 22)
+        if blend_on: key = key | (1 << 26) | (__vg_factor(__vg_bf.0) << 27) | (__vg_factor(__vg_bf.1) << 31) | (__vg_factor(__vg_bf.2) << 35) | (__vg_factor(__vg_bf.3) << 39)
+        if let pl = __vgp[p].pipelines.get(key): return pl
+        pool = objc_autoreleasePoolPush()
+        d = __oc(__oc(__cls("MTLRenderPipelineDescriptor"), __sel("alloc")), __sel("init"))
+        __oc_p(d, __sel("setVertexFunction:"), __vgp[p].vs)
+        __oc_p(d, __sel("setFragmentFunction:"), __vgp[p].fs)
+        if cf != 0:
+            a = __oc_i(__oc(d, __sel("colorAttachments")), __sel("objectAtIndexedSubscript:"), 0)
+            __oc_i(a, __sel("setPixelFormat:"), cf)
+            # (Metal's write mask: red 8, green 4, blue 2, alpha 1)
+            m = ((__vg_cmask & 1) << 3) | ((__vg_cmask & 2) << 1) | ((__vg_cmask & 4) >> 1) | ((__vg_cmask & 8) >> 3)
+            __oc_i(a, __sel("setWriteMask:"), m)
+            if blend_on:
+                __oc_i(a, __sel("setBlendingEnabled:"), 1)
+                __oc_i(a, __sel("setSourceRGBBlendFactor:"), __vg_factor(__vg_bf.0))
+                __oc_i(a, __sel("setDestinationRGBBlendFactor:"), __vg_factor(__vg_bf.1))
+                __oc_i(a, __sel("setSourceAlphaBlendFactor:"), __vg_factor(__vg_bf.2))
+                __oc_i(a, __sel("setDestinationAlphaBlendFactor:"), __vg_factor(__vg_bf.3))
+        if df != 0: __oc_i(d, __sel("setDepthAttachmentPixelFormat:"), df)
+        # (points, lines or triangles)
+        __oc_i(d, __sel("setInputPrimitiveTopology:"), cls + 1)
+        err: *u8 = null
+        pl = __oc_pp(__mg_dev, __sel("newRenderPipelineStateWithDescriptor:error:"), d, (&err) as *u8)
+        __mg_release(d)
+        if pl == null: panic("Metal: a pipeline could not be made: {__mg_err_text(err)}")
+        objc_autoreleasePoolPop(pool)
+        __vgp[p].pipelines[key] = pl
+        pl
+
+    __mg_depth_state_now = () -> *u8:
+        on = __vg_depth
+        key = 0
+        if on: key = 1 | ((__vg_depth_func - 0x200) << 1) | (int(__vg_depth_write) << 4)
+        if let s = __mg_depth_states.get(key): return s
+        pool = objc_autoreleasePoolPush()
+        d = __oc(__oc(__cls("MTLDepthStencilDescriptor"), __sel("alloc")), __sel("init"))
+        if on:
+            __oc_i(d, __sel("setDepthCompareFunction:"), __vg_depth_func - 0x200)
+            __oc_i(d, __sel("setDepthWriteEnabled:"), int(__vg_depth_write))
+        else:
+            __oc_i(d, __sel("setDepthCompareFunction:"), 7)
+            __oc_i(d, __sel("setDepthWriteEnabled:"), 0)
+        s = __oc_p(__mg_dev, __sel("newDepthStencilStateWithDescriptor:"), d)
+        __mg_release(d)
+        objc_autoreleasePoolPop(pool)
+        __mg_depth_states[key] = s
+        s
+
+    # GL modes as Metal primitive types (fans become lists of triangles: see __mg_fan)
+    __mg_prim = (mode: int) -> int:
+        if mode == GL_POINTS: return 0
+        if mode == GL_LINES: return 1
+        if mode == GL_LINE_STRIP: return 2
+        if mode == GL_TRIANGLE_STRIP: return 4
+        3
+
+    __mg_class = (prim: int) -> int:
+        if prim == 0: return 0
+        if prim <= 2: return 1
+        2
+
+    # ---------------- draws ----------------
+    # the constants of a draw (compiler/msl.jo's SlPC)
+    struct __VgPush:
+        params: int
+        verts: int
+        insts: int
+        vstride: i32
+        istride: i32
+        flip: f32
+        pad: f32
+
+    # bind program p's pipeline and the state for a draw of the given GL mode; false when nothing
+    # is to be drawn (both faces culled)
+    __vg_prepare = (p: int, mode: int) -> bool:
+        __vg_begin_pass()
+        if __vg_cull and __vg_cull_face == 0x408: return false
+        enc = __mg_enc
+        pl = __vg_pipeline_for(p, __mg_class(__mg_prim(mode)))
+        if pl != __vg_pipeline:
+            __oc_p(enc, __sel("setRenderPipelineState:"), pl)
+            __vg_pipeline = pl
+        ds = __mg_depth_state_now()
+        if ds != __mg_depth_state:
+            __oc_p(enc, __sel("setDepthStencilState:"), ds)
+            __mg_depth_state = ds
+        vx, vy, vw, vh = __vg_viewport
+        vp: f64[] = [f64(vx), f64(vy), f64(max(vw, 1)), f64(max(vh, 1)), 0.0, 1.0]
+        __oc_p(enc, __sel("setViewport:"), data(vp) as *u8)
+        w, h = __vg_fb_size(__vg_fb)
+        r: int[] = [0, 0, w, h]
+        if __vg_scissor_on:
+            x0 = clamp(__vg_scissor.0, 0, w)
+            y0 = clamp(__vg_scissor.1, 0, h)
+            x1 = clamp(__vg_scissor.0 + __vg_scissor.2, x0, w)
+            y1 = clamp(__vg_scissor.1 + __vg_scissor.3, y0, h)
+            r = [x0, y0, x1 - x0, y1 - y0]
+        if r[2] == 0 or r[3] == 0: return false
+        __oc_p(enc, __sel("setScissorRect:"), data(r) as *u8)
+        cull = 0
+        if __vg_cull:
+            if __vg_cull_face == GL_FRONT: cull = 1
+            else: cull = 2
+        __oc_i(enc, __sel("setCullMode:"), cull)
+        # (y is turned over: GL's counter-clockwise is clockwise here)
+        front = 0
+        if __vg_front_cw: front = 1
+        __oc_i(enc, __sel("setFrontFacingWinding:"), front)
+        true
+
+    __mg_set_constants = (pc: __VgPush):
+        __mo_pii(__mg_enc, __sel("setVertexBytes:length:atIndex:"), (&pc) as *u8, 40, 0)
+        __mo_pii(__mg_enc, __sel("setFragmentBytes:length:atIndex:"), (&pc) as *u8, 40, 0)
+
+    __vk_draw_mesh = (prog: int, mode: int, vbo: int, stride: int, nverts: int, ibo: int, nidx: int, uni: *u8, usize: int, ibuf: int, istride: int, ninst: int, ioff: int):
+        insts = 0
+        if ibuf > 0: insts = __vg_buffer_addr(ibuf) + ioff
+        __vk_draw_at(prog, mode, __vg_buffer_addr(vbo), stride, nverts, ibo, nidx, uni, usize, insts, istride, ninst)
+
+    __vk_draw_at = (prog: int, mode: int, verts: int, stride: int, nverts: int, ibo: int, nidx: int, uni: *u8, usize: int, insts: int, istride: int, ninst: int, ind: int = 0, ind_off: int = 0, ndraws: int = 0, cnt: int = 0, cnt_off: int = 0):
+        if prog <= 0: return
+        if verts == 0 and nverts > 0: return
+        indexed = nidx > 0 and ibo > 0 and ibo < __vgb.len()
+        blk, off = __vk_upload(uni, usize)
+        __vg_tex_slots(prog, __vk_blocks[blk].ptr + off)
+        pc = __VgPush(params = __vk_addr(blk, off), verts = verts, insts = insts, vstride = i32(stride), istride = i32(istride))
+        if not __vg_prepare(prog, mode): return
+        __mg_set_constants(pc)
+        prim = __mg_prim(mode)
+        n = max(ninst, 1)
+        # (a fan: its triangles through indices of their own)
+        if mode == GL_TRIANGLE_FAN and ind == 0:
+            count = nverts
+            if indexed: count = nidx
+            fb, fo = __mg_fan(ibo, indexed, count)
+            if fb == null: return
+            __mo_iiipii(__mg_enc, __sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:"), 3, max(count - 2, 0) * 3, 1, fb, fo, n)
+            return
+        if ind != 0:
+            if ndraws <= 0: return
+            ib: *u8 = null
+            io = 0
+            if indexed:
+                ib, io = __mg_buffer_at(ibo)
+            else:
+                ib = __vg_sequence(nverts)
+            loop d in [0..ndraws): __mo_iipipi(__mg_enc, __sel("drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:indirectBufferOffset:"), prim, 1, ib, io, ind as *u8, ind_off + 20 * d)
+            return
+        if indexed:
+            ib, io = __mg_buffer_at(ibo)
+            __mo_iiipii(__mg_enc, __sel("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:"), prim, nidx, 1, ib, io, n)
+        else: __mo_iiii(__mg_enc, __sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), prim, 0, nverts, n)
+
+    # the indices of a fan's triangles, in this frame's upload memory: (buffer, offset)
+    __mg_fan = (ibo: int, indexed: bool, count: int) -> (*u8, int):
+        if count < 3: return (null, 0)
+        src: *u32 = null
+        if indexed:
+            if __vgb[ibo].frame >= 0: src = (__vk_blocks[__vgb[ibo].block].ptr + __vgb[ibo].off) as *u32
+            else: src = __vgb[ibo].buf.ptr as *u32
+        idx: u32[]
+        loop i in [1..count - 1):
+            if src != null:
+                idx.push(src[0])
+                idx.push(src[i])
+                idx.push(src[i + 1])
+            else:
+                idx.push(0)
+                idx.push(u32(i))
+                idx.push(u32(i + 1))
+        blk, off = __vk_upload(data(idx) as *u8, idx.len() * 4)
+        (__vk_blocks[blk].buffer as *u8, off)
+
+    # indices 0, 1, 2... (at least n), for indirect draws of meshes without indices
+    __vg_seq = __VkBuffer()
+    __vg_seq_n = 0
+    __vg_sequence = (n: int) -> *u8:
+        if n > __vg_seq_n:
+            m = max(max(n, __vg_seq_n * 2), 1024)
+            __vk_defer_buffer(__vg_seq)
+            __vg_seq = __vk_buffer(m * 4, 0, 0, 0)
+            __vg_seq_n = m
+            p = __vg_seq.ptr as *u32
+            loop i in [0..m): p[i] = u32(i)
+        __vg_seq.buffer as *u8
+
+    # vertices already in upload memory (at address verts): the 2D batch
+    __vk_draw_batch = (prog: int, verts: int, stride: int, nverts: int, uni: *u8, usize: int):
+        blk, off = __vk_upload(uni, usize)
+        __vg_tex_slots(prog, __vk_blocks[blk].ptr + off)
+        pc = __VgPush(params = __vk_addr(blk, off), verts = verts, vstride = i32(stride))
+        if not __vg_prepare(prog, GL_TRIANGLES): return
+        __mg_set_constants(pc)
+        __mo_iiii(__mg_enc, __sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), 3, 0, nverts, 1)
+
+    # ---------------- compute ----------------
+    __vk_compute_pipeline = (code: str) -> int:
+        f = __mg_function(code, "sl_main")
+        pool = objc_autoreleasePoolPush()
+        err: *u8 = null
+        pl = __oc_pp(__mg_dev, __sel("newComputePipelineStateWithFunction:error:"), f, (&err) as *u8)
+        objc_autoreleasePoolPop(pool)
+        if pl == null: panic("Metal: a compute pipeline could not be made: {__mg_err_text(err)}")
+        pl as int
+
+    # run compute pipeline pl, its parameters the n bytes at p: over count ids (count2 0), a grid of
+    # count by count2 (by count3), or (count 0: a GPU array kernel) gx * gy groups of 64
+    __vk_dispatch = (pl: int, p: *u8, n: int, gx: int, gy: int, count: int = 0, count2: int = 0, gz: int = 1, count3: int = 0):
+        blk, off = __vk_upload(p, n)
+        __vk_begin_frame()
+        __vg_end_pass()
+        pool = objc_autoreleasePoolPush()
+        enc = __mg_keep(__oc(__vk_cb(), __sel("computeCommandEncoder")))
+        objc_autoreleasePoolPop(pool)
+        __mg_use_heaps(enc)
+        __oc_p(enc, __sel("setComputePipelineState:"), pl as *u8)
+        pc = __VgPush(params = __vk_addr(blk, off), vstride = i32(count), istride = i32(count2), pad = 0.0)
+        # (a 3D grid's depth after the flip, as compiler/msl.jo's SlPC has it)
+        q = (&pc) as *u8
+        ((q + 36) as *i32)[0] = i32(count3)
+        __mo_pii(enc, __sel("setBytes:length:atIndex:"), q, 40, 0)
+        __mo_pii(enc, __sel("setBuffer:offset:atIndex:"), __mg_args, 0, 1)
+        threads: int[] = [count, 1, 1]
+        group: int[] = [64, 1, 1]
+        if count == 0: threads = [gx * gy * 64, 1, 1]
+        else if count3 > 0:
+            threads = [count, count2, count3]
+            group = [4, 4, 4]
+        else if count2 > 0:
+            threads = [count, count2, 1]
+            group = [8, 8, 1]
+        __oc_pp(enc, __sel("dispatchThreads:threadsPerThreadgroup:"), data(threads) as *u8, data(group) as *u8)
+        __oc(enc, __sel("endEncoding"))
+        __mg_release(enc)
+
+    # a buffer's first n bytes set to 0, before what runs next
+    __vk_fill_buffer = (b: int, n: int):
+        enc = __mg_blit()
+        __mo_piii(enc, __sel("fillBuffer:range:value:"), b as *u8, 0, n, 0)
+        __mg_end_blit(enc)
+
+    # n bytes of a buffer (from byte off), after everything recorded so far has run
+    __vk_read_buffer = (b: int, n: int, out: *u8, off: int = 0):
+        __vk_begin_frame()
+        __vk_submit_and_wait()
+        # (every buffer is the CPU's to read)
+        mem_copy(out, (__oc(b as *u8, __sel("contents"))) + off, n)
+
+    # ---------------- frames ----------------
+    __vg_end_frame = ():
+        __vg_end_pass()
+        __vg_frame_no += 1
+
+    # the screen drawn into the window's drawable, turned over (the screen's row 0 is the bottom)
+    __mg_present_pl: *u8 = null
+    __MG_PRESENT = "#include <metal_stdlib>\nusing namespace metal;\nstruct PO \{ float4 pos [[position]]; float2 uv; };\nvertex PO sl_pvs(uint vid [[vertex_id]]) \{\n    float2 p = float2(float((vid << 1) & 2), float(vid & 2));\n    PO o;\n    o.pos = float4(p * 2.0f - 1.0f, 0.0f, 1.0f);\n    o.uv = p;\n    return o;\n}\nfragment float4 sl_pfs(PO i [[stage_in]], texture2d<float> t [[texture(0)]]) \{\n    constexpr sampler s(filter::linear, address::clamp_to_edge);\n    return float4(t.sample(s, i.uv).rgb, 1.0f);\n}\n"
+
+    __mg_make_present = ():
+        vs = __mg_function(__MG_PRESENT, "sl_pvs")
+        fs = __mg_function(__MG_PRESENT, "sl_pfs")
+        pool = objc_autoreleasePoolPush()
+        d = __oc(__oc(__cls("MTLRenderPipelineDescriptor"), __sel("alloc")), __sel("init"))
+        __oc_p(d, __sel("setVertexFunction:"), vs)
+        __oc_p(d, __sel("setFragmentFunction:"), fs)
+        a = __oc_i(__oc(d, __sel("colorAttachments")), __sel("objectAtIndexedSubscript:"), 0)
+        __oc_i(a, __sel("setPixelFormat:"), 80)
+        err: *u8 = null
+        __mg_present_pl = __oc_pp(__mg_dev, __sel("newRenderPipelineStateWithDescriptor:error:"), d, (&err) as *u8)
+        __mg_release(d)
+        objc_autoreleasePoolPop(pool)
+        if __mg_present_pl == null: panic("Metal: the present pipeline could not be made: {__mg_err_text(err)}")
+
+    # the window's layer (cocoa.jo puts it on the view)
+    __mg_make_layer = () -> *u8:
+        pool = objc_autoreleasePoolPush()
+        l = __mg_keep(__oc(__cls("CAMetalLayer"), __sel("layer")))
+        objc_autoreleasePoolPop(pool)
+        __oc_p(l, __sel("setDevice:"), __mg_dev)
+        __oc_i(l, __sel("setPixelFormat:"), 80)
+        __oc_i(l, __sel("setFramebufferOnly:"), 1)
+        __mg_layer = l
+        l
+
+    __vk_present = ():
+        __vk_begin_frame()
+        __vg_end_frame()
+        cb = __vk_cb()
+        if __vk_headless or __mg_layer == null or __win_w <= 0 or __win_h <= 0:
+            __vk_submit_and_wait()
+            __vk_frame = (__vk_frame + 1) % __VK_FRAMES
+            return
+        if __mg_present_pl == null: __mg_make_present()
+        __oc_size(__mg_layer, __sel("setDrawableSize:"), f64(__win_w), f64(__win_h))
+        pool = objc_autoreleasePoolPush()
+        dr = __oc(__mg_layer, __sel("nextDrawable"))
+        if dr != null:
+            rp = __oc(__cls("MTLRenderPassDescriptor"), __sel("renderPassDescriptor"))
+            a = __oc_i(__oc(rp, __sel("colorAttachments")), __sel("objectAtIndexedSubscript:"), 0)
+            __oc_p(a, __sel("setTexture:"), __oc(dr, __sel("texture")))
+            __oc_i(a, __sel("setLoadAction:"), 0)
+            __oc_i(a, __sel("setStoreAction:"), 1)
+            enc = __oc_p(cb, __sel("renderCommandEncoderWithDescriptor:"), rp)
+            __oc_p(enc, __sel("setRenderPipelineState:"), __mg_present_pl)
+            __mo_pi(enc, __sel("setFragmentTexture:atIndex:"), __mg_screen, 0)
+            __mo_iii(enc, __sel("drawPrimitives:vertexStart:vertexCount:"), 3, 0, 3)
+            __oc(enc, __sel("endEncoding"))
+            __oc_p(cb, __sel("presentDrawable:"), dr)
+        __oc(cb, __sel("commit"))
+        objc_autoreleasePoolPop(pool)
+        __vk_recording = false
+        __vk_frame = (__vk_frame + 1) % __VK_FRAMES

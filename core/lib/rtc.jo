@@ -1,0 +1,1556 @@
+# WebRTC data channels in native programs, made of UDP and lib/crypto.jo, so that a desktop build
+# and a web page connect straight to each other (and two desktop builds too), with no server in
+# between: ICE finds a path (STUN asks a public server how this machine looks from outside), DTLS
+# encrypts it, SCTP carries the messages. Two short codes, which the players pass to each other,
+# hold what each side needs (lib/net.jo's invite and join_invite use them).
+#
+# Here: the connection's ICE (RFC 8445, 8489). DTLS and SCTP follow below it.
+
+import crypto
+import net
+
+# ---------------- STUN ----------------
+const __STUN_MAGIC = 0x2112A442
+const __STUN_REQUEST = 0x0001
+const __STUN_SUCCESS = 0x0101
+
+# a STUN message read: its type, transaction id and attributes (type, value)
+struct __Stun:
+    kind: int
+    tid: u8[]
+    attrs: (int, u8[])[]
+    raw: u8[]
+
+__stun_read = (b: u8[]) -> __Stun?:
+    if b.len() < 20 or b[0] >= 4: return none
+    n = (int(b[2]) << 8) | int(b[3])
+    if n + 20 != b.len() or int(__be32(b, 4)) != __STUN_MAGIC: return none
+    m = __Stun((int(b[0]) << 8) | int(b[1]), b[8..20), [], b)
+    i = 20
+    loop i + 4 <= b.len():
+        t = (int(b[i]) << 8) | int(b[i + 1])
+        l = (int(b[i + 2]) << 8) | int(b[i + 3])
+        if i + 4 + l > b.len(): return none
+        m.attrs.push((t, b[i + 4..i + 4 + l)))
+        i += 4 + ((l + 3) & ~3)
+    m
+
+__be32 = (b: u8[], i: int) -> u32: (u32(b[i]) << 24) | (u32(b[i + 1]) << 16) | (u32(b[i + 2]) << 8) | u32(b[i + 3])
+__be16 = (b: u8[], i: int) -> int: (int(b[i]) << 8) | int(b[i + 1])
+__put16 = (out: mut u8[], v: int):
+    out.push(u8((v >> 8) & 255))
+    out.push(u8(v & 255))
+__put32 = (out: mut u8[], v: int):
+    out.push(u8((v >> 24) & 255))
+    out.push(u8((v >> 16) & 255))
+    out.push(u8((v >> 8) & 255))
+    out.push(u8(v & 255))
+
+__stun_attr = (m: __Stun, t: int) -> u8[]?:
+    loop a in m.attrs:
+        if a.0 == t: return a.1
+    none
+
+# a STUN message: header, attributes; with integrity (HMAC-SHA1 under key) and the fingerprint
+# when key is not empty
+__stun_make = (kind: int, tid: u8[], attrs: (int, u8[])[], key: u8[]) -> u8[]:
+    body: u8[]
+    loop a in attrs:
+        __put16(body, a.0)
+        __put16(body, a.1.len())
+        body.extend(a.1)
+        loop body.len() % 4 != 0: body.push(0)
+    out: u8[]
+    __put16(out, kind)
+    __put16(out, 0)
+    __put32(out, __STUN_MAGIC)
+    out.extend(tid)
+    out.extend(body)
+    if key.len() > 0:
+        # MESSAGE-INTEGRITY: the length counts it, not the fingerprint after it
+        __stun_set_len(out, out.len() - 20 + 24)
+        mi = crypto.hmac_sha1(key, out)
+        __put16(out, 0x0008)
+        __put16(out, 20)
+        out.extend(mi)
+        __stun_set_len(out, out.len() - 20 + 8)
+        fp = crypto.crc32(out) xor u32(0x5354554e)
+        __put16(out, 0x8028)
+        __put16(out, 4)
+        __put32(out, int(fp))
+    __stun_set_len(out, out.len() - 20)
+    out
+
+__stun_set_len = (b: mut u8[], n: int):
+    b[2] = u8((n >> 8) & 255)
+    b[3] = u8(n & 255)
+
+# whether a message's MESSAGE-INTEGRITY is right for key
+__stun_check = (m: __Stun, key: u8[]) -> bool:
+    # (where it is: the message up to it, its length counting it)
+    i = 20
+    loop i + 4 <= m.raw.len():
+        t = __be16(m.raw, i)
+        l = __be16(m.raw, i + 2)
+        if t == 0x0008:
+            if l != 20: return false
+            b = m.raw[..i)
+            __stun_set_len(b, i - 20 + 24)
+            return crypto.hmac_sha1(key, b) == m.raw[i + 4..i + 24)
+        i += 4 + ((l + 3) & ~3)
+    false
+
+# an address as XOR-MAPPED-ADDRESS carries it
+__xor_addr = (ip: str, port: int) -> u8[]:
+    out: u8[] = [u8(0), 1]
+    __put16(out, port xor 0x2112)
+    parts = split(ip, ".")
+    loop k in [0..4): out.push(u8((to_int(parts[k]) ?? 0) xor ((__STUN_MAGIC >> (24 - k * 8)) & 255)))
+    out
+
+__xor_addr_read = (v: u8[]) -> (str, int)?:
+    if v.len() < 8 or v[1] != 1: return none
+    port = __be16(v, 2) xor 0x2112
+    ip = "{int(v[4]) xor 0x21}.{int(v[5]) xor 0x12}.{int(v[6]) xor 0xA4}.{int(v[7]) xor 0x42}"
+    (ip, port)
+
+# ---------------- a connection's description ----------------
+# what one side tells the other (the invite code holds it): its ICE name and password, its
+# certificate's fingerprint, whether it is the DTLS client, and where it may be reached
+struct RtcDesc:
+    ufrag: str
+    pwd: str
+    fingerprint: u8[]       # SHA-256 of the DTLS certificate
+    active: bool            # the DTLS client
+    candidates: RtcCand[]
+
+struct RtcCand:
+    host: str               # an address, or a browser's name.local
+    port: int
+    kind: str               # "host", "srflx" (as a STUN server saw it), "prflx", "relay"
+
+# ---------------- connections ----------------
+const __ICE_CHECKING = 0
+const __ICE_CONNECTED = 1
+const __ICE_FAILED = 2
+const __ICE_LOST = 3            # (connected, then nothing came for __ICE_SILENCE seconds)
+const __ICE_SILENCE = 15.0
+
+struct __Pair:
+    host: str
+    port: int
+    tid: u8[]               # the check in flight
+    relay = false           # (through this side's TURN relay)
+    sent = 0.0
+    tries = 0
+    ok = false              # a check answered
+    nominate = false        # (controlling: the check that nominates is in flight)
+
+struct __Conn:
+    sock = -1
+    port = 0
+    controlling = false
+    tiebreak: u8[]
+    ufrag = ""
+    pwd = ""
+    remote: RtcDesc? = none
+    local: RtcCand[]
+    pairs: __Pair[]
+    state = 0
+    sel_host = ""           # the path chosen
+    sel_port = 0
+    since = 0.0             # (made, for giving up)
+    stun_tid: u8[]          # (the question to the STUN server)
+    stun_host = ""
+    stun_port = 0
+    stun_sent = 0.0
+    gathered = false        # the candidates are all known (the STUN server answered, or did not in time)
+    last_heard = 0.0
+    sel_relay = false       # (the path chosen goes through this side's TURN relay)
+    # TURN (RFC 8656): a relay's address for this side, for when no direct path is allowed
+    t_host = ""
+    t_port = 0
+    t_user = ""
+    t_pass = ""
+    t_realm: u8[]
+    t_nonce: u8[]
+    t_key: u8[]             # (MD5 of user:realm:password: the long-term credential)
+    t_tid: u8[]             # (the Allocate or Refresh in flight)
+    t_state = 0             # 0 none, 1 allocating, 2 allocated, 3 failed
+    t_sent = 0.0
+    t_tries = 0
+    t_refresh_at = 0.0
+    t_perms: {str: f64}     # peers' addresses given a permission, and when
+    inbox: u8[][]           # (DTLS's datagrams, for the layer above)
+    key: crypto.P256Key
+    cert: u8[]
+    # DTLS
+    d_client = false
+    d_state = 0             # 0 not begun, 1 handshaking, 2 done, 3 failed or closed
+    d_why = ""
+    d_out_seq: int[2]       # (the next record's sequence number, per epoch)
+    d_epoch = 0             # (what is sent now)
+    d_msg_out = 0           # (the next handshake message's number)
+    d_msg_in = 0            # (the next one expected)
+    d_frags: {int: u8[]}    # (handshake messages arriving in pieces, by number)
+    d_transcript: u8[]
+    d_crand: u8[]
+    d_srand: u8[]
+    d_eph: crypto.P256Key
+    d_peer_pub: u8[]        # (the other side's certificate's key)
+    d_peer_eph: u8[]
+    d_ems = false
+    d_master: u8[]
+    d_wkey: crypto.AesKey   # (this side's writing key and IV, and the other side's)
+    d_wiv: u8[]
+    d_rkey: crypto.AesKey
+    d_riv: u8[]
+    d_cert_req = false
+    d_flight: u8[][]        # (the last flight sent, to send again when nothing comes back)
+    d_flight_at = 0.0
+    d_cookie: u8[]
+    d_app: u8[][]           # (the other side's application data: SCTP packets)
+    # SCTP
+    s_state = 0             # 0 not begun, 1 waiting (INIT sent), 2 established, 3 closed
+    s_my_tag = 0
+    s_peer_tag = 0
+    s_tsn = 0               # (the next TSN this side sends)
+    s_peer_cum = -1         # (the other side's TSNs up to here have come; -1: none yet)
+    s_got: {int: __Chunk}   # (its chunks come ahead of others: by TSN)
+    s_unacked: __Sent[]
+    s_queue: __Sent[]       # (made, waiting for room: no more than __SCTP_WINDOW go unacknowledged)
+    s_init: u8[]            # (the INIT, sent again until answered)
+    s_init_at = 0.0
+    s_echo: u8[]            # (the COOKIE ECHO, likewise)
+    s_fwd = false           # (the other side takes FORWARD TSN)
+    s_ssn: {int: int}       # (the next stream sequence number, by stream)
+    s_partial: u8[]         # (a message arriving in pieces)
+    s_chan = -1             # the data channel's stream
+    s_chan_open = false     # (opened and acknowledged)
+    s_reliable = true       # (its messages are resent until they arrive)
+    s_rtt = 0.2
+    s_msgs: u8[][]          # (messages that came, each with a byte in front: 1 text, 0 bytes)
+    s_sack_due = false
+
+struct __Chunk:
+    flags: int
+    stream: int
+    ppid: int
+    data: u8[]
+
+struct __Sent:
+    tsn: int
+    chunk: u8[]             # (the DATA chunk, as sent)
+    at = 0.0
+    tries = 1
+    reliable = true
+
+__conns: __Conn[]
+
+# STUN servers asked for this machine's public address ("host:port"); none: only local addresses
+rtc_stun_servers = ["stun.l.google.com:19302"]
+
+# TURN servers ("host:port", user, password: net.turn_server sets them), which relay for players
+# whose networks allow no direct path; the first is used
+rtc_turn_servers: (str, str, str)[]
+
+__ice_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+__ice_text = (n: int) -> str:
+    r = crypto.random_bytes(n)
+    out: u8[]
+    loop b in r: out.push(__ice_chars[int(b) & 63])
+    str_from_bytes(out)
+
+# a new connection: controlling for the side that invites
+__rtc_new = (controlling: bool) -> int:
+    c = __Conn()
+    c.sock = net.udp(0)
+    if c.sock < 0: return -1
+    c.port = net.udp_port(c.sock)
+    c.controlling = controlling
+    c.tiebreak = crypto.random_bytes(8)
+    c.ufrag = __ice_text(8)
+    c.pwd = __ice_text(24)
+    c.since = time()
+    c.key = crypto.p256_key()
+    c.cert = crypto.self_signed_certificate(c.key, "sloppy")
+    me = net.local_address()
+    if len(me) > 0: c.local.push(RtcCand(me, c.port, "host"))
+    c.local.push(RtcCand("127.0.0.1", c.port, "host"))
+    # (this machine as the internet sees it: asked of a STUN server, answered in __ice_poll)
+    if rtc_stun_servers.len() > 0:
+        hp = split(rtc_stun_servers[0], ":")
+        c.stun_host = hp[0]
+        c.stun_port = to_int(hp[hp.len() - 1]) ?? 3478
+        c.stun_tid = crypto.random_bytes(12)
+        c.stun_sent = time()
+        if not net.udp_send(c.sock, c.stun_host, c.stun_port, __stun_make(__STUN_REQUEST, c.stun_tid, [], [])): c.gathered = true
+    else: c.gathered = true
+    if rtc_turn_servers.len() > 0:
+        t = rtc_turn_servers[0]
+        hp = split(t.0, ":")
+        c.t_host = hp[0]
+        c.t_port = to_int(hp[hp.len() - 1]) ?? 3478
+        c.t_user = t.1
+        c.t_pass = t.2
+        c.t_state = 1
+        __turn_allocate(c)
+    # (SLOPPY_RTC_RELAY_ONLY=1, for trying the TURN path: no direct candidates)
+    if __rtc_relay_only: c.local.clear()
+    __conns.push(c)
+    __conns.len() - 1
+
+__rtc_relay_only = (env("SLOPPY_RTC_RELAY_ONLY") ?? "") == "1"
+
+# this side's description (complete once gathered)
+__rtc_desc = (id: int, active: bool) -> RtcDesc:
+    c = __conns[id]
+    RtcDesc(c.ufrag, c.pwd, crypto.sha256(c.cert), active, c.local)
+
+__rtc_set_remote = (id: int, d: RtcDesc):
+    __conns[id].remote = d
+    __conns[id].since = time()             # (the checks start now: given up on from now)
+    # (the side whose code says active is the DTLS client: the one that answered)
+    __conns[id].d_client = not d.active
+    loop cd in d.candidates:
+        if ends_with(cd.host, ".local") or find(cd.host, ":") >= 0: continue      # (a hidden name, or IPv6: checks come from it instead)
+        if not __rtc_relay_only: __conns[id].pairs.push(__Pair(cd.host, cd.port, []))
+        if __conns[id].t_state == 2: __conns[id].pairs.push(__Pair(cd.host, cd.port, [], relay = true))
+
+# ICE's part of a frame: what arrived, checks to send; DTLS's datagrams go to inbox
+__ice_poll = (id: int):
+    c = __conns[id]
+    now = time()
+    if not c.gathered and now - c.stun_sent > 1.5: c.gathered = true
+    loop dg in net.udp_receive(c.sock):
+        if dg.data.len() == 0: continue
+        # (from the TURN server: its answers, and what peers sent through the relay)
+        if c.t_state > 0 and dg.host == c.t_host and dg.port == c.t_port and dg.data[0] < 4:
+            __turn_in(c, dg.data)
+            continue
+        __ice_in(c, dg.host, dg.port, dg.data, false)
+    __turn_upkeep(c, now)
+    if c.remote != none and c.state == __ICE_CHECKING:
+        r = c.remote!
+        sends: (str, int, u8[], bool)[]
+        loop mut p in c.pairs:
+            if p.ok and not c.controlling: continue
+            if p.ok and c.controlling and p.nominate and now - p.sent < 0.2: continue
+            if not p.ok and now - p.sent < 0.1: continue
+            if p.tries > 60: continue
+            p.tid = crypto.random_bytes(12)
+            p.sent = now
+            p.tries += 1
+            # (controlling: once a check has been answered, the next nominates the path)
+            nom = c.controlling and p.ok
+            p.nominate = nom
+            sends.push((p.host, p.port, __ice_check(c, r, p.tid, nom), p.relay))
+        loop s in sends: __rtc_out_to(c, s.0, s.1, s.2, s.3)
+        # (given up when the other game has answered nothing for 30 s; while it answers, as while
+        # its player is still pasting the reply in, for up to 10 minutes)
+        answered = false
+        loop p in c.pairs:
+            if p.ok: answered = true
+        if (now - c.since > 30.0 and not answered) or now - c.since > 600.0: c.state = __ICE_FAILED
+    # (the other side gone without a word, as a machine switched off or its network lost: nothing
+    # from it for a while, not even answers to the checks below)
+    if c.state == __ICE_CONNECTED and c.last_heard > 0.0 and now - c.last_heard > __ICE_SILENCE: c.state = __ICE_LOST
+    # (keep the path open, as browsers expect: a check now and then)
+    if c.state == __ICE_CONNECTED and now - c.stun_sent > 2.0 and c.remote != none:
+        c.stun_sent = now
+        __rtc_out(c, __ice_check(c, c.remote!, crypto.random_bytes(12), false))
+    __conns[id] = c
+
+# a datagram from host:port (through the relay: relay), for ICE or, once connected, DTLS
+__ice_in = (c: mut __Conn, host: str, port: int, data: u8[], relay: bool):
+    if data.len() == 0: return
+    b0 = data[0]
+    if b0 < 4: __ice_stun(c, host, port, data, relay)
+    else if b0 >= 20 and b0 < 64:
+        if c.state == __ICE_CONNECTED and host == c.sel_host and port == c.sel_port and relay == c.sel_relay:
+            c.inbox.push(data)
+            c.last_heard = time()
+
+# a datagram to the other side, along the path chosen
+__rtc_out = (c: mut __Conn, data: u8[]): __rtc_out_to(c, c.sel_host, c.sel_port, data, c.sel_relay)
+
+# ---------------- TURN (RFC 8656) ----------------
+# A relay: the TURN server gives this side an address of its own, and passes on what comes to
+# it (Data indications) and what this side sends through it (Send indications), for peers given
+# a permission. Requests are signed with the long-term credential once the server has said its
+# realm and a nonce (its first answer, 401).
+
+# ask for the relay address
+__turn_allocate = (c: mut __Conn):
+    c.t_tid = crypto.random_bytes(12)
+    c.t_sent = time()
+    c.t_tries += 1
+    attrs: (int, u8[])[] = [(0x0019, [u8(17), 0, 0, 0])]           # (REQUESTED-TRANSPORT: UDP)
+    net.udp_send(c.sock, c.t_host, c.t_port, __turn_msg(c, 0x0003, c.t_tid, attrs))
+
+# a request to the TURN server, signed once its realm and nonce are known
+__turn_msg = (c: __Conn, kind: int, tid: u8[], attrs0: (int, u8[])[]) -> u8[]:
+    if c.t_key.len() == 0: return __stun_make(kind, tid, attrs0, [])
+    attrs = attrs0
+    attrs.push((0x0006, bytes(c.t_user)))
+    attrs.push((0x0014, c.t_realm))
+    attrs.push((0x0015, c.t_nonce))
+    __stun_make(kind, tid, attrs, c.t_key)
+
+# what the TURN server sent
+__turn_in = (c: mut __Conn, b: u8[]):
+    mm = __stun_read(b)
+    if mm == none: return
+    m = mm!
+    if m.kind == 0x0017:
+        # (a Data indication: what a peer sent to the relay address)
+        if let pa = __stun_attr(m, 0x0012):
+            if let a = __xor_addr_read(pa):
+                if let d = __stun_attr(m, 0x0013): __ice_in(c, a.0, a.1, d, true)
+        return
+    if m.kind & 0x0110 == 0x0110:
+        # an error: 401 (credentials wanted) and 438 (a stale nonce) say the realm and nonce to use
+        code = 0
+        if let e = __stun_attr(m, 0x0009):
+            if e.len() >= 4: code = int(e[2] & 7) * 100 + int(e[3])
+        if code == 401 or code == 438:
+            if let r = __stun_attr(m, 0x0014): c.t_realm = r
+            if let n = __stun_attr(m, 0x0015): c.t_nonce = n
+            c.t_key = crypto.md5(bytes("{c.t_user}:{str_from_bytes(c.t_realm)}:{c.t_pass}"))
+            c.t_perms.clear()
+            if m.tid == c.t_tid:
+                if c.t_state == 1 and c.t_tries < 5: __turn_allocate(c)
+                else if c.t_state == 2: c.t_refresh_at = 0.0
+            return
+        if m.tid == c.t_tid and c.t_state == 1:
+            __rtc_say(c, "the TURN server said no: {code}")
+            c.t_state = 3
+        return
+    if m.tid != c.t_tid or (c.t_key.len() > 0 and not __stun_check(m, c.t_key)): return
+    life = 600
+    if let l = __stun_attr(m, 0x000D):
+        if l.len() == 4: life = int(__be32(l, 0))
+    if m.kind == 0x0103 and c.t_state == 1:
+        # allocated: the relay address is a candidate (and the server saw this machine's address too)
+        if let ra = __stun_attr(m, 0x0016):
+            if let a = __xor_addr_read(ra):
+                c.local.push(RtcCand(a.0, a.1, "relay"))
+                c.t_state = 2
+                __rtc_say(c, "relay at {a.0}:{a.1}")
+                if c.remote != none:
+                    loop cd in c.remote!.candidates:
+                        if not ends_with(cd.host, ".local") and find(cd.host, ":") < 0: c.pairs.push(__Pair(cd.host, cd.port, [], relay = true))
+        if not __rtc_relay_only:
+            if let xa = __stun_attr(m, 0x0020):
+                if let a = __xor_addr_read(xa):
+                    seen = false
+                    loop l in c.local:
+                        if l.host == a.0 and l.port == a.1: seen = true
+                    if not seen: c.local.push(RtcCand(a.0, a.1, "srflx"))
+    c.t_refresh_at = time() + max(f64(life) - 60.0, 30.0)
+
+# allocations and permissions last minutes: refreshed before they lapse
+__turn_upkeep = (c: mut __Conn, now: f64):
+    if c.t_state == 1:
+        if now - c.since > 4.0: c.t_state = 3
+        else if now - c.t_sent > 0.5: __turn_allocate(c)
+    if c.t_state == 2 and now > c.t_refresh_at:
+        c.t_tid = crypto.random_bytes(12)
+        c.t_refresh_at = now + 20.0                 # (again then, if no answer comes)
+        lt: u8[]
+        __put32(lt, 600)
+        net.udp_send(c.sock, c.t_host, c.t_port, __turn_msg(c, 0x0004, c.t_tid, [(0x000D, lt)]))
+
+# a permission for host's datagrams through the relay (asked again every 4 minutes: they last 5)
+__turn_permit = (c: mut __Conn, host: str):
+    if let t = c.t_perms.get(host):
+        if time() - t < 240.0: return
+    c.t_perms[host] = time()
+    net.udp_send(c.sock, c.t_host, c.t_port, __turn_msg(c, 0x0008, crypto.random_bytes(12), [(0x0012, __xor_addr(host, 0))]))
+
+# a datagram to host:port, straight or through this side's relay (a Send indication)
+__rtc_out_to = (c: mut __Conn, host: str, port: int, data: u8[], relay: bool):
+    if not relay:
+        net.udp_send(c.sock, host, port, data)
+        return
+    if c.t_state != 2: return
+    __turn_permit(c, host)
+    attrs: (int, u8[])[] = [(0x0012, __xor_addr(host, port)), (0x0013, data)]
+    net.udp_send(c.sock, c.t_host, c.t_port, __stun_make(0x0016, crypto.random_bytes(12), attrs, []))
+
+__ice_check = (c: __Conn, r: RtcDesc, tid: u8[], nominate: bool) -> u8[]:
+    attrs: (int, u8[])[]
+    attrs.push((0x0006, bytes("{r.ufrag}:{c.ufrag}")))
+    pr: u8[]
+    __put32(pr, (110 << 24) | (65535 << 8) | 255)            # (a peer-reflexive candidate's priority)
+    attrs.push((0x0024, pr))
+    if c.controlling:
+        attrs.push((0x802A, c.tiebreak))
+        if nominate: attrs.push((0x0025, []))
+    else: attrs.push((0x8029, c.tiebreak))
+    __stun_make(__STUN_REQUEST, tid, attrs, bytes(r.pwd))
+
+__ice_stun = (c: mut __Conn, host: str, port: int, b: u8[], relay: bool):
+    mm = __stun_read(b)
+    if mm == none: return
+    m = mm!
+    if m.kind == __STUN_REQUEST:
+        # a check: ours if its name is ours and it is signed with our password
+        uu = __stun_attr(m, 0x0006)
+        if uu == none: return
+        u = uu!
+        if not starts_with(str_from_bytes(u), c.ufrag + ":") or not __stun_check(m, bytes(c.pwd)):
+            __rtc_say(c, "a check from {host}:{port} not for this connection")
+            return
+        __rtc_say(c, "a check from {host}:{port}{if relay: " (relayed)" else: ""}")
+        attrs: (int, u8[])[] = [(0x0020, __xor_addr(host, port))]
+        __rtc_out_to(c, host, port, __stun_make(__STUN_SUCCESS, m.tid, attrs, bytes(c.pwd)), relay)
+        c.last_heard = time()
+        # (from somewhere it did not say: a peer-reflexive candidate, to check as well)
+        known = false
+        loop p in c.pairs:
+            if p.host == host and p.port == port and p.relay == relay: known = true
+        if not known: c.pairs.push(__Pair(host, port, [], relay = relay))
+        if not c.controlling and __stun_attr(m, 0x0025) != none and c.state == __ICE_CHECKING:
+            c.sel_host = host
+            c.sel_port = port
+            c.sel_relay = relay
+            c.state = __ICE_CONNECTED
+        return
+    if m.kind == __STUN_SUCCESS:
+        # the STUN server's answer: this machine as the internet sees it
+        if m.tid == c.stun_tid and not c.gathered:
+            if __rtc_relay_only:
+                c.gathered = true
+                return
+            if let xa = __stun_attr(m, 0x0020):
+                if let a = __xor_addr_read(xa):
+                    seen = false
+                    loop l in c.local:
+                        if l.host == a.0 and l.port == a.1: seen = true
+                    if not seen: c.local.push(RtcCand(a.0, a.1, "srflx"))
+            c.gathered = true
+            return
+        # an answer to a check (also those that keep the path open)
+        if c.remote == none or not __stun_check(m, bytes(c.remote!.pwd)): return
+        c.last_heard = time()
+        loop mut p in c.pairs:
+            if p.tid == m.tid:
+                if p.nominate and c.state == __ICE_CHECKING:
+                    c.sel_host = p.host
+                    c.sel_port = p.port
+                    c.sel_relay = p.relay
+                    c.state = __ICE_CONNECTED
+                if not p.ok:
+                    p.ok = true
+                    p.sent = 0.0                    # (controlling: nominate at once)
+                c.last_heard = time()
+
+# ---------------- DTLS 1.2 (RFC 6347; TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256) ----------------
+# Both sides show self-signed certificates, each checked against the fingerprint the other's code
+# carried: that, not a certificate authority, is what makes it the right peer.
+const __CT_CCS = 20
+const __CT_ALERT = 21
+const __CT_HANDSHAKE = 22
+const __CT_APP = 23
+
+__put24 = (out: mut u8[], v: int):
+    out.push(u8((v >> 16) & 255))
+    out.push(u8((v >> 8) & 255))
+    out.push(u8(v & 255))
+__be24 = (b: u8[], i: int) -> int: (int(b[i]) << 16) | (int(b[i + 1]) << 8) | int(b[i + 2])
+
+# TLS 1.2's PRF (P_SHA256): n bytes from secret, label and seed
+__prf = (secret: u8[], label: str, seed: u8[], n: int) -> u8[]:
+    s = bytes(label)
+    s.extend(seed)
+    out: u8[]
+    a = s
+    loop out.len() < n:
+        a = crypto.hmac_sha256(secret, a)
+        x = a
+        x.extend(s)
+        out.extend(crypto.hmac_sha256(secret, x))
+    out[..n)
+
+# a record of content type ctype, in the epoch being sent (1: encrypted)
+__dtls_record = (c: mut __Conn, ctype: int, body: u8[], epoch: int) -> u8[]:
+    seq = c.d_out_seq[epoch]
+    c.d_out_seq[epoch] = seq + 1
+    hdr: u8[] = [u8(ctype), 0xFE, 0xFD]
+    __put16(hdr, epoch)
+    __put16(hdr, (seq >> 32) & 0xFFFF)
+    __put32(hdr, seq & 0xFFFFFFFF)
+    if epoch == 0:
+        __put16(hdr, body.len())
+        hdr.extend(body)
+        return hdr
+    explicit = hdr[3..11)
+    nonce = c.d_wiv
+    nonce.extend(explicit)
+    aad = explicit
+    aad.extend([u8(ctype), 0xFE, 0xFD])
+    __put16(aad, body.len())
+    sealed = crypto.aes_gcm_seal(c.d_wkey, nonce, aad, body)
+    __put16(hdr, 8 + sealed.len())
+    hdr.extend(explicit)
+    hdr.extend(sealed)
+    hdr
+
+# a handshake message (as the transcript holds it too)
+__dtls_hs = (c: mut __Conn, typ: int, body: u8[]) -> u8[]:
+    m: u8[] = [u8(typ)]
+    __put24(m, body.len())
+    __put16(m, c.d_msg_out)
+    __put24(m, 0)
+    __put24(m, body.len())
+    m.extend(body)
+    c.d_msg_out += 1
+    c.d_transcript.extend(m)
+    m
+
+# a flight: (content type, body, epoch) each, recorded afresh each time it is sent
+struct __FlightPart:
+    ctype: int
+    body: u8[]
+    epoch: int
+
+__dtls_flight = (c: mut __Conn, parts: __FlightPart[]):
+    c.d_flight.clear()
+    loop p in parts:
+        b: u8[] = [u8(p.ctype), u8(p.epoch)]
+        b.extend(p.body)
+        c.d_flight.push(b)
+    __dtls_resend(c)
+
+__dtls_resend = (c: mut __Conn):
+    __rtc_say(c, "sending a flight of {c.d_flight.len()} to {c.sel_host}:{c.sel_port}")
+    c.d_flight_at = time()
+    dg: u8[]
+    loop f in c.d_flight:
+        rec = __dtls_record(c, int(f[0]), f[2..], int(f[1]))
+        if dg.len() + rec.len() > 1100 and dg.len() > 0:
+            __rtc_out(c, dg)
+            dg.clear()
+        dg.extend(rec)
+    if dg.len() > 0: __rtc_out(c, dg)
+
+__dtls_fail = (c: mut __Conn, why: str):
+    c.d_state = 3
+    c.d_why = why
+
+# the extensions both hellos carry: extended master secret, a secure renegotiation's empty one
+__dtls_exts = (client: bool) -> u8[]:
+    e: u8[]
+    if client:
+        __put16(e, 10)                      # supported_groups: secp256r1
+        __put16(e, 4)
+        __put16(e, 2)
+        __put16(e, 23)
+        __put16(e, 13)                      # signature_algorithms: ecdsa_secp256r1_sha256
+        __put16(e, 4)
+        __put16(e, 2)
+        __put16(e, 0x0403)
+    __put16(e, 11)                          # ec_point_formats: uncompressed
+    __put16(e, 2)
+    e.extend([u8(1), 0])
+    __put16(e, 23)                          # extended_master_secret
+    __put16(e, 0)
+    __put16(e, 0xff01)                      # renegotiation_info
+    __put16(e, 1)
+    e.push(0)
+    out: u8[]
+    __put16(out, e.len())
+    out.extend(e)
+    out
+
+# start the handshake: the client says hello; the server waits for it
+__dtls_start = (c: mut __Conn):
+    c.d_state = 1
+    if not c.d_client: return
+    c.d_crand = crypto.random_bytes(32)
+    __dtls_client_hello(c)
+
+__dtls_client_hello = (c: mut __Conn):
+    b: u8[] = [u8(0xFE), 0xFD]
+    b.extend(c.d_crand)
+    b.push(0)                               # (no session id)
+    b.push(u8(c.d_cookie.len()))
+    b.extend(c.d_cookie)
+    __put16(b, 2)
+    __put16(b, 0xC02B)
+    b.extend([u8(1), 0])                    # (no compression)
+    b.extend(__dtls_exts(true))
+    __dtls_flight(c, [__FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 1, b), 0)])
+
+# the server's first flight: hello, certificate, its ECDHE key (signed), a request for the
+# client's certificate, done
+__dtls_server_flight = (c: mut __Conn):
+    c.d_srand = crypto.random_bytes(32)
+    c.d_eph = crypto.p256_key()
+    sh: u8[] = [u8(0xFE), 0xFD]
+    sh.extend(c.d_srand)
+    sh.push(0)
+    __put16(sh, 0xC02B)
+    sh.push(0)
+    sh.extend(__dtls_exts(false))
+    certs: u8[]
+    __put24(certs, c.cert.len() + 3)
+    __put24(certs, c.cert.len())
+    certs.extend(c.cert)
+    params: u8[] = [u8(3), 0, 23, 65]
+    params.extend(c.d_eph.public)
+    signed = c.d_crand
+    signed.extend(c.d_srand)
+    signed.extend(params)
+    sig = crypto.der_signature(crypto.p256_sign(c.key, crypto.sha256(signed)))
+    ske = params
+    __put16(ske, 0x0403)
+    __put16(ske, sig.len())
+    ske.extend(sig)
+    cr: u8[] = [u8(1), 64]                  # (an ECDSA certificate)
+    __put16(cr, 2)
+    __put16(cr, 0x0403)
+    __put16(cr, 0)                          # (no authorities)
+    parts: __FlightPart[]
+    loop m in [__dtls_hs(c, 2, sh), __dtls_hs(c, 11, certs), __dtls_hs(c, 12, ske), __dtls_hs(c, 13, cr), __dtls_hs(c, 14, [])]:
+        parts.push(__FlightPart(__CT_HANDSHAKE, m, 0))
+    __dtls_flight(c, parts)
+
+# the master secret and the keys, once the shared ECDH secret is known (transcript: up to the
+# ClientKeyExchange)
+__dtls_keys = (c: mut __Conn, pre: u8[]):
+    if c.d_ems: c.d_master = __prf(pre, "extended master secret", crypto.sha256(c.d_transcript), 48)
+    else:
+        seed = c.d_crand
+        seed.extend(c.d_srand)
+        c.d_master = __prf(pre, "master secret", seed, 48)
+    seed = c.d_srand
+    seed.extend(c.d_crand)
+    kb = __prf(c.d_master, "key expansion", seed, 40)
+    ck = crypto.aes_key(kb[0..16))
+    sk = crypto.aes_key(kb[16..32))
+    if c.d_client:
+        c.d_wkey = ck
+        c.d_rkey = sk
+        c.d_wiv = kb[32..36)
+        c.d_riv = kb[36..40)
+    else:
+        c.d_wkey = sk
+        c.d_rkey = ck
+        c.d_wiv = kb[36..40)
+        c.d_riv = kb[32..36)
+
+__dtls_finished = (c: __Conn, client: bool) -> u8[]:
+    label = if client: "client finished" else: "server finished"
+    __prf(c.d_master, label, crypto.sha256(c.d_transcript), 12)
+
+# the certificate the other side showed: right when its fingerprint is the one its code carried
+__dtls_peer_cert = (c: mut __Conn, body: u8[]) -> bool:
+    if body.len() < 6: return false
+    n = __be24(body, 3)
+    if 6 + n > body.len(): return false
+    cert = body[6..6 + n)
+    if c.remote == none or crypto.sha256(cert) != c.remote!.fingerprint:
+        __dtls_fail(c, "the other side's certificate is not the one its code named")
+        return false
+    k = crypto.certificate_p256_key(cert)
+    if k == none:
+        __dtls_fail(c, "the other side's certificate holds no P-256 key")
+        return false
+    c.d_peer_pub = k!
+    true
+
+# one handshake message (whole), in order
+__dtls_message = (c: mut __Conn, typ: int, msg: u8[]):
+    body = msg[12..]
+    if c.d_client:
+        if typ == 3:
+            # HelloVerifyRequest: hello again, with its cookie (and a transcript started over)
+            if body.len() < 3: return
+            c.d_cookie = body[3..3 + int(body[2]))
+            c.d_transcript.clear()
+            __dtls_client_hello(c)
+            return
+        c.d_transcript.extend(msg)
+        if typ == 2:
+            # ServerHello: its random; extended master secret when it took it
+            if body.len() < 38: return
+            c.d_srand = body[2..34)
+            i = 35 + int(body[34])
+            i += 3
+            if i + 2 <= body.len():
+                n = __be16(body, i)
+                j = i + 2
+                loop j + 4 <= i + 2 + n and j + 4 <= body.len():
+                    if __be16(body, j) == 23: c.d_ems = true
+                    j += 4 + __be16(body, j + 2)
+        else if typ == 11: __dtls_peer_cert(c, body)
+        else if typ == 12:
+            # the server's ECDHE key, signed with its certificate's key
+            if body.len() < 4 + 65 + 4: return
+            plen = int(body[3])
+            params = body[..4 + plen)
+            c.d_peer_eph = body[4..4 + plen)
+            sl = __be16(body, 4 + plen + 2)
+            sig = crypto.der_signature_parts(body[4 + plen + 4..4 + plen + 4 + sl)) ?? []
+            signed = c.d_crand
+            signed.extend(c.d_srand)
+            signed.extend(params)
+            if c.d_peer_pub.len() == 0 or not crypto.p256_verify(c.d_peer_pub, crypto.sha256(signed), sig): __dtls_fail(c, "the server's key exchange is not signed by its certificate")
+        else if typ == 13: c.d_cert_req = true
+        else if typ == 14:
+            # ServerHelloDone: the client's flight
+            if c.d_state == 3: return
+            c.d_eph = crypto.p256_key()
+            parts: __FlightPart[]
+            if c.d_cert_req:
+                certs: u8[]
+                __put24(certs, c.cert.len() + 3)
+                __put24(certs, c.cert.len())
+                certs.extend(c.cert)
+                parts.push(__FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 11, certs), 0))
+            cke: u8[] = [u8(65)]
+            cke.extend(c.d_eph.public)
+            parts.push(__FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 16, cke), 0))
+            pre = crypto.p256_ecdh(c.d_eph, c.d_peer_eph)
+            if pre == none:
+                __dtls_fail(c, "the server's key exchange holds no P-256 point")
+                return
+            __dtls_keys(c, pre!)
+            if c.d_cert_req:
+                sig = crypto.der_signature(crypto.p256_sign(c.key, crypto.sha256(c.d_transcript)))
+                cv: u8[]
+                __put16(cv, 0x0403)
+                __put16(cv, sig.len())
+                cv.extend(sig)
+                parts.push(__FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 15, cv), 0))
+            parts.push(__FlightPart(__CT_CCS, [u8(1)], 0))
+            fin = __dtls_finished(c, true)
+            parts.push(__FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 20, fin), 1))
+            __dtls_flight(c, parts)
+        return
+    # the server
+    if typ == 1:
+        # ClientHello: its random, extended master secret when it offers it
+        c.d_transcript.clear()
+        c.d_transcript.extend(msg)
+        if body.len() < 39: return
+        c.d_crand = body[2..34)
+        i = 35 + int(body[34])
+        i += 1 + int(body[i])
+        ncs = __be16(body, i)
+        has = false
+        k = i + 2
+        loop k + 1 < i + 2 + ncs:
+            if __be16(body, k) == 0xC02B: has = true
+            k += 2
+        if not has:
+            __dtls_fail(c, "the client offers no cipher suite this side has (ECDHE-ECDSA with AES-128-GCM)")
+            return
+        i += 2 + ncs
+        i += 1 + int(body[i])
+        if i + 2 <= body.len():
+            n = __be16(body, i)
+            j = i + 2
+            loop j + 4 <= i + 2 + n and j + 4 <= body.len():
+                if __be16(body, j) == 23: c.d_ems = true
+                j += 4 + __be16(body, j + 2)
+        __dtls_server_flight(c)
+        return
+    if typ == 11:
+        c.d_transcript.extend(msg)
+        __dtls_peer_cert(c, body)
+    else if typ == 16:
+        c.d_transcript.extend(msg)
+        if body.len() < 1 + 65: return
+        pre = crypto.p256_ecdh(c.d_eph, body[1..1 + int(body[0])))
+        if pre == none:
+            __dtls_fail(c, "the client's key exchange holds no P-256 point")
+            return
+        __dtls_keys(c, pre!)
+    else if typ == 15:
+        # CertificateVerify: signed over the transcript before it
+        sl = __be16(body, 2)
+        sig = crypto.der_signature_parts(body[4..4 + sl)) ?? []
+        if c.d_peer_pub.len() == 0 or not crypto.p256_verify(c.d_peer_pub, crypto.sha256(c.d_transcript), sig):
+            __dtls_fail(c, "the client's certificate verify is not signed by its certificate")
+            return
+        c.d_transcript.extend(msg)
+    else if typ == 20:
+        if body != __dtls_finished(c, true):
+            __dtls_fail(c, "the client's finished message is wrong")
+            return
+        c.d_transcript.extend(msg)
+        fin = __dtls_finished(c, false)
+        __dtls_flight(c, [__FlightPart(__CT_CCS, [u8(1)], 0), __FlightPart(__CT_HANDSHAKE, __dtls_hs(c, 20, fin), 1)])
+        c.d_state = 2
+
+# the client's last step: the server's Finished
+__dtls_client_finished = (c: mut __Conn, msg: u8[]):
+    if msg[12..] != __dtls_finished(c, false):
+        __dtls_fail(c, "the server's finished message is wrong")
+        return
+    c.d_transcript.extend(msg)
+    c.d_state = 2
+    c.d_flight.clear()
+
+# (SLOPPY_RTC_DEBUG=1: what goes on, on stderr)
+__rtc_debug = env("SLOPPY_RTC_DEBUG") != none
+__rtc_say = (c: __Conn, s: str):
+    if __rtc_debug:
+        who = if c.d_client: "client" else: "server"
+        eprint("rtc {who} {time():.3f}: {s}")
+
+# a datagram's records
+__dtls_in = (c: mut __Conn, dg: u8[]):
+    i = 0
+    loop i + 13 <= dg.len():
+        ctype = int(dg[i])
+        epoch = __be16(dg, i + 3)
+        n = __be16(dg, i + 11)
+        if i + 13 + n > dg.len(): return
+        frag = dg[i + 13..i + 13 + n)
+        hdr = dg[i + 3..i + 11)
+        i += 13 + n
+        __rtc_say(c, "record type {ctype} epoch {epoch} {n} bytes")
+        if epoch == 1:
+            if c.d_master.len() == 0 or frag.len() < 24: continue
+            nonce = c.d_riv
+            nonce.extend(frag[..8))
+            aad = hdr
+            aad.extend([u8(ctype), 0xFE, 0xFD])
+            __put16(aad, frag.len() - 24)
+            opened = crypto.aes_gcm_open(c.d_rkey, nonce, aad, frag[8..])
+            if opened == none:
+                __rtc_say(c, "a record of type {ctype} did not decrypt")
+                continue
+            frag = opened!
+        else if epoch != 0: continue
+        if ctype == __CT_APP and epoch == 1: c.d_app.push(frag)
+        else if ctype == __CT_ALERT:
+            if frag.len() >= 2 and frag[1] == 0: __dtls_fail(c, "the other side ended the connection")
+            else if frag.len() >= 2 and frag[0] == 2: __dtls_fail(c, "the other side ended the connection: it found something wrong (alert {frag[1]})")
+        else if ctype == __CT_HANDSHAKE: __dtls_handshake(c, frag, epoch)
+
+# a handshake record's messages, put together from pieces when they came in pieces
+__dtls_handshake = (c: mut __Conn, frag: u8[], epoch: int):
+    j = 0
+    loop j + 12 <= frag.len():
+        typ = int(frag[j])
+        len_ = __be24(frag, j + 1)
+        seq = __be16(frag, j + 4)
+        off = __be24(frag, j + 6)
+        flen = __be24(frag, j + 9)
+        if j + 12 + flen > frag.len(): return
+        piece = frag[j + 12..j + 12 + flen)
+        j += 12 + flen
+        # (the server takes the client's first hello whatever its number)
+        if not c.d_client and typ == 1 and c.d_crand.len() == 0: c.d_msg_in = seq
+        if seq != c.d_msg_in: __rtc_say(c, "handshake message {typ} number {seq}, expecting {c.d_msg_in}")
+        if seq < c.d_msg_in:
+            # (the other side sent its flight again: ours was lost)
+            if time() - c.d_flight_at > 0.25 and c.d_flight.len() > 0: __dtls_resend(c)
+            continue
+        if seq > c.d_msg_in: continue
+        whole: u8[] = []
+        if off == 0 and flen == len_: whole = piece
+        else:
+            buf = c.d_frags.get(seq) ?? []
+            if buf.len() == 0: buf = fill(u8(0), len_ + 1)                 # (the last byte: how much has come, roughly)
+            loop k in [0..flen): buf[off + k] = piece[k]
+            buf[len_] = u8(min(255, int(buf[len_]) + 1))
+            c.d_frags[seq] = buf
+            if off + flen < len_: continue
+            whole = buf[..len_)
+            c.d_frags.remove(seq)
+        msg: u8[] = [u8(typ)]
+        __put24(msg, len_)
+        __put16(msg, seq)
+        __put24(msg, 0)
+        __put24(msg, len_)
+        msg.extend(whole)
+        __rtc_say(c, "handshake message {typ} (number {seq})")
+        c.d_msg_in += 1
+        if c.d_client and typ == 20: __dtls_client_finished(c, msg)
+        else: __dtls_message(c, typ, msg)
+
+# DTLS's part of a frame: the datagrams ICE took in, and the flight again when nothing came back
+__dtls_poll = (id: int):
+    c = __conns[id]
+    if c.state == __ICE_CONNECTED and c.d_state == 0: __dtls_start(c)
+    loop dg in c.inbox: __dtls_in(c, dg)
+    c.inbox.clear()
+    if c.d_state == 1 and c.d_flight.len() > 0 and time() - c.d_flight_at > 1.0: __dtls_resend(c)
+    __sctp_poll(c)
+    __conns[id] = c
+
+# application data (an SCTP packet) to the other side
+__dtls_send_app = (c: mut __Conn, data: u8[]):
+    if c.d_state != 2: return
+    __rtc_out(c, __dtls_record(c, __CT_APP, data, 1))
+
+# ---------------- SCTP over DTLS (RFC 4960, 8261) and data channels (RFC 8831, 8832) ----------------
+const __SCTP_PORT = 5000
+const __PPID_DCEP = 50
+const __PPID_TEXT = 51
+const __PPID_BYTES = 53
+const __PPID_TEXT_EMPTY = 56
+const __PPID_BYTES_EMPTY = 57
+const __CHUNK_DATA = 1100           # (bytes of a message in one DATA chunk: a packet fits 1200)
+const __SCTP_WINDOW = 128           # (chunks sent and not yet acknowledged, at most: a big message all at once
+                                    # would overflow the other side's socket, and wait for the resends)
+
+# TSN order, as serial numbers that wrap at 2^32
+__tsn_after = (a: int, b: int) -> bool:
+    d = (a - b) & 0xFFFFFFFF
+    d != 0 and d < 0x80000000
+__tsn_next = (a: int) -> int: (a + 1) & 0xFFFFFFFF
+
+# a packet of chunks for the other side
+__sctp_packet = (c: __Conn, chunks: u8[], tag: int) -> u8[]:
+    p: u8[]
+    __put16(p, __SCTP_PORT)
+    __put16(p, __SCTP_PORT)
+    __put32(p, tag)
+    __put32(p, 0)
+    p.extend(chunks)
+    crc = int(crypto.crc32c(p))
+    # (the checksum's bytes, lowest first)
+    p[8] = u8(crc & 255)
+    p[9] = u8((crc >> 8) & 255)
+    p[10] = u8((crc >> 16) & 255)
+    p[11] = u8((crc >> 24) & 255)
+    p
+
+__sctp_chunk = (typ: int, flags: int, value: u8[]) -> u8[]:
+    ch: u8[] = [u8(typ), u8(flags)]
+    __put16(ch, 4 + value.len())
+    ch.extend(value)
+    loop ch.len() % 4 != 0: ch.push(0)
+    ch
+
+__sctp_send = (c: mut __Conn, chunks: u8[]):
+    __dtls_send_app(c, __sctp_packet(c, chunks, c.s_peer_tag))
+
+# INIT and INIT ACK's fields: this side's tag, window, streams, first TSN, and that it takes
+# FORWARD TSN
+__sctp_init_fields = (c: __Conn) -> u8[]:
+    v: u8[]
+    __put32(v, c.s_my_tag)
+    __put32(v, 1 << 20)
+    __put16(v, 1024)
+    __put16(v, 1024)
+    __put32(v, c.s_tsn)
+    __put16(v, 0xC000)                      # Forward-TSN-Supported
+    __put16(v, 4)
+    __put16(v, 0x8008)                      # Supported Extensions: FORWARD TSN
+    __put16(v, 5)
+    v.extend([u8(192), 0, 0, 0])
+    v
+
+__sctp_start = (c: mut __Conn):
+    c.s_state = 1
+    c.s_my_tag = int(__be32(crypto.random_bytes(4), 0)) | 1
+    c.s_tsn = int(__be32(crypto.random_bytes(4), 0)) & 0x7FFFFFFF
+    # (the DTLS client starts the association; the server answers, or starts too when its INIT
+    # comes first: both work)
+    if c.d_client:
+        c.s_init = __sctp_packet(c, __sctp_chunk(1, 0, __sctp_init_fields(c)), 0)
+        c.s_init_at = time()
+        __dtls_send_app(c, c.s_init)
+
+# the other side's INIT or INIT ACK parameters: its tag, first TSN, whether it takes FORWARD TSN
+__sctp_peer_init = (c: mut __Conn, v: u8[]):
+    c.s_peer_tag = int(__be32(v, 0))
+    c.s_peer_cum = (int(__be32(v, 12)) - 1) & 0xFFFFFFFF
+    i = 16
+    loop i + 4 <= v.len():
+        t = __be16(v, i)
+        l = __be16(v, i + 2)
+        if t == 0xC000: c.s_fwd = true
+        if l < 4: break
+        i += (l + 3) & ~3
+
+# a packet from the other side
+__sctp_in = (c: mut __Conn, p: u8[]):
+    if p.len() < 12: return
+    q = p
+    q[8] = 0
+    q[9] = 0
+    q[10] = 0
+    q[11] = 0
+    crc = int(crypto.crc32c(q))
+    got = int(p[8]) | (int(p[9]) << 8) | (int(p[10]) << 16) | (int(p[11]) << 24)
+    if crc != got:
+        __rtc_say(c, "an SCTP packet with a wrong checksum")
+        return
+    i = 12
+    reply: u8[]
+    loop i + 4 <= p.len():
+        typ = int(p[i])
+        flags = int(p[i + 1])
+        l = __be16(p, i + 2)
+        if l < 4 or i + l > p.len(): break
+        v = p[i + 4..i + l)
+        i += (l + 3) & ~3
+        if typ == 1:
+            # INIT: an INIT ACK, with a cookie (here: just this side's tag, as nothing is kept)
+            __sctp_peer_init(c, v)
+            if c.s_state == 0:
+                c.s_state = 1
+                c.s_my_tag = int(__be32(crypto.random_bytes(4), 0)) | 1
+                c.s_tsn = int(__be32(crypto.random_bytes(4), 0)) & 0x7FFFFFFF
+            f = __sctp_init_fields(c)
+            __put16(f, 7)                   # State Cookie
+            __put16(f, 12)
+            __put32(f, c.s_my_tag)
+            __put32(f, c.s_peer_tag)
+            __dtls_send_app(c, __sctp_packet(c, __sctp_chunk(2, 0, f), c.s_peer_tag))
+        else if typ == 2:
+            # INIT ACK: echo its cookie
+            __sctp_peer_init(c, v)
+            j = 16
+            loop j + 4 <= v.len():
+                t = __be16(v, j)
+                pl = __be16(v, j + 2)
+                if pl < 4: break
+                if t == 7:
+                    c.s_echo = __sctp_packet(c, __sctp_chunk(10, 0, v[j + 4..j + pl)), c.s_peer_tag)
+                    c.s_init.clear()
+                    c.s_init_at = time()
+                    __dtls_send_app(c, c.s_echo)
+                j += (pl + 3) & ~3
+        else if typ == 10:
+            # COOKIE ECHO: established
+            reply.extend(__sctp_chunk(11, 0, []))
+            __sctp_established(c)
+        else if typ == 11:
+            c.s_echo.clear()
+            __sctp_established(c)
+        else if typ == 0: __sctp_data(c, flags, v)
+        else if typ == 3: __sctp_sack(c, v)
+        else if typ == 4: reply.extend(__sctp_chunk(5, 0, v))            # HEARTBEAT: its ACK
+        else if typ == 192 and v.len() >= 4:
+            # FORWARD TSN: what was given up on counts as come
+            n = int(__be32(v, 0))
+            if __tsn_after(n, c.s_peer_cum):
+                c.s_peer_cum = n
+                c.s_partial.clear()
+                __sctp_deliver(c)
+            c.s_sack_due = true
+        else if typ == 6 or typ == 7:
+            # ABORT, SHUTDOWN: the other side has gone
+            c.s_state = 3
+            if typ == 7: reply.extend(__sctp_chunk(8, 0, []))
+    if reply.len() > 0: __sctp_send(c, reply)
+
+__sctp_established = (c: mut __Conn):
+    if c.s_state == 2: return
+    c.s_state = 2
+    c.s_init.clear()
+    __rtc_say(c, "SCTP established")
+    # (the side that invited opens the data channel, as a browser that makes one does)
+    if c.controlling:
+        c.s_chan = if c.d_client: 0 else: 1
+        c.s_ssn[c.s_chan] = 0
+        o: u8[] = [u8(3)]
+        if c.s_reliable: o.push(0)                 # (reliable, in order)
+        else: o.push(0x81)                         # (sent once, in any order)
+        __put16(o, 256)
+        __put32(o, 0)
+        label = bytes("sloppy")
+        __put16(o, label.len())
+        __put16(o, 0)
+        o.extend(label)
+        __sctp_send_data(c, c.s_chan, __PPID_DCEP, o, true, true)
+
+# a DATA chunk: kept by TSN, delivered in order; acknowledged
+__sctp_data = (c: mut __Conn, flags: int, v: u8[]):
+    if v.len() < 12: return
+    tsn = int(__be32(v, 0))
+    c.s_sack_due = true
+    if not __tsn_after(tsn, c.s_peer_cum) or c.s_got.has(tsn): return            # (had it)
+    # (a whole message that may come in any order: given out at once, whatever is missing before it)
+    if flags & 7 == 7:
+        __sctp_message(c, __be16(v, 4), int(__be32(v, 8)), v[12..])
+        c.s_got[tsn] = __Chunk(0x80, 0, 0, [])
+    else: c.s_got[tsn] = __Chunk(flags, __be16(v, 4), int(__be32(v, 8)), v[12..])
+    __sctp_deliver(c)
+
+# the chunks that follow on from what has come: messages, put together from their pieces
+__sctp_deliver = (c: mut __Conn):
+    loop true:
+        n = __tsn_next(c.s_peer_cum)
+        got = c.s_got.get(n)
+        if got == none: break
+        ch = got!
+        c.s_got.remove(n)
+        c.s_peer_cum = n
+        if ch.flags & 0x80 != 0: continue           # (given out already: a whole message sent in any order)
+        if ch.flags & 2 != 0: c.s_partial.clear()
+        c.s_partial.extend(ch.data)
+        if ch.flags & 1 == 0: continue
+        msg = c.s_partial
+        c.s_partial.clear()
+        __sctp_message(c, ch.stream, ch.ppid, msg)
+    # (chunks far ahead of the last in order, kept no more: a peer that gave up and said nothing)
+    if c.s_got.len() > 4096: c.s_got.clear()
+
+__sctp_message = (c: mut __Conn, stream: int, ppid: int, msg: u8[]):
+    if ppid == __PPID_DCEP:
+        if msg.len() > 0 and msg[0] == 3:
+            # DATA_CHANNEL_OPEN: this side's channel too; acknowledged
+            c.s_chan = stream
+            c.s_chan_open = true
+            if msg.len() > 1: c.s_reliable = msg[1] & 0x80 == 0
+            __sctp_send_data(c, stream, __PPID_DCEP, [u8(2)], true, true)
+            __rtc_say(c, "the data channel opened (stream {stream})")
+        else if msg.len() > 0 and msg[0] == 2:
+            c.s_chan_open = true
+            __rtc_say(c, "the data channel was acknowledged")
+        return
+    if stream != c.s_chan: return
+    m: u8[] = [u8(if ppid == __PPID_TEXT or ppid == __PPID_TEXT_EMPTY: 1 else: 0)]
+    if ppid != __PPID_TEXT_EMPTY and ppid != __PPID_BYTES_EMPTY: m.extend(msg)
+    c.s_msgs.push(m)
+
+# a message on a stream, in DATA chunks of at most __CHUNK_DATA bytes
+__sctp_send_data = (c: mut __Conn, stream: int, ppid: int, msg: u8[], ordered: bool, reliable: bool):
+    ssn = c.s_ssn.get(stream) ?? 0
+    if ordered: c.s_ssn[stream] = (ssn + 1) & 0xFFFF
+    out: u8[]
+    loop ch in __sctp_data_chunks(c.s_tsn, stream, ssn, ppid, msg, ordered):
+        if c.s_queue.len() > 0 or c.s_unacked.len() >= __SCTP_WINDOW:
+            # (no room: sent as acknowledgements make some)
+            c.s_queue.push(__Sent(c.s_tsn, ch, 0.0, 0, reliable))
+        else:
+            c.s_unacked.push(__Sent(c.s_tsn, ch, time(), 1, reliable))
+            if out.len() + ch.len() > __CHUNK_DATA + 64 and out.len() > 0:
+                __sctp_send(c, out)
+                out.clear()
+            out.extend(ch)
+        c.s_tsn = __tsn_next(c.s_tsn)
+    if out.len() > 0: __sctp_send(c, out)
+
+# a message as DATA chunks, numbered from tsn0 on
+__sctp_data_chunks = (tsn0: int, stream: int, ssn: int, ppid: int, msg: u8[], ordered: bool) -> u8[][]:
+    out: u8[][]
+    tsn = tsn0
+    off = 0
+    loop true:
+        n = min(__CHUNK_DATA, msg.len() - off)
+        flags = 0
+        if off == 0: flags |= 2
+        if off + n >= msg.len(): flags |= 1
+        if not ordered: flags |= 4
+        v: u8[]
+        __put32(v, tsn)
+        __put16(v, stream)
+        __put16(v, if ordered: ssn else: 0)
+        __put32(v, ppid)
+        v.extend(msg[off..off + n))
+        out.push(__sctp_chunk(0, flags, v))
+        tsn = __tsn_next(tsn)
+        off += n
+        if off >= msg.len(): break
+    out
+
+# what waits for room, sent as far as there is room
+__sctp_send_queued = (c: mut __Conn):
+    if c.s_queue.len() == 0 or c.s_unacked.len() >= __SCTP_WINDOW: return
+    now = time()
+    out: u8[]
+    k = 0
+    loop k < c.s_queue.len() and c.s_unacked.len() < __SCTP_WINDOW:
+        s = c.s_queue[k]
+        s.at = now
+        s.tries = 1
+        c.s_unacked.push(s)
+        if out.len() + s.chunk.len() > __CHUNK_DATA + 64 and out.len() > 0:
+            __sctp_send(c, out)
+            out.clear()
+        out.extend(s.chunk)
+        k += 1
+    if out.len() > 0: __sctp_send(c, out)
+    c.s_queue = c.s_queue[k..]
+
+# SACK: what the other side has; the rest is sent again when its time comes
+__sctp_sack = (c: mut __Conn, v: u8[]):
+    if v.len() < 12: return
+    cum = int(__be32(v, 0))
+    ngaps = __be16(v, 8)
+    acked: {int: bool}
+    loop k in [0..ngaps):
+        if 12 + k * 4 + 4 > v.len(): break
+        a = (cum + __be16(v, 12 + k * 4)) & 0xFFFFFFFF
+        b = (cum + __be16(v, 14 + k * 4)) & 0xFFFFFFFF
+        t = a
+        loop true:
+            acked[t] = true
+            if t == b: break
+            t = __tsn_next(t)
+    keep: __Sent[]
+    now = time()
+    loop s in c.s_unacked:
+        if not __tsn_after(s.tsn, cum) or acked.has(s.tsn):
+            if s.tries == 1: c.s_rtt = c.s_rtt * 0.875 + (now - s.at) * 0.125
+            continue
+        keep.push(s)
+    c.s_unacked = keep
+
+# SCTP's part of a frame: the packets DTLS took in, a SACK when one is due, what to send again
+__sctp_poll = (c: mut __Conn):
+    if c.d_state != 2: return
+    if c.s_state == 0: __sctp_start(c)
+    loop pk in c.d_app: __sctp_in(c, pk)
+    c.d_app.clear()
+    now = time()
+    if c.s_state == 1:
+        if c.s_init.len() > 0 and now - c.s_init_at > 1.0:
+            c.s_init_at = now
+            __dtls_send_app(c, c.s_init)
+        if c.s_echo.len() > 0 and now - c.s_init_at > 1.0:
+            c.s_init_at = now
+            __dtls_send_app(c, c.s_echo)
+    if c.s_state != 2: return
+    __sctp_send_queued(c)
+    if c.s_sack_due:
+        c.s_sack_due = false
+        v: u8[]
+        __put32(v, c.s_peer_cum)
+        __put32(v, 1 << 20)
+        __put16(v, 0)
+        __put16(v, 0)
+        __sctp_send(c, __sctp_chunk(3, 0, v))
+    # (sent again after a while: or, for messages sent once, given up on, with FORWARD TSN)
+    rto = max(0.2, min(2.0, c.s_rtt * 3.0))
+    gave_up = -1
+    again: u8[][] = [[]]
+    keep: __Sent[]
+    loop mut s in c.s_unacked:
+        if now - s.at < rto * f64(s.tries):
+            keep.push(s)
+            continue
+        if not s.reliable or s.tries > 12:
+            if gave_up < 0 or __tsn_after(s.tsn, gave_up): gave_up = s.tsn
+            continue
+        s.at = now
+        s.tries += 1
+        if again[again.len() - 1].len() + s.chunk.len() > __CHUNK_DATA + 64: again.push([])
+        again[again.len() - 1].extend(s.chunk)
+        keep.push(s)
+    c.s_unacked = keep
+    loop pk in again:
+        if pk.len() > 0: __sctp_send(c, pk)
+    if gave_up >= 0 and c.s_fwd:
+        # (everything up to the oldest still waiting has come, as far as the other side need know)
+        upto = gave_up
+        loop s in c.s_unacked:
+            if __tsn_after(upto, s.tsn): upto = (s.tsn - 1) & 0xFFFFFFFF
+        v: u8[]
+        __put32(v, upto)
+        __sctp_send(c, __sctp_chunk(192, 0, v))
+
+# ---------------- SDP (what browsers take and give) ----------------
+# a description as a browser's session description: an offer (actpass) or answer
+__rtc_sdp = (d: RtcDesc, offer: bool) -> str:
+    fp: str[]
+    loop b in d.fingerprint: fp.push(upper(crypto.hex_text([b])))
+    setup = if offer: "actpass" else: (if d.active: "active" else: "passive")
+    s = "v=0\r\no=- {int(__be32(crypto.random_bytes(4), 0)) & 0x7FFFFFFF} 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    s += "a=group:BUNDLE 0\r\na=msid-semantic: WMS\r\n"
+    s += "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n"
+    loop i in 0.. and cd in d.candidates:
+        prio = if cd.kind == "host": 2130706431 - i else: (if cd.kind == "srflx": 1694498815 - i else: 16777215 - i)
+        extra = if cd.kind == "host": "" else: " raddr 0.0.0.0 rport 0"
+        s += "a=candidate:{i + 1} 1 udp {prio} {cd.host} {cd.port} typ {cd.kind}{extra}\r\n"
+    s += "a=ice-ufrag:{d.ufrag}\r\na=ice-pwd:{d.pwd}\r\na=ice-options:trickle\r\n"
+    fps = join(fp, ":")
+    s += "a=fingerprint:sha-256 {fps}\r\na=setup:{setup}\r\na=mid:0\r\n"
+    s += "a=sctp-port:5000\r\na=max-message-size:262144\r\n"
+    s
+
+# a browser's session description as a description (none when it lacks what one needs)
+__rtc_parse_sdp = (sdp: str) -> RtcDesc?:
+    d = RtcDesc("", "", [], false, [])
+    loop l0 in lines(sdp):
+        l = trim(l0)
+        if starts_with(l, "a=ice-ufrag:"): d.ufrag = l[12..]
+        else if starts_with(l, "a=ice-pwd:"): d.pwd = l[10..]
+        else if starts_with(l, "a=fingerprint:sha-256 "):
+            h = replace(l[22..], ":", "")
+            d.fingerprint = crypto.hex_bytes(h) ?? []
+        else if starts_with(l, "a=setup:"): d.active = l[8..] == "active"
+        else if starts_with(l, "a=candidate:"):
+            w = words(l[12..])
+            if w.len() >= 8 and lower(w[2]) == "udp" and w[1] == "1":
+                d.candidates.push(RtcCand(w[4], to_int(w[5]) ?? 0, w[7]))
+    if len(d.ufrag) == 0 or len(d.pwd) == 0 or d.fingerprint.len() != 32: return none
+    d
+
+# ---------------- codes (what the players pass to each other) ----------------
+# A description as a short code: a version, whether its side is the DTLS client, the ICE name and
+# password, the fingerprint, and the candidates (IPv4 addresses, or a browser's name.local), all
+# in base64url
+__CAND_KINDS = ["host", "srflx", "prflx", "relay"]
+
+rtc_code = (d: RtcDesc) -> str:
+    b: u8[] = [u8(1), u8(if d.active: 1 else: 0)]
+    b.push(u8(len(d.ufrag)))
+    b.extend(bytes(d.ufrag))
+    b.push(u8(len(d.pwd)))
+    b.extend(bytes(d.pwd))
+    b.extend(d.fingerprint)
+    cs: RtcCand[]
+    loop cd in d.candidates:
+        if find(cd.host, ":") < 0 and cs.len() < 8: cs.push(cd)
+    b.push(u8(cs.len()))
+    loop cd in cs:
+        k = max(0, __CAND_KINDS.index_of(cd.kind))
+        parts = split(cd.host, ".")
+        if parts.len() == 4 and to_int(parts[0]) != none:
+            b.push(u8(k))
+            loop p in parts: b.push(u8(to_int(p) ?? 0))
+        else:
+            b.push(u8(k | 0x80))
+            b.push(u8(len(cd.host)))
+            b.extend(bytes(cd.host))
+        __put16(b, cd.port)
+    __b64url(b)
+
+# a code back as a description (none when it is not one)
+rtc_from_code = (code: str) -> RtcDesc?:
+    # (spaces and line breaks in it skipped: a chat app may have broken it across lines)
+    cs: u8[]
+    loop ch in bytes(code):
+        if ch != ' ' and ch != '\n' and ch != '\r' and ch != '\t': cs.push(ch)
+    bb = __b64url_read(str_from_bytes(cs))
+    if bb == none: return none
+    b = bb!
+    if b.len() < 4 or b[0] != 1: return none
+    d = RtcDesc("", "", [], b[1] == 1, [])
+    i = 2
+    n = int(b[i])
+    if i + 1 + n > b.len(): return none
+    d.ufrag = str_from_bytes(b[i + 1..i + 1 + n))
+    i += 1 + n
+    n = int(b[i])
+    if i + 1 + n > b.len(): return none
+    d.pwd = str_from_bytes(b[i + 1..i + 1 + n))
+    i += 1 + n
+    if i + 33 > b.len(): return none
+    d.fingerprint = b[i..i + 32)
+    i += 32
+    nc = int(b[i])
+    i += 1
+    loop _ in [0..nc):
+        if i >= b.len(): return none
+        k = int(b[i])
+        i += 1
+        host = ""
+        if k & 0x80 == 0:
+            if i + 4 > b.len(): return none
+            host = "{b[i]}.{b[i + 1]}.{b[i + 2]}.{b[i + 3]}"
+            i += 4
+        else:
+            l = int(b[i])
+            if i + 1 + l > b.len(): return none
+            host = str_from_bytes(b[i + 1..i + 1 + l))
+            i += 1 + l
+        if i + 2 > b.len(): return none
+        d.candidates.push(RtcCand(host, __be16(b, i), __CAND_KINDS[min(k & 0x7f, 3)]))
+        i += 2
+    d
+
+__rtc_b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+__b64url = (b: u8[]) -> str:
+    out: u8[]
+    i = 0
+    loop i < b.len():
+        n = int(b[i]) << 16
+        if i + 1 < b.len(): n |= int(b[i + 1]) << 8
+        if i + 2 < b.len(): n |= int(b[i + 2])
+        out.push(__rtc_b64[(n >> 18) & 63])
+        out.push(__rtc_b64[(n >> 12) & 63])
+        if i + 1 < b.len(): out.push(__rtc_b64[(n >> 6) & 63])
+        if i + 2 < b.len(): out.push(__rtc_b64[n & 63])
+        i += 3
+    str_from_bytes(out)
+
+__b64url_read = (s: str) -> u8[]?:
+    out: u8[]
+    acc = 0
+    bits = 0
+    loop ch in bytes(s):
+        v = find(__rtc_b64, byte_str(ch))
+        if v < 0: return none
+        acc = (acc << 6) | v
+        bits += 6
+        if bits >= 8:
+            bits -= 8
+            out.push(u8((acc >> bits) & 255))
+    out
+
+# ---------------- for lib/net.jo ----------------
+# a frame of a connection's work: ICE, DTLS, SCTP
+__rtc_poll = (id: int):
+    if id < 0 or id >= __conns.len() or __conns[id].sock < 0: return
+    __ice_poll(id)
+    __dtls_poll(id)
+
+# what became of it: 0 connecting, 1 open (the data channel), 2 gone; and why it went
+__rtc_status = (id: int) -> (int, str):
+    c = __conns[id]
+    if c.sock < 0: return (2, "")
+    if c.state == __ICE_LOST: return (2, "the other game stopped answering: closed without a word, or its network went")
+    # (never a word from it: not a network that allows no path, but a game not there)
+    if c.state == __ICE_FAILED and c.last_heard == 0.0:
+        if c.controlling: return (2, "their game never answered: is it still open, showing the reply they sent?")
+        return (2, "their game never answered: did they paste your reply in (and is their game still open)?")
+    if c.state == __ICE_FAILED: return (2, "no path was found between the two: one of you may be on a network that allows none (mobile data, a school's or an office's), where a relay server (TURN) is needed")
+    if c.d_state == 3:
+        # (a certificate or signature not the code's: the code changed on its way, as by a mistyped
+        # character, or someone in between)
+        if find(c.d_why, "certificate") >= 0 or find(c.d_why, "signed") >= 0 or find(c.d_why, "finished") >= 0: return (2, "that code does not match the game that made it (a character changed or lost?)")
+        return (2, c.d_why)
+    if c.s_state == 3: return (2, "the other side ended the connection")
+    if c.s_chan_open: return (1, "")
+    (0, "")
+
+# (on the connection in place: a copy of it, changed, would copy what is waiting for its
+# acknowledgement, each message: sending n messages in a frame took n squared)
+__rtc_send = (id: int, msg: u8[], text: bool):
+    if not __conns[id].s_chan_open: return
+    ppid = if text: (if msg.len() == 0: __PPID_TEXT_EMPTY else: __PPID_TEXT) else: (if msg.len() == 0: __PPID_BYTES_EMPTY else: __PPID_BYTES)
+    m = msg
+    if m.len() == 0: m = [u8(0)]
+    rel = __conns[id].s_reliable
+    if __conns[id].s_queue.len() == 0 and __conns[id].s_unacked.len() < __SCTP_WINDOW:
+        __sctp_send_data(__conns[id], __conns[id].s_chan, ppid, m, rel, rel)
+        return
+    # (others wait already: this one after them, put in the queue where it is)
+    stream = __conns[id].s_chan
+    ssn = __conns[id].s_ssn.get(stream) ?? 0
+    if rel: __conns[id].s_ssn[stream] = (ssn + 1) & 0xFFFF
+    loop ch in __sctp_data_chunks(__conns[id].s_tsn, stream, ssn, ppid, m, rel):
+        __conns[id].s_queue.push(__Sent(__conns[id].s_tsn, ch, 0.0, 0, rel))
+        __conns[id].s_tsn = __tsn_next(__conns[id].s_tsn)
+
+# the messages that came (each: 1 text or 0 bytes, then the message)
+__rtc_take = (id: int) -> u8[][]:
+    out = __conns[id].s_msgs
+    __conns[id].s_msgs.clear()
+    out
+
+__rtc_close = (id: int):
+    c = __conns[id]
+    if c.s_state == 2: __sctp_send(c, __sctp_chunk(6, 0, []))             # ABORT
+    if c.sock >= 0: net.udp_close(c.sock)
+    c.sock = -1
+    __conns[id] = c
+
+# (a native side's code, once its candidates are known: "" before)
+__rtc_code = (id: int, active: bool) -> str:
+    if not __conns[id].gathered or __conns[id].t_state == 1: return ""
+    rtc_code(__rtc_desc(id, active))

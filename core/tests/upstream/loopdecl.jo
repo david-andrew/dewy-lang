@@ -1,0 +1,25 @@
+# an array declared inside a loop gets a fresh (possibly shared, read-only) value each
+# iteration: writing to it must still copy first
+h1 = (p0: int) -> int:
+    total = 0
+    loop w in [0..3):
+        a8 = [7]
+        a8[0] = p0 + w
+        total += a8[0]
+    total
+print(h1(3))
+shared = [1, 2, 3]
+loop i in [0..3):
+    b = shared
+    b[i] = 0
+    print(b, shared)
+k = 0
+loop k < 2:
+    c = [5, 5]
+    c[k] += 1
+    print(c)
+    k += 1
+# hoisting still applies to arrays that exist before the loop
+d = fill(0, 4)
+loop i in [0..4): d[i] = i * i
+print(d)

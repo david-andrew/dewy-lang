@@ -1,0 +1,464 @@
+# Stories: a script of dialogue, choices and what happens on screen, written as Ren'Py writes
+# one, read into a Story that the game steps through. The game draws each line and choice its
+# own way (a dialogue box, text_rich, portraits) and does each command (show, scene, play...).
+#
+#   character m "Mira" #f4a6c6
+#
+#   label start:
+#       scene cafe
+#       show mira happy
+#       "The bell rang twice."                 (narration)
+#       m "You came! I wasn't sure you would."
+#       menu:
+#           "Of course I came.":
+#               $ mira += 2
+#           "I almost didn't." if mira < 5:
+#               $ mira -= 1
+#               jump doubt
+#       if mira >= 3:
+#           m "Then stay a while."
+#       else:
+#           jump goodbye
+#
+#   st = story(str_from_bytes(embed("story.txt")))
+#   if len(st.error) > 0: print(st.error)
+#   step = st.next()            # (again when the player clicks: the next line, choice or command)
+#   match step.kind:
+#       .line: draw step.speaker and step.text (step.who: the character's id, for a portrait)
+#       .choice: draw step.choices; on a click, st.choose(i) and step = st.next()
+#       .command: do step.words ("show", "mira", "happy"), then step = st.next()
+#       .end: the end
+#
+# Lines: `label name:` (the story starts at `start`, else at the top), `character id "Name"
+# #color`, "narration", `id "dialogue"`, `menu:` with "options": (and `if` conditions), `if`,
+# `elif`, `else`, `jump label`, `call label` and `return`, `$ name = value` (and += -=), `end`.
+# Anything else is a command for the game. Variables are whole numbers (true is 1, false 0), and
+# "[name]" in a line puts one in. A Story is a value: save_value("story", st.save()) and later
+# st.load(load_value("story", st.save())) take up where it was, even after the script changed
+# in other labels.
+
+enum StoryKind: line, choice, command, end
+
+# what the story does next
+struct StoryStep:
+    kind: StoryKind
+    speaker = ""        # a line's speaker ("": narration)
+    who = ""            # the speaker's id, as in the script (m)
+    color = ""          # the speaker's color, as written (#f4a6c6; "": none given)
+    text = ""           # a line's text, with [name]s put in
+    choices: str[]      # a choice's options (those whose condition holds)
+    words: str[]        # a command's words
+
+# a story read from its script; error says what is wrong with it ("" if nothing)
+struct Story:
+    error = ""
+    vars: {str: int}
+    __code: __StoryIns[]
+    __labels: {str: int}
+    __chars: {str: (str, str)}
+    __ip = 0
+    __stack: int[]
+    __menu: (str, int)[]
+
+# where a story is, to save and load: the place by label and statement, so it still loads after
+# the script changes elsewhere
+struct StorySave:
+    label = ""
+    nth = 0
+    stack: (str, int)[]
+    vars: {str: int}
+
+struct __StoryIns:
+    op: int             # 0 say, 1 menu, 2 jump, 3 jump unless, 4 set, 5 command, 6 call, 7 return, 8 end
+    a = ""              # say: who; set: the variable; jump, call: the label; command: its words
+    b = ""              # say: text; set: = += -=
+    expr = ""           # a condition, or a value
+    target = -1
+    opts: (str, str, int)[]     # menu: text, condition, where it goes
+    line = 0
+    label = ""
+    nth = 0
+
+# (the script's lines: indent, text, line number)
+struct __StoryParse:
+    lines: (int, str, int)[]
+    i = 0
+    st: Story
+    label = ""
+    nth = 0
+    jumps: (int, str)[]          # (instruction, label) to resolve at the end
+
+# a story from its script (st.error: what is wrong with it, with its line)
+story = (text: str) -> Story:
+    p = __StoryParse(st = Story())
+    loop k in 0.. and raw in split(text, "\n"):
+        line = trim_end(raw)
+        t = trim(line)
+        if len(t) == 0 or t[0] == '#': continue
+        ind = 0
+        loop ind < len(line) and (line[ind] == ' ' or line[ind] == '\t'): ind += 1
+        p.lines.push((ind, t, k + 1))
+    __story_block(p, 0)
+    loop j in p.jumps:
+        if let at = p.st.__labels.get(j.1): p.st.__code[j.0].target = at
+        else if len(p.st.error) == 0: p.st.error = "line {p.st.__code[j.0].line}: there is no label '{j.1}'"
+    if let s = p.st.__labels.get("start"): p.st.__ip = s
+    p.st
+
+__story_err = (p: mut __StoryParse, line: int, msg: str):
+    if len(p.st.error) == 0: p.st.error = "line {line}: {msg}"
+
+__story_emit = (p: mut __StoryParse, ins: __StoryIns) -> int:
+    let ins = ins
+    ins.label = p.label
+    ins.nth = p.nth
+    p.nth += 1
+    p.st.__code.push(ins)
+    p.st.__code.len() - 1
+
+# the statements indented more than `outer`, from p.i on
+__story_block = (p: mut __StoryParse, outer: int):
+    if p.i >= p.lines.len(): return
+    ind = p.lines[p.i].0
+    if ind <= outer and outer > 0: return
+    loop p.i < p.lines.len() and p.lines[p.i].0 == ind and len(p.st.error) == 0:
+        __story_stmt(p, ind)
+    if p.i < p.lines.len() and p.lines[p.i].0 > ind and len(p.st.error) == 0: __story_err(p, p.lines[p.i].2, "this line is indented more than the one before it")
+
+__story_stmt = (p: mut __StoryParse, ind: int):
+    t = p.lines[p.i].1
+    ln = p.lines[p.i].2
+    p.i += 1
+    w = words(t)
+    first = w[0]
+    if first == "label":
+        name = trim(t[5..])
+        if ends_with(name, ":"): name = trim(name[..len(name) - 1))
+        if len(name) == 0:
+            __story_err(p, ln, "a label needs a name: `label start:`")
+            return
+        if p.st.__labels.has(name):
+            __story_err(p, ln, "a second label '{name}'")
+            return
+        p.label = name
+        p.nth = 0
+        p.st.__labels[name] = p.st.__code.len()
+        __story_block(p, ind)
+        return
+    if first == "character":
+        # character m "Mira" #f4a6c6
+        q0 = find(t, "\"")
+        q1 = find(t, "\"", q0 + 1)
+        if w.len() < 3 or q0 < 0 or q1 < 0:
+            __story_err(p, ln, "a character is written `character m \"Mira\"` (and a color: #f4a6c6)")
+            return
+        color = trim(t[q1 + 1..])
+        p.st.__chars[w[1]] = (t[q0 + 1..q1), color)
+        return
+    if t[0] == '"':
+        e = __story_quote_end(t)
+        if e < 0:
+            __story_err(p, ln, "this line's text has no closing quote")
+            return
+        __story_emit(p, __StoryIns(0, b = t[1..e), line = ln))
+        return
+    if w.len() >= 2 and w[1][0] == '"' and first != "jump" and first != "call":
+        q = find(t, "\"")
+        e = __story_quote_end(t[q..])
+        if e < 0:
+            __story_err(p, ln, "this line's text has no closing quote")
+            return
+        __story_emit(p, __StoryIns(0, a = first, b = t[q + 1..q + e), line = ln))
+        return
+    if first == "menu:" or t == "menu:":
+        __story_menu(p, ind, ln)
+        return
+    if first == "if":
+        __story_if(p, ind, t, ln)
+        return
+    if first == "elif" or first == "else:" or first == "else":
+        __story_err(p, ln, "an {first} with no if before it")
+        return
+    if first == "jump" or first == "call":
+        if w.len() != 2:
+            __story_err(p, ln, "`{first} label`")
+            return
+        op = 6
+        if first == "jump": op = 2
+        k = __story_emit(p, __StoryIns(op, a = w[1], line = ln))
+        p.jumps.push((k, w[1]))
+        return
+    if t == "return":
+        __story_emit(p, __StoryIns(7, line = ln))
+        return
+    if t == "end":
+        __story_emit(p, __StoryIns(8, line = ln))
+        return
+    if first == "$":
+        # $ name = value, += -=
+        if w.len() < 4 or (w[2] != "=" and w[2] != "+=" and w[2] != "-="):
+            __story_err(p, ln, "a variable is set with `$ name = value` (or += and -=)")
+            return
+        rest = trim(t[find(t, w[2]) + len(w[2])..])
+        __story_emit(p, __StoryIns(4, a = w[1], b = w[2], expr = rest, line = ln))
+        return
+    __story_emit(p, __StoryIns(5, a = t, line = ln))
+
+# (where a quoted text that starts at s[0] ends: its closing quote, \" passed over)
+__story_quote_end = (s: str) -> int:
+    k = 1
+    loop k < len(s):
+        if s[k] == '\\': k += 2
+        else if s[k] == '"': return k
+        else: k += 1
+    -1
+
+__story_menu = (p: mut __StoryParse, ind: int, ln: int):
+    m = __story_emit(p, __StoryIns(1, line = ln))
+    ends: int[]
+    if p.i >= p.lines.len() or p.lines[p.i].0 <= ind:
+        __story_err(p, ln, "a menu's options go on the lines below it, indented: \"Stay.\":")
+        return
+    oind = p.lines[p.i].0
+    loop p.i < p.lines.len() and p.lines[p.i].0 == oind and len(p.st.error) == 0:
+        t = p.lines[p.i].1
+        oln = p.lines[p.i].2
+        p.i += 1
+        if len(t) == 0 or t[0] != '"' or not ends_with(t, ":"):
+            __story_err(p, oln, "a menu's option is its text in quotes and a colon: \"Stay.\": (or \"Stay.\" if mira > 2:)")
+            return
+        e = __story_quote_end(t)
+        if e < 0:
+            __story_err(p, oln, "this option's text has no closing quote")
+            return
+        cond = trim(t[e + 1..len(t) - 1))
+        if starts_with(cond, "if "): cond = trim(cond[3..])
+        else if len(cond) > 0:
+            __story_err(p, oln, "after an option's text: `if` and a condition, or nothing")
+            return
+        p.st.__code[m].opts.push((t[1..e), cond, p.st.__code.len()))
+        __story_block(p, oind)
+        ends.push(__story_emit(p, __StoryIns(2, line = oln)))
+    loop k in ends: p.st.__code[k].target = p.st.__code.len()
+
+__story_if = (p: mut __StoryParse, ind: int, t: str, ln: int):
+    ends: int[]
+    cond = t
+    cln = ln
+    loop true:
+        c = trim(cond[2..])
+        if starts_with(cond, "elif"): c = trim(cond[4..])
+        if ends_with(c, ":"): c = trim(c[..len(c) - 1))
+        j = __story_emit(p, __StoryIns(3, expr = c, line = cln))
+        __story_block(p, ind)
+        ends.push(__story_emit(p, __StoryIns(2, line = cln)))
+        p.st.__code[j].target = p.st.__code.len()
+        if p.i >= p.lines.len() or p.lines[p.i].0 != ind: break
+        nt = p.lines[p.i].1
+        if starts_with(nt, "elif "):
+            cond = nt
+            cln = p.lines[p.i].2
+            p.i += 1
+            continue
+        if nt == "else:":
+            p.i += 1
+            __story_block(p, ind)
+        break
+    loop k in ends: p.st.__code[k].target = p.st.__code.len()
+
+# what the story does next: a line to show, a choice to make (until choose), a command for the
+# game, or the end
+next = (st: mut Story) -> StoryStep:
+    if st.__menu.len() > 0: return StoryStep(.choice, choices = [loop o in st.__menu: o.0])
+    n = 0
+    loop st.__ip < st.__code.len():
+        n += 1
+        if n > 100000:
+            st.error = "the story goes round without a line to show (a jump that comes back to itself?)"
+            return StoryStep(.end)
+        ins = st.__code[st.__ip]
+        if ins.op == 0:
+            st.__ip += 1
+            name = ins.a
+            color = ""
+            if let c = st.__chars.get(ins.a):
+                name = c.0
+                color = c.1
+            return StoryStep(.line, speaker = name, who = ins.a, color = color, text = __story_text(st, ins.b))
+        if ins.op == 1:
+            st.__menu.clear()
+            loop o in ins.opts:
+                if len(o.1) == 0 or __story_eval(st, o.1) != 0: st.__menu.push((__story_text(st, o.0), o.2))
+            if st.__menu.len() == 0:
+                # (no option open: past the menu)
+                st.__ip = ins.opts[ins.opts.len() - 1].2
+                continue
+            return StoryStep(.choice, choices = [loop o in st.__menu: o.0])
+        if ins.op == 2: st.__ip = ins.target
+        else if ins.op == 3:
+            if __story_eval(st, ins.expr) == 0: st.__ip = ins.target
+            else: st.__ip += 1
+        else if ins.op == 4:
+            v = __story_eval(st, ins.expr)
+            old = st.vars.get(ins.a) ?? 0
+            if ins.b == "+=": v = old + v
+            else if ins.b == "-=": v = old - v
+            st.vars[ins.a] = v
+            st.__ip += 1
+        else if ins.op == 5:
+            st.__ip += 1
+            return StoryStep(.command, words = words(ins.a))
+        else if ins.op == 6:
+            st.__stack.push(st.__ip + 1)
+            st.__ip = ins.target
+        else if ins.op == 7:
+            if st.__stack.len() == 0: st.__ip = st.__code.len()
+            else: st.__ip = st.__stack.pop()
+        else: st.__ip = st.__code.len()
+    StoryStep(.end)
+
+# take option i of the choice next gave (from 0); the story goes on from there
+choose = (st: mut Story, i: int):
+    if i < 0 or i >= st.__menu.len(): return
+    st.__ip = st.__menu[i].1
+    st.__menu.clear()
+
+# go to a label (a chapter select, a new game)
+jump = (st: mut Story, label: str) -> bool:
+    if let at = st.__labels.get(label):
+        st.__ip = at
+        st.__menu.clear()
+        st.__stack.clear()
+        return true
+    false
+
+# where the story is (for save_value), and back there (a StorySave from an older script finds
+# its label's statement)
+save = (st: Story) -> StorySave:
+    s = StorySave(vars = st.vars)
+    here = __story_where(st, st.__ip)
+    s.label = here.0
+    s.nth = here.1
+    loop r in st.__stack: s.stack.push(__story_where(st, r))
+    s
+
+load = (st: mut Story, s: StorySave):
+    st.vars = s.vars
+    st.__menu.clear()
+    st.__ip = __story_at(st, s.label, s.nth)
+    st.__stack = [loop r in s.stack: __story_at(st, r.0, r.1)]
+
+__story_where = (st: Story, ip: int) -> (str, int):
+    if ip >= st.__code.len(): return ("", -1)
+    (st.__code[ip].label, st.__code[ip].nth)
+
+__story_at = (st: Story, label: str, nth: int) -> int:
+    if nth < 0: return st.__code.len()
+    start = st.__labels.get(label) ?? 0
+    loop i in [start..st.__code.len()):
+        if st.__code[i].label == label and st.__code[i].nth == nth: return i
+    start
+
+# (a line's text: [name] put in for each variable named so; \" a quote)
+__story_text = (st: Story, s: str) -> str:
+    out = replace(s, "\\\"", "\"")
+    if find(out, "[") < 0: return out
+    loop name, v in st.vars: out = replace(out, "[{name}]", "{v}")
+    out
+
+# (a condition or value: whole numbers, variables (0 if not set), true and false, + - * / %,
+# comparisons, and, or, not, parentheses)
+__story_eval = (st: Story, e: str) -> int:
+    toks = __story_tokens(e)
+    k = 0
+    __story_or(st, toks, k)
+
+__story_tokens = (e: str) -> str[]:
+    out: str[]
+    i = 0
+    loop i < len(e):
+        c = e[i]
+        if c == ' ' or c == '\t':
+            i += 1
+            continue
+        j = i
+        if is_alnum(c) or c == '_':
+            loop j < len(e) and (is_alnum(e[j]) or e[j] == '_'): j += 1
+        else if i + 1 < len(e) and (e[i + 1] == '=') and (c == '=' or c == '!' or c == '<' or c == '>'): j = i + 2
+        else: j = i + 1
+        out.push(e[i..j))
+        i = j
+    out
+
+__story_or = (st: Story, t: str[], k: mut int) -> int:
+    v = __story_and(st, t, k)
+    loop k < t.len() and t[k] == "or":
+        k += 1
+        r = __story_and(st, t, k)
+        v = int(v != 0 or r != 0)
+    v
+
+__story_and = (st: Story, t: str[], k: mut int) -> int:
+    v = __story_not(st, t, k)
+    loop k < t.len() and t[k] == "and":
+        k += 1
+        r = __story_not(st, t, k)
+        v = int(v != 0 and r != 0)
+    v
+
+__story_not = (st: Story, t: str[], k: mut int) -> int:
+    if k < t.len() and t[k] == "not":
+        k += 1
+        return int(__story_not(st, t, k) == 0)
+    __story_cmp(st, t, k)
+
+__story_cmp = (st: Story, t: str[], k: mut int) -> int:
+    a = __story_sum(st, t, k)
+    if k < t.len():
+        op = t[k]
+        if op == "==" or op == "!=" or op == "<" or op == "<=" or op == ">" or op == ">=":
+            k += 1
+            b = __story_sum(st, t, k)
+            match op:
+                "==": return int(a == b)
+                "!=": return int(a != b)
+                "<": return int(a < b)
+                "<=": return int(a <= b)
+                ">": return int(a > b)
+                _: return int(a >= b)
+    a
+
+__story_sum = (st: Story, t: str[], k: mut int) -> int:
+    v = __story_prod(st, t, k)
+    loop k < t.len() and (t[k] == "+" or t[k] == "-"):
+        op = t[k]
+        k += 1
+        r = __story_prod(st, t, k)
+        if op == "+": v += r
+        else: v -= r
+    v
+
+__story_prod = (st: Story, t: str[], k: mut int) -> int:
+    v = __story_atom(st, t, k)
+    loop k < t.len() and (t[k] == "*" or t[k] == "/" or t[k] == "%"):
+        op = t[k]
+        k += 1
+        r = __story_atom(st, t, k)
+        if op == "*": v *= r
+        else if r != 0 and op == "/": v /= r
+        else if r != 0: v %= r
+    v
+
+__story_atom = (st: Story, t: str[], k: mut int) -> int:
+    if k >= t.len(): return 0
+    x = t[k]
+    k += 1
+    if x == "(":
+        v = __story_or(st, t, k)
+        if k < t.len() and t[k] == ")": k += 1
+        return v
+    if x == "-": return -__story_atom(st, t, k)
+    if x == "true": return 1
+    if x == "false": return 0
+    if let n = to_int(x): return n
+    st.vars.get(x) ?? 0

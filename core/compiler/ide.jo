@@ -1,0 +1,881 @@
+# Editor support (see lsp.jo): while a program is checked, what each name in the edited files
+# refers to (its declaration) and its type; the completions possible at a placeholder name; and
+# errors, all written as lines for the language server:
+#   F <file> <path>                         a source file (positions below are <file>:<offset>)
+#   R <pos> <len> <decl> <info>             a name at pos refers to decl (info: its type)
+#   D <pos> <len> <kind> <name> <snippet> <doc>   a declaration
+#   H <pos> <label>                         an inlay hint (an inferred type) at pos
+#   C <label> <kind> <detail>               a completion
+#   E <pos> <message> <skip>                an error; skip: a function whose body may be left
+#                                           unchecked to find further errors (or -1)
+#   W <pos> <message>                       a warning
+# Fields are separated by tabs; tabs, newlines and backslashes in them are escaped (\t \n \\).
+
+use 'util.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'lex.jo'
+
+const IK_LOCAL = 1
+const IK_PARAM = 2
+const IK_GLOBAL = 3
+const IK_CONST = 4
+const IK_FN = 5
+const IK_STRUCT = 6
+const IK_ENUM = 7
+const IK_FIELD = 8
+const IK_VARIANT = 9
+const IK_MODULE = 10
+const IK_TYPE = 11
+const IK_BUILTIN = 12
+
+ide_on = false
+ide_fd = 1
+ide_doc = ""                    # the edited file: indexed even when it is part of the library
+ide_wide = false                # index all the program's files (not just ide_doc)
+ide_sentinel = 0                # the name standing for the one being completed (0: none)
+ide_skip: {int: bool} = {}      # functions (declaration positions) whose bodies are not checked
+ide_force = -1                  # a library file whose functions are all checked (being edited)
+ide_files: int[]                # per file: 0 unknown, 1 indexed, 2 not
+ide_texts: {str: str} = {}      # the editor's text of files (by path), newer than the files'
+
+struct IdeRef:
+    pos: int
+    decl: int
+    kind: i32
+    type: i32
+    inst: i32
+
+ide_refs: IdeRef[]
+ide_hint_locals: int[]          # variables declared without a type
+ide_hint_fns: int[]             # functions whose return type is inferred
+ide_lines: str[]
+
+# a path without . and .. parts (and no doubled slashes, but for a UNC path's //server/share)
+ide_norm = (path: str) -> str:
+    parts: str[]
+    loop p in split(path, "/"):
+        if len(p) == 0 or p == ".": continue
+        if p == "..":
+            if parts.len() > 0: parts.pop()
+            continue
+        parts.push(p)
+    out = join(parts, "/")
+    if starts_with(path, "//") and not starts_with(path, "///"): out = "//" + out
+    else if starts_with(path, "/"): out = "/" + out
+    out
+
+# a source file: as the editor has it, else from disk
+read_source = (path: str) -> str?:
+    if ide_texts.len() > 0:
+        if let t = ide_texts.get(ide_norm(path)): return t
+    read_file(path)
+
+ide_esc = (s: str) -> str:
+    if find_byte(s, '\t') < 0 and find_byte(s, '\n') < 0 and find_byte(s, '\\') < 0: return s
+    out = ""
+    loop c in s:
+        if c == '\t': out += "\\t"
+        else if c == '\n': out += "\\n"
+        else if c == '\\': out += "\\\\"
+        else: out += byte_str(int(c))
+    out
+
+ide_emit = (line: str): ide_lines.push(line)
+
+ide_out = ""                    # (ide_fd < 0: what is flushed goes here)
+
+ide_flush = ():
+    s = join(ide_lines, "\n")
+    ide_lines = []
+    if len(s) == 0: return
+    if ide_fd < 0:
+        ide_out += s + "\n"
+        return
+    __write_fd(ide_fd, data(s), len(s))
+    __write_fd(ide_fd, data("\n"), 1)
+
+ide_indexed = (f: int) -> bool:
+    if f < 0 or f >= files.len(): return false
+    loop ide_files.len() <= f: ide_files.push(0)
+    if ide_files[f] == 0:
+        p = ide_norm(files[f].path)
+        ide_files[f] = 1
+        if p != ide_doc and (not ide_wide or starts_with(p, ide_norm(lib_dir) + "/")): ide_files[f] = 2
+    ide_files[f] == 1
+
+ide_is_name_byte = (c: u8) -> bool: is_ident_char(c)
+
+# where name is written at or after p, on the same line (-1 if it is not)
+ide_name_at = (p: int, name: int) -> int:
+    if p <= 0 or name <= 0: return -1
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return -1
+    r = ide_find_name(f, pos_off(p), name)
+    if r >= 0: return r
+    # (or before it on the line: x = 1 is positioned at its =)
+    ide_find_name(f, ide_line_start(files[f].src, pos_off(p)), name)
+
+ide_find_name = (f: int, from: int, name: int) -> int:
+    src = files[f].src
+    nm = name_of(name)
+    n = len(nm)
+    if n == 0: return -1
+    i = from
+    loop i + n <= len(src):
+        c = src[i]
+        if c == '\n': return -1
+        if c == nm[0] and (i == 0 or not ide_is_name_byte(src[i - 1])) and (i + n == len(src) or not ide_is_name_byte(src[i + n])):
+            if __mem_eq(data(src) + i, data(nm), n): return mkpos(f, i)
+        i += 1
+    -1
+
+ide_ref = (pos: int, name: int, kind: int, decl: int, type: int, inst: int):
+    if not ide_on or not ide_indexed(pos_file(pos)): return
+    p = ide_name_at(pos, name)
+    if p < 0: return
+    d = -1
+    if decl > 0: d = ide_name_at(decl, name)
+    # (a name imported as another: its declaration has the original name)
+    if d < 0 and decl > 0:
+        if let orig = ide_alias_of.get(name): d = ide_name_at(decl, orig)
+    ide_refs.push(IdeRef(p, d, i32(kind), i32(type), i32(inst)))
+
+# from m import x as y: y -> x
+ide_alias_of: {int: int} = {}
+
+# the variable a local stands for (a closure's copy, or a narrowed name, is its variable)
+ide_local_root = (l0: int) -> int:
+    l = l0
+    loop true:
+        if int(locals[l].flags) & LF_CAPTURE != 0 and locals[l].outer != 0: l = int(locals[l].outer)
+        else:
+            v = narrowed_var(l)
+            if v == 0: return l
+            l = v
+    l
+
+ide_local_kind = (l: int) -> int:
+    if int(locals[l].flags) & LF_PARAM != 0: return IK_PARAM
+    IK_LOCAL
+
+# a name resolved to symbol s (at n's position)
+ide_sym_ref = (n: int, s: int):
+    if not ide_on: return
+    sk = syms[s].kind
+    nm = int(nodes[n].name)
+    p = nodes[n].pos
+    if sk == .local:
+        l = int(syms[s].ref)
+        r = ide_local_root(l)
+        ide_ref(p, nm, ide_local_kind(r), locals[r].pos, int(locals[l].type), 0)
+    else if sk == .global:
+        g = int(syms[s].ref)
+        ide_ref(p, nm, IK_GLOBAL, nodes[int(syms[s].decl)].pos, int(globals[g].type), 0)
+    else if sk == .const_:
+        g = int(syms[s].ref)
+        dp = 0
+        if globals[g].decl != 0: dp = nodes[int(globals[g].decl)].pos
+        ide_ref(p, nm, IK_CONST, dp, int(globals[g].type), 0)
+    else if sk == .struct_: ide_ref(p, nm, IK_STRUCT, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .enum_: ide_ref(p, nm, IK_ENUM, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .alias_: ide_ref(p, nm, IK_TYPE, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .type_: ide_ref(p, nm, IK_TYPE, 0, int(syms[s].ref), 0)
+    else if sk == .module:
+        m = int(syms[s].ref)
+        ide_ref(p, nm, IK_MODULE, mkpos(int(modules[m].file), 0), 0, int(modules[m].file))
+
+ide_fn_ref = (p: int, name: int, f: int):
+    if not ide_on or f <= 0 or fns[f].decl == 0: return
+    ide_ref(p, name, IK_FN, nodes[int(fns[f].decl)].pos, 0, f)
+
+# field i of struct (or variant) declaration d
+ide_field_ref = (p: int, name: int, d: int, i: int, type: int):
+    if not ide_on or d == 0 or i < 0 or i >= nkids(d): return
+    ide_ref(p, name, IK_FIELD, nodes[kid(d, i)].pos, type, 0)
+
+# name = value arguments: the parameters (or fields) of declaration d they are for
+ide_named_args = (args: int[], d: int, kind: int, ts: int[]):
+    loop a in args:
+        if nodes[a].kind != .namedarg: continue
+        nm = int(nodes[a].name)
+        loop i in [0..nkids(d)):
+            if int(nodes[kid(d, i)].name) == nm:
+                t = 0
+                if i < ts.len(): t = ts[i]
+                ide_ref(nodes[a].pos, nm, kind, nodes[kid(d, i)].pos, t, 0)
+
+# a call of a builtin function (call node n)
+ide_builtin_ref = (n: int, name: int):
+    if nodes[n].a != 0: ide_ref(nodes[int(nodes[n].a)].pos, name, IK_BUILTIN, 0, 0, 0)
+
+ide_variant_ref = (p: int, name: int, et: int, vi: int):
+    if not ide_on: return
+    t = prune(et)
+    if types[t].kind != .enum_: return
+    d = int(structs[int(types[t].st)].decl)
+    if vi < 0 or vi >= nkids(d): return
+    ide_ref(p, name, IK_VARIANT, nodes[kid(d, vi)].pos, t, 0)
+
+# ---- descriptions ----
+
+ide_line_start = (src: str, i0: int) -> int:
+    i = i0
+    loop i > 0 and src[i - 1] != '\n': i -= 1
+    i
+
+ide_line_end = (src: str, i0: int) -> int:
+    i = i0
+    loop i < len(src) and src[i] != '\n': i += 1
+    i
+
+ide_indent = (src: str, a: int) -> int:
+    i = a
+    loop i < len(src) and (src[i] == ' ' or src[i] == '\t'): i += 1
+    i - a
+
+# does a string literal start at i ("", '', """""", r"")?
+ide_str_start = (src: str, i: int) -> bool:
+    c = src[i]
+    if c == '"' or c == '\'': return true
+    c == 'r' and i + 1 < len(src) and (src[i + 1] == '"' or src[i + 1] == '\'') and (i == 0 or not is_ident_char(src[i - 1]))
+
+ide_mark = (m: mut u8[], i: int, v: u8):
+    if i < m.len(): m[i] = v
+
+# the end of the string literal at i (after its closing quote), read as the lexer does; marks (by
+# offset, as far as it reaches): 1 where a cursor would be inside the string, not in the code
+# of one of its {interpolations}
+ide_str_end = (src: str, i0: int, marks: mut u8[]) -> int:
+    n = len(src)
+    i = i0
+    raw = src[i] == 'r'
+    if raw: i += 1
+    q = src[i]
+    triple = q == '"' and i + 2 < n and src[i + 1] == '"' and src[i + 2] == '"'
+    i += 1
+    if triple:
+        ide_mark(marks, i, 1)
+        ide_mark(marks, i + 1, 1)
+        i += 2
+    depth = 0
+    loop i < n:
+        c = src[i]
+        if depth == 0:
+            ide_mark(marks, i, 1)
+            if c == '\\' and not raw:
+                ide_mark(marks, i + 1, 1)
+                i += 2
+                continue
+            if triple:
+                if c == '"' and i + 2 < n and src[i + 1] == '"' and src[i + 2] == '"':
+                    ide_mark(marks, i + 1, 1)
+                    ide_mark(marks, i + 2, 1)
+                    return i + 3
+            else if c == q: return i + 1
+            if not raw and c == '{{':
+                if i + 1 < n and src[i + 1] == '{{':
+                    ide_mark(marks, i + 1, 1)
+                    i += 2
+                    continue
+                depth = 1
+        else:
+            if c == '{{': depth += 1
+            else if c == '}}': depth -= 1
+            else if c == '"' or c == '\'':
+                # (a string in an interpolation: to its quote)
+                i += 1
+                loop i < n and src[i] != c:
+                    ide_mark(marks, i, 1)
+                    if src[i] == '\\':
+                        ide_mark(marks, i + 1, 1)
+                        i += 1
+                    i += 1
+                ide_mark(marks, i, 1)
+        i += 1
+    ide_mark(marks, n, 1)
+    n
+
+ide_skip_str = (src: str, i: int) -> int:
+    m: u8[]
+    ide_str_end(src, i, m)
+
+# where a comment starts on the line [a, b) (outside strings), or -1
+ide_comment_at = (src: str, a: int, b: int) -> int:
+    i = a
+    loop i < b:
+        if ide_str_start(src, i):
+            i = ide_skip_str(src, i)
+            continue
+        if src[i] == '#': return i
+        i += 1
+    -1
+
+# the comment lines right above the declaration at p, and a comment after it on its line
+ide_doc_of = (p: int) -> str:
+    f = pos_file(p)
+    if p <= 0 or f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    a = ide_line_start(src, pos_off(p))
+    out = ""
+    k = a
+    loop k > 0:
+        pa = ide_line_start(src, k - 1)
+        t = trim(src[pa..k - 1))
+        # (past its @attributes)
+        if len(out) == 0 and len(t) > 0 and t[0] == '@':
+            k = pa
+            continue
+        if len(t) == 0 or t[0] != '#': break
+        t = t[1..]
+        if len(t) > 0 and t[0] == ' ': t = t[1..]
+        if len(out) > 0: out = t + "\n" + out
+        else: out = t
+        k = pa
+    b = ide_line_end(src, a)
+    c = ide_comment_at(src, pos_off(p), b)
+    if c >= 0:
+        t = trim(src[c + 1..b))
+        if len(t) > 0:
+            if len(out) > 0: out += "\n"
+            out += t
+    out
+
+# the source of a declaration: its first line without a trailing comment or body, and for
+# structs and enums the indented lines after it (at most 30)
+ide_snippet = (p: int, whole: bool) -> str:
+    f = pos_file(p)
+    if p <= 0 or f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    a = ide_line_start(src, pos_off(p))
+    b = ide_line_end(src, a)
+    c = ide_comment_at(src, a, b)
+    e = b
+    if c >= 0: e = c
+    out = trim(src[pos_off(p)..e))
+    if not whole: return out
+    ind = ide_indent(src, a)
+    i = b + 1
+    n = 0
+    loop i < len(src) and n < 30:
+        j = ide_line_end(src, i)
+        t = src[i..j)
+        if len(trim(t)) > 0 and ide_indent(src, i) <= ind: break
+        if len(trim(t)) > 0:
+            cc = ide_comment_at(src, i, j)
+            if cc >= 0: t = src[i..cc)
+            if len(trim(t)) > 0:
+                out += "\n" + trim_end(t[ind..])
+                n += 1
+        i = j + 1
+    out
+
+# a parameter as written: name: Type = default
+ide_param_text = (p: int) -> str:
+    src = files[pos_file(p)].src
+    i = pos_off(p)
+    depth = 0
+    loop i < len(src) and src[i] != '\n':
+        c = src[i]
+        if ide_str_start(src, i):
+            i = ide_skip_str(src, i)
+            continue
+        if c == '(' or c == '[' or c == '{{': depth += 1
+        else if c == ')' or c == ']' or c == '}}':
+            if depth == 0: break
+            depth -= 1
+        else if c == ',' and depth == 0: break
+        i += 1
+    trim(src[pos_off(p)..min(i, len(src))))
+
+# the end of a function's parameter list (after its closing parenthesis), from its declaration at
+# offset i (-1 if there is none)
+ide_params_end = (src: str, i0: int) -> int:
+    i = i0
+    loop i < len(src) and src[i] != '(' and src[i] != '\n': i += 1
+    if i >= len(src) or src[i] != '(': return -1
+    depth = 0
+    loop i < len(src):
+        c = src[i]
+        if ide_str_start(src, i):
+            i = ide_skip_str(src, i)
+            continue
+        if c == '#': i = ide_line_end(src, i)
+        else if c == '(' or c == '[' or c == '{{': depth += 1
+        else if c == ')' or c == ']' or c == '}}':
+            depth -= 1
+            if depth == 0: return i + 1
+        i += 1
+    -1
+
+# a function's header: name = (params) -> ret (the parameter list as written)
+ide_fn_header = (d: int) -> str:
+    p = nodes[d].pos
+    f = pos_file(p)
+    src = files[f].src
+    start = pos_off(p)
+    i = ide_params_end(src, start)
+    if i < 0: i = ide_line_end(src, start)
+    # -> ret, up to the colon that starts the body
+    j = i
+    loop j < len(src) and src[j] == ' ': j += 1
+    if j + 1 < len(src) and src[j] == '-' and src[j + 1] == '>':
+        depth = 0
+        loop j < len(src) and src[j] != '\n':
+            c = src[j]
+            if ide_str_start(src, j):
+                j = ide_skip_str(src, j)
+                continue
+            if c == '(' or c == '[' or c == '{{': depth += 1
+            else if c == ')' or c == ']' or c == '}}': depth -= 1
+            else if c == ':' and depth == 0: break
+            j += 1
+        i = min(j, len(src))
+    out = ""
+    loop k in [start..i):
+        c = src[k]
+        if c == '\n': out += " "
+        else: out += byte_str(int(c))
+    # (parameters on several lines: one space between them)
+    loop find(out, "  ") >= 0: out = replace(out, "  ", " ")
+    trim(out)
+
+# name(a: int, b: str[]): the generic instance that err_trail[k]'s call made
+trail_sig = (k: int) -> str:
+    f = err_trail_fns[k]
+    d = int(fns[f].decl)
+    s = err_trail_names[k] + "("
+    loop i in [0..fns[f].ptypes.len()):
+        if i > 0: s += ", "
+        if i < nkids(d): s += name_of(int(nodes[kid(d, i)].name)) + ": "
+        s += type_str(zonk(fns[f].ptypes[i]))
+    s + ")"
+
+# a function instance's signature: (a: int, b: str) -> int
+ide_fn_sig = (f: int) -> str:
+    d = int(fns[f].decl)
+    s = "("
+    loop i in [0..fns[f].ptypes.len()):
+        if i > 0: s += ", "
+        if i < nkids(d):
+            if has_flag(kid(d, i), NF_MUT): s += "mut "
+            s += name_of(int(nodes[kid(d, i)].name)) + ": "
+        s += type_str(zonk(fns[f].ptypes[i]))
+    s += ")"
+    r = zonk(int(fns[f].ret))
+    if r != 0 and tkind(r) != .void_: s += " -> " + type_str(r)
+    s
+
+# Enum.variant(fields) = value
+ide_variant_text = (ed: int, vd: int) -> str:
+    s = "{name_of(int(nodes[ed].name))}.{name_of(int(nodes[vd].name))}"
+    if nkids(vd) > 0:
+        s += "("
+        loop i in [0..nkids(vd)):
+            if i > 0: s += ", "
+            fnm = name_of(int(nodes[kid(vd, i)].name))
+            if not is_digit(fnm[0]): s += fnm + ": "
+            s += ide_param_text(nodes[int(nodes[kid(vd, i)].a)].pos)
+        s += ")"
+    if nodes[vd].a != 0 and nodes[int(nodes[vd].a)].kind == .int_lit: s += " = {nodes[int(nodes[vd].a)].ival}"
+    s
+
+ide_type_info = (t: int) -> str:
+    if t == 0: return ""
+    type_str(zonk(t))
+
+ide_ref_name = (p: int) -> str:
+    src = files[pos_file(p)].src
+    e = pos_off(p)
+    loop e < len(src) and ide_is_name_byte(src[e]): e += 1
+    src[pos_off(p)..e)
+
+ide_pos_str = (p: int) -> str: "{pos_file(p)}:{pos_off(p)}"
+
+decl_done: {int: bool} = {}
+
+ide_decl = (p: int, name: int, kind: int, snippet: str, doc: str):
+    if p < 0 or decl_done.get(p) != none: return
+    decl_done[p] = true
+    ide_emit("D\t{ide_pos_str(p)}\t{len(name_of(name))}\t{kind}\t{ide_esc(name_of(name))}\t{ide_esc(snippet)}\t{ide_esc(doc)}")
+
+# a declaration node d of kind k (with its name at p)
+ide_decl_node = (d: int, p: int, kind: int):
+    nm = int(nodes[d].name)
+    if kind == IK_FN: ide_decl(p, nm, kind, ide_fn_header(d), ide_doc_of(nodes[d].pos))
+    else if kind == IK_STRUCT or kind == IK_ENUM: ide_decl(p, nm, kind, ide_snippet(nodes[d].pos, true), ide_doc_of(nodes[d].pos))
+    else: ide_decl(p, nm, kind, ide_snippet(nodes[d].pos, false), ide_doc_of(nodes[d].pos))
+
+# the declaration a reference points to, when it is not one of the indexed files' own
+ide_decl_of_ref = (r: IdeRef):
+    if r.decl < 0 or decl_done.get(r.decl) != none: return
+    f = pos_file(r.decl)
+    src = files[f].src
+    e = pos_off(r.decl)
+    loop e < len(src) and ide_is_name_byte(src[e]): e += 1
+    nm = intern(src[pos_off(r.decl)..e))
+    k = int(r.kind)
+    if k == IK_FN: ide_decl(r.decl, nm, k, ide_fn_header(int(fns[int(r.inst)].decl)), ide_doc_of(r.decl))
+    else if k == IK_MODULE: ide_decl(r.decl, nm, k, "module {files[f].path}", "")
+    else if k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL: ide_decl(r.decl, nm, k, "{name_of(nm)}: {ide_type_info(int(r.type))}", ide_doc_of(r.decl))
+    else if k == IK_VARIANT and tkind(int(r.type)) == .enum_:
+        ed = int(structs[int(types[prune(int(r.type))].st)].decl)
+        vd = 0
+        loop i in [0..nkids(ed)):
+            if int(nodes[kid(ed, i)].name) == nm: vd = kid(ed, i)
+        sn = name_of(nm)
+        if vd != 0: sn = ide_variant_text(ed, vd)
+        ide_decl(r.decl, nm, k, sn, ide_doc_of(r.decl))
+    else: ide_decl(r.decl, nm, k, ide_snippet(r.decl, k == IK_STRUCT or k == IK_ENUM), ide_doc_of(r.decl))
+
+# the declarations made in an indexed module
+ide_module_decls = (m: int):
+    loop nm, s0 in modules[m].names:
+        ide_sym_decls(s0)
+    if modules[m].is_prelude:
+        loop nm, s0 in prelude:
+            d = int(syms[s0].decl)
+            if d != 0 and pos_file(nodes[d].pos) == int(modules[m].file): ide_sym_decls(s0)
+
+ide_sym_decls = (s0: int):
+    s = s0
+    loop s != 0:
+        d = int(syms[s].decl)
+        sk = syms[s].kind
+        if d != 0 and ide_indexed(pos_file(nodes[d].pos)):
+            nm = int(syms[s].name)
+            p = ide_name_at(nodes[d].pos, nm)
+            if sk == .fns:
+                ide_decl_node(d, p, IK_FN)
+                info = ""
+                di = decl_info(d)
+                if decl_infos[di].insts.len() > 0: info = ide_fn_sig(decl_infos[di].insts[0])
+                ide_self_ref(p, nm, info)
+                # (the parameters of generic functions that were never used)
+                loop i in [0..nkids(d)):
+                    pp = ide_name_at(nodes[kid(d, i)].pos, int(nodes[kid(d, i)].name))
+                    if pp >= 0 and decl_done.get(pp) == none:
+                        ide_decl(pp, int(nodes[kid(d, i)].name), IK_PARAM, ide_param_text(pp), "")
+                        ide_self_ref(pp, int(nodes[kid(d, i)].name), "")
+            else if sk == .struct_ or sk == .enum_:
+                k = IK_STRUCT
+                if sk == .enum_: k = IK_ENUM
+                ide_decl_node(d, p, k)
+                ide_self_ref(p, nm, "")
+                fk = IK_FIELD
+                if sk == .enum_: fk = IK_VARIANT
+                loop i in [0..nkids(d)):
+                    fd = kid(d, i)
+                    fp = ide_name_at(nodes[fd].pos, int(nodes[fd].name))
+                    sn = ide_snippet(nodes[fd].pos, false)
+                    if fk == IK_VARIANT: sn = ide_variant_text(d, fd)
+                    ide_decl(fp, int(nodes[fd].name), fk, sn, ide_doc_of(nodes[fd].pos))
+                    ide_self_ref(fp, int(nodes[fd].name), "")
+            else if sk == .alias_:
+                ide_decl_node(d, p, IK_TYPE)
+                ide_self_ref(p, nm, "")
+            else if sk == .global or sk == .const_:
+                g = int(syms[s].ref)
+                k = IK_GLOBAL
+                if sk == .const_: k = IK_CONST
+                t = ide_type_info(int(globals[g].type))
+                if k == IK_GLOBAL: ide_decl(p, nm, k, "{name_of(nm)}: {t}", ide_doc_of(nodes[d].pos))
+                else: ide_decl(p, nm, k, ide_snippet(nodes[d].pos, false), ide_doc_of(nodes[d].pos))
+                ide_self_ref(p, nm, t)
+        s = int(syms[s].next)
+
+ide_self_ref = (p: int, nm: int, info: str):
+    if p < 0: return
+    ide_emit("R\t{ide_pos_str(p)}\t{len(name_of(nm))}\t{ide_pos_str(p)}\t{ide_esc(info)}")
+
+ide_hint_agree = (hints: mut {int: str}, order: mut int[], p: int, lbl: str):
+    if let o = hints.get(p):
+        if o != lbl: hints[p] = ""
+        return
+    hints[p] = lbl
+    order.push(p)
+
+# from m import x as y: where each y is bound ("file:y": position); the binding refers to what x does
+ide_alias_at: {str: int} = {}
+
+ide_alias_binds = ():
+    binds: IdeRef[]
+    loop d in from_imports:
+        f = pos_file(nodes[d].pos)
+        if not ide_indexed(f): continue
+        loop i in [0..nkids(d)):
+            id = kid(d, i)
+            if nodes[id].aux == 0: continue
+            nm = int(nodes[id].name)
+            al = int(nodes[id].aux)
+            p = ide_name_at(nodes[id].pos, nm)
+            if p < 0: continue
+            ap = ide_find_name(f, pos_off(p) + len(name_of(nm)), al)
+            if ap < 0: continue
+            ide_alias_at["{f}:{name_of(al)}"] = ap
+            loop r in ide_refs:
+                if r.pos == p:
+                    binds.push(IdeRef(ap, r.decl, r.kind, r.type, r.inst))
+                    break
+    loop b in binds: ide_refs.push(b)
+
+# everything learned: files, declarations, references, hints
+ide_finish = ():
+    loop i in 0.. and f in files:
+        ide_emit("F\t{i}\t{ide_esc(f.path)}")
+    loop m in [0..modules.len()):
+        if ide_indexed(int(modules[m].file)): ide_module_decls(m)
+    # variables
+    loop l in [1..locals.len()):
+        lc = locals[l]
+        if lc.name == 0 or int(lc.flags) & LF_CAPTURE != 0 or narrowed_var(l) != 0: continue
+        if not ide_indexed(pos_file(lc.pos)): continue
+        p = ide_name_at(lc.pos, int(lc.name))
+        if p < 0: continue
+        t = ide_type_info(int(lc.type))
+        if decl_done.get(p) == none:
+            ide_decl(p, int(lc.name), ide_local_kind(l), "{name_of(int(lc.name))}: {t}", ide_doc_of(lc.pos))
+        ide_self_ref(p, int(lc.name), t)
+    ide_alias_binds()
+    loop r in ide_refs:
+        ide_decl_of_ref(r)
+        info = ""
+        if int(r.kind) == IK_FN and r.inst > 0: info = ide_fn_sig(int(r.inst))
+        else if int(r.kind) == IK_BUILTIN: info = "(builtin) " + ide_ref_name(r.pos)
+        else if int(r.kind) == IK_MODULE: info = "module " + files[int(r.inst)].path
+        else: info = ide_type_info(int(r.type))
+        d = ""
+        if r.decl >= 0: d = ide_pos_str(r.decl)
+        nm = ide_ref_name(r.pos)
+        # (a name imported as another: where it is bound)
+        al = ""
+        if r.decl >= 0 and ide_alias_at.len() > 0 and nm != ide_ref_name(r.decl):
+            if let ap = ide_alias_at.get("{pos_file(r.pos)}:{nm}"): al = "\t" + ide_pos_str(ap)
+        ide_emit("R\t{ide_pos_str(r.pos)}\t{len(nm)}\t{d}\t{ide_esc(info)}{al}")
+    # hints: inferred types of variables and of functions' results (where all of a generic
+    # function's instances agree)
+    hints: {int: str} = {}
+    order: int[]
+    loop l in ide_hint_locals:
+        lc = locals[l]
+        p = ide_name_at(lc.pos, int(lc.name))
+        if p < 0: continue
+        t = zonk(int(lc.type))
+        lbl = ""
+        if not has_var(prune(t)): lbl = ": " + type_str(t)
+        ide_hint_agree(hints, order, p + len(name_of(int(lc.name))), lbl)
+    loop f in ide_hint_fns:
+        d = int(fns[f].decl)
+        # after the parameter list
+        i = ide_params_end(files[pos_file(nodes[d].pos)].src, pos_off(nodes[d].pos))
+        if i < 0: continue
+        r = zonk(int(fns[f].ret))
+        lbl = ""
+        if r != 0 and tkind(r) != .void_ and not has_var(prune(r)): lbl = " -> " + type_str(r)
+        ide_hint_agree(hints, order, mkpos(pos_file(nodes[d].pos), i), lbl)
+    loop p in order:
+        if len(hints[p]) > 0: ide_emit("H\t{ide_pos_str(p)}\t{ide_esc(hints[p])}")
+    ide_flush()
+
+# a variable declared as `name = value`: worth a hint unless the value says its type
+ide_hint_local = (s: int, l: int):
+    if not ide_on or not ide_indexed(pos_file(nodes[s].pos)): return
+    b = int(nodes[s].b)
+    if b == 0 or has_flag(b, NF_LITERAL): return
+    k = nodes[b].kind
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit: return
+    # Point(...), vec2(...), f32(...): the type is written already
+    t = type_str(zonk(int(locals[l].type)))
+    src = files[pos_file(nodes[s].pos)].src
+    i = pos_off(nodes[s].pos)
+    e = ide_line_end(src, i)
+    eq = find_byte(src, '=', i)
+    if eq >= 0 and eq < e:
+        rest = trim(src[eq + 1..e))
+        if starts_with(rest, t + "(") or starts_with(rest, t + "[") or starts_with(rest, "[") and ends_with(rest, "]") and ends_with(t, "[]") and rest != "[]": return
+    ide_hint_locals.push(l)
+
+# ---- errors ----
+
+# (sloppy build/run/check/test, after an error in a function's body: the same command again, as
+# a check without that body, which reports the next error; at most 5 in all)
+next_error_run = ():
+    when TARGET == "wasm":
+        return
+    else:
+        sp = ide_skippable()
+        if sp < 0: return
+        if err_skips.len() >= 4:
+            eprint("(there may be more errors: these first)")
+            return
+        skips = err_skips
+        skips.push("{pos_file(sp)}:{pos_off(sp)}")
+        a = args()
+        argv = [a[0], "--skip-fns", join(skips + shown_warnings, ",")]
+        k = 1
+        if a.len() > 2 and a[1] == "--skip-fns": k = 3
+        loop i in [k..a.len()): argv.push(a[i])
+        exec(exe_path(), argv)
+
+# the outermost function being checked, if its body could be skipped (a function whose result
+# type is inferred then returns `never`, which fits anywhere a value is expected)
+ide_skippable = () -> int:
+    c = cx
+    if c < 0: return -1
+    loop ctxs[c].parent >= 0: c = int(ctxs[c].parent)
+    inst = int(ctxs[c].inst)
+    if inst <= 0 or fns[inst].kind != FK_NORMAL: return -1
+    d = int(fns[inst].decl)
+    if d == 0 or nodes[d].kind != .fn_: return -1
+    nodes[d].pos
+
+ide_find_file = (path: str) -> int:
+    loop i in 0.. and f in files:
+        if ide_norm(f.path) == path: return i
+    -1
+
+ide_fatal = (p: int, msg: str):
+    skip = -1
+    if p >= 0: skip = ide_skippable()
+    ps = "-1"
+    if p >= 0: ps = ide_pos_str(p)
+    sk = "-1"
+    if skip >= 0: sk = ide_pos_str(skip)
+    ide_emit("E\t{ps}\t{ide_esc(msg)}\t{sk}")
+    if ide_sentinel == 0: ide_finish()
+    else: ide_flush()
+    stop(0)
+
+ide_warn = (p: int, msg: str): ide_emit("W\t{ide_pos_str(p)}\t{ide_esc(msg)}")
+
+# ---- completion ----
+
+ide_sym_detail = (s: int) -> (int, str):
+    sk = syms[s].kind
+    if sk == .local:
+        l = int(syms[s].ref)
+        return (ide_local_kind(ide_local_root(l)), type_str(zonk(int(locals[l].type))))
+    if sk == .global: return (IK_GLOBAL, type_str(zonk(int(globals[int(syms[s].ref)].type))))
+    if sk == .const_: return (IK_CONST, type_str(zonk(int(globals[int(syms[s].ref)].type))))
+    if sk == .fns:
+        d = int(syms[s].decl)
+        if d != 0: return (IK_FN, ide_fn_header(d))
+        return (IK_FN, "")
+    if sk == .struct_: return (IK_STRUCT, "struct")
+    if sk == .enum_: return (IK_ENUM, "enum")
+    if sk == .alias_ or sk == .type_: return (IK_TYPE, "type")
+    if sk == .module: return (IK_MODULE, "module")
+    (IK_FN, "builtin")
+
+ide_complete_names = ():
+    seen: {int: bool} = {}
+    seen[ide_sentinel] = true
+    loop nm in visible_names():
+        if seen.get(nm) != none: continue
+        seen[nm] = true
+        nms = name_of(nm)
+        if len(nms) == 0 or not is_ident_start(nms[0]): continue
+        s = lookup(nm)
+        if s == 0: continue
+        kd = ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(nms)}\t{kd.0}\t{ide_esc(kd.1)}")
+    loop it in intrinsics:
+        nm = intern(it.name)
+        if seen.get(nm) != none: continue
+        seen[nm] = true
+        ide_emit("C\t{it.name}\t{IK_FN}\tbuiltin")
+    ide_flush()
+    stop(0)
+
+# what `from m import ` can bring in: m's names (its private ones too)
+ide_complete_module = (m: int):
+    tab = modules[m].names
+    if modules[m].is_prelude: tab = prelude
+    loop nm, s in tab:
+        if nm == ide_sentinel or syms[s].kind == .module: continue
+        nms = name_of(nm)
+        if starts_with(nms, "__"): continue
+        d = int(syms[s].decl)
+        if modules[m].is_prelude and (d == 0 or int(nodes[d].mod) != m): continue
+        kd = ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(nms)}\t{kd.0}\t{ide_esc(kd.1)}")
+    ide_flush()
+    stop(0)
+
+ide_complete_types = ():
+    loop nm in type_names():
+        if nm == ide_sentinel: continue
+        s = lookup(nm)
+        if s == 0: continue
+        kd = ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(name_of(nm))}\t{kd.0}\t{ide_esc(kd.1)}")
+    ide_flush()
+    stop(0)
+
+# the members of a value of type t0: fields, then functions taking it first (x.f() is f(x))
+ide_complete_members = (t0: int):
+    t = prune(t0)
+    k = types[t].kind
+    seen: {int: bool} = {}
+    if k == .module:
+        m = int(types[t].mod)
+        loop nm, s in modules[m].names:
+            nms = name_of(nm)
+            if len(nms) == 0 or nms[0] == '#': continue
+            kd = ide_sym_detail(s)
+            ide_emit("C\t{ide_esc(nms)}\t{kd.0}\t{ide_esc(kd.1)}")
+        ide_flush()
+        stop(0)
+    if k == .typeval:
+        tt = prune(int(types[t].elem))
+        if tt != 0 and types[tt].kind == .enum_: ide_complete_variants(tt)
+        ide_flush()
+        stop(0)
+    st = t
+    if k == .ptr: st = prune(int(types[t].elem))
+    if types[st].kind == .struct_:
+        si = int(types[st].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            fi = int(structs[si].fields) + i
+            seen[int(fields[fi].name)] = true
+            ide_emit("C\t{ide_esc(name_of(int(fields[fi].name)))}\t{IK_FIELD}\t{ide_esc(type_str(zonk(int(fields[fi].type))))}")
+    if k == .vec and t != T_MAT4:
+        names_ = ["x", "y", "z", "w"]
+        loop i in [0..vec_n(t)): ide_emit("C\t{names_[i]}\t{IK_FIELD}\t{type_str(vec_comp_type(t))}")
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)): ide_emit("C\t{i}\t{IK_FIELD}\t{type_str(zonk(targ(t, i)))}")
+    if k == .fixed: ide_emit("C\tlen\t{IK_FN}\tlen() -> int")
+    loop nm in method_names(t):
+        if seen.get(nm) != none or not is_ident_start(name_of(nm)[0]): continue
+        seen[nm] = true
+        # (an overload whose first parameter takes the value)
+        s = lookup(nm)
+        if s == 0: s = module_lookup(-1, nm)
+        loop s != 0:
+            d = int(syms[s].decl)
+            if syms[s].kind == .fns and d != 0 and nkids(d) > 0:
+                sig = fn_sig(d)
+                binds = fill(0, int(sig.ntp))
+                if match_type(sig.params[0], t, binds, 0) >= 0:
+                    ide_emit("C\t{ide_esc(name_of(nm))}\t{IK_FN}\t{ide_esc(ide_fn_header(d))}")
+                    break
+            s = int(syms[s].next)
+    if k == .array or k == .str_:
+        loop it in intrinsics:
+            if it.arr: ide_emit("C\t{it.name}\t{IK_FN}\tbuiltin")
+    ide_flush()
+    stop(0)
+
+ide_complete_variants = (et: int):
+    t = prune(et)
+    if types[t].kind == .opt: t = prune(int(types[t].elem))
+    if types[t].kind == .enum_:
+        si = int(types[t].st)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            ide_emit("C\t{ide_esc(name_of(int(variants[vi].name)))}\t{IK_VARIANT}\t{ide_esc(type_str(t))}")
+    ide_flush()
+    stop(0)

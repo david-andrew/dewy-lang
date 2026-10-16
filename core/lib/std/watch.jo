@@ -1,0 +1,217 @@
+# The program side of `sloppy watch` (compiler/watch.jo): a game built by it applies the patches
+# the compiler sends (fd 3) between frames, and answers (fd 4) once it has. While it runs under
+# sloppy watch a panic in update or draw does not end it: the game pauses with the message on the
+# screen, and goes on after the next reload.
+#
+# Messages: words [op, a, b], then for op 1 and 4 b bytes
+#   1 write the bytes at address a    2 run the function at a    3 jump from a to b
+#   4 show text over the game (a: 1 for the compiler's errors; 0: a build worked, nothing)
+#   5 the end: apply
+
+const __WATCH_IN = 3
+const __WATCH_OUT = 4
+const __WATCH_REGION = 0x50000000           # (taken at start: compiler/x64.jo, x64_entry)
+const __WATCH_REGION_MAC = 0x120000000      # (macOS: compiler/macho.jo, the loader)
+const __WATCH_MARK = 0x6A6F74776174636B
+
+__watch_on = false
+__watch_hin: *u8 = null          # (Windows: the pipes, handles passed in SLOPPY_WATCH_PIPES)
+__watch_hout: *u8 = null
+__watch_jbuf: *u8 = null
+__watch_jmp: *u8 = null      # set while update and draw run: where a panic goes
+__watch_paused = false
+__watch_note = ""            # shown over the game: a panic, or the compiler's errors
+
+# (tells sloppy watch whether this program can take patches: 0 yes, 1 no)
+__watch_init = ():
+    when TARGET != "wasm":
+        if __watch_on: return
+        ok = false
+        when TARGET == "windows":
+            # the pipes' handles, from sloppy watch (else the program was started some other way)
+            hs = split(env("SLOPPY_WATCH_PIPES") ?? "", ",")
+            if hs.len() != 2: return
+            __watch_hin = (to_int(hs[0]) ?? 0) as *u8
+            __watch_hout = (to_int(hs[1]) ?? 0) as *u8
+            mbi = fill(0, 6)                                        # MEMORY_BASIC_INFORMATION
+            ok = VirtualQuery(__WATCH_REGION as *u8, data(mbi) as *u8, 48) == 48 and (mbi[4] & 0xFFFFFFFF) == 0x1000 and (__WATCH_REGION as *int)[0] == __WATCH_MARK
+        else:
+            # fd 3: from sloppy watch (else the program was started some other way: no reloading)
+            if syscall(72, __WATCH_IN, 1) < 0: return               # fcntl(F_GETFD)
+            v: u8[] = [0]
+            reg = __WATCH_REGION
+            when TARGET == "macos":
+                reg = __WATCH_REGION_MAC
+                # (what finds C functions later builds use first, and what the loader's copier
+                # uses, bound when the game starts)
+                if reg == 0:
+                    __ffi_resolve("", "")
+                    __c_jit_write_protect(1)
+            ok = syscall(27, reg, 4096, data(v)) == 0 and (reg as *int)[0] == __WATCH_MARK
+        if not ok:
+            eprint("sloppy watch: no room for new code in this process; changes restart it")
+            __watch_answer(1)
+            return
+        __watch_answer(0)
+        __watch_jbuf = __alloc(192)
+        __watch_on = true
+
+# (a word back to sloppy watch)
+__watch_answer = (v: int):
+    w = [v]
+    when TARGET == "windows":
+        n: u32[] = [0]
+        WriteFile(__watch_hout, data(w) as *u8, 8, data(n), null)
+    else:
+        __write_fd(__WATCH_OUT, data(w) as *u8, 8)
+
+__watch_read = (p: *u8, n: int) -> bool:
+    got = 0
+    loop got < n:
+        r = 0
+        when TARGET == "windows":
+            k: u32[] = [0]
+            if ReadFile(__watch_hin, p + got, u32(min(n - got, 1 << 30)), data(k), null) != 0: r = int(k[0])
+        else:
+            r = syscall(0, __WATCH_IN, p + got, n - got)
+        if r <= 0: return false
+        got += r
+    true
+
+# is a patch waiting?
+__watch_pending = () -> bool:
+    when TARGET == "windows":
+        avail: u32[] = [0]
+        if PeekNamedPipe(__watch_hin, null, 0, null, data(avail), null) == 0: return true     # (gone: the read says so)
+        return avail[0] > 0
+    else:
+        pf = [__WATCH_IN | (1 << 32)]
+        return syscall(7, data(pf), 1, 0) > 0                      # poll, no waiting
+
+# between frames: apply what sloppy watch sent
+__watch_frame = ():
+    when TARGET != "wasm":
+        if not __watch_on: return
+        if not __watch_pending(): return
+        hdr = [0, 0, 0]
+        jumps: int[]
+        runs: int[]
+        built = false
+        loop true:
+            if not __watch_read(data(hdr) as *u8, 24):
+                __watch_on = false
+                return
+            op = hdr[0]
+            if op == 1:
+                when TARGET == "windows":
+                    # (the region for new code is reserved at start; its pages are committed as used)
+                    if hdr[1] >= __WATCH_REGION and hdr[1] < __WATCH_REGION + 0x20000000:
+                        VirtualAlloc(hdr[1] as *u8, hdr[2], u32(0x1000), u32(0x40))      # MEM_COMMIT, read/write/run
+                when TARGET == "macos":
+                    b = fill(u8(0), hdr[2])
+                    if not __watch_read(data(b), hdr[2]): return
+                    __watch_jit_copy(hdr[1] as *u8, data(b), hdr[2])
+                else:
+                    if not __watch_read(hdr[1] as *u8, hdr[2]): return
+                __code_sync(hdr[1] as *u8, hdr[2])
+            else if op == 2: runs.push(hdr[1])
+            else if op == 3:
+                jumps.push(hdr[1])
+                jumps.push(hdr[2])
+            else if op == 4:
+                b = fill(u8(0), hdr[2])
+                if hdr[2] > 0 and not __watch_read(data(b), hdr[2]): return
+                __watch_note = str_from_bytes(b)
+                if hdr[1] == 0: built = true
+            else if op == 5: break
+        # a jump at the first address of each function replaced
+        k = 0
+        loop k < jumps.len():
+            at = jumps[k]
+            to = jumps[k + 1]
+            when TARGET == "windows":
+                old: u32[] = [0]
+                VirtualProtect((at & ~4095) as *u8, 8192, u32(0x40), data(old))
+            else when TARGET == "macos":
+                pass                                               # (all the code is in the region)
+            else when ARCH == "arm64":
+                syscall(10, at & ~0xFFFF, 0x20000, 7)              # (pages may be 64 KB)
+            else:
+                syscall(10, at & ~4095, 8192, 7)                   # mprotect: read, write, run
+            p = at as *u8
+            when ARCH == "arm64":
+                # ldr x16, #8; br x16; the address (functions are longer than these 16 bytes)
+                w = [0xD61F020058000050, to]
+                when TARGET == "macos":
+                    __watch_jit_copy(p, data(w) as *u8, 16)
+                else:
+                    loop q in [0..16): p[q] = (data(w) as *u8)[q]
+                __code_sync(p, 16)
+            else:
+                d = to - (at + 5)
+                p[0] = 0xE9
+                loop q in [0..4): p[1 + q] = u8((d >> (8 * q)) & 255)
+            k += 2
+        # new and changed globals
+        loop a in runs:
+            if __setjmp(__watch_jbuf) == 0:
+                __watch_jmp = __watch_jbuf
+                f = (a as *u8) as cfn()
+                f()
+            __watch_jmp = null
+        # (a build that worked: what was paused goes on)
+        if built:
+            if __watch_paused: eprint("sloppy watch: going on")
+            __watch_paused = false
+        __watch_answer(0)
+
+# (macOS: bytes written into the region holding the game's code, by the loader's copier: code
+# running from the region cannot run while the region is writable, compiler/macho.jo)
+__watch_jit_copy = (to: *u8, from: *u8, n: int):
+    when TARGET == "macos":
+        f = ((__WATCH_REGION_MAC + 8) as *int)[0] as *u8 as cfn(*u8, *u8, int)
+        f(to, from, n)
+
+# a panic (on the main thread) while the game's code runs: back to the frame, which pauses
+__watch_panic = (msg: str):
+    if __watch_jmp == null or __tid() != 0: return
+    __watch_note = "panic: {msg}"
+    j = __watch_jmp
+    __watch_jmp = null
+    __longjmp(j, 1)
+
+# update and draw, unless paused by a panic
+__watch_update_draw = (dt: f64, update: (f64) -> void, draw: () -> void):
+    if not __watch_on:
+        update(dt)
+        draw()
+        return
+    if not __watch_paused:
+        if __setjmp(__watch_jbuf) == 0:
+            __watch_jmp = __watch_jbuf
+            update(dt)
+            draw()
+            __watch_jmp = null
+        else:
+            __watch_paused = true
+            eprint("sloppy watch: paused (fix the code and save it to go on)")
+    if len(__watch_note) > 0: __watch_draw_note()
+
+__watch_draw_note = ():
+    push_transform()
+    reset_transform()
+    r = visible_rect()
+    lines = split(__watch_note, "\n")
+    if lines.len() > 12: lines = lines[..12)
+    h = f64(lines.len()) * 22.0 + 36.0
+    if __watch_paused:
+        rect(r, vec4(0.08, 0.08, 0.1, 1))
+        lines.push("")
+        lines.push("(paused: fix the code and save it to go on)")
+        h += 44.0
+    rect(f64(r.x), f64(r.y), f64(r.w), h, vec4(0.35, 0.05, 0.05, 0.92))
+    loop i in 0.. and l in lines:
+        s = l
+        if len(s) > 120: s = s[..117) + "..."
+        text(s, vec2(f32(r.x) + 18.0, f32(r.y) + 14.0 + f32(i) * 22.0), 18.0, vec4(1, 0.92, 0.88, 1))
+    pop_transform()

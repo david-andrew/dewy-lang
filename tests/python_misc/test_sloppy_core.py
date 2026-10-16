@@ -267,3 +267,21 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
                                text=True, timeout=10, check=False)
     assert formatted.returncode != 0 and 'not implemented' in formatted.stderr
     assert source.read_text() == text
+
+
+@pytest.mark.parametrize('command', ['update', 'upgrade', 'new', 'repl', 'add'])
+def test_core_unavailable_cli(compiler, tmp_path, command):
+    result = subprocess.run([compiler, command], cwd=tmp_path, capture_output=True,
+                            text=True, timeout=5, check=False)
+    assert result.returncode == 2
+    assert 'dewy-core:' in result.stderr
+    assert not list(tmp_path.iterdir())
+
+
+def test_core_cli_identity(compiler):
+    result = subprocess.run([compiler, '--version'], capture_output=True, text=True,
+                            timeout=5, check=False)
+    assert result.returncode == 0 and result.stdout.startswith('dewy-core ')
+    result = subprocess.run([compiler, '--help'], capture_output=True, text=True,
+                            timeout=5, check=False)
+    assert result.returncode == 0 and 'file.dewy' in result.stderr

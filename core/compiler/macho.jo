@@ -1,0 +1,796 @@
+# Mach-O executable writer (macOS on arm64).
+#
+# macOS runs no static executables: dyld loads the program, binds the C functions it uses
+# (lower.jo's mac_imports: slots in the data), and calls its entry point as main(argc, argv, envp).
+# The file, in 16 KB pages (Apple's arm64 page size):
+#   __PAGEZERO     4 GB of nothing below the program
+#   __TEXT         the header and load commands, the code (from MACHO_TEXT_OFF), then rodata
+#   __DATA         the data, all zeros at the start (zero-fill: no bytes in the file)
+#   __DWARF        (sloppy build) the debugging information: dwarf.jo's sections, as __debug_*
+#   __LINKEDIT     the binds (dyld's opcodes), symbols, and the code signature
+# The code signature is "ad hoc" (no certificate: a hash of each 4 KB page), which arm64 macOS
+# requires of every program it runs.
+
+use 'util.jo'
+use 'elf.jo'
+use 'lower.jo'
+use 'x64.jo'
+use 'arm64.jo'
+use 'types.jo'
+
+const MACHO_BASE = 0x100000000
+const MACHO_PAGE = 0x4000
+const MACHO_TEXT_OFF = 0x4000
+const MACHO_WATCH_AT = MACHO_BASE + 0x20000000      # sloppy watch: all the game's code (see below;
+const MACHO_WATCH_SIZE = 0x10000000                 # below where libSystem's malloc puts its regions)
+const MACHO_WATCH_CODE = MACHO_WATCH_AT + 0x4000    # (after the page with the region's mark)
+
+macho_page_up = (x: int) -> int: (x + MACHO_PAGE - 1) & ~(MACHO_PAGE - 1)
+
+# (rodata's offset in the file: after the code, 16-aligned; then the functions and lines for
+# backtraces, __sloppy: x64.jo's pe_backtrace_info)
+macho_layout = (text_len: int, ro_len: int, info_len: int) -> (int, int, int, int):
+    ro_off = (MACHO_TEXT_OFF + text_len + 15) & ~15
+    info_off = (ro_off + ro_len + 15) & ~15
+    text_size = macho_page_up(info_off + info_len)
+    (MACHO_TEXT_OFF, ro_off, info_off, text_size)
+
+# little-endian and big-endian puts
+mp32 = (b: mut u8[], v: int):
+    loop k in [0..4): b.push(u8((v >> (8 * k)) & 255))
+mp64 = (b: mut u8[], v: int):
+    mp32(b, v)
+    mp32(b, v >> 32)
+mpbe32 = (b: mut u8[], v: int):
+    loop k in [0..4): b.push(u8((v >> (24 - 8 * k)) & 255))
+mpbe64 = (b: mut u8[], v: int):
+    mpbe32(b, v >> 32)
+    mpbe32(b, v)
+mpname = (b: mut u8[], s: str, n: int):
+    loop i in [0..n):
+        if i < len(s): b.push(s[i])
+        else: b.push(0)
+muleb = (b: mut u8[], v0: int):
+    v = v0
+    loop true:
+        c = v & 127
+        v = v >> 7
+        if v != 0: b.push(u8(c | 128))
+        else:
+            b.push(u8(c))
+            return
+
+# a segment load command (with nsect sections to follow)
+mseg = (b: mut u8[], name: str, vmaddr: int, vmsize: int, fileoff: int, filesize: int, prot: int, nsect: int):
+    mp32(b, 0x19)                               # LC_SEGMENT_64
+    mp32(b, 72 + 80 * nsect)
+    mpname(b, name, 16)
+    mp64(b, vmaddr)
+    mp64(b, vmsize)
+    mp64(b, fileoff)
+    mp64(b, filesize)
+    mp32(b, prot)                               # maxprot
+    mp32(b, prot)                               # initprot
+    mp32(b, nsect)
+    mp32(b, 0)
+
+msect = (b: mut u8[], name: str, seg: str, addr: int, size: int, off: int, align: int, flags: int):
+    mpname(b, name, 16)
+    mpname(b, seg, 16)
+    mp64(b, addr)
+    mp64(b, size)
+    mp32(b, off)
+    mp32(b, align)
+    mp32(b, 0)
+    mp32(b, 0)
+    mp32(b, flags)
+    mp32(b, 0)
+    mp32(b, 0)
+    mp32(b, 0)
+
+# a load command with a string after a fixed part of `fixed` bytes (padded to 8)
+mstrcmd = (b: mut u8[], cmd: int, fixed: int, s: str, extra: int[]):
+    size = (fixed + len(s) + 1 + 7) & ~7
+    mp32(b, cmd)
+    mp32(b, size)
+    mp32(b, fixed)
+    loop x in extra: mp32(b, x)
+    loop c in s: b.push(c)
+    loop k in [0..size - fixed - len(s)): b.push(0)
+
+macho_dwarf: (str, u8[])[]         # (sloppy build: dwarf.jo's sections, for write_macho)
+
+write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int, name: str, watch: bool) -> bool:
+    ident = name
+    if len(ident) == 0: ident = strip_ext(path[rfind(path, "/") + 1..])
+    text_off, ro_off, info_off, text_size = macho_layout(text.len(), ro.len(), info.len())
+    data_addr = MACHO_BASE + text_size
+    data_vm = macho_page_up(max(data_size, 16))
+    link_addr = data_addr + data_vm
+    # (the debugging information: a segment of its own after the data, before __LINKEDIT)
+    dw_addr = link_addr
+    dw_size = 0
+    loop x in macho_dwarf: dw_size = align_up(dw_size, 8) + x.1.len()
+    dw_file = macho_page_up(dw_size)
+    link_addr += dw_file
+    # (sloppy watch: the region for the game's code kept free by a segment of nothing, which the
+    # loader replaces; __LINKEDIT, which dyld wants last, after it)
+    if watch:
+        if link_addr > MACHO_WATCH_AT: ice("sloppy watch on macOS: the program is too big for the region at {MACHO_WATCH_AT:x}")
+        link_addr = MACHO_WATCH_AT + MACHO_WATCH_SIZE
+    # the libraries (dylib ordinals from 1) and the binds into the data segment (index 2)
+    libs: str[] = ["/usr/lib/libSystem.B.dylib"]
+    binds: u8[]
+    loop imp in mac_imports:
+        lib = imp.1
+        k = index_of(libs, lib)
+        if k < 0:
+            libs.push(lib)
+            k = libs.len() - 1
+        binds.push(u8(0x10 | (k + 1)))           # BIND_OPCODE_SET_DYLIB_ORDINAL_IMM
+        binds.push(u8(0x40 | 1))                 # BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM (weak import)
+        binds.push(u8('_'))
+        loop c in imp.2: binds.push(c)
+        binds.push(0)
+        binds.push(u8(0x50 | 1))                 # BIND_OPCODE_SET_TYPE_IMM (pointer)
+        binds.push(u8(0x70 | 2))                 # BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB: __DATA
+        muleb(binds, imp.0)
+        binds.push(u8(0x90))                     # BIND_OPCODE_DO_BIND
+    binds.push(0)                                # BIND_OPCODE_DONE
+    loop binds.len() % 8 != 0: binds.push(0)
+    # symbols: the functions (local), for debuggers and crash reports
+    strtab: u8[] = [u8(' '), 0]
+    symtab: u8[]
+    loop sym in elf_syms:
+        mp32(symtab, strtab.len())
+        strtab.push(u8('_'))
+        loop c in sym.0: strtab.push(c)
+        strtab.push(0)
+        symtab.push(0x0E)                        # N_SECT
+        symtab.push(1)                           # section 1: __text
+        symtab.push(0)
+        symtab.push(0)
+        mp64(symtab, MACHO_BASE + text_off + sym.1)
+    loop strtab.len() % 8 != 0: strtab.push(0)
+    nsyms = elf_syms.len()
+    bind_off = text_size + dw_file
+    sym_off = bind_off + binds.len()
+    strs_off = sym_off + symtab.len()
+    sig_off = (strs_off + strtab.len() + 15) & ~15
+    # the code signature's size: a SuperBlob holding one CodeDirectory with a hash per 4 KB page
+    nslots = (sig_off + 4095) / 4096
+    id_len = len(ident) + 1
+    # (in an app bundle: also the hashes of Info.plist, of the requirements (an empty set) and of
+    # _CodeSignature/CodeResources, before the pages', and the requirements as a second blob)
+    bundled = macho_plist.len() > 0
+    nspecial = 0
+    if bundled: nspecial = 3
+    cd_len = 88 + id_len + 32 * (nspecial + nslots)
+    sig_len = 20 + cd_len
+    if bundled: sig_len += 8 + 12
+    sig_len = (sig_len + 15) & ~15
+    link_size = sig_off + sig_len - bind_off
+    # ---- header and load commands ----
+    cmds: u8[]
+    ncmds = 0
+    mseg(cmds, "__PAGEZERO", 0, MACHO_BASE, 0, 0, 0, 0)
+    ncmds += 1
+    mseg(cmds, "__TEXT", MACHO_BASE, text_size, 0, text_size, 5, 3)
+    msect(cmds, "__text", "__TEXT", MACHO_BASE + text_off, text.len(), text_off, 4, 0x80000400)
+    msect(cmds, "__const", "__TEXT", MACHO_BASE + ro_off, ro.len(), ro_off, 4, 0)
+    msect(cmds, "__sloppy", "__TEXT", MACHO_BASE + info_off, info.len(), info_off, 4, 0)
+    ncmds += 1
+    mseg(cmds, "__DATA", data_addr, data_vm, text_size, 0, 3, 1)
+    msect(cmds, "__bss", "__DATA", data_addr, data_size, 0, 4, 1)       # S_ZEROFILL
+    ncmds += 1
+    if dw_size > 0:
+        mseg(cmds, "__DWARF", dw_addr, dw_file, text_size, dw_size, 0, macho_dwarf.len())
+        o = 0
+        loop x in macho_dwarf:
+            o = align_up(o, 8)
+            msect(cmds, "__" + x.0[1..], "__DWARF", dw_addr + o, x.1.len(), text_size + o, 0, 0x02000000)      # S_ATTR_DEBUG
+            o += x.1.len()
+        ncmds += 1
+    if watch:
+        mseg(cmds, "__SLOPPYJIT", MACHO_WATCH_AT, MACHO_WATCH_SIZE, 0, 0, 0, 0)
+        ncmds += 1
+    mseg(cmds, "__LINKEDIT", link_addr, macho_page_up(link_size), bind_off, link_size, 1, 0)
+    ncmds += 1
+    mp32(cmds, 0x80000022)                       # LC_DYLD_INFO_ONLY
+    mp32(cmds, 48)
+    mp32(cmds, 0)
+    mp32(cmds, 0)                                # rebase: none (the code is position independent)
+    mp32(cmds, bind_off)
+    mp32(cmds, binds.len())
+    loop k in [0..6): mp32(cmds, 0)              # weak bind, lazy bind, export
+    ncmds += 1
+    mp32(cmds, 0x2)                              # LC_SYMTAB
+    mp32(cmds, 24)
+    mp32(cmds, sym_off)
+    mp32(cmds, nsyms)
+    mp32(cmds, strs_off)
+    mp32(cmds, strtab.len())
+    ncmds += 1
+    mp32(cmds, 0xB)                              # LC_DYSYMTAB
+    mp32(cmds, 80)
+    mp32(cmds, 0)
+    mp32(cmds, nsyms)                            # all local
+    loop k in [0..16): mp32(cmds, 0)
+    ncmds += 1
+    mstrcmd(cmds, 0xE, 12, "/usr/lib/dyld", [])  # LC_LOAD_DYLINKER
+    ncmds += 1
+    # LC_UUID: from a hash of the code
+    h = sha256(text, 0, text.len())
+    mp32(cmds, 0x1B)
+    mp32(cmds, 24)
+    loop k in [0..16): cmds.push(h[k])
+    ncmds += 1
+    mp32(cmds, 0x32)                             # LC_BUILD_VERSION: macOS 11.0 or later
+    mp32(cmds, 24)
+    mp32(cmds, 1)
+    mp32(cmds, 0xB0000)
+    mp32(cmds, 0xE0000)
+    mp32(cmds, 0)
+    ncmds += 1
+    mp32(cmds, 0x80000028)                       # LC_MAIN
+    mp32(cmds, 24)
+    mp64(cmds, text_off + entry_off)
+    mp64(cmds, 0)
+    ncmds += 1
+    loop lib in libs:
+        # (LC_LOAD_DYLIB; LC_LOAD_WEAK_DYLIB for a library not the system's, which may be missing)
+        cmd = 0xC
+        if not starts_with(lib, "/usr/lib/") and not starts_with(lib, "/System/"): cmd = 0x80000018
+        mstrcmd(cmds, cmd, 24, lib, [2, 0x10000, 0x10000])
+        ncmds += 1
+    mp32(cmds, 0x1D)                             # LC_CODE_SIGNATURE
+    mp32(cmds, 16)
+    mp32(cmds, sig_off)
+    mp32(cmds, sig_len)
+    ncmds += 1
+    out: u8[]
+    mp32(out, 0xFEEDFACF)                        # MH_MAGIC_64
+    mp32(out, 0x0100000C)                        # CPU_TYPE_ARM64
+    mp32(out, 0)
+    mp32(out, 2)                                 # MH_EXECUTE
+    mp32(out, ncmds)
+    mp32(out, cmds.len())
+    mp32(out, 0x200085)                          # MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
+    mp32(out, 0)
+    append_bytes(out, cmds)
+    if out.len() > text_off: ice("Mach-O load commands do not fit before the code")
+    out.resize(text_off)
+    append_bytes(out, text)
+    out.resize(ro_off)
+    append_bytes(out, ro)
+    out.resize(info_off)
+    append_bytes(out, info)
+    out.resize(text_size)
+    loop x in macho_dwarf:
+        out.resize(text_size + align_up(out.len() - text_size, 8))
+        append_bytes(out, x.1)
+    out.resize(bind_off)
+    append_bytes(out, binds)
+    append_bytes(out, symtab)
+    append_bytes(out, strtab)
+    out.resize(sig_off)
+    # ---- the code signature (big-endian) ----
+    sig: u8[]
+    req: u8[]                                    # an empty requirement set
+    mpbe32(req, 0xFADE0C01)
+    mpbe32(req, 12)
+    mpbe32(req, 0)
+    mpbe32(sig, 0xFADE0CC0)                      # CSMAGIC_EMBEDDED_SIGNATURE
+    mpbe32(sig, sig_len)
+    if bundled:
+        mpbe32(sig, 2)
+        mpbe32(sig, 0)                           # CSSLOT_CODEDIRECTORY
+        mpbe32(sig, 28)
+        mpbe32(sig, 2)                           # CSSLOT_REQUIREMENTS
+        mpbe32(sig, 28 + cd_len)
+    else:
+        mpbe32(sig, 1)
+        mpbe32(sig, 0)                           # CSSLOT_CODEDIRECTORY
+        mpbe32(sig, 20)
+    mpbe32(sig, 0xFADE0C02)                      # CSMAGIC_CODEDIRECTORY
+    mpbe32(sig, cd_len)
+    mpbe32(sig, 0x20400)                         # version
+    if bundled: mpbe32(sig, 0x2)                 # CS_ADHOC
+    else: mpbe32(sig, 0x20002)                   # CS_ADHOC | CS_LINKER_SIGNED
+    mpbe32(sig, 88 + id_len + 32 * nspecial)     # hashOffset
+    mpbe32(sig, 88)                              # identOffset
+    mpbe32(sig, nspecial)                        # nSpecialSlots
+    mpbe32(sig, nslots)
+    mpbe32(sig, sig_off)                         # codeLimit
+    sig.push(32)                                 # hashSize
+    sig.push(2)                                  # CS_HASHTYPE_SHA256
+    sig.push(0)                                  # platform
+    sig.push(12)                                 # log2(page size)
+    mpbe32(sig, 0)                               # spare2
+    mpbe32(sig, 0)                               # scatterOffset
+    mpbe32(sig, 0)                               # teamOffset
+    mpbe32(sig, 0)                               # spare3
+    mpbe64(sig, 0)                               # codeLimit64
+    mpbe64(sig, 0)                               # execSegBase
+    mpbe64(sig, text_size)                       # execSegLimit
+    mpbe64(sig, 1)                               # CS_EXECSEG_MAIN_BINARY
+    loop c in ident: sig.push(c)
+    sig.push(0)
+    if bundled:
+        # slots -3 (CodeResources), -2 (requirements), -1 (Info.plist), in that order
+        loop c in sha256(macho_resources, 0, macho_resources.len()): sig.push(c)
+        loop c in sha256(req, 0, req.len()): sig.push(c)
+        loop c in sha256(macho_plist, 0, macho_plist.len()): sig.push(c)
+    loop k in [0..nslots):
+        e = min((k + 1) * 4096, sig_off)
+        d = sha256(out, k * 4096, e - k * 4096)
+        loop c in d: sig.push(c)
+    if bundled: append_bytes(sig, req)
+    loop sig.len() < sig_len: sig.push(0)
+    append_bytes(out, sig)
+    delete_file(path)
+    if not write_bytes(path, out): return false
+    chmod(path, 0x1ED)
+    true
+
+# ---------------- SHA-256 ----------------
+SHA_K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
+
+sha_rotr = (x: int, n: int) -> int: ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
+
+# the SHA-256 of b[off..off + n)
+sha256 = (b: u8[], off: int, n: int) -> u8[]:
+    hs = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+    # the message's last block(s): its tail, 0x80, zeros, then its length in bits
+    full = n / 64
+    tail: u8[]
+    loop i in [full * 64..n): tail.push(b[off + i])
+    tail.push(0x80)
+    loop tail.len() % 64 != 56: tail.push(0)
+    bits = n * 8
+    loop k in [0..8): tail.push(u8((bits >> (56 - 8 * k)) & 255))
+    w = fill(0, 64)
+    nblocks = full + tail.len() / 64
+    loop bi in [0..nblocks):
+        loop t in [0..16):
+            p = bi * 64 + t * 4
+            if bi < full:
+                q = off + p
+                w[t] = (int(b[q]) << 24) | (int(b[q + 1]) << 16) | (int(b[q + 2]) << 8) | int(b[q + 3])
+            else:
+                q = p - full * 64
+                w[t] = (int(tail[q]) << 24) | (int(tail[q + 1]) << 16) | (int(tail[q + 2]) << 8) | int(tail[q + 3])
+        loop t in [16..64):
+            s0 = sha_rotr(w[t - 15], 7) xor sha_rotr(w[t - 15], 18) xor (w[t - 15] >> 3)
+            s1 = sha_rotr(w[t - 2], 17) xor sha_rotr(w[t - 2], 19) xor (w[t - 2] >> 10)
+            w[t] = (w[t - 16] + s0 + w[t - 7] + s1) & 0xFFFFFFFF
+        a = hs[0]
+        bb = hs[1]
+        c = hs[2]
+        d = hs[3]
+        e = hs[4]
+        f = hs[5]
+        g = hs[6]
+        h = hs[7]
+        loop t in [0..64):
+            S1 = sha_rotr(e, 6) xor sha_rotr(e, 11) xor sha_rotr(e, 25)
+            ch = (e & f) xor ((e xor 0xFFFFFFFF) & g)
+            t1 = (h + S1 + ch + SHA_K[t] + w[t]) & 0xFFFFFFFF
+            S0 = sha_rotr(a, 2) xor sha_rotr(a, 13) xor sha_rotr(a, 22)
+            mj = (a & bb) xor (a & c) xor (bb & c)
+            t2 = (S0 + mj) & 0xFFFFFFFF
+            h = g
+            g = f
+            f = e
+            e = (d + t1) & 0xFFFFFFFF
+            d = c
+            c = bb
+            bb = a
+            a = (t1 + t2) & 0xFFFFFFFF
+        hs[0] = (hs[0] + a) & 0xFFFFFFFF
+        hs[1] = (hs[1] + bb) & 0xFFFFFFFF
+        hs[2] = (hs[2] + c) & 0xFFFFFFFF
+        hs[3] = (hs[3] + d) & 0xFFFFFFFF
+        hs[4] = (hs[4] + e) & 0xFFFFFFFF
+        hs[5] = (hs[5] + f) & 0xFFFFFFFF
+        hs[6] = (hs[6] + g) & 0xFFFFFFFF
+        hs[7] = (hs[7] + h) & 0xFFFFFFFF
+    out: u8[]
+    loop x in hs:
+        loop k in [0..4): out.push(u8((x >> (24 - 8 * k)) & 255))
+    out
+
+# ---- sloppy watch ----
+# Apple silicon runs code from a signed page only as signed, so the game's functions cannot be
+# patched where the executable has them. A game built by sloppy watch keeps its code (and
+# read-only data, which the code reaches relative to itself) in __TEXT as data instead, linked to
+# run at MACHO_WATCH_CODE, and starts with this loader: it takes the region (MAP_JIT memory, which
+# each thread sees either writable or runnable), copies the code there, marks the region's first
+# word as x64.jo's entry does on Linux (and the next with where its copier for patches is), and
+# calls the code's entry. Later builds' code goes into
+# the region after it (lib/std/watch.jo). The executable keeps the region free with a segment of
+# nothing there (write_macho), and is started where it was linked, without address space
+# randomization (lib/core/os.jo, __exec_unslid).
+
+# a 64-bit constant in 4 instructions (the loader has the same size whatever its numbers are)
+mw_mov64 = (rd: int, v: int):
+    a_movz(rd, v & 0xFFFF, 0)
+    loop k in [1..4): a_movk(rd, (v >> (16 * k)) & 0xFFFF, k)
+
+# the slot (in __DATA) of a C function the program uses (data_addr 0: only the loader's size is
+# wanted)
+mw_slot = (name: str, data_addr: int) -> int:
+    if data_addr == 0: return 0
+    loop imp in mac_imports:
+        if imp.2 == name: return imp.0
+    ice("sloppy watch on macOS: the program does not use {name}")
+    0
+
+macho_watch_loader = (data_addr: int, blob_addr: int, blob_len: int, entry: int) -> u8[]:
+    saved = code
+    code = []
+    w32(0xA9BE7BFD)                                             # stp x29, x30, [sp, #-32]!
+    w32(0x910003FD)                                             # mov x29, sp
+    w32(0xA90107E0)                                             # stp x0, x1, [sp, #16]
+    # the segment keeping the region given back, then mmap(region, size, read/write/run,
+    # MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0) there (MAP_JIT cannot go with MAP_FIXED)
+    mw_mov64(0, MACHO_WATCH_AT)
+    mw_mov64(1, MACHO_WATCH_SIZE)
+    mw_mov64(16, data_addr + mw_slot("munmap", data_addr))
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    mw_mov64(0, MACHO_WATCH_AT)
+    mw_mov64(1, MACHO_WATCH_SIZE)
+    a_movz(2, 7, 0)
+    a_movz(3, 0x1802, 0)
+    a_movn(4, 0, 0)
+    a_movz(5, 0, 0)
+    mw_mov64(16, data_addr + mw_slot("mmap", data_addr))
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    mw_mov64(9, MACHO_WATCH_AT)
+    a_cmp(0, 9)
+    fail = code.len()
+    w32(0x54000000 | AC_NE)                                     # b.ne fail
+    # writable: the code copied in, 8 bytes at a time; the mark
+    jit = data_addr + mw_slot("pthread_jit_write_protect_np", data_addr)
+    a_movz(0, 0, 0)
+    mw_mov64(16, jit)
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    mw_mov64(9, blob_addr)
+    mw_mov64(10, MACHO_WATCH_CODE)
+    mw_mov64(11, blob_len)
+    w32(0xF840852C)                                             # ldr x12, [x9], #8
+    w32(0xF800854C)                                             # str x12, [x10], #8
+    w32(0xF100216B)                                             # subs x11, x11, #8
+    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_NE)           # b.ne
+    mw_mov64(9, MACHO_WATCH_AT)
+    mw_mov64(10, 0x6A6F74776174636B)
+    a_str(10, 9, 0)
+    # (and after it, where the copier below is)
+    copier_at = code.len()
+    mw_mov64(10, 0)
+    a_str(10, 9, 8)
+    # runnable, through the caches
+    a_movz(0, 1, 0)
+    mw_mov64(16, jit)
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    mw_mov64(0, MACHO_WATCH_AT)
+    mw_mov64(1, MACHO_WATCH_CODE - MACHO_WATCH_AT + blob_len)
+    mw_mov64(16, MACHO_WATCH_CODE + stub_addr[11])              # code_sync
+    a_blr(16)
+    # the program
+    w32(0xA94107E0)                                             # ldp x0, x1, [sp, #16]
+    mw_mov64(16, MACHO_WATCH_CODE + entry)
+    a_blr(16)
+    w32(0xA8C27BFD)                                             # ldp x29, x30, [sp], #32
+    a_ret()
+    # (no region: the code cannot run)
+    wr32(fail, rd32(fail) | ((((code.len() - fail) / 4) & 0x7FFFF) << 5))
+    a_movz(0, 70, 0)
+    w32(0xA8C27BFD)                                             # ldp x29, x30, [sp], #32
+    a_ret()
+    # the copier, copy(x0 = to, x1 = from, x2 = bytes): writes into the region for the game's
+    # patches (lib/std/watch.jo). While the region is writable for a thread it cannot run code
+    # from it, and all the game's code is there: this runs from __TEXT.
+    copier = code.len()
+    w32(0xA9BD7BFD)                                             # stp x29, x30, [sp, #-48]!
+    w32(0x910003FD)                                             # mov x29, sp
+    w32(0xA90107E0)                                             # stp x0, x1, [sp, #16]
+    a_str(2, A_SP, 32)
+    a_movz(0, 0, 0)
+    mw_mov64(16, jit)
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    w32(0xA9412BE9)                                             # ldp x9, x10, [sp, #16]
+    a_ldr(11, A_SP, 32)
+    w32(0xB4000000 | (5 << 5) | 11)                             # cbz x11, done
+    w32(0x3840154C)                                             # ldrb w12, [x10], #1
+    w32(0x3800152C)                                             # strb w12, [x9], #1
+    w32(0xF100056B)                                             # subs x11, x11, #1
+    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_NE)           # b.ne
+    a_movz(0, 1, 0)
+    mw_mov64(16, jit)
+    a_ldr(16, 16, 0)
+    a_blr(16)
+    w32(0xA8C37BFD)                                             # ldp x29, x30, [sp], #48
+    a_ret()
+    # (its address, in the instructions storing it after the mark)
+    ca = MACHO_BASE + MACHO_TEXT_OFF + copier
+    loop k in [0..4): wr32(copier_at + 4 * k, (rd32(copier_at + 4 * k) & ~(0xFFFF << 5)) | (((ca >> (16 * k)) & 0xFFFF) << 5))
+    out = code
+    code = saved
+    out
+
+macho_plist: u8[] = []          # (an app bundle's Info.plist and CodeResources, which its program's signature hashes)
+macho_resources: u8[] = []
+
+# ---------------- an app bundle: `sloppy build --target macos -o Game.app` ----------------
+# Game.app/Contents/MacOS/<name> (the program), Info.plist (what the Finder and the Dock read)
+# and Resources/icon.icns (the build block's icon). Returns where the program goes, "" if the
+# folders could not be made.
+macos_bundle = (app: str, name: str, icon: u8[]) -> str:
+    base = strip_ext(app[rfind(app, "/") + 1..])
+    exe = base
+    if len(exe) == 0: exe = "game"
+    title = name
+    if len(title) == 0: title = exe
+    if not (mkdir(app) and mkdir("{app}/Contents") and mkdir("{app}/Contents/MacOS") and mkdir("{app}/Contents/Resources")): return ""
+    # (a bundle id from the name: letters, digits, '-' and '.')
+    idb: u8[]
+    loop c in bytes(title):
+        if is_alnum(c) or c == '-' or c == '.': idb.push(c)
+        else if c == ' ' or c == '_': idb.push('-')
+    id = str_from_bytes(idb)
+    if len(id) == 0: id = "game"
+    icon_key = ""
+    if icon.len() >= 24:
+        if write_bytes("{app}/Contents/Resources/icon.icns", icns(icon)): icon_key = "\n    <key>CFBundleIconFile</key>\n    <string>icon</string>"
+    plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>{xml_text(exe)}</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.sloppy-lang.{id}</string>
+    <key>CFBundleName</key>
+    <string>{xml_text(title)}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{xml_text(title)}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>{icon_key}
+</dict>
+</plist>
+"""
+    if not write_file("{app}/Contents/Info.plist", plist): return ""
+    # the resources, sealed: what the signature's hash of CodeResources stands for
+    sealed = ""
+    sealed2 = ""
+    if len(icon_key) > 0:
+        ic = icns(icon)
+        sealed = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{b64(sha1(ic))}</data>"
+        sealed2 = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{b64(sha256(ic, 0, ic.len()))}</data>\n\t\t</dict>"
+    res = CODE_RESOURCES_HEAD + "<key>files</key>\n\t<dict>{sealed}\n\t</dict>\n\t<key>files2</key>\n\t<dict>{sealed2}\n\t</dict>\n\t" + CODE_RESOURCES_RULES
+    if not mkdir("{app}/Contents/_CodeSignature") or not write_file("{app}/Contents/_CodeSignature/CodeResources", res): return ""
+    macho_plist = bytes(plist)
+    macho_resources = bytes(res)
+    "{app}/Contents/MacOS/{exe}"
+
+
+CODE_RESOURCES_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	"""
+
+# (codesign's default rules)
+CODE_RESOURCES_RULES = """<key>rules</key>
+	<dict>
+		<key>^Resources/</key>
+		<true/>
+		<key>^Resources/.*\\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Resources/Base\\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^version.plist$</key>
+		<true/>
+	</dict>
+	<key>rules2</key>
+	<dict>
+		<key>.*\\.dSYM($|/)</key>
+		<dict>
+			<key>weight</key>
+			<real>11</real>
+		</dict>
+		<key>^(.*/)?\\.DS_Store$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>2000</real>
+		</dict>
+		<key>^.*</key>
+		<true/>
+		<key>^Info\\.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^PkgInfo$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^Resources/</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Resources/Base\\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^[^/]+$</key>
+		<dict>
+			<key>nested</key>
+			<true/>
+			<key>weight</key>
+			<real>10</real>
+		</dict>
+		<key>^embedded\\.provisionprofile$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^version\\.plist$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+	</dict>
+</dict>
+</plist>
+"""
+
+# (base64, for plist <data>; the C bootstrap's compiler has no library one)
+b64 = (b: u8[]) -> str:
+    al = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    out: u8[]
+    i = 0
+    loop i < b.len():
+        n = int(b[i]) << 16
+        if i + 1 < b.len(): n = n | (int(b[i + 1]) << 8)
+        if i + 2 < b.len(): n = n | int(b[i + 2])
+        out.push(al[(n >> 18) & 63])
+        out.push(al[(n >> 12) & 63])
+        if i + 1 < b.len(): out.push(al[(n >> 6) & 63])
+        else: out.push('=')
+        if i + 2 < b.len(): out.push(al[n & 63])
+        else: out.push('=')
+        i += 3
+    str_from_bytes(out)
+
+# ---------------- SHA-1 (CodeResources' "files": the older hash it keeps beside SHA-256) ----------------
+sha1 = (b: u8[]) -> u8[]:
+    h0 = 0x67452301
+    h1 = 0xEFCDAB89
+    h2 = 0x98BADCFE
+    h3 = 0x10325476
+    h4 = 0xC3D2E1F0
+    m = b
+    bits = b.len() * 8
+    m.push(0x80)
+    loop m.len() % 64 != 56: m.push(0)
+    loop k in [0..8): m.push(u8((bits >> (56 - 8 * k)) & 255))
+    w = fill(0, 80)
+    rotl = (x: int, n: int) -> int: ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
+    loop blk in [0..m.len() / 64):
+        loop i in [0..16):
+            o = blk * 64 + i * 4
+            w[i] = (int(m[o]) << 24) | (int(m[o + 1]) << 16) | (int(m[o + 2]) << 8) | int(m[o + 3])
+        loop i in [16..80): w[i] = rotl(w[i - 3] xor w[i - 8] xor w[i - 14] xor w[i - 16], 1)
+        a = h0
+        bb = h1
+        c = h2
+        d = h3
+        e = h4
+        loop i in [0..80):
+            f = 0
+            k = 0
+            if i < 20:
+                f = (bb & c) | ((bb xor 0xFFFFFFFF) & d)
+                k = 0x5A827999
+            else if i < 40:
+                f = bb xor c xor d
+                k = 0x6ED9EBA1
+            else if i < 60:
+                f = (bb & c) | (bb & d) | (c & d)
+                k = 0x8F1BBCDC
+            else:
+                f = bb xor c xor d
+                k = 0xCA62C1D6
+            t = (rotl(a, 5) + f + e + k + w[i]) & 0xFFFFFFFF
+            e = d
+            d = c
+            c = rotl(bb, 30)
+            bb = a
+            a = t
+        h0 = (h0 + a) & 0xFFFFFFFF
+        h1 = (h1 + bb) & 0xFFFFFFFF
+        h2 = (h2 + c) & 0xFFFFFFFF
+        h3 = (h3 + d) & 0xFFFFFFFF
+        h4 = (h4 + e) & 0xFFFFFFFF
+    out: u8[]
+    loop h in [h0, h1, h2, h3, h4]: mpbe32(out, h)
+    out
+
+xml_text = (s: str) -> str: replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+
+# an .icns holding the PNG as it is, under the type for its size
+icns = (png: u8[]) -> u8[]:
+    w = (int(png[16]) << 24) | (int(png[17]) << 16) | (int(png[18]) << 8) | int(png[19])
+    ty = "ic08"                                  # 256
+    if w <= 16: ty = "icp4"
+    else if w <= 32: ty = "icp5"
+    else if w <= 64: ty = "icp6"
+    else if w <= 128: ty = "ic07"
+    else if w > 256: ty = "ic09"
+    out: u8[]
+    loop c in bytes("icns"): out.push(c)
+    mpbe32(out, 8 + 8 + png.len())
+    loop c in bytes(ty): out.push(c)
+    mpbe32(out, 8 + png.len())
+    loop c in png: out.push(c)
+    out

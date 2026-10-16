@@ -1,0 +1,998 @@
+# OGG Vorbis: load_ogg decodes a whole .ogg file into a Sound. Vorbis is the usual format for
+# game music: about a tenth of the size of a WAV. (Written from the Vorbis I specification.)
+#
+#   music = load_ogg(embed("music.ogg"))
+#   play(music, 0.6, looping = true)
+
+# a whole Ogg Vorbis file, at the mixer's rate, in stereo (mono is copied to both sides; files
+# with more channels give their front left and right). A file it cannot read stops the program
+# with a message saying why.
+load_ogg = (file: u8[]) -> Sound:
+    d = __ogg_decode(file)
+    if d.error != "": panic("load_ogg: {d.error}")
+    frames = d.samples.len() / max(d.channels, 1)
+    st = fill(f32(0), frames * 2)
+    right = 0
+    if d.channels == 2: right = 1
+    else if d.channels >= 3: right = 2           # (Vorbis's order: left, center, right, ...)
+    loop i in [0..frames):
+        st[i * 2] = d.samples[i * d.channels]
+        st[i * 2 + 1] = d.samples[i * d.channels + right]
+    __resample(st, d.rate)
+
+# ---------------- music: decoded while it plays ----------------
+# A long piece of music played as it is decoded, a little ahead of where it is playing: no wait
+# when it loads and little memory (a three-minute song decoded whole is about 70 MB).
+#
+#   song = load_music(embed("song.ogg"))
+#   id = play_music(song, 0.6)          # looping; stop(id), set_volume(id, v) as for sounds
+struct Music:
+    file: u8[]
+    channels: int
+    rate: int
+    seconds: f64                # how long it is (0: unknown)
+
+load_music = (file: u8[]) -> Music:
+    d = __vdec_open(file)
+    if d.error != "": panic("load_music: {d.error}")
+    Music(file, d.ch, d.v.rate, f64(d.granule) / f64(max(d.v.rate, 1)))
+
+# play music from its start; returns a voice id for stop(), set_volume() and is_playing()
+play_music = (m: Music, volume: f64 = 1.0, looping: bool = true, pan: f64 = 0.0) -> int:
+    __audio_start()
+    __voice_id += 1
+    __streams.push(__Stream(__voice_id, __vdec_open(m.file), [], 0.0, looping))
+    __voices.push(Voice(Sound([]), 0.0, f32(volume), f32(clamp(pan, -1.0, 1.0)), 1.0, looping, __voice_id, true))
+    __voice_id
+
+# fade out the voice `old` while music m starts silent and fades in to `volume` (returns the
+# music's voice; old may be 0 or already stopped)
+crossfade = (old: int, m: Music, seconds: f64 = 1.0, volume: f64 = 1.0, looping: bool = true) -> int:
+    fade_out(old, seconds)
+    id = play_music(m, 0.0, looping)
+    fade_volume(id, volume, seconds)
+    id
+
+struct __Stream:
+    id: int                     # its voice
+    dec: __VDec
+    buf: f32[]                  # stereo frames at the mixer's rate, ready to mix
+    frac: f64                   # where resampling is, in dec.out's frames
+    looping: bool
+    ended = false
+
+__streams: __Stream[]
+
+# at least `need` frames in s.buf (fewer only at the end of music that does not loop)
+__stream_fill = (s: mut __Stream, need: int):
+    ch = max(s.dec.ch, 1)
+    right = 0
+    if ch == 2: right = 1
+    else if ch >= 3: right = 2
+    step = f64(s.dec.v.rate) / f64(MIX_RATE)
+    loop s.buf.len() / 2 < need and not s.ended:
+        avail = s.dec.out.len() / ch
+        loop s.frac + 1.0 < f64(avail) and s.buf.len() / 2 < need:
+            ip = int(s.frac)
+            fr = f32(s.frac - f64(ip))
+            a = ip * ch
+            bq = a + ch
+            s.buf.push(s.dec.out[a] + (s.dec.out[bq] - s.dec.out[a]) * fr)
+            s.buf.push(s.dec.out[a + right] + (s.dec.out[bq + right] - s.dec.out[a + right]) * fr)
+            s.frac += step
+        if s.buf.len() / 2 >= need: break
+        # (what has been used: dropped, but for the frame the next values start from)
+        drop = int(s.frac)
+        if drop > 0 and drop * ch <= s.dec.out.len():
+            s.dec.out = s.dec.out[drop * ch..]
+            s.frac -= f64(drop)
+        if not __vdec_packet(s.dec):
+            if s.looping and s.dec.error == "" and s.dec.packets.len() > 3: __vdec_rewind(s.dec)
+            else:
+                s.ended = true
+                if s.dec.out.len() >= ch:
+                    last = s.dec.out.len() - ch
+                    s.buf.push(s.dec.out[last])
+                    s.buf.push(s.dec.out[last + right])
+
+# mix voice i (a music one) into out; false when it has finished
+__mix_stream = (vi: int, out: *f32, n: int) -> bool:
+    k = -1
+    loop j in 0.. and st in __streams:
+        if st.id == __voices[vi].id: k = j
+    if k < 0: return false
+    v = __voices[vi]
+    __stream_fill(__streams[k], int(f64(n) * v.pitch) + 2)
+    src = data(__streams[k].buf)
+    total = __streams[k].buf.len() / 2
+    gl_ = v.volume * f32(__master) * (1.0 - max(v.pan, 0.0))
+    gr = v.volume * f32(__master) * (1.0 + min(v.pan, 0.0))
+    pos = v.pos
+    loop f in [0..n):
+        ip = int(pos)
+        if ip + 1 >= total: break
+        fr = f32(pos - f64(ip))
+        l = src[ip * 2] + (src[ip * 2 + 2] - src[ip * 2]) * fr
+        r = src[ip * 2 + 1] + (src[ip * 2 + 3] - src[ip * 2 + 1]) * fr
+        out[f * 2] += l * gl_
+        out[f * 2 + 1] += r * gr
+        pos += v.pitch
+    used = min(int(pos), total)
+    __streams[k].buf = __streams[k].buf[used * 2..]
+    __voices[vi].pos = pos - f64(used)
+    if __streams[k].ended and __streams[k].buf.len() <= 2:
+        __streams.remove(k)
+        return false
+    true
+
+# the samples as the file has them (interleaved, d.channels of them, at d.rate)
+struct OggAudio:
+    channels: int
+    rate: int
+    samples: f32[]
+    error = ""                  # why it could not be read ("": it could)
+
+# ---------------- reading bits ----------------
+struct __VBits:
+    d: u8[]
+    p = 0                       # the next bit
+    n = 0                       # bits there are
+    eop = false                 # a read went past the end of the packet
+
+__vbits_of = (d: u8[]) -> __VBits: __VBits(d, 0, d.len() * 8)
+
+__vget = (b: mut __VBits, n: int) -> int:
+    if n == 0: return 0
+    if b.p + n > b.n:
+        b.eop = true
+        b.p = b.n
+        return 0
+    v = 0
+    got = 0
+    loop got < n:
+        off = b.p & 7
+        take = min(8 - off, n - got)
+        v = v | (((int(b.d[b.p >> 3]) >> off) & ((1 << take) - 1)) << got)
+        got += take
+        b.p += take
+    v
+
+__vilog = (x: int) -> int:
+    n = 0
+    v = x
+    loop v > 0:
+        n += 1
+        v = v >> 1
+    n
+
+__vfloat32 = (x: int) -> f64:
+    mant = f64(x & 0x1FFFFF)
+    exp = (x & 0x7FE00000) >> 21
+    v = mant * pow(2.0, f64(exp - 788))
+    if x & 0x80000000 != 0: v = -v
+    v
+
+# ---------------- the setup ----------------
+struct __VBook:
+    dims: int
+    entries: int
+    tree: int[]                 # node i: tree[2i] for a 0 bit, tree[2i + 1] for a 1 (>0: a node, <0: entry -v-1)
+    vq: f32[]                   # entries * dims values (lookup types 1 and 2)
+    lookup = 0
+    fast: int[]                 # the next 8 bits -> entry * 16 + bits used, or -(tree node) to go on from
+
+struct __VFloor:
+    pclass: int[]               # each partition's class
+    cdim: int[]
+    csub: int[]
+    cmaster: int[]
+    subbook: int[]              # class * 8 + j
+    mult: int
+    xs: int[]
+    order: int[]                # indices of xs, by x
+    low: int[]
+    high: int[]
+
+struct __VResidue:
+    kind: int
+    begin: int
+    end: int
+    psize: int
+    nclass: int
+    classbook: int
+    books: int[]                # class * 8 + stage (-1: none)
+
+struct __VMapping:
+    mags: int[]
+    angs: int[]
+    mux: int[]                  # each channel's submap
+    sfloor: int[]
+    sresidue: int[]
+
+struct __VMode:
+    long: bool
+    mapping: int
+
+struct __VState:
+    channels = 0
+    rate = 0
+    bs0 = 0
+    bs1 = 0
+    books: __VBook[]
+    floors: __VFloor[]
+    residues: __VResidue[]
+    maps: __VMapping[]
+    modes: __VMode[]
+    error = ""
+
+__vlookup1 = (entries: int, dims: int) -> int:
+    r = int(floor(exp(log(f64(entries)) / f64(dims))))
+    loop pow(f64(r + 1), f64(dims)) <= f64(entries): r += 1
+    loop r > 0 and pow(f64(r), f64(dims)) > f64(entries): r -= 1
+    r
+
+__vread_book = (b: mut __VBits, v: mut __VState) -> __VBook:
+    if __vget(b, 24) != 0x564342: v.error = "a codebook is damaged"
+    dims = __vget(b, 16)
+    entries = __vget(b, 24)
+    if entries > (1 << 20) or entries * dims > (1 << 22) or b.eop:
+        v.error = "a codebook is damaged (too big)"
+        return __VBook(dims, 0, [0, 0], [])
+    lengths = fill(0, entries)
+    if __vget(b, 1) == 0:
+        sparse = __vget(b, 1) == 1
+        loop i in [0..entries):
+            if not sparse or __vget(b, 1) == 1: lengths[i] = __vget(b, 5) + 1
+    else:
+        cur = __vget(b, 5) + 1
+        i = 0
+        loop i < entries and not b.eop:
+            num = __vget(b, __vilog(entries - i))
+            loop k in [0..num):
+                if i < entries: lengths[i] = cur
+                i += 1
+            cur += 1
+            if cur > 33:
+                v.error = "a codebook is damaged (codes over 32 bits)"
+                return __VBook(dims, 0, [0, 0], [])
+    book = __VBook(dims, entries, [0, 0], [], 0, [])
+    # (the codewords: each length takes the first free code, in entry order)
+    avail = fill(0, 33)
+    first = -1
+    loop i in [0..entries):
+        if lengths[i] > 0:
+            first = i
+            break
+    if first >= 0:
+        loop i in [1..lengths[first]]: avail[i] = 1 << (32 - i)
+        __vbook_add(book, 0, lengths[first], first)
+        loop i in [first + 1..entries):
+            z = lengths[i]
+            if z == 0: continue
+            loop z > 0 and avail[z] == 0: z -= 1
+            if z == 0:
+                v.error = "a codebook has too many codes"
+                break
+            code = avail[z]
+            avail[z] = 0
+            __vbook_add(book, code, lengths[i], i)
+            y = lengths[i]
+            loop y > z:
+                avail[y] = code + (1 << (32 - y))
+                y -= 1
+    __vbook_fast(book)
+    book.lookup = __vget(b, 4)
+    if book.lookup == 1 or book.lookup == 2:
+        lo = __vfloat32(__vget(b, 32))
+        delta = __vfloat32(__vget(b, 32))
+        bits = __vget(b, 4) + 1
+        seq = __vget(b, 1) == 1
+        nvals = entries * dims
+        if book.lookup == 1 and dims > 0: nvals = __vlookup1(entries, dims)
+        if nvals <= 0 or nvals > (1 << 22) or dims == 0:
+            v.error = "a codebook is damaged (its vectors)"
+            return book
+        mults = fill(0.0, nvals)
+        loop i in [0..nvals): mults[i] = f64(__vget(b, bits))
+        book.vq = fill(f32(0), entries * dims)
+        loop e in [0..entries):
+            last = 0.0
+            div = 1
+            loop j in [0..dims):
+                off = e * dims + j
+                if book.lookup == 1:
+                    off = (e / div) % nvals
+                    div *= nvals
+                val = mults[off] * delta + lo + last
+                book.vq[e * dims + j] = f32(val)
+                if seq: last = val
+    else if book.lookup != 0: v.error = "codebook lookup type {book.lookup}"
+    book
+
+# a codeword (its bits from bit 31 down) for an entry
+__vbook_add = (book: mut __VBook, code: int, len: int, entry: int):
+    node = 0
+    loop j in [0..len):
+        bit = (code >> (31 - j)) & 1
+        if j == len - 1:
+            book.tree[node * 2 + bit] = -(entry + 1)
+        else:
+            nx = book.tree[node * 2 + bit]
+            if nx <= 0:
+                nx = book.tree.len() / 2
+                book.tree.push(0)
+                book.tree.push(0)
+                book.tree[node * 2 + bit] = nx
+            node = nx
+
+# (each 8-bit start of a code: the entry it is, or where in the tree it leads)
+__vbook_fast = (book: mut __VBook):
+    book.fast = fill(0, 256)
+    loop t in [0..256):
+        node = 0
+        loop j in [0..8):
+            nx = book.tree[node * 2 + ((t >> j) & 1)]
+            if nx < 0:
+                book.fast[t] = (-nx - 1) * 16 + j + 1
+                break
+            if nx == 0:
+                book.fast[t] = 0                # (no code starts this way)
+                break
+            node = nx
+            if j == 7: book.fast[t] = -node
+
+# the next entry of a codebook (-1: none, or the end of the packet)
+__vdecode = (b: mut __VBits, book: __VBook) -> int:
+    node = 0
+    if b.p + 16 <= b.n:
+        i = b.p >> 3
+        t = ((int(b.d[i]) | (int(b.d[i + 1]) << 8)) >> (b.p & 7)) & 255
+        f = book.fast[t]
+        if f > 0:
+            b.p += f & 15
+            return f >> 4
+        if f == 0: return -1
+        node = -f
+        b.p += 8
+    loop true:
+        if b.p >= b.n:
+            b.eop = true
+            return -1
+        bit = (int(b.d[b.p >> 3]) >> (b.p & 7)) & 1
+        b.p += 1
+        nx = book.tree[node * 2 + bit]
+        if nx < 0: return -nx - 1
+        if nx == 0: return -1
+        node = nx
+    -1
+
+__vread_floor = (b: mut __VBits, v: mut __VState) -> __VFloor:
+    f = __VFloor([], [], [], [], [], 1, [], [], [], [])
+    parts = __vget(b, 5)
+    maxc = -1
+    loop i in [0..parts):
+        c = __vget(b, 4)
+        f.pclass.push(c)
+        maxc = max(maxc, c)
+    f.subbook = fill(-1, (maxc + 1) * 8)
+    loop c in [0..maxc + 1):
+        f.cdim.push(__vget(b, 3) + 1)
+        f.csub.push(__vget(b, 2))
+        m = -1
+        if f.csub[c] > 0: m = __vget(b, 8)
+        f.cmaster.push(m)
+        loop j in [0..1 << f.csub[c]): f.subbook[c * 8 + j] = __vget(b, 8) - 1
+    f.mult = __vget(b, 2) + 1
+    rb = __vget(b, 4)
+    f.xs = [0, 1 << rb]
+    loop i in [0..parts):
+        loop j in [0..f.cdim[f.pclass[i]]): f.xs.push(__vget(b, rb))
+    n = f.xs.len()
+    f.order = fill(0, n)
+    loop i in [0..n): f.order[i] = i
+    loop i in [0..n):
+        loop k in [0..i):
+            if f.xs[k] == f.xs[i]: v.error = "a floor is damaged (two points at one place)"
+    # (sort by x; few points: insertion sort)
+    loop i in [1..n):
+        k = i
+        loop k > 0 and f.xs[f.order[k - 1]] > f.xs[f.order[k]]:
+            t = f.order[k]
+            f.order[k] = f.order[k - 1]
+            f.order[k - 1] = t
+            k -= 1
+    # each point's nearest neighbors among those before it: the closest x below and above
+    f.low = fill(0, n)
+    f.high = fill(1, n)
+    loop i in [2..n):
+        lo = 0
+        hi = 1
+        loop k in [0..i):
+            if f.xs[k] < f.xs[i] and f.xs[k] > f.xs[lo]: lo = k
+            if f.xs[k] > f.xs[i] and f.xs[k] < f.xs[hi]: hi = k
+        f.low[i] = lo
+        f.high[i] = hi
+    f
+
+__vread_residue = (b: mut __VBits, kind: int) -> __VResidue:
+    r = __VResidue(kind, __vget(b, 24), __vget(b, 24), __vget(b, 24) + 1, __vget(b, 6) + 1, __vget(b, 8), [])
+    cascade: int[]
+    loop c in [0..r.nclass):
+        low = __vget(b, 3)
+        high = 0
+        if __vget(b, 1) == 1: high = __vget(b, 5)
+        cascade.push(high * 8 + low)
+    r.books = fill(-1, r.nclass * 8)
+    loop c in [0..r.nclass):
+        loop j in [0..8):
+            if cascade[c] & (1 << j) != 0: r.books[c * 8 + j] = __vget(b, 8)
+    r
+
+__vread_setup = (b: mut __VBits, v: mut __VState):
+    nbooks = __vget(b, 8) + 1
+    loop i in [0..nbooks):
+        if v.error != "" or b.eop: return
+        v.books.push(__vread_book(b, v))
+    ntimes = __vget(b, 6) + 1
+    loop i in [0..ntimes):
+        if __vget(b, 16) != 0: v.error = "time domain transforms are not supported"
+    nfloors = __vget(b, 6) + 1
+    loop i in [0..nfloors):
+        kind = __vget(b, 16)
+        if kind != 1:
+            v.error = "floor type {kind} is not supported (only floor 1: re-encode the file with a newer encoder)"
+            return
+        v.floors.push(__vread_floor(b, v))
+    nres = __vget(b, 6) + 1
+    loop i in [0..nres):
+        kind = __vget(b, 16)
+        if kind > 2:
+            v.error = "residue type {kind}"
+            return
+        v.residues.push(__vread_residue(b, kind))
+    nmaps = __vget(b, 6) + 1
+    loop i in [0..nmaps):
+        if __vget(b, 16) != 0:
+            v.error = "mapping type not 0"
+            return
+        m = __VMapping([], [], fill(0, v.channels), [], [])
+        sub = 1
+        if __vget(b, 1) == 1: sub = __vget(b, 4) + 1
+        if __vget(b, 1) == 1:
+            steps = __vget(b, 8) + 1
+            loop s in [0..steps):
+                m.mags.push(__vget(b, __vilog(v.channels - 1)))
+                m.angs.push(__vget(b, __vilog(v.channels - 1)))
+        __vget(b, 2)
+        if sub > 1:
+            loop c in [0..v.channels): m.mux[c] = __vget(b, 4)
+        loop s in [0..sub):
+            __vget(b, 8)
+            m.sfloor.push(__vget(b, 8))
+            m.sresidue.push(__vget(b, 8))
+        v.maps.push(m)
+    nmodes = __vget(b, 6) + 1
+    loop i in [0..nmodes):
+        long = __vget(b, 1) == 1
+        __vget(b, 16)
+        __vget(b, 16)
+        v.modes.push(__VMode(long, __vget(b, 8)))
+    if b.eop: v.error = "the setup header is cut short"
+    if v.error == "": v.error = __vcheck(v)
+
+# every reference from one part of the setup to another points at something there
+__vcheck = (v: __VState) -> str:
+    nb = v.books.len()
+    bad = "the setup header is damaged"
+    loop f in v.floors:
+        loop c in [0..f.cdim.len()):
+            if f.cmaster[c] >= nb: return bad
+            loop j in [0..1 << f.csub[c]):
+                if f.subbook[c * 8 + j] >= nb: return bad
+        loop c in f.pclass:
+            if c >= f.cdim.len(): return bad
+    loop r in v.residues:
+        if r.classbook >= nb or v.books[r.classbook].dims < 1: return bad
+        loop k in r.books:
+            if k >= nb: return bad
+            if k >= 0 and (v.books[k].dims < 1 or v.books[k].lookup == 0): return bad
+    loop m in v.maps:
+        loop s in [0..m.mags.len()):
+            if m.mags[s] >= v.channels or m.angs[s] >= v.channels or m.mags[s] == m.angs[s]: return bad
+        loop c in m.mux:
+            if c >= m.sfloor.len(): return bad
+        loop k in m.sfloor:
+            if k >= v.floors.len(): return bad
+        loop k in m.sresidue:
+            if k >= v.residues.len(): return bad
+    loop md in v.modes:
+        if md.mapping >= v.maps.len(): return bad
+    ""
+
+# ---------------- decoding audio ----------------
+__vinverse_db = __vmake_inverse_db()
+__vmake_inverse_db = () -> f32[]:
+    t = fill(f32(0), 256)
+    loop i in [0..256): t[i] = f32(1.0649863e-07 * exp(f64(i) * 16.055133715729436 / 255.0))
+    t
+
+__vrender_point = (x0: int, y0: int, x1: int, y1: int, x: int) -> int:
+    dy = y1 - y0
+    adx = x1 - x0
+    err = abs(dy) * (x - x0)
+    off = err / adx
+    if dy < 0: return y0 - off
+    y0 + off
+
+__vrender_line = (x0: int, y0: int, x1: int, y1: int, out: mut f32[], n2: int):
+    dy = y1 - y0
+    adx = x1 - x0
+    if adx <= 0: return
+    ady = abs(dy)
+    base = dy / adx
+    sy = base + 1
+    if dy < 0: sy = base - 1
+    ady = ady - abs(base) * adx
+    y = y0
+    err = 0
+    if x0 < n2: out[x0] = __vinverse_db[clamp(y, 0, 255)]
+    x = x0 + 1
+    loop x < x1 and x < n2:
+        err += ady
+        if err >= adx:
+            err -= adx
+            y += sy
+        else: y += base
+        out[x] = __vinverse_db[clamp(y, 0, 255)]
+        x += 1
+
+# a channel's floor curve into out (n2 values); false: the channel is silent in this packet
+__vfloor_curve = (b: mut __VBits, v: __VState, f: __VFloor, out: mut f32[], n2: int) -> bool:
+    if __vget(b, 1) == 0: return false
+    range = [256, 128, 86, 64][f.mult - 1]
+    rbits = __vilog(range - 1)
+    n = f.xs.len()
+    ys = fill(0, n)
+    ys[0] = __vget(b, rbits)
+    ys[1] = __vget(b, rbits)
+    off = 2
+    loop c in f.pclass:
+        cd = f.cdim[c]
+        cbits = f.csub[c]
+        cmask = (1 << cbits) - 1
+        cval = 0
+        if cbits > 0: cval = __vdecode(b, v.books[f.cmaster[c]])
+        loop j in [0..cd):
+            book = f.subbook[c * 8 + (cval & cmask)]
+            cval = cval >> cbits
+            if book >= 0: ys[off + j] = __vdecode(b, v.books[book])
+            else: ys[off + j] = 0
+        off += cd
+    if b.eop: return false
+    # (the points' heights, each predicted from its neighbors and corrected)
+    used = fill(false, n)
+    fy = fill(0, n)
+    used[0] = true
+    used[1] = true
+    fy[0] = ys[0]
+    fy[1] = ys[1]
+    loop i in [2..n):
+        lo = f.low[i]
+        hi = f.high[i]
+        pred = __vrender_point(f.xs[lo], fy[lo], f.xs[hi], fy[hi], f.xs[i])
+        val = ys[i]
+        highroom = range - pred
+        lowroom = pred
+        room = min(highroom, lowroom) * 2
+        if val != 0:
+            used[lo] = true
+            used[hi] = true
+            used[i] = true
+            if val >= room:
+                if highroom > lowroom: fy[i] = val - lowroom + pred
+                else: fy[i] = pred - val + highroom - 1
+            else if val & 1 == 1: fy[i] = pred - (val + 1) / 2
+            else: fy[i] = pred + val / 2
+        else: fy[i] = pred
+    # straight lines between the used points, in order of x
+    lx = 0
+    ly = fy[0] * f.mult
+    hx = 0
+    hy = ly
+    loop k in [1..n):
+        i = f.order[k]
+        if used[i]:
+            hy = fy[i] * f.mult
+            hx = f.xs[i]
+            __vrender_line(lx, ly, hx, hy, out, n2)
+            lx = hx
+            ly = hy
+    if hx < n2: __vrender_line(hx, hy, n2, hy, out, n2)
+    true
+
+# residue partitions into vectors (type 0 and 1 layouts; type 2 is type 1 on one interleaved vector)
+__vresidue = (b: mut __VBits, v: __VState, r: __VResidue, vecs: mut f32[][], skip: bool[], size: int, kind: int):
+    book = v.books[r.classbook]
+    per = book.dims
+    rb = min(r.begin, size)
+    re = min(r.end, size)
+    nparts = (re - rb) / r.psize
+    if nparts <= 0: return
+    nch = vecs.len()
+    classes = fill(0, nch * (nparts + per))
+    loop stage in [0..8):
+        p = 0
+        loop p < nparts:
+            if stage == 0:
+                loop j in [0..nch):
+                    if skip[j]: continue
+                    t = __vdecode(b, book)
+                    if t < 0: return
+                    i = per - 1
+                    loop i >= 0:
+                        classes[j * (nparts + per) + p + i] = t % r.nclass
+                        t = t / r.nclass
+                        i -= 1
+            i = 0
+            loop i < per and p < nparts:
+                loop j in [0..nch):
+                    if skip[j]: continue
+                    cl = classes[j * (nparts + per) + p]
+                    bk = r.books[cl * 8 + stage]
+                    if bk < 0: continue
+                    vb = v.books[bk]
+                    if vb.lookup == 0: continue
+                    off = rb + p * r.psize
+                    d = vb.dims
+                    if kind == 0:
+                        step = r.psize / d
+                        loop k in [0..step):
+                            e = __vdecode(b, vb)
+                            if e < 0: return
+                            loop m in [0..d): vecs[j][off + k + m * step] += vb.vq[e * d + m]
+                    else:
+                        k = 0
+                        loop k < r.psize:
+                            e = __vdecode(b, vb)
+                            if e < 0: return
+                            loop m in [0..d):
+                                if k < r.psize: vecs[j][off + k] += vb.vq[e * d + m]
+                                k += 1
+                p += 1
+                i += 1
+
+# the inverse MDCT of n2 coefficients into n samples (a DCT-IV through an n/4-point FFT)
+struct __VMdct:
+    n: int
+    pre_c: f64[]
+    pre_s: f64[]
+    post_c: f64[]
+    post_s: f64[]
+    fft_c: f64[]
+    fft_s: f64[]
+    rev: int[]
+    re: f64[]                   # (work space)
+    im: f64[]
+    u: f64[]
+
+__vmdct_for = (n: int) -> __VMdct:
+    m = n / 2
+    h = m / 2
+    t = __VMdct(n, [], [], [], [], [], [], [], fill(0.0, n / 4), fill(0.0, n / 4), fill(0.0, n / 2))
+    loop k in [0..h):
+        a = -PI * f64(4 * k + 1) / f64(4 * m)
+        t.pre_c.push(cos(a))
+        t.pre_s.push(sin(a))
+        b = -PI * f64(k) / f64(m)
+        t.post_c.push(cos(b))
+        t.post_s.push(sin(b))
+        c = -2.0 * PI * f64(k) / f64(h)
+        t.fft_c.push(cos(c))
+        t.fft_s.push(sin(c))
+    bits = __vilog(h) - 1
+    loop k in [0..h):
+        r = 0
+        loop j in [0..bits): r = r | (((k >> j) & 1) << (bits - 1 - j))
+        t.rev.push(r)
+    t
+
+__vimdct = (t: mut __VMdct, x: f32[], out: mut f32[]):
+    m = t.n / 2
+    h = m / 2
+    loop k in [0..h):
+        a = f64(x[2 * k])
+        b = f64(x[m - 1 - 2 * k])
+        r = t.rev[k]
+        t.re[r] = a * t.pre_c[k] - b * t.pre_s[k]
+        t.im[r] = a * t.pre_s[k] + b * t.pre_c[k]
+    size = 2
+    loop size <= h:
+        half = size / 2
+        step = h / size
+        s = 0
+        loop s < h:
+            loop k in [0..half):
+                wr = t.fft_c[k * step]
+                wi = t.fft_s[k * step]
+                a = s + k
+                c = a + half
+                tr = t.re[c] * wr - t.im[c] * wi
+                ti = t.re[c] * wi + t.im[c] * wr
+                t.re[c] = t.re[a] - tr
+                t.im[c] = t.im[a] - ti
+                t.re[a] += tr
+                t.im[a] += ti
+            s += size
+        size *= 2
+    loop k in [0..h):
+        wr = t.re[k] * t.post_c[k] - t.im[k] * t.post_s[k]
+        wi = t.re[k] * t.post_s[k] + t.im[k] * t.post_c[k]
+        t.u[2 * k] = wr
+        t.u[m - 1 - 2 * k] = -wi
+    q = m / 2
+    loop i in [0..q): out[i] = f32(t.u[i + q])
+    loop i in [q..3 * q): out[i] = f32(-t.u[3 * q - 1 - i])
+    loop i in [3 * q..t.n): out[i] = f32(-t.u[i - 3 * q])
+
+__vwindow = (n: int, bs0: int, long: bool, prev_long: bool, next_long: bool) -> f32[]:
+    w = fill(f32(0), n)
+    lw = n / 2
+    rw = n / 2
+    if long and not prev_long: lw = bs0 / 2
+    if long and not next_long: rw = bs0 / 2
+    ls = n / 4 - lw / 2
+    rs = n * 3 / 4 - rw / 2
+    loop i in [0..n):
+        if i < ls: continue
+        if i < ls + lw:
+            s = sin((f64(i - ls) + 0.5) / f64(lw) * PI / 2.0)
+            w[i] = f32(sin(PI / 2.0 * s * s))
+        else if i < rs: w[i] = 1.0
+        else if i < rs + rw:
+            s = sin((f64(i - rs) + 0.5) / f64(rw) * PI / 2.0 + PI / 2.0)
+            w[i] = f32(sin(PI / 2.0 * s * s))
+    w
+
+# ---------------- Ogg pages ----------------
+# the packets of the file's first stream, and the last page's granule position (its length in
+# samples)
+__ogg_packets = (f: u8[]) -> (u8[][], int, str):
+    packets: u8[][]
+    cur: u8[]
+    serial = -1
+    granule = -1
+    if f.len() < 4 or f[0] != 'O' or f[1] != 'g' or f[2] != 'g' or f[3] != 'S': return (packets, 0, "not an Ogg file")
+    p = 0
+    loop p + 27 <= f.len():
+        if f[p] != 'O' or f[p + 1] != 'g' or f[p + 2] != 'g' or f[p + 3] != 'S':
+            p += 1                      # (resynchronize)
+            continue
+        nseg = int(f[p + 26])
+        if p + 27 + nseg > f.len(): break
+        sn = int(f[p + 14]) | (int(f[p + 15]) << 8) | (int(f[p + 16]) << 16) | (int(f[p + 17]) << 24)
+        g = 0
+        loop k in [0..8): g = g | (int(f[p + 6 + k]) << (8 * k))
+        if serial < 0: serial = sn
+        body = p + 27 + nseg
+        total = 0
+        loop k in [0..nseg): total += int(f[p + 27 + k])
+        if body + total > f.len(): break
+        if sn == serial:
+            if g >= 0: granule = g
+            q = body
+            loop k in [0..nseg):
+                l = int(f[p + 27 + k])
+                loop i in [0..l): cur.push(f[q + i])
+                q += l
+                if l < 255:
+                    packets.push(cur)
+                    cur = []
+        p = body + total
+    (packets, granule, "")
+
+# a decoder that goes a packet at a time (load_ogg runs it to the end; music plays as it goes)
+struct __VDec:
+    v: __VState
+    packets: u8[][]
+    granule: int                # the stream's length in samples (from its last page; 0: unknown)
+    next = 3                    # the next packet (the first three are headers)
+    ch = 0
+    mdct0: __VMdct
+    mdct1: __VMdct
+    bufs: f32[][]               # two blocks per channel, the last one and this one, taking turns:
+    which = 0                   # bufs[which * ch + c] is this one
+    spec: f32[]
+    prev_n = 0
+    floors: f32[][]
+    vecs: f32[][]
+    block: f32[]
+    windows: f32[][]            # short, then long by the flags of its neighbors
+    mode_bits = 0
+    out: f32[]                  # samples made and not taken yet (interleaved, ch of them)
+    made = 0                    # frames made since the start
+    error = ""
+
+__vdec_open = (file: u8[]) -> __VDec:
+    v = __VState()
+    pk = __ogg_packets(file)
+    d = __VDec(v, pk.0, pk.1, 3, 0, __vmdct_for(64), __vmdct_for(64), [], 0, [], 0, [], [], [], [], 0, [], 0, pk.2)
+    if d.error != "": return d
+    packets = pk.0
+    if packets.len() < 3:
+        d.error = "not an Ogg Vorbis file (it has no Vorbis headers)"
+        return d
+    # identification
+    b = __vbits_of(packets[0])
+    if __vget(b, 8) != 1 or packets[0].len() < 30 or packets[0][1] != 'v' or packets[0][2] != 'o':
+        d.error = "not an Ogg Vorbis file (it may be Opus or FLAC in Ogg)"
+        return d
+    loop k in [0..6): __vget(b, 8)
+    __vget(b, 32)
+    v.channels = __vget(b, 8)
+    v.rate = __vget(b, 32)
+    __vget(b, 32)
+    __vget(b, 32)
+    __vget(b, 32)
+    v.bs0 = 1 << __vget(b, 4)
+    v.bs1 = 1 << __vget(b, 4)
+    if v.channels < 1 or v.rate < 1 or v.bs0 < 64 or v.bs1 < v.bs0 or v.bs1 > 8192:
+        d.error = "the Vorbis header is damaged"
+        return d
+    # setup (packets[1] is the comments)
+    b = __vbits_of(packets[2])
+    if __vget(b, 8) != 5:
+        d.error = "the Vorbis setup header is missing"
+        return d
+    loop k in [0..6): __vget(b, 8)
+    __vread_setup(b, v)
+    if v.error != "":
+        d.error = v.error
+        return d
+    d.v = v
+    ch = v.channels
+    d.ch = ch
+    d.mdct0 = __vmdct_for(v.bs0)
+    d.mdct1 = __vmdct_for(v.bs1)
+    loop c in [0..2 * ch): d.bufs.push(fill(f32(0), v.bs1))
+    d.spec = fill(f32(0), v.bs1 / 2)
+    loop c in [0..ch):
+        d.floors.push(fill(f32(0), v.bs1 / 2))
+        d.vecs.push(fill(f32(0), v.bs1 / 2))
+    d.block = fill(f32(0), v.bs1)
+    d.windows = [[], [], [], [], []]
+    d.mode_bits = __vilog(v.modes.len() - 1)
+    d
+
+# back to the start (for music that loops; what is in d.out stays, the start comes after it)
+__vdec_rewind = (d: mut __VDec):
+    d.next = 3
+    d.prev_n = 0
+    d.made = 0
+
+# decode the next packet into d.out; false at the end of the stream
+__vdec_packet = (d: mut __VDec) -> bool:
+    if d.error != "" or d.next >= d.packets.len(): return false
+    v = d.v
+    ch = d.ch
+    before = d.out.len()
+    __vdec_one(d, v, ch)
+    d.next += 1
+    # (the last page says how long it really is)
+    made = (d.out.len() - before) / max(ch, 1)
+    if d.granule > 0 and d.made + made > d.granule:
+        keep = max(d.granule - d.made, 0)
+        d.out.truncate(before + keep * ch)
+        made = keep
+    d.made += made
+    true
+
+__vdec_one = (d: mut __VDec, v: __VState, ch: int):
+    b = __vbits_of(d.packets[d.next])
+    if d.packets[d.next].len() == 0 or __vget(b, 1) != 0: return
+    mi = __vget(b, d.mode_bits)
+    if mi >= v.modes.len(): return
+    mode = v.modes[mi]
+    n = v.bs0
+    if mode.long: n = v.bs1
+    n2 = n / 2
+    pl = false
+    nl = false
+    if mode.long:
+        pl = __vget(b, 1) == 1
+        nl = __vget(b, 1) == 1
+    map = v.maps[mode.mapping]
+    # floors
+    silent = fill(false, ch)
+    loop c in [0..ch):
+        f = v.floors[map.sfloor[map.mux[c]]]
+        silent[c] = not __vfloor_curve(b, v, f, d.floors[c], n2)
+    # (a channel coupled with one that is not silent is decoded too)
+    loop s in [0..map.mags.len()):
+        if not silent[map.mags[s]] or not silent[map.angs[s]]:
+            silent[map.mags[s]] = false
+            silent[map.angs[s]] = false
+    loop c in [0..ch):
+        loop i in [0..n2): d.vecs[c][i] = 0.0
+    # residues, a submap at a time
+    loop s in [0..map.sresidue.len()):
+        r = v.residues[map.sresidue[s]]
+        idx: int[]
+        loop c in [0..ch):
+            if map.mux[c] == s: idx.push(c)
+        if r.kind == 2:
+            any = false
+            loop c in idx:
+                if not silent[c]: any = true
+            if not any: continue
+            k = idx.len()
+            inter: f32[][] = [fill(f32(0), n2 * k)]
+            __vresidue(b, v, r, inter, [false], n2 * k, 1)
+            loop j in 0.. and c in idx:
+                loop i in [0..n2): d.vecs[c][i] = inter[0][i * k + j]
+        else:
+            sub: f32[][]
+            skip: bool[]
+            loop c in idx:
+                sub.push(fill(f32(0), n2))
+                skip.push(silent[c])
+            __vresidue(b, v, r, sub, skip, n2, r.kind)
+            loop j in 0.. and c in idx:
+                loop i in [0..n2): d.vecs[c][i] = sub[j][i]
+    # inverse coupling
+    s = map.mags.len() - 1
+    loop s >= 0:
+        mc = map.mags[s]
+        ac = map.angs[s]
+        loop i in [0..n2):
+            m = d.vecs[mc][i]
+            a = d.vecs[ac][i]
+            if m > 0.0:
+                if a > 0.0:
+                    d.vecs[ac][i] = m - a
+                else:
+                    d.vecs[ac][i] = m
+                    d.vecs[mc][i] = m + a
+            else:
+                if a > 0.0:
+                    d.vecs[ac][i] = m + a
+                else:
+                    d.vecs[ac][i] = m
+                    d.vecs[mc][i] = m - a
+        s -= 1
+    # floor times residue, back to samples, windowed, overlapped with the last block
+    wi = 0
+    if mode.long: wi = 1 + (int(pl) * 2) + int(nl)
+    if d.windows[wi].len() == 0: d.windows[wi] = __vwindow(n, v.bs0, mode.long, pl, nl)
+    w = d.windows[wi]
+    cur0 = d.which * ch
+    prev0 = (1 - d.which) * ch
+    loop c in [0..ch):
+        if silent[c]:
+            loop i in [0..n2): d.spec[i] = 0.0
+        else:
+            loop i in [0..n2): d.spec[i] = d.vecs[c][i] * d.floors[c][i]
+        if mode.long: __vimdct(d.mdct1, d.spec, d.block)
+        else: __vimdct(d.mdct0, d.spec, d.block)
+        loop i in [0..n): d.bufs[cur0 + c][i] = d.block[i] * w[i]
+    if d.prev_n > 0:
+        count = d.prev_n / 4 + n / 4
+        shift = d.prev_n * 3 / 4 - n / 4
+        loop i in [0..count):
+            pp = d.prev_n / 2 + i
+            q = pp - shift
+            loop c in [0..ch):
+                sample = f32(0)
+                if pp < d.prev_n: sample = d.bufs[prev0 + c][pp]
+                if q >= 0 and q < n: sample += d.bufs[cur0 + c][q]
+                d.out.push(sample)
+    d.which = 1 - d.which
+    d.prev_n = n
+
+__ogg_decode = (file: u8[]) -> OggAudio:
+    d = __vdec_open(file)
+    out = OggAudio(d.v.channels, d.v.rate, [], d.error)
+    if d.error != "": return out
+    if d.granule > 0 and d.granule < (1 << 31): d.out.reserve(d.granule * d.ch + d.v.bs1 * d.ch)
+    loop __vdec_packet(d): pass
+    out.samples = d.out
+    out

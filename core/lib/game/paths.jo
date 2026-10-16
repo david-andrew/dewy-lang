@@ -1,0 +1,280 @@
+# Paths over a grid, for enemies finding their way round walls: the grid's cells are open or
+# blocked, and path_step() gives, from anywhere, the next point to walk to on the way to a goal.
+# The steps to each goal are worked out once (a flood over the open cells, eight ways round:
+# diagonally only where both sides are open, about 1 ms for 128 x 128) and kept, for up to 256
+# goals, until the grid changes (any set_open forgets them all). Many units sharing a few goals
+# is what it is for; each unit with a goal of its own floods the grid for each.
+#
+#   grid = path_grid(40, 30, 16.0)                  # 40 by 30 cells, 16 units across
+#   set_open(grid, 3, 4, false)                     # a wall there
+#   way = path_step(grid, enemy, player)            # walk toward this
+#
+# Positions are vec2: x and y in a 2D game; on the ground of a 3D one, x and z. origin is
+# where the grid's first cell starts (its corner with the least x and y). A game played on
+# the cells themselves (a roguelike) gives them as ivec2: path_step(grid, monster, player,
+# taken = others) is the next cell. field_of_view and line_cells are below.
+
+struct PathGrid:
+    width: int
+    height: int
+    cell: f64
+    origin: vec2
+    open: bool[]                # by cell: x + y * width
+    fields: {int: int[]} = {}   # (steps to a goal from every cell, by the goal's cell)
+
+# a grid with every cell open
+path_grid = (width: int, height: int, cell: f64 = 1.0, origin: vec2 = vec2(0, 0)) -> PathGrid:
+    PathGrid(width, height, cell, origin, fill(true, width * height))
+
+set_open = (g: mut PathGrid, x: int, y: int, open: bool):
+    if x < 0 or y < 0 or x >= g.width or y >= g.height: return
+    if g.open[x + y * g.width] == open: return
+    g.open[x + y * g.width] = open
+    g.fields.clear()
+
+# whether a cell is open (outside the grid: no)
+is_open = (g: PathGrid, x: int, y: int) -> bool:
+    if x < 0 or y < 0 or x >= g.width or y >= g.height: return false
+    g.open[x + y * g.width]
+
+# the cell a point is in (kept within the grid), and the middle of a cell
+path_cell = (g: PathGrid, p: vec2) -> ivec2:
+    x = clamp(int(floor(f64(p.x - g.origin.x) / g.cell)), 0, g.width - 1)
+    y = clamp(int(floor(f64(p.y - g.origin.y) / g.cell)), 0, g.height - 1)
+    ivec2(i32(x), i32(y))
+
+cell_center = (g: PathGrid, c: ivec2) -> vec2:
+    g.origin + vec2(f32((f64(c.x) + 0.5) * g.cell), f32((f64(c.y) + 0.5) * g.cell))
+
+# the open cell nearest c, looking up to `reach` cells away (c itself when nothing is open)
+nearest_open = (g: PathGrid, c: ivec2, reach: int = 4) -> ivec2:
+    if is_open(g, int(c.x), int(c.y)): return c
+    loop r in [1..reach + 1):
+        found = c
+        best = 1000000
+        loop dy in [-r..r + 1):
+            loop dx in [-r..r + 1):
+                x = int(c.x) + dx
+                y = int(c.y) + dy
+                if is_open(g, x, y) and dx * dx + dy * dy < best:
+                    found = ivec2(i32(x), i32(y))
+                    best = dx * dx + dy * dy
+        if best < 1000000: return found
+    c
+
+__path_dirs = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+# whether a step of (dx, dy) from (x, y) may be taken: to an open cell, and diagonally only
+# past two open sides
+__path_can = (g: PathGrid, x: int, y: int, dx: int, dy: int) -> bool:
+    if not is_open(g, x + dx, y + dy): return false
+    dx == 0 or dy == 0 or (is_open(g, x + dx, y) and is_open(g, x, y + dy))
+
+# steps to the goal cell from every cell (unreachable: a million): a flood, breadth first, its
+# eight ways out of a cell tested in place (a 128 x 128 grid in about 1 ms)
+__path_field = (g: mut PathGrid, goal: int) -> int[]:
+    if let f = g.fields.get(goal): return f
+    if g.fields.len() > 256: g.fields.clear()
+    w = g.width
+    h = g.height
+    open = g.open
+    dist = fill(1000000, w * h)
+    dist[goal] = 0
+    queue = fill(0, w * h)
+    queue[0] = goal
+    qn = 1
+    k = 0
+    last_row = w * (h - 1)
+    loop k < qn:
+        c = queue[k]
+        k += 1
+        x = c % w
+        nd = dist[c] + 1
+        l = x > 0 and open[c - 1]
+        r = x < w - 1 and open[c + 1]
+        u = c >= w and open[c - w]
+        dn = c < last_row and open[c + w]
+        if l and dist[c - 1] > nd:
+            dist[c - 1] = nd
+            queue[qn] = c - 1
+            qn += 1
+        if r and dist[c + 1] > nd:
+            dist[c + 1] = nd
+            queue[qn] = c + 1
+            qn += 1
+        if u and dist[c - w] > nd:
+            dist[c - w] = nd
+            queue[qn] = c - w
+            qn += 1
+        if dn and dist[c + w] > nd:
+            dist[c + w] = nd
+            queue[qn] = c + w
+            qn += 1
+        # (diagonally only past two open sides)
+        if l and u and open[c - w - 1] and dist[c - w - 1] > nd:
+            dist[c - w - 1] = nd
+            queue[qn] = c - w - 1
+            qn += 1
+        if r and u and open[c - w + 1] and dist[c - w + 1] > nd:
+            dist[c - w + 1] = nd
+            queue[qn] = c - w + 1
+            qn += 1
+        if l and dn and open[c + w - 1] and dist[c + w - 1] > nd:
+            dist[c + w - 1] = nd
+            queue[qn] = c + w - 1
+            qn += 1
+        if r and dn and open[c + w + 1] and dist[c + w + 1] > nd:
+            dist[c + w + 1] = nd
+            queue[qn] = c + w + 1
+            qn += 1
+    g.fields[goal] = dist
+    dist
+
+# how many steps from one point to another over open cells (-1: there is no way)
+path_distance = (g: mut PathGrid, from: vec2, to: vec2) -> int:
+    goal = nearest_open(g, path_cell(g, to))
+    start = nearest_open(g, path_cell(g, from))
+    f = __path_field(g, int(goal.x) + int(goal.y) * g.width)
+    d = f[int(start.x) + int(start.y) * g.width]
+    if d >= 1000000: return -1
+    d
+
+# Where to head from `from` on the way to `to`: the middle of the next cell, or `to` itself
+# when it is in the same or the next cell (or cannot be reached). Off the open cells (pushed
+# into a corner, or a goal on a crate), the nearest open cell stands in.
+path_step = (g: mut PathGrid, from: vec2, to: vec2) -> vec2:
+    if f64(length(to - from)) < g.cell * 1.5: return to
+    goal = nearest_open(g, path_cell(g, to))
+    if not is_open(g, int(goal.x), int(goal.y)): return to
+    f = __path_field(g, int(goal.x) + int(goal.y) * g.width)
+    c = path_cell(g, from)
+    if not is_open(g, int(c.x), int(c.y)):
+        o = nearest_open(g, c)
+        if o != c: return cell_center(g, o)
+    x = int(c.x)
+    y = int(c.y)
+    best = x + y * g.width
+    loop d in __path_dirs:
+        if not __path_can(g, x, y, d.0, d.1): continue
+        n = (y + d.1) * g.width + x + d.0
+        if f[n] < f[best]: best = n
+    if best == x + y * g.width: return to
+    cell_center(g, ivec2(i32(best % g.width), i32(best / g.width)))
+
+# ---- in cells, for games on a grid (a roguelike's monsters) ----
+
+# the next cell on the way from one cell to another: `to` itself when it is next to `from` (a
+# step onto it: a bump, an attack), `from` when there is no way. taken: cells it may not step
+# to (other monsters): it takes the best of the free cells that still get closer, so a crowd
+# goes round each other
+path_step = (g: mut PathGrid, from: ivec2, to: ivec2, taken: ivec2[] = []) -> ivec2:
+    if from == to or not is_open(g, int(to.x), int(to.y)): return from
+    x = int(from.x)
+    y = int(from.y)
+    if abs(int(to.x) - x) <= 1 and abs(int(to.y) - y) <= 1 and __path_can(g, x, y, int(to.x) - x, int(to.y) - y): return to
+    f = __path_field(g, int(to.x) + int(to.y) * g.width)
+    here = 1000000
+    if is_open(g, x, y): here = f[x + y * g.width]
+    best = -1
+    loop d in __path_dirs:
+        if not __path_can(g, x, y, d.0, d.1): continue
+        n = (y + d.1) * g.width + x + d.0
+        if f[n] >= here or (best >= 0 and f[n] >= f[best]): continue
+        c = ivec2(i32(x + d.0), i32(y + d.1))
+        if taken.contains(c): continue
+        best = n
+    if best < 0: return from
+    ivec2(i32(best % g.width), i32(best / g.width))
+
+# how many steps from one cell to another (-1: there is no way)
+path_distance = (g: mut PathGrid, from: ivec2, to: ivec2) -> int:
+    if not is_open(g, int(to.x), int(to.y)) or not is_open(g, int(from.x), int(from.y)): return -1
+    d = __path_field(g, int(to.x) + int(to.y) * g.width)[int(from.x) + int(from.y) * g.width]
+    if d >= 1000000: return -1
+    d
+
+# the steps to a goal cell from every cell (x + y * width), as path_step follows them: a
+# Dijkstra map (a million where there is no way). For several goals at once, or to flee
+# (step to where the number is larger), read it directly
+path_field = (g: mut PathGrid, goal: ivec2) -> int[]:
+    if not is_open(g, int(goal.x), int(goal.y)): return fill(1000000, g.width * g.height)
+    __path_field(g, int(goal.x) + int(goal.y) * g.width)
+
+# ---- what can be seen: field of view and lines over a grid ----
+
+# the cells seen from a cell (x + y * width): those within radius cells that a line from it
+# reaches past no opaque cell (the opaque cells it reaches are seen too: walls show). Shadows
+# are cast as a roguelike's are (recursive shadowcasting)
+field_of_view = (width: int, height: int, opaque: bool[], from: ivec2, radius: int) -> bool[]:
+    vis = fill(false, width * height)
+    x = int(from.x)
+    y = int(from.y)
+    if x < 0 or y < 0 or x >= width or y >= height: return vis
+    vis[x + y * width] = true
+    loop o in [0..8):
+        __fov_cast(vis, width, height, opaque, x, y, 1, 1.0, 0.0, radius, __FOV_XX[o], __FOV_XY[o], __FOV_YX[o], __FOV_YY[o])
+    vis
+
+# the same over a path grid, its blocked cells opaque (walls block sight as they block the way)
+field_of_view = (g: PathGrid, from: ivec2, radius: int) -> bool[]:
+    field_of_view(g.width, g.height, [loop o in g.open: not o], from, radius)
+
+__FOV_XX = [1, 0, 0, -1, -1, 0, 0, 1]
+__FOV_XY = [0, 1, -1, 0, 0, -1, 1, 0]
+__FOV_YX = [0, 1, 1, 0, 0, -1, -1, 0]
+__FOV_YY = [1, 0, 0, 1, -1, 0, 0, -1]
+
+# (one octant, from row `row` out, between two slopes; xx..yy turn it into place)
+__fov_cast = (vis: mut bool[], w: int, h: int, opaque: bool[], cx: int, cy: int, row: int, start0: f64, end: f64, radius: int, xx: int, xy: int, yx: int, yy: int):
+    start = start0
+    if start < end: return
+    r2 = radius * radius + radius
+    new_start = 0.0
+    loop j in [row..radius + 1):
+        dy = -j
+        blocked = false
+        loop dx in [-j..1):
+            x = cx + dx * xx + dy * xy
+            y = cy + dx * yx + dy * yy
+            l_slope = (f64(dx) - 0.5) / (f64(dy) + 0.5)
+            r_slope = (f64(dx) + 0.5) / (f64(dy) - 0.5)
+            if start < r_slope: continue
+            if end > l_slope: break
+            inside = x >= 0 and y >= 0 and x < w and y < h
+            if inside and dx * dx + dy * dy <= r2: vis[x + y * w] = true
+            wall = not inside or opaque[x + y * w]
+            if blocked:
+                if wall: new_start = r_slope
+                else:
+                    blocked = false
+                    start = new_start
+            else if wall and j < radius:
+                blocked = true
+                __fov_cast(vis, w, h, opaque, cx, cy, j + 1, start, l_slope, radius, xx, xy, yx, yy)
+                new_start = r_slope
+        if blocked: return
+
+# the cells a straight line from a to b goes through, both ends in (Bresenham's): for line
+# of sight, a thrown item's flight, a beam
+line_cells = (a: ivec2, b: ivec2) -> ivec2[]:
+    out: ivec2[]
+    x = int(a.x)
+    y = int(a.y)
+    dx = abs(int(b.x) - x)
+    dy = -abs(int(b.y) - y)
+    sx = 1
+    if int(b.x) < x: sx = -1
+    sy = 1
+    if int(b.y) < y: sy = -1
+    err = dx + dy
+    loop true:
+        out.push(ivec2(i32(x), i32(y)))
+        if x == int(b.x) and y == int(b.y): break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+    out

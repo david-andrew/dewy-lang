@@ -1,0 +1,417 @@
+# JSON: parse_json reads text into a Json value (or a JsonError saying where it is wrong), and
+# to_json writes one. Reading: get (a field), at (an element) and the as_* functions all take a
+# Json? and give an optional, so they chain, and a missing piece anywhere gives none:
+#   j = parse_json(text)
+#   if j is JsonError: return j
+#   width = j.get("width").as_int() ?? 0
+#   name = j.get("layers").at(0).get("name").as_str() ?? "?"
+#   loop l in j.get("layers").as_list(): print(l.get("name").as_str() ?? "")
+# For JSON straight into your own structs and back, from_json[Config](text) and to_json(value)
+# are in "Saving, and values as text" (they give a TextError, with the same message, line, column).
+
+enum Json: null_, boolean(b: bool), number(n: f64), text(s: str), list(items: Json[]), object(keys: str[], values: Json[])
+
+struct JsonError:
+    message: str
+    line: int
+    column: int
+
+struct __JsonReader:
+    s: str
+    i = 0
+    err = ""
+
+parse_json = (s: str) -> Json | JsonError:
+    r = __JsonReader(s)
+    v = __json_value(r, 0)
+    __json_space(r)
+    if r.err == "" and r.i < len(s): r.err = "more after the end of the value"
+    if r.err != "":
+        line = 1
+        col = 1
+        loop k in [0..min(r.i, len(s))):
+            if s[k] == '\n':
+                line += 1
+                col = 1
+            else: col += 1
+        return JsonError(r.err, line, col)
+    return v
+
+__json_space = (r: mut __JsonReader):
+    loop r.i < len(r.s) and is_space(r.s[r.i]): r.i += 1
+
+__json_fail = (r: mut __JsonReader, msg: str) -> Json:
+    if r.err == "": r.err = msg
+    Json.null_
+
+__json_value = (r: mut __JsonReader, depth: int) -> Json:
+    __json_space(r)
+    if r.i >= len(r.s): return __json_fail(r, "a value was expected, found the end")
+    if depth > 500: return __json_fail(r, "nested too deeply")
+    c = r.s[r.i]
+    if c == '\{':
+        r.i += 1
+        keys: str[]
+        values: Json[]
+        __json_space(r)
+        if r.i < len(r.s) and r.s[r.i] == '}':
+            r.i += 1
+            return Json.object(keys, values)
+        loop r.err == "":
+            __json_space(r)
+            if r.i >= len(r.s) or r.s[r.i] != '"': return __json_fail(r, "a field name (in quotes) was expected")
+            keys.push(__json_string(r))
+            __json_space(r)
+            if r.i >= len(r.s) or r.s[r.i] != ':': return __json_fail(r, "':' was expected after a field name")
+            r.i += 1
+            values.push(__json_value(r, depth + 1))
+            __json_space(r)
+            if r.i < len(r.s) and r.s[r.i] == ',': r.i += 1
+            else if r.i < len(r.s) and r.s[r.i] == '}':
+                r.i += 1
+                return Json.object(keys, values)
+            else: return __json_fail(r, "',' or '}' was expected")
+        return Json.null_
+    if c == '[':
+        r.i += 1
+        items: Json[]
+        __json_space(r)
+        if r.i < len(r.s) and r.s[r.i] == ']':
+            r.i += 1
+            return Json.list(items)
+        loop r.err == "":
+            items.push(__json_value(r, depth + 1))
+            __json_space(r)
+            if r.i < len(r.s) and r.s[r.i] == ',': r.i += 1
+            else if r.i < len(r.s) and r.s[r.i] == ']':
+                r.i += 1
+                return Json.list(items)
+            else: return __json_fail(r, "',' or ']' was expected")
+        return Json.null_
+    if c == '"': return Json.text(__json_string(r))
+    # (infinity and NaN, which JSON leaves out, as JavaScript's and Python's write them)
+    if __json_word(r, "Infinity"): return Json.number(1e308 * 10.0)
+    if __json_word(r, "-Infinity"): return Json.number(-1e308 * 10.0)
+    if __json_word(r, "NaN"): return Json.number(0.0 / 0.0)
+    if c == '-' or is_digit(c):
+        start = r.i
+        r.i += 1
+        loop r.i < len(r.s) and (is_digit(r.s[r.i]) or r.s[r.i] == '.' or r.s[r.i] == 'e' or r.s[r.i] == 'E' or r.s[r.i] == '+' or r.s[r.i] == '-'): r.i += 1
+        if let n = to_float(r.s[start..r.i)): return Json.number(n)
+        r.i = start
+        return __json_fail(r, "not a number")
+    if __json_word(r, "true"): return Json.boolean(true)
+    if __json_word(r, "false"): return Json.boolean(false)
+    if __json_word(r, "null"): return Json.null_
+    __json_fail(r, "a value was expected")
+
+__json_word = (r: mut __JsonReader, w: str) -> bool:
+    if r.i + len(w) <= len(r.s) and r.s[r.i..r.i + len(w)) == w:
+        r.i += len(w)
+        return true
+    false
+
+__json_hex4 = (r: mut __JsonReader) -> int:
+    v = 0
+    loop k in [0..4):
+        if r.i >= len(r.s): return -1
+        c = r.s[r.i]
+        d = -1
+        if c >= '0' and c <= '9': d = int(c) - int('0')
+        else if c >= 'a' and c <= 'f': d = int(c) - int('a') + 10
+        else if c >= 'A' and c <= 'F': d = int(c) - int('A') + 10
+        if d < 0: return -1
+        v = v * 16 + d
+        r.i += 1
+    v
+
+__utf8_push = (b: mut u8[], cp: int):
+    if cp < 0x80: b.push(u8(cp))
+    else if cp < 0x800:
+        b.push(u8(0xC0 | (cp >> 6)))
+        b.push(u8(0x80 | (cp & 0x3F)))
+    else if cp < 0x10000:
+        b.push(u8(0xE0 | (cp >> 12)))
+        b.push(u8(0x80 | ((cp >> 6) & 0x3F)))
+        b.push(u8(0x80 | (cp & 0x3F)))
+    else:
+        b.push(u8(0xF0 | (cp >> 18)))
+        b.push(u8(0x80 | ((cp >> 12) & 0x3F)))
+        b.push(u8(0x80 | ((cp >> 6) & 0x3F)))
+        b.push(u8(0x80 | (cp & 0x3F)))
+
+# (at the opening quote)
+__json_string = (r: mut __JsonReader) -> str:
+    r.i += 1
+    b: u8[]
+    loop true:
+        if r.i >= len(r.s):
+            __json_fail(r, "the text has no closing '\"'")
+            return ""
+        c = r.s[r.i]
+        r.i += 1
+        if c == '"': break
+        if c != '\\':
+            b.push(c)
+            continue
+        if r.i >= len(r.s): continue
+        e = r.s[r.i]
+        r.i += 1
+        if e == 'n': b.push('\n')
+        else if e == 't': b.push('\t')
+        else if e == 'r': b.push('\r')
+        else if e == 'b': b.push(u8(8))
+        else if e == 'f': b.push(u8(12))
+        else if e == 'u':
+            cp = __json_hex4(r)
+            if cp < 0:
+                __json_fail(r, "\\u needs four hex digits")
+                return ""
+            # (a surrogate pair: one character beyond the first 65536)
+            if cp >= 0xD800 and cp < 0xDC00 and __json_word(r, "\\u"):
+                lo = __json_hex4(r)
+                if lo >= 0xDC00 and lo < 0xE000: cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+            __utf8_push(b, cp)
+        else: b.push(e)
+    str_from_bytes(b)
+
+# ---------------- reading ----------------
+# an object's field
+get = (j: Json?, key: str) -> Json?:
+    if j is Json:
+        match j:
+            .object(keys, values):
+                loop i in 0.. and k in keys:
+                    if k == key: return values[i]
+            _: pass
+    none
+
+# a list's element
+at = (j: Json?, i: int) -> Json?:
+    if j is Json:
+        match j:
+            .list(items):
+                if i >= 0 and i < items.len(): return items[i]
+            _: pass
+    none
+
+as_num = (j: Json?) -> f64?:
+    if j is Json:
+        match j:
+            .number(n): return n
+            _: pass
+    none
+
+as_int = (j: Json?) -> int?:
+    if let n = as_num(j): return int(n)
+    none
+
+as_str = (j: Json?) -> str?:
+    if j is Json:
+        match j:
+            .text(s): return s
+            _: pass
+    none
+
+as_bool = (j: Json?) -> bool?:
+    if j is Json:
+        match j:
+            .boolean(b): return b
+            _: pass
+    none
+
+# a list's elements (none: an empty array)
+as_list = (j: Json?) -> Json[]:
+    if j is Json:
+        match j:
+            .list(items): return items
+            _: pass
+    []
+
+# an object's field names, in order
+keys = (j: Json?) -> str[]:
+    if j is Json:
+        match j:
+            .object(ks, vs): return ks
+            _: pass
+    []
+
+is_null = (j: Json?) -> bool:
+    if j is Json:
+        match j:
+            .null_: return true
+            _: pass
+    false
+
+# ---------------- writing ----------------
+# JSON text for a value (indent > 0: on several lines, indented by that many spaces)
+to_json = (j: Json, indent: int = 0) -> str:
+    b: u8[]
+    __json_write(b, j, indent, 0)
+    str_from_bytes(b)
+
+# any value as JSON: a struct as an object (by field name), an array, tuple or vector as a list,
+# a map as an object (its keys as text), none as null, an enum's variant as its name (one with
+# fields as {"name": [fields]}), and a Json inside it as itself; from_json[T] reads it back
+to_json[T] = (x: T, indent: int = 0) -> str: to_json(json_value(x), indent)
+
+# any value as a Json (what to_json writes for it)
+json_value[T] = (x: T) -> Json:
+    r = __TextIn(to_text(x))
+    __json_of_text(r)
+
+# (to_text's text of a value, as a Json)
+__json_of_text = (r: mut __TextIn) -> Json:
+    k = __tx_kind(r)
+    if k == 1:
+        s = ""
+        __read(r, s)
+        return Json.text(s)
+    if k == 2 or k == 3:
+        v = 0.0
+        __read(r, v)
+        return Json.number(v)
+    if k == 4:
+        __tx_word(r, false)
+        return Json.null_
+    if k == 5:
+        b = false
+        __read(r, b)
+        return Json.boolean(b)
+    if k == 8 or k == 10:
+        close: u8 = ']'
+        if k == 10: close = ')'
+        r.i += 1
+        items: Json[]
+        loop len(r.err) == 0:
+            __tx_eat(r, ',')
+            if __tx_eat(r, close): break
+            items.push(__json_of_text(r))
+        return Json.list(items)
+    if k == 9:
+        r.i += 1
+        keys: str[]
+        vals: Json[]
+        loop len(r.err) == 0:
+            __tx_eat(r, ',')
+            if __tx_eat(r, '}}'): break
+            kv = __json_of_text(r)
+            match kv:
+                .text(t): keys.push(t)
+                _: keys.push(to_json(kv))
+            __tx_want(r, ':')
+            vals.push(__json_of_text(r))
+        return Json.object(keys, vals)
+    if k == 6:
+        name = r.name
+        __tx_word(r, false)
+        __tx_want(r, '(')
+        # (a struct names its fields: Name(a=1); a vector or an enum's variant does not)
+        at = r.i
+        w = __tx_word(r, false)
+        named = len(w) > 0 and __tx_eat(r, '=')
+        r.i = at
+        keys: str[]
+        vals: Json[]
+        loop len(r.err) == 0:
+            __tx_eat(r, ',')
+            if __tx_eat(r, ')'): break
+            if named:
+                keys.push(__tx_word(r, false))
+                __tx_want(r, '=')
+            vals.push(__json_of_text(r))
+        if named: return Json.object(keys, vals)
+        if starts_with(name, "vec") or starts_with(name, "ivec") or name == "mat4": return Json.list(vals)
+        # (a Json inside the value: what it stands for)
+        if vals.len() == 1 and (name == "boolean" or name == "number" or name == "text" or name == "list"): return vals[0]
+        if vals.len() == 2 and name == "object":
+            match vals[0]:
+                .list(ks):
+                    match vals[1]:
+                        .list(vs):
+                            names: str[]
+                            loop kj in ks:
+                                match kj:
+                                    .text(t): names.push(t)
+                                    _: names.push(to_json(kj))
+                            return Json.object(names, vs)
+                        _: pass
+                _: pass
+        return Json.object([name], [Json.list(vals)])
+    if k == 7:
+        w = __tx_word(r, false)
+        if w == "null_": return Json.null_
+        return Json.text(w)
+    __tx_fail(r, "a value that is not JSON")
+    Json.null_
+
+__json_put = (b: mut u8[], s: str):
+    loop k in [0..len(s)): b.push(s[k])
+
+__json_newline = (b: mut u8[], indent: int, level: int):
+    if indent <= 0: return
+    b.push('\n')
+    loop k in [0..indent * level): b.push(' ')
+
+__json_write_str = (b: mut u8[], s: str):
+    b.push('"')
+    loop k in [0..len(s)):
+        c = s[k]
+        if c == '"' or c == '\\':
+            b.push('\\')
+            b.push(c)
+        else if c == '\n': __json_put(b, "\\n")
+        else if c == '\t': __json_put(b, "\\t")
+        else if c == '\r': __json_put(b, "\\r")
+        else if c < u8(32):
+            __json_put(b, "\\u00")
+            b.push("0123456789abcdef"[int(c) >> 4])
+            b.push("0123456789abcdef"[int(c) & 15])
+        else: b.push(c)
+    b.push('"')
+
+__json_write = (b: mut u8[], j: Json, indent: int, level: int):
+    match j:
+        .null_: __json_put(b, "null")
+        .boolean(v):
+            if v: __json_put(b, "true")
+            else: __json_put(b, "false")
+        .number(n):
+            # (whole numbers without a fraction; JSON has no infinity or NaN: written as
+            # Python's json and JavaScript's numbers name them, and read back)
+            if n != n: __json_put(b, "NaN")
+            else if n - n != 0.0 and n > 0.0: __json_put(b, "Infinity")
+            else if n - n != 0.0: __json_put(b, "-Infinity")
+            else if n == floor(n) and abs(n) <= 9007199254740992.0: __json_put(b, "{int(n)}")      # (2^53: every whole number below is exact)
+            else: __json_put(b, "{n}")
+        .text(s): __json_write_str(b, s)
+        .list(items):
+            # (a list of numbers, bools and nulls stays on one line: a map's tiles are rows,
+            # not one number a line)
+            flat = true
+            loop x in items:
+                match x:
+                    .list(_): flat = false
+                    .object(_, _): flat = false
+                    .text(_): flat = false
+                    _: pass
+            b.push('[')
+            loop i in 0.. and x in items:
+                if i > 0:
+                    b.push(',')
+                    if flat and indent > 0: b.push(' ')
+                if not flat: __json_newline(b, indent, level + 1)
+                __json_write(b, x, indent, level + 1)
+            if items.len() > 0 and not flat: __json_newline(b, indent, level)
+            b.push(']')
+        .object(ks, vs):
+            b.push('\{')
+            loop i in 0.. and k in ks:
+                if i > 0: b.push(',')
+                __json_newline(b, indent, level + 1)
+                __json_write_str(b, k)
+                b.push(':')
+                if indent > 0: b.push(' ')
+                __json_write(b, vs[i], indent, level + 1)
+            if ks.len() > 0: __json_newline(b, indent, level)
+            b.push('}')

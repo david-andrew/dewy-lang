@@ -1,0 +1,14 @@
+# requires: sloppy (mut x in xs in a combined loop: x stands for the element itself)
+struct E:
+    hp = 10
+es = [E(), E(), E()]
+loop i in 0.. and mut e in es: e.hp -= i
+print(es)
+xs = [1, 2, 3, 4]
+loop i in 0.. and mut x in xs and i < 2: x *= 10
+print(xs)
+grow = (ys: mut int[]):
+    loop k in [0..10) and mut y in ys: y += k
+zs = [0, 0, 0]
+grow(zs)
+print(zs)

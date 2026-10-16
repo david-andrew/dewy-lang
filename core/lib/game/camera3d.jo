@@ -1,0 +1,192 @@
+# Cameras that the player moves (3D): an orbit camera, around a point (to look at a model, a
+# board, a level from above), and a fly camera (to move through a scene). Each is a value the
+# game keeps: update it with the frame's input, then make it the camera.
+#
+#   cam = orbit_camera(vec3(0, 1, 0), 12.0)
+#   update = (dt: f64): update(cam, dt)
+#   draw = ():
+#       camera3d(cam)
+#       draw_mesh(...)
+
+# Around target, at distance: dragging with the left or right mouse button (or the right stick)
+# turns it, the wheel (or the left stick up and down) brings it closer or further.
+struct OrbitCamera:
+    target: vec3
+    distance: f64 = 10.0
+    yaw: f64 = 0.0                 # around the vertical axis, in radians (0: from +z)
+    pitch: f64 = 0.4               # above the horizon, in radians
+    min_distance: f64 = 1.0
+    max_distance: f64 = 200.0
+    turn_speed: f64 = 0.006        # radians per pixel the mouse moves
+    smooth: f64 = 14.0             # how quickly it follows (0: at once)
+    drag_left = true               # a left-button drag turns it (false: only the right, the left left to the game)
+    shown_yaw: f64 = 0.0           # (where it is now, on its way to yaw, pitch and distance)
+    shown_pitch: f64 = 0.4
+    shown_distance: f64 = 10.0
+
+orbit_camera = (target: vec3 = vec3(0, 0, 0), distance: f64 = 10.0, yaw: f64 = 0.0, pitch: f64 = 0.4) -> OrbitCamera:
+    c = OrbitCamera(target, distance)
+    c.yaw = yaw
+    c.pitch = pitch
+    c.shown_yaw = yaw
+    c.shown_pitch = pitch
+    c.shown_distance = distance
+    c
+
+update = (c: mut OrbitCamera, dt: f64):
+    if (c.drag_left and mouse_down(.left)) or mouse_down(.right):
+        d = mouse_delta()
+        c.yaw -= f64(d.x) * c.turn_speed
+        c.pitch += f64(d.y) * c.turn_speed
+    s = right_stick()
+    c.yaw -= f64(s.x) * 2.5 * dt
+    c.pitch -= f64(s.y) * 2.0 * dt
+    c.distance *= pow(0.88, mouse_wheel())
+    c.distance *= exp(f64(left_stick().y) * 1.5 * dt)
+    c.pitch = clamp(c.pitch, -1.5, 1.5)
+    c.distance = clamp(c.distance, c.min_distance, c.max_distance)
+    if c.smooth <= 0.0:
+        c.shown_yaw = c.yaw
+        c.shown_pitch = c.pitch
+        c.shown_distance = c.distance
+    else:
+        c.shown_yaw = approach(c.shown_yaw, c.yaw, c.smooth, dt)
+        c.shown_pitch = approach(c.shown_pitch, c.pitch, c.smooth, dt)
+        c.shown_distance = approach(c.shown_distance, c.distance, c.smooth, dt)
+
+# where the camera is
+position = (c: OrbitCamera) -> vec3:
+    cp = cos(c.shown_pitch)
+    off = vec3(f32(sin(c.shown_yaw) * cp), f32(sin(c.shown_pitch)), f32(cos(c.shown_yaw) * cp))
+    c.target + off * f32(c.shown_distance)
+
+camera3d = (c: OrbitCamera, fov_degrees: f64 = 60.0, near: f64 = 0.1, far: f64 = 500.0):
+    camera3d(position(c), c.target, fov_degrees, near, far)
+
+# Behind a target the game moves (a third-person camera): the mouse while it is locked
+# (mouse_lock()) or the right button is held, or the right stick, turns it around the target,
+# and the wheel brings it closer. Walk the player along flat_forward and flat_right, so that
+# ahead is where the camera looks:
+#
+#   cam = follow_camera(distance = 6.0)
+#   update = (dt: f64):
+#       a = input_axis()
+#       move = flat_forward(cam) * -a.y + flat_right(cam) * a.x     # (then move the player)
+#       update(cam, player_pos, dt)
+#       # kept out of walls: if let h = w.sphere_cast(aim(cam), position(cam), 0.2): pull_in(cam, h.fraction)
+#   draw = (): camera3d(cam)
+#
+# Its yaw is the other cameras': 0 looks along -z, more turns it left. Behind a vehicle (a chase
+# camera), give update the way it faces, in the same terms: it swings round behind it, smoothly
+# (chase: how quickly), `update(cam, kart.pos, dt, heading = kart.yaw)`.
+struct FollowCamera:
+    target: vec3                   # what it follows (update sets it)
+    distance: f64 = 6.0
+    height: f64 = 1.5              # how far above the target it aims
+    yaw: f64 = 0.0                 # 0: behind the target, looking along -z; more: turned left
+    pitch: f64 = 0.35              # looking down from above, in radians
+    min_pitch: f64 = -0.3
+    max_pitch: f64 = 1.3
+    min_distance: f64 = 2.0
+    max_distance: f64 = 20.0
+    turn_speed: f64 = 0.004        # radians per pixel the mouse moves
+    smooth: f64 = 12.0             # how quickly it follows the target (0: at once)
+    chase: f64 = 4.0               # how quickly it swings round behind a heading given to update
+    reach: f64 = 1.0               # (the share of its distance it may be out this frame: pull_in)
+    shown_target: vec3
+    shown_reach: f64 = 1.0
+    placed = false
+
+follow_camera = (distance: f64 = 6.0, yaw: f64 = 0.0, pitch: f64 = 0.35, height: f64 = 1.5) -> FollowCamera:
+    c = FollowCamera(vec3(0, 0, 0))
+    c.distance = distance
+    c.yaw = yaw
+    c.pitch = pitch
+    c.height = height
+    c
+
+update = (c: mut FollowCamera, target: vec3, dt: f64, heading: f64? = none):
+    if let h = heading: c.yaw = approach_angle(c.yaw, h, c.chase, dt)
+    if is_mouse_locked() or mouse_down(.right):
+        d = mouse_delta()
+        c.yaw -= f64(d.x) * c.turn_speed
+        c.pitch += f64(d.y) * c.turn_speed
+    s = right_stick()
+    c.yaw -= f64(s.x) * 2.5 * dt
+    c.pitch += f64(s.y) * 2.0 * dt
+    c.pitch = clamp(c.pitch, c.min_pitch, c.max_pitch)
+    c.distance = clamp(c.distance * pow(0.88, mouse_wheel()), c.min_distance, c.max_distance)
+    c.target = target
+    if not c.placed or c.smooth <= 0.0:
+        c.shown_target = target
+        c.placed = true
+    else: c.shown_target = vec3(f32(approach(f64(c.shown_target.x), f64(target.x), c.smooth, dt)), f32(approach(f64(c.shown_target.y), f64(target.y), c.smooth, dt)), f32(approach(f64(c.shown_target.z), f64(target.z), c.smooth, dt)))
+    # (back out slowly after a wall let it go; pull_in brings it in at once)
+    c.shown_reach = approach(c.shown_reach, c.reach, 4.0, dt)
+    c.reach = 1.0
+
+# a wall between aim(c) and position(c): only this share of the way out (a cast's fraction)
+pull_in = (c: mut FollowCamera, fraction: f64):
+    c.reach = clamp(fraction, 0.05, 1.0)
+    c.shown_reach = min(c.shown_reach, c.reach)
+
+# the point it looks at (above the target), and where it is
+aim = (c: FollowCamera) -> vec3: c.shown_target + vec3(0, f32(c.height), 0)
+position = (c: FollowCamera) -> vec3:
+    cp = cos(c.pitch)
+    off = vec3(f32(sin(c.yaw) * cp), f32(sin(c.pitch)), f32(cos(c.yaw) * cp))
+    aim(c) + off * f32(c.distance * c.shown_reach)
+
+# the way it looks along the ground, and its right (for walking where it looks)
+flat_forward = (c: FollowCamera) -> vec3: vec3(f32(-sin(c.yaw)), 0, f32(-cos(c.yaw)))
+flat_right = (c: FollowCamera) -> vec3: vec3(f32(cos(c.yaw)), 0, f32(-sin(c.yaw)))
+
+camera3d = (c: FollowCamera, fov_degrees: f64 = 60.0, near: f64 = 0.1, far: f64 = 500.0):
+    camera3d(position(c), aim(c), fov_degrees, near, far)
+
+# Through the scene: W A S D (or the arrows, or the left stick) move, Space and Q go up and
+# down, Shift is faster; the mouse looks around while the right button is held, or always when
+# the mouse is locked (mouse_lock()), as does the right stick.
+struct FlyCamera:
+    pos: vec3
+    yaw: f64 = 0.0                 # 0: looking toward -z
+    pitch: f64 = 0.0
+    speed: f64 = 8.0               # units per second (Shift: four times that)
+    turn_speed: f64 = 0.004
+
+fly_camera = (pos: vec3, yaw: f64 = 0.0, pitch: f64 = 0.0) -> FlyCamera:
+    c = FlyCamera(pos)
+    c.yaw = yaw
+    c.pitch = pitch
+    c
+
+# the way it looks (a unit vector), and its right
+forward = (c: FlyCamera) -> vec3:
+    cp = cos(c.pitch)
+    vec3(f32(-sin(c.yaw) * cp), f32(sin(c.pitch)), f32(-cos(c.yaw) * cp))
+right = (c: FlyCamera) -> vec3: vec3(f32(cos(c.yaw)), 0, f32(-sin(c.yaw)))
+
+update = (c: mut FlyCamera, dt: f64):
+    if mouse_down(.right) or is_mouse_locked():
+        d = mouse_delta()
+        c.yaw -= f64(d.x) * c.turn_speed
+        c.pitch -= f64(d.y) * c.turn_speed
+    rs = right_stick()
+    c.yaw -= f64(rs.x) * 2.5 * dt
+    c.pitch -= f64(rs.y) * 2.0 * dt
+    c.pitch = clamp(c.pitch, -1.55, 1.55)
+    move = left_stick()
+    if key_down(.w) or key_down(.up): move.y -= 1.0
+    if key_down(.s) or key_down(.down): move.y += 1.0
+    if key_down(.d) or key_down(.right): move.x += 1.0
+    if key_down(.a) or key_down(.left): move.x -= 1.0
+    up = 0.0
+    if key_down(.space): up += 1.0
+    if key_down(.q): up -= 1.0
+    if length(move) > 1.0: move = normalize(move)
+    v = c.speed
+    if key_down(.shift): v *= 4.0
+    c.pos += (forward(c) * (-move.y) + right(c) * move.x + vec3(0, f32(up), 0)) * f32(v * dt)
+
+camera3d = (c: FlyCamera, fov_degrees: f64 = 60.0, near: f64 = 0.1, far: f64 = 500.0):
+    camera3d(c.pos, c.pos + forward(c), fov_degrees, near, far)

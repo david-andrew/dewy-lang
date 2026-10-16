@@ -1,0 +1,72 @@
+# Data a program keeps between runs: saved games, settings, high scores.
+#
+#   save_data("progress", "{level}\n{coins}")
+#   if let s = load_data("progress"): ...
+#
+# Each program has its own place, named after it (PROGRAM_NAME: the build block's `name`, else
+# the main file's name): on Linux ~/.local/share/<name>/ (or $XDG_DATA_HOME), on Windows
+# %APPDATA%\<name>\, on macOS ~/Library/Application Support/<name>/, in a web page the browser's storage for the page (it survives reloads and
+# restarts of the browser). SLOPPY_SAVE_DIR=/tmp/x puts it in /tmp/x/<name>/ instead (tests).
+# For a file the player names (an editor's levels), write the text yourself:
+# `write_file(path, to_text(level))` and `from_text[Level](read_file(path) ?? "")`.
+
+when TARGET == "wasm":
+    extern __wasm_save_set = (key: *u8, n: int, p: *u8, len: int) -> int
+    extern __wasm_save_get = (key: *u8, n: int, out: *u8, cap: int) -> int
+
+# the directory a program's data goes to (made when first written; "" in a web page)
+save_dir = () -> str:
+    if let d = env("SLOPPY_SAVE_DIR"):
+        if len(d) > 0: return "{d}/{PROGRAM_NAME}"
+    when TARGET == "windows":
+        base = env("APPDATA") ?? ""
+        if len(base) == 0: base = (env("USERPROFILE") ?? ".") + "\\AppData\\Roaming"
+        return "{base}\\{PROGRAM_NAME}"
+    else when TARGET == "linux":
+        base = env("XDG_DATA_HOME") ?? ""
+        if len(base) == 0: base = (env("HOME") ?? ".") + "/.local/share"
+        return "{base}/{PROGRAM_NAME}"
+    else when TARGET == "macos":
+        return (env("HOME") ?? ".") + "/Library/Application Support/{PROGRAM_NAME}"
+    else:
+        return ""
+
+# keep contents under name (a file name: no / or \); false if it could not be written
+save_data = (name: str, contents: str) -> bool:
+    if not __save_name_ok(name): return false
+    when TARGET == "wasm":
+        key = "{PROGRAM_NAME}/{name}"
+        return __wasm_save_set(data(key), len(key), data(contents), len(contents)) == 1
+    else:
+        d = save_dir()
+        make_dirs(d)
+        # (written beside, then renamed over the old one: a crash midway leaves the old data)
+        path = "{d}/{name}"
+        if not write_file(path + ".new", contents): return false
+        return rename_file(path + ".new", path)
+
+# what was kept under name; none if nothing was
+load_data = (name: str) -> str?:
+    if not __save_name_ok(name): return none
+    when TARGET == "wasm":
+        key = "{PROGRAM_NAME}/{name}"
+        b = __wasm_bytes((p: *u8, cap: int): __wasm_save_get(data(key), len(key), p, cap))
+        if b.len() == 0 and __wasm_save_get(data(key), len(key), data(b), 0) < 0: return none
+        return str_from_bytes(b)
+    else:
+        return read_file("{save_dir()}/{name}")
+
+# forget what was kept under name (a saved game, at the player's death); false if nothing was
+delete_data = (name: str) -> bool:
+    if not __save_name_ok(name): return false
+    when TARGET == "wasm":
+        key = "{PROGRAM_NAME}/{name}"
+        return __wasm_save_set(data(key), len(key), data(key), -1) == 1
+    else:
+        return delete_file("{save_dir()}/{name}")
+
+__save_name_ok = (name: str) -> bool:
+    if len(name) == 0 or name == "." or name == "..": return false
+    loop c in name:
+        if c == '/' or c == '\\' or c == ':' or c < ' ': return false
+    true

@@ -1,0 +1,381 @@
+# Vector and matrix math for the built-in vec2/vec3/vec4/mat4 types (f32 components).
+# mat4 is column-major: m[i] is column i.
+
+__fmt_f32 = (buf: mut u8[], x: f32): __fmt_float(buf, f64(x), true)
+__fmt_i32 = (buf: mut u8[], x: int): __fmt(buf, x)
+
+# column-major: each result column is a combination of a's columns (packed vector arithmetic)
+__mat4_mul = (out: *f32, a: *f32, b: *f32):
+    ac = a as *vec4
+    oc = out as *vec4
+    loop c in [0..4):
+        k = b + c * 4
+        oc[c] = ac[0] * k[0] + ac[1] * k[1] + ac[2] * k[2] + ac[3] * k[3]
+
+__mat4_mul_vec4 = (out: *f32, m: *f32, v: *f32):
+    mc = m as *vec4
+    (out as *vec4)[0] = mc[0] * v[0] + mc[1] * v[1] + mc[2] * v[2] + mc[3] * v[3]
+
+dot = (a: vec2, b: vec2) -> f32: a.x * b.x + a.y * b.y
+dot = (a: vec3, b: vec3) -> f32: a.x * b.x + a.y * b.y + a.z * b.z
+dot = (a: vec4, b: vec4) -> f32: a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+cross = (a: vec3, b: vec3) -> vec3: vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+cross = (a: vec2, b: vec2) -> f32: a.x * b.y - a.y * b.x
+length = (v: vec2) -> f32: sqrt(v.x * v.x + v.y * v.y)
+length = (v: vec3) -> f32: sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+length = (v: vec4) -> f32: sqrt(dot(v, v))
+length_sq = (v: vec2) -> f32: v.x * v.x + v.y * v.y
+length_sq = (v: vec3) -> f32: dot(v, v)
+distance = (a: vec2, b: vec2) -> f32: length(a - b)
+distance = (a: vec3, b: vec3) -> f32: length(a - b)
+normalize = (v: vec2) -> vec2:
+    l = length(v)
+    if l == 0.0: return v
+    v / l
+normalize = (v: vec3) -> vec3:
+    l = length(v)
+    if l == 0.0: return v
+    v / l
+normalize = (v: vec4) -> vec4:
+    l = length(v)
+    if l == 0.0: return v
+    v / l
+lerp = (a: f32, b: f32, t: f32) -> f32: a + (b - a) * t
+lerp = (a: vec2, b: vec2, t: f32) -> vec2: a + (b - a) * t
+lerp = (a: vec3, b: vec3, t: f32) -> vec3: a + (b - a) * t
+lerp = (a: vec4, b: vec4, t: f32) -> vec4: a + (b - a) * t
+mix = (a: f32, b: f32, t: f32) -> f32: a + (b - a) * t
+mix = (a: vec2, b: vec2, t: f32) -> vec2: a + (b - a) * t
+mix = (a: vec3, b: vec3, t: f32) -> vec3: a + (b - a) * t
+mix = (a: vec4, b: vec4, t: f32) -> vec4: a + (b - a) * t
+abs = (v: vec2) -> vec2: vec2(abs(v.x), abs(v.y))
+abs = (v: vec3) -> vec3: vec3(abs(v.x), abs(v.y), abs(v.z))
+min = (a: vec2, b: vec2) -> vec2: vec2(min(a.x, b.x), min(a.y, b.y))
+max = (a: vec2, b: vec2) -> vec2: vec2(max(a.x, b.x), max(a.y, b.y))
+min = (a: vec3, b: vec3) -> vec3: vec3(min(a.x, b.x), min(a.y, b.y), min(a.z, b.z))
+max = (a: vec3, b: vec3) -> vec3: vec3(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z))
+clamp = (v: vec2, lo: vec2, hi: vec2) -> vec2: vec2(clamp(v.x, lo.x, hi.x), clamp(v.y, lo.y, hi.y))
+clamp = (v: vec3, lo: f32, hi: f32) -> vec3: vec3(clamp(v.x, lo, hi), clamp(v.y, lo, hi), clamp(v.z, lo, hi))
+clamp = (v: vec3, lo: vec3, hi: vec3) -> vec3: vec3(clamp(v.x, lo.x, hi.x), clamp(v.y, lo.y, hi.y), clamp(v.z, lo.z, hi.z))
+floor = (v: vec2) -> vec2: vec2(f32(floor(f64(v.x))), f32(floor(f64(v.y))))
+# GLSL's math on each part of a vector, as a shader writes it (there, GLSL's own)
+sin = (v: vec2) -> vec2: vec2(sin(v.x), sin(v.y))
+cos = (v: vec2) -> vec2: vec2(cos(v.x), cos(v.y))
+ceil = (v: vec2) -> vec2: vec2(f32(ceil(f64(v.x))), f32(ceil(f64(v.y))))
+pow = (v: vec2, e: vec2) -> vec2: vec2(pow(v.x, e.x), pow(v.y, e.y))
+step = (edge: vec2, x: vec2) -> vec2: vec2(step(edge.x, x.x), step(edge.y, x.y))
+step = (edge: f32, x: vec2) -> vec2: vec2(step(edge, x.x), step(edge, x.y))
+smoothstep = (e0: vec2, e1: vec2, x: vec2) -> vec2: vec2(smoothstep(e0.x, e1.x, x.x), smoothstep(e0.y, e1.y, x.y))
+smoothstep = (e0: f32, e1: f32, x: vec2) -> vec2: vec2(smoothstep(e0, e1, x.x), smoothstep(e0, e1, x.y))
+mix = (a: vec2, b: vec2, t: vec2) -> vec2: a + (b - a) * t
+sin = (v: vec3) -> vec3: vec3(sin(v.x), sin(v.y), sin(v.z))
+cos = (v: vec3) -> vec3: vec3(cos(v.x), cos(v.y), cos(v.z))
+floor = (v: vec3) -> vec3: vec3(f32(floor(f64(v.x))), f32(floor(f64(v.y))), f32(floor(f64(v.z))))
+fract = (v: vec3) -> vec3: v - floor(v)
+ceil = (v: vec3) -> vec3: vec3(f32(ceil(f64(v.x))), f32(ceil(f64(v.y))), f32(ceil(f64(v.z))))
+pow = (v: vec3, e: vec3) -> vec3: vec3(pow(v.x, e.x), pow(v.y, e.y), pow(v.z, e.z))
+step = (edge: vec3, x: vec3) -> vec3: vec3(step(edge.x, x.x), step(edge.y, x.y), step(edge.z, x.z))
+step = (edge: f32, x: vec3) -> vec3: vec3(step(edge, x.x), step(edge, x.y), step(edge, x.z))
+smoothstep = (e0: vec3, e1: vec3, x: vec3) -> vec3: vec3(smoothstep(e0.x, e1.x, x.x), smoothstep(e0.y, e1.y, x.y), smoothstep(e0.z, e1.z, x.z))
+smoothstep = (e0: f32, e1: f32, x: vec3) -> vec3: vec3(smoothstep(e0, e1, x.x), smoothstep(e0, e1, x.y), smoothstep(e0, e1, x.z))
+mix = (a: vec3, b: vec3, t: vec3) -> vec3: a + (b - a) * t
+sin = (v: vec4) -> vec4: vec4(sin(v.x), sin(v.y), sin(v.z), sin(v.w))
+cos = (v: vec4) -> vec4: vec4(cos(v.x), cos(v.y), cos(v.z), cos(v.w))
+floor = (v: vec4) -> vec4: vec4(f32(floor(f64(v.x))), f32(floor(f64(v.y))), f32(floor(f64(v.z))), f32(floor(f64(v.w))))
+fract = (v: vec4) -> vec4: v - floor(v)
+ceil = (v: vec4) -> vec4: vec4(f32(ceil(f64(v.x))), f32(ceil(f64(v.y))), f32(ceil(f64(v.z))), f32(ceil(f64(v.w))))
+abs = (v: vec4) -> vec4: vec4(abs(v.x), abs(v.y), abs(v.z), abs(v.w))
+min = (a: vec4, b: vec4) -> vec4: vec4(min(a.x, b.x), min(a.y, b.y), min(a.z, b.z), min(a.w, b.w))
+max = (a: vec4, b: vec4) -> vec4: vec4(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z), max(a.w, b.w))
+pow = (v: vec4, e: vec4) -> vec4: vec4(pow(v.x, e.x), pow(v.y, e.y), pow(v.z, e.z), pow(v.w, e.w))
+step = (edge: vec4, x: vec4) -> vec4: vec4(step(edge.x, x.x), step(edge.y, x.y), step(edge.z, x.z), step(edge.w, x.w))
+step = (edge: f32, x: vec4) -> vec4: vec4(step(edge, x.x), step(edge, x.y), step(edge, x.z), step(edge, x.w))
+smoothstep = (e0: vec4, e1: vec4, x: vec4) -> vec4: vec4(smoothstep(e0.x, e1.x, x.x), smoothstep(e0.y, e1.y, x.y), smoothstep(e0.z, e1.z, x.z), smoothstep(e0.w, e1.w, x.w))
+smoothstep = (e0: f32, e1: f32, x: vec4) -> vec4: vec4(smoothstep(e0, e1, x.x), smoothstep(e0, e1, x.y), smoothstep(e0, e1, x.z), smoothstep(e0, e1, x.w))
+mix = (a: vec4, b: vec4, t: vec4) -> vec4: a + (b - a) * t
+smoothstep = (e0: f32, e1: f32, x: f32) -> f32:
+    t = clamp((x - e0) / (e1 - e0), f32(0), f32(1))
+    t * t * (3.0 - 2.0 * t)
+reflect = (d: vec3, n: vec3) -> vec3: d - n * (2.0 * dot(d, n))
+reflect = (d: vec2, n: vec2) -> vec2: d - n * (2.0 * dot(d, n))
+perp = (v: vec2) -> vec2: vec2(-v.y, v.x)
+angle = (v: vec2) -> f64: atan2(f64(v.y), f64(v.x))
+from_angle = (a: f64) -> vec2: vec2(f32(cos(a)), f32(sin(a)))
+rotate = (v: vec2, a: f64) -> vec2:
+    c = f32(cos(a))
+    s = f32(sin(a))
+    vec2(v.x * c - v.y * s, v.x * s + v.y * c)
+# a moved toward b by at most step (reaching it, not passing it): a steady speed, where approach eases in
+move_toward = (a: vec2, b: vec2, step: f32) -> vec2:
+    d = b - a
+    l = length(d)
+    if l <= step or l == 0.0: return b
+    a + d / l * step
+move_toward = (a: vec3, b: vec3, step: f64) -> vec3:
+    d = b - a
+    l = f64(length(d))
+    if l <= step or l == 0.0: return b
+    a + d * f32(step / l)
+move_toward = (a: f64, b: f64, step: f64) -> f64:
+    if abs(b - a) <= step: return b
+    if b > a: return a + step
+    a - step
+sinf = (x: f32) -> f32: f32(sin(f64(x)))
+cosf = (x: f32) -> f32: f32(cos(f64(x)))
+
+# ---------------- random points, directions and colors ----------------
+# a direction at a random angle (length 1)
+random_direction = () -> vec2:
+    a = random(0.0, TAU)
+    vec2(cos(a), sin(a))
+
+# a direction in 3D, all equally likely (length 1)
+random_direction_3d = () -> vec3:
+    y = random(-1.0, 1.0)
+    a = random(0.0, TAU)
+    r = sqrt(1.0 - y * y)
+    vec3(r * cos(a), y, r * sin(a))
+
+# a point in the rectangle between corners low and high
+random_point = (low: vec2, high: vec2) -> vec2: vec2(random(low.x, high.x), random(low.y, high.y))
+
+# a point inside the circle around center (spread evenly over it)
+random_in_circle = (center: vec2, radius: f64) -> vec2: center + random_direction() * radius * sqrt(random())
+
+# a color of a random hue (less saturation: paler; less value: darker)
+random_color = (saturation: f64 = 0.7, value: f64 = 1.0) -> vec4: hsv(random(), saturation, value)
+
+# ---------------- colors (vec4 rgba in 0..1) ----------------
+rgb = (r: f32, g: f32, b: f32) -> vec4: vec4(r, g, b, 1)
+rgba = (r: f32, g: f32, b: f32, a: f32) -> vec4: vec4(r, g, b, a)
+gray = (v: f32) -> vec4: vec4(v, v, v, 1)
+hex = (c: int) -> vec4: vec4(f32((c >> 16) & 255) / 255.0, f32((c >> 8) & 255) / 255.0, f32(c & 255) / 255.0, 1)
+# a color from CSS's hex digits: "#ff8000", "#f80", "#ff800080" (with alpha); white if it is not one
+hex = (s: str) -> vec4:
+    t = s
+    if len(t) > 0 and t[0] == '#': t = t[1..]
+    if len(t) == 3 or len(t) == 4:
+        # (one digit for each part: "f80" is "ff8800")
+        long = ""
+        loop c in t: long += byte_str(int(c)) + byte_str(int(c))
+        t = long
+    if len(t) != 6 and len(t) != 8: return vec4(1, 1, 1, 1)
+    v = 0
+    loop c in t:
+        d = 0
+        if c >= '0' and c <= '9': d = int(c) - '0'
+        else if c >= 'a' and c <= 'f': d = int(c) - 'a' + 10
+        else if c >= 'A' and c <= 'F': d = int(c) - 'A' + 10
+        else: return vec4(1, 1, 1, 1)
+        v = v * 16 + d
+    if len(t) == 6: return hex(v)
+    vec4(f32((v >> 24) & 255) / 255.0, f32((v >> 16) & 255) / 255.0, f32((v >> 8) & 255) / 255.0, f32(v & 255) / 255.0)
+hsv = (h: f64, s: f64, v: f64) -> vec4:
+    hh = mod(h, 1.0) * 6.0
+    i = int(hh)
+    f = hh - f64(i)
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    match i:
+        0: rgb(f32(v), f32(t), f32(p))
+        1: rgb(f32(q), f32(v), f32(p))
+        2: rgb(f32(p), f32(v), f32(t))
+        3: rgb(f32(p), f32(q), f32(v))
+        4: rgb(f32(t), f32(p), f32(v))
+        _: rgb(f32(v), f32(p), f32(q))
+with_alpha = (c: vec4, a: f32) -> vec4: vec4(c.x, c.y, c.z, a)
+lighten = (c: vec4, k: f32) -> vec4: vec4(c.x + (1.0 - c.x) * k, c.y + (1.0 - c.y) * k, c.z + (1.0 - c.z) * k, c.w)
+darken = (c: vec4, k: f32) -> vec4: vec4(c.x * (1.0 - k), c.y * (1.0 - k), c.z * (1.0 - k), c.w)
+
+const WHITE = vec4(1, 1, 1, 1)
+const BLACK = vec4(0, 0, 0, 1)
+const RED = vec4(0.9, 0.2, 0.2, 1)
+const GREEN = vec4(0.2, 0.8, 0.3, 1)
+const BLUE = vec4(0.2, 0.4, 0.9, 1)
+const YELLOW = vec4(1, 0.85, 0.2, 1)
+const ORANGE = vec4(1, 0.55, 0.15, 1)
+const PURPLE = vec4(0.6, 0.3, 0.8, 1)
+const CYAN = vec4(0.2, 0.85, 0.9, 1)
+const MAGENTA = vec4(0.9, 0.25, 0.75, 1)
+const GRAY = vec4(0.5, 0.5, 0.5, 1)
+const TRANSPARENT = vec4(0, 0, 0, 0)
+
+# ---------------- matrices ----------------
+mat4_identity = () -> mat4: mat4()
+
+translation = (t: vec3) -> mat4:
+    m = mat4()
+    m[3] = vec4(t, 1)
+    m
+
+scaling = (s: vec3) -> mat4:
+    m = mat4()
+    m[0] = vec4(s.x, 0, 0, 0)
+    m[1] = vec4(0, s.y, 0, 0)
+    m[2] = vec4(0, 0, s.z, 0)
+    m
+
+# the same in every direction
+scaling = (s: f64) -> mat4: scaling(vec3(f32(s), f32(s), f32(s)))
+
+rotation = (axis0: vec3, a: f64) -> mat4:
+    axis = normalize(axis0)
+    c = f32(cos(a))
+    s = f32(sin(a))
+    t = 1.0 - c
+    x = axis.x
+    y = axis.y
+    z = axis.z
+    m = mat4()
+    m[0] = vec4(t * x * x + c, t * x * y + s * z, t * x * z - s * y, 0)
+    m[1] = vec4(t * x * y - s * z, t * y * y + c, t * y * z + s * x, 0)
+    m[2] = vec4(t * x * z + s * y, t * y * z - s * x, t * z * z + c, 0)
+    m
+rotation_x = (a: f64) -> mat4: rotation(vec3(1, 0, 0), a)
+rotation_y = (a: f64) -> mat4: rotation(vec3(0, 1, 0), a)
+rotation_z = (a: f64) -> mat4: rotation(vec3(0, 0, 1), a)
+
+# the turn that points a model's front (-z, the way a camera looks) along dir, its top toward up: a
+# turret aimed at its target, a beam from a to b (`translation(a) * facing(b - a)`)
+facing = (dir: vec3, up: vec3 = vec3(0, 1, 0)) -> mat4:
+    z = normalize(-dir)
+    u = up
+    if length_sq(cross(u, z)) < 1e-8: u = vec3(0, 0, 1)
+    if length_sq(cross(u, z)) < 1e-8: u = vec3(1, 0, 0)
+    x = normalize(cross(u, z))
+    y = cross(z, x)
+    m = mat4()
+    m[0] = vec4(x, 0)
+    m[1] = vec4(y, 0)
+    m[2] = vec4(z, 0)
+    m
+
+perspective = (fov_y: f64, aspect: f64, near: f64, far: f64) -> mat4:
+    f = f32(1.0 / tan(fov_y / 2.0))
+    m = mat4(0)
+    m[0] = vec4(f / f32(aspect), 0, 0, 0)
+    m[1] = vec4(0, f, 0, 0)
+    m[2] = vec4(0, 0, f32((far + near) / (near - far)), -1)
+    m[3] = vec4(0, 0, f32(2.0 * far * near / (near - far)), 0)
+    m
+
+orthographic = (left: f64, right: f64, bottom: f64, top: f64, near: f64, far: f64) -> mat4:
+    m = mat4()
+    m[0] = vec4(f32(2.0 / (right - left)), 0, 0, 0)
+    m[1] = vec4(0, f32(2.0 / (top - bottom)), 0, 0)
+    m[2] = vec4(0, 0, f32(-2.0 / (far - near)), 0)
+    m[3] = vec4(f32(-(right + left) / (right - left)), f32(-(top + bottom) / (top - bottom)), f32(-(far + near) / (far - near)), 1)
+    m
+
+look_at = (eye: vec3, target: vec3, up: vec3) -> mat4:
+    f = normalize(target - eye)
+    s = normalize(cross(f, up))
+    u = cross(s, f)
+    m = mat4()
+    m[0] = vec4(s.x, u.x, -f.x, 0)
+    m[1] = vec4(s.y, u.y, -f.y, 0)
+    m[2] = vec4(s.z, u.z, -f.z, 0)
+    m[3] = vec4(-dot(s, eye), -dot(u, eye), dot(f, eye), 1)
+    m
+
+transpose = (m: mat4) -> mat4:
+    r = mat4()
+    loop c in [0..4):
+        loop k in [0..4): r[c][k] = m[k][c]
+    r
+
+transform_point = (m: mat4, p: vec3) -> vec3:
+    v = m * vec4(p, 1)
+    vec3(v.x, v.y, v.z) / v.w
+
+transform_dir = (m: mat4, d: vec3) -> vec3:
+    v = m * vec4(d, 0)
+    vec3(v.x, v.y, v.z)
+
+inverse = (m: mat4) -> mat4:
+    a = fill(f32(0.0), 16)
+    loop c in [0..4):
+        loop r in [0..4): a[c * 4 + r] = m[c][r]
+    inv = fill(f32(0.0), 16)
+    inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15] + a[9] * a[7] * a[14] + a[13] * a[6] * a[11] - a[13] * a[7] * a[10]
+    inv[4] = -a[4] * a[10] * a[15] + a[4] * a[11] * a[14] + a[8] * a[6] * a[15] - a[8] * a[7] * a[14] - a[12] * a[6] * a[11] + a[12] * a[7] * a[10]
+    inv[8] = a[4] * a[9] * a[15] - a[4] * a[11] * a[13] - a[8] * a[5] * a[15] + a[8] * a[7] * a[13] + a[12] * a[5] * a[11] - a[12] * a[7] * a[9]
+    inv[12] = -a[4] * a[9] * a[14] + a[4] * a[10] * a[13] + a[8] * a[5] * a[14] - a[8] * a[6] * a[13] - a[12] * a[5] * a[10] + a[12] * a[6] * a[9]
+    inv[1] = -a[1] * a[10] * a[15] + a[1] * a[11] * a[14] + a[9] * a[2] * a[15] - a[9] * a[3] * a[14] - a[13] * a[2] * a[11] + a[13] * a[3] * a[10]
+    inv[5] = a[0] * a[10] * a[15] - a[0] * a[11] * a[14] - a[8] * a[2] * a[15] + a[8] * a[3] * a[14] + a[12] * a[2] * a[11] - a[12] * a[3] * a[10]
+    inv[9] = -a[0] * a[9] * a[15] + a[0] * a[11] * a[13] + a[8] * a[1] * a[15] - a[8] * a[3] * a[13] - a[12] * a[1] * a[11] + a[12] * a[3] * a[9]
+    inv[13] = a[0] * a[9] * a[14] - a[0] * a[10] * a[13] - a[8] * a[1] * a[14] + a[8] * a[2] * a[13] + a[12] * a[1] * a[10] - a[12] * a[2] * a[9]
+    inv[2] = a[1] * a[6] * a[15] - a[1] * a[7] * a[14] - a[5] * a[2] * a[15] + a[5] * a[3] * a[14] + a[13] * a[2] * a[7] - a[13] * a[3] * a[6]
+    inv[6] = -a[0] * a[6] * a[15] + a[0] * a[7] * a[14] + a[4] * a[2] * a[15] - a[4] * a[3] * a[14] - a[12] * a[2] * a[7] + a[12] * a[3] * a[6]
+    inv[10] = a[0] * a[5] * a[15] - a[0] * a[7] * a[13] - a[4] * a[1] * a[15] + a[4] * a[3] * a[13] + a[12] * a[1] * a[7] - a[12] * a[3] * a[5]
+    inv[14] = -a[0] * a[5] * a[14] + a[0] * a[6] * a[13] + a[4] * a[1] * a[14] - a[4] * a[2] * a[13] - a[12] * a[1] * a[6] + a[12] * a[2] * a[5]
+    inv[3] = -a[1] * a[6] * a[11] + a[1] * a[7] * a[10] + a[5] * a[2] * a[11] - a[5] * a[3] * a[10] - a[9] * a[2] * a[7] + a[9] * a[3] * a[6]
+    inv[7] = a[0] * a[6] * a[11] - a[0] * a[7] * a[10] - a[4] * a[2] * a[11] + a[4] * a[3] * a[10] + a[8] * a[2] * a[7] - a[8] * a[3] * a[6]
+    inv[11] = -a[0] * a[5] * a[11] + a[0] * a[7] * a[9] + a[4] * a[1] * a[11] - a[4] * a[3] * a[9] - a[8] * a[1] * a[7] + a[8] * a[3] * a[5]
+    inv[15] = a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5]
+    det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12]
+    r = mat4()
+    if det == 0.0: return r
+    loop c in [0..4):
+        loop k in [0..4): r[c][k] = inv[c * 4 + k] / det
+    r
+
+# ---------------- quaternions (vec4: x, y, z, w) ----------------
+quat_axis_angle = (axis: vec3, a: f64) -> vec4:
+    s = f32(sin(a / 2.0))
+    n = normalize(axis)
+    vec4(n.x * s, n.y * s, n.z * s, f32(cos(a / 2.0)))
+# turned by pitch about x, then yaw about y, roll about z (as Unity's Euler angles: roll first,
+# then pitch, then yaw), in radians (`quat_euler(0, 90deg, 0)`)
+quat_euler = (pitch: f64, yaw: f64, roll: f64) -> vec4:
+    quat_mul(quat_mul(quat_axis_angle(vec3(0, 1, 0), yaw), quat_axis_angle(vec3(1, 0, 0), pitch)), quat_axis_angle(vec3(0, 0, 1), roll))
+# the turn that points -z along dir (facing's, as a quaternion)
+quat_facing = (dir: vec3, up: vec3 = vec3(0, 1, 0)) -> vec4: quat_from_mat4(facing(dir, up))
+# the turn back
+quat_inverse = (q: vec4) -> vec4: vec4(-q.x, -q.y, -q.z, q.w) * f32(1.0 / f64(dot(q, q)))
+# a rotation matrix's turn (its scaling left out)
+quat_from_mat4 = (m0: mat4) -> vec4:
+    c0 = normalize(m0[0].xyz)
+    c1 = normalize(m0[1].xyz)
+    c2 = normalize(m0[2].xyz)
+    tr = f64(c0.x + c1.y + c2.z)
+    if tr > 0.0:
+        s = sqrt(tr + 1.0) * 2.0
+        return normalize(vec4(f32(f64(c1.z - c2.y) / s), f32(f64(c2.x - c0.z) / s), f32(f64(c0.y - c1.x) / s), f32(0.25 * s)))
+    if c0.x > c1.y and c0.x > c2.z:
+        s = sqrt(1.0 + f64(c0.x - c1.y - c2.z)) * 2.0
+        return normalize(vec4(f32(0.25 * s), f32(f64(c1.x + c0.y) / s), f32(f64(c2.x + c0.z) / s), f32(f64(c1.z - c2.y) / s)))
+    if c1.y > c2.z:
+        s = sqrt(1.0 + f64(c1.y - c0.x - c2.z)) * 2.0
+        return normalize(vec4(f32(f64(c1.x + c0.y) / s), f32(0.25 * s), f32(f64(c2.y + c1.z) / s), f32(f64(c2.x - c0.z) / s)))
+    s = sqrt(1.0 + f64(c2.z - c0.x - c1.y)) * 2.0
+    normalize(vec4(f32(f64(c2.x + c0.z) / s), f32(f64(c2.y + c1.z) / s), f32(0.25 * s), f32(f64(c0.y - c1.x) / s)))
+quat_mul = (a: vec4, b: vec4) -> vec4:
+    vec4(a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z)
+quat_rotate = (q: vec4, v: vec3) -> vec3:
+    u = vec3(q.x, q.y, q.z)
+    t = cross(u, v) * 2.0
+    v + t * q.w + cross(u, t)
+quat_to_mat4 = (q: vec4) -> mat4:
+    x = q.x
+    y = q.y
+    z = q.z
+    w = q.w
+    m = mat4()
+    m[0] = vec4(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + z * w), 2.0 * (x * z - y * w), 0)
+    m[1] = vec4(2.0 * (x * y - z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + x * w), 0)
+    m[2] = vec4(2.0 * (x * z + y * w), 2.0 * (y * z - x * w), 1.0 - 2.0 * (x * x + y * y), 0)
+    m
+slerp = (a: vec4, b0: vec4, t: f32) -> vec4:
+    b = b0
+    d = dot(a, b)
+    if d < 0.0:
+        b = b * -1.0
+        d = -d
+    if d > 0.9995: return normalize(a + (b - a) * t)
+    th = acos(f64(d))
+    s = sin(th)
+    wa = f32(sin((1.0 - f64(t)) * th) / s)
+    wb = f32(sin(f64(t) * th) / s)
+    a * wa + b * wb

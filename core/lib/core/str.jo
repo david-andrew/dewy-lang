@@ -1,0 +1,705 @@
+# String utilities. Strings are immutable UTF-8 byte sequences; indexing gives bytes.
+
+is_digit = (c: u8) -> bool: c >= '0' and c <= '9'
+is_alpha = (c: u8) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
+is_alnum = (c: u8) -> bool: is_alpha(c) or is_digit(c)
+is_space = (c: u8) -> bool: c == ' ' or c == '\t' or c == '\n' or c == '\r'
+is_upper = (c: u8) -> bool: c >= 'A' and c <= 'Z'
+is_lower = (c: u8) -> bool: c >= 'a' and c <= 'z'
+
+# the character with code point c, as text (UTF-8: one to four bytes); chr(233) is "é"
+chr = (c: int) -> str:
+    b: u8[]
+    if c >= 0 and c < 0x80: b.push(u8(c))
+    else if c >= 0x80 and c < 0x800:
+        b.push(u8(0xC0 | (c >> 6)))
+        b.push(u8(0x80 | (c & 0x3F)))
+    else if c >= 0x800 and c < 0x10000 and (c < 0xD800 or c > 0xDFFF):
+        b.push(u8(0xE0 | (c >> 12)))
+        b.push(u8(0x80 | ((c >> 6) & 0x3F)))
+        b.push(u8(0x80 | (c & 0x3F)))
+    else if c >= 0x10000 and c < 0x110000:
+        b.push(u8(0xF0 | (c >> 18)))
+        b.push(u8(0x80 | ((c >> 12) & 0x3F)))
+        b.push(u8(0x80 | ((c >> 6) & 0x3F)))
+        b.push(u8(0x80 | (c & 0x3F)))
+    else: return "\xEF\xBF\xBD"           # (no such character: U+FFFD)
+    str_from_bytes(b)
+
+# a string of the one byte b (0 to 255; text in UTF-8 is made of these)
+byte_str = (b: int) -> str:
+    out: u8[]
+    out.push(u8(b & 255))
+    str_from_bytes(out)
+
+find = (s: str, sub: str, start: int = 0) -> int:
+    n = len(s)
+    m = len(sub)
+    if m == 0: return start
+    if start < 0 or m > n: return -1
+    p = data(s)
+    q = data(sub)
+    first = q[0]
+    last = n - m
+    i = start
+    if m == 1: return __memchr(p, i, last + 1, first)
+    # eight places at a time: where the first two bytes both match (a word xor each, or-ed, has
+    # a zero byte), then those places one by one
+    pf = u64(first) * 0x0101010101010101
+    ps = u64(q[1]) * 0x0101010101010101
+    loop i + 8 <= last:
+        w = (((p + i) as *u64)[0] xor pf) | (((p + i + 1) as *u64)[0] xor ps)
+        if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 != 0:
+            loop k in [0..8):
+                if p[i + k] == first and __mem_eq(p + i + k, q, m): return i + k
+        i += 8
+    loop i <= last:
+        if p[i] == first and __mem_eq(p + i, q, m): return i
+        i += 1
+    -1
+
+# where byte c first is in p[from..n), or -1: a word at a time (has a byte equal to c: the
+# word xor c in every byte has a zero byte)
+__memchr = (p: *u8, from: int, n: int, c: u8) -> int:
+    i = from
+    loop i < n and ((p + i) as int) & 7 != 0:
+        if p[i] == c: return i
+        i += 1
+    pat = u64(c) * 0x0101010101010101
+    loop i + 8 <= n:
+        w = ((p + i) as *u64)[0] xor pat
+        if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 != 0: break
+        i += 8
+    loop i < n:
+        if p[i] == c: return i
+        i += 1
+    -1
+
+rfind = (s: str, sub: str) -> int:
+    n = len(s)
+    m = len(sub)
+    i = n - m
+    loop i >= 0:
+        if __mem_eq(data(s) + i, data(sub), m): return i
+        i -= 1
+    -1
+
+find_byte = (s: str, c: u8, start: int = 0) -> int:
+    if start < 0: return __memchr(data(s), 0, len(s), c)
+    __memchr(data(s), start, len(s), c)
+
+contains = (s: str, sub: str) -> bool: find(s, sub) >= 0
+
+# whether a character (a byte: s[i]) is one of the text's: `c in "aeiou"`
+contains = (s: str, c: u8) -> bool: find_byte(s, c) >= 0
+
+starts_with = (s: str, prefix: str) -> bool:
+    m = len(prefix)
+    if m > len(s): return false
+    __mem_eq(data(s), data(prefix), m)
+
+ends_with = (s: str, suffix: str) -> bool:
+    m = len(suffix)
+    n = len(s)
+    if m > n: return false
+    __mem_eq(data(s) + n - m, data(suffix), m)
+
+# remove spaces, tabs and line breaks from both ends
+trim = (s: str) -> str:
+    a = 0
+    b = len(s)
+    loop a < b and is_space(s[a]): a += 1
+    loop b > a and is_space(s[b - 1]): b -= 1
+    s[a..b)
+
+# remove any of the characters in `chars` from both ends
+trim = (s: str, chars: str) -> str:
+    a = 0
+    b = len(s)
+    loop a < b and __has_byte(chars, s[a]): a += 1
+    loop b > a and __has_byte(chars, s[b - 1]): b -= 1
+    s[a..b)
+
+__has_byte = (s: str, c: u8) -> bool:
+    loop x in s:
+        if x == c: return true
+    false
+
+trim_start = (s: str) -> str:
+    a = 0
+    loop a < len(s) and is_space(s[a]): a += 1
+    s[a..]
+
+trim_end = (s: str) -> str:
+    b = len(s)
+    loop b > 0 and is_space(s[b - 1]): b -= 1
+    s[..b)
+
+# the parts of s between the separators (split("a,b", ",") is ["a", "b"]; with "", the characters)
+split = (s: str, sep: str) -> str[]:
+    out: str[]
+    if len(sep) == 0:
+        # (each character: a code point's bytes together)
+        loop c in chars(s): out.push(chr(c))
+        return out
+    p = data(s)
+    n = len(s)
+    start = 0
+    if len(sep) == 1:
+        # (one byte: a word at a time, and the parts copied straight out)
+        c = sep[0]
+        loop true:
+            i = __memchr(p, start, n, c)
+            if i < 0:
+                out.push(__str_from(p + start, n - start))
+                return out
+            out.push(__str_from(p + start, i - start))
+            start = i + 1
+    loop true:
+        i = find(s, sep, start)
+        if i < 0:
+            out.push(s[start..])
+            return out
+        out.push(s[start..i))
+        start = i + len(sep)
+    out
+
+# split at the first `max` separators only: the rest stays in the last part
+# (split("k=v=w", "=", 1) is ["k", "v=w"])
+split = (s: str, sep: str, max: int) -> str[]:
+    if len(sep) == 0 or max < 0: return split(s, sep)
+    out: str[]
+    start = 0
+    loop out.len() < max:
+        i = find(s, sep, start)
+        if i < 0: break
+        out.push(s[start..i))
+        start = i + len(sep)
+    out.push(s[start..])
+    out
+
+# split on runs of whitespace (the same as words(s))
+split = (s: str) -> str[]: words(s)
+
+# how many times sub is in s, not overlapping ("banana".count("an") is 2)
+count = (s: str, sub: str) -> int:
+    if len(sub) == 0: return 0
+    n = 0
+    i = find(s, sub)
+    loop i >= 0:
+        n += 1
+        i = find(s, sub, i + len(sub))
+    n
+
+# s made `width` characters long with `fill` before it (pad_start("7", 3, "0") is "007"), or after it;
+# a longer s stays as it is ("{s:>10}" and "{s:<10}" in a string do the same with spaces)
+pad_start = (s: str, width: int, fill: str = " ") -> str:
+    n = char_count(s)
+    if n >= width or len(fill) == 0: return s
+    __pad_fill(fill, width - n) + s
+pad_end = (s: str, width: int, fill: str = " ") -> str:
+    n = char_count(s)
+    if n >= width or len(fill) == 0: return s
+    s + __pad_fill(fill, width - n)
+
+# (count characters of fill, round and round)
+__pad_fill = (fill: str, count: int) -> str:
+    if len(fill) == 1: return repeat(fill, count)
+    fc = chars(fill)
+    out = ""
+    loop i in [0..count): out += chr(fc[i % fc.len()])
+    out
+
+# the first letter in upper case ("hello world" -> "Hello world")
+capitalize = (s: str) -> str:
+    if len(s) == 0: return s
+    # (the first character whole: é is two bytes)
+    n = 1
+    loop n < len(s) and s[n] & 0xC0 == 0x80: n += 1
+    upper(s[..n)) + s[n..]
+
+# split on runs of whitespace
+words = (s: str) -> str[]:
+    out: str[]
+    p = data(s)
+    n = len(s)
+    i = 0
+    loop i < n:
+        # (most bytes are above ' ': one compare each)
+        loop i < n and p[i] <= 32 and __space_byte(p[i]): i += 1
+        if i >= n: break
+        j = i + 1
+        loop j < n and (p[j] > 32 or not __space_byte(p[j])): j += 1
+        out.push(__str_from(p + i, j - i))
+        i = j
+    out
+
+__space_byte = (c: u8) -> bool: c == 32 or c == 10 or c == 9 or c == 13
+
+# a new string of the n bytes at p
+__str_from = (p: *u8, n: int) -> str:
+    if n == 0: return ""
+    q = __str_new(n)
+    mem_copy(q + 24, p, n)
+    q as str
+
+lines = (s: str) -> str[]:
+    out = split(s, "\n")
+    if out.len() > 0 and len(out[out.len() - 1]) == 0: out.pop()
+    loop mut l in out:
+        if len(l) > 0 and l[len(l) - 1] == '\r': l = l[..len(l) - 1)
+    out
+
+join = (parts: str[], sep: str = "") -> str:
+    buf: u8[]
+    loop i in 0.. and p in parts:
+        if i > 0: __buf_append_str(buf, sep)
+        __buf_append_str(buf, p)
+    __buf_finish_val(buf)
+
+# sep.join(parts), as in Python
+join = (sep: str, parts: str[]) -> str: join(parts, sep)
+
+__buf_finish_val = (buf: u8[]) -> str: str_from_bytes(buf)
+
+replace = (s: str, old: str, new: str) -> str:
+    if len(old) == 0: return s
+    buf: u8[]
+    start = 0
+    loop true:
+        i = find(s, old, start)
+        if i < 0: break
+        __buf_append_raw(buf, data(s) + start, i - start)
+        __buf_append_str(buf, new)
+        start = i + len(old)
+    __buf_append_raw(buf, data(s) + start, len(s) - start)
+    str_from_bytes(buf)
+
+repeat = (s: str, n: int) -> str:
+    buf: u8[]
+    loop i in [0..n): __buf_append_str(buf, s)
+    str_from_bytes(buf)
+
+(*) = (s: str, n: int) -> str: repeat(s, n)
+(*) = (n: int, s: str) -> str: repeat(s, n)
+
+# s in capitals (letters of Latin, accented ones too, Greek and Cyrillic: "café" is "CAFÉ")
+upper = (s: str) -> str:
+    b = bytes(s)
+    wide = false
+    loop mut c in b:
+        if c >= 'a' and c <= 'z': c = c - 32
+        else if c >= 128: wide = true
+    if not wide: return str_from_bytes(b)
+    __case_text(str_from_bytes(b), true)
+
+# s in small letters (as upper)
+lower = (s: str) -> str:
+    b = bytes(s)
+    wide = false
+    loop mut c in b:
+        if c >= 'A' and c <= 'Z': c = c + 32
+        else if c >= 128: wide = true
+    if not wide: return str_from_bytes(b)
+    __case_text(str_from_bytes(b), false)
+
+__case_text = (s: str, up: bool) -> str:
+    out: u8[]
+    loop c in chars(s):
+        d = __case_of(c, up)
+        loop x in bytes(chr(d)): out.push(x)
+    str_from_bytes(out)
+
+# (the other case of a letter of Latin-1, Latin Extended-A, Greek or Cyrillic; c when it has none)
+__case_of = (c: int, up: bool) -> int:
+    if up:
+        if c >= 0xE0 and c <= 0xFE and c != 0xF7: return c - 32
+        if c == 0xFF: return 0x178
+        if c >= 0x3B1 and c <= 0x3C9 and c != 0x3C2: return c - 32
+        if c >= 0x430 and c <= 0x44F: return c - 32
+        if c >= 0x450 and c <= 0x45F: return c - 80
+    else:
+        if c >= 0xC0 and c <= 0xDE and c != 0xD7: return c + 32
+        if c == 0x178: return 0xFF
+        if c >= 0x391 and c <= 0x3A9 and c != 0x3A2: return c + 32
+        if c >= 0x410 and c <= 0x42F: return c + 32
+        if c >= 0x400 and c <= 0x40F: return c + 80
+    # (Latin Extended-A: pairs, the capital first)
+    if (c >= 0x100 and c <= 0x137) or (c >= 0x14A and c <= 0x177):
+        if up and c % 2 == 1: return c - 1
+        if not up and c % 2 == 0: return c + 1
+    if (c >= 0x139 and c <= 0x148) or (c >= 0x179 and c <= 0x17E):
+        if up and c % 2 == 0: return c - 1
+        if not up and c % 2 == 1: return c + 1
+    c
+
+# parse an integer (decimal, or hex after 0x; _ may separate digits); none if it is not one or
+# does not fit in an int
+to_int = (s: str) -> int?:
+    t = trim(s)
+    n = len(t)
+    if n == 0: return none
+    i = 0
+    neg = false
+    if t[0] == '-' or t[0] == '+':
+        neg = t[0] == '-'
+        i = 1
+    if i >= n: return none
+    base = 10
+    if i + 1 < n and t[i] == '0' and (t[i + 1] == 'x' or t[i + 1] == 'X'):
+        base = 16
+        i += 2
+    v = 0
+    any = false
+    loop i < n:
+        c = t[i]
+        d = -1
+        if c >= '0' and c <= '9': d = int(c) - 48
+        else if c >= 'a' and c <= 'f': d = int(c) - 87
+        else if c >= 'A' and c <= 'F': d = int(c) - 55
+        else if c == '_':
+            i += 1
+            continue
+        if d < 0 or d >= base: return none
+        # (accumulated negated, which reaches the smallest int; none when out of range)
+        if v < (-0x7FFFFFFFFFFFFFFF - 1 + d) / base: return none
+        v = v * base - d
+        any = true
+        i += 1
+    if not any: return none
+    if neg: return v
+    if v == -0x7FFFFFFFFFFFFFFF - 1: return none
+    -v
+
+# Parse a decimal number. The result is the double nearest to the exact decimal value
+# (ties to even), like C's strtod: an estimate, then exact big-integer comparisons.
+to_float = (s: str) -> f64?:
+    t = trim(s)
+    n = len(t)
+    if n == 0: return none
+    i = 0
+    neg = false
+    if t[0] == '-' or t[0] == '+':
+        neg = t[0] == '-'
+        i = 1
+    # (inf and nan as Sloppy writes them; Infinity and NaN as JavaScript's and JSON's)
+    if t[i..] == "inf" or t[i..] == "Infinity":
+        if neg: return -1e308 * 10.0
+        return 1e308 * 10.0
+    if t[i..] == "nan" or t[i..] == "NaN": return 0.0 / 0.0
+    digs: u8[]            # significant digits (leading zeros dropped)
+    exp = 0              # value = digs * 10^exp
+    any = false
+    loop i < n and is_digit(t[i]):
+        if digs.len() > 0 or t[i] != '0': digs.push(t[i] - '0')
+        any = true
+        i += 1
+    if i < n and t[i] == '.':
+        i += 1
+        loop i < n and is_digit(t[i]):
+            if digs.len() > 0 or t[i] != '0': digs.push(t[i] - '0')
+            exp -= 1
+            any = true
+            i += 1
+    if not any: return none
+    if i < n and (t[i] == 'e' or t[i] == 'E'):
+        i += 1
+        eneg = false
+        if i < n and (t[i] == '-' or t[i] == '+'):
+            eneg = t[i] == '-'
+            i += 1
+        e = 0
+        if i >= n: return none
+        loop i < n and is_digit(t[i]):
+            if e < 100000: e = e * 10 + int(t[i]) - 48
+            i += 1
+        if eneg: exp -= e
+        else: exp += e
+    if i != n: return none
+    v = __decimal_to_float(digs, exp)
+    if neg: return -v
+    v
+
+__decimal_to_float = (digs0: u8[], exp0: int) -> f64:
+    digs = digs0
+    exp = exp0
+    # trailing zeros only scale the exponent
+    loop digs.len() > 0 and digs[digs.len() - 1] == 0:
+        digs.pop()
+        exp += 1
+    if digs.len() == 0: return 0.0
+    if exp + digs.len() > 310: return 1e308 * 10.0
+    if exp + digs.len() < -330: return 0.0
+    # very long inputs: keep 780 digits plus a sticky digit (enough to decide the rounding)
+    if digs.len() > 780:
+        exp += digs.len() - 781
+        digs.truncate(780)
+        digs.push(1)
+    mant: u64 = 0
+    loop k in [0..min(digs.len(), 19)): mant = mant * 10 + u64(digs[k])
+    e19 = exp + max(digs.len() - 19, 0)
+    # fast path (Clinger): exact operands, one correctly rounded operation
+    if digs.len() <= 15 and exp >= -22 and exp <= 22:
+        if exp >= 0: return f64(mant) * __pow10(exp)
+        return f64(mant) / __pow10(-exp)
+    x = __scale10(f64(mant), e19)
+    if x != x: x = 1e308
+    __float_correct(digs, exp, x)
+
+# nudge the estimate x until it is the double nearest to digs * 10^exp
+__float_correct = (digs: u8[], exp: int, x0: f64) -> f64:
+    d = __big_from_digits(digs)
+    x = x0
+    if x > 1.7976931348623157e308: x = 1.7976931348623157e308
+    if x <= 0.0: x = 5e-324
+    loop iter in [0..80):
+        bits = x as u64
+        ef = int((bits >> 52) & 0x7FF)
+        m = int(bits & 0x000FFFFFFFFFFFFF)
+        k = -1074
+        if ef > 0:
+            m = m | (1 << 52)
+            k = ef - 1075
+        # above the halfway point to the next double?
+        c = __cmp_scaled(d, exp, 2 * m + 1, k - 1)
+        if c > 0 or (c == 0 and m & 1 == 1):
+            if bits == 0x7FEFFFFFFFFFFFFF: return 1e308 * 10.0
+            x = (bits + 1) as f64
+            continue
+        # below the halfway point to the previous one? (the gap halves below a power of two)
+        c2 = 0
+        if m == 1 << 52 and ef > 1: c2 = __cmp_scaled(d, exp, 4 * m - 1, k - 2)
+        else: c2 = __cmp_scaled(d, exp, 2 * m - 1, k - 1)
+        if c2 < 0 or (c2 == 0 and m & 1 == 1):
+            if bits == 1: return 0.0
+            x = (bits - 1) as f64
+            continue
+        return x
+    x
+
+# ---- minimal unsigned big integers: little-endian 32-bit limbs in ints ----
+__big_from_digits = (digs: u8[]) -> int[]:
+    b = [0]
+    k = 0
+    loop k < digs.len():
+        # take up to 9 digits at a time
+        chunk = 0
+        p = 1
+        j = 0
+        loop j < 9 and k < digs.len():
+            chunk = chunk * 10 + int(digs[k])
+            p *= 10
+            j += 1
+            k += 1
+        __big_mul_small(b, p)
+        __big_add_small(b, chunk)
+    b
+
+__big_mul_small = (b: mut int[], m: int):
+    carry = 0
+    loop i in [0..b.len()):
+        v = b[i] * m + carry
+        b[i] = v & 0xFFFFFFFF
+        carry = v >> 32
+    loop carry > 0:
+        b.push(carry & 0xFFFFFFFF)
+        carry = carry >> 32
+
+__big_add_small = (b: mut int[], a: int):
+    carry = a
+    i = 0
+    loop carry > 0:
+        if i == b.len(): b.push(0)
+        v = b[i] + carry
+        b[i] = v & 0xFFFFFFFF
+        carry = v >> 32
+        i += 1
+
+__big_mul_pow10 = (b: mut int[], e: int):
+    k = e
+    loop k >= 9:
+        __big_mul_small(b, 1000000000)
+        k -= 9
+    p = 1
+    loop _ in [0..k): p *= 10
+    if p > 1: __big_mul_small(b, p)
+
+__big_shl = (b: mut int[], bits: int):
+    if bits <= 0: return
+    words = bits / 32
+    r = bits % 32
+    if r > 0:
+        carry = 0
+        loop i in [0..b.len()):
+            v = (b[i] << r) | carry
+            b[i] = v & 0xFFFFFFFF
+            carry = (v >> 32) & 0xFFFFFFFF
+        if carry > 0: b.push(carry)
+    if words > 0:
+        old = b.len()
+        b.resize(old + words)
+        i = old - 1
+        loop i >= 0:
+            b[i + words] = b[i]
+            i -= 1
+        loop j in [0..words): b[j] = 0
+
+__big_of = (v: int) -> int[]:
+    if v >> 32 == 0: return [v]
+    [v & 0xFFFFFFFF, v >> 32]
+
+# a + b as a new number
+__big_add = (a: int[], b: int[]) -> int[]:
+    n = max(a.len(), b.len())
+    out = fill(0, n)
+    carry = 0
+    loop i in [0..n):
+        v = carry
+        if i < a.len(): v += a[i]
+        if i < b.len(): v += b[i]
+        out[i] = v & 0xFFFFFFFF
+        carry = v >> 32
+    if carry > 0: out.push(carry)
+    out
+
+# a -= b (requires a >= b)
+__big_sub = (a: mut int[], b: int[]):
+    borrow = 0
+    loop i in [0..a.len()):
+        v = a[i] - borrow
+        if i < b.len(): v -= b[i]
+        borrow = 0
+        if v < 0:
+            v += 1 << 32
+            borrow = 1
+        a[i] = v
+
+__big_shr = (b: mut int[], bits: int):
+    words = bits / 32
+    r = bits % 32
+    if words >= b.len():
+        b.clear()
+        b.push(0)
+        return
+    if words > 0:
+        loop i in [0..b.len() - words): b[i] = b[i + words]
+        b.truncate(b.len() - words)
+    if r > 0:
+        loop i in [0..b.len()):
+            hi = 0
+            if i + 1 < b.len(): hi = b[i + 1]
+            b[i] = ((b[i] >> r) | (hi << (32 - r))) & 0xFFFFFFFF
+
+# divide in place by a small number; returns the remainder
+__big_divmod_small = (b: mut int[], d: int) -> int:
+    rem = 0
+    i = b.len() - 1
+    loop i >= 0:
+        cur = (rem << 32) | b[i]
+        b[i] = cur / d
+        rem = cur % d
+        i -= 1
+    rem
+
+__big_to_dec = (b0: int[]) -> str:
+    b = b0
+    chunks: int[]
+    loop true:
+        nz = false
+        loop w in b:
+            if w != 0: nz = true
+        if not nz: break
+        chunks.push(__big_divmod_small(b, 1000000000))
+    if chunks.len() == 0: return "0"
+    out = "{chunks[chunks.len() - 1]}"
+    i = chunks.len() - 2
+    loop i >= 0:
+        c = "{chunks[i]}"
+        out = out + repeat("0", 9 - len(c)) + c
+        i -= 1
+    out
+
+__big_cmp = (a0: int[], b0: int[]) -> int:
+    a = a0
+    b = b0
+    na = a.len()
+    nb = b.len()
+    loop na > 0 and a[na - 1] == 0: na -= 1
+    loop nb > 0 and b[nb - 1] == 0: nb -= 1
+    if na != nb:
+        if na < nb: return -1
+        return 1
+    i = na - 1
+    loop i >= 0:
+        if a[i] != b[i]:
+            if a[i] < b[i]: return -1
+            return 1
+        i -= 1
+    0
+
+# compare d * 10^exp with q * 2^e (all exact)
+__cmp_scaled = (d: int[], exp: int, q: int, e: int) -> int:
+    lhs = d
+    rhs: int[] = [q & 0xFFFFFFFF, q >> 32]
+    if exp >= 0: __big_mul_pow10(lhs, exp)
+    else: __big_mul_pow10(rhs, -exp)
+    if e >= 0: __big_shl(rhs, e)
+    else: __big_shl(lhs, -e)
+    __big_cmp(lhs, rhs)
+
+# ---------------- characters ----------------
+# the characters (code points) in reverse order
+reverse = (s: str) -> str:
+    n = len(s)
+    out: u8[]
+    out.reserve(n)
+    e = n
+    loop e > 0:
+        # (the start of the character that ends at e: continuation bytes are 10xxxxxx)
+        k = e - 1
+        loop k > 0 and (int(s[k]) & 0xC0) == 0x80: k -= 1
+        loop j in [k..e): out.push(s[j])
+        e = k
+    str_from_bytes(out)
+
+# number of unicode code points
+# s without its last character (all its bytes: backspace in a text field)
+without_last_char = (s: str) -> str:
+    n = len(s)
+    if n == 0: return s
+    i = n - 1
+    loop i > 0 and int(s[i]) & 0xC0 == 0x80: i -= 1
+    s[..i)
+
+char_count = (s: str) -> int:
+    n = 0
+    loop c in s:
+        if c & 0xC0 != 0x80: n += 1
+    n
+
+# unicode code points of s
+chars = (s: str) -> int[]:
+    out: int[]
+    i = 0
+    n = len(s)
+    loop i < n:
+        c = int(s[i])
+        if c < 0x80:
+            out.push(c)
+            i += 1
+        else if c < 0xE0 and i + 1 < n:
+            out.push(((c & 0x1F) << 6) | (int(s[i + 1]) & 0x3F))
+            i += 2
+        else if c < 0xF0 and i + 2 < n:
+            out.push(((c & 0x0F) << 12) | ((int(s[i + 1]) & 0x3F) << 6) | (int(s[i + 2]) & 0x3F))
+            i += 3
+        else if i + 3 < n:
+            out.push(((c & 0x07) << 18) | ((int(s[i + 1]) & 0x3F) << 12) | ((int(s[i + 2]) & 0x3F) << 6) | (int(s[i + 3]) & 0x3F))
+            i += 4
+        else:
+            out.push(0xFFFD)
+            i += 1
+    out
+
+# a number made from the text: the same for the same text (for maps, and to pick by name)
+hash = (s: str) -> u64: __str_hash(s)

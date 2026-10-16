@@ -1,0 +1,220 @@
+import net
+
+# Invite a friend, and Join a friend: the screens that connect two players with invite codes
+# (net.invite: no server), for any game. One player's game gives a link to send in a chat; the
+# friend opens it (the game in a web browser) or pastes it into Join a friend, and sends back the
+# code their game then shows. The screens say all that, copy and share the codes, take pastes
+# (a Paste button on a phone), and say why when no connection is made.
+#
+#   import invite
+#   friend = -1
+#   invite.from_link()                         # (opened from an invite link: Join a friend, at once)
+#   draw = ():
+#       if invite.active():
+#           if let c = invite.screen("Duel", "https://example.com/duel/"):
+#               friend = c.peer                # connected: c.inviter says this side invited
+#           return
+#       ui_begin("menu", vec2(640, 300))
+#       if ui_button("Invite a friend"): invite.start()
+#       if ui_button("Join a friend"): invite.join()
+#       ui_end()
+#
+# A game on a computer gives a link to its web page (web_page) when it has one, so the friend
+# needs nothing installed; a web page gives its own address. Without either, it gives the code.
+
+# the other player, once connected
+struct Invited:
+    peer: int                   # (a net peer: net.send, net.receive)
+    inviter: bool               # this side invited (and the other joined)
+
+__inv_mode = 0                  # 0 no screen, 1 Invite a friend, 2 Join a friend
+__inv_peer = -1
+__inv_reliable = true
+__inv_code = ""                 # this side's code, once made
+__inv_theirs = ""               # the other side's, typed or pasted in
+__inv_copied = false
+__inv_status = ""
+__inv_why = ""
+__inv_shown_at = 0.0            # (when this side's code was made: how long it has waited)
+
+# show Invite a friend: an invite is made at once (reliable = false: lost messages are not sent
+# again, nor do they hold up later ones; for fast games and rollback)
+start = (reliable: bool = true):
+    __inv_reset()
+    __inv_mode = 1
+    __inv_reliable = reliable
+    __inv_peer = net.invite(reliable)
+    net.__net_hold(__inv_peer, true)
+
+# show Join a friend, with their link or code if given (joined at once)
+join = (code: str = ""):
+    __inv_reset()
+    __inv_mode = 2
+    __inv_theirs = code
+    if len(trim(code)) > 0:
+        __inv_peer = net.join_invite(trim(code))
+        net.__net_hold(__inv_peer, true)
+
+# the program was opened from an invite link (a web page's ?invite=..., or INVITE=code): Join a
+# friend with it, and true
+from_link = () -> bool:
+    code = env("INVITE") ?? ""
+    if len(trim(code)) == 0: return false
+    join(code)
+    true
+
+# one of the screens is up
+active = () -> bool: __inv_mode != 0
+
+# this side's code: the invite, or the reply to one ("" until it is made, a moment after start
+# or join): for a game that shows it in its own way
+code = () -> str: __inv_code
+
+# the friend's reply to this side's invite, as Connect takes it from the box: false if it is not one
+reply = (code: str) -> bool:
+    if __inv_mode != 1 or __inv_peer < 0: return false
+    ok = net.accept_reply(__inv_peer, trim(code))
+    k = net.code_kind(code)
+    __inv_status = "connecting..."
+    if not ok and k == "invite": __inv_status = "that is an invite, not a reply: one of you chooses Join a friend and pastes the other's link"
+    else if not ok: __inv_status = "that is not their reply code: copied whole?"
+    ok
+
+# leave the screens (Back does it too), dropping the invite if it has not connected
+cancel = ():
+    __inv_reset()
+    __inv_mode = 0
+
+__inv_reset = ():
+    if __inv_peer >= 0:
+        net.__net_hold(__inv_peer, false)
+        net.close(__inv_peer)
+    __inv_peer = -1
+    __inv_code = ""
+    __inv_theirs = ""
+    __inv_copied = false
+    __inv_status = ""
+    __inv_why = ""
+
+# draw the screen that is up (in draw), and follow the connection: none until the other player
+# is connected, then them (the screens are gone then). game names the game in what it says;
+# web_page is where it is on the web, for a computer's invite to link to
+screen = (game: str = "the game", web_page: str = "") -> Invited?:
+    if __inv_mode == 0: return none
+    if __inv_peer >= 0:
+        # (its joining and leaving, which net.receive() leaves for this until it is connected;
+        # what it says goes to the game then)
+        loop e in net.__net_take([__inv_peer], false):
+            if e.kind == .joined:
+                net.__net_hold(__inv_peer, false)
+                c = Invited(__inv_peer, __inv_mode == 1)
+                __inv_peer = -1
+                cancel()
+                return c
+            if e.kind == .left:
+                net.__net_hold(__inv_peer, false)
+                # (joining: why, said large, as it is mostly the code pasted)
+                if __inv_mode == 2 and len(net.why(e.peer)) > 0:
+                    __inv_status = net.why(e.peer)
+                    __inv_why = ""
+                else:
+                    __inv_status = "no connection was made"
+                    __inv_why = net.why(e.peer)
+                __inv_peer = -1
+        if __inv_peer >= 0 and len(__inv_code) == 0:
+            __inv_code = net.invite_code(__inv_peer)
+            if len(__inv_code) > 0: __inv_shown_at = time()
+            if len(__inv_code) > 0 and not __inv_copied:
+                set_clipboard(if __inv_mode == 1: __inv_link(web_page) else: __inv_code)
+                __inv_copied = true
+    sz = screen_size()
+    cx = f64(sz.x) / 2.0
+    top = max((f64(sz.y) - 720.0) / 2.0, 0.0)
+    w = min(800.0, f64(sz.x) - 60.0)
+    if __inv_mode == 1: __inv_draw_invite(game, web_page, cx, top, w)
+    else: __inv_draw_join(game, cx, top, w)
+    if len(__inv_why) > 0: text_wrapped(__inv_why, vec2(f32(cx - w / 2.0), f32(top + 615.0)), w, 18, hud_style.disabled, align = .center)
+    if hud_button(Rect(30, f32(top + 24.0), 120, 44), "Back") or (key_pressed(.escape) and not ui_typing()): cancel()
+    none
+
+# the invite as a link to the game (this page's address, or web_page) with the code in it
+__inv_link = (web_page: str) -> str:
+    base = page_url()
+    if len(base) == 0: base = web_page
+    if len(base) == 0: return __inv_code
+    "{base}?invite={__inv_code}"
+
+__inv_draw_invite = (game: str, web_page: str, cx: f64, top: f64, w: f64):
+    title_color = hud_style.accent
+    text_centered("Invite a friend", vec2(f32(cx), f32(top + 60.0)), 44, title_color)
+    link = __inv_link(web_page)
+    what = if link == __inv_code: "code" else: "link"
+    if __inv_peer < 0 and len(__inv_status) > 0:
+        text_centered(__inv_status, vec2(f32(cx), f32(top + 200.0)), 26)
+        if hud_button(Rect(f32(cx - 80.0), f32(top + 250.0), 160, 44), "Try again"): start(__inv_reliable)
+        return
+    text_centered("1. Send them this {what}: in a chat or a message, any way", vec2(f32(cx), f32(top + 120.0)), 24)
+    if len(__inv_code) == 0: text_centered("(making it: a moment)", vec2(f32(cx), f32(top + 170.0)), 22, hud_style.disabled)
+    else:
+        __inv_draw_code(link, cx, top + 165.0)
+        __inv_copy_buttons(link, cx, top + 265.0)
+        text_centered(__inv_copied_note(), vec2(f32(cx), f32(top + 320.0)), 18, hud_style.disabled)
+        if what == "link": text_centered("They open it in a web browser and play there, or paste it into Join a friend in their {game}", vec2(f32(cx), f32(top + 350.0)), 18, hud_style.disabled)
+        else: text_centered("They paste it into Join a friend in their {game}", vec2(f32(cx), f32(top + 350.0)), 18, hud_style.disabled)
+    text_centered("2. Their game then shows a code for them to send back. Paste it here:", vec2(f32(cx), f32(top + 405.0)), 24)
+    __inv_theirs = hud_text_field(Rect(f32(cx - w / 2.0), f32(top + 440.0), f32(w), 44), __inv_theirs, "invite reply", 400, __inv_paste_hint())
+    if hud_button(Rect(f32(cx - 80.0), f32(top + 505.0), 160, 44), "Connect") or key_pressed(.enter):
+        if len(trim(__inv_theirs)) > 0: reply(__inv_theirs)
+    if len(__inv_status) > 0: text_centered(__inv_status, vec2(f32(cx), f32(top + 585.0)), 22, hud_style.text)
+    else: text_wrapped("Works across the internet as on one Wi-Fi, with no server: each game finds the other.", vec2(f32(cx - w / 2.0), f32(top + 640.0)), w, 18, hud_style.disabled, align = .center)
+
+__inv_draw_join = (game: str, cx: f64, top: f64, w: f64):
+    text_centered("Join a friend", vec2(f32(cx), f32(top + 70.0)), 44, hud_style.accent)
+    if __inv_peer < 0:
+        if len(__inv_status) > 0: text_wrapped(__inv_status, vec2(f32(cx - w / 2.0), f32(top + 115.0)), w, 22, hud_style.text, align = .center)
+        text_centered("Paste the link or code your friend sent you, then Next:", vec2(f32(cx), f32(top + 180.0)), 26)
+        __inv_theirs = hud_text_field(Rect(f32(cx - w / 2.0), f32(top + 220.0), f32(w), 44), __inv_theirs, "invite code", 400, __inv_paste_hint())
+        if hud_button(Rect(f32(cx - 80.0), f32(top + 285.0), 160, 44), "Next") or key_pressed(.enter):
+            if len(trim(__inv_theirs)) > 0:
+                __inv_status = ""
+                __inv_why = ""
+                __inv_peer = net.join_invite(trim(__inv_theirs))
+                net.__net_hold(__inv_peer, true)
+        if len(__inv_why) == 0: text_wrapped("Your friend chooses Invite a friend in their {game}, and sends you what it gives them.", vec2(f32(cx - w / 2.0), f32(top + 640.0)), w, 18, hud_style.disabled, align = .center)
+        return
+    text_centered("Send this code back to your friend:", vec2(f32(cx), f32(top + 160.0)), 26)
+    if len(__inv_code) == 0: text_centered("(making it: a moment)", vec2(f32(cx), f32(top + 210.0)), 22, hud_style.disabled)
+    else:
+        __inv_draw_code(__inv_code, cx, top + 210.0)
+        __inv_copy_buttons(__inv_code, cx, top + 305.0)
+        text_centered(__inv_copied_note(), vec2(f32(cx), f32(top + 365.0)), 18, hud_style.disabled)
+    waited = ""
+    if len(__inv_code) > 0:
+        s = int(time() - __inv_shown_at)
+        waited = " ({s / 60}:{s % 60:02})"
+    text_centered("Waiting for them to paste it in...{waited}", vec2(f32(cx), f32(top + 440.0)), 24, hud_style.disabled)
+
+# a code, in two lines of a fixed width (it is one word, too long for one): the start of it,
+# enough to see it is there (it goes whole by Copy or Share; nobody types it)
+__inv_draw_code = (code: str, cx: f64, y: f64):
+    n = 60
+    shown = code
+    if len(shown) > 2 * n: shown = shown[..2 * n - 3) + "..."
+    gold = rgb(1.0, 0.85, 0.3)
+    text_centered(shown[..min(n, len(shown))), vec2(f32(cx), f32(y)), 22, gold, mono = true)
+    if len(shown) > n: text_centered(shown[n..], vec2(f32(cx), f32(y + 30.0)), 22, gold, mono = true)
+
+# Copy, and Share where the device has a menu for sending it (a phone's)
+__inv_copy_buttons = (s: str, cx: f64, y: f64):
+    label = if touch_input(): "Copy" else: "Copy again"
+    if can_share():
+        if hud_button(Rect(f32(cx - 170.0), f32(y), 160, 40), label): set_clipboard(s)
+        if hud_button(Rect(f32(cx + 10.0), f32(y), 160, 40), "Share"): share(s)
+    else if hud_button(Rect(f32(cx - 80.0), f32(y), 160, 40), label): set_clipboard(s)
+
+# where a code goes, and how it was copied: said for a phone (a finger) or a computer's keys
+# (a phone's browser copies only inside a tap: there, the code is copied by the button)
+__inv_paste_hint = () -> str: if touch_input(): "their code: tap here, then Paste" else: "their code (ctrl+V)"
+__inv_copied_note = () -> str:
+    if touch_input(): return "(then paste it into a message)"
+    "(it is copied: paste it with ctrl+V, or cmd+V on a Mac)"

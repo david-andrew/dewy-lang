@@ -1,0 +1,1232 @@
+# 3D rendering: camera, sun + sky lighting, fog, shadows, instancing and post effects.
+# Draw calls made during draw() are recorded and rendered (shadow pass, then the lit
+# pass) before any 2D drawing that follows them, so a HUD can be drawn on top.
+#
+# Directions: y is up, in meters. A turn by `a` about y (`transform(pos, a)`, `rotation_y(a)`)
+# turns +z toward +x, so something turned by `a` faces vec3(sin(a), 0, cos(a)); glTF models
+# face +z unturned, so a model faces a direction d turned by atan2(d.x, d.z). facing(d) turns
+# -z, a camera's front, to d. The cameras (fly, follow, orbit) share one yaw: 0 looks along -z,
+# more turns left, and the way ahead is vec3(-sin(yaw), 0, -cos(yaw)).
+
+struct Vertex3D:
+    pos: vec3
+    normal: vec3
+    uv: vec2
+    color: vec4
+
+# a vertex of a skinned mesh: also the 4 joints that bend it (their places in the skin, as
+# numbers) and how much each does
+struct SkinVertex3D:
+    pos: vec3
+    normal: vec3
+    uv: vec2
+    color: vec4
+    joints: vec4
+    weights: vec4
+
+struct Instance3D:
+    model: mat4
+    color: vec4
+
+struct LitParams:
+    view_proj: mat4
+    model: mat4
+    shadow_vp: mat4
+    color: vec4
+    cam_pos: vec3
+    sun_dir: vec3
+    sun_color: vec3
+    sky_color: vec3
+    ground_color: vec3
+    fog_color: vec3
+    fog_density: f32
+    fog_height: f32
+    emissive: f32
+    specular: f32
+    use_tex: f32
+    shadow_strength: f32
+    time: f32
+    wind: f32
+    tex: Texture
+    shadow_map: Texture
+    lights: vec4[8]             # point lights: position and radius
+    light_colors: vec4[8]
+    light_count: f32
+    bones: vec4[192]            # skinned meshes: each joint's matrix, its first three rows
+
+struct LitOut:
+    pos: vec4
+    world: vec3
+    normal: vec3
+    uv: vec2
+    color: vec4
+    shadow_pos: vec4
+
+lit_vs = (v: Vertex3D, u: LitParams) -> LitOut:
+    w = u.model * vec4(v.pos, 1)
+    n = (u.model * vec4(v.normal, 0)).xyz
+    LitOut(u.view_proj * w, w.xyz, n, v.uv, v.color * u.color, u.shadow_vp * w)
+
+lit_vs_inst = (v: Vertex3D, inst: Instance3D, u: LitParams) -> LitOut:
+    p = v.pos
+    # gentle sway for foliage-like instances (wind > 0), stronger at the top of the mesh
+    if u.wind > 0.0:
+        sway = sin(u.time * 2.0 + inst.model[3].x * 0.7 + inst.model[3].z * 0.5) * u.wind * max(p.y, 0.0)
+        p = p + vec3(sway, 0, sway * 0.5)
+    w = inst.model * vec4(p, 1)
+    n = (inst.model * vec4(v.normal, 0)).xyz
+    LitOut(u.view_proj * w, w.xyz, n, v.uv, v.color * u.color * inst.color, u.shadow_vp * w)
+
+# (a skinned vertex: bent by its joints, then placed by the model matrix)
+lit_vs_skin = (v: SkinVertex3D, u: LitParams) -> LitOut:
+    j = v.joints
+    k = v.weights
+    a = i32(j.x) * 3
+    b = i32(j.y) * 3
+    c = i32(j.z) * 3
+    d = i32(j.w) * 3
+    r0 = u.bones[a] * k.x + u.bones[b] * k.y + u.bones[c] * k.z + u.bones[d] * k.w
+    r1 = u.bones[a + 1] * k.x + u.bones[b + 1] * k.y + u.bones[c + 1] * k.z + u.bones[d + 1] * k.w
+    r2 = u.bones[a + 2] * k.x + u.bones[b + 2] * k.y + u.bones[c + 2] * k.z + u.bones[d + 2] * k.w
+    p = vec4(v.pos, 1)
+    nv = vec4(v.normal, 0)
+    w = u.model * vec4(dot(r0, p), dot(r1, p), dot(r2, p), 1)
+    n = (u.model * vec4(dot(r0, nv), dot(r1, nv), dot(r2, nv), 0)).xyz
+    LitOut(u.view_proj * w, w.xyz, n, v.uv, v.color * u.color, u.shadow_vp * w)
+
+shadow_factor = (u: LitParams, sp: vec4, ndl: f32) -> f32:
+    if u.shadow_strength <= 0.0: return 1.0
+    p = sp.xyz / sp.w * 0.5 + vec3(0.5, 0.5, 0.5)
+    if p.x < 0.0 or p.x > 1.0 or p.y < 0.0 or p.y > 1.0 or p.z > 1.0: return 1.0
+    bias = 0.0015 + 0.004 * (1.0 - ndl)
+    lit: f32 = 0.0
+    texel: f32 = 1.0 / 2048.0
+    loop x in [-1..2):
+        loop y in [-1..2):
+            d = sample(u.shadow_map, p.xy + vec2(f32(x), f32(y)) * texel).x
+            if p.z - bias <= d: lit += 1.0
+    lit = lit / 9.0
+    1.0 - u.shadow_strength * (1.0 - lit)
+
+aces = (c: vec3) -> vec3:
+    a = c * (c * 2.51 + vec3(0.03, 0.03, 0.03))
+    b = c * (c * 2.43 + vec3(0.59, 0.59, 0.59)) + vec3(0.14, 0.14, 0.14)
+    clamp(a / b, 0.0, 1.0)
+
+lit_fs = (i: LitOut, u: LitParams) -> vec4:
+    base = i.color
+    if u.use_tex > 0.5: base = base * sample(u.tex, i.uv)
+    n = normalize(i.normal)
+    l = normalize(u.sun_dir)
+    v = normalize(u.cam_pos - i.world)
+    ndl = max(dot(n, l), 0.0)
+    sh = shadow_factor(u, i.shadow_pos, ndl)
+    hemi = mix(u.ground_color, u.sky_color, n.y * 0.5 + 0.5)
+    h = normalize(l + v)
+    spec = pow(max(dot(n, h), 0.0), 48.0) * u.specular * sh
+    rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.35
+    c = base.xyz * (hemi * 0.55 + u.sun_color * (ndl * sh * 0.9)) + u.sun_color * spec + u.sky_color * rim * base.xyz
+    c = c + base.xyz * u.emissive
+    loop k in [0..8):
+        if f32(k) >= u.light_count: break
+        lp = u.lights[k]
+        to = lp.xyz - i.world
+        dist = length(to)
+        if dist < lp.w:
+            f = 1.0 - dist / lp.w
+            ld = to * (1.0 / max(dist, 0.001))
+            c = c + base.xyz * u.light_colors[k].xyz * (max(dot(n, ld), 0.0) * 0.85 + 0.15) * (f * f)
+    # height-attenuated exponential fog
+    dist = length(i.world - u.cam_pos)
+    fog_amount = 1.0 - exp(-dist * u.fog_density * exp(-max(i.world.y, 0.0) * u.fog_height))
+    c = mix(c, u.fog_color, clamp(fog_amount, 0.0, 1.0))
+    vec4(aces(c), base.w)
+
+# ---------------- shadow pass ----------------
+struct _ShadowOut:
+    pos: vec4
+
+_shadow_vs = (v: Vertex3D, u: LitParams) -> _ShadowOut: _ShadowOut(u.shadow_vp * (u.model * vec4(v.pos, 1)))
+_shadow_vs_inst = (v: Vertex3D, inst: Instance3D, u: LitParams) -> _ShadowOut: _ShadowOut(u.shadow_vp * (inst.model * vec4(v.pos, 1)))
+_shadow_vs_skin = (v: SkinVertex3D, u: LitParams) -> _ShadowOut:
+    j = v.joints
+    k = v.weights
+    a = i32(j.x) * 3
+    b = i32(j.y) * 3
+    c = i32(j.z) * 3
+    d = i32(j.w) * 3
+    r0 = u.bones[a] * k.x + u.bones[b] * k.y + u.bones[c] * k.z + u.bones[d] * k.w
+    r1 = u.bones[a + 1] * k.x + u.bones[b + 1] * k.y + u.bones[c + 1] * k.z + u.bones[d + 1] * k.w
+    r2 = u.bones[a + 2] * k.x + u.bones[b + 2] * k.y + u.bones[c + 2] * k.z + u.bones[d + 2] * k.w
+    p = vec4(v.pos, 1)
+    _ShadowOut(u.shadow_vp * (u.model * vec4(dot(r0, p), dot(r1, p), dot(r2, p), 1)))
+_shadow_fs = (i: _ShadowOut, u: LitParams) -> vec4: vec4(1, 1, 1, 1)
+
+# ---------------- sky ----------------
+struct _SkyVertex:
+    pos: vec2
+
+struct _SkyParams:
+    inv_view_proj: mat4
+    sky_top: vec3
+    sky_horizon: vec3
+    ground: vec3
+    sun_dir: vec3
+    sun_color: vec3
+    time: f32
+    stars: f32
+
+struct _SkyOut:
+    pos: vec4
+    ndc: vec2
+
+_sky_vs = (v: _SkyVertex, u: _SkyParams) -> _SkyOut: _SkyOut(vec4(v.pos, 0.9999, 1), v.pos)
+
+# ---------------- for shaders ----------------
+# a number in [0, 1) that looks random, made from the cell a 2D point is in (its whole parts:
+# noise, stars, sparkle in a shader). Integers, so every GPU and the CPU give the same one
+hash21 = (p: vec2) -> f32:
+    h = u32(int(floor(p.x))) * u32(0x8DA6B343) xor u32(int(floor(p.y))) * u32(0xD8163841)
+    h = (h xor (h >> 16)) * u32(0x7FEB352D)
+    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = h xor (h >> 16)
+    f32(h & u32(0xFFFFFF)) / 16777216.0
+
+_sky_fs = (i: _SkyOut, u: _SkyParams) -> vec4:
+    a = u.inv_view_proj * vec4(i.ndc, 1, 1)
+    b = u.inv_view_proj * vec4(i.ndc, -1, 1)
+    dir = normalize(a.xyz / a.w - b.xyz / b.w)
+    y = dir.y
+    c = mix(u.sky_horizon, u.sky_top, pow(clamp(y, 0.0, 1.0), 0.45))
+    if y < 0.0: c = mix(u.sky_horizon, u.ground, clamp(-y * 4.0, 0.0, 1.0))
+    sd = max(dot(dir, normalize(u.sun_dir)), 0.0)
+    c = c + u.sun_color * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.25)
+    if u.stars > 0.0 and y > 0.0:
+        g = floor(dir.xz / (y + 0.3) * 220.0)
+        s = hash21(g)
+        if s > 0.997: c = c + vec3(1, 1, 1) * (u.stars * (s - 0.997) * 250.0 * (0.6 + 0.4 * sin(u.time * 3.0 + s * 100.0)))
+    vec4(aces(c), 1)
+
+# ---------------- post effects (bloom) ----------------
+struct _PostParams:
+    src: Texture
+    bloom: Texture
+    texel: vec2
+    threshold: f32
+    strength: f32
+    vignette: f32
+    dir: vec2
+    saturation: f32
+    tint: vec3
+
+struct _PostOut:
+    pos: vec4
+    uv: vec2
+
+_post_vs = (v: _SkyVertex, u: _PostParams) -> _PostOut: _PostOut(vec4(v.pos, 0, 1), v.pos * 0.5 + vec2(0.5, 0.5))
+
+_bright_fs = (i: _PostOut, u: _PostParams) -> vec4:
+    c = sample(u.src, i.uv).xyz
+    lum = dot(c, vec3(0.299, 0.587, 0.114))
+    k = smoothstep(u.threshold, u.threshold + 0.25, lum)
+    vec4(c * k, 1)
+
+_blur_fs = (i: _PostOut, u: _PostParams) -> vec4:
+    d = u.dir * u.texel
+    c = sample(u.src, i.uv).xyz * 0.227
+    c = c + (sample(u.src, i.uv + d * 1.385).xyz + sample(u.src, i.uv - d * 1.385).xyz) * 0.316
+    c = c + (sample(u.src, i.uv + d * 3.231).xyz + sample(u.src, i.uv - d * 3.231).xyz) * 0.070
+    vec4(c, 1)
+
+_composite_fs = (i: _PostOut, u: _PostParams) -> vec4:
+    c = sample(u.src, i.uv).xyz + sample(u.bloom, i.uv).xyz * u.strength
+    gray = dot(c, vec3(0.299, 0.587, 0.114))
+    c = mix(vec3(gray, gray, gray), c, u.saturation) * u.tint
+    q = i.uv - vec2(0.5, 0.5)
+    c = c * (1.0 - u.vignette * dot(q, q) * 1.6)
+    vec4(c, 1)
+
+# ---------------- state ----------------
+struct Draw3D:
+    mesh: Mesh
+    model: mat4
+    color: vec4
+    tex: int
+    emissive: f32
+    specular: f32
+    instances: Instance3D[]
+    instanced: bool
+    shadow: bool
+    wind: f32
+    custom: () -> void
+    has_custom: bool
+    front: bool = false
+    bones: vec4[] = []          # (skinned: the joints' rows for LitParams.bones)
+    both_sides = false          # (draw_mesh's double_sided: its backs drawn too)
+
+__3d_ready = false
+__lit: Shader
+__lit_inst: Shader
+__lit_skin: Shader
+__shadow_sh_skin: Shader
+__shadow_sh: Shader
+__shadow_sh_inst: Shader
+__sky_sh: Shader
+__bright_sh: Shader
+__blur_sh: Shader
+__comp_sh: Shader
+__fs_tri: Mesh
+__draws: Draw3D[]
+# (3D particles: their shader, and a mesh for each set drawn in a frame)
+__pt_sh = Shader()
+__pt_ready = false
+__pt_meshes: Mesh[]
+__pt_used = 0
+__view = mat4()
+__proj3 = mat4()
+__cam_pos = vec3(0, 2, 5)
+__cam_target = vec3(0, 0, 0)
+__fov = 1.05
+__near = 0.1
+__far = 500.0
+__sun_dir = normalize(vec3(0.4, 0.8, 0.3))
+__sun_color = vec3(1.0, 0.95, 0.85)
+__sky_top = vec3(0.25, 0.45, 0.85)
+__sky_horizon = vec3(0.75, 0.85, 0.95)
+__ground_color = vec3(0.35, 0.3, 0.25)
+__fog_color = vec3(0.75, 0.85, 0.95)
+__fog_density = 0.004
+__fog_height = 0.05
+__sky_on = true
+__stars = 0.0
+__shadows = true
+__shadow_strength = 0.8
+__shadow_size = 30.0
+__shadow_rt = RenderTarget(Texture(0, 0, 0), 0, 0)
+__shadow_vp = mat4()
+__bloom_on = false
+__post_hud = false              # (post effects on the 2D drawn after the 3D too)
+__bloom_strength = 0.6
+__bloom_threshold = 0.7
+__vignette = 0.0
+__saturation = 1.0
+__tint = vec3(1, 1, 1)
+__scene_rt = RenderTarget(Texture(0, 0, 0), 0, 0)
+__bloom_a = RenderTarget(Texture(0, 0, 0), 0, 0)
+__bloom_b = RenderTarget(Texture(0, 0, 0), 0, 0)
+__post_active = false
+__drawn3d = 0                   # (draws made in the last frame's lit pass: a test sees culling)
+__point_lights: vec4[]          # this frame's point_light() calls: position and radius, color
+__point_colors: vec4[]
+__light_pos: vec4[8]            # the (at most 8) that light the frame
+__light_col: vec4[8]
+__light_n: f32 = 0.0
+
+__3d_init = ():
+    if __3d_ready: return
+    __3d_ready = true
+    __lit = make_shader(shader(lit_vs, lit_fs))
+    __lit_inst = make_shader(shader(lit_vs_inst, lit_fs))
+    __lit_skin = make_shader(shader(lit_vs_skin, lit_fs))
+    __shadow_sh_skin = make_shader(shader(_shadow_vs_skin, _shadow_fs))
+    __shadow_sh = make_shader(shader(_shadow_vs, _shadow_fs))
+    __shadow_sh_inst = make_shader(shader(_shadow_vs_inst, _shadow_fs))
+    __sky_sh = make_shader(shader(_sky_vs, _sky_fs))
+    __bright_sh = make_shader(shader(_post_vs, _bright_fs))
+    __blur_sh = make_shader(shader(_post_vs, _blur_fs))
+    __comp_sh = make_shader(shader(_post_vs, _composite_fs))
+    __fs_tri = mesh([_SkyVertex(vec2(-1, -1)), _SkyVertex(vec2(3, -1)), _SkyVertex(vec2(-1, 3))])
+
+# ---------------- public API ----------------
+# place the camera; call once per frame before drawing 3D objects
+camera3d = (pos: vec3, target: vec3, fov_degrees: f64 = 60.0, near: f64 = 0.1, far: f64 = 500.0):
+    __cam_pos = pos
+    __cam_target = target
+    __fov = radians(fov_degrees)
+    __near = near
+    __far = far
+
+# where a point in 3D appears on the screen, in 2D drawing units (for a name or a health bar
+# over someone's head); none when it is behind the camera. As the camera was last placed.
+world_to_screen = (p: vec3) -> vec2?:
+    aspect = f64(__target_w) / f64(max(__target_h, 1))
+    vp = perspective(__fov, aspect, __near, __far) * look_at(__cam_pos, __cam_target, vec3(0, 1, 0))
+    c = vp * vec4(p, 1)
+    if c.w <= 0.0: return none
+    u = __units3d()
+    vec2(f32(f64(u.x) + (f64(c.x / c.w) + 1.0) * 0.5 * f64(u.z - u.x)), f32(f64(u.y) + (1.0 - f64(c.y / c.w)) * 0.5 * f64(u.w - u.y)))
+
+# (the part of the 2D plane the 3D picture covers, as (x0, y0, x1, y1): all of a render target,
+# or on the screen the whole window, around the design area when its shape is another)
+__units3d = () -> vec4:
+    if __cur_target >= 0: return vec4(0, 0, f32(__view_w), f32(__view_h))
+    __screen_layout()
+    __screen_units()
+
+# the ray from the camera through a point on the screen (2D units, as mouse_pos): where it starts
+# and its direction (length 1), for picking what the mouse is on (with a physics3d raycast)
+screen_ray = (p: vec2) -> (vec3, vec3):
+    aspect = f64(__target_w) / f64(max(__target_h, 1))
+    inv = inverse(perspective(__fov, aspect, __near, __far) * look_at(__cam_pos, __cam_target, vec3(0, 1, 0)))
+    u = __units3d()
+    x = f32((f64(p.x) - f64(u.x)) / max(f64(u.z - u.x), 1e-6) * 2.0 - 1.0)
+    y = f32(1.0 - (f64(p.y) - f64(u.y)) / max(f64(u.w - u.y), 1e-6) * 2.0)
+    a = inv * vec4(x, y, -1, 1)
+    b = inv * vec4(x, y, 1, 1)
+    near = a.xyz / a.w
+    far = b.xyz / b.w
+    (near, normalize(far - near))
+
+# the sunlight: direction points toward the sun (y > 0: above the horizon), color is its light
+sun = (direction: vec3, color: vec3 = vec3(1, 0.95, 0.85)):
+    __sun_dir = normalize(direction)
+    __sun_color = color
+
+sky = (top: vec3, horizon: vec3, ground: vec3 = vec3(0.3, 0.27, 0.24)):
+    __sky_top = top
+    __sky_horizon = horizon
+    __ground_color = ground
+    __sky_on = true
+
+hide_sky = (): __sky_on = false
+night_stars = (amount: f64): __stars = amount
+fog = (color: vec3, density: f64 = 0.01, height_falloff: f64 = 0.05):
+    __fog_color = color
+    __fog_density = f32(density)
+    __fog_height = f32(height_falloff)
+shadows = (on: bool, strength: f64 = 0.8, area: f64 = 30.0):
+    __shadows = on
+    __shadow_strength = strength
+    __shadow_size = area
+# bloom + color grading for the frame: all of a 2D game; in a 3D one, the 3D and the 2D drawn
+# before it, while 2D drawn after the 3D (a HUD, text) stays as drawn, unless include_hud
+post_effects = (bloom: f64 = 0.6, threshold: f64 = 0.7, vignette: f64 = 0.35, saturation: f64 = 1.0, tint: vec3 = vec3(1, 1, 1), include_hud: bool = false):
+    __bloom_on = true
+    __post_hud = include_hud
+    __bloom_strength = bloom
+    __bloom_threshold = threshold
+    __vignette = vignette
+    __saturation = saturation
+    __tint = tint
+no_post_effects = (): __bloom_on = false
+
+# a light at a point for this frame (muzzle flashes, glowing shots, lamps): it reaches radius
+# meters, fading out on the way. Up to 8 light a frame (the ones nearest the camera); they cast
+# no shadows.
+point_light = (pos: vec3, color: vec3, radius: f64 = 6.0, intensity: f64 = 1.0):
+    __point_lights.push(vec4(pos, f32(radius)))
+    __point_colors.push(vec4(color * f32(intensity), 1))
+
+# the 8 point lights nearest the camera (by how near their reach comes)
+__pick_lights = ():
+    n = __point_lights.len()
+    order: int[]
+    loop i in [0..n): order.push(i)
+    if n > 8: order.sort_by((i: int) -> f32: length(__point_lights[i].xyz - __cam_pos) - __point_lights[i].w)
+    k = 0
+    loop i in order:
+        if k == 8: break
+        __light_pos[k] = __point_lights[i]
+        __light_col[k] = __point_colors[i]
+        k += 1
+    __light_n = f32(k)
+    __point_lights.clear()
+    __point_colors.clear()
+
+# A color whose alpha is below 1 is see-through, drawn after the solid ones (rgba(1, 0, 0, 0.5);
+# much emissive makes it near white, which hides that). in_front = true: drawn after everything
+# else and over it, casting no shadow (a first-person weapon, which would otherwise poke into
+# walls the player stands against)
+draw_mesh = (m: Mesh, transform: mat4 = mat4(), color: vec4 = vec4(1, 1, 1, 1), texture: Texture = Texture(0, 0, 0), emissive: f64 = 0.0, specular: f64 = 0.3, cast_shadow: bool = true, in_front: bool = false, double_sided: bool = false):
+    __draws.push(Draw3D(m, transform, color, texture.id, f32(emissive), f32(specular), [], false, cast_shadow and not in_front, 0, __noop3d, false, in_front, both_sides = double_sided))
+
+# a skinned mesh (of SkinVertex3D), bent by bones (3 rows per joint: see draw_model)
+__line_mesh = Mesh()
+__line_ready = false
+
+# a line from a to b, `width` thick: for seeing paths, rays, normals and boxes while making a game
+draw_line3d = (a: vec3, b: vec3, color: vec4 = vec4(1, 1, 1, 1), width: f64 = 0.03):
+    d = b - a
+    l = length(d)
+    if l <= 0.0: return
+    if not __line_ready:
+        __line_mesh = cube_mesh(1.0)
+        __line_ready = true
+    y = d / l
+    up = vec3(0, 1, 0)
+    if abs(y.y) > 0.99: up = vec3(1, 0, 0)
+    x = normalize(cross(up, y))
+    z = cross(x, y)
+    w = f32(width)
+    m = mat4()
+    m[0] = vec4(x * w, 0)
+    m[1] = vec4(d, 0)
+    m[2] = vec4(z * w, 0)
+    m[3] = vec4((a + b) * 0.5, 1)
+    draw_mesh(__line_mesh, m, color, emissive = 0.8, specular = 0.0, cast_shadow = false)
+
+# lines on the ground (y = height), `step` apart out to `size` from the center: to see distances
+draw_grid3d = (size: f64 = 10.0, step: f64 = 1.0, height: f64 = 0.0, color: vec4 = vec4(1, 1, 1, 0.35)):
+    n = int(floor(size / step))
+    s = f32(f64(n) * step)
+    h = f32(height)
+    loop i in [-n..n]:
+        k = f32(f64(i) * step)
+        draw_line3d(vec3(k, h, -s), vec3(k, h, s), color, 0.02)
+        draw_line3d(vec3(-s, h, k), vec3(s, h, k), color, 0.02)
+
+__draw_skinned = (m: Mesh, bones: vec4[], transform: mat4, color: vec4, texture: Texture, emissive: f64, specular: f64, cast_shadow: bool, in_front: bool):
+    __draws.push(Draw3D(m, transform, color, texture.id, f32(emissive), f32(specular), [], false, cast_shadow and not in_front, 0, __noop3d, false, in_front, bones))
+
+# many copies of a mesh in one draw call (crowds, forests, particles...)
+draw_mesh_instanced = (m: Mesh, instances: Instance3D[], color: vec4 = vec4(1, 1, 1, 1), emissive: f64 = 0.0, specular: f64 = 0.2, cast_shadow: bool = true, wind: f64 = 0.0):
+    __draws.push(Draw3D(m, mat4(), color, 0, f32(emissive), f32(specular), instances, true, cast_shadow, f32(wind), __noop3d, false))
+
+# draw with your own shader inside the 3D pass; `render` runs with depth testing on.
+# Use scene_view_proj(), scene_camera(), scene_sun(), scene_shadow_vp(), scene_shadow_map()...
+# transparent = true: run after the sky with alpha blending on and depth writes off;
+# additive = true: like transparent, but colors add up (glows, beams, light shafts)
+draw_custom = (render: () -> void, transparent: bool = false, additive: bool = false):
+    a: f32 = 1.0
+    if transparent or additive: a = 0.5
+    em: f32 = 0.0
+    if additive: em = 1.0
+    __draws.push(Draw3D(__dummy_mesh(), mat4(), vec4(1, 1, 1, a), 0, em, 0, [], false, false, 0, render, true))
+
+__noop3d = (): pass
+
+# ---------------- 3D particles ----------------
+# sparks, smoke, dust and magic: soft dots that always face the camera
+#   ps: Particles3D
+#   ps.gravity = vec3(0, -9.8, 0)
+#   emit(ps, hit_point, 30, 4.0, rgb(1, 0.6, 0.2))     # in update, when something happens
+#   ps.update(dt)                                      # in update, every frame
+#   ps.draw()                                          # in draw, with the 3D scene
+struct Particle3D:
+    pos: vec3
+    vel: vec3
+    life: f32
+    max_life: f32
+    size: f32
+    color: vec4
+
+struct Particles3D:
+    items: Particle3D[]
+    gravity: vec3
+    drag: f32 = 1.0
+
+# count particles from pos, at up to speed (m/s), within `spread` radians of `direction` (PI:
+# every way), lasting up to `life` seconds, up to `size` meters across
+emit = (ps: mut Particles3D, pos: vec3, count: int, speed: f64, color: vec4, life: f64 = 1.0, size: f64 = 0.15, spread: f64 = PI, direction: vec3 = vec3(0, 1, 0)):
+    d = normalize(direction)
+    side = vec3(1, 0, 0)
+    if abs(d.x) > 0.9: side = vec3(0, 0, 1)
+    a = normalize(cross(d, side))
+    b = cross(d, a)
+    c0 = cos(min(spread, PI))
+    loop i in [0..count):
+        # (a direction in the cone, evenly over its area)
+        z = random(c0, 1.0)
+        r = sqrt(max(1.0 - z * z, 0.0))
+        t = random(0.0, TAU)
+        dir = d * f32(z) + a * f32(r * cos(t)) + b * f32(r * sin(t))
+        l = f32(random(life * 0.6, life))
+        ps.items.push(Particle3D(pos, dir * f32(random(speed * 0.3, speed)), l, l, f32(random(size * 0.5, size)), color))
+
+update = (ps: mut Particles3D, dt: f64):
+    k = 0
+    loop k < ps.items.len():
+        if ps.items[k].life <= 0.0:
+            ps.items[k] = ps.items[ps.items.len() - 1]
+            ps.items.pop()
+        else: k += 1
+    damp = f32(exp(-f64(ps.drag) * dt))
+    loop mut p in ps.items:
+        p.vel = (p.vel + ps.gravity * f32(dt)) * damp
+        p.pos += p.vel * f32(dt)
+        p.life -= f32(dt)
+
+# draw them with the 3D scene: glowing (colors add up: sparks, fire, magic) or not (blended:
+# smoke, dust); they fade and shrink as they age
+draw = (ps: Particles3D, glow: bool = true):
+    if ps.items.len() == 0: return
+    if not __pt_ready:
+        __pt_sh = make_shader(shader(_pt_vs, _pt_fs))
+        __pt_ready = true
+    fwd = normalize(__cam_target - __cam_pos)
+    up0 = vec3(0, 1, 0)
+    if abs(fwd.y) > 0.99: up0 = vec3(0, 0, 1)
+    right = normalize(cross(fwd, up0))
+    up = cross(right, fwd)
+    vs: Vertex3D[]
+    vs.reserve(ps.items.len() * 6)
+    n = -fwd
+    loop p in ps.items:
+        t = clamp(p.life / p.max_life, 0.0, 1.0)
+        c = p.color
+        c.w = c.w * t
+        h = p.size * (0.5 + 0.5 * t) * 0.5
+        rx = right * h
+        uy = up * h
+        q0 = Vertex3D(p.pos - rx - uy, n, vec2(0, 0), c)
+        q1 = Vertex3D(p.pos + rx - uy, n, vec2(1, 0), c)
+        q2 = Vertex3D(p.pos + rx + uy, n, vec2(1, 1), c)
+        q3 = Vertex3D(p.pos - rx + uy, n, vec2(0, 1), c)
+        vs.push(q0)
+        vs.push(q1)
+        vs.push(q2)
+        vs.push(q0)
+        vs.push(q2)
+        vs.push(q3)
+    # (a mesh of its own for each set drawn this frame: they are drawn later, all at once)
+    k = __pt_used
+    __pt_used += 1
+    if k >= __pt_meshes.len(): __pt_meshes.push(mesh(vs))
+    else: update_mesh(__pt_meshes[k], vs)
+    draw_custom((): draw(__pt_sh, __pt_meshes[k], _PtParams(scene_view_proj())), transparent = not glow, additive = glow)
+
+struct _PtParams:
+    view_proj: mat4
+struct _PtOut:
+    pos: vec4
+    uv: vec2
+    color: vec4
+_pt_vs = (v: Vertex3D, u: _PtParams) -> _PtOut: _PtOut(u.view_proj * vec4(v.pos, 1), v.uv, v.color)
+_pt_fs = (i: _PtOut, u: _PtParams) -> vec4:
+    d = length(i.uv * 2.0 - vec2(1, 1))
+    a = clamp(1.0 - d, 0.0, 1.0)
+    vec4(i.color.xyz, i.color.w * a * a)
+__dummy_mesh = () -> Mesh: Mesh()
+
+scene_view_proj = () -> mat4: __proj3 * __view
+scene_camera = () -> vec3: __cam_pos
+scene_sun = () -> vec3: __sun_dir
+scene_sun_color = () -> vec3: __sun_color
+scene_sky_color = () -> vec3: __sky_top * 0.6 + __sky_horizon * 0.4
+scene_ground_color = () -> vec3: __ground_color
+scene_fog_color = () -> vec3: __fog_color
+scene_fog = () -> vec2: vec2(__fog_density, __fog_height)
+scene_shadow_vp = () -> mat4: __shadow_vp
+scene_shadow_map = () -> Texture: __shadow_rt.texture
+scene_shadow_strength = () -> f32: f32(__shadow_strength) * f32(int(__shadows))
+
+instance = (transform: mat4, color: vec4 = vec4(1, 1, 1, 1)) -> Instance3D: Instance3D(transform, color)
+
+# transform helpers
+transform = (pos: vec3, rot_y: f64 = 0.0, scale: f64 = 1.0) -> mat4:
+    translation(pos) * rotation_y(rot_y) * scaling(vec3(f32(scale), f32(scale), f32(scale)))
+
+__params = (d: Draw3D, vp: mat4) -> LitParams:
+    LitParams(view_proj = vp, model = d.model, shadow_vp = __shadow_vp, color = d.color, cam_pos = __cam_pos,
+        sun_dir = __sun_dir, sun_color = __sun_color, sky_color = __sky_top * 0.6 + __sky_horizon * 0.4,
+        ground_color = __ground_color, fog_color = __fog_color, fog_density = __fog_density, fog_height = __fog_height,
+        emissive = d.emissive, specular = d.specular, use_tex = f32(int(d.tex != 0)),
+        shadow_strength = f32(__shadow_strength) * f32(int(__shadows)), time = f32(elapsed()), wind = d.wind,
+        tex = Texture(d.tex, 1, 1), shadow_map = __shadow_rt.texture, lights = __light_pos,
+        light_colors = __light_col, light_count = __light_n, bones = __no_bones)
+
+# the params for a draw, and its shader (lit or shadow pass)
+__params_for = (d: Draw3D, vp: mat4) -> LitParams:
+    p = __params(d, vp)
+    loop k in [0..min(d.bones.len(), 192)): p.bones[k] = d.bones[k]
+    p
+
+__no_bones: vec4[192]
+
+# (3D drawn after 2D in the same frame goes over it: a second pass into the same target keeps
+# the depth of the first, draws no sky, and the first pass's objects still cast shadows)
+__pass_frame = -1
+__pass_target = -2
+__casters: Draw3D[]
+
+__cast_shadow = (d: mut Draw3D, sv: vec4[], vp: mat4):
+    if not d.shadow or d.has_custom: return
+    if not __in_view(d, sv): return
+    p = __params_for(d, vp)
+    p.shadow_map = Texture(0, 1, 1)          # never sample the target being rendered
+    if d.instanced: draw_instanced(__shadow_sh_inst, d.mesh, d.instances, p)
+    else if d.bones.len() > 0: draw(__shadow_sh_skin, d.mesh, p)
+    else: draw(__shadow_sh, d.mesh, p)
+
+__render3d = ():
+    if __draws.len() == 0:
+        __point_lights.clear()
+        __point_colors.clear()
+        return
+    __3d_init()
+    flush()
+    __clip_off()
+    zone("3d")
+    again = __pass_frame == __frame_count and __pass_target == __cur_target
+    if not again: __casters.clear()
+    __pass_frame = __frame_count
+    __pass_target = __cur_target
+    w = __target_w
+    h = __target_h
+    aspect = f64(w) / f64(max(h, 1))
+    __view = look_at(__cam_pos, __cam_target, vec3(0, 1, 0))
+    __proj3 = perspective(__fov, aspect, __near, __far)
+    vp = __proj3 * __view
+    __pick_lights()
+    # shadow pass: orthographic projection around the camera target
+    if __shadows:
+        zone("shadows")
+        if __shadow_rt.fbo == 0:
+            res = 2048
+            if __soft: res = 1024
+            __shadow_rt = __depth_target(res)
+        center = __cam_target
+        lpos = center + __sun_dir * f32(__shadow_size * 2.0)
+        s = __shadow_size
+        __shadow_vp = orthographic(-s, s, -s, s, 0.1, s * 5.0) * look_at(lpos, center, vec3(0, 1, 0))
+        glBindFramebuffer(GL_FRAMEBUFFER, u32(__shadow_rt.fbo))
+        glViewport(0, 0, i32(__shadow_rt.texture.width), i32(__shadow_rt.texture.height))
+        glClear(GL_DEPTH_BUFFER_BIT)
+        glEnable(GL_DEPTH_TEST)
+        glDepthFunc(GL_LEQUAL)
+        glDisable(GL_BLEND)
+        glColorMask(0, 0, 0, 0)
+        sv = __frustum(__shadow_vp)
+        loop mut d in __casters: __cast_shadow(d, sv, vp)
+        loop mut d in __draws: __cast_shadow(d, sv, vp)
+        glColorMask(1, 1, 1, 1)
+        __rebind_target()
+        zone_end()
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LEQUAL)
+    glDepthMask(1)
+    if not again: glClear(GL_DEPTH_BUFFER_BIT)
+    glEnable(GL_CULL_FACE)
+    glCullFace(GL_BACK)
+    glDisable(GL_BLEND)
+    view = __frustum(vp)
+    __drawn3d = 0
+    loop mut d in __draws:
+        if d.has_custom:
+            if d.color.w < 1.0: continue
+            d.custom()
+            glEnable(GL_DEPTH_TEST)
+            glEnable(GL_CULL_FACE)
+            glDisable(GL_BLEND)
+            continue
+        if d.color.w < 1.0 or d.front or not __in_view(d, view): continue
+        __drawn3d += 1
+        p = __params_for(d, vp)
+        if d.both_sides: glDisable(GL_CULL_FACE)
+        if d.instanced: draw_instanced(__lit_inst, d.mesh, d.instances, p)
+        else if d.bones.len() > 0: draw(__lit_skin, d.mesh, p)
+        else: draw(__lit, d.mesh, p)
+        if d.both_sides: glEnable(GL_CULL_FACE)
+    if __sky_on and not again:
+        glDisable(GL_CULL_FACE)
+        sp = _SkyParams(inverse(vp), __sky_top, __sky_horizon, __ground_color, __sun_dir, __sun_color, f32(elapsed()), f32(__stars))
+        draw(__sky_sh, __fs_tri, sp)
+    # transparent objects last, blended
+    glEnable(GL_BLEND)
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+    glDepthMask(0)
+    glDisable(GL_CULL_FACE)
+    loop mut d in __draws:
+        if d.color.w >= 1.0 or d.front: continue
+        if d.has_custom:
+            if d.emissive > 0.0: glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+            d.custom()
+            glEnable(GL_BLEND)
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+            glDepthMask(0)
+            glDisable(GL_CULL_FACE)
+            continue
+        if not __in_view(d, view): continue
+        p = __params_for(d, vp)
+        if d.instanced: draw_instanced(__lit_inst, d.mesh, d.instances, p)
+        else if d.bones.len() > 0: draw(__lit_skin, d.mesh, p)
+        else: draw(__lit, d.mesh, p)
+    glDepthMask(1)
+    # in front of everything: the depth so far is cleared first
+    cleared = false
+    loop mut d in __draws:
+        if not d.front: continue
+        if not cleared:
+            glClear(GL_DEPTH_BUFFER_BIT)
+            glDisable(GL_BLEND)
+            glEnable(GL_CULL_FACE)
+            cleared = true
+        if d.color.w < 1.0: glEnable(GL_BLEND)
+        else: glDisable(GL_BLEND)
+        if d.bones.len() > 0: draw(__lit_skin, d.mesh, __params_for(d, vp))
+        else: draw(__lit, d.mesh, __params(d, vp))
+    glDisable(GL_CULL_FACE)
+    glDisable(GL_DEPTH_TEST)
+    __apply_blend(__blend)
+    loop d in __draws:
+        if d.shadow and not d.has_custom: __casters.push(d)
+    __draws.clear()
+    __pt_used = 0
+    if __clip_on: __apply_clip()
+    zone_end()
+
+__rebind_target = (): __bind_current()
+
+# the six planes of what m (a view-projection) shows: (normal, distance) as vec4, inside >= 0
+__frustum = (m: mat4) -> vec4[]:
+    row = (i: int) -> vec4: vec4(m[0][i], m[1][i], m[2][i], m[3][i])
+    r0 = row(0)
+    r1 = row(1)
+    r2 = row(2)
+    r3 = row(3)
+    out: vec4[]
+    loop p in [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r3 + r2, r3 - r2]:
+        l = length(p.xyz)
+        if l > 0.0: out.push(p * (1.0 / l))
+        else: out.push(p)
+    out
+
+# whether a draw may be seen: its mesh's sphere, placed by its transform, not wholly outside
+# (instanced draws and meshes without a sphere: always)
+__in_view = (d: Draw3D, planes: vec4[]) -> bool:
+    if d.instanced or d.mesh.radius < 0.0: return true
+    c = (d.model * vec4(d.mesh.center, 1)).xyz
+    s = max(length(d.model[0].xyz), max(length(d.model[1].xyz), length(d.model[2].xyz)))
+    r = d.mesh.radius * s
+    loop p in planes:
+        if dot(p.xyz, c) + p.w < -r: return false
+    true
+
+__depth_target = (size: int) -> RenderTarget:
+    id = gl_create_texture()
+    glBindTexture(GL_TEXTURE_2D, u32(id))
+    gl_tex_image(size, size, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, null, 0)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(GL_NEAREST))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(GL_NEAREST))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, i32(GL_CLAMP_TO_EDGE))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, i32(GL_CLAMP_TO_EDGE))
+    fbo = gl_create_framebuffer()
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(fbo))
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, u32(id), 0)
+    RenderTarget(Texture(id, size, size), fbo, 0)
+
+# ---------------- frame post-processing ----------------
+__post_begin = ():
+    if not __bloom_on:
+        __post_active = false
+        return
+    __3d_init()
+    w = __screen_px_w()
+    h = __screen_px_h()
+    if __scene_rt.texture.width != w or __scene_rt.texture.height != h:
+        if __scene_rt.fbo != 0:
+            free_render_target(__scene_rt)
+            free_render_target(__bloom_a)
+            free_render_target(__bloom_b)
+        __scene_rt = render_target(w, h)
+        __bloom_a = render_target(max(w / 4, 1), max(h / 4, 1))
+        __bloom_b = render_target(max(w / 4, 1), max(h / 4, 1))
+    draw_to(__scene_rt)
+    __set_screen_target()          # (it stands in for the screen)
+    __post_active = true
+
+__post_pass = (sh: Shader, fs: (_PostOut, _PostParams) -> vec4, dst: RenderTarget, p: _PostParams):
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(dst.fbo))
+    glViewport(0, 0, i32(dst.texture.width), i32(dst.texture.height))
+    __post_draw(sh, fs, p)
+
+__post_blur = (dst: RenderTarget, p: _PostParams):
+    when TARGET != "wasm":
+        if __soft and __sw_post_blur(dst, p): return
+    __post_pass(__blur_sh, _blur_fs, dst, p)
+
+# (the software renderer calls the fragment function for each pixel itself: no triangle to
+# rasterize, nothing to interpolate)
+__post_draw = (sh: Shader, fs: (_PostOut, _PostParams) -> vec4, p: _PostParams):
+    when TARGET != "wasm":
+        if __soft:
+            __sw_fullscreen((uv: vec2) -> vec4: fs(_PostOut(vec4(0, 0, 0, 1), uv), p))
+            return
+    draw(sh, __fs_tri, p)
+
+when TARGET != "wasm":
+    # The software renderer's blur and composite: _blur_fs's and _composite_fs's arithmetic done
+    # on its pixels directly (most of a frame's time was theirs, a call for every sample). A
+    # blur's five samples fall at the same offsets from every pixel, along a row or a column, so
+    # each is two neighbours with fixed weights.
+    __sw_post_blur = (dst: RenderTarget, p: _PostParams) -> bool:
+        s = __st[p.src.id]
+        d = __st[dst.texture.id]
+        if s.p == null or d.p == null or s.w != d.w or s.h != d.h or not s.linear or s.rep: return false
+        horiz = p.dir.x != 0.0
+        # (offsets in this texture's pixels: the shader's are in texels of the size it was made at)
+        k = f32(s.w) * p.texel.x
+        if not horiz: k = f32(s.h) * p.texel.y
+        offs: int[]
+        ws: f32[]
+        at = [0.0, 1.385, -1.385, 3.231, -3.231]
+        wt = [0.227, 0.316, 0.316, 0.070, 0.070]
+        loop i in [0..5):
+            u = f32(at[i]) * k
+            i0 = __floor_i(u)
+            f = u - f32(i0)
+            offs.push(i0)
+            ws.push(f32(wt[i]) * (1.0 - f))
+            offs.push(i0 + 1)
+            ws.push(f32(wt[i]) * f)
+        sp = s.p
+        dp = d.p
+        w = s.w
+        h = s.h
+        op = data(offs)
+        wp = data(ws)
+        n = offs.len()
+        __par_serial = w * h < 4096
+        parallel_range(h, (y: int):
+            row = dp + y * w * 4
+            loop x in [0..w):
+                r: f32 = 0
+                g: f32 = 0
+                b: f32 = 0
+                loop t in [0..n):
+                    q = sp
+                    if horiz: q = sp + (y * w + clamp(x + op[t], 0, w - 1)) * 4
+                    else: q = sp + (clamp(y + op[t], 0, h - 1) * w + x) * 4
+                    r += q[0] * wp[t]
+                    g += q[1] * wp[t]
+                    b += q[2] * wp[t]
+                o = row + x * 4
+                o[0] = r
+                o[1] = g
+                o[2] = b
+                o[3] = 1.0
+        )
+        __par_serial = false
+        true
+
+    __sw_post_composite = (p: _PostParams) -> bool:
+        c, _ = __sw_target()
+        if c <= 0: return false
+        t = __st[c]
+        s = __st[p.src.id]
+        bl = __st[p.bloom.id]
+        if t.p == null or s.p == null or bl.p == null or not bl.linear or bl.rep: return false
+        x0, y0, x1, y1 = __sw_clip_rect()
+        if x1 <= x0 or y1 <= y0: return true
+        vp = __s_vp
+        vw = f32(vp.2)
+        vh = f32(vp.3)
+        # (the scene at the screen's pixels: each pixel's own, not a blend of four)
+        exact = s.w == vp.2 and s.h == vp.3
+        tp = t.p
+        tw = t.w
+        sp = s.p
+        bp = bl.p
+        bw = bl.w
+        bh = bl.h
+        __par_serial = (x1 - x0) * (y1 - y0) < 4096
+        parallel_range(y1 - y0, (k: int):
+            y = y0 + k
+            v = (f32(y - vp.1) + 0.5) / vh
+            by = v * f32(bh) - 0.5
+            byi = __floor_i(by)
+            fy = by - f32(byi)
+            ra = bp + clamp(byi, 0, bh - 1) * bw * 4
+            rb = bp + clamp(byi + 1, 0, bh - 1) * bw * 4
+            row = tp + y * tw * 4
+            loop x in [x0..x1):
+                u = (f32(x - vp.0) + 0.5) / vw
+                sc = vec3(0, 0, 0)
+                if exact:
+                    q = sp + ((y - vp.1) * s.w + (x - vp.0)) * 4
+                    sc = vec3(q[0], q[1], q[2])
+                else: sc = __sw_sample(p.src.id, vec2(u, v)).xyz
+                bx = u * f32(bw) - 0.5
+                bxi = __floor_i(bx)
+                fx = bx - f32(bxi)
+                xa = clamp(bxi, 0, bw - 1) * 4
+                xb = clamp(bxi + 1, 0, bw - 1) * 4
+                gx = 1.0 - fx
+                gy = 1.0 - fy
+                bc = vec3(ra[xa] * gx * gy + ra[xb] * fx * gy + rb[xa] * gx * fy + rb[xb] * fx * fy,
+                          ra[xa + 1] * gx * gy + ra[xb + 1] * fx * gy + rb[xa + 1] * gx * fy + rb[xb + 1] * fx * fy,
+                          ra[xa + 2] * gx * gy + ra[xb + 2] * fx * gy + rb[xa + 2] * gx * fy + rb[xb + 2] * fx * fy)
+                col = sc + bc * p.strength
+                gray = dot(col, vec3(0.299, 0.587, 0.114))
+                col = mix(vec3(gray, gray, gray), col, p.saturation) * p.tint
+                qv = vec2(u, v) - vec2(0.5, 0.5)
+                col = col * (1.0 - p.vignette * dot(qv, qv) * 1.6)
+                o = row + x * 4
+                o[0] = col.x
+                o[1] = col.y
+                o[2] = col.z
+                o[3] = 1.0
+        )
+        __par_serial = false
+        true
+
+__post_end = ():
+    if not __post_active: return
+    __render3d()
+    flush()
+    zone("post")
+    glDisable(GL_BLEND)
+    glDisable(GL_DEPTH_TEST)
+    bw = __bloom_a.texture.width
+    bh = __bloom_a.texture.height
+    texel = vec2(1.0 / f32(bw), 1.0 / f32(bh))
+    # (`bloom` must not alias a pass's render target: WebGL rejects feedback loops)
+    p = _PostParams(__scene_rt.texture, __scene_rt.texture, texel, f32(__bloom_threshold), f32(__bloom_strength), f32(__vignette), vec2(1, 0), f32(__saturation), __tint)
+    __post_pass(__bright_sh, _bright_fs, __bloom_a, p)
+    loop k in [0..2):
+        p.src = __bloom_a.texture
+        p.dir = vec2(1, 0)
+        __post_blur(__bloom_b, p)
+        p.src = __bloom_b.texture
+        p.dir = vec2(0, 1)
+        __post_blur(__bloom_a, p)
+    __post_active = false
+    draw_to_screen()
+    glDisable(GL_BLEND)
+    p.src = __scene_rt.texture
+    p.bloom = __bloom_a.texture
+    done = false
+    when TARGET != "wasm":
+        if __soft: done = __sw_post_composite(p)
+    if not done: __post_draw(__comp_sh, _composite_fs, p)
+    __apply_blend(__blend)
+    __post_active = false
+    zone_end()
+
+# ---------------- mesh generators ----------------
+# a mesh of 3D vertices, with the sphere around them (draws outside the view are left out)
+__mesh3d = (vs: Vertex3D[], idx: u32[] = []) -> Mesh:
+    m = mesh(vs, idx)
+    if vs.len() == 0: return m
+    lo = vs[0].pos
+    hi = vs[0].pos
+    loop v in vs:
+        lo = min(lo, v.pos)
+        hi = max(hi, v.pos)
+    m.center = (lo + hi) * 0.5
+    r = 0.0
+    loop v in vs: r = max(r, f64(length(v.pos - m.center)))
+    m.radius = f32(r)
+    m
+
+__v3 = (p: vec3, n: vec3, uv: vec2) -> Vertex3D: Vertex3D(p, n, uv, vec4(1, 1, 1, 1))
+
+cube_mesh = (size: f64 = 1.0) -> Mesh:
+    vs: Vertex3D[]
+    add_box(vs, vec3(0, 0, 0), vec3(f32(size), f32(size), f32(size)))
+    __mesh3d(vs)
+
+# Shapes added to a vertex array, to build one mesh from many parts (a building, a robot, a
+# whole level): drawn in one call, it costs far less than a draw per part.
+#
+#   parts: Vertex3D[]
+#   add_box(parts, vec3(0, 1, 0), vec3(2, 2, 2), rgb(0.8, 0.8, 0.7))
+#   add_cylinder(parts, vec3(0, 2, 0), 0.3, 1.5, rgb(0.2, 0.6, 0.9))
+#   tower = custom_mesh(parts)
+#
+# transform places the shape (it is applied after center and size: turn a box with
+# rotation_y(...) or rotation_x(...), keeping the scale uniform so normals stay right).
+
+# a box: center, and its size along x, y and z
+add_box = (vs: mut Vertex3D[], center: vec3, size: vec3, color: vec4 = vec4(1, 1, 1, 1), transform: mat4 = mat4()):
+    h = size * 0.5
+    faces = [(vec3(1, 0, 0), vec3(0, 1, 0)), (vec3(-1, 0, 0), vec3(0, 1, 0)), (vec3(0, 1, 0), vec3(0, 0, -1)),
+              (vec3(0, -1, 0), vec3(0, 0, 1)), (vec3(0, 0, 1), vec3(0, 1, 0)), (vec3(0, 0, -1), vec3(0, 1, 0))]
+    uvs = [vec2(0, 0), vec2(0, 1), vec2(1, 1), vec2(1, 0)]
+    loop f in faces:
+        n = f.0
+        up = f.1
+        side = cross(up, n)
+        c = [n + up - side, n - up - side, n - up + side, n + up + side]
+        tn = normalize((transform * vec4(n, 0)).xyz)
+        loop k in [0, 1, 2, 0, 2, 3]:
+            p = (transform * vec4(center + c[k] * h, 1)).xyz
+            vs.push(Vertex3D(p, tn, uvs[k], color))
+
+# a cylinder standing on base (a cone when top_radius is 0)
+add_cylinder = (vs: mut Vertex3D[], base: vec3, radius: f64, height: f64, color: vec4 = vec4(1, 1, 1, 1), segments: int = 16, top_radius: f64 = -1.0, transform: mat4 = mat4()):
+    tr = top_radius
+    if tr < 0.0: tr = radius
+    v = (p: vec3, n: vec3, uv: vec2) -> Vertex3D: Vertex3D((transform * vec4(base + p, 1)).xyz, normalize((transform * vec4(n, 0)).xyz), uv, color)
+    loop i in [0..segments):
+        a0 = TAU * f64(i) / f64(segments)
+        a1 = TAU * f64(i + 1) / f64(segments)
+        d0 = vec3(f32(cos(a0)), 0, f32(sin(a0)))
+        d1 = vec3(f32(cos(a1)), 0, f32(sin(a1)))
+        slope = f32((radius - tr) / height)
+        n0 = normalize(d0 + vec3(0, slope, 0))
+        n1 = normalize(d1 + vec3(0, slope, 0))
+        b0 = d0 * f32(radius)
+        b1 = d1 * f32(radius)
+        t0 = d0 * f32(tr) + vec3(0, f32(height), 0)
+        t1 = d1 * f32(tr) + vec3(0, f32(height), 0)
+        vs.push(v(b0, n0, vec2(0, 1)))
+        vs.push(v(t0, n0, vec2(0, 0)))
+        vs.push(v(t1, n1, vec2(1, 0)))
+        vs.push(v(b0, n0, vec2(0, 1)))
+        vs.push(v(t1, n1, vec2(1, 0)))
+        vs.push(v(b1, n1, vec2(1, 1)))
+        up = vec3(0, 1, 0)
+        if tr > 0.0:
+            top = vec3(0, f32(height), 0)
+            vs.push(v(top, up, vec2(0.5, 0.5)))
+            vs.push(v(t1, up, vec2(0.5, 0.5)))
+            vs.push(v(t0, up, vec2(0.5, 0.5)))
+        dn = vec3(0, -1, 0)
+        vs.push(v(vec3(0, 0, 0), dn, vec2(0.5, 0.5)))
+        vs.push(v(b0, dn, vec2(0.5, 0.5)))
+        vs.push(v(b1, dn, vec2(0.5, 0.5)))
+
+# a sphere (segments around, rings from top to bottom: few of each give a faceted look)
+add_sphere = (vs: mut Vertex3D[], center: vec3, radius: f64, color: vec4 = vec4(1, 1, 1, 1), segments: int = 16, rings: int = 8, transform: mat4 = mat4()):
+    at = (r: int, s: int) -> Vertex3D:
+        th = PI * f64(r) / f64(rings)
+        ph = TAU * f64(s) / f64(segments)
+        n = vec3(f32(sin(th) * cos(ph)), f32(cos(th)), f32(sin(th) * sin(ph)))
+        Vertex3D((transform * vec4(center + n * f32(radius), 1)).xyz, normalize((transform * vec4(n, 0)).xyz),
+            vec2(f32(f64(s) / f64(segments)), f32(f64(r) / f64(rings))), color)
+    loop r in [0..rings):
+        loop s in [0..segments):
+            a = at(r, s)
+            b = at(r + 1, s)
+            c = at(r, s + 1)
+            d = at(r + 1, s + 1)
+            if r > 0:
+                vs.push(a)
+                vs.push(c)
+                vs.push(b)
+            if r < rings - 1:
+                vs.push(c)
+                vs.push(d)
+                vs.push(b)
+
+sphere_mesh = (radius: f64 = 0.5, segments: int = 32, rings: int = 16) -> Mesh:
+    vs: Vertex3D[]
+    idx: u32[]
+    loop r in [0..rings + 1):
+        th = PI * f64(r) / f64(rings)
+        loop s in [0..segments + 1):
+            ph = TAU * f64(s) / f64(segments)
+            n = vec3(f32(sin(th) * cos(ph)), f32(cos(th)), f32(sin(th) * sin(ph)))
+            vs.push(__v3(n * f32(radius), n, vec2(f32(f64(s) / f64(segments)), f32(f64(r) / f64(rings)))))
+    loop r in [0..rings):
+        loop s in [0..segments):
+            a = u32(r * (segments + 1) + s)
+            b = a + u32(segments + 1)
+            idx.push(a)
+            idx.push(a + 1)
+            idx.push(b)
+            idx.push(a + 1)
+            idx.push(b + 1)
+            idx.push(b)
+    __mesh3d(vs, idx)
+
+# a capsule standing on end: `height` from end to end, centered (physics3d's add_capsule and a
+# character are this shape)
+capsule_mesh = (radius: f64 = 0.5, height: f64 = 2.0, segments: int = 24, rings: int = 16) -> Mesh:
+    vs: Vertex3D[]
+    idx: u32[]
+    hh = max(height / 2.0 - radius, 0.0)
+    half = max(rings / 2, 1)
+    # (rings of the top half sphere, raised by hh, then the bottom one's, lowered: the equator twice)
+    rows: (f64, f64)[]
+    loop r in [0..half]: rows.push((PI * f64(r) / f64(half * 2), hh))
+    loop r in [half..half * 2]: rows.push((PI * f64(r) / f64(half * 2), -hh))
+    total = height
+    if total <= 0.0: total = 1.0
+    loop row in rows:
+        th = row.0
+        loop sg in [0..segments + 1):
+            ph = TAU * f64(sg) / f64(segments)
+            n = vec3(f32(sin(th) * cos(ph)), f32(cos(th)), f32(sin(th) * sin(ph)))
+            p = n * f32(radius) + vec3(0, f32(row.1), 0)
+            vs.push(__v3(p, n, vec2(f32(f64(sg) / f64(segments)), f32(0.5 - f64(p.y) / total))))
+    loop r in [0..rows.len() - 1):
+        loop sg in [0..segments):
+            a = u32(r * (segments + 1) + sg)
+            b = a + u32(segments + 1)
+            idx.push(a)
+            idx.push(a + 1)
+            idx.push(b)
+            idx.push(a + 1)
+            idx.push(b + 1)
+            idx.push(b)
+    __mesh3d(vs, idx)
+
+# a grid in the XZ plane, centered on the origin and `size` across (x and z from -size/2 to
+# size/2), in divisions x divisions squares; `height` gives the elevation at (x, z), and
+# `color` each corner's color from (x, y, z). To stand on it with import physics3d:
+# `w.add_mesh(physics3d.terrain_triangles(size, divisions, height))`, the same triangles
+terrain_mesh = (size: f64, divisions: int, height: (f64, f64) -> f64, color: (f64, f64, f64) -> vec4) -> Mesh:
+    vs: Vertex3D[]
+    idx: u32[]
+    n = divisions
+    step = size / f64(n)
+    half = size / 2.0
+    loop zi in [0..n + 1):
+        loop xi in [0..n + 1):
+            x = -half + f64(xi) * step
+            z = -half + f64(zi) * step
+            y = height(x, z)
+            e = step * 0.5
+            nx = height(x - e, z) - height(x + e, z)
+            nz = height(x, z - e) - height(x, z + e)
+            nrm = normalize(vec3(f32(nx), f32(2.0 * e), f32(nz)))
+            vs.push(Vertex3D(vec3(f32(x), f32(y), f32(z)), nrm, vec2(f32(f64(xi) / f64(n)), f32(f64(zi) / f64(n))), color(x, y, z)))
+    loop zi in [0..n):
+        loop xi in [0..n):
+            a = u32(zi * (n + 1) + xi)
+            b = a + u32(n + 1)
+            idx.push(a)
+            idx.push(b)
+            idx.push(a + 1)
+            idx.push(a + 1)
+            idx.push(b)
+            idx.push(b + 1)
+    __mesh3d(vs, idx)
+
+plane_mesh = (size: f64 = 10.0) -> Mesh:
+    terrain_mesh(size, 1, (x: f64, z: f64): 0.0, (x: f64, y: f64, z: f64): vec4(1, 1, 1, 1))
+
+# a cylinder standing on its base at y = 0 (the cube, sphere and capsule meshes are centered
+# instead), up to y = height; top_radius 0 makes a cone
+cylinder_mesh = (radius: f64 = 0.5, height: f64 = 1.0, segments: int = 24, top_radius: f64 = -1.0) -> Mesh:
+    vs: Vertex3D[]
+    add_cylinder(vs, vec3(0, 0, 0), radius, height, segments = segments, top_radius = top_radius)
+    __mesh3d(vs)
+
+cone_mesh = (radius: f64 = 0.5, height: f64 = 1.0, segments: int = 24) -> Mesh: cylinder_mesh(radius, height, segments, 0.0)
+
+# a mesh of your own: triangles, three vertices each (or three indices each into vertices). A
+# triangle's front is the side its normals point to, and only fronts are drawn (a box seen from
+# inside is clear): a triangle wound the other way (its corners clockwise as seen from its
+# front) is turned around to face where its normals do. With no normals (all zero), corners go
+# counter-clockwise as seen from the front. draw_mesh(..., double_sided = true) draws both sides
+custom_mesh = (vertices: Vertex3D[], indices: u32[] = []) -> Mesh:
+    if indices.len() == 0:
+        vs = vertices
+        i = 0
+        loop i + 2 < vs.len():
+            if __tri_backwards(vs[i], vs[i + 1], vs[i + 2]):
+                t = vs[i + 1]
+                vs[i + 1] = vs[i + 2]
+                vs[i + 2] = t
+            i += 3
+        return __mesh3d(vs, indices)
+    ix = indices
+    i = 0
+    loop i + 2 < ix.len():
+        a = int(ix[i])
+        b = int(ix[i + 1])
+        c = int(ix[i + 2])
+        if a < vertices.len() and b < vertices.len() and c < vertices.len() and __tri_backwards(vertices[a], vertices[b], vertices[c]):
+            ix[i + 1] = u32(c)
+            ix[i + 2] = u32(b)
+        i += 3
+    __mesh3d(vertices, ix)
+
+# (its corners clockwise as seen from the side its normals point to)
+__tri_backwards = (a: Vertex3D, b: Vertex3D, c: Vertex3D) -> bool:
+    n = a.normal + b.normal + c.normal
+    if length(n) < 0.0001: return false
+    dot(cross(b.pos - a.pos, c.pos - a.pos), n) < 0.0

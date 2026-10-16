@@ -1,0 +1,376 @@
+# Windows x64 executables (PE32+): sloppy build --target windows.
+#
+# Sections: .text (code), .rdata (read-only data), .data: an import table for kernel32.dll
+# (pe_imports: what everything else is looked up with at run time, as on Linux, and what that
+# needs: lib/core/windows.jo) followed by the program's globals (zero at start, not in the
+# file). The import address table ends where the globals begin, so code finds its entries at
+# fixed offsets below them (pe_iat_off). Last, .sloppy: the functions' names and the line table,
+# for backtraces (x64.jo, pe_backtrace_info; lib/std/backtrace.jo reads it where it is loaded).
+
+use 'util.jo'
+use 'elf.jo'
+
+const PE_BASE = 0x400000
+const PE_SECT = 0x1000         # section alignment in memory
+const PE_FILE = 0x200          # in the file
+const PE_HEADERS = 0x400       # DOS header, PE headers and section table, padded
+
+pe_imports = ["ExitProcess", "LoadLibraryA", "GetProcAddress", "VirtualAlloc", "VirtualFree"]
+
+# where import k's address is: from the start of the globals (the table ends with a zero entry)
+pe_iat_off = (k: int) -> int: -8 * (pe_imports.len() + 1) + 8 * k
+pe_iat_size = () -> int: 8 * (pe_imports.len() + 1)
+
+align_to = (x: int, a: int) -> int: (x + a - 1) / a * a
+
+# the import table (at rva in memory): descriptors, lookup table, names, then the address table
+# (last: an entry for each import and a zero)
+pe_idata = (rva: int) -> u8[]:
+    desc_size = 40                       # one descriptor and the zero one
+    ilt_off = desc_size
+    names_off = ilt_off + 8 * (pe_imports.len() + 1)
+    names: u8[]
+    name_rvas: int[]
+    loop nm in pe_imports:
+        name_rvas.push(rva + names_off + names.len())
+        put16(names, 0)                  # hint
+        loop c in nm: names.push(c)
+        names.push(0)
+        if names.len() % 2 == 1: names.push(0)
+    dll_off = names_off + names.len()
+    dll = "kernel32.dll"
+    size = align_to(dll_off + len(dll) + 1 + pe_iat_size(), 16)
+    iat_off = size - pe_iat_size()
+    out: u8[]
+    put32(out, rva + ilt_off)            # OriginalFirstThunk
+    put32(out, 0)
+    put32(out, 0)
+    put32(out, rva + dll_off)            # Name
+    put32(out, rva + iat_off)            # FirstThunk
+    loop i in [0..20): out.push(0)
+    loop r in name_rvas: put64(out, r)
+    put64(out, 0)
+    append_bytes(out, names)
+    loop c in dll: out.push(c)
+    out.push(0)
+    loop out.len() < iat_off: out.push(0)
+    loop r in name_rvas: put64(out, r)
+    put64(out, 0)
+    out
+
+# (x64.jo) how to unwind each function's frame: (start, end, kind, the size the prologue takes
+# off rsp). A function: push rbp; mov rbp, rsp; sub rsp, n. An adapter (@cabi): that with push
+# rdi; push rsi before the sub. The entry: sub rsp, 8.
+const UW_FRAME = 0
+const UW_ADAPTER = 1
+const UW_ENTRY = 2
+const UW_SAVES = 3          # a function that saves registers below rbp: its codes from uw_data[size]
+unwind_fns: (int, int, int, int)[]
+# (UW_SAVES) the frame's size, fo (rbp = rsp + 16 fo after sub rsp, 16 fo), where in the prologue
+# the sub, the lea and the second sub end, how many registers it saves, then each save's end,
+# register and offset from rsp after the first sub
+uw_data: int[]
+
+# .pdata: how Windows (its debuggers, stack walks, exception dispatch) unwinds each function's
+# frame (x64.jo, unwind_fns): the RUNTIME_FUNCTION entries (start, end, UNWIND_INFO), by
+# address; then the UNWIND_INFOs, one per kind and size. rbp is the frame register; where a
+# function saves registers is described too (debuggers show callers' variables in them).
+pe_unwind = (rva: int, text_rva: int) -> u8[]:
+    fns = unwind_fns
+    fns.sort_by((f: (int, int, int, int)): f.0)
+    infos: u8[]
+    info_at: {int: int} = {}
+    table: u8[]
+    base = rva + 12 * fns.len()
+    loop f in fns:
+        key = f.2 * (1 << 32) + f.3
+        off = info_at.get(key) ?? -1
+        if off < 0:
+            off = infos.len()
+            info_at[key] = off
+            pe_unwind_info(infos, f.2, f.3)
+        put32(table, text_rva + f.0)
+        put32(table, text_rva + f.1)
+        put32(table, base + off)
+    append_bytes(table, infos)
+    table
+
+# UNWIND_INFO: version 1, the prologue's size, the codes (by offset, last first), rbp as the
+# frame register (at rsp + 0 when set)
+pe_unwind_info = (out: mut u8[], kind: int, size: int):
+    codes: (int, int, int)[]                 # (offset in the prologue, op, info)
+    plen = 0
+    fp = true
+    fo = 0
+    if kind == UW_SAVES:
+        # push rbp; sub rsp, 16 fo; lea rbp, [rsp + 16 fo]; sub rsp, frame - 16 fo; the saves
+        frame = uw_data[size]
+        fo = uw_data[size + 1]
+        n = uw_data[size + 5]
+        loop i in [0..n):
+            j = size + 6 + 3 * (n - 1 - i)
+            codes.push((uw_data[j], -2, uw_data[j + 1] | ((uw_data[j + 2] / 8) << 8)))
+        if frame > 16 * fo: codes.push((uw_data[size + 4], -1, frame - 16 * fo))
+        codes.push((uw_data[size + 3], 3, 0))    # UWOP_SET_FPREG
+        codes.push((uw_data[size + 2], -1, 16 * fo))
+        codes.push((1, 0, 5))                # UWOP_PUSH_NONVOL rbp
+        plen = codes[0].0
+    else if kind == UW_ENTRY:
+        codes.push((4, 2, size / 8 - 1))    # UWOP_ALLOC_SMALL
+        plen = 4
+        fp = false
+    else:
+        plen = 4
+        if kind == UW_ADAPTER:
+            plen = 13
+        else if size > 0: plen = 11
+        if size > 0: codes.push((plen, -1, size))
+        if kind == UW_ADAPTER:
+            codes.push((6, 0, 6))            # UWOP_PUSH_NONVOL rsi
+            codes.push((5, 0, 7))            # rdi
+        codes.push((4, 3, 0))                # UWOP_SET_FPREG
+        codes.push((1, 0, 5))                # UWOP_PUSH_NONVOL rbp
+    slots: u8[]
+    loop c in codes:
+        if c.1 == -2:
+            # UWOP_SAVE_NONVOL: the register, where (by 8) from the frame's base (rbp - 16 fo)
+            slots.push(u8(c.0))
+            slots.push(u8(4 | ((c.2 & 15) << 4)))
+            put16(slots, c.2 >> 8)
+        else if c.1 == -1:
+            # an allocation: small (8..128), large (to 512 KB - 8) or larger
+            if c.2 <= 128:
+                slots.push(u8(c.0))
+                slots.push(u8(2 | ((c.2 / 8 - 1) << 4)))
+            else if c.2 < 512 * 1024:
+                slots.push(u8(c.0))
+                slots.push(u8(1))
+                put16(slots, c.2 / 8)
+            else:
+                slots.push(u8(c.0))
+                slots.push(u8(1 | (1 << 4)))
+                put32(slots, c.2)
+        else:
+            slots.push(u8(c.0))
+            slots.push(u8(c.1 | (c.2 << 4)))
+    n = slots.len() / 2
+    out.push(1)
+    out.push(u8(plen))
+    out.push(u8(n))
+    if fp: out.push(u8(5 | (fo << 4)))       # rbp, at rsp + 16 fo
+    else: out.push(0)
+    append_bytes(out, slots)
+    if n % 2 == 1: put16(out, 0)
+
+# where the sections go: (text rva, rodata rva, data rva, size of the import table)
+pe_layout = (text_len: int, ro_len: int) -> (int, int, int, int):
+    text_rva = PE_SECT
+    ro_rva = text_rva + align_to(max(text_len, 1), PE_SECT)
+    data_rva = ro_rva + align_to(max(ro_len, 1), PE_SECT)
+    (text_rva, ro_rva, data_rva, pe_idata(data_rva).len())
+
+# the resources: the program's icon (a PNG, as Windows takes since Vista), as icon 1 in group 1
+# (the window class loads it: lib/game/window.jo). Directories by type, name, language; then the
+# data entries and the data.
+pe_rsrc = (rva: int, png: u8[]) -> u8[]:
+    out: u8[]
+    sub = 0x80000000
+    pe_rsrc_dir(out, [(3, 32 | sub), (14, 80 | sub)])      # RT_ICON, RT_GROUP_ICON
+    pe_rsrc_dir(out, [(1, 56 | sub)])                       # @32
+    pe_rsrc_dir(out, [(0x409, 128)])                        # @56
+    pe_rsrc_dir(out, [(1, 104 | sub)])                      # @80
+    pe_rsrc_dir(out, [(0x409, 144)])                        # @104
+    group: u8[]
+    put16(group, 0)
+    put16(group, 1)                                    # icons
+    put16(group, 1)                                    # how many
+    w = (int(png[16]) << 24) | (int(png[17]) << 16) | (int(png[18]) << 8) | int(png[19])
+    h = (int(png[20]) << 24) | (int(png[21]) << 16) | (int(png[22]) << 8) | int(png[23])
+    group.push(u8(w & 255))                            # (256: 0)
+    group.push(u8(h & 255))
+    group.push(0)
+    group.push(0)
+    put16(group, 1)                                    # planes
+    put16(group, 32)                                   # bits
+    put32(group, png.len())
+    put16(group, 1)                                    # the icon's id
+    icon_at = 160
+    group_at = align_to(icon_at + png.len(), 8)
+    put32(out, rva + icon_at)                          # @128: the icon
+    put32(out, png.len())
+    put32(out, 0)
+    put32(out, 0)
+    put32(out, rva + group_at)                         # @144: the group
+    put32(out, group.len())
+    put32(out, 0)
+    put32(out, 0)
+    append_bytes(out, png)
+    loop out.len() < group_at: out.push(0)
+    append_bytes(out, group)
+    out
+
+# a resource directory: (id, offset) entries; a set high bit marks a subdirectory
+pe_rsrc_dir = (out: mut u8[], entries: (int, int)[]):
+    put32(out, 0)
+    put32(out, 0)
+    put32(out, 0)
+    put16(out, 0)
+    put16(out, entries.len())
+    loop e in entries:
+        put32(out, e.0)
+        put32(out, e.1)
+
+pe_section_headers: u8[]                # (the last program's: its PDB has them, pdb.jo)
+
+# write the program; pdb: the name of its PDB (pdb.jo), with guid, for the debug directory
+write_pe = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int, gui: bool, info: u8[], icon: u8[], pdb: str, guid: u8[]) -> bool:
+    text_rva, ro_rva, data_rva, idata_size = pe_layout(text.len(), ro.len())
+    idata = pe_idata(data_rva)
+    data_vsize = idata_size + data_size + 8
+    info_rva = data_rva + align_to(data_vsize, PE_SECT)
+    pdata_rva = info_rva + align_to(max(info.len(), 1), PE_SECT)
+    pdata = pe_unwind(pdata_rva, text_rva)
+    # (after it: the debug directory and its CodeView record, which names the PDB)
+    debug_at = -1
+    if len(pdb) > 0:
+        loop pdata.len() % 4 != 0: pdata.push(0)
+        debug_at = pdata.len()
+        cv: u8[] = ['R', 'S', 'D', 'S']
+        append_bytes(cv, guid)
+        put32(cv, 1)                         # age
+        loop c in pdb: cv.push(c)
+        cv.push(0)
+        put32(pdata, 0)
+        put32(pdata, 0)                      # time stamp
+        put32(pdata, 0)                      # version
+        put32(pdata, 2)                      # IMAGE_DEBUG_TYPE_CODEVIEW
+        put32(pdata, cv.len())
+        put32(pdata, pdata_rva + debug_at + 28)
+        put32(pdata, 0)                      # (its place in the file: below)
+        append_bytes(pdata, cv)
+    rsrc_rva = pdata_rva + align_to(max(pdata.len(), 1), PE_SECT)
+    rsrc: u8[]
+    if icon.len() > 0: rsrc = pe_rsrc(rsrc_rva, icon)
+    image_size = rsrc_rva + align_to(max(rsrc.len(), 1), PE_SECT)
+    if rsrc.len() == 0: image_size = rsrc_rva
+    text_raw = align_to(text.len(), PE_FILE)
+    ro_raw = align_to(max(ro.len(), 1), PE_FILE)
+    data_raw = align_to(idata.len(), PE_FILE)
+    info_raw = align_to(max(info.len(), 1), PE_FILE)
+    pdata_raw = align_to(max(pdata.len(), 1), PE_FILE)
+    text_off = PE_HEADERS
+    ro_off = text_off + text_raw
+    data_off = ro_off + ro_raw
+    info_off = data_off + data_raw
+    pdata_off = info_off + info_raw
+    if debug_at >= 0:
+        o = pdata_off + debug_at + 28
+        loop i in [0..4): pdata[debug_at + 24 + i] = u8((o >> (8 * i)) & 255)
+    rsrc_raw = align_to(rsrc.len(), PE_FILE)
+    rsrc_off = pdata_off + pdata_raw
+    nsections = 5
+    if rsrc.len() > 0: nsections = 6
+    out: u8[]
+    out.reserve(rsrc_off + rsrc_raw)
+    # DOS header: "MZ", and where the PE header is
+    out.push('M')
+    out.push('Z')
+    loop out.len() < 0x3C: out.push(0)
+    put32(out, 0x40)
+    # PE signature and COFF header
+    loop c in ['P', 'E', 0, 0]: out.push(u8(c))
+    put16(out, 0x8664)                   # x86-64
+    put16(out, nsections)
+    put32(out, 0)                        # time stamp
+    put32(out, 0)
+    put32(out, 0)
+    put16(out, 240)                      # size of the optional header
+    put16(out, 0x0023)                   # executable, no relocations, large addresses
+    # optional header (PE32+)
+    put16(out, 0x20B)
+    out.push(1)                          # linker version
+    out.push(0)
+    put32(out, text_raw)                 # size of code
+    put32(out, ro_raw + data_raw + info_raw + pdata_raw + rsrc_raw)   # initialized data
+    put32(out, data_vsize - idata_size)  # uninitialized data
+    put32(out, text_rva + entry_off)     # entry point
+    put32(out, text_rva)                 # base of code
+    put64(out, PE_BASE)
+    put32(out, PE_SECT)
+    put32(out, PE_FILE)
+    put16(out, 6)                        # OS version 6.0 (Vista and later)
+    put16(out, 0)
+    put16(out, 0)                        # image version
+    put16(out, 0)
+    put16(out, 6)                        # subsystem version
+    put16(out, 0)
+    put32(out, 0)
+    put32(out, image_size)
+    put32(out, PE_HEADERS)
+    put32(out, 0)                        # checksum
+    sub = 3                              # console
+    if gui: sub = 2
+    put16(out, sub)
+    put16(out, 0x8100)                   # NX compatible, terminal server aware (no ASLR)
+    put64(out, 0x800000)                 # stack reserve: 8 MB, all committed (no probing)
+    put64(out, 0x800000)
+    put64(out, 0x100000)                 # heap reserve and commit
+    put64(out, 0x1000)
+    put32(out, 0)
+    put32(out, 16)                       # data directories
+    loop i in [0..16):
+        if i == 1:
+            put32(out, data_rva)         # imports
+            put32(out, 40)
+        else if i == 2 and rsrc.len() > 0:
+            put32(out, rsrc_rva)         # resources
+            put32(out, rsrc.len())
+        else if i == 3:
+            put32(out, pdata_rva)        # exceptions: the RUNTIME_FUNCTIONs
+            put32(out, 12 * unwind_fns.len())
+        else if i == 6 and debug_at >= 0:
+            put32(out, pdata_rva + debug_at)   # debug directory
+            put32(out, 28)
+        else if i == 12:
+            put32(out, data_rva + idata_size - pe_iat_size())   # import address table
+            put32(out, pe_iat_size())
+        else: put64(out, 0)
+    # section table
+    sect_at = out.len()
+    pe_section(out, ".text", text.len(), text_rva, text_raw, text_off, 0x60000020)
+    pe_section(out, ".rdata", max(ro.len(), 1), ro_rva, ro_raw, ro_off, 0x40000040)
+    pe_section(out, ".data", data_vsize, data_rva, data_raw, data_off, 0xC0000040)
+    pe_section(out, ".sloppy", max(info.len(), 1), info_rva, info_raw, info_off, 0x40000040)
+    pe_section(out, ".pdata", max(pdata.len(), 1), pdata_rva, pdata_raw, pdata_off, 0x40000040)
+    if rsrc.len() > 0: pe_section(out, ".rsrc", rsrc.len(), rsrc_rva, rsrc_raw, rsrc_off, 0x40000040)
+    pe_section_headers = out[sect_at..)
+    out.resize(text_off)
+    append_bytes(out, text)
+    out.resize(ro_off)
+    append_bytes(out, ro)
+    out.resize(data_off)
+    append_bytes(out, idata)
+    out.resize(info_off)
+    append_bytes(out, info)
+    out.resize(pdata_off)
+    append_bytes(out, pdata)
+    out.resize(pdata_off + pdata_raw)
+    append_bytes(out, rsrc)
+    out.resize(rsrc_off + rsrc_raw)
+    delete_file(path)
+    if not write_bytes(path, out): return false
+    chmod(path, 0x1ED)
+
+pe_section = (out: mut u8[], name: str, vsize: int, rva: int, raw: int, off: int, flags: int):
+    loop i in [0..8):
+        if i < len(name): out.push(name[i])
+        else: out.push(0)
+    put32(out, vsize)
+    put32(out, rva)
+    put32(out, raw)
+    put32(out, off)
+    put32(out, 0)
+    put32(out, 0)
+    put16(out, 0)
+    put16(out, 0)
+    put32(out, flags)

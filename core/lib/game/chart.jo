@@ -1,0 +1,289 @@
+# Charts: lines, points, bars and histograms over axes with ticks, labels and a legend. A Chart
+# holds what to show; draw_chart draws it into a rectangle (in a game's draw, a live graph), and
+# chart_image makes a picture of it with no window (a script's chart, saved with save_png).
+#
+#   c = Chart(title = "Daily sales", x_label = "day", y_label = "revenue")
+#   c.line(days, revenue, "revenue")
+#   c.line(days, weekly_mean, "7-day mean")
+#   c.points(xs, ys, "orders")
+#   save_png(chart_image(c, 800, 500), "sales.png")
+#
+#   c2 = Chart(title = "Units by region")
+#   c2.bars(["north", "south", "east"], [120.0, 95.0, 143.0], "2026")
+#   c3 = Chart(title = "Prices")
+#   c3.histogram(prices, 30)
+#
+# Each series takes the next color of a palette unless it is given one. The axes fit what is
+# shown (from 0 for bars and histograms) unless x_min, x_max, y_min or y_max say otherwise.
+
+struct Chart:
+    title = ""
+    x_label = ""
+    y_label = ""
+    series: ChartSeries[]
+    categories: str[]           # (bars: the labels along the x axis)
+    x_min: f64? = none
+    x_max: f64? = none
+    y_min: f64? = none
+    y_max: f64? = none
+    legend = true
+    grid = true
+    background = vec4(1, 1, 1, 1)
+    ink = vec4(0.15, 0.15, 0.17, 1)     # text and axes
+    text_size = 14.0
+    log_y = false                       # y on a log scale: each tick ten times the one below
+    __exp_ticks = false                 # (drawn as log_y: the ys are already log10 of the values)
+
+struct ChartSeries:
+    kind: int                   # 0 line, 1 points, 2 bars, 3 histogram
+    xs: f64[]
+    ys: f64[]
+    name: str
+    color: vec4
+    size: f64                   # a line's width, a point's radius
+    bin_width = 0.0             # (a histogram's)
+
+# (the colors series take in turn: matplotlib's)
+CHART_COLORS = [rgb(0.12, 0.47, 0.71), rgb(1.0, 0.5, 0.05), rgb(0.17, 0.63, 0.17), rgb(0.84, 0.15, 0.16),
+    rgb(0.58, 0.4, 0.74), rgb(0.55, 0.34, 0.29), rgb(0.89, 0.47, 0.76), rgb(0.5, 0.5, 0.5), rgb(0.74, 0.74, 0.13), rgb(0.09, 0.75, 0.81)]
+
+__chart_color = (c: Chart, color: vec4?) -> vec4: color ?? CHART_COLORS[c.series.len() % CHART_COLORS.len()]
+
+# a line through the points (x, y), in order
+line = (c: mut Chart, xs: f64[], ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0):
+    c.series.push(ChartSeries(0, xs, ys, name, __chart_color(c, color), width))
+
+# a line through ys, at x = 0, 1, 2...
+line = (c: mut Chart, ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0):
+    line(c, [loop i in [0..ys.len()): f64(i)], ys, name, color, width)
+
+# a dot at each point (a scatter plot)
+points = (c: mut Chart, xs: f64[], ys: f64[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
+    c.series.push(ChartSeries(1, xs, ys, name, __chart_color(c, color), radius))
+
+# a bar for each category (more bars series stand side by side)
+bars = (c: mut Chart, labels: str[], values: f64[], name: str = "", color: vec4? = none):
+    if c.categories.len() < labels.len(): c.categories = labels
+    c.series.push(ChartSeries(2, [loop i in [0..values.len()): f64(i)], values, name, __chart_color(c, color), 0.0))
+
+# how the values spread: how many fall in each of `bins` equal ranges (NaN left out)
+histogram = (c: mut Chart, values: f64[], bins: int = 20, name: str = "", color: vec4? = none):
+    vs = [loop v in values: if not is_nan(v): v]
+    if vs.len() == 0: return
+    counts, edges = histogram(vs, max(bins, 1))
+    s = ChartSeries(3, edges[..counts.len()), [loop k in counts: f64(k)], name, __chart_color(c, color), 0.0)
+    if edges.len() > 1: s.bin_width = edges[1] - edges[0]
+    c.series.push(s)
+
+# a picture of the chart, w x h pixels (no window needed)
+chart_image = (c: Chart, w: int, h: int) -> Image:
+    render_image(w, h, (): draw_chart(c, Rect(0, 0, f32(w), f32(h))))
+
+# draw the chart in a rectangle (its background, axes, series, title and legend)
+draw_chart = (c: Chart, r: Rect):
+    if c.log_y:
+        # (drawn as the logarithms of the values, with ticks at powers of ten; 0 and below left out)
+        lc = c
+        lc.log_y = false
+        lc.__exp_ticks = true
+        loop mut s in lc.series: s.ys = [loop y in s.ys: (if y > 0.0: log10(y) else: NAN)]
+        if let v = c.y_min: lc.y_min = log10(max(v, 1e-300))
+        if let v = c.y_max: lc.y_max = log10(max(v, 1e-300))
+        draw_chart(lc, r)
+        return
+    ts = c.text_size
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c.background)
+    # what the axes cover
+    bars_n = 0
+    loop s in c.series:
+        if s.kind == 2: bars_n += 1
+    cat = bars_n > 0
+    x0 = INF
+    x1 = -INF
+    y0 = INF
+    y1 = -INF
+    loop s in c.series:
+        loop i in [0..min(s.xs.len(), s.ys.len())):
+            x = s.xs[i]
+            y = s.ys[i]
+            if is_nan(x) or is_nan(y): continue
+            x0 = min(x0, x)
+            x1 = max(x1, x + s.bin_width)
+            y0 = min(y0, y)
+            y1 = max(y1, y)
+        if s.kind >= 2: y0 = min(y0, 0.0)
+    if x0 > x1:
+        x0 = 0.0
+        x1 = 1.0
+    if y0 > y1:
+        y0 = 0.0
+        y1 = 1.0
+    if cat:
+        x0 = -0.5
+        x1 = f64(max(c.categories.len(), 1)) - 0.5
+    x0 = c.x_min ?? x0
+    x1 = c.x_max ?? x1
+    y0 = c.y_min ?? y0
+    y1 = c.y_max ?? y1
+    if x1 <= x0: x1 = x0 + 1.0
+    if y1 <= y0: y1 = y0 + 1.0
+    # (y: rounded out to its ticks, unless given)
+    ystep = __chart_step(y1 - y0, max(2, int(f64(r.h) / (ts * 4.0))))
+    if c.__exp_ticks: ystep = max(1.0, round(ystep))
+    if c.y_min == none: y0 = floor(y0 / ystep) * ystep
+    if c.y_max == none: y1 = ceil(y1 / ystep) * ystep
+    xstep = __chart_step(x1 - x0, max(2, int(f64(r.w) / (ts * 7.0))))
+    # the plot's area, inside room for the labels
+    yticks: f64[]
+    v = ceil(y0 / ystep - 1e-9) * ystep
+    loop v <= y1 + ystep * 1e-9:
+        yticks.push(v)
+        v += ystep
+    ylab_w = 0.0
+    loop t in yticks: ylab_w = max(ylab_w, text_width(__chart_tick(c, t, ystep), ts))
+    top = f64(r.y) + ts * 0.8
+    if len(c.title) > 0: top += ts * 1.8
+    if len(c.y_label) > 0: top += ts * 1.8
+    left = f64(r.x) + ylab_w + ts * 1.0
+    right = f64(r.x + r.w) - ts * 1.2
+    bottom = f64(r.y + r.h) - ts * 1.8
+    if len(c.x_label) > 0: bottom -= ts * 1.5
+    if right - left < 10.0 or bottom - top < 10.0:
+        # (no room for a plot: the title, so it is not a blank)
+        if len(c.title) > 0: text_centered(c.title, vec2(f32(f64(r.x) + f64(r.w) / 2.0), f32(f64(r.y) + ts * 1.3)), ts * 1.3, c.ink)
+        return
+    px = (x: f64) -> f64: left + (x - x0) / (x1 - x0) * (right - left)
+    py = (y: f64) -> f64: bottom - (y - y0) / (y1 - y0) * (bottom - top)
+    grid_c = vec4(c.ink.x, c.ink.y, c.ink.z, 0.12)
+    # y ticks and grid
+    loop t in yticks:
+        y = py(t)
+        if c.grid: line(vec2(f32(left), f32(y)), vec2(f32(right), f32(y)), 1.0, grid_c)
+        line(vec2(f32(left - 4.0), f32(y)), vec2(f32(left), f32(y)), 1.0, c.ink)
+        s = __chart_tick(c, t, ystep)
+        text(s, vec2(f32(left - 6.0 - text_width(s, ts)), f32(y - ts * 0.6)), ts, c.ink)
+    # x ticks: the categories, or numbers
+    if cat:
+        n = c.categories.len()
+        every = 1
+        widest = 0.0
+        loop l in c.categories: widest = max(widest, text_width(l, ts))
+        loop n > 0 and f64(n / every) * (widest + ts) > right - left: every += 1
+        loop i in 0.. and l in c.categories:
+            if i % every != 0: continue
+            text_centered(l, vec2(f32(px(f64(i))), f32(bottom + ts * 0.9)), ts, c.ink)
+    else:
+        t = ceil(x0 / xstep - 1e-9) * xstep
+        loop t <= x1 + xstep * 1e-9:
+            x = px(t)
+            if c.grid: line(vec2(f32(x), f32(top)), vec2(f32(x), f32(bottom)), 1.0, grid_c)
+            line(vec2(f32(x), f32(bottom)), vec2(f32(x), f32(bottom + 4.0)), 1.0, c.ink)
+            text_centered(__chart_num(t, xstep), vec2(f32(x), f32(bottom + ts * 0.9)), ts, c.ink)
+            t += xstep
+    # the series, inside the plot area
+    clip(vec2(f32(left), f32(top)), vec2(f32(right - left), f32(bottom - top)))
+    bar_k = 0
+    loop s in c.series:
+        n = min(s.xs.len(), s.ys.len())
+        if s.kind == 0:
+            loop i in [1..n):
+                a = vec2(f32(px(s.xs[i - 1])), f32(py(s.ys[i - 1])))
+                b = vec2(f32(px(s.xs[i])), f32(py(s.ys[i])))
+                if is_nan(s.ys[i - 1]) or is_nan(s.ys[i]): continue
+                line(a, b, s.size, s.color)
+                if s.size > 2.5: circle(b, s.size / 2.0, s.color)
+        else if s.kind == 1:
+            loop i in [0..n):
+                if is_nan(s.ys[i]) or is_nan(s.xs[i]): continue
+                circle(vec2(f32(px(s.xs[i])), f32(py(s.ys[i]))), s.size, s.color)
+        else if s.kind == 2:
+            slot = 0.8 / f64(bars_n)
+            loop i in [0..n):
+                xa = px(s.xs[i] - 0.4 + slot * f64(bar_k))
+                xb = px(s.xs[i] - 0.4 + slot * f64(bar_k + 1))
+                ya = py(max(s.ys[i], 0.0))
+                yb = py(min(s.ys[i], 0.0))
+                rect(xa + 1.0, ya, max(xb - xa - 2.0, 1.0), yb - ya, s.color)
+            bar_k += 1
+        else:
+            loop i in [0..n):
+                xa = px(s.xs[i])
+                xb = px(s.xs[i] + s.bin_width)
+                ya = py(s.ys[i])
+                rect(xa, ya, max(xb - xa - 1.0, 1.0), py(0.0) - ya, s.color)
+    no_clip()
+    # the axes, the labels and the title
+    line(vec2(f32(left), f32(top)), vec2(f32(left), f32(bottom)), 1.5, c.ink)
+    line(vec2(f32(left), f32(bottom)), vec2(f32(right), f32(bottom)), 1.5, c.ink)
+    if len(c.title) > 0: text_centered(c.title, vec2(f32((left + right) / 2.0), f32(f64(r.y) + ts * 1.3)), ts * 1.3, c.ink)
+    if len(c.y_label) > 0: text(c.y_label, vec2(f32(left - ylab_w - ts * 0.6), f32(top - ts * 2.2)), ts, c.ink)
+    if len(c.x_label) > 0: text_centered(c.x_label, vec2(f32((left + right) / 2.0), f32(bottom + ts * 2.4)), ts, c.ink)
+    # the legend: the series that have names
+    if c.legend:
+        named = [loop s in c.series: if len(s.name) > 0: s]
+        if named.len() > 0:
+            lw = 0.0
+            loop s in named: lw = max(lw, text_width(s.name, ts))
+            bw = lw + ts * 2.6
+            bh = f64(named.len()) * ts * 1.4 + ts * 0.5
+            bx = right - bw - ts * 0.5
+            by = top + ts * 0.5
+            rect(bx, by, bw, bh, vec4(c.background.x, c.background.y, c.background.z, 0.85))
+            rect_outline(bx, by, bw, bh, 1.0, grid_c)
+            loop i in 0.. and s in named:
+                y = by + ts * 0.25 + f64(i) * ts * 1.4 + ts * 0.7
+                if s.kind == 0: line(vec2(f32(bx + ts * 0.4), f32(y)), vec2(f32(bx + ts * 1.6), f32(y)), max(s.size, 2.0), s.color)
+                else if s.kind == 1: circle(vec2(f32(bx + ts), f32(y)), max(s.size, 3.0), s.color)
+                else: rect(bx + ts * 0.5, y - ts * 0.4, ts * 1.0, ts * 0.8, s.color)
+                text(s.name, vec2(f32(bx + ts * 2.0), f32(y - ts * 0.6)), ts, c.ink)
+
+# a round step for about n ticks over a span: 1, 2 or 5 times a power of ten
+__chart_step = (span: f64, n: int) -> f64:
+    raw = span / f64(max(n, 1))
+    if raw <= 0.0 or is_nan(raw): return 1.0
+    p = pow(10.0, floor(log10(raw)))
+    m = raw / p
+    if m <= 1.0: return p
+    if m <= 2.0: return 2.0 * p
+    if m <= 5.0: return 5.0 * p
+    10.0 * p
+
+# a y tick's label: its number, or on a log scale, ten to it
+__chart_tick = (c: Chart, t: f64, step: f64) -> str:
+    if not c.__exp_ticks: return __chart_num(t, step)
+    v = pow(10.0, t)
+    __chart_num(v, v)
+
+# a tick's number: as many decimals as the step needs, thousands with commas, millions as M,
+# billions as B, trillions as T; beyond (and below a ten-thousandth) as 1.5e45
+__chart_num = (v: f64, step: f64) -> str:
+    if abs(v) < step * 1e-6: return "0"
+    if abs(v) >= 1e15 or step < 1e-4:
+        # (the digits the step needs after the first)
+        d = max(0, min(6, int(floor(log10(abs(v)) + 1e-9)) - int(floor(log10(step) + 1e-9))))
+        return __chart_sci(v, d)
+    loop sc in [(1e12, "T"), (1e9, "B"), (1e6, "M")]:
+        if abs(v) >= sc.0 and step >= sc.0 / 10.0:
+            d = max(0, int(ceil(-log10(step / sc.0) - 1e-9)))
+            return __chart_fixed(v / sc.0, d) + sc.1
+    d = max(0, int(ceil(-log10(step) - 1e-9)))
+    if d == 0: return "{v:,.0f}"
+    __chart_fixed(v, d)
+
+__chart_sci = (v: f64, d: int) -> str:
+    match d:
+        0: "{v:.0e}"
+        1: "{v:.1e}"
+        2: "{v:.2e}"
+        3: "{v:.3e}"
+        _: "{v:.4e}"
+
+__chart_fixed = (v: f64, d: int) -> str:
+    match min(d, 6):
+        0: "{v:.0f}"
+        1: "{v:.1f}"
+        2: "{v:.2f}"
+        3: "{v:.3f}"
+        4: "{v:.4f}"
+        5: "{v:.5f}"
+        _: "{v:.6f}"

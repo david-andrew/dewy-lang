@@ -1,0 +1,361 @@
+# A minimal X11 client speaking the wire protocol directly (no libX11): enough to open a
+# window, show software-rendered frames and receive input. Used when libX11 is missing, so
+# a static program can still put pixels on any X server (including XWayland).
+
+__xp_fd = -1
+__xp_win = 0
+__xp_gc = 0
+__xp_root = 0
+__xp_depth = 24
+__xp_id = 0
+__xp_maxreq = 65535          # longest request, in 4-byte units
+__xp_minkc = 8
+__xp_kpk = 0                 # keysyms per keycode
+__xp_keysyms: int[]
+__xp_in: u8[]
+__xp_wm_delete = 0
+
+__xp_send = (b: u8[]):
+    p = data(b)
+    n = b.len()
+    sent = 0
+    loop sent < n:
+        r = syscall(1, __xp_fd, p + sent, n - sent)
+        if r <= 0: return
+        sent += r
+
+# blocking read of exactly n bytes
+__xp_read = (n: int) -> u8[]?:
+    b = fill(u8(0), n)
+    got = 0
+    loop got < n:
+        r = syscall(0, __xp_fd, data(b) + got, n - got)
+        if r <= 0: return none
+        got += r
+    b
+
+__xp_u16 = (b: u8[], i: int) -> int: int(b[i]) | (int(b[i + 1]) << 8)
+__xp_u32 = (b: u8[], i: int) -> int: __xp_u16(b, i) | (__xp_u16(b, i + 2) << 16)
+__xp_i16 = (b: u8[], i: int) -> int:
+    v = __xp_u16(b, i)
+    if v >= 0x8000: return v - 0x10000
+    v
+__xp_pad = (b: mut u8[]):
+    loop b.len() % 4 != 0: b.push(0)
+__xp_be16 = (b: u8[], i: int) -> int: (int(b[i]) << 8) | int(b[i + 1])
+
+__xp_new_id = () -> int:
+    __xp_id += 1
+    __xp_id - 1
+
+# the MIT-MAGIC-COOKIE-1 for display `num` from the Xauthority file, if any
+__xp_cookie = (num: str) -> u8[]:
+    path = env("XAUTHORITY") ?? "{env("HOME") ?? ""}/.Xauthority"
+    f = read_bytes(path) ?? []
+    i = 0
+    loop i + 2 <= f.len():
+        family = __xp_be16(f, i)
+        i += 2
+        fields: u8[][]
+        loop k in [0..4):
+            if i + 2 > f.len(): return []
+            n = __xp_be16(f, i)
+            i += 2
+            if i + n > f.len(): return []
+            fields.push(f[i..i + n))
+            i += n
+        number = str_from_bytes(fields[1])
+        name = str_from_bytes(fields[2])
+        if (family == 256 or family == 65535 or family == 0) and (number == num or len(number) == 0) and name == "MIT-MAGIC-COOKIE-1":
+            return fields[3]
+    []
+
+# connect to the X server named by DISPLAY (local displays only); "" on success, else why not
+__xp_connect = () -> str:
+    disp = env("DISPLAY") ?? ""
+    c = find(disp, ":")
+    if c < 0: return "DISPLAY is not set"
+    host = disp[..c)
+    if len(host) > 0 and host != "unix" and host != "localhost": return "remote X displays need libX11"
+    num = disp[c + 1..]
+    dot = find(num, ".")
+    if dot >= 0: num = num[..dot)
+    fd = syscall(41, 1, 1 | 0x80000, 0)           # socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC)
+    if fd < 0: return "cannot create a socket"
+    __xp_fd = fd
+    # the abstract socket first, then the file
+    path = "/tmp/.X11-unix/X{num}"
+    ok = false
+    loop abstract in [true, false]:
+        addr = fill(u8(0), 110)
+        addr[0] = 1                                 # AF_UNIX
+        o = 2
+        if abstract: o = 3
+        loop k in [0..len(path)): addr[o + k] = path[k]
+        alen = o + len(path)
+        if not abstract: alen += 1
+        if syscall(42, fd, data(addr), alen) == 0:
+            ok = true
+            break
+    if not ok:
+        syscall(3, fd)
+        __xp_fd = -1
+        return "cannot connect to the X server at {path}"
+    # connection setup
+    cookie = __xp_cookie(num)
+    name = "MIT-MAGIC-COOKIE-1"
+    if cookie.len() == 0: name = ""
+    b: u8[]
+    b.push(0x6C)                                    # little-endian
+    b.push(0)
+    __put16(b, 11)
+    __put16(b, 0)
+    __put16(b, len(name))
+    __put16(b, cookie.len())
+    __put16(b, 0)
+    loop k in [0..len(name)): b.push(name[k])
+    __xp_pad(b)
+    loop x in cookie: b.push(x)
+    __xp_pad(b)
+    __xp_send(b)
+    head = __xp_read(8) ?? []
+    if head.len() < 8: return "the X server closed the connection"
+    rest = __xp_read(__xp_u16(head, 6) * 4) ?? []
+    if head[0] != 1:
+        n = int(head[1])
+        why = "authentication failed"
+        if n > 0 and rest.len() >= n: why = str_from_bytes(rest[..n))
+        return "the X server refused the connection: {why}"
+    r = head + rest
+    __xp_id = __xp_u32(r, 12)
+    __xp_maxreq = __xp_u16(r, 26)
+    vlen = __xp_u16(r, 24)
+    nformats = int(r[29])
+    __xp_minkc = int(r[34])
+    maxkc = int(r[35])
+    scr = 40 + (vlen + 3) / 4 * 4 + 8 * nformats
+    __xp_root = __xp_u32(r, scr)
+    __xp_depth = int(r[scr + 38])
+    # the 32-bit pixel layout we write needs a 24- or 32-bit visual with 32 bits per pixel
+    bpp = 0
+    loop k in [0..nformats):
+        fo = 40 + (vlen + 3) / 4 * 4 + 8 * k
+        if int(r[fo]) == __xp_depth: bpp = int(r[fo + 1])
+    if bpp != 32: return "unsupported X visual ({__xp_depth}-bit depth, {bpp} bits per pixel)"
+    __xp_keymap(__xp_minkc, maxkc)
+    ""
+
+__xp_keymap = (minkc: int, maxkc: int):
+    b: u8[]
+    b.push(101)                                     # GetKeyboardMapping
+    b.push(0)
+    __put16(b, 2)
+    b.push(u8(minkc))
+    b.push(u8(maxkc - minkc + 1))
+    __put16(b, 0)
+    __xp_send(b)
+    loop true:
+        h = __xp_read(32) ?? []
+        if h.len() < 32: return
+        if h[0] == 1:
+            body = __xp_read(__xp_u32(h, 4) * 4) ?? []
+            __xp_kpk = int(h[1])
+            loop k in [0..body.len() / 4): __xp_keysyms.push(__xp_u32(body, k * 4))
+            return
+        if h[0] == 0: return                        # an error
+
+__xp_intern = (name: str) -> int:
+    b: u8[]
+    b.push(16)                                      # InternAtom
+    b.push(0)
+    __put16(b, 2 + (len(name) + 3) / 4)
+    __put16(b, len(name))
+    __put16(b, 0)
+    loop k in [0..len(name)): b.push(name[k])
+    __xp_pad(b)
+    __xp_send(b)
+    loop true:
+        h = __xp_read(32) ?? []
+        if h.len() < 32: return 0
+        if h[0] == 1: return __xp_u32(h, 8)
+        if h[0] == 0: return 0
+        __xp_in = __xp_in + h                       # an event that arrived first
+
+__xp_property = (prop: int, ty: int, format: int, values: u8[]):
+    b: u8[]
+    b.push(18)                                      # ChangeProperty
+    b.push(0)
+    __put16(b, 6 + (values.len() + 3) / 4)
+    __put32(b, __xp_win)
+    __put32(b, prop)
+    __put32(b, ty)
+    b.push(u8(format))
+    b.push(0)
+    b.push(0)
+    b.push(0)
+    __put32(b, values.len() / (format / 8))
+    loop x in values: b.push(x)
+    __xp_pad(b)
+    __xp_send(b)
+
+__xp_open = (title: str, w: int, h: int) -> str:
+    why = __xp_connect()
+    if len(why) > 0: return why
+    __xp_win = __xp_new_id()
+    b: u8[]
+    b.push(1)                                       # CreateWindow
+    b.push(0)
+    __put16(b, 9)
+    __put32(b, __xp_win)
+    __put32(b, __xp_root)
+    __put16(b, 0)
+    __put16(b, 0)
+    __put16(b, w)
+    __put16(b, h)
+    __put16(b, 0)
+    __put16(b, 1)                                   # InputOutput
+    __put32(b, 0)                                   # CopyFromParent visual
+    __put32(b, 0x800)                               # event mask
+    __put32(b, 0x1 | 0x2 | 0x4 | 0x8 | 0x40 | 0x20000 | 0x200000)
+    __xp_send(b)
+    __xp_property(39, 31, 8, bytes(title))          # WM_NAME, STRING
+    protocols = __xp_intern("WM_PROTOCOLS")
+    __xp_wm_delete = __xp_intern("WM_DELETE_WINDOW")
+    v: u8[]
+    __put32(v, __xp_wm_delete)
+    __xp_property(protocols, 4, 32, v)              # ATOM
+    __xp_gc = __xp_new_id()
+    g: u8[]
+    g.push(55)                                      # CreateGC
+    g.push(0)
+    __put16(g, 4)
+    __put32(g, __xp_gc)
+    __put32(g, __xp_win)
+    __put32(g, 0)
+    __xp_send(g)
+    m: u8[]
+    m.push(8)                                       # MapWindow
+    m.push(0)
+    __put16(m, 2)
+    __put32(m, __xp_win)
+    __xp_send(m)
+    ""
+
+# ask the window manager for fullscreen (_NET_WM_STATE): a ClientMessage sent to the root window
+__xp_fullscreen = (on: bool):
+    state = __xp_intern("_NET_WM_STATE")
+    full = __xp_intern("_NET_WM_STATE_FULLSCREEN")
+    b: u8[]
+    b.push(25)                                      # SendEvent
+    b.push(0)
+    __put16(b, 11)
+    __put32(b, __xp_root)
+    __put32(b, 0x180000)                            # SubstructureRedirect | SubstructureNotify
+    b.push(33)                                      # ClientMessage
+    b.push(32)
+    __put16(b, 0)
+    __put32(b, __xp_win)
+    __put32(b, state)
+    __put32(b, int(on))                             # add / remove
+    __put32(b, full)
+    __put32(b, 0)
+    __put32(b, 1)
+    __put32(b, 0)
+    __xp_send(b)
+
+# show w x h pixels (32-bit BGRX rows, top first), split into requests the server accepts
+__xp_put_image = (pixels: u8[], w: int, h: int):
+    rows = max((__xp_maxreq * 4 - 24) / (w * 4), 1)
+    y = 0
+    loop y < h:
+        n = min(rows, h - y)
+        b: u8[]
+        b.reserve(24 + n * w * 4)
+        b.push(72)                                  # PutImage
+        b.push(2)                                   # ZPixmap
+        __put16(b, 6 + n * w)
+        __put32(b, __xp_win)
+        __put32(b, __xp_gc)
+        __put16(b, w)
+        __put16(b, n)
+        __put16(b, 0)
+        __put16(b, y)
+        b.push(0)
+        b.push(u8(__xp_depth))
+        __put16(b, 0)
+        b.resize(24 + n * w * 4)
+        mem_copy(data(b) + 24, data(pixels) + y * w * 4, n * w * 4)
+        __xp_send(b)
+        y += n
+    # a round trip keeps a slow server from falling behind (GetInputFocus)
+    s: u8[]
+    s.push(43)
+    s.push(0)
+    __put16(s, 1)
+    __xp_send(s)
+    loop true:
+        e = __xp_read(32) ?? []
+        if e.len() < 32: return
+        if e[0] == 1: return
+        if e[0] != 0: __xp_in = __xp_in + e
+
+__xp_keysym = (code: int, shift: bool) -> int:
+    i = (code - __xp_minkc) * __xp_kpk
+    if __xp_kpk == 0 or i < 0 or i >= __xp_keysyms.len(): return 0
+    s = __xp_keysyms[i]
+    if shift and __xp_kpk > 1 and __xp_keysyms[i + 1] != 0: s = __xp_keysyms[i + 1]
+    s
+
+# read whatever the server has sent and turn events into input
+__xp_poll = ():
+    buf = fill(u8(0), 4096)
+    loop true:
+        r = syscall(45, __xp_fd, data(buf), 4096, 0x40, 0, 0)     # recvfrom(MSG_DONTWAIT)
+        if r <= 0:
+            if r == 0: __win_close = true                         # the server went away
+            break
+        __xp_in = __xp_in + buf[..r)
+    k = 0
+    repeat = false
+    loop k + 32 <= __xp_in.len():
+        e = __xp_in[k..k + 32)
+        kind = int(e[0]) & 0x7F
+        n = 32
+        if kind == 35 or kind == 1: n += __xp_u32(e, 4) * 4         # generic events and replies carry more
+        if k + n > __xp_in.len(): break
+        k += n
+        if kind == 3 and k + 32 <= __xp_in.len():
+            # a release at once followed by a press of the same key (same time): held down, repeating
+            nx = __xp_in[k..k + 32)
+            if int(nx[0]) & 0x7F == 2 and nx[1] == e[1] and __xp_u32(nx, 4) == __xp_u32(e, 4):
+                repeat = true
+                continue
+        if kind == 2 or kind == 3:
+            sym = __xp_keysym(int(e[1]), false)
+            __key_event(__xkey(sym), kind == 2, repeat)
+            repeat = false
+            if kind == 2:
+                ch = __xp_keysym(int(e[1]), __xp_u16(e, 28) & 1 != 0)
+                if ch >= 32 and ch < 127 and __xp_u16(e, 28) & 4 == 0: __text_input += chr(ch)
+        else if kind == 4 or kind == 5:
+            btn = int(e[1])
+            if btn == 1: __mouse_event(0, kind == 4)
+            else if btn == 2: __mouse_event(1, kind == 4)
+            else if btn == 3: __mouse_event(2, kind == 4)
+            else if btn == 4 and kind == 4: __mouse_wheel += 1.0
+            else if btn == 5 and kind == 4: __mouse_wheel -= 1.0
+        else if kind == 6:
+            x = f64(__xp_i16(e, 24))
+            y = f64(__xp_i16(e, 26))
+            __mouse_dx += x - __mouse_x
+            __mouse_dy += y - __mouse_y
+            __mouse_x = x
+            __mouse_y = y
+        else if kind == 22:
+            __win_w = max(__xp_u16(e, 20), 1)
+            __win_h = max(__xp_u16(e, 22), 1)
+        else if kind == 33:
+            if __xp_u32(e, 12) == __xp_wm_delete: __win_close = true
+        else if kind == 10:
+            loop mut kd in __key_down: kd = false
+    __xp_in = __xp_in[k..]

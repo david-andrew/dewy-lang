@@ -1,0 +1,64 @@
+# loops, nested control flow, break/continue, integer edge cases
+total = 0
+loop i in [0..10):
+    if i == 3: continue
+    if i == 8: break
+    loop j in 0..i:
+        total += i * j
+print(total)
+n = 0
+loop true:
+    n += 1
+    if n > 100: break
+print(n)
+# collatz
+steps = (x0: int) -> int:
+    let x = x0
+    let s = 0
+    loop x != 1:
+        if x % 2 == 0: x /= 2
+        else: x = 3 * x + 1
+        s += 1
+    s
+best = 0
+arg = 0
+loop i in [1..1000):
+    st = steps(i)
+    if st > best:
+        best = st
+        arg = i
+print(arg, best)
+# integer types
+a: i32 = 2147483647
+a += 1
+print(a)
+b: u8 = 200
+b = b + b
+print(b)
+c: i64 = -7
+print(c / 2, c % 2, -c >> 1, c >> 1, u64(c) >> 60)
+d: u32 = 0xFFFFFFFF
+print(d, d + 1, int(d) + 1)
+print(1 << 40, 255 & 15, 6 | 9, (6 xor 3), ~0)
+# floats
+x = 0.0
+loop i in [0..10): x += 0.1
+print(x, floor(2.7), ceil(2.1), round(-2.5), abs(-3.5), sqrt(2.0))
+print(int(3.99), int(-3.99), f64(7) / 2.0, 7.5 % 2.0)
+f: f32 = 1.0 / 3.0
+print(f, f * 3.0)
+print(sin(0.5), cos(0.5), atan2(1.0, 1.0), exp(1.0), log(10.0), pow(2.0, 10.0))
+# nested functions & recursion
+ackermann = (m: int, nn: int) -> int:
+    if m == 0: return nn + 1
+    if nn == 0: return ackermann(m - 1, 1)
+    ackermann(m - 1, ackermann(m, nn - 1))
+print(ackermann(2, 3))
+# string building
+s = ""
+loop i in [0..5): s += "{i},"
+print(s, s.len())
+parts: str[]
+loop w in "a,b,,c".split(","): parts.push("[{w}]")
+print(join(parts, ""))
+print("{3.14159:.2} {42:5}|{7:03} {255:x} {"left":6}|")

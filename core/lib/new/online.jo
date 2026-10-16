@@ -1,0 +1,138 @@
+# __TITLE__: two players, anywhere, with no server: first to 10 coins wins. Invite a friend gives
+# a link to send them (a chat message); they open it, the game in their browser, and send back the
+# code it shows. Each machine runs the whole game (rollback netplay): only the players' inputs
+# travel, so neither waits for the other's moves. Practice plays alone, to try changes.
+# Move with the arrows, W A S D, a gamepad's stick, or a finger (or the mouse held down).
+# Run it with `sloppy watch __NAME__.jo`; `sloppy build __NAME__.jo --target wasm` makes the web
+# page, and put its address in WEB_PAGE, so a computer's invite links to it.
+
+build:
+    name = "__TITLE__"
+
+import net
+import netplay
+import invite
+
+const SPEED = 6.0               # how far a player moves in a tick (1/60 s)
+const WIN = 10
+const WEB_PAGE = ""             # where the web build is ("https://you.itch.io/__NAME__/")
+
+window("__TITLE__", 1280, 720)
+COLORS = [rgb(0.35, 0.7, 1.0), rgb(1.0, 0.6, 0.3)]
+
+# ---------------- the game: everything a tick depends on ----------------
+struct Pad:
+    x = 0                       # -1, 0, 1
+    y = 0
+
+struct Player:
+    pos: vec2
+    score = 0
+
+struct Game:
+    players: Player[] = [Player(vec2(400, 360)), Player(vec2(880, 360))]
+    coin = vec2(640, 200)
+    taken = 0                   # (coins taken so far: where the next goes comes from it)
+    winner = -1
+
+# one tick: the same game and pads give the same game on every machine, so no random() or clock
+# here (a coin's place comes from hash, of what is in the game)
+tick = (g: Game, pads: Pad[]) -> Game:
+    let g = g
+    if g.winner >= 0: return g
+    loop i in [0..2):
+        p = g.players[i].pos + vec2(f32(pads[i].x), f32(pads[i].y)) * f32(SPEED)
+        g.players[i].pos = vec2(clamp(p.x, 20, 1260), clamp(p.y, 20, 700))
+        if length(g.players[i].pos - g.coin) < 34.0:
+            g.players[i].score += 1
+            g.taken += 1
+            g.coin = vec2(f32(100 + int(hash(g.taken * 2) % 1080)), f32(100 + int(hash(g.taken * 2 + 1) % 520)))
+            if g.players[i].score >= WIN: g.winner = i
+    g
+
+# ---------------- playing: with a friend, or alone ----------------
+enum Mode: menu, online, practice
+
+mode = Mode.menu
+s = netplay.session(Game(), tick, players = 2, me = 0)
+friend = -1
+practice = Game()
+spare = 0.0
+status = ""
+invite.from_link()              # (opened from an invite link: Join a friend, at once)
+
+# connected: the one who invited is player 1 (me = 0)
+begin = (c: invite.Invited):
+    friend = c.peer
+    me = if c.inviter: 0 else: 1
+    s = netplay.session(Game(), tick, players = 2, me = me)
+    peers = [-1, -1]
+    peers[1 - me] = friend
+    s.over(peers)
+    status = ""
+    mode = .online
+
+leave = ():
+    if friend >= 0: net.close(friend)
+    friend = -1
+    mode = .menu
+
+game = () -> Game: if mode == .online: s.state else: practice
+me = () -> int: if mode == .online: s.me else: 0
+
+# this machine's input for a tick
+my_pad = () -> Pad:
+    a = input_axis()
+    p = Pad(int(round(f64(a.x))), int(round(f64(a.y))))
+    if mouse_down(.left):
+        d = mouse_pos() - game().players[me()].pos
+        if abs(d.x) > 8.0: p.x = int(sign(f64(d.x)))
+        if abs(d.y) > 8.0: p.y = int(sign(f64(d.y)))
+    p
+
+update = (dt: f64):
+    loop e in net.receive():
+        if e.kind == .left and e.peer == friend:
+            status = "your friend left"
+            friend = -1
+            mode = .menu
+    if mode == .menu: return
+    if key_pressed(.escape) or (game().winner >= 0 and key_pressed(.enter)): leave()
+    # (ticks at 60 a second, whatever the frame rate)
+    spare = min(spare + dt, 0.1)
+    loop spare >= 1.0 / 60.0:
+        spare -= 1.0 / 60.0
+        if mode == .online: s.play(my_pad())
+        else: practice = tick(practice, [my_pad(), Pad()])
+
+draw = ():
+    clear(rgb(0.07, 0.08, 0.11))
+    if mode == .menu:
+        draw_menu()
+        return
+    g = game()
+    circle(g.coin, 14, rgb(1.0, 0.85, 0.3))
+    loop i in 0.. and p in g.players:
+        circle(p.pos, 20, COLORS[i])
+        if i == me(): ring(p.pos, 26, 2, WHITE)
+    text("{g.players[0].score}", vec2(40, 30), 48, COLORS[0])
+    text_centered("{g.players[1].score}", vec2(1220, 54), 48, COLORS[1])
+    if g.winner >= 0:
+        text_centered(if g.winner == me(): "you won" else: "you lost", vec2(640, 330), 72)
+        text_centered("Enter: back to the menu", vec2(640, 400), 24, gray(0.7))
+    if mode == .online and s.waiting and s.silent(1 - s.me) > 1.0: text_centered("waiting for your friend...", vec2(640, 660), 24, gray(0.7))
+    if hud_button(Rect(1150, 660, 110, 40), "Leave"): leave()
+
+draw_menu = ():
+    if invite.active():
+        if let c = invite.screen("__TITLE__", WEB_PAGE): begin(c)
+        return
+    text_centered("__TITLE__", vec2(640, 170), 80, COLORS[0])
+    ui_begin("menu", vec2(640, 300))
+    if ui_button("Invite a friend"): invite.start(reliable = false)
+    if ui_button("Join a friend"): invite.join()
+    if ui_button("Practice"):
+        practice = Game()
+        mode = .practice
+    ui_end()
+    if len(status) > 0: text_centered(status, vec2(640, 560), 22, gray(0.7))

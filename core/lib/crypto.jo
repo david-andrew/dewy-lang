@@ -1,0 +1,920 @@
+# Cryptography: hashes (SHA-1, SHA-256), HMAC, AES-128-GCM, the P-256 curve (ECDH keys and ECDSA
+# signatures), a self-signed certificate, and random bytes from the operating system. It is what
+# the library's WebRTC (lib/rtc.jo) is made of, and a program may use it too: `import crypto`.
+#
+#   key = crypto.random_bytes(16)
+#   sealed = crypto.aes_gcm_seal(key, nonce12, aad, message)        # the message and a 16-byte tag
+#   opened = crypto.aes_gcm_open(key, nonce12, aad, sealed)         # none when it was changed
+#   pk = crypto.p256_key()                                          # a private key and its public point
+#   sig = crypto.p256_sign(pk, crypto.sha256(msg))
+#   ok = crypto.p256_verify(pk.public, crypto.sha256(msg), sig)
+#
+# (The curve's arithmetic does not take the same time whatever the key: fine for keys made for a
+# session, as WebRTC's are; not for long-lived keys on shared machines.)
+
+# ---------------- random bytes ----------------
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getentropy")
+    extern __cr_getentropy = (p: *u8, n: int) -> i32
+when TARGET == "windows":
+    @lib("advapi32.dll")
+    @symbol("SystemFunction036")
+    extern __cr_rtlgenrandom = (p: *u8, n: u32) -> u8
+when TARGET == "wasm":
+    extern __wasm_random = (p: *u8, n: int)
+
+# n bytes from the operating system's random source (for keys and nonces: not seeded, not repeatable)
+random_bytes = (n: int) -> u8[]:
+    b = fill(u8(0), n)
+    if n == 0: return b
+    when TARGET == "linux":
+        got = 0
+        loop got < n:
+            r = syscall(318, data(b) + got, n - got, 0)            # getrandom
+            if r <= 0: panic("random_bytes: the system gave no random bytes")
+            got += r
+    else when TARGET == "macos":
+        got = 0
+        loop got < n:
+            k = min(n - got, 256)
+            if int(__cr_getentropy(data(b) + got, k)) != 0: panic("random_bytes: the system gave no random bytes")
+            got += k
+    else when TARGET == "windows":
+        if int(__cr_rtlgenrandom(data(b), u32(n))) == 0: panic("random_bytes: the system gave no random bytes")
+    else:
+        __wasm_random(data(b), n)
+    b
+
+# ---------------- bytes ----------------
+# bytes as lowercase hex ("a9993e...")
+hex_text = (b: u8[]) -> str:
+    d = "0123456789abcdef"
+    out: u8[]
+    loop x in b:
+        out.push(d[int(x >> 4)])
+        out.push(d[int(x & 15)])
+    str_from_bytes(out)
+
+# "a9993e..." as bytes (none when it is not hex)
+hex_bytes = (s: str) -> u8[]?:
+    if len(s) % 2 != 0: return none
+    out: u8[]
+    i = 0
+    loop i < len(s):
+        h = __cr_hexval(s[i])
+        l = __cr_hexval(s[i + 1])
+        if h < 0 or l < 0: return none
+        out.push(u8(h * 16 + l))
+        i += 2
+    out
+
+__cr_hexval = (c: u8) -> int:
+    if c >= '0' and c <= '9': return int(c) - 48
+    if c >= 'a' and c <= 'f': return int(c) - 87
+    if c >= 'A' and c <= 'F': return int(c) - 55
+    -1
+
+__rotl = (x: u32, n: int) -> u32: (x << u32(n)) | (x >> u32(32 - n))
+__rotr = (x: u32, n: int) -> u32: (x >> u32(n)) | (x << u32(32 - n))
+__be32 = (b: u8[], i: int) -> u32: (u32(b[i]) << 24) | (u32(b[i + 1]) << 16) | (u32(b[i + 2]) << 8) | u32(b[i + 3])
+__put32 = (out: mut u8[], v: u32):
+    out.push(u8(v >> 24))
+    out.push(u8((v >> 16) & 255))
+    out.push(u8((v >> 8) & 255))
+    out.push(u8(v & 255))
+
+# the message, padded as SHA-1 and SHA-256 take it: 0x80, zeros, its length in bits (64, big-endian)
+__md_pad = (m: u8[]) -> u8[]:
+    b = m
+    b.push(0x80)
+    loop b.len() % 64 != 56: b.push(0)
+    bits = m.len() * 8
+    loop k in [0..8): b.push(u8((bits >> (56 - k * 8)) & 255))
+    b
+
+# ---------------- MD5 ----------------
+# MD5 of the bytes (16 bytes): for TURN's long-term credentials, which use it; not for anything new
+__md5_k: u32[] = [
+    0xD76AA478, 0xE8C7B756, 0x242070DB, 0xC1BDCEEE, 0xF57C0FAF, 0x4787C62A, 0xA8304613, 0xFD469501,
+    0x698098D8, 0x8B44F7AF, 0xFFFF5BB1, 0x895CD7BE, 0x6B901122, 0xFD987193, 0xA679438E, 0x49B40821,
+    0xF61E2562, 0xC040B340, 0x265E5A51, 0xE9B6C7AA, 0xD62F105D, 0x02441453, 0xD8A1E681, 0xE7D3FBC8,
+    0x21E1CDE6, 0xC33707D6, 0xF4D50D87, 0x455A14ED, 0xA9E3E905, 0xFCEFA3F8, 0x676F02D9, 0x8D2A4C8A,
+    0xFFFA3942, 0x8771F681, 0x6D9D6122, 0xFDE5380C, 0xA4BEEA44, 0x4BDECFA9, 0xF6BB4B60, 0xBEBFBC70,
+    0x289B7EC6, 0xEAA127FA, 0xD4EF3085, 0x04881D05, 0xD9D4D039, 0xE6DB99E5, 0x1FA27CF8, 0xC4AC5665,
+    0xF4292244, 0x432AFF97, 0xAB9423A7, 0xFC93A039, 0x655B59C3, 0x8F0CCC92, 0xFFEFF47D, 0x85845DD1,
+    0x6FA87E4F, 0xFE2CE6E0, 0xA3014314, 0x4E0811A1, 0xF7537E82, 0xBD3AF235, 0x2AD7D2BB, 0xEB86D391]
+__md5_s: int[] = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
+
+md5 = (m: u8[]) -> u8[]:
+    h: u32[4] = [u32(0x67452301), u32(0xEFCDAB89), u32(0x98BADCFE), u32(0x10325476)]
+    b = m
+    b.push(0x80)
+    loop b.len() % 64 != 56: b.push(0)
+    bits = m.len() * 8
+    loop k in [0..8): b.push(u8((bits >> (k * 8)) & 255))
+    w: u32[16]
+    off = 0
+    loop off < b.len():
+        loop t in [0..16):
+            o = off + t * 4
+            w[t] = u32(b[o]) | (u32(b[o + 1]) << 8) | (u32(b[o + 2]) << 16) | (u32(b[o + 3]) << 24)
+        a = h[0]
+        bb = h[1]
+        c = h[2]
+        d = h[3]
+        loop i in [0..64):
+            f = u32(0)
+            g = 0
+            if i < 16:
+                f = (bb & c) | ((~bb) & d)
+                g = i
+            else if i < 32:
+                f = (d & bb) | ((~d) & c)
+                g = (5 * i + 1) % 16
+            else if i < 48:
+                f = bb xor c xor d
+                g = (3 * i + 5) % 16
+            else:
+                f = c xor (bb | (~d))
+                g = (7 * i) % 16
+            f = f + a + __md5_k[i] + w[g]
+            a = d
+            d = c
+            c = bb
+            bb = bb + __rotl(f, __md5_s[i])
+        h[0] += a
+        h[1] += bb
+        h[2] += c
+        h[3] += d
+        off += 64
+    out: u8[]
+    loop x in h:
+        loop k in [0..4): out.push(u8((x >> u32(k * 8)) & 255))
+    out
+
+# ---------------- SHA-1 ----------------
+# SHA-1 of the bytes (20 bytes); for HMAC-SHA1, which STUN uses, not for anything new
+sha1 = (m: u8[]) -> u8[]:
+    h: u32[5] = [u32(0x67452301), u32(0xEFCDAB89), u32(0x98BADCFE), u32(0x10325476), u32(0xC3D2E1F0)]
+    b = __md_pad(m)
+    w: u32[80]
+    off = 0
+    loop off < b.len():
+        loop t in [0..16): w[t] = __be32(b, off + t * 4)
+        loop t in [16..80): w[t] = __rotl(w[t - 3] xor w[t - 8] xor w[t - 14] xor w[t - 16], 1)
+        a = h[0]
+        bb = h[1]
+        c = h[2]
+        d = h[3]
+        e = h[4]
+        loop t in [0..80):
+            f = u32(0)
+            k = u32(0)
+            if t < 20:
+                f = (bb & c) | ((~bb) & d)
+                k = 0x5A827999
+            else if t < 40:
+                f = bb xor c xor d
+                k = 0x6ED9EBA1
+            else if t < 60:
+                f = (bb & c) | (bb & d) | (c & d)
+                k = 0x8F1BBCDC
+            else:
+                f = bb xor c xor d
+                k = 0xCA62C1D6
+            tmp = __rotl(a, 5) + f + e + k + w[t]
+            e = d
+            d = c
+            c = __rotl(bb, 30)
+            bb = a
+            a = tmp
+        h[0] += a
+        h[1] += bb
+        h[2] += c
+        h[3] += d
+        h[4] += e
+        off += 64
+    out: u8[]
+    loop v in h: __put32(out, v)
+    out
+
+# ---------------- SHA-256 ----------------
+__SHA256_K: u32[64] = [u32(0x428a2f98), 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
+
+# SHA-256 of the bytes (32 bytes; std/hash's sha256 gives them as hex)
+sha256 = (m: u8[]) -> u8[]:
+    h: u32[8] = [u32(0x6a09e667), 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+    b = __md_pad(m)
+    w: u32[64]
+    off = 0
+    loop off < b.len():
+        loop t in [0..16): w[t] = __be32(b, off + t * 4)
+        loop t in [16..64):
+            s0 = __rotr(w[t - 15], 7) xor __rotr(w[t - 15], 18) xor (w[t - 15] >> 3)
+            s1 = __rotr(w[t - 2], 17) xor __rotr(w[t - 2], 19) xor (w[t - 2] >> 10)
+            w[t] = w[t - 16] + s0 + w[t - 7] + s1
+        a = h[0]
+        bb = h[1]
+        c = h[2]
+        d = h[3]
+        e = h[4]
+        f = h[5]
+        g = h[6]
+        hh = h[7]
+        loop t in [0..64):
+            S1 = __rotr(e, 6) xor __rotr(e, 11) xor __rotr(e, 25)
+            ch = (e & f) xor ((~e) & g)
+            t1 = hh + S1 + ch + __SHA256_K[t] + w[t]
+            S0 = __rotr(a, 2) xor __rotr(a, 13) xor __rotr(a, 22)
+            mj = (a & bb) xor (a & c) xor (bb & c)
+            t2 = S0 + mj
+            hh = g
+            g = f
+            f = e
+            e = d + t1
+            d = c
+            c = bb
+            bb = a
+            a = t1 + t2
+        h[0] += a
+        h[1] += bb
+        h[2] += c
+        h[3] += d
+        h[4] += e
+        h[5] += f
+        h[6] += g
+        h[7] += hh
+        off += 64
+    out: u8[]
+    loop v in h: __put32(out, v)
+    out
+
+# ---------------- HMAC ----------------
+hmac_sha256 = (key: u8[], msg: u8[]) -> u8[]: __hmac(key, msg, false)
+hmac_sha1 = (key: u8[], msg: u8[]) -> u8[]: __hmac(key, msg, true)
+
+__hmac = (key0: u8[], msg: u8[], one: bool) -> u8[]:
+    key = key0
+    if key.len() > 64:
+        if one: key = sha1(key)
+        else: key = sha256(key)
+    loop key.len() < 64: key.push(0)
+    inner: u8[]
+    outer: u8[]
+    loop k in key:
+        inner.push(k xor 0x36)
+        outer.push(k xor 0x5c)
+    inner.extend(msg)
+    if one:
+        outer.extend(sha1(inner))
+        return sha1(outer)
+    outer.extend(sha256(inner))
+    sha256(outer)
+
+# ---------------- AES-128 ----------------
+__AES_SBOX: u8[256] = [u8(0x63), 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16]
+
+# an AES-128 key, expanded: the 11 round keys, 176 bytes (and as 44 big-endian words)
+struct AesKey:
+    w: u8[176]
+    rk: u32[44]
+
+aes_key = (key: u8[]) -> AesKey:
+    if key.len() != 16: panic("aes_key: an AES-128 key is 16 bytes, not {key.len()}")
+    k = AesKey()
+    loop i in [0..16): k.w[i] = key[i]
+    rcon = u8(1)
+    i = 16
+    loop i < 176:
+        t0 = k.w[i - 4]
+        t1 = k.w[i - 3]
+        t2 = k.w[i - 2]
+        t3 = k.w[i - 1]
+        if i % 16 == 0:
+            u = t0
+            t0 = __AES_SBOX[int(t1)] xor rcon
+            t1 = __AES_SBOX[int(t2)]
+            t2 = __AES_SBOX[int(t3)]
+            t3 = __AES_SBOX[int(u)]
+            rcon = __xtime(rcon)
+        k.w[i] = k.w[i - 16] xor t0
+        k.w[i + 1] = k.w[i - 15] xor t1
+        k.w[i + 2] = k.w[i - 14] xor t2
+        k.w[i + 3] = k.w[i - 13] xor t3
+        i += 4
+    loop j in [0..44): k.rk[j] = (u32(k.w[j * 4]) << 24) | (u32(k.w[j * 4 + 1]) << 16) | (u32(k.w[j * 4 + 2]) << 8) | u32(k.w[j * 4 + 3])
+    k
+
+# (SubBytes, ShiftRows and MixColumns as four tables of 256 words, made once: a round is 16
+# lookups. Not constant-time, as the bytes-wise way was not either)
+__aes_te: u32[]
+__aes_tables = ():
+    if __aes_te.len() > 0: return
+    loop t in [0..4):
+        loop x in [0..256):
+            s = __AES_SBOX[x]
+            s2 = __xtime(s)
+            s3 = s2 xor s
+            w = (u32(s2) << 24) | (u32(s) << 16) | (u32(s) << 8) | u32(s3)
+            # (table t: the word rotated right by 8 t bits)
+            if t > 0: w = (w >> u32(8 * t)) | (w << u32(32 - 8 * t))
+            __aes_te.push(w)
+
+__xtime = (x: u8) -> u8:
+    if x & 0x80 != 0: return (x << 1) xor 0x1b
+    x << 1
+
+# one 16-byte block encrypted
+aes_encrypt_block = (k: AesKey, block: u8[16]) -> u8[16]:
+    __aes_tables()
+    te = __aes_te
+    rk = k.rk
+    # (the state as four big-endian columns)
+    s0 = ((u32(block[0]) << 24) | (u32(block[1]) << 16) | (u32(block[2]) << 8) | u32(block[3])) xor rk[0]
+    s1 = ((u32(block[4]) << 24) | (u32(block[5]) << 16) | (u32(block[6]) << 8) | u32(block[7])) xor rk[1]
+    s2 = ((u32(block[8]) << 24) | (u32(block[9]) << 16) | (u32(block[10]) << 8) | u32(block[11])) xor rk[2]
+    s3 = ((u32(block[12]) << 24) | (u32(block[13]) << 16) | (u32(block[14]) << 8) | u32(block[15])) xor rk[3]
+    loop r in [1..10):
+        t0 = te[int(s0 >> 24)] xor te[256 + int((s1 >> 16) & 255)] xor te[512 + int((s2 >> 8) & 255)] xor te[768 + int(s3 & 255)] xor rk[r * 4]
+        t1 = te[int(s1 >> 24)] xor te[256 + int((s2 >> 16) & 255)] xor te[512 + int((s3 >> 8) & 255)] xor te[768 + int(s0 & 255)] xor rk[r * 4 + 1]
+        t2 = te[int(s2 >> 24)] xor te[256 + int((s3 >> 16) & 255)] xor te[512 + int((s0 >> 8) & 255)] xor te[768 + int(s1 & 255)] xor rk[r * 4 + 2]
+        t3 = te[int(s3 >> 24)] xor te[256 + int((s0 >> 16) & 255)] xor te[512 + int((s1 >> 8) & 255)] xor te[768 + int(s2 & 255)] xor rk[r * 4 + 3]
+        s0 = t0
+        s1 = t1
+        s2 = t2
+        s3 = t3
+    # (the last round: no MixColumns)
+    out: u8[16]
+    cols = [s0, s1, s2, s3]
+    loop c in [0..4):
+        loop row in [0..4):
+            src = cols[(c + row) % 4]
+            b = __AES_SBOX[int((src >> u32(24 - row * 8)) & 255)]
+            out[c * 4 + row] = b xor k.w[160 + c * 4 + row]
+    out
+
+# ---------------- AES-GCM ----------------
+# GF(2^128) multiply, as GCM's GHASH does (bits in GCM's order: the first byte's high bit is x^0)
+# (on two 64-bit halves: a bit a step, 128 steps)
+__gf_mul = (x: u8[16], y: u8[16]) -> u8[16]:
+    xh = __be64(x, 0)
+    xl = __be64(x, 8)
+    vh = __be64(y, 0)
+    vl = __be64(y, 8)
+    zh = u64(0)
+    zl = u64(0)
+    loop i in [0..128):
+        bit = if i < 64: (xh >> u64(63 - i)) & 1 else: (xl >> u64(127 - i)) & 1
+        if bit != 0:
+            zh = zh xor vh
+            zl = zl xor vl
+        lsb = vl & 1
+        vl = (vl >> 1) | (vh << 63)
+        vh = vh >> 1
+        if lsb != 0: vh = vh xor 0xE100000000000000
+    z: u8[16]
+    loop k in [0..8):
+        z[k] = u8((zh >> u64(56 - k * 8)) & 255)
+        z[8 + k] = u8((zl >> u64(56 - k * 8)) & 255)
+    z
+
+__be64 = (b: u8[16], i: int) -> u64:
+    v = u64(0)
+    loop k in [0..8): v = (v << 8) | u64(b[i + k])
+    v
+
+__ghash = (h: u8[16], aad: u8[], c: u8[]) -> u8[16]:
+    y: u8[16]
+    loop part in [aad, c]:
+        i = 0
+        loop i < part.len():
+            loop j in [0..16):
+                if i + j < part.len(): y[j] = y[j] xor part[i + j]
+            y = __gf_mul(y, h)
+            i += 16
+    lens: u8[16]
+    loop k in [0..8):
+        lens[k] = u8(((aad.len() * 8) >> (56 - k * 8)) & 255)
+        lens[8 + k] = u8(((c.len() * 8) >> (56 - k * 8)) & 255)
+    loop j in [0..16): y[j] = y[j] xor lens[j]
+    __gf_mul(y, h)
+
+# the CTR keystream from counter block j0 + 1 on, applied to src
+__gcm_ctr = (k: AesKey, j0: u8[16], src: u8[]) -> u8[]:
+    out = src
+    ctr = j0
+    i = 0
+    loop i < src.len():
+        # (the last 4 bytes count, big-endian)
+        n = (int(ctr[12]) << 24 | int(ctr[13]) << 16 | int(ctr[14]) << 8 | int(ctr[15])) + 1
+        ctr[12] = u8((n >> 24) & 255)
+        ctr[13] = u8((n >> 16) & 255)
+        ctr[14] = u8((n >> 8) & 255)
+        ctr[15] = u8(n & 255)
+        ks = aes_encrypt_block(k, ctr)
+        loop j in [0..16):
+            if i + j < src.len(): out[i + j] = out[i + j] xor ks[j]
+        i += 16
+    out
+
+__gcm_j0 = (nonce: u8[]) -> u8[16]:
+    if nonce.len() != 12: panic("aes_gcm: the nonce is 12 bytes, not {nonce.len()}")
+    j0: u8[16]
+    loop i in [0..12): j0[i] = nonce[i]
+    j0[15] = 1
+    j0
+
+# the message encrypted, then its 16-byte tag: nonce (12 bytes) must never repeat for one key;
+# aad is bytes the tag covers that travel unencrypted
+aes_gcm_seal = (key: AesKey, nonce: u8[], aad: u8[], message: u8[]) -> u8[]:
+    zero: u8[16]
+    h = aes_encrypt_block(key, zero)
+    j0 = __gcm_j0(nonce)
+    c = __gcm_ctr(key, j0, message)
+    s = __ghash(h, aad, c)
+    t = aes_encrypt_block(key, j0)
+    out = c
+    loop j in [0..16): out.push(t[j] xor s[j])
+    out
+
+# the message back from aes_gcm_seal's bytes, or none when they (or aad) were changed
+aes_gcm_open = (key: AesKey, nonce: u8[], aad: u8[], sealed: u8[]) -> u8[]?:
+    if sealed.len() < 16: return none
+    c = sealed[..sealed.len() - 16)
+    zero: u8[16]
+    h = aes_encrypt_block(key, zero)
+    j0 = __gcm_j0(nonce)
+    s = __ghash(h, aad, c)
+    t = aes_encrypt_block(key, j0)
+    diff = u8(0)
+    loop j in [0..16): diff = diff | (sealed[c.len() + j] xor t[j] xor s[j])
+    if diff != 0: return none
+    __gcm_ctr(key, j0, c)
+
+# ---------------- 256-bit numbers ----------------
+# (eight 32-bit limbs, the lowest first)
+__u256_be = (b: u8[], off: int) -> u32[8]:
+    r: u32[8]
+    loop i in [0..8): r[7 - i] = __be32(b, off + i * 4)
+    r
+
+__u256_bytes = (a: u32[8]) -> u8[]:
+    out: u8[]
+    i = 7
+    loop i >= 0:
+        __put32(out, a[i])
+        i -= 1
+    out
+
+__u256_hex = (s: str) -> u32[8]: __u256_be(hex_bytes(s)!, 0)
+
+__u256_cmp = (a: u32[8], b: u32[8]) -> int:
+    i = 7
+    loop i >= 0:
+        if a[i] != b[i]: return if a[i] < b[i]: -1 else: 1
+        i -= 1
+    0
+
+__u256_is_zero = (a: u32[8]) -> bool:
+    loop x in a:
+        if x != 0: return false
+    true
+
+# a + b, and the carry out
+__u256_add = (a: u32[8], b: u32[8]) -> (u32[8], u64):
+    r: u32[8]
+    c = u64(0)
+    loop i in [0..8):
+        s = u64(a[i]) + u64(b[i]) + c
+        r[i] = u32(s & 0xFFFFFFFF)
+        c = s >> 32
+    (r, c)
+
+# a - b, and the borrow out (1 when b > a)
+__u256_sub = (a: u32[8], b: u32[8]) -> (u32[8], u64):
+    r: u32[8]
+    bw = u64(0)
+    loop i in [0..8):
+        s = u64(a[i]) - u64(b[i]) - bw
+        r[i] = u32(s & 0xFFFFFFFF)
+        bw = (s >> 63) & 1
+    (r, bw)
+
+# a modulus and what its Montgomery arithmetic needs
+struct __Mod:
+    m: u32[8]
+    minv: u32               # -m^-1 mod 2^32
+    r2: u32[8]              # 2^512 mod m (to Montgomery form)
+    one: u32[8]             # 2^256 mod m (1 in Montgomery form)
+
+__mod_new = (m: u32[8]) -> __Mod:
+    inv = u32(1)
+    loop _ in [0..5): inv = inv * (u32(2) - m[0] * inv)
+    md = __Mod(m, u32(0) - inv)
+    # (2^256 mod m, then doubled 256 times more)
+    x: u32[8]
+    x[0] = 1
+    loop _ in [0..512): x = __add_mod(x, x, m)
+    md.r2 = x
+    md.one = __mont(md, x, [u32(1), 0, 0, 0, 0, 0, 0, 0])
+    md
+
+__add_mod = (a: u32[8], b: u32[8], m: u32[8]) -> u32[8]:
+    s, c = __u256_add(a, b)
+    if c != 0 or __u256_cmp(s, m) >= 0:
+        t, _ = __u256_sub(s, m)
+        return t
+    s
+
+__sub_mod = (a: u32[8], b: u32[8], m: u32[8]) -> u32[8]:
+    d, bw = __u256_sub(a, b)
+    if bw != 0:
+        t, _ = __u256_add(d, m)
+        return t
+    d
+
+# a * b * 2^-256 mod m (Montgomery multiplication, operand-scanning)
+__mont = (md: __Mod, a: u32[8], b: u32[8]) -> u32[8]:
+    t: u64[10]
+    loop i in [0..8):
+        c = u64(0)
+        bi = u64(b[i])
+        loop j in [0..8):
+            s = t[j] + u64(a[j]) * bi + c
+            t[j] = s & 0xFFFFFFFF
+            c = s >> 32
+        s = t[8] + c
+        t[8] = s & 0xFFFFFFFF
+        t[9] = s >> 32
+        q = (t[0] * u64(md.minv)) & 0xFFFFFFFF
+        s = t[0] + q * u64(md.m[0])
+        c = s >> 32
+        loop j in [1..8):
+            s = t[j] + q * u64(md.m[j]) + c
+            t[j - 1] = s & 0xFFFFFFFF
+            c = s >> 32
+        s = t[8] + c
+        t[7] = s & 0xFFFFFFFF
+        t[8] = t[9] + (s >> 32)
+        t[9] = 0
+    r: u32[8]
+    loop i in [0..8): r[i] = u32(t[i])
+    if t[8] != 0 or __u256_cmp(r, md.m) >= 0:
+        r2, _ = __u256_sub(r, md.m)
+        return r2
+    r
+
+__to_mont = (md: __Mod, a: u32[8]) -> u32[8]: __mont(md, a, md.r2)
+__from_mont = (md: __Mod, a: u32[8]) -> u32[8]: __mont(md, a, [u32(1), 0, 0, 0, 0, 0, 0, 0])
+
+# a^e (a in Montgomery form, and the result)
+__mont_pow = (md: __Mod, a: u32[8], e: u32[8]) -> u32[8]:
+    r = md.one
+    i = 255
+    loop i >= 0:
+        r = __mont(md, r, r)
+        if (e[i >> 5] >> u32(i & 31)) & 1 != 0: r = __mont(md, r, a)
+        i -= 1
+    r
+
+# a^-1 (Montgomery form in and out; m prime: a^(m-2))
+__mont_inv = (md: __Mod, a: u32[8]) -> u32[8]:
+    e, _ = __u256_sub(md.m, [u32(2), 0, 0, 0, 0, 0, 0, 0])
+    __mont_pow(md, a, e)
+
+# ---------------- P-256 ----------------
+__p256_ready = false
+__P: __Mod
+__N: __Mod
+__B: u32[8]                 # (Montgomery form)
+__GX: u32[8]
+__GY: u32[8]
+
+__p256_init = ():
+    if __p256_ready: return
+    __p256_ready = true
+    __P = __mod_new(__u256_hex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"))
+    __N = __mod_new(__u256_hex("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"))
+    __B = __to_mont(__P, __u256_hex("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"))
+    __GX = __to_mont(__P, __u256_hex("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"))
+    __GY = __to_mont(__P, __u256_hex("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"))
+
+# a point in Jacobian coordinates (x / z^2, y / z^3), Montgomery form; z == 0: the point at infinity
+struct __Jac:
+    x: u32[8]
+    y: u32[8]
+    z: u32[8]
+
+__fadd = (a: u32[8], b: u32[8]) -> u32[8]: __add_mod(a, b, __P.m)
+__fsub = (a: u32[8], b: u32[8]) -> u32[8]: __sub_mod(a, b, __P.m)
+__fmul = (a: u32[8], b: u32[8]) -> u32[8]: __mont(__P, a, b)
+
+__jac_double = (p: __Jac) -> __Jac:
+    if __u256_is_zero(p.z) or __u256_is_zero(p.y): return __Jac()
+    # (a = -3: m = 3 (x - z^2)(x + z^2))
+    zz = __fmul(p.z, p.z)
+    t = __fmul(__fsub(p.x, zz), __fadd(p.x, zz))
+    m = __fadd(__fadd(t, t), t)
+    yy = __fmul(p.y, p.y)
+    s = __fmul(p.x, yy)
+    s = __fadd(s, s)
+    s = __fadd(s, s)
+    x3 = __fsub(__fsub(__fmul(m, m), s), s)
+    y4 = __fmul(yy, yy)
+    y4 = __fadd(y4, y4)
+    y4 = __fadd(y4, y4)
+    y4 = __fadd(y4, y4)
+    y3 = __fsub(__fmul(m, __fsub(s, x3)), y4)
+    z3 = __fmul(p.y, p.z)
+    z3 = __fadd(z3, z3)
+    __Jac(x3, y3, z3)
+
+__jac_add = (p: __Jac, q: __Jac) -> __Jac:
+    if __u256_is_zero(p.z): return q
+    if __u256_is_zero(q.z): return p
+    z1z1 = __fmul(p.z, p.z)
+    z2z2 = __fmul(q.z, q.z)
+    u1 = __fmul(p.x, z2z2)
+    u2 = __fmul(q.x, z1z1)
+    s1 = __fmul(p.y, __fmul(q.z, z2z2))
+    s2 = __fmul(q.y, __fmul(p.z, z1z1))
+    if __u256_cmp(u1, u2) == 0:
+        if __u256_cmp(s1, s2) == 0: return __jac_double(p)
+        return __Jac()
+    h = __fsub(u2, u1)
+    r = __fsub(s2, s1)
+    hh = __fmul(h, h)
+    hhh = __fmul(hh, h)
+    v = __fmul(u1, hh)
+    x3 = __fsub(__fsub(__fmul(r, r), hhh), __fadd(v, v))
+    y3 = __fsub(__fmul(r, __fsub(v, x3)), __fmul(s1, hhh))
+    z3 = __fmul(__fmul(p.z, q.z), h)
+    __Jac(x3, y3, z3)
+
+# k * p
+__jac_mul = (p: __Jac, k: u32[8]) -> __Jac:
+    r = __Jac()
+    i = 255
+    loop i >= 0:
+        r = __jac_double(r)
+        if (k[i >> 5] >> u32(i & 31)) & 1 != 0: r = __jac_add(r, p)
+        i -= 1
+    r
+
+# the affine x and y (not Montgomery form), or none at infinity
+__jac_affine = (p: __Jac) -> (u32[8], u32[8])?:
+    if __u256_is_zero(p.z): return none
+    zi = __mont_inv(__P, p.z)
+    zi2 = __fmul(zi, zi)
+    x = __from_mont(__P, __fmul(p.x, zi2))
+    y = __from_mont(__P, __fmul(p.y, __fmul(zi2, zi)))
+    (x, y)
+
+__p256_g = () -> __Jac: __Jac(__GX, __GY, __P.one)
+
+# a P-256 key: the private scalar and the public point (65 bytes: 0x04, x, y)
+struct P256Key:
+    private: u8[]
+    public: u8[]
+
+# a new key, from the system's random bytes
+p256_key = () -> P256Key:
+    __p256_init()
+    loop true:
+        d = random_bytes(32)
+        k = __u256_be(d, 0)
+        if __u256_is_zero(k) or __u256_cmp(k, __N.m) >= 0: continue
+        return P256Key(d, __p256_point_bytes(__jac_mul(__p256_g(), k)))
+
+__p256_point_bytes = (p: __Jac) -> u8[]:
+    out: u8[] = [u8(4)]
+    if let xy = __jac_affine(p):
+        out.extend(__u256_bytes(xy.0))
+        out.extend(__u256_bytes(xy.1))
+    out
+
+# a public point's 65 bytes as a point, when it is one on the curve (else none)
+__p256_point = (b: u8[]) -> __Jac?:
+    __p256_init()
+    if b.len() != 65 or b[0] != 4: return none
+    x = __u256_be(b, 1)
+    y = __u256_be(b, 33)
+    if __u256_cmp(x, __P.m) >= 0 or __u256_cmp(y, __P.m) >= 0: return none
+    xm = __to_mont(__P, x)
+    ym = __to_mont(__P, y)
+    # y^2 == x^3 - 3x + b
+    lhs = __fmul(ym, ym)
+    x3 = __fmul(__fmul(xm, xm), xm)
+    rhs = __fadd(__fsub(__fsub(__fsub(x3, xm), xm), xm), __B)
+    if __u256_cmp(lhs, rhs) != 0: return none
+    __Jac(xm, ym, __P.one)
+
+# the shared secret of a key and another's public point (its x, 32 bytes), or none when that is no
+# point on the curve
+p256_ecdh = (k: P256Key, other: u8[]) -> u8[]?:
+    if let q = __p256_point(other):
+        if let xy = __jac_affine(__jac_mul(q, __u256_be(k.private, 0))): return __u256_bytes(xy.0)
+    none
+
+# a hash's integer, reduced mod n
+__hash_int = (h: u8[]) -> u32[8]:
+    e = __u256_be(h, 0)
+    if __u256_cmp(e, __N.m) >= 0:
+        r, _ = __u256_sub(e, __N.m)
+        return r
+    e
+
+# an ECDSA signature of a 32-byte hash: r and s, 32 bytes each
+p256_sign = (k: P256Key, hash: u8[]) -> u8[]:
+    __p256_init()
+    d = __to_mont(__N, __u256_be(k.private, 0))
+    e = __to_mont(__N, __hash_int(hash))
+    loop true:
+        kb = __u256_be(random_bytes(32), 0)
+        if __u256_is_zero(kb) or __u256_cmp(kb, __N.m) >= 0: continue
+        if let xy = __jac_affine(__jac_mul(__p256_g(), kb)):
+            r = xy.0
+            if __u256_cmp(r, __N.m) >= 0:
+                rr, _ = __u256_sub(r, __N.m)
+                r = rr
+            if __u256_is_zero(r): continue
+            rm = __to_mont(__N, r)
+            kinv = __mont_inv(__N, __to_mont(__N, kb))
+            s = __from_mont(__N, __mont(__N, kinv, __add_mod(e, __mont(__N, rm, d), __N.m)))
+            if __u256_is_zero(s): continue
+            out = __u256_bytes(r)
+            out.extend(__u256_bytes(s))
+            return out
+
+# whether sig (r and s, 32 bytes each) signs the 32-byte hash for the public point
+p256_verify = (public: u8[], hash: u8[], sig: u8[]) -> bool:
+    __p256_init()
+    if sig.len() != 64: return false
+    qq = __p256_point(public)
+    if qq == none: return false
+    q = qq!
+    r = __u256_be(sig, 0)
+    s = __u256_be(sig, 32)
+    if __u256_is_zero(r) or __u256_is_zero(s) or __u256_cmp(r, __N.m) >= 0 or __u256_cmp(s, __N.m) >= 0: return false
+    w = __mont_inv(__N, __to_mont(__N, s))
+    u1 = __from_mont(__N, __mont(__N, __to_mont(__N, __hash_int(hash)), w))
+    u2 = __from_mont(__N, __mont(__N, __to_mont(__N, r), w))
+    p = __jac_add(__jac_mul(__p256_g(), u1), __jac_mul(q, u2))
+    pa = __jac_affine(p)
+    if pa == none: return false
+    x = pa!.0
+    if __u256_cmp(x, __N.m) >= 0:
+        xx, _ = __u256_sub(x, __N.m)
+        x = xx
+    __u256_cmp(x, r) == 0
+
+# ---------------- DER ----------------
+# r and s (32 bytes each) as an ECDSA signature in DER (as TLS and certificates carry it)
+der_signature = (sig: u8[]) -> u8[]:
+    body: u8[]
+    loop part in [sig[..32), sig[32..64)]:
+        v = part
+        loop v.len() > 1 and v[0] == 0 and v[1] < 0x80: v = v[1..]
+        if v[0] >= 0x80: v.insert(0, 0)
+        body.push(2)
+        body.push(u8(v.len()))
+        body.extend(v)
+    __der(0x30, body)
+
+# a DER ECDSA signature as r and s (32 bytes each), or none when it is not one
+der_signature_parts = (der: u8[]) -> u8[]?:
+    if der.len() < 8 or der[0] != 0x30: return none
+    out: u8[]
+    i = 2
+    loop _ in [0..2):
+        if i + 2 > der.len() or der[i] != 2: return none
+        n = int(der[i + 1])
+        if i + 2 + n > der.len() or n > 33: return none
+        v = der[i + 2..i + 2 + n)
+        loop v.len() > 32 and v[0] == 0: v = v[1..]
+        if v.len() > 32: return none
+        loop v.len() < 32: v.insert(0, 0)
+        out.extend(v)
+        i += 2 + n
+    out
+
+# a DER element: its tag, length and contents
+__der = (tag: int, body: u8[]) -> u8[]:
+    out: u8[] = [u8(tag)]
+    n = body.len()
+    if n < 128: out.push(u8(n))
+    else if n < 256:
+        out.push(0x81)
+        out.push(u8(n))
+    else:
+        out.push(0x82)
+        out.push(u8(n >> 8))
+        out.push(u8(n & 255))
+    out.extend(body)
+    out
+
+__OID_ECDSA_SHA256: u8[] = [u8(6), 8, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02]
+__OID_EC_PUBLIC: u8[] = [u8(6), 7, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]
+__OID_P256: u8[] = [u8(6), 8, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]
+
+# a self-signed X.509 certificate for the key (DER), named name: what DTLS (WebRTC's) shows the
+# other side, which knows it by its SHA-256 fingerprint
+self_signed_certificate = (k: P256Key, name: str) -> u8[]:
+    alg = __der(0x30, __OID_ECDSA_SHA256)
+    cn: u8[] = [u8(6), 3, 0x55, 0x04, 0x03]
+    cn.extend(__der(0x0c, bytes(name)))
+    dn = __der(0x30, __der(0x31, __der(0x30, cn)))
+    validity: u8[]
+    validity.extend(__der(0x17, bytes("250101000000Z")))
+    validity.extend(__der(0x17, bytes("491231235959Z")))
+    spki_alg: u8[]
+    spki_alg.extend(__OID_EC_PUBLIC)
+    spki_alg.extend(__OID_P256)
+    key_bits: u8[] = [u8(0)]
+    key_bits.extend(k.public)
+    spki: u8[]
+    spki.extend(__der(0x30, spki_alg))
+    spki.extend(__der(0x03, key_bits))
+    serial = random_bytes(8)
+    serial[0] = serial[0] & 0x7f
+    tbs: u8[]
+    tbs.extend(__der(0xa0, __der(2, [u8(2)])))
+    tbs.extend(__der(2, serial))
+    tbs.extend(alg)
+    tbs.extend(dn)
+    tbs.extend(__der(0x30, validity))
+    tbs.extend(dn)
+    tbs.extend(__der(0x30, spki))
+    tbs_der = __der(0x30, tbs)
+    sig: u8[] = [u8(0)]
+    sig.extend(der_signature(p256_sign(k, sha256(tbs_der))))
+    cert: u8[]
+    cert.extend(tbs_der)
+    cert.extend(alg)
+    cert.extend(__der(0x03, sig))
+    __der(0x30, cert)
+
+# the P-256 public point (65 bytes) a certificate holds, or none when it holds none
+certificate_p256_key = (cert: u8[]) -> u8[]?:
+    i = 0
+    loop i + __OID_P256.len() + 4 + 65 <= cert.len():
+        if cert[i..i + __OID_P256.len()) == __OID_P256:
+            j = i + __OID_P256.len()
+            if cert[j] == 3 and cert[j + 1] == 66 and cert[j + 2] == 0 and cert[j + 3] == 4: return cert[j + 3..j + 3 + 65)
+        i += 1
+    none
+
+# ---------------- CRC-32 ----------------
+__crc_tab: u32[]
+__crcc_tab: u32[]
+
+# CRC-32 (zip's, PNG's, STUN's) of the bytes
+crc32 = (b: u8[]) -> u32: __crc_with(b, false)
+# CRC-32C (Castagnoli: SCTP's, iSCSI's) of the bytes
+crc32c = (b: u8[]) -> u32: __crc_with(b, true)
+
+__crc_with = (b: u8[], c32c: bool) -> u32:
+    if __crc_tab.len() == 0:
+        loop poly in [u32(0xEDB88320), u32(0x82F63B78)]:
+            t: u32[]
+            loop n in [0..256):
+                c = u32(n)
+                loop k in [0..8):
+                    if c & 1 == 1: c = poly xor (c >> 1)
+                    else: c = c >> 1
+                t.push(c)
+            if __crc_tab.len() == 0: __crc_tab = t
+            else: __crcc_tab = t
+    c = u32(0xFFFFFFFF)
+    if c32c:
+        loop x in b: c = __crcc_tab[int((c xor u32(x)) & 255)] xor (c >> 8)
+    else:
+        loop x in b: c = __crc_tab[int((c xor u32(x)) & 255)] xor (c >> 8)
+    c xor u32(0xFFFFFFFF)

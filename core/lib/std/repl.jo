@@ -1,0 +1,271 @@
+# The program side of the interactive prompt (`sloppy` with no file, see compiler/repl.jo). The
+# compiler builds a program whose main is __repl_serve, and runs it; then for each input it
+# compiles new machine code that uses this program's functions and globals, and sends it here.
+# If an input fails (a panic, a crash, ctrl-c), the state before it is still here. On Linux each
+# input runs in a copy of this process (fork): if it fails, the copy is gone; if it finishes,
+# the copy carries on as the session. On Windows, a copy of this process's memory is taken first
+# (lib/std/snapshot.jo), and put back if it fails.
+#
+# Messages from the compiler (fd 3; Windows: the handles in SLOPPY_REPL_PIPES), each a header of
+# three words:
+#   1 addr len, then len bytes: copy them to addr (in the region __repl_region reserved)
+#   2 entry end: run the code at entry (a function taking and returning nothing); the globals
+#     end at end
+#   3 0 0: quit
+# Replies (fd 4): one word per run: 0 finished; 256 + signal number if it crashed (2: ctrl-c);
+# 512 + status if it exited (101: a panic).
+
+const __REPL_IN = 3
+const __REPL_OUT = 4
+
+__repl_read_all = (fd: int, p: *u8, n: int) -> bool:
+    got = 0
+    loop got < n:
+        r = 0
+        when TARGET == "windows":
+            k: u32[] = [0]
+            if ReadFile(__repl_hin, p + got, u32(min(n - got, 1 << 30)), data(k), null) != 0: r = int(k[0])
+        else:
+            r = syscall(0, fd, p + got, n - got)
+        if r <= 0: return false
+        got += r
+    true
+
+__repl_reply = (v: int):
+    __out_flush()                   # (what the input printed, before the prompt says it is done)
+    w = [v]
+    when TARGET == "windows":
+        k: u32[] = [0]
+        WriteFile(__repl_hout, data(w) as *u8, 8, data(k), null)
+    else:
+        __write_fd(__REPL_OUT, data(w) as *u8, 8)
+
+# (only the thread that forked is in the copy: a thread pool must be started again there)
+__repl_after_fork = ():
+    __pool_ctl = null
+    __tstack_base = null
+    __pool_workers = 0
+
+# ignore ctrl-c (SIGINT) or not: the prompt and the session ignore it; the input running stops
+__repl_sigint = (ignore: bool):
+    when TARGET != "wasm":
+        act = [0, 0, 0, 0]                                           # struct sigaction
+        if ignore: act[0] = 1                                        # SIG_IGN (else SIG_DFL)
+        syscall(13, 2, data(act), 0, 8)                              # rt_sigaction(SIGINT)
+
+__repl_serve = (region: int, size: int):
+    when TARGET == "windows":
+        __repl_serve_w32(region, size)
+    else when TARGET != "wasm":
+        __repl_sigint(true)
+        # the code of later inputs goes here (read, write, execute; pages are touched as needed)
+        r = 0
+        ok = false
+        when TARGET == "macos":
+            # (what finds C functions an input uses first, bound when the session starts)
+            if region == 0: __ffi_resolve("", "")
+            # (Apple silicon: code written at run time only in MAP_JIT memory, which each thread
+            # sees either writable or runnable; near where it was asked to be: it says where, and
+            # its code reaches the globals if it is within 4 GB of them)
+            r = __c_mmap(region, size, 7, 0x1000 | 0x800 | 0x2, -1, 0)             # ANON, JIT, PRIVATE
+            ok = r > 0 and r + size < 0x100000000 + (4 << 30)
+        else:
+            r = syscall(9, region, size, 7, 0x22 | 0x4000 | 0x100000, -1, 0)     # MAP_FIXED_NOREPLACE
+            ok = r == region
+        if not ok:
+            eprint("sloppy: no room for the prompt's code near {region:x} (the system gave {r:x})")
+            __repl_reply(-1)
+            exit(1)
+        __repl_reply(r)
+        hdr = [0, 0, 0]
+        loop true:
+            if not __repl_read_all(__REPL_IN, data(hdr) as *u8, 24): exit(0)
+            op = hdr[0]
+            if op == 1:
+                when TARGET == "macos":
+                    b = fill(u8(0), hdr[2])
+                    if not __repl_read_all(__REPL_IN, data(b), hdr[2]): exit(0)
+                    __c_jit_write_protect(0)
+                    __mem_move(hdr[1] as *u8, data(b), hdr[2])
+                    __c_jit_write_protect(1)
+                else:
+                    if not __repl_read_all(__REPL_IN, hdr[1] as *u8, hdr[2]): exit(0)
+                __code_sync(hdr[1] as *u8, hdr[2])
+            else if op == 2:
+                # run it in a copy; the copy tells us (through a pipe) when it finished
+                fds: i32[] = [-1, -1]
+                syscall(293, data(fds), 0x80000)                    # pipe2(O_CLOEXEC)
+                pid = syscall(57)                                    # fork
+                if pid == 0:
+                    syscall(3, int(fds[0]))
+                    __repl_sigint(false)
+                    __repl_after_fork()
+                    # (macOS: the copy's thread has no alternate signal stack: a stack overflow
+                    # could not be told)
+                    when TARGET == "macos":
+                        __crash_install()
+                    entry = (hdr[1] as *u8) as cfn()
+                    entry()
+                    __repl_sigint(true)
+                    __repl_reply(0)
+                    one = [1]
+                    syscall(1, int(fds[1]), data(one), 1)
+                    syscall(3, int(fds[1]))
+                    continue                                         # the copy is the session now
+                syscall(3, int(fds[1]))
+                b = [0]
+                n = syscall(0, int(fds[0]), data(b), 1)
+                syscall(3, int(fds[0]))
+                if n == 1:
+                    # finished: the copy carries on; this process is done
+                    syscall(231, 0)
+                status = [0]
+                syscall(61, pid, data(status), 0, 0)                # wait4
+                st = status[0] & 0xFFFF
+                how = 512 + (st >> 8)
+                if st & 0x7F != 0: how = 256 + (st & 0x7F)
+                __repl_reply(how)
+            else: exit(0)
+
+when TARGET == "windows":
+    @lib("kernel32.dll")
+    extern SetConsoleCtrlHandler = (f: *u8, add: i32) -> i32
+    @lib("kernel32.dll")
+    extern GetCurrentThread = () -> *u8
+    @lib("kernel32.dll")
+    extern GetCurrentProcess = () -> *u8
+    @lib("kernel32.dll")
+    extern DuplicateHandle = (from_proc: *u8, h: *u8, to_proc: *u8, out: **u8, access: u32, inherit: i32, options: u32) -> i32
+    @lib("kernel32.dll")
+    extern SuspendThread = (h: *u8) -> u32
+    @lib("kernel32.dll")
+    extern ResumeThread = (h: *u8) -> u32
+    @lib("kernel32.dll")
+    extern GetThreadContext = (h: *u8, ctx: *u8) -> i32
+    @lib("kernel32.dll")
+    extern SetThreadContext = (h: *u8, ctx: *u8) -> i32
+
+    __repl_hin: *u8 = null
+    __repl_hout: *u8 = null
+    __repl_thread: *u8 = null               # the main thread (ctrl-c stops what it runs)
+    __repl_ctx: *u8 = null                  # (a CONTEXT for that, 16-byte aligned)
+    __repl_running = false
+    __repl_why = 0                          # what the reply to a run that failed says
+    __repl_lo = 0                           # the region of inputs' code (crashes there are theirs)
+    __repl_hi = 0
+
+    __repl_serve_w32 = (region: int, size: int):
+        hs = split(env("SLOPPY_REPL_PIPES") ?? "", ",")
+        if hs.len() != 2: exit(1)
+        __repl_hin = (to_int(hs[0]) ?? 0) as *u8
+        __repl_hout = (to_int(hs[1]) ?? 0) as *u8
+        # the code of later inputs goes here (read, write, execute; committed as it comes)
+        if VirtualAlloc(region as *u8, size, u32(0x2000), u32(0x40)) != region as *u8:   # MEM_RESERVE
+            __repl_reply(-1)
+            exit(1)
+        __repl_lo = region
+        __repl_hi = region + size
+        th: *u8[] = [null]
+        DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), data(th), 0, 0, u32(2))   # DUPLICATE_SAME_ACCESS
+        __repl_thread = th[0]
+        __repl_ctx = __alloc(1232 + 16)
+        __repl_ctx = ((__repl_ctx as int + 15) & ~15) as *u8
+        h: cfn(u32) -> i32 = __repl_ctrl
+        SetConsoleCtrlHandler(h as *u8, 1)
+        # (the functions it calls, looked up now: that allocates, which it cannot on its thread)
+        SuspendThread(null)
+        ResumeThread(null)
+        GetThreadContext(null, __repl_ctx)
+        SetThreadContext(null, __repl_ctx)
+        Sleep(u32(0))
+        jb = __alloc(192)
+        __repl_reply(0)
+        hdr = [0, 0, 0]
+        loop true:
+            if not __repl_read_all(0, data(hdr) as *u8, 24): exit(0)
+            op = hdr[0]
+            if op == 1:
+                VirtualAlloc(hdr[1] as *u8, hdr[2], u32(0x1000), u32(0x40))           # MEM_COMMIT
+                if not __repl_read_all(0, hdr[1] as *u8, hdr[2]): exit(0)
+            else if op == 2:
+                lo, n = __image_data()
+                snap = __snap_take(lo, hdr[2])
+                entry = (hdr[1] as *u8) as cfn()
+                __repl_why = 512 + 101
+                if __setjmp(jb) == 0:
+                    __repl_jmp = jb
+                    __repl_running = true
+                    entry()
+                    __repl_running = false
+                    __repl_jmp = null
+                    __snap_drop(snap)
+                    __repl_reply(0)
+                else:
+                    __repl_running = false
+                    __repl_jmp = null
+                    how = __repl_why
+                    __snap_restore(snap)
+                    __snap_drop(snap)
+                    __w32_stack_guard()
+                    __repl_reply(how)
+            else: exit(0)
+
+    # ctrl-c (on a thread of its own): the main thread, if it runs an input, goes to
+    # __repl_stopped. (Not in the middle of a system function, if it can wait a little: one may
+    # hold a lock.)
+    @cabi
+    __repl_ctrl = (kind: u32) -> i32:
+        if kind != u32(0) and kind != u32(1): return 0
+        if not __repl_running: return 1
+        tries = 0
+        loop __repl_running:
+            SuspendThread(__repl_thread)
+            ((__repl_ctx + 0x30) as *u32)[0] = u32(0x100003)                  # CONTEXT_CONTROL | INTEGER
+            if GetThreadContext(__repl_thread, __repl_ctx) != 0:
+                rip = ((__repl_ctx + 0xF8) as *int)[0]
+                ours = rip >= __repl_lo and rip < __repl_hi or rip >= 0x400000 and rip < 0x400000 + __w32_image_size()
+                if ours or tries >= 20:
+                    rsp = ((__repl_ctx + 0x98) as *int)[0]
+                    f: cfn() = __repl_stopped
+                    ((__repl_ctx + 0x98) as *int)[0] = ((rsp - 256) & ~15) - 8
+                    ((__repl_ctx + 0xF8) as *int)[0] = f as int
+                    __repl_why = 256 + 2
+                    SetThreadContext(__repl_thread, __repl_ctx)
+                    ResumeThread(__repl_thread)
+                    return 1
+            ResumeThread(__repl_thread)
+            tries += 1
+            Sleep(10)
+        1
+
+    # (where a crash in an input, or ctrl-c, sends the main thread: back to __repl_serve_w32)
+    @cabi
+    __repl_stopped = ():
+        __repl_unwind()
+        __exit(101)
+
+    # a crash at rip, told already (lib/std/backtrace.jo): true if it goes back to the prompt,
+    # the registers set for that
+    __repl_crashed = (ctx: *u8) -> bool:
+        if __repl_jmp == null or not __repl_running or __tid() != 0: return false
+        rsp = ((ctx + 0x98) as *int)[0]
+        f: cfn() = __repl_stopped
+        ((ctx + 0x98) as *int)[0] = ((rsp - 256) & ~15) - 8
+        ((ctx + 0xF8) as *int)[0] = f as int
+        true
+
+# Where a panic goes instead of ending the process, while it is set: back to the prompt (in
+# the compiler: an error in an input; in the session on Windows: an input that panicked), which
+# puts memory back as it was (lib/std/snapshot.jo)
+__repl_jmp: *u8 = null
+
+__repl_unwind = ():
+    when TARGET != "wasm":
+        if __repl_jmp == null or __tid() != 0: return
+        j = __repl_jmp
+        __repl_jmp = null
+        __longjmp(j, 1)
+
+# what the prompt shows for an expression's value
+__repl_show = (x): print(x)
+__repl_show = (x: str): print("\"{x}\"")

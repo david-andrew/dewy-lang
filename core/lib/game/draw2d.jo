@@ -1,0 +1,1365 @@
+# 2D drawing: batched shapes, textured sprites, SDF text, transforms, blend modes and
+# render targets. Coordinates are in the screen's units (1280 x 720 unless the program says
+# otherwise, whatever the window's real size), with (0, 0) at the top-left and y down; on a
+# render target, its pixels.
+
+struct Texture:
+    id: int
+    width: int
+    height: int
+
+struct RenderTarget:
+    texture: Texture
+    fbo: int
+    depth: int
+
+enum Blend: alpha, add, multiply, premultiplied
+
+const __VFLOATS = 9          # x, y, u, v, r, g, b, a, mode (0 color/texture, 1 sdf text)
+const __BATCH_MAX = 16384
+
+__g_init = false
+__b_buf: *f32 = null
+__b_count = 0
+__b_tex = 0
+__b_vbo = 0
+__b_vao = 0
+__b_prog = 0
+__b_loc_proj = 0
+__b_loc_tex = 0
+__white = Texture(0, 1, 1)
+__default_font = Font(Texture(0, 1, 1), {}, fill(-1, 128), [], 16, 48.0, 34.0, 36.0, 6.0)
+__font = __default_font          # the one text() draws with (set_font)
+__proj = mat4()
+__xform = mat4()
+__xform_stack: mat4[]
+__target_w = 0          # pixels of the current target
+__target_h = 0
+__view_w = 0.0          # its size in 2D drawing units
+__view_h = 0.0
+__cur_target = -1
+__blend = Blend.alpha
+
+# (v_uv is centroid: with antialiasing, a pixel on a quad's edge is shaded where the quad
+# covers it, not at its center outside the quad: there the texture coordinate runs past the
+# quad's, into the next tile of a tileset, lines between tiles that flicker as they move)
+const __VS2D = r"""
+#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;
+layout(location=1) in vec2 a_uv;
+layout(location=2) in vec4 a_color;
+layout(location=3) in float a_mode;
+uniform mat4 u_proj;
+centroid out vec2 v_uv;
+out vec4 v_color;
+out float v_mode;
+void main() {
+    v_uv = a_uv;
+    v_color = a_color;
+    v_mode = a_mode;
+    gl_Position = u_proj * vec4(a_pos, 0.0, 1.0);
+}
+"""
+
+const __FS2D = r"""
+#version 300 es
+precision highp float;
+centroid in vec2 v_uv;
+in vec4 v_color;
+in float v_mode;
+uniform sampler2D u_tex;
+out vec4 frag;
+void main() {
+    vec4 t = texture(u_tex, v_uv);
+    if (v_mode > 2.5) {
+        float d = abs(v_uv.y);
+        float w = max(fwidth(d), 0.0001);
+        frag = vec4(v_color.rgb, v_color.a * clamp((1.0 - d) / w + 0.5, 0.0, 1.0));
+    } else if (v_mode > 1.5) {
+        float d = length(v_uv);
+        float w = max(fwidth(d), 0.0001);
+        frag = vec4(v_color.rgb, v_color.a * clamp((1.0 - d) / w + 0.5, 0.0, 1.0));
+    } else if (v_mode > 0.5) {
+        float d = t.r;
+        float w = max(fwidth(d), 0.02);
+        float a = smoothstep(0.5 - w, 0.5 + w, d);
+        frag = vec4(v_color.rgb, v_color.a * a);
+    } else {
+        frag = t * v_color;
+    }
+}
+"""
+
+# the same as Sloppy shader functions, for Vulkan (which takes SPIR-V)
+struct __Vert2D:
+    pos: vec2
+    uv: vec2
+    color: vec4
+    mode: f32
+
+struct __Params2D:
+    proj: mat4
+    tex: Texture
+
+struct __Out2D:
+    pos: vec4
+    uv: vec2
+    color: vec4
+    mode: f32
+
+__vs2d = (v: __Vert2D, u: __Params2D) -> __Out2D: __Out2D(u.proj * vec4(v.pos, 0, 1), v.uv, v.color, v.mode)
+
+# ---------------- effects: a shader of your own on 2D drawing ----------------
+# An effect is a fragment function run for each pixel of what is drawn while it is on (sprites,
+# shapes, text): it gets the pixel (where it is, its place in the texture, the color it is drawn
+# with) and the uniforms, Effect2D[P] holding your parameters P; base_color gives what drawing
+# would have made of the pixel without it.
+#
+#   struct Glow: strength: f32
+#   glow_fs = (p: Pixel2D, u: Effect2D[Glow]) -> vec4:
+#       c = base_color(p, u)
+#       vec4(c.rgb * u.params.strength, c.a)
+#   glow = make_shader(shader(effect_vs, glow_fs))      # once
+#   ...
+#   use_effect(glow, Glow(1.5))                         # in draw: what is drawn now glows
+#   sprite(ship, pos)
+#   no_effect()
+struct Pixel2D:
+    pos: vec4               # where on the screen, in pixels from the bottom left (z, w: 0 and 1)
+    uv: vec2                # where in the texture (0 to 1)
+    color: vec4             # the color it is drawn with
+    mode: f32               # (1 for text: its texture holds distances to the letters' edges)
+
+struct Effect2D[P]:
+    proj: mat4
+    texture: Texture        # what is being drawn (white for shapes)
+    params: P
+
+# the vertex function of every effect: shader(effect_vs, your_fragment_function)
+effect_vs[P] = (v: __Vert2D, u: Effect2D[P]) -> Pixel2D: Pixel2D(u.proj * vec4(v.pos, 0, 1), v.uv, v.color, v.mode)
+
+# the pixel's color as 2D drawing makes it without an effect
+base_color[P] = (p: Pixel2D, u: Effect2D[P]) -> vec4:
+    t = sample(u.texture, p.uv)
+    if p.mode > 2.5: return __band_color(p.uv, p.color)
+    if p.mode > 1.5: return __circle_color(p.uv, p.color)
+    if p.mode > 0.5:
+        w = max(fwidth(t.x), 0.02)
+        a = smoothstep(0.5 - w, 0.5 + w, t.x)
+        return vec4(p.color.xyz, p.color.w * a)
+    t * p.color
+
+__fx_on = false
+__fx_draw: () -> void = (): pass
+__fx_mesh = Mesh()
+__fx_has_mesh = false
+
+# 2D drawing from here on goes through effect sh (made with shader(effect_vs, ...)), with params,
+# until no_effect() or the end of the frame
+use_effect[P] = (sh: Shader, params: P):
+    flush()
+    __fx_on = true
+    __fx_draw = ():
+        vs: __Vert2D[]
+        vs.reserve(__b_count)
+        loop i in [0..__b_count):
+            q = __b_buf + i * __VFLOATS
+            vs.push(__Vert2D(vec2(q[0], q[1]), vec2(q[2], q[3]), vec4(q[4], q[5], q[6], q[7]), q[8]))
+        if not __fx_has_mesh:
+            __fx_mesh = mesh(vs)
+            __fx_has_mesh = true
+        else: update_mesh(__fx_mesh, vs)
+        __fx_mesh.count = vs.len()
+        # (draw flushes 2D drawing first: the batch is in the mesh now)
+        __b_count = 0
+        __fx_on = false
+        draw(sh, __fx_mesh, Effect2D[P](__proj, Texture(__b_tex, 1, 1), params))
+        __fx_on = true
+
+# back to drawing without an effect
+no_effect = ():
+    if not __fx_on: return
+    flush()
+    __fx_on = false
+
+# (a circle drawn as a square: its uv where the pixel is, in radii from the center; the edge
+# smoothed over a pixel)
+__circle_color = (uv: vec2, color: vec4) -> vec4:
+    d = length(uv)
+    w = max(fwidth(d), 0.0001)
+    vec4(color.xyz, color.w * clamp((1.0 - d) / w + 0.5, 0.0, 1.0))
+
+# (a band drawn as a quad, a line's or a ring's: uv.y across it, -1 to 1 at its edges)
+__band_color = (uv: vec2, color: vec4) -> vec4:
+    d = abs(uv.y)
+    w = max(fwidth(d), 0.0001)
+    vec4(color.xyz, color.w * clamp((1.0 - d) / w + 0.5, 0.0, 1.0))
+
+__fs2d = (i: __Out2D, u: __Params2D) -> vec4:
+    t = sample(u.tex, i.uv)
+    if i.mode > 2.5: return __band_color(i.uv, i.color)
+    if i.mode > 1.5: return __circle_color(i.uv, i.color)
+    if i.mode > 0.5:
+        w = max(fwidth(t.x), 0.02)
+        a = smoothstep(0.5 - w, 0.5 + w, t.x)
+        return vec4(i.color.xyz, i.color.w * a)
+    t * i.color
+
+__b_vk_prog = 0
+
+when TARGET != "wasm":
+    # the batch drawn through Vulkan: its vertices into this frame's upload memory
+    __vk_draw2d = ():
+        if __b_vk_prog == 0: __b_vk_prog = __vk_program(shader(__vs2d, __fs2d))
+        n = __b_count * __VFLOATS * 4
+        blk, off = __vk_upload(__b_buf as *u8, n)
+        p = __Params2D(__proj, Texture(__b_tex, 1, 1))
+        __vk_draw_batch(__b_vk_prog, __vk_addr(blk, off), __VFLOATS * 4, __b_count, (&p) as *u8, size_of(__Params2D))
+        __b_count = 0
+
+__gfx_init = ():
+    if __g_init: return
+    __g_init = true
+    __b_prog = gl_create_program(__VS2D, __FS2D)
+    __b_loc_proj = gl_uniform_location(__b_prog, "u_proj")
+    __b_loc_tex = gl_uniform_location(__b_prog, "u_tex")
+    __b_buf = __alloc(__BATCH_MAX * __VFLOATS * 4) as *f32
+    __b_vao = gl_create_vertex_array()
+    glBindVertexArray(u32(__b_vao))
+    __b_vbo = gl_create_buffer()
+    glBindBuffer(GL_ARRAY_BUFFER, u32(__b_vbo))
+    glBufferData(GL_ARRAY_BUFFER, __BATCH_MAX * __VFLOATS * 4, null, GL_DYNAMIC_DRAW)
+    stride = __VFLOATS * 4
+    glEnableVertexAttribArray(0)
+    glVertexAttribPointer(0, 2, GL_FLOAT, 0, i32(stride), 0)
+    glEnableVertexAttribArray(1)
+    glVertexAttribPointer(1, 2, GL_FLOAT, 0, i32(stride), 8)
+    glEnableVertexAttribArray(2)
+    glVertexAttribPointer(2, 4, GL_FLOAT, 0, i32(stride), 16)
+    glEnableVertexAttribArray(3)
+    glVertexAttribPointer(3, 1, GL_FLOAT, 0, i32(stride), 32)
+    glBindVertexArray(0)
+    white = image(1, 1, vec4(1, 1, 1, 1))
+    __white = texture(white)
+    # default font (signed distance field atlas)
+    __font_init()
+    same = __font.texture.id == __default_font.texture.id
+    __default_font.texture = texture(load_image(embed("assets/font.png")), true)
+    if same: __font = __default_font
+
+# the built-in font's sizes (text_width works before there is a window)
+__font_ready = false
+__font_init = ():
+    if __font_ready: return
+    __font_ready = true
+    meta = lines(str_from_bytes(embed("assets/font.txt")))
+    head = words(meta[0])
+    f = Font(Texture(0, 1, 1), {}, fill(-1, 128), [], to_int(head[1]) ?? 16, to_float(head[0]) ?? 48.0, to_float(head[5]) ?? 34.0, to_float(head[3]) ?? 36.0, to_float(head[4]) ?? 6.0)
+    loop i in 0.. and a in words(meta[1]):
+        f.adv.push(to_float(a) ?? 10.0)
+        if i < 95:
+            f.slots[32 + i] = i
+            f.ascii[32 + i] = i
+    # (the cells after ASCII's: é, ñ, €, curly quotes, ...; the third line has their code points)
+    if meta.len() > 2:
+        loop i in 95.. and c in words(meta[2]): f.slots[to_int(c) ?? 0] = i
+    same = __font.texture.id == __default_font.texture.id
+    __default_font = f
+    if same: __font = f
+
+__gfx_begin_frame = ():
+    __gfx_init()
+    __fx_on = false
+    __screen_layout()
+    __canvas_begin()
+    __cur_target = -1
+    __set_screen_target()
+    __bind_screen()
+    __xform = mat4()
+    __xform_set = false
+    __xform_stack.clear()
+    __apply_blend(.alpha)
+    glDisable(GL_DEPTH_TEST)
+    glDisable(GL_CULL_FACE)
+    __post_begin()
+    # (a frame starts black, as a web page's does: a draw with no clear() leaves no trail of the
+    # frames before; a picture kept from frame to frame is a render target. With post_effects,
+    # the picture that stands for the screen, on the web too)
+    black = __post_active
+    when TARGET != "wasm":
+        black = true
+    if black:
+        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+__gfx_end_frame = ():
+    __render3d()
+    flush()
+    __clip_off()
+    __clip_on = false
+    __post_end()
+    __canvas_end()
+
+# a render target: 2D units are its pixels
+__set_target_size = (w: int, h: int):
+    __target_w = w
+    __target_h = h
+    __view_w = f64(w)
+    __view_h = f64(h)
+    __proj = orthographic(0.0, f64(w), f64(h), 0.0, -1.0, 1.0)
+
+# the screen: 2D units are the size the program asked for in window(), mapped to the window as
+# screen.jo says (by default scaled uniformly to fit and centered, showing more around it)
+__set_screen_target = ():
+    __target_w = __screen_px_w()
+    __target_h = __screen_px_h()
+    u = __screen_units()
+    __view_w = __units_w
+    __view_h = __units_h
+    __proj = orthographic(f64(u.x), f64(u.z), f64(u.w), f64(u.y), -1.0, 1.0)
+
+# the pixels of what stands for the screen: the window, or the canvas this frame
+__screen_px_w = () -> int:
+    if __canvas_active: return __canvas_w
+    __win_w
+__screen_px_h = () -> int:
+    if __canvas_active: return __canvas_h
+    __win_h
+
+__bind_screen = ():
+    if __canvas_active: glBindFramebuffer(GL_FRAMEBUFFER, u32(__canvas_rt.fbo))
+    else: glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    glViewport(0, 0, i32(__screen_px_w()), i32(__screen_px_h()))
+
+# bind what is being drawn to (after something else was bound)
+__bind_current = ():
+    if __cur_target >= 0:
+        glBindFramebuffer(GL_FRAMEBUFFER, u32(__cur_target))
+        glViewport(0, 0, i32(__target_w), i32(__target_h))
+    else: __bind_screen()
+
+# ---------------- textures ----------------
+# upload an image to the GPU
+texture = (img: Image, smooth: bool = true) -> Texture:
+    __gfx_init_gl_only()
+    id = gl_create_texture()
+    glBindTexture(GL_TEXTURE_2D, u32(id))
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    gl_tex_image(img.width, img.height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, data(img.pixels), img.pixels.len())
+    f = GL_NEAREST
+    if smooth: f = GL_LINEAR
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, i32(f))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, i32(f))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, i32(GL_CLAMP_TO_EDGE))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, i32(GL_CLAMP_TO_EDGE))
+    loop __tex_nearest.len() <= id: __tex_nearest.push(false)
+    __tex_nearest[id] = not smooth
+    Texture(id, img.width, img.height)
+
+# (by texture id: made with smooth = false, sampled nearest; sprite_region insets less for those)
+__tex_nearest: bool[]
+
+__gfx_init_gl_only = ():
+    # (a texture or font made before the window: a game's opens it; a script, with no update or
+    # draw, draws pictures with no window: render_image)
+    if not __win_open:
+        if __is_game: window(__win_title, __win_w, __win_h)
+        else: __open_offscreen()
+
+set_repeat = (t: Texture, on: bool):
+    glBindTexture(GL_TEXTURE_2D, u32(t.id))
+    m = GL_CLAMP_TO_EDGE
+    if on: m = GL_REPEAT
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, i32(m))
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, i32(m))
+
+update_texture = (t: Texture, img: Image):
+    flush()
+    glBindTexture(GL_TEXTURE_2D, u32(t.id))
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    gl_tex_sub_image(0, 0, img.width, img.height, GL_RGBA, GL_UNSIGNED_BYTE, data(img.pixels), img.pixels.len())
+
+load_texture = (file: u8[], smooth: bool = true) -> Texture: texture(load_image(file), smooth)
+
+# give back a texture's memory (it may not be drawn after): for textures made while the game
+# runs, a save's thumbnail, a level's tiles
+free_texture = (t: Texture):
+    if t.id == 0 or t.id == __white.id: return
+    flush()
+    gl_delete_texture(t.id)
+
+# ---------------- render targets ----------------
+__targets: RenderTarget[]
+
+render_target = (w: int, h: int, smooth: bool = true) -> RenderTarget:
+    __gfx_init_gl_only()
+    tex = texture(image(w, h), smooth)
+    fbo = gl_create_framebuffer()
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(fbo))
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, u32(tex.id), 0)
+    rb = gl_create_renderbuffer()
+    glBindRenderbuffer(GL_RENDERBUFFER, u32(rb))
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, i32(w), i32(h))
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, u32(rb))
+    when TARGET != "wasm":
+        if __soft: __sw_scale_target(fbo, w, h)
+    if __g_init: __bind_current()
+    else: glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    RenderTarget(tex, fbo, rb)
+
+# a picture of w x h pixels drawn by draw (with what `draw = ():` uses, in pixels from its top
+# left corner), at any time: a chart a script saves, a texture made at the start. Before any
+# window is open it needs none: the software renderer draws it.
+#   img = render_image(600, 400, ():
+#       clear(WHITE)
+#       line(vec2(40, 360), vec2(560, 40), 2, BLUE))
+#   save_png(img, "chart.png")
+render_image = (w: int, h: int, draw: () -> void) -> Image:
+    when TARGET != "wasm":
+        if not __win_open: __open_offscreen()
+    __gfx_init()
+    flush()
+    prev = __cur_target
+    pw = __target_w
+    ph = __target_h
+    pvw = __view_w
+    pvh = __view_h
+    pproj = __proj
+    pxf = __xform
+    rt = render_target(w, h)
+    when TARGET != "wasm":
+        if __soft: __sw_exact_target(rt.fbo, w, h)
+    draw_to(rt)
+    __xform = mat4()
+    # (as a frame begins: blending, no depth test)
+    __apply_blend(.alpha)
+    glDisable(GL_DEPTH_TEST)
+    glDisable(GL_CULL_FACE)
+    clear(vec4(0, 0, 0, 0))
+    draw()
+    img = screenshot()
+    flush()
+    __apply_blend(__blend)
+    __xform = pxf
+    if prev < 0: draw_to_screen()
+    else:
+        glBindFramebuffer(GL_FRAMEBUFFER, u32(prev))
+        glViewport(0, 0, i32(pw), i32(ph))
+        __cur_target = prev
+        __target_w = pw
+        __target_h = ph
+    __view_w = pvw
+    __view_h = pvh
+    __proj = pproj
+    free_render_target(rt)
+    img
+
+# give back a render target's memory (it may not be used after)
+free_render_target = (rt: RenderTarget):
+    if rt.texture.id != 0: gl_delete_texture(rt.texture.id)
+    if rt.fbo != 0: gl_delete_framebuffer(rt.fbo)
+    if rt.depth != 0: gl_delete_renderbuffer(rt.depth)
+
+# draw into a render target until draw_to_screen() is called
+draw_to = (rt: RenderTarget):
+    flush()
+    __clip_off()
+    __clip_on = false
+    glBindFramebuffer(GL_FRAMEBUFFER, u32(rt.fbo))
+    glViewport(0, 0, i32(rt.texture.width), i32(rt.texture.height))
+    __set_target_size(rt.texture.width, rt.texture.height)
+    __cur_target = rt.fbo
+
+draw_to_screen = ():
+    # (with post_effects on, a picture stands for the screen until the frame ends: draw_to
+    # then back draws into it, under the effects)
+    if __post_active:
+        draw_to(__scene_rt)
+        __set_screen_target()
+        return
+    flush()
+    __clip_off()
+    __clip_on = false
+    __cur_target = -1
+    __set_screen_target()
+    __bind_screen()
+
+# ---------------- state ----------------
+clear = (c: vec4 = vec4(0, 0, 0, 1)):
+    flush()
+    __clip_off()
+    glClearColor(c.x, c.y, c.z, c.w)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    if __clip_on: __apply_clip()
+
+__apply_blend = (b: Blend):
+    glEnable(GL_BLEND)
+    match b:
+        alpha: glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+        add: glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        multiply: glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA)
+        premultiplied: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+    __blend = b
+
+blend = (b: Blend):
+    if b == __blend: return
+    flush()
+    __apply_blend(b)
+
+# 2D drawing after this shows only inside the rectangle (in screen units, or a render target's
+# pixels: translate and camera2d do not move it), until no_clip(), the next frame or another
+# target (draw_to); for a scrolling list, a panel, a minimap
+clip = (pos: vec2, size: vec2):
+    flush()
+    __clip_on = true
+    __clip = vec4(pos.x, pos.y, size.x, size.y)
+    __apply_clip()
+
+no_clip = ():
+    if not __clip_on: return
+    flush()
+    __clip_on = false
+    glDisable(GL_SCISSOR_TEST)
+
+__clip_on = false
+__clip = vec4(0, 0, 0, 0)
+
+# the clip rectangle in the pixels of what is drawn to (GL's: from the bottom left)
+__apply_clip = ():
+    a = __proj * vec4(__clip.x, __clip.y, 0, 1)
+    b = __proj * vec4(__clip.x + __clip.z, __clip.y + __clip.w, 0, 1)
+    w = f64(__target_w)
+    h = f64(__target_h)
+    x0 = int(round((f64(min(a.x, b.x)) + 1.0) / 2.0 * w))
+    x1 = int(round((f64(max(a.x, b.x)) + 1.0) / 2.0 * w))
+    y0 = int(round((f64(min(a.y, b.y)) + 1.0) / 2.0 * h))
+    y1 = int(round((f64(max(a.y, b.y)) + 1.0) / 2.0 * h))
+    glEnable(GL_SCISSOR_TEST)
+    glScissor(i32(x0), i32(y0), i32(max(x1 - x0, 0)), i32(max(y1 - y0, 0)))
+
+# (the clip is for the 2D drawing it was set for: not 3D, a new target or the next frame)
+__clip_off = ():
+    if __clip_on: glDisable(GL_SCISSOR_TEST)
+
+push_transform = (): __xform_stack.push(__xform)
+pop_transform = ():
+    if __xform_stack.len() > 0: __xform = __xform_stack.pop()
+    __xform_set = true
+translate = (x: f64, y: f64):
+    __xform = __xform * translation(vec3(f32(x), f32(y), 0))
+    __xform_set = true
+rotate = (angle: f64):
+    __xform = __xform * rotation_z(angle)
+    __xform_set = true
+scale = (sx: f64, sy: f64):
+    __xform = __xform * scaling(vec3(f32(sx), f32(sy), 1))
+    __xform_set = true
+reset_transform = ():
+    __xform = mat4()
+    __xform_set = true
+
+# (whether this frame set a transform yet: before one is, as in update, screen_to_world and
+# world_to_screen use the last camera2d's, the one draw set the frame before)
+__xform_set = false
+__camera_xform = mat4()
+__world_xform = () -> mat4:
+    if __xform_set: return __xform
+    __camera_xform
+
+# 2D camera: `target` appears at the screen center, scaled by zoom
+camera2d = (target: vec2, zoom: f64 = 1.0, angle: f64 = 0.0):
+    __xform = mat4()
+    translate(__view_w / 2.0, __view_h / 2.0)
+    rotate(angle)
+    scale(zoom, zoom)
+    translate(-f64(target.x), -f64(target.y))
+    __camera_xform = __xform
+
+# a 2D camera showing the area `world` (in the world's units) as large as it fits inside `on`
+# (a part of the screen: visible_rect() for all of it), centered there, its shape kept: a board
+# above the buttons on a phone held upright,
+#   v = visible_rect()
+#   camera2d_fit(Rect(0, 0, COLS * 64, ROWS * 64), Rect(v.x, v.y, v.w, v.h - 200))
+camera2d_fit = (world: Rect, on: Rect):
+    zoom = min(f64(on.w) / max(f64(world.w), 1e-6), f64(on.h) / max(f64(world.h), 1e-6))
+    __xform = mat4()
+    translate(f64(on.x) + f64(on.w) / 2.0, f64(on.y) + f64(on.h) / 2.0)
+    scale(zoom, zoom)
+    translate(-(f64(world.x) + f64(world.w) / 2.0), -(f64(world.y) + f64(world.h) / 2.0))
+    __camera_xform = __xform
+
+# convert a screen position to world coordinates under the current transform; in update (before
+# draw sets one), under the last camera2d: screen_to_world(mouse_pos()) is where the mouse points
+screen_to_world = (p: vec2) -> vec2:
+    w = inverse(__world_xform()) * vec4(p, 0, 1)
+    vec2(w.x, w.y)
+
+# where a world position appears on the screen under the current transform (the other way; in
+# update, the last camera2d's)
+world_to_screen = (p: vec2) -> vec2:
+    s = __world_xform() * vec4(p, 0, 1)
+    vec2(s.x, s.y)
+
+# ---------------- batching ----------------
+flush = ():
+    if __b_count == 0: return
+    if __fx_on:
+        __fx_draw()
+        __b_count = 0
+        return
+    when TARGET != "wasm":
+        if __soft:
+            __sw_draw2d(__b_buf, __b_count, __proj, __b_tex)
+            __b_count = 0
+            return
+        if __vk:
+            __vk_draw2d()
+            return
+    glUseProgram(u32(__b_prog))
+    glUniformMatrix4fv(i32(__b_loc_proj), 1, 0, (&__proj) as *u8)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, u32(__b_tex))
+    glUniform1i(i32(__b_loc_tex), 0)
+    glBindVertexArray(u32(__b_vao))
+    glBindBuffer(GL_ARRAY_BUFFER, u32(__b_vbo))
+    glBufferSubData(GL_ARRAY_BUFFER, 0, __b_count * __VFLOATS * 4, __b_buf as *u8)
+    glDrawArrays(GL_TRIANGLES, 0, i32(__b_count))
+    glBindVertexArray(0)
+    __b_count = 0
+
+# (circle(...) on a line of the top level, as in Scratch: there is no screen to draw on yet)
+__outside_draw = ():
+    panic("drawing works only inside `draw = ():`, which the game calls by itself each frame (after `update`) once the window is open")
+
+__use_tex = (id: int, nverts: int):
+    if __b_buf == null: __outside_draw()
+    if __draws.len() > 0:
+        __render3d()
+        # (2D after the 3D: a HUD, which the post effects leave as drawn)
+        if __post_active and not __post_hud: __post_end()
+    if id != __b_tex or __b_count + nverts > __BATCH_MAX:
+        flush()
+        __b_tex = id
+
+__v = (p: vec2, uv: vec2, c: vec4, mode: f32):
+    q = __xform * vec4(p, 0, 1)
+    o = __b_buf + __b_count * __VFLOATS
+    o[0] = q.x
+    o[1] = q.y
+    o[2] = uv.x
+    o[3] = uv.y
+    o[4] = c.x
+    o[5] = c.y
+    o[6] = c.z
+    o[7] = c.w
+    o[8] = mode
+    __b_count += 1
+
+__quad = (a: vec2, b: vec2, c: vec2, d: vec2, ua: vec2, ub: vec2, uc: vec2, ud: vec2, col: vec4, mode: f32):
+    __v(a, ua, col, mode)
+    __v(b, ub, col, mode)
+    __v(c, uc, col, mode)
+    __v(a, ua, col, mode)
+    __v(c, uc, col, mode)
+    __v(d, ud, col, mode)
+
+# ---------------- shapes ----------------
+rect = (x: f64, y: f64, w: f64, h: f64, c: vec4):
+    __use_tex(__white.id, 6)
+    z = vec2(0, 0)
+    __quad(vec2(f32(x), f32(y)), vec2(f32(x + w), f32(y)), vec2(f32(x + w), f32(y + h)), vec2(f32(x), f32(y + h)), z, z, z, z, c, 0)
+
+rect = (pos: vec2, size: vec2, c: vec4): rect(f64(pos.x), f64(pos.y), f64(size.x), f64(size.y), c)
+rect = (r: Rect, c: vec4): rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
+
+# rectangle with a vertical color gradient
+rect_gradient = (x: f64, y: f64, w: f64, h: f64, top: vec4, bottom: vec4):
+    __use_tex(__white.id, 6)
+    z = vec2(0, 0)
+    a = vec2(f32(x), f32(y))
+    b = vec2(f32(x + w), f32(y))
+    cc = vec2(f32(x + w), f32(y + h))
+    d = vec2(f32(x), f32(y + h))
+    __v(a, z, top, 0)
+    __v(b, z, top, 0)
+    __v(cc, z, bottom, 0)
+    __v(a, z, top, 0)
+    __v(cc, z, bottom, 0)
+    __v(d, z, bottom, 0)
+
+rect_outline = (x: f64, y: f64, w: f64, h: f64, thickness: f64, c: vec4):
+    rect(x, y, w, thickness, c)
+    rect(x, y + h - thickness, w, thickness, c)
+    rect(x, y + thickness, thickness, h - 2.0 * thickness, c)
+    rect(x + w - thickness, y + thickness, thickness, h - 2.0 * thickness, c)
+rect_outline = (r: Rect, thickness: f64, c: vec4): rect_outline(f64(r.x), f64(r.y), f64(r.w), f64(r.h), thickness, c)
+
+triangle = (a: vec2, b: vec2, c: vec2, col: vec4):
+    __use_tex(__white.id, 3)
+    z = vec2(0, 0)
+    __v(a, z, col, 0)
+    __v(b, z, col, 0)
+    __v(c, z, col, 0)
+
+# triangle with a color per corner (colors blend across it)
+triangle_gradient = (a: vec2, b: vec2, c: vec2, ca: vec4, cb: vec4, cc: vec4):
+    __use_tex(__white.id, 3)
+    z = vec2(0, 0)
+    __v(a, z, ca, 0)
+    __v(b, z, cb, 0)
+    __v(c, z, cc, 0)
+
+# quad (a, b, c, d in order around it) with a color per corner
+quad_gradient = (a: vec2, b: vec2, c: vec2, d: vec2, ca: vec4, cb: vec4, cc: vec4, cd: vec4):
+    __use_tex(__white.id, 6)
+    z = vec2(0, 0)
+    __v(a, z, ca, 0)
+    __v(b, z, cb, 0)
+    __v(c, z, cc, 0)
+    __v(a, z, ca, 0)
+    __v(c, z, cc, 0)
+    __v(d, z, cd, 0)
+
+circle = (center: vec2, radius: f64, c: vec4, segments: int = 0):
+    # (one square, its pixels in the circle or out by their distance from the center: an edge
+    # smooth over a pixel on every renderer, and 6 vertices, not 3 for each of many segments;
+    # segments given: a polygon of that many sides)
+    if segments <= 0 and radius > 0.0:
+        __use_tex(__white.id, 6)
+        e = radius + max(1.5, radius * 0.06)
+        k = f32(e / radius)
+        s = f32(e)
+        __quad(center + vec2(-s, -s), center + vec2(s, -s), center + vec2(s, s), center + vec2(-s, s), vec2(-k, -k), vec2(k, -k), vec2(k, k), vec2(-k, k), c, 2)
+        return
+    n = segments
+    if n <= 0: n = clamp(int(radius * 0.8) + 12, 12, 96)
+    __use_tex(__white.id, n * 3)
+    z = vec2(0, 0)
+    u = __unit_circle(n)
+    r = f32(radius)
+    prev = center + u[0] * r
+    loop i in [1..n + 1):
+        p = center + u[i] * r
+        __v(center, z, c, 0)
+        __v(prev, z, c, 0)
+        __v(p, z, c, 0)
+        prev = p
+
+# (the points of a circle of radius 1 cut in n, the first again at the end: made once for each n,
+# as a game draws many circles each frame)
+__unit_circles: {int: vec2[]}
+__unit_circle = (n: int) -> vec2[]:
+    if let u = __unit_circles.get(n): return u
+    u: vec2[]
+    loop i in [0..n + 1):
+        a = TAU * f64(i % n) / f64(n)
+        u.push(vec2(f32(cos(a)), f32(sin(a))))
+    __unit_circles[n] = u
+    u
+
+# an ellipse: radii.x across, radii.y up and down (a shadow under a card or a character)
+ellipse = (center: vec2, radii: vec2, c: vec4, segments: int = 0):
+    n = segments
+    if n <= 0: n = clamp(int(f64(max(radii.x, radii.y)) * 0.8) + 12, 12, 96)
+    __use_tex(__white.id, n * 3)
+    z = vec2(0, 0)
+    u = __unit_circle(n)
+    prev = center + vec2(radii.x, 0)
+    loop i in [1..n + 1):
+        p = center + vec2(u[i].x * radii.x, u[i].y * radii.y)
+        __v(center, z, c, 0)
+        __v(prev, z, c, 0)
+        __v(p, z, c, 0)
+        prev = p
+
+# a rectangle with rounded corners, each a quarter circle of this radius (a card, a button)
+rect_rounded = (x: f64, y: f64, w: f64, h: f64, radius: f64, c: vec4):
+    polygon(__rounded_points(x, y, w, h, radius), c)
+
+# its outline, thickness wide inside it
+rect_rounded_outline = (x: f64, y: f64, w: f64, h: f64, radius: f64, thickness: f64, c: vec4):
+    t = thickness / 2.0
+    polyline(__rounded_points(x + t, y + t, w - thickness, h - thickness, max(radius - t, 0.0)), thickness, c, closed = true)
+
+__rounded_points = (x: f64, y: f64, w: f64, h: f64, radius: f64) -> vec2[]:
+    r = clamp(radius, 0.0, min(w, h) / 2.0)
+    n = clamp(int(r * 0.4) + 3, 3, 16)
+    pts: vec2[]
+    centers = [vec2(f32(x + w - r), f32(y + r)), vec2(f32(x + w - r), f32(y + h - r)), vec2(f32(x + r), f32(y + h - r)), vec2(f32(x + r), f32(y + r))]
+    loop k in [0..4):
+        loop i in [0..n]:
+            a = (f64(k) - 1.0 + f64(i) / f64(n)) * PI / 2.0
+            pts.push(centers[k] + vec2(f32(cos(a) * r), f32(sin(a) * r)))
+    pts
+
+# circle that fades from `inner` color at the center to `outer` at the edge (glows, soft lights)
+circle_gradient = (center: vec2, radius: f64, inner: vec4, outer: vec4, segments: int = 48):
+    __use_tex(__white.id, segments * 3)
+    z = vec2(0, 0)
+    prev = center + vec2(f32(radius), 0)
+    loop i in [1..segments + 1):
+        a = TAU * f64(i) / f64(segments)
+        p = center + vec2(f32(cos(a) * radius), f32(sin(a) * radius))
+        __v(center, z, inner, 0)
+        __v(prev, z, outer, 0)
+        __v(p, z, outer, 0)
+        prev = p
+
+ring = (center: vec2, radius: f64, thickness: f64, c: vec4, segments: int = 48):
+    __use_tex(__white.id, segments * 6)
+    z = vec2(0, 0)
+    # (a band around: a little wider than it is, its edges smooth over a pixel)
+    h = thickness / 2.0
+    r0 = radius - h - 1.0
+    r1 = radius + h + 1.0
+    k = f32((h + 1.0) / max(h, 0.0001))
+    u = __unit_circle(max(segments, 3))
+    loop i in [0..segments):
+        d0 = u[i]
+        d1 = u[i + 1]
+        __quad(center + d0 * f32(r0), center + d0 * f32(r1), center + d1 * f32(r1), center + d1 * f32(r0), vec2(0, -k), vec2(0, k), vec2(0, k), vec2(0, -k), c, 3)
+
+# part of a ring: from angle `start` to `stop` (radians, clockwise on screen)
+arc = (center: vec2, radius: f64, thickness: f64, start: f64, stop: f64, c: vec4, segments: int = 0):
+    n = segments
+    if n <= 0: n = clamp(int(abs(stop - start) * radius / 6.0) + 2, 2, 128)
+    __use_tex(__white.id, n * 6)
+    h = thickness / 2.0
+    r0 = radius - h - 1.0
+    r1 = radius + h + 1.0
+    k = f32((h + 1.0) / max(h, 0.0001))
+    loop i in [0..n):
+        a0 = start + (stop - start) * f64(i) / f64(n)
+        a1 = start + (stop - start) * f64(i + 1) / f64(n)
+        d0 = vec2(f32(cos(a0)), f32(sin(a0)))
+        d1 = vec2(f32(cos(a1)), f32(sin(a1)))
+        __quad(center + d0 * f32(r0), center + d0 * f32(r1), center + d1 * f32(r1), center + d1 * f32(r0), vec2(0, -k), vec2(0, k), vec2(0, k), vec2(0, -k), c, 3)
+
+line = (a: vec2, b: vec2, thickness: f64, c: vec4):
+    d = b - a
+    l = length(d)
+    if l == 0.0: return
+    # (a little wider than it is, its sides smooth over a pixel: uv.y across it, 1 at its edges)
+    h = thickness / 2.0
+    e = h + 1.0
+    n = perp(d / l) * f32(e)
+    k = f32(e / max(h, 0.0001))
+    __use_tex(__white.id, 6)
+    __quad(a + n, b + n, b - n, a - n, vec2(0, k), vec2(0, k), vec2(0, -k), vec2(0, -k), c, 3)
+
+polyline = (points: vec2[], thickness: f64, c: vec4, closed: bool = false):
+    loop i in [0..points.len() - 1): line(points[i], points[i + 1], thickness, c)
+    if closed and points.len() > 2: line(points[points.len() - 1], points[0], thickness, c)
+
+# a filled polygon, its points in order around it (either way round); a concave one (a star, an
+# L) is cut into triangles
+polygon = (points: vec2[], c: vec4):
+    n = points.len()
+    if n < 3: return
+    z = vec2(0, 0)
+    if __convex(points):
+        __use_tex(__white.id, (n - 2) * 3)
+        loop i in [1..n - 1):
+            __v(points[0], z, c, 0)
+            __v(points[i], z, c, 0)
+            __v(points[i + 1], z, c, 0)
+        return
+    tris = __triangulate(points)
+    __use_tex(__white.id, tris.len())
+    loop k in tris: __v(points[k], z, c, 0)
+
+# every turn the same way round
+__convex = (ps: vec2[]) -> bool:
+    n = ps.len()
+    pos = false
+    neg = false
+    loop i in [0..n):
+        a = ps[i]
+        b = ps[(i + 1) % n]
+        d = ps[(i + 2) % n]
+        cr = (b.x - a.x) * (d.y - b.y) - (b.y - a.y) * (d.x - b.x)
+        if cr > 0.0: pos = true
+        if cr < 0.0: neg = true
+    not (pos and neg)
+
+# a simple polygon's triangles, by cutting off ears: corner indices, three by three
+__triangulate = (ps: vec2[]) -> int[]:
+    n = ps.len()
+    idx = [loop i in [0..n): i]
+    # (counterclockwise in the math sense: the area's sign)
+    area = 0.0
+    loop i in [0..n):
+        a = ps[i]
+        b = ps[(i + 1) % n]
+        area += f64(a.x * b.y - b.x * a.y)
+    sgn: f32 = 1
+    if area < 0.0: sgn = -1
+    out: int[]
+    guard = 0
+    loop idx.len() > 3 and guard < n * n:
+        guard += 1
+        m = idx.len()
+        cut = false
+        loop j in [0..m):
+            i0 = idx[(j + m - 1) % m]
+            i1 = idx[j]
+            i2 = idx[(j + 1) % m]
+            a = ps[i0]
+            b = ps[i1]
+            d = ps[i2]
+            if ((b.x - a.x) * (d.y - b.y) - (b.y - a.y) * (d.x - b.x)) * sgn <= 0.0: continue
+            inside = false
+            loop q in idx:
+                if q == i0 or q == i1 or q == i2: continue
+                p = ps[q]
+                c1 = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) * sgn
+                c2 = ((d.x - b.x) * (p.y - b.y) - (d.y - b.y) * (p.x - b.x)) * sgn
+                c3 = ((a.x - d.x) * (p.y - d.y) - (a.y - d.y) * (p.x - d.x)) * sgn
+                if c1 >= 0.0 and c2 >= 0.0 and c3 >= 0.0:
+                    inside = true
+                    break
+            if inside: continue
+            out.push(i0)
+            out.push(i1)
+            out.push(i2)
+            idx.remove(j)
+            cut = true
+            break
+        if not cut: break
+    if idx.len() == 3:
+        out.push(idx[0])
+        out.push(idx[1])
+        out.push(idx[2])
+    out
+
+# ---------------- sprites ----------------
+# draw a texture at `pos` (top-left), optionally scaled, rotated around its center and tinted
+sprite = (t: Texture, pos: vec2, size: vec2 = vec2(0, 0), tint: vec4 = vec4(1, 1, 1, 1), angle: f64 = 0.0):
+    sz = size
+    if sz.x == 0.0 and sz.y == 0.0: sz = vec2(f32(t.width), f32(t.height))
+    sprite_region(t, vec4(0, 0, f32(t.width), f32(t.height)), pos + sz * 0.5, sz, tint, angle)
+
+# draw part of a texture (src = x, y, w, h in pixels) centered at `center`
+sprite_region = (t: Texture, src: vec4, center: vec2, size: vec2, tint: vec4 = vec4(1, 1, 1, 1), angle: f64 = 0.0):
+    __use_tex(t.id, 6)
+    tw = f32(t.width)
+    th = f32(t.height)
+    # (a part of a texture, as a tile of a tileset, is sampled a little inside its edges: at a
+    # fractional position or scale, the pixels along a tile's edge otherwise take the texels of
+    # the next tile over, lines that flicker as the camera moves. Smooth textures blend in the
+    # next texel half a texel out, so half a texel in; nearest ones only need a hair)
+    ins: f32 = 0.5
+    if t.id >= 0 and t.id < __tex_nearest.len() and __tex_nearest[t.id]: ins = 0.01
+    ix: f32 = 0
+    iy: f32 = 0
+    if abs(src.z) < tw and abs(src.z) > 2.0 * ins: ix = ins * f32(sign(f64(src.z)))
+    if abs(src.w) < th and abs(src.w) > 2.0 * ins: iy = ins * f32(sign(f64(src.w)))
+    u0 = (src.x + ix) / tw
+    v0 = (src.y + iy) / th
+    u1 = (src.x + src.z - ix) / tw
+    v1 = (src.y + src.w - iy) / th
+    h = size * 0.5
+    a = vec2(-h.x, -h.y)
+    b = vec2(h.x, -h.y)
+    c = vec2(h.x, h.y)
+    d = vec2(-h.x, h.y)
+    if angle != 0.0:
+        a = rotate(a, angle)
+        b = rotate(b, angle)
+        c = rotate(c, angle)
+        d = rotate(d, angle)
+    __quad(center + a, center + b, center + c, center + d, vec2(u0, v0), vec2(u1, v0), vec2(u1, v1), vec2(u0, v1), tint, 0)
+
+# draw a render target's texture (flipped: render targets are stored bottom-up)
+draw_target = (rt: RenderTarget, pos: vec2 = vec2(0, 0), size: vec2 = vec2(0, 0), tint: vec4 = vec4(1, 1, 1, 1)):
+    t = rt.texture
+    sz = size
+    if sz.x == 0.0: sz = vec2(f32(t.width), f32(t.height))
+    __use_tex(t.id, 6)
+    __quad(pos, pos + vec2(sz.x, 0), pos + sz, pos + vec2(0, sz.y), vec2(0, 1), vec2(1, 1), vec2(1, 0), vec2(0, 0), tint, 0)
+
+# ---------------- text ----------------
+# the font text() and text_width() use (load_font makes one); set_font() goes back to the built-in
+set_font = (f: Font):
+    __font = f
+    __font_loaded = true
+set_font = ():
+    __gfx_init()
+    __font = __default_font
+    __font_loaded = false
+
+__font_loaded = false           # (set_font(f): the built-in font fills in what f lacks)
+
+# (the code point at s[i], and where the next one starts: UTF-8)
+__next_char = (s: str, i: int) -> (int, int):
+    c = int(s[i])
+    if c < 0x80: return (c, i + 1)
+    n = 0
+    if c >= 0xF0:
+        c = c & 7
+        n = 3
+    else if c >= 0xE0:
+        c = c & 15
+        n = 2
+    else if c >= 0xC0:
+        c = c & 31
+        n = 1
+    else: return (0xFFFD, i + 1)
+    j = i + 1
+    loop n > 0 and j < len(s):
+        c = (c << 6) | (int(s[j]) & 63)
+        j += 1
+        n -= 1
+    (c, j)
+
+# a character's cell in the font (-1: it has none)
+__glyph = (f: Font, c: int) -> int:
+    if c < 128: return f.ascii[c]
+    f.slots.get(c, -1)
+
+# how wide text is drawn (the widest of its lines)
+text_width = (s: str, size: f64 = 20.0, mono: bool = false) -> f64:
+    __font_init()
+    k = size / __font.px
+    if mono:
+        # (each character a cell of the same width)
+        widest_line = 0
+        n = 0
+        loop c in s:
+            if c == '\n':
+                widest_line = max(widest_line, n)
+                n = 0
+            else if c & 0xC0 != 0x80: n += 1
+        return f64(max(widest_line, n)) * __mono_adv(__font) * k
+    w = 0.0
+    widest = 0.0
+    i = 0
+    loop i < len(s):
+        r = __next_char(s, i)
+        i = r.1
+        if r.0 == '\n':
+            widest = max(widest, w)
+            w = 0.0
+            continue
+        g = __glyph(__font, r.0)
+        if g < 0 and __font_loaded and r.0 >= 32:
+            # (drawn with the built-in font)
+            g2 = __glyph(__default_font, r.0)
+            if g2 < 0: g2 = __glyph(__default_font, '?')
+            if g2 >= 0 and __glyph(__font, r.0) < 0 and (__glyph(__default_font, r.0) >= 0 or __glyph(__font, '?') < 0):
+                w += __default_font.adv[g2] * size / __default_font.px
+                continue
+        if g < 0 and r.0 >= 32: g = __glyph(__font, '?')
+        if g >= 0: w += __font.adv[g] * k
+    max(widest, w)
+
+# how tall text is drawn: its lines, each size * 1.25 below the one before
+text_height = (s: str, size: f64 = 20.0) -> f64: size + f64(s.count("\n")) * size * 1.25
+
+enum Align:
+    left
+    center
+    right
+
+# s broken into lines no wider than width, at spaces, and between the characters of Chinese,
+# Japanese and Korean (a word wider than that has a line of its own; a line break in s starts a
+# new line; 。、」 and the like stay at the end of a line, not the start of the next)
+wrap_text = (s: str, width: f64, size: f64 = 20.0) -> str[]:
+    out: str[]
+    space = text_width(" ", size)
+    loop para in s.split("\n"):
+        line = ""
+        w = 0.0
+        loop u in __wrap_units(para):
+            uw = text_width(u.0, size)
+            gap = 0.0
+            if len(line) > 0 and u.1: gap = space
+            if len(line) > 0 and w + gap + uw > width and not __cjk_closing(u.0):
+                out.push(line)
+                line = ""
+                w = 0.0
+                gap = 0.0
+            if len(line) > 0 and u.1: line += " "
+            line += u.0
+            w += gap + uw
+        out.push(line)
+    out
+
+# (the pieces a line may break between: words, and each CJK character; with whether a space was
+# before it)
+__wrap_units = (s: str) -> (str, bool)[]:
+    out: (str, bool)[]
+    word = ""
+    spaced = false
+    i = 0
+    loop i < len(s):
+        r = __next_char(s, i)
+        ch = s[i..r.1)
+        i = r.1
+        if r.0 == ' ':
+            if len(word) > 0:
+                out.push((word, spaced))
+                word = ""
+            spaced = true
+            continue
+        if __cjk(r.0):
+            if len(word) > 0:
+                out.push((word, spaced))
+                spaced = false
+                word = ""
+            out.push((ch, spaced))
+            spaced = false
+            continue
+        if len(word) == 0 and out.len() > 0 and not spaced and __cjk_char_last(out):
+            # (a word right after a CJK character: no space between them)
+            spaced = false
+        word += ch
+    if len(word) > 0: out.push((word, spaced))
+    out
+
+__cjk_char_last = (us: (str, bool)[]) -> bool:
+    l = us[us.len() - 1].0
+    len(l) > 0 and __cjk(__next_char(l, 0).0)
+
+__cjk = (c: int) -> bool: (c >= 0x2E80 and c <= 0x9FFF) or (c >= 0xAC00 and c <= 0xD7AF) or (c >= 0xF900 and c <= 0xFAFF) or (c >= 0xFF00 and c <= 0xFFEF)
+
+# (punctuation that closes: kept on the line before)
+__cjk_closing = (u: str) -> bool:
+    if len(u) == 0: return false
+    c = __next_char(u, 0).0
+    c == 0x3001 or c == 0x3002 or c == 0xFF0C or c == 0xFF0E or c == 0x300D or c == 0x300F or c == 0xFF09 or c == 0x3009 or c == 0x300B or c == 0x3011 or c == 0xFF01 or c == 0xFF1F or c == 0x30FC or c == 0x2026 or c == 0x30FB or c == 0x3063 or c == 0x30C3 or c == 0x3083 or c == 0x3085 or c == 0x3087
+
+# text in a column `width` wide from pos (its top-left corner), broken into lines at spaces,
+# each line to the left, centered or to the right; the height it took (LÖVE's printf). chars:
+# only the first that many characters, laid out where the whole text puts them (dialogue that
+# types itself out does not jump to the next line midway through a word)
+text_wrapped = (s: str, pos: vec2, width: f64, size: f64 = 20.0, color: vec4 = vec4(1, 1, 1, 1), align: Align = .left, shadow: vec4 = vec4(0, 0, 0, 0), chars: int = -1) -> f64:
+    lines = wrap_text(s, width, size)
+    y = f64(pos.y)
+    left = chars
+    loop line in lines:
+        x = f64(pos.x)
+        if align == .center: x += (width - text_width(line, size)) / 2.0
+        else if align == .right: x += width - text_width(line, size)
+        n = char_count(line)
+        if left < 0: text(line, vec2(x, y), size, color, shadow)
+        else if left > 0: text(line, vec2(x, y), size, color, shadow, chars = min(left, n))
+        if left > 0: left = max(left - n - 1, 0)      # (and the space or break between lines)
+        y += size * 1.25
+    f64(lines.len()) * size * 1.25
+
+# draw text with its top-left corner at `pos` (characters the font does not have show as ?);
+# shadow: a color drawn under it, a little down and right, to read over a busy scene
+# (`shadow = rgba(0, 0, 0, 0.7)`). mono: each character in a cell of the same width, so
+# columns made with "{name:<12} {score:>5}" line up (a scoreboard, a table, a roguelike's map).
+# chars: only the first that many characters (dialogue appearing letter by letter: where the
+# rest will be does not move); -1: all
+text = (s: str, pos: vec2, size: f64 = 20.0, color: vec4 = vec4(1, 1, 1, 1), shadow: vec4 = vec4(0, 0, 0, 0), mono: bool = false, chars: int = -1):
+    if shadow.w > 0.0:
+        off = f32(max(1.0, size * 0.07))
+        text(s, pos + vec2(off, off), size, shadow, mono = mono, chars = chars)
+    if not __win_open: __outside_draw()
+    __gfx_init()
+    f = __font
+    d = __default_font
+    # (a loaded font without a character: the built-in one's, as Latin in a Japanese font)
+    fill_in = __font_loaded
+    k = f32(size / f.px)
+    x = pos.x
+    top = pos.y + f32(size * 0.82)
+    madv = f32(__mono_adv(f)) * k
+    i = 0
+    left = chars
+    loop i < len(s):
+        r = __next_char(s, i)
+        i = r.1
+        c = r.0
+        if left == 0: break
+        if left > 0: left -= 1
+        if c == '\n':
+            x = pos.x
+            top += f32(size * 1.25)
+            continue
+        if c < 32: continue
+        gf = f
+        g = __glyph(f, c)
+        if g < 0 and fill_in:
+            g = __glyph(d, c)
+            if g >= 0: gf = d
+        if g < 0:
+            gf = f
+            g = __glyph(f, '?')
+            if g < 0 and fill_in:
+                gf = d
+                g = __glyph(d, '?')
+        if g < 0: continue
+        gw = f32(gf.adv[g] * size / gf.px)
+        if mono:
+            # (centered in its cell; a wider letter, M or W, narrowed to fit it)
+            sx = min(f32(1.0), madv / max(gw, f32(0.001)))
+            if c != ' ': __text_glyph(gf, g, x + (madv - gw * sx) / 2.0, top, size, sx, color)
+            x += madv
+            continue
+        if c != ' ': __text_glyph(gf, g, x, top, size, 1.0, color)
+        x += gw
+
+# (glyph g of font f, its advance starting at x, the line's top at top; sx narrows it; slant
+# leans it, the top that much of its height to the right: italic)
+__text_glyph = (f: Font, g: int, x: f32, top: f32, size: f64, sx: f32, color: vec4, slant: f32 = 0):
+    __use_tex(f.texture.id, 6)
+    k = f32(size / f.px)
+    cell = f32(f.cell)
+    aw = f32(f.texture.width)
+    ah = f32(f.texture.height)
+    col = f32(g % f.cols)
+    row = f32(g / f.cols)
+    y = top - f32(f.base) * k
+    s_ = cell * k
+    x0 = x - f32(f.spread) * k * sx
+    x1 = x0 + s_ * sx
+    lean = slant * s_ * 0.5
+    __quad(vec2(x0 + lean, y), vec2(x1 + lean, y), vec2(x1 - lean, y + s_), vec2(x0 - lean, y + s_), vec2(col * cell / aw, row * cell / ah), vec2((col + 1.0) * cell / aw, row * cell / ah), vec2((col + 1.0) * cell / aw, (row + 1.0) * cell / ah), vec2(col * cell / aw, (row + 1.0) * cell / ah), color, 1)
+
+# text with parts of it styled where they are: [color=#ff8040]...[/color] (or a name: red,
+# green, blue, yellow, orange, purple, cyan, magenta, gray, white, black), [b]...[/b] bold,
+# [i]...[/i] slanted, [[ for a [. width above 0: lines broken to fit it (as wrap_text). chars:
+# only the first that many characters (dialogue typing itself out). The height it took.
+#   text_rich("You found [color=yellow]the brass key[/color]. It is [i]warm[/i].", vec2(40, 600), 24, WHITE, width = 800)
+text_rich = (s: str, pos: vec2, size: f64 = 20.0, color: vec4 = vec4(1, 1, 1, 1), width: f64 = 0.0, chars: int = -1, shadow: vec4 = vec4(0, 0, 0, 0)) -> f64:
+    plain, styles = __rich_parse(s, color)
+    lines = split(plain, "\n")
+    if width > 0.0: lines = wrap_text(plain, width, size)
+    if not __win_open: __outside_draw()
+    __gfx_init()
+    passes = 1
+    if shadow.w > 0.0: passes = 2
+    loop pass_ in [0..passes):
+        off = 0.0
+        if pass_ == 0 and passes == 2: off = max(1.0, size * 0.07)
+        pi = 0
+        ci = 0
+        left = chars
+        top = pos.y + f32(size * 0.82 + off)
+        loop line in lines:
+            x = pos.x + f32(off)
+            li = 0
+            loop li < len(line) and left != 0:
+                r = __next_char(line, li)
+                li = r.1
+                # (the same character in the text before it was broken into lines: spaces and
+                # line breaks the breaking took out are passed over)
+                loop pi < len(plain) and __next_char(plain, pi).0 != r.0:
+                    pi = __next_char(plain, pi).1
+                    ci += 1
+                if pi < len(plain):
+                    pi = __next_char(plain, pi).1
+                st = styles[min(ci, styles.len() - 1)]
+                ci += 1
+                if left > 0: left -= 1
+                c = st.color
+                if pass_ == 0 and passes == 2: c = shadow
+                x += __rich_char(r.0, x, top, size, c, st.bold, st.italic)
+            top += f32(size * 1.25)
+    f64(lines.len()) * size * 1.25
+
+struct __RichStyle:
+    color: vec4
+    bold = false
+    italic = false
+
+# (the text without its tags, and each of its characters' style)
+__rich_parse = (s: str, color: vec4) -> (str, __RichStyle[]):
+    plain = ""
+    styles: __RichStyle[]
+    colors = [color]
+    bold = 0
+    italic = 0
+    i = 0
+    loop i < len(s):
+        if s[i] == '[':
+            if i + 1 < len(s) and s[i + 1] == '[':
+                plain += "["
+                styles.push(__RichStyle(colors[colors.len() - 1], bold > 0, italic > 0))
+                i += 2
+                continue
+            e = find(s, "]", i)
+            if e > i:
+                tag = lower(trim(s[i + 1..e)))
+                known = true
+                if tag == "b": bold += 1
+                else if tag == "/b": bold = max(bold - 1, 0)
+                else if tag == "i": italic += 1
+                else if tag == "/i": italic = max(italic - 1, 0)
+                else if starts_with(tag, "color="): colors.push(__rich_color(tag[6..]))
+                else if tag == "/color":
+                    if colors.len() > 1: colors.pop()
+                else: known = false
+                if known:
+                    i = e + 1
+                    continue
+        r = __next_char(s, i)
+        plain += s[i..r.1)
+        styles.push(__RichStyle(colors[colors.len() - 1], bold > 0, italic > 0))
+        i = r.1
+    (plain, styles)
+
+__rich_color = (v: str) -> vec4:
+    t = trim(v)
+    if starts_with(t, "#"): return hex(t)
+    match t:
+        "red": RED
+        "green": GREEN
+        "blue": BLUE
+        "yellow": YELLOW
+        "orange": ORANGE
+        "purple": PURPLE
+        "cyan": CYAN
+        "magenta": MAGENTA
+        "gray", "grey": GRAY
+        "black": BLACK
+        _: WHITE
+
+# (one character of text_rich: drawn, as text draws it, its font's or the built-in's; its advance)
+__rich_char = (c: int, x: f32, top: f32, size: f64, color: vec4, bold: bool, italic: bool) -> f32:
+    f = __font
+    d = __default_font
+    if c < 32: return 0
+    gf = f
+    g = __glyph(f, c)
+    if g < 0 and __font_loaded:
+        g = __glyph(d, c)
+        if g >= 0: gf = d
+    if g < 0:
+        gf = f
+        g = __glyph(f, '?')
+        if g < 0 and __font_loaded:
+            gf = d
+            g = __glyph(d, '?')
+    if g < 0: return 0
+    gw = f32(gf.adv[g] * size / gf.px)
+    if c == ' ': return gw
+    slant = f32(0)
+    if italic: slant = 0.2
+    __text_glyph(gf, g, x, top, size, 1.0, color, slant)
+    # (bold: drawn again a little to the right)
+    if bold: __text_glyph(gf, g, x + f32(max(1.0, size * 0.045)), top, size, 1.0, color, slant)
+    gw
+
+# (a monospaced cell: as wide as n, the width of a monospaced font's)
+__mono_adv = (f: Font) -> f64:
+    g = __glyph(f, 'n')
+    if g < 0: return f.px * 0.6
+    f.adv[g]
+
+# text centered on `center` (horizontally and vertically; each of its lines centered). The
+# built-in font is proportional ("i" is narrower than "@"): a grid of characters, a roguelike's
+# map, draws each one centered in its cell
+text_centered = (s: str, center: vec2, size: f64 = 20.0, color: vec4 = vec4(1, 1, 1, 1), shadow: vec4 = vec4(0, 0, 0, 0), mono: bool = false):
+    if s.count("\n") == 0:
+        text(s, center - vec2(f32(text_width(s, size, mono) / 2.0), f32(size / 2.0)), size, color, shadow, mono)
+        return
+    y = f64(center.y) - text_height(s, size) / 2.0
+    loop line in s.split("\n"):
+        text(line, vec2(f64(center.x) - text_width(line, size, mono) / 2.0, y), size, color, shadow, mono)
+        y += size * 1.25

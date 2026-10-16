@@ -1,0 +1,36 @@
+# values computed before or early in a loop must be recomputed when an operand changes later
+main = ():
+    x = 1
+    y = x * 7
+    loop i in [0..3):
+        z = x * 7               # same expression as before the loop, but x changes below
+        print(y, z)
+        x += 1
+    arr = [10, 20, 30, 40]
+    k = 0
+    total = 0
+    loop k < 4:
+        total += arr[k] + k * 3  # k is redefined at the end of the body
+        k += 1
+    print(total)
+    grid = [[1, 2], [3, 4]]
+    s = 0
+    loop r in [0..2):
+        row = grid[r]
+        loop c in [0..2):
+            s += row[c] * (r + 1)
+            row = [9, 9]         # reassigned inside the inner loop
+    print(s)
+    v = [1.5, 2.5]
+    acc = 0.0
+    loop i in [0..4):
+        acc += v[i % 2] * 2.0
+        v[i % 2] = v[i % 2] + 1.0
+    print(acc, v)
+    n = 5
+    fact = 1
+    m = n
+    loop m > 1:
+        fact *= m
+        m -= 1
+    print(fact, m, n)

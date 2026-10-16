@@ -1,0 +1,408 @@
+# Generic array utilities. Arrays are values with copy-on-write storage.
+
+is_empty[T] = (xs: T[]) -> bool: xs.len() == 0
+first[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("first of an empty array")
+    xs[0]
+last[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("last of an empty array")
+    xs[xs.len() - 1]
+# the first n elements (all of them when there are fewer: xs[..n) would panic)
+first[T] = (xs: T[], n: int) -> T[]: xs[..clamp(n, 0, xs.len()))
+# the last n elements (all of them when there are fewer)
+last[T] = (xs: T[], n: int) -> T[]: xs[xs.len() - clamp(n, 0, xs.len())..]
+
+# element i, or none past either end (xs[i] stops the program there): xs.get(i) ?? fallback
+get[T] = (xs: T[], i: int) -> T?:
+    if i < 0 or i >= xs.len(): return none
+    xs[i]
+
+contains[T] = (xs: T[], x: T) -> bool:
+    loop e in xs:
+        if e == x: return true
+    false
+
+index_of[T] = (xs: T[], x: T) -> int:
+    loop i in 0.. and e in xs:
+        if e == x: return i
+    -1
+
+map[T, U] = (xs: T[], f: (T) -> U) -> U[]:
+    out: U[]
+    out.reserve(xs.len())
+    loop x in xs: out.push(f(x))
+    out
+
+filter[T] = (xs: T[], f: (T) -> bool) -> T[]:
+    out: T[]
+    loop x in xs:
+        if f(x): out.push(x)
+    out
+
+# keep only the elements for which keep is true, in their order (in place: bullets.retain((b): b.alive))
+retain[T] = (xs: mut T[], keep: (T) -> bool):
+    n = 0
+    loop i in [0..xs.len()):
+        if keep(xs[i]):
+            if n != i: xs[n] = xs[i]
+            n += 1
+    xs.truncate(n)
+
+each[T] = (xs: T[], f: (T) -> void):
+    loop x in xs: f(x)
+
+reduce[T, A] = (xs: T[], init: A, f: (A, T) -> A) -> A:
+    acc = init
+    loop x in xs: acc = f(acc, x)
+    acc
+
+# the index of the first element f is true for, or -1
+find_index[T] = (xs: T[], f: (T) -> bool) -> int:
+    loop i in 0.. and x in xs:
+        if f(x): return i
+    -1
+
+any[T] = (xs: T[], f: (T) -> bool) -> bool:
+    loop x in xs:
+        if f(x): return true
+    false
+
+all[T] = (xs: T[], f: (T) -> bool) -> bool:
+    loop x in xs:
+        if not f(x): return false
+    true
+
+find[T] = (xs: T[], f: (T) -> bool) -> T?:
+    loop x in xs:
+        if f(x): return x
+    none
+
+count[T] = (xs: T[], f: (T) -> bool) -> int:
+    n = 0
+    loop x in xs:
+        if f(x): n += 1
+    n
+
+sum[T] = (xs: T[]) -> T:
+    s: T
+    loop x in xs: s = s + x
+    s
+
+min[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("min of an empty array")
+    m = xs[0]
+    loop x in xs:
+        if x < m: m = x
+    m
+
+max[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("max of an empty array")
+    m = xs[0]
+    loop x in xs:
+        if x > m: m = x
+    m
+
+# the smaller and the larger of two values of a type with its own `<` (a big number, a version)
+min[T] = (a: T, b: T) -> T: if b < a: b else: a
+max[T] = (a: T, b: T) -> T: if a < b: b else: a
+
+# the element with the smallest key, or the largest (the first of equal ones): the cheapest
+# item, the nearest enemy (min_by(enemies, (e): distance(e.pos, me)))
+min_by[T, K] = (xs: T[], key: (T) -> K) -> T:
+    if xs.len() == 0: panic("min_by of an empty array")
+    m = xs[0]
+    mk = key(m)
+    loop x in xs[1..]:
+        k = key(x)
+        if k < mk:
+            m = x
+            mk = k
+    m
+max_by[T, K] = (xs: T[], key: (T) -> K) -> T:
+    if xs.len() == 0: panic("max_by of an empty array")
+    m = xs[0]
+    mk = key(m)
+    loop x in xs[1..]:
+        k = key(x)
+        if mk < k:
+            m = x
+            mk = k
+    m
+
+# (a, b = xs: the elements of an array of exactly that many, as a tuple)
+__unpack2[T] = (xs: T[]) -> (T, T):
+    if xs.len() != 2: panic("unpacking {xs.len()} elements into 2 names")
+    (xs[0], xs[1])
+__unpack3[T] = (xs: T[]) -> (T, T, T):
+    if xs.len() != 3: panic("unpacking {xs.len()} elements into 3 names")
+    (xs[0], xs[1], xs[2])
+__unpack4[T] = (xs: T[]) -> (T, T, T, T):
+    if xs.len() != 4: panic("unpacking {xs.len()} elements into 4 names")
+    (xs[0], xs[1], xs[2], xs[3])
+
+# (xs[mask]: the elements where mask is true; xs[idxs]: the elements at those indexes, in
+# their order; xs[mask] = v and xs[idxs] = v set them)
+__pick_mask[T] = (xs: T[], mask: bool[]) -> T[]:
+    if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
+    out: T[]
+    loop i in 0.. and x in xs:
+        if __at(mask, i): out.push(x)
+    out
+__pick[T] = (xs: T[], idxs: int[]) -> T[]:
+    out: T[]
+    out.reserve(idxs.len())
+    loop i in idxs: out.push(xs[i])
+    out
+__put_mask[T] = (xs: mut T[], mask: bool[], v: T):
+    if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
+    loop i in [0..xs.len()):
+        if __at(mask, i): xs[i] = v
+__put_mask[T] = (xs: mut T[], mask: bool[], vs: T[]):
+    if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
+    k = 0
+    loop i in [0..xs.len()):
+        if __at(mask, i):
+            if k >= vs.len(): panic("{vs.len()} values for more elements than that in the mask")
+            xs[i] = vs[k]
+            k += 1
+    if k != vs.len(): panic("{vs.len()} values for the {k} elements in the mask")
+__put[T] = (xs: mut T[], idxs: int[], v: T):
+    loop i in idxs: xs[i] = v
+__put[T] = (xs: mut T[], idxs: int[], vs: T[]):
+    if vs.len() != idxs.len(): panic("{vs.len()} values for {idxs.len()} indexes")
+    loop j in 0.. and i in idxs: xs[i] = vs[j]
+
+# each different element once, in the order they first come
+unique[T] = (xs: T[]) -> T[]:
+    seen: {T: bool}
+    out: T[]
+    loop x in xs:
+        if not seen.has(x):
+            seen[x] = true
+            out.push(x)
+    out
+
+# the elements by a key: each key with the elements that have it, in order (keys in the order
+# they first come)
+group_by[T, K] = (xs: T[], key: (T) -> K) -> {K: T[]}:
+    out: {K: T[]}
+    loop x in xs:
+        k = key(x)
+        if not out.has(k): out[k] = []
+        out[k].push(x)
+    out
+
+reverse[T] = (xs: mut T[]):
+    i = 0
+    j = xs.len() - 1
+    loop i < j:
+        t = xs[i]
+        xs[i] = xs[j]
+        xs[j] = t
+        i += 1
+        j -= 1
+
+reversed[T] = (xs: T[]) -> T[]:
+    out = xs
+    out.reverse()
+    out
+
+range = (a: int, b: int) -> int[]:
+    out: int[]
+    loop i in [a..b): out.push(i)
+    out
+
+enumerate[T] = (xs: T[]) -> (int, T)[]:
+    out: (int, T)[]
+    loop i in 0.. and x in xs: out.push((i, x))
+    out
+
+zip[A, B] = (xs: A[], ys: B[]) -> (A, B)[]:
+    out: (A, B)[]
+    n = xs.len()
+    if ys.len() < n: n = ys.len()
+    loop i in [0..n): out.push((xs[i], ys[i]))
+    out
+
+flatten[T] = (xss: T[][]) -> T[]:
+    out: T[]
+    loop xs in xss:
+        loop x in xs: out.push(x)
+    out
+
+swap[T] = (xs: mut T[], i: int, j: int):
+    t = xs[i]
+    xs[i] = xs[j]
+    xs[j] = t
+
+# ---------------- sorting ----------------
+__insertion_sort[T] = (xs: mut T[], lo: int, hi: int, less: (T, T) -> bool):
+    i = lo + 1
+    loop i < hi:
+        j = i
+        loop j > lo and less(xs[j], xs[j - 1]):
+            t = xs[j]
+            xs[j] = xs[j - 1]
+            xs[j - 1] = t
+            j -= 1
+        i += 1
+
+# (stable: elements that are equal keep their order; sorted runs of 16, merged back and forth
+# between xs and a copy)
+__merge_sort[T] = (xs: mut T[], less: (T, T) -> bool):
+    n = xs.len()
+    lo = 0
+    loop lo < n:
+        __insertion_sort(xs, lo, min(lo + 16, n), less)
+        lo += 16
+    if n <= 16: return
+    buf = xs
+    in_xs = true
+    w = 16
+    loop w < n:
+        if in_xs: __merge_pass(xs, buf, w, less)
+        else: __merge_pass(buf, xs, w, less)
+        in_xs = not in_xs
+        w *= 2
+    if not in_xs: xs = buf
+
+# merges each two neighboring sorted runs of w in src into dst
+__merge_pass[T] = (src: T[], dst: mut T[], w: int, less: (T, T) -> bool):
+    n = src.len()
+    lo = 0
+    loop lo < n:
+        mid = min(lo + w, n)
+        hi = min(lo + 2 * w, n)
+        i = lo
+        j = mid
+        k = lo
+        loop k < hi:
+            if j < hi and (i >= mid or less(src[j], src[i])):
+                dst[k] = src[j]
+                j += 1
+            else:
+                dst[k] = src[i]
+                i += 1
+            k += 1
+        lo += 2 * w
+
+# tuples compare element by element, the first that differs deciding (sorting (score, name)
+# pairs sorts by score, then name)
+(<)[A, B] = (a: (A, B), b: (A, B)) -> bool:
+    if a.0 < b.0: return true
+    if b.0 < a.0: return false
+    a.1 < b.1
+(<)[A, B, C] = (a: (A, B, C), b: (A, B, C)) -> bool:
+    if a.0 < b.0: return true
+    if b.0 < a.0: return false
+    if a.1 < b.1: return true
+    if b.1 < a.1: return false
+    a.2 < b.2
+
+__less[T] = (a: T, b: T) -> bool: a < b
+__more[T] = (a: T, b: T) -> bool: b < a
+
+# (sort's own copy of the above with < itself, not a function value: one call fewer per compare)
+__merge_sort_lt[T] = (xs: mut T[]):
+    n = xs.len()
+    lo = 0
+    loop lo < n:
+        hi = min(lo + 16, n)
+        i = lo + 1
+        loop i < hi:
+            t = xs[i]
+            j = i
+            loop j > lo and t < xs[j - 1]:
+                xs[j] = xs[j - 1]
+                j -= 1
+            xs[j] = t
+            i += 1
+        lo += 16
+    if n <= 16: return
+    buf = xs
+    in_xs = true
+    w = 16
+    loop w < n:
+        if in_xs: __merge_pass_lt(xs, buf, w)
+        else: __merge_pass_lt(buf, xs, w)
+        in_xs = not in_xs
+        w *= 2
+    if not in_xs: xs = buf
+
+__merge_pass_lt[T] = (src: T[], dst: mut T[], w: int):
+    n = src.len()
+    lo = 0
+    loop lo < n:
+        mid = min(lo + w, n)
+        hi = min(lo + 2 * w, n)
+        i = lo
+        j = mid
+        k = lo
+        # (two runs already in order: copied as they are)
+        if mid >= hi or not (src[mid] < src[mid - 1]):
+            loop k < hi:
+                dst[k] = src[k]
+                k += 1
+        else:
+            loop i < mid and j < hi:
+                if src[j] < src[i]:
+                    dst[k] = src[j]
+                    j += 1
+                else:
+                    dst[k] = src[i]
+                    i += 1
+                k += 1
+            loop i < mid:
+                dst[k] = src[i]
+                i += 1
+                k += 1
+            loop j < hi:
+                dst[k] = src[j]
+                j += 1
+                k += 1
+        lo += 2 * w
+
+# sort in place, smallest first (using <), or largest first; equal elements keep their order
+sort[T] = (xs: mut T[], descending: bool = false):
+    # (largest first and still stable: equal elements reversed twice keep their order)
+    if descending: xs.reverse()
+    __merge_sort_lt(xs)
+    if descending: xs.reverse()
+
+# sort in place with a custom "less than" function (equal elements keep their order)
+sort_with[T] = (xs: mut T[], less: (T, T) -> bool):
+    __merge_sort(xs, less)
+
+# sort in place by a key, smallest first or largest first (equal keys keep their order: sort by
+# name, then by score, for the scores in order of name)
+sort_by[T, K] = (xs: mut T[], key: (T) -> K, descending: bool = false):
+    n = xs.len()
+    if n < 2: return
+    # (each key worked out once, then the positions sorted by them: not twice a comparison)
+    ks: K[]
+    loop x in xs: ks.push(key(x))
+    idx = fill(0, n)
+    loop i in [0..n): idx[i] = i
+    if descending: __merge_sort(idx, (a: int, b: int) -> bool: ks[b] < ks[a])
+    else: __merge_sort(idx, (a: int, b: int) -> bool: ks[a] < ks[b])
+    old = xs
+    loop i in [0..n): xs[i] = old[idx[i]]
+
+# a sorted copy of xs
+sorted[T] = (xs: T[], descending: bool = false) -> T[]:
+    out = xs
+    out.sort(descending)
+    out
+
+# a copy of xs sorted by a key
+sorted_by[T, K] = (xs: T[], key: (T) -> K, descending: bool = false) -> T[]:
+    out = xs
+    out.sort_by(key, descending)
+    out
+
+__fmt_join[T] = (xs: T[], sep: str) -> str:
+    buf: u8[]
+    loop i in 0.. and x in xs:
+        if i > 0: __buf_append_str(buf, sep)
+        __fmt(buf, x)
+    str_from_bytes(buf)

@@ -1,0 +1,628 @@
+# Loop transformations on optimized IR (release builds).
+#
+# Versioning: a counting loop (rotated by lowering: `block { brif done; loop { body; ctr += 1;
+# brif ctr < end, loop } }`) whose bounds checks index by the counter (plus a constant) or by
+# something the loop does not change, with lengths it does not change, gets a test in front:
+# if every check passes for every counter value the loop can take, a copy of the loop without
+# them runs, else the original, which fails where it always did. The copy is what vectorizing
+# needs, and is faster anyway.
+
+use 'util.jo'
+use 'ir.jo'
+use 'opt.jo'
+use 'lower.jo'
+use 'check.jo'
+
+struct CLoop:
+    pl: int             # the loop instruction
+    pe: int             # its end
+    ctr: int            # counter vreg
+    endv: int           # the bound it stays below
+    inc: int            # position of `ctr = ctr + 1`
+    signed: bool        # (counter and bound compare signed)
+
+# where each construct starting at a position ends (-1 elsewhere)
+lx_ends = (code: Ins[]) -> int[]:
+    ends = fill(-1, code.len())
+    open: int[]
+    loop i in 0.. and ins in code:
+        op = ins.op
+        if op == .block or op == .loop or op == .if_: open.push(i)
+        else if op == .end: ends[open.pop()] = i
+    ends
+
+lx_is_const = (v: int, k: int) -> bool: v >= 0 and is_kv(v) and kv_of(v) == k
+
+# is v defined anywhere in [s, e]?
+lx_defined_in = (code: Ins[], v: int, s: int, e: int) -> bool:
+    loop p in [s..e]:
+        ins = code[p]
+        if int(ins.dst) == v and o_defines(ins.op): return true
+        if ins.op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(ir.args[int(ins.a) + k])
+                if item & 1 == 1 and item >> 1 == v: return true
+    false
+
+# the innermost counting loops
+lx_counting = (code: Ins[], ends: int[]) -> CLoop[]:
+    out: CLoop[]
+    loop i in 0.. and ins in code:
+        if ins.op != .loop: continue
+        e = ends[i]
+        if e < i + 4: continue
+        inner = false
+        loop p in [i + 1..e):
+            if code[p].op == .loop:
+                inner = true
+                break
+        if inner: continue
+        br = code[e - 1]
+        cmp = code[e - 2]
+        inc = code[e - 3]
+        if br.op != .brif or br.imm != 0 or int(br.a) != int(cmp.dst): continue
+        if cmp.op != .lts and cmp.op != .ltu: continue
+        ctr = int(cmp.a)
+        endv = int(cmp.b)
+        if inc.op != .add or int(inc.dst) != ctr or int(inc.a) != ctr or not lx_is_const(int(inc.b), 1): continue
+        # (nothing else changes the counter or the bound)
+        ok = true
+        loop p in [i + 1..e - 3):
+            ins2 = code[p]
+            if o_defines(ins2.op) and (int(ins2.dst) == ctr or int(ins2.dst) == endv): ok = false
+            if ins2.op == .zeroslots: ok = false
+        if lx_defined_in(code, endv, i + 1, e - 3): ok = false
+        if ok: out.push(CLoop(i, e, ctr, endv, e - 3, cmp.op == .lts))
+    out
+
+# the position of the definition of v in [s, e) when there is exactly one there (-1 otherwise)
+lx_def_at = (code: Ins[], v: int, s: int, e: int) -> int:
+    at = -1
+    loop p in [s..e):
+        if int(code[p].dst) == v and o_defines(code[p].op):
+            if at >= 0: return -1
+            at = p
+    at
+
+# a check in loop L: `if c { (arguments) noreturn call }` where c fails for an index or a null
+struct LCheck:
+    pi: int             # the if
+    pend: int           # its end
+    pc: int             # the comparison it tests (gone with it in the copy, when used only there)
+    kind: int           # 0: index x + k against len (x the counter), 1: invariant index x, 2: null arr
+    x: int
+    k: int
+    len: int
+
+lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
+    out: LCheck[]
+    loop p in [L.pl + 1..L.inc):
+        ins = code[p]
+        if ins.op != .if_: continue
+        q = ends[p]
+        # the body: argument setup and a call that never returns
+        last = code[q - 1]
+        if not (last.op == .call and last.c == 1): continue
+        plain = true
+        loop r in [p + 1..q - 1):
+            op = code[r].op
+            if not (op == .daddr or op == .iconst or op == .mov or op == .add or op == .gaddr): plain = false
+        if not plain: continue
+        c = int(ins.a)
+        d = lx_def_at(code, c, L.pl + 1, L.inc)
+        if d < 0: continue
+        cd = code[d]
+        if cd.op == .geu:
+            x = int(cd.a)
+            len = int(cd.b)
+            if lx_defined_in(code, len, L.pl + 1, L.pe): continue
+            if x == L.ctr:
+                out.push(LCheck(p, q, d, 0, x, 0, len))
+                continue
+            if not lx_defined_in(code, x, L.pl + 1, L.pe):
+                out.push(LCheck(p, q, d, 1, x, 0, len))
+                continue
+            xd = lx_def_at(code, x, L.pl + 1, L.inc)
+            if xd >= 0 and code[xd].op == .add and int(code[xd].a) == L.ctr and is_kv(int(code[xd].b)) and lx_def_at(code, L.ctr, L.pl + 1, L.inc) < 0:
+                out.push(LCheck(p, q, d, 0, L.ctr, kv_of(int(code[xd].b)), len))
+            continue
+        if cd.op == .eq and lx_is_const(int(cd.b), 0) and not lx_defined_in(code, int(cd.a), L.pl + 1, L.pe):
+            out.push(LCheck(p, q, d, 2, int(cd.a), 0, 0))
+    out
+
+# o_repl as the identity for every vreg made so far (it renames uses in copies)
+lx_known = 0
+lx_sync = ():
+    n = ir.vtypes.len()
+    if n == 0: return
+    o_resize_one(n - 1)
+    loop v in [lx_known..n): o_repl[v] = i32(v)
+    lx_known = n
+
+# to the checking loop if c (out of the innermost block)
+lx_fail = (out: mut Ins[], c: int): out.push(Ins(.brif, 0, 0, i32(c), 0, 0, 0))
+
+# does the counter of L start at a constant >= 0 (set just before the loop)?
+lx_starts_nonneg = (code: Ins[], L: CLoop) -> bool:
+    p = L.pl - 1
+    loop p >= 0 and p >= L.pl - 16:
+        ins = code[p]
+        op = ins.op
+        if op == .loop or op == .end or op == .if_ or op == .else_: return false
+        if o_defines(op) and int(ins.dst) == L.ctr:
+            if op == .mov and is_kv(int(ins.a)): return kv_of(int(ins.a)) >= 0
+            if op == .iconst: return ins.imm >= 0
+            return false
+        p -= 1
+    false
+
+lx_bin = (out: mut Ins[], op: Op, a: int, b: int) -> int:
+    d = vreg(VI)
+    out.push(Ins(op, VI, i32(d), i32(a), i32(b), 0, 0))
+    d
+
+# the instructions of loop [s, e] with branches leaving it pointing one construct further out
+# (`wrap` more: it is about to be wrapped in constructs); the checks are left out, `ren` renames vregs
+lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut Ins[], wrap: int):
+    depth = -1
+    p = s
+    loop p <= e:
+        skipped = false
+        loop ch in checks:
+            if p == ch.pi:
+                p = ch.pend + 1
+                skipped = true
+                break
+        if skipped: continue
+        p += 1
+        ins = code[p - 1]
+        op = ins.op
+        if ren.len() > 0:
+            # (o_repl holds the renaming of uses; definitions are renamed here; argument lists
+            # are copied first, the original loop keeps its own)
+            if op == .call or op == .calli or op == .callc or op == .syscall or op == .intr or op == .zeroslots:
+                st = ir.args.len()
+                loop k in [0..int(ins.b)):
+                    item = ir.args[int(ins.a) + k]
+                    if op == .zeroslots and int(item) & 1 == 1 and ren[int(item) >> 1] >= 0: item = i32((ren[int(item) >> 1] << 1) | 1)
+                    ir.args.push(item)
+                ins.a = i32(st)
+            o_rewrite(ins)
+            if o_defines(op) and int(ins.dst) >= 0 and int(ins.dst) < ren.len() and ren[int(ins.dst)] >= 0: ins.dst = i32(ren[int(ins.dst)])
+        if op == .br or op == .brif:
+            if ins.imm > depth: ins.imm += wrap
+        if op == .brtable:
+            st = ir.args.len()
+            loop k in [0..int(ins.b)):
+                t = int(ir.args[int(ins.c) + k])
+                if t > depth: t += wrap
+                ir.args.push(i32(t))
+            ins.c = i32(st)
+            if ins.imm > depth: ins.imm += wrap
+        out.push(ins)
+        if op == .block or op == .loop or op == .if_: depth += 1
+        else if op == .end: depth -= 1
+
+# ---------------- vectorization ----------------
+# A counting loop whose body (without its checks) is straight-line code doing the same thing
+# to element i of arrays (loads and stores at [base + i * size], elements of one size) and
+# arithmetic of + - * / min max on floats or + - and or xor on integers, with values from
+# outside the loop used in every lane, runs 8 (or 4) elements at a time with AVX2 where the
+# processor has it, else 4 (or 2) with SSE2, then the rest one at a time. Each element gets
+# exactly the operations it got before (no reordering across elements: float sums over the loop
+# are left alone), so the results are the same everywhere. An integer sum over the loop (and
+# `and`, `or`, `xor`), which comes out the same in any order, is kept in a vector of partial
+# sums, added together after.
+lx_vec_on = true            # (off for wasm)
+lx_reds: int[]              # (the plan's integer sums: their scalar vregs ...)
+lx_red_ops: Op[]            # (... and operations)
+
+struct VPlan:
+    ok: bool
+    es: int                 # element size: 4 or 8
+    avx_only: bool          # a 32-bit integer multiply: SSE2 has none
+    bases: int[]            # memory accesses: base vreg, offset, 1 if a store
+    offs: int[]
+    stores: bool[]
+
+lx_kind_of_mode = (c: int) -> int:
+    size = c & 15
+    if c & M_FLOAT != 0:
+        if size == 4: return 0
+        return 1
+    if size == 4: return 2
+    3
+
+lx_in_check = (p: int, checks: LCheck[]) -> bool:
+    loop ch in checks:
+        if (p >= ch.pi and p <= ch.pend) or p == ch.pc: return true
+    false
+
+lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[]) -> VPlan:
+    no = VPlan(false, 0, false, [], [], [])
+    plan = VPlan(true, 0, false, [], [], [])
+    lx_reds.clear()
+    lx_red_ops.clear()
+    kinds: {int: int}           # vreg made in the body -> element kind of its lanes
+    loop p in [L.pl + 1..L.inc):
+        if lx_in_check(p, checks): continue
+        ins = code[p]
+        op = ins.op
+        d = int(ins.dst)
+        if op == .block or op == .end or op == .nop: continue
+        if op == .fconst:
+            # (a constant: in every lane)
+            if last[d] > L.pe: return no
+            kinds[d] = -1
+            continue
+        if op == .load or op == .store:
+            c = int(ins.c)
+            if c & M_INDEX == 0 or c & M_HDR != 0: return no
+            size = c & 15
+            if size != 4 and size != 8: return no
+            ix = mem_index(ins)
+            sc = 3
+            if size == 4: sc = 2
+            if ix != L.ctr or mem_scale(ins) != sc: return no
+            base = int(ins.a)
+            if lx_defined_in(code, base, L.pl + 1, L.pe): return no
+            if plan.es == 0: plan.es = size
+            if plan.es != size: return no
+            k = lx_kind_of_mode(c)
+            plan.bases.push(base)
+            plan.offs.push(ins.imm)
+            plan.stores.push(op == .store)
+            if op == .load:
+                if last[d] > L.pe or first[d] < L.pl: return no
+                kinds[d] = k
+            else:
+                v = int(ins.b)
+                if let vk = kinds.get(v):
+                    if vk != k and vk >= 0: return no
+                else if lx_defined_in(code, v, L.pl + 1, L.pe) or is_kv(v): return no
+            continue
+        if op == .sext32 or op == .zext32:
+            # (keeps the low 32 bits: nothing to do in 32-bit lanes)
+            if let uk = kinds.get(int(ins.a)):
+                if uk == 2 and last[d] <= L.pe and first[d] >= L.pl:
+                    kinds[d] = 2
+                    continue
+            return no
+        # (s = s + x: an integer sum over the loop, s used nowhere else in it)
+        if (op == .add or op == .xor or op == .or_ or op == .and_) and int(ins.ty) == VI and (int(ins.a) == d or int(ins.b) == d) and int(ins.a) != int(ins.b):
+            x = int(ins.b)
+            if int(ins.a) != d: x = int(ins.a)
+            if let xk = kinds.get(x):
+                if xk == 3 and lx_appears(code, d, L.pl, L.pe) == 1:
+                    lx_reds.push(d)
+                    lx_red_ops.push(op)
+                    continue
+            return no
+        fl = op == .fadd or op == .fsub or op == .fmul or op == .fdiv or op == .fmin or op == .fmax
+        il = op == .add or op == .sub or op == .mul or op == .and_ or op == .or_ or op == .xor
+        if not fl and not il: return no
+        if last[d] > L.pe or first[d] < L.pl: return no
+        k = -1
+        lanes = 0
+        loop u in [int(ins.a), int(ins.b)]:
+            if u == L.ctr: return no
+            if let uk = kinds.get(u):
+                if uk >= 0:
+                    if k >= 0 and k != uk: return no
+                    k = uk
+                lanes += 1
+            else if lx_defined_in(code, u, L.pl + 1, L.pe): return no   # (from the last iteration)
+        fk = 1
+        if int(ins.ty) == VS: fk = 0
+        if lanes == 0: return no                  # (both operands the same in every iteration)
+        if k < 0:
+            k = 3
+            if fl: k = fk
+        if fl and k != fk: return no
+        if fl and k >= 2: return no
+        if il and k < 2: return no
+        if op == .mul:
+            if k != 2: return no
+            plan.avx_only = true
+        kinds[d] = k
+    if plan.es == 0: return no
+    # stores and the accesses at the same base: the same element (an update in place), or none
+    loop i in 0.. and bi in plan.bases:
+        loop j in 0.. and bj in plan.bases:
+            if i < j and bi == bj and (plan.stores[i] or plan.stores[j]) and plan.offs[i] != plan.offs[j]: return no
+    plan
+
+# how many instructions in [lo, hi] name v (define or use it)
+lx_appears = (code: Ins[], v: int, lo: int, hi: int) -> int:
+    n = 0
+    loop p in [lo..hi + 1):
+        d = o_operands(code[p])
+        if d == v:
+            n += 1
+            continue
+        loop u in o_buf:
+            if u == v:
+                n += 1
+                break
+    n
+
+# the vector of u: its own if made in the loop, else u in every lane (made once, in front)
+lx_splat = (pre: mut Ins[], vmap: mut {int: int}, u: int, k: int, ty: int) -> int:
+    if let v = vmap.get(u): return v
+    src = u
+    if is_kv(u):
+        src = vreg(VI)
+        pre.push(Ins(.iconst, VI, i32(src), 0, 0, 0, kv_of(u)))
+    v = vreg(ty)
+    pre.push(Ins(.vsplat, i32(ty), i32(v), i32(src), 0, 0, k))
+    vmap[u] = v
+    v
+
+# the vector loop of width ty (VY or VX) over the body of L; in a block that it leaves when
+# fewer than a vector's worth of elements remain
+lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, ty: int, out: mut Ins[]):
+    lanes = 16 / plan.es
+    if ty == VY: lanes = 32 / plan.es
+    out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+    t = lx_bin(out, .add, L.ctr, k_vreg(lanes - 1))
+    ge = Op.geu
+    lt = Op.ltu
+    if L.signed:
+        ge = .ges
+        lt = .lts
+    out.push(Ins(.brif, 0, 0, i32(lx_bin(out, ge, t, L.endv)), 0, 0, 0))
+    vmap: {int: int}            # scalar vreg -> its vector
+    kind: {int: int}
+    pre: Ins[]
+    body: Ins[]
+    racc = fill(-1, lx_reds.len())
+    loop p in [L.pl + 1..L.inc):
+        if lx_in_check(p, checks): continue
+        ins = code[p]
+        op = ins.op
+        d = int(ins.dst)
+        if op == .block or op == .end or op == .nop: continue
+        if op == .fconst:
+            # (made in front of the loop, in every lane)
+            c = vreg(int(ins.ty))
+            pre.push(Ins(.fconst, ins.ty, i32(c), 0, 0, 0, ins.imm))
+            k = 1
+            if int(ins.ty) == VS: k = 0
+            v = vreg(ty)
+            pre.push(Ins(.vsplat, i32(ty), i32(v), i32(c), 0, 0, k))
+            vmap[d] = v
+            kind[d] = k
+            continue
+        if op == .load:
+            k = lx_kind_of_mode(int(ins.c))
+            v = vreg(ty)
+            body.push(Ins(.vld, i32(ty), i32(v), ins.a, i32(L.ctr), i32(k), ins.imm))
+            vmap[d] = v
+            kind[d] = k
+            continue
+        if op == .store:
+            k = lx_kind_of_mode(int(ins.c))
+            val = int(ins.b)
+            vv = lx_splat(pre, vmap, val, k, ty)
+            body.push(Ins(.vst, i32(ty), i32(L.ctr), ins.a, i32(vv), i32(k), ins.imm))
+            continue
+        if op == .sext32 or op == .zext32:
+            vmap[d] = vmap[int(ins.a)]
+            kind[d] = 2
+            continue
+        ri = lx_reds.index_of(d)
+        if ri >= 0 and int(ins.ty) == VI:
+            # (an integer sum: partial sums in a vector, which starts at the identity)
+            if racc[ri] < 0:
+                z = vreg(VI)
+                iden = 0
+                if lx_red_ops[ri] == .and_: iden = -1
+                pre.push(Ins(.iconst, VI, i32(z), 0, 0, 0, iden))
+                racc[ri] = vreg(ty)
+                pre.push(Ins(.vsplat, i32(ty), i32(racc[ri]), i32(z), 0, 0, 3))
+            x = int(ins.b)
+            if int(ins.a) != d: x = int(ins.a)
+            ro = 0
+            if lx_red_ops[ri] == .and_: ro = 6
+            else if lx_red_ops[ri] == .or_: ro = 7
+            else if lx_red_ops[ri] == .xor: ro = 8
+            body.push(Ins(.vbin, i32(ty), i32(racc[ri]), i32(racc[ri]), i32(vmap[x]), i32(ro), 3))
+            continue
+        # arithmetic: the element kind from an operand with lanes
+        k = -1
+        loop u in [int(ins.a), int(ins.b)]:
+            if let uk = kind.get(u):
+                k = uk
+                break
+        vo = 0
+        match op:
+            fadd, add: vo = 0
+            fsub, sub: vo = 1
+            fmul, mul: vo = 2
+            fdiv: vo = 3
+            fmin: vo = 4
+            fmax: vo = 5
+            and_: vo = 6
+            or_: vo = 7
+            _: vo = 8
+        xa = lx_splat(pre, vmap, int(ins.a), k, ty)
+        xb = lx_splat(pre, vmap, int(ins.b), k, ty)
+        v = vreg(ty)
+        body.push(Ins(.vbin, i32(ty), i32(v), i32(xa), i32(xb), i32(vo), k))
+        vmap[d] = v
+        kind[d] = k
+    loop x in pre: out.push(x)
+    out.push(Ins(.loop, 0, 0, 0, 0, 0, 0))
+    loop x in body: out.push(x)
+    out.push(Ins(.add, VI, i32(L.ctr), i32(L.ctr), i32(k_vreg(lanes)), 0, 0))
+    t2 = lx_bin(out, .add, L.ctr, k_vreg(lanes - 1))
+    out.push(Ins(.brif, 0, 0, i32(lx_bin(out, lt, t2, L.endv)), 0, 0, 0))
+    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+    # (the partial sums added into the sum, through memory: the rest of the loop goes on from there)
+    loop ri in 0.. and acc in lx_reds:
+        if racc[ri] < 0: continue
+        sl = new_slot(32, 32)
+        sa = vreg(VI)
+        out.push(Ins(.slot, VI, i32(sa), i32(sl), 0, 0, 0))
+        z = vreg(VI)
+        out.push(Ins(.iconst, VI, i32(z), 0, 0, 0, 0))
+        out.push(Ins(.vst, i32(ty), i32(z), i32(sa), i32(racc[ri]), 3, 0))
+        loop j in [0..lanes):
+            t = vreg(VI)
+            out.push(Ins(.load, VI, i32(t), i32(sa), 0, 8, j * 8))
+            out.push(Ins(lx_red_ops[ri], VI, i32(acc), i32(acc), i32(t), 0, 0))
+    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+
+# the vectorized part of L, in front of what finishes it one element at a time
+lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut Ins[]):
+    out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+    # arrays at different bases that are written: the ranges the loop touches must not overlap
+    es = k_vreg(plan.es)
+    loop i in 0.. and bi in plan.bases:
+        loop j in 0.. and bj in plan.bases:
+            if j <= i or bi == bj or not (plan.stores[i] or plan.stores[j]): continue
+            ai = lx_bin(out, .add, bi, k_vreg(plan.offs[i]))
+            aj = lx_bin(out, .add, bj, k_vreg(plan.offs[j]))
+            lo = lx_bin(out, .mul, L.ctr, es)
+            hi = lx_bin(out, .mul, L.endv, es)
+            lo_i = lx_bin(out, .add, ai, lo)
+            hi_i = lx_bin(out, .add, ai, hi)
+            lo_j = lx_bin(out, .add, aj, lo)
+            hi_j = lx_bin(out, .add, aj, hi)
+            lx_fail(out, lx_bin(out, .and_, lx_bin(out, .ltu, lo_i, hi_j), lx_bin(out, .ltu, lo_j, hi_i)))
+    s = prelude.get(intern("__cpu_avx2")) ?? 0
+    if s == 0 or syms[s].kind != .global: ice("missing runtime global __cpu_avx2")
+    ga = vreg(VI)
+    out.push(Ins(.gaddr, VI, i32(ga), 0, 0, 0, global_addr_off(int(syms[s].ref))))
+    avx = vreg(VI)
+    out.push(Ins(.load, VI, i32(avx), i32(ga), 0, 1, 0))
+    out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+    lx_fail(out, lx_bin(out, .eq, avx, k_vreg(0)))
+    lx_vloop(code, L, checks, plan, VY, out)
+    out.push(Ins(.vzu, 0, 0, 0, 0, 0, 0))
+    out.push(Ins(.br, 0, 0, 0, 0, 0, 1))
+    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+    if not plan.avx_only: lx_vloop(code, L, checks, plan, VX, out)
+    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+
+# version the counting loops of the current function that have checks to drop
+lx_dbg_read = false
+lx_dbg = ""
+loop_versioning = ():
+    if not lx_dbg_read:
+        lx_dbg_read = true
+        lx_dbg = env("SLOPPY_LXDBG") ?? ""
+    if len(lx_dbg) > 0 and find(ir.name, lx_dbg) < 0: return
+    code = ir.code
+    ends = lx_ends(code)
+    cl = lx_counting(code, ends)
+    if cl.len() == 0: return
+    nv = ir.vtypes.len()
+    lx_known = 0
+    lx_sync()
+    # where each vreg first and last appears (defined or used)
+    first = fill(code.len(), nv)
+    last = fill(-1, nv)
+    loop p in 0.. and ins in code:
+        d = o_operands(ins)
+        if d >= 0:
+            if p < first[d]: first[d] = p
+            if p > last[d]: last[d] = p
+        loop u in o_buf:
+            if p < first[u]: first[u] = p
+            if p > last[u]: last[u] = p
+    out: Ins[]
+    out.reserve(code.len() * 2)
+    at = 0
+    loop L in cl:
+        if L.pe - L.pl > 400: continue
+        checks = lx_checks(code, ends, L)
+        plan = VPlan(false, 0, false, [], [], [])
+        if lx_vec_on: plan = lx_vec_plan(code, L, checks, first, last)
+        # (one check costs about as much as testing for it in front: not worth a copy)
+        if not plan.ok and checks.len() < 2: continue
+        loop p in [at..L.pl): out.push(code[p])
+        wrap = 0
+        if checks.len() > 0:
+            # the test of every check over the whole range:
+            #   block { block { brif fails...; fast loop; br out }; loop }
+            out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+            out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+            wrap = 2
+        start_nonneg = lx_starts_nonneg(code, L)
+        done_len: int[]
+        loop ch in checks:
+            if ch.kind == 0:
+                # (one test per length: the smallest and largest offsets against it)
+                if done_len.contains(ch.len): continue
+                done_len.push(ch.len)
+                kmin = ch.k
+                kmax = ch.k
+                loop c2 in checks:
+                    if c2.kind == 0 and c2.len == ch.len:
+                        kmin = min(kmin, c2.k)
+                        kmax = max(kmax, c2.k)
+                if not (start_nonneg and kmin >= 0):
+                    lo = L.ctr
+                    if kmin != 0: lo = lx_bin(out, .add, L.ctr, k_vreg(kmin))
+                    lx_fail(out, lx_bin(out, .lts, lo, k_vreg(0)))
+                hi = L.endv
+                if kmax != 0: hi = lx_bin(out, .add, L.endv, k_vreg(kmax))
+                lx_fail(out, lx_bin(out, .gts, hi, ch.len))
+            else if ch.kind == 1: lx_fail(out, lx_bin(out, .geu, ch.x, ch.len))
+            else: lx_fail(out, lx_bin(out, .eq, ch.x, k_vreg(0)))
+        # the copy without the checks: values made and used only in the loop get names of their own
+        lx_sync()
+        renamed: int[]
+        ren = fill(-1, nv)
+        loop p in [L.pl..L.pe]:
+            d = int(code[p].dst)
+            if d >= 0 and d < nv and o_defines(code[p].op) and ren[d] < 0 and first[d] >= L.pl and last[d] <= L.pe and not is_kv(d) and d >= ir.nparams:
+                ren[d] = vreg(vtype(d))
+                renamed.push(d)
+        lx_sync()
+        loop d in renamed: o_repl[d] = i32(ren[d])
+        if plan.ok:
+            # vectors first, then the rest one at a time (if any is left)
+            lx_vec_emit(code, L, checks, plan, out)
+            out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
+            ge = Op.geu
+            if L.signed: ge = .ges
+            lx_fail(out, lx_bin(out, ge, L.ctr, L.endv))
+            lx_copy(code, L.pl, L.pe, checks, ren, out, wrap + 1)
+            out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+        else: lx_copy(code, L.pl, L.pe, checks, ren, out, wrap)
+        loop v in renamed: o_repl[v] = i32(v)
+        if checks.len() > 0:
+            out.push(Ins(.br, 0, 0, 0, 0, 0, 1))
+            out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+            empty: int[]
+            nochecks: LCheck[]
+            lx_copy(code, L.pl, L.pe, nochecks, empty, out, 1)
+            out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+        at = L.pe + 1
+    if at == 0: return
+    loop p in [at..code.len()): out.push(code[p])
+    ir.code = lx_dce(out)
+
+# drop pure instructions whose results are unused (what the checks computed, in the copies)
+lx_dce = (code: Ins[]) -> Ins[]:
+    nuse = fill(0, ir.vtypes.len())
+    loop ins in code:
+        o_operands(ins)
+        loop u in o_buf: nuse[u] += 1
+    keep = fill(true, code.len())
+    i = code.len() - 1
+    loop i >= 0:
+        ins = code[i]
+        d = int(ins.dst)
+        if o_pure(ins.op) and d >= 0 and nuse[d] == 0:
+            keep[i] = false
+            o_operands(ins)
+            loop u in o_buf: nuse[u] -= 1
+        i -= 1
+    out: Ins[]
+    out.reserve(code.len())
+    loop j in 0.. and ins in code:
+        if keep[j]: out.push(ins)
+    out

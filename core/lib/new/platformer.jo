@@ -1,0 +1,161 @@
+# __TITLE__: a platformer. Run and jump across a level written as text: ground, slopes, and
+# platforms you jump up through (hold down to drop through one). Take every coin.
+# Move with the arrows, A and D or a gamepad's stick; jump with Space, W, up or the gamepad's A.
+# Run it with `sloppy watch __NAME__.jo` and change it while it runs, the level too: each save
+# reloads the code, and the game goes on where it was.
+
+build:
+    name = "__TITLE__"
+
+window("__TITLE__", 1280, 720)
+
+# ---------------- tuning ----------------
+const T = 48                    # a tile's size
+const RUN = 330.0               # top speed sideways
+const ACCEL = 12.0              # how soon the player gets there (higher: snappier)
+const JUMP = 820.0              # upward speed at the start of a jump
+const GRAVITY = 2400.0
+const COYOTE = 0.1              # seconds after running off a ledge that a jump still works
+const BUFFER = 0.12             # seconds before landing that a jump press is kept for it
+
+# ---------------- the level ----------------
+# '#' ground, '=' a platform (jumped up through), '/' and '\' slopes, 'o' a coin, '@' the start
+LEVEL = r"
+............................................................
+............................................................
+............................................................
+...................................o.o.o....................
+..................................=======...................
+..............................o...........................o.
+.............................===.............o...........===
+.............o.o............/##\............===.............
+............=====........../####\......o..............o.....
+....o...................../######\....===............===....
+...==....o.............../########\...........o.....o.......
+......../#\............./##########\.............../\.......
+.@...../###\........o../############\....o../#\.../##\......
+############################################################
+############################################################
+"
+
+# the tiles, drawn here (an image file would do: tileset(load_texture(embed("tiles.png"), false), T, T))
+make_tiles = () -> Texture:
+    img = image(4 * T, T)
+    loop y in [0..T):
+        loop x in [0..T):
+            n = noise(x * 0.3, y * 0.3)
+            dirt = rgb(0.36 + 0.06 * n, 0.25 + 0.04 * n, 0.18 + 0.03 * n)
+            set(img, x, y, dirt)                                        # 1 '#': ground
+            if y < 10: set(img, T + x, y, rgb(0.62, 0.42, 0.24))        # 2 '=': a plank
+            if y == 9: set(img, T + x, y, rgb(0.4, 0.26, 0.14))
+            if y >= T - 1 - x: set(img, 2 * T + x, y, dirt)             # 3 '/': rising right
+            if y >= x: set(img, 3 * T + x, y, dirt)                     # 4 '\': falling right
+            if y >= T - 4 - x and y < T + 2 - x: set(img, 2 * T + x, y, rgb(0.35, 0.7, 0.3))     # (grass)
+            if y >= x - 3 and y < x + 3: set(img, 3 * T + x, y, rgb(0.35, 0.7, 0.3))
+    texture(img, false)
+
+level = tilemap(tileset(make_tiles(), T, T), [tile_layer("ground", LEVEL, r"#=/\")])
+set_tile_shape(level, 2, .platform)
+set_tile_shape(level, 3, .slope(0.0, 1.0))
+set_tile_shape(level, 4, .slope(1.0, 0.0))
+
+struct Coin:
+    pos: vec2
+    taken = false
+    pop = tween(0.0, 1.0, 0.35, ease_out)       # (grows and fades once taken)
+
+coins: Coin[]
+start = vec2(0, 0)
+loop y in 0.. and row in lines(trim(LEVEL)):
+    loop x in [0..len(row)):
+        at = vec2((x + 0.5) * T, (y + 0.5) * T)
+        if row[x] == 'o': coins.push(Coin(at))
+        if row[x] == '@': start = at
+
+# ---------------- the player ----------------
+action("Jump", [.key(.space), .key(.up), .key(.w), .button(.a)])
+
+box = Rect(start.x - 14.0, start.y - 20.0, 28, 40)
+vel = vec2(0, 0)
+on_ground = false
+coyote = 0.0                    # (time left to jump after leaving the ground)
+jump_wait = 0.0                 # (time left for a jump pressed before landing)
+facing = 1.0
+got = 0
+run_time = 0.0                  # (until every coin is taken)
+t = 0.0
+cam = start
+shake = Shake()
+
+snd_jump = sfx_jump()
+snd_coin = sfx_coin()
+snd_land = sfx_hit()
+
+update = (dt: f64):
+    if key_pressed(.escape): quit()
+    t += dt
+    if got < coins.len(): run_time += dt
+    move = input_axis().x
+    if move != 0.0: facing = sign(move)
+    vel.x = approach(vel.x, move * RUN, ACCEL, dt)
+    vel.y += GRAVITY * dt
+    # (released early: a short hop)
+    if vel.y < 0.0 and not action_down("Jump"): vel.y += GRAVITY * dt
+    coyote -= dt
+    jump_wait -= dt
+    if on_ground: coyote = COYOTE
+    if action_pressed("Jump"): jump_wait = BUFFER
+    if jump_wait > 0.0 and coyote > 0.0:
+        vel.y = -JUMP
+        jump_wait = 0.0
+        coyote = 0.0
+        play(snd_jump)
+    falling = vel.y
+    m = tilemap_move(level, 0, box, vel * dt, drop = input_axis().y > 0.5)
+    box = m.rect
+    if m.hit_x: vel.x = 0.0
+    on_ground = m.hit_y and vel.y > 0.0
+    if m.hit_y:
+        if falling > 1300.0:
+            shake.add(0.35)
+            play(snd_land, 0.5)
+        vel.y = 0.0
+    # (fell off the map: back to the start)
+    if box.y > tilemap_size(level).y + 400.0:
+        box.x = start.x - 14.0
+        box.y = start.y - 20.0
+        vel = vec2(0, 0)
+    center = vec2(box.x + box.w / 2.0, box.y + box.h / 2.0)
+    loop mut c in coins:
+        if c.taken: c.pop.update(dt)
+        else if length(c.pos - center) < 30.0:
+            c.taken = true
+            got += 1
+            play(snd_coin)
+    # the camera follows, inside the level
+    size = tilemap_size(level)
+    cam = follow(cam, center, dt, 6.0, vec2(140, 90))
+    cam = clamp(cam, vec2(640, 360), vec2(max(size.x - 640.0, 640.0), max(size.y - 360.0, 360.0)))
+    shake.update(dt)
+
+draw = ():
+    clear(rgb(0.45, 0.68, 0.9))
+    camera2d(cam + shake.offset())
+    draw_tilemap(level)
+    loop c in coins:
+        if not c.taken:
+            bob = sin(t * 4.0 + c.pos.x * 0.05) * 4.0
+            circle(c.pos + vec2(0, bob), 12, rgb(1.0, 0.82, 0.25))
+            circle(c.pos + vec2(-3, bob - 3), 4, rgb(1.0, 0.95, 0.7))
+        else if not c.pop.done():
+            k = c.pop.value()
+            circle(c.pos - vec2(0, 30.0 * k), 12.0 + 14.0 * k, rgba(1.0, 0.82, 0.25, 1.0 - k))
+    # the player: a box with eyes looking the way it goes
+    rect(box.x, box.y, box.w, box.h, rgb(0.9, 0.35, 0.3))
+    ex = box.x + box.w / 2.0 + facing * 6.0
+    circle(vec2(ex - 5.0, box.y + 12), 3, WHITE)
+    circle(vec2(ex + 5.0, box.y + 12), 3, WHITE)
+    # what is left, on the screen
+    camera2d(vec2(640, 360))
+    text("coins {got} / {coins.len()}", vec2(24, 24), 32, WHITE)
+    if got == coins.len(): text_centered("all the coins, in {run_time:.1} s", vec2(640, 120), 48, WHITE)

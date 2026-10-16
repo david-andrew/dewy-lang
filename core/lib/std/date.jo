@@ -1,0 +1,371 @@
+# Dates and the wall clock: what time it is (unix_time), and the calendar date and time of day
+# of a moment, where the computer is (its time zone) or in UTC.
+#   d = now()
+#   print("{d.year}-{d.month:02}-{d.day:02} {d.hour:02}:{d.minute:02}")   # 2026-10-14 08:15
+#   print(date_text(now()))                                               # 2026-10-14 08:15:03
+#   started = unix_time()  ...  print("took {unix_time() - started:.1} s")
+# (time() is the clock to measure with in a game: it never jumps, as the wall clock may)
+
+struct Date:
+    year: int
+    month: int          # 1 (January) to 12
+    day: int            # 1 to 31
+    hour: int           # 0 to 23
+    minute: int         # 0 to 59
+    second: int         # 0 to 59
+    weekday: int        # 0 (Monday) to 6 (Sunday)
+    offset: int         # its time zone: seconds east of UTC (0: UTC; New York in winter: -18000)
+
+when TARGET == "wasm":
+    extern __wasm_clock = () -> f64
+    extern __wasm_tz = (unix_ms: f64) -> f64
+else when TARGET == "windows":
+    @lib("kernel32.dll")
+    extern GetSystemTimeAsFileTime = (ft: *int)
+    @lib("kernel32.dll")
+    extern GetTimeZoneInformation = (tzi: *u8) -> u32
+
+# seconds since 1970-01-01 00:00 UTC, now (the wall clock: it can jump when it is set)
+unix_time = () -> f64:
+    when TARGET == "wasm":
+        return __wasm_clock() / 1000.0
+    else when TARGET == "windows":
+        ft = [0]
+        GetSystemTimeAsFileTime(data(ft))
+        # (100 ns steps since 1601)
+        return f64(ft[0] / 10000000 - 11644473600) + f64(ft[0] % 10000000) * 1e-7
+    else:
+        ts: (int, int)
+        syscall(228, 0, &ts)                          # CLOCK_REALTIME
+        f64(ts.0) + f64(ts.1) * 1e-9
+
+# the date and time of day of moment t (unix seconds), in the computer's time zone, or in UTC
+date = (t: f64, utc: bool = false) -> Date:
+    s = int(floor(t))
+    off = 0
+    if not utc: off = utc_offset(s)
+    __date_of(s + off, off)
+
+# the date and time of day it is now, where the computer is
+now = () -> Date: date(unix_time())
+
+# the moment (unix seconds) a date stands for (its offset says where it was: from date(), or 0
+# for a Date made as UTC); fields past their range carry over (month 13 is January of the next year)
+unix_time = (d: Date) -> f64:
+    y = d.year + __floor_div(d.month - 1, 12)
+    m = __floor_mod(d.month - 1, 12) + 1
+    days = __days_from_civil(y, m, 1) + d.day - 1
+    f64(days * 86400 + d.hour * 3600 + d.minute * 60 + d.second - d.offset)
+
+# a date written as ISO 8601 has it, or none: "2026-10-14", "2026-10-14 08:15",
+# "2026-10-14T08:15:03Z" (Z: UTC), "2026-10-14T08:15:03.250+02:00". One without a time zone is
+# where the computer is (utc = true: in UTC)
+parse_date = (text: str, utc: bool = false) -> Date?:
+    s = trim(text)
+    n = len(s)
+    if n < 10 or s[4] != '-' or s[7] != '-': return none
+    y = __date_num(s, 0, 4)
+    mo = __date_num(s, 5, 2)
+    d = __date_num(s, 8, 2)
+    if y < 0 or mo < 1 or mo > 12 or d < 1 or d > __days_in(y, mo): return none
+    h = 0
+    mi = 0
+    sec = 0
+    i = 10
+    if i < n and (s[i] == 'T' or s[i] == 't' or s[i] == ' '):
+        if i + 6 > n or s[i + 3] != ':': return none
+        h = __date_num(s, i + 1, 2)
+        mi = __date_num(s, i + 4, 2)
+        i += 6
+        if i < n and s[i] == ':':
+            sec = __date_num(s, i + 1, 2)
+            i += 3
+            # (a fraction of a second: left out)
+            if i < n and (s[i] == '.' or s[i] == ','):
+                i += 1
+                loop i < n and s[i] >= '0' and s[i] <= '9': i += 1
+        if h < 0 or h > 23 or mi < 0 or mi > 59 or sec < 0 or sec > 60: return none
+    off = 0
+    zoned = false
+    if i < n and (s[i] == 'Z' or s[i] == 'z'):
+        zoned = true
+        i += 1
+    else if i < n and (s[i] == '+' or s[i] == '-'):
+        # +02:00, +0200, +02
+        sign = 1
+        if s[i] == '-': sign = -1
+        oh = __date_num(s, i + 1, 2)
+        om = 0
+        i += 3
+        if i < n and s[i] == ':': i += 1
+        if i + 2 <= n:
+            om = __date_num(s, i, 2)
+            i += 2
+        if oh < 0 or oh > 23 or om < 0 or om > 59: return none
+        off = sign * (oh * 3600 + om * 60)
+        zoned = true
+    if i != n: return none
+    local = __days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec
+    if not zoned and not utc:
+        # (the zone's offset then: found from the moment taken as UTC, then once more from there)
+        off = utc_offset(local)
+        off = utc_offset(local - off)
+    __date_of(local, off)
+
+__date_num = (s: str, at: int, digits: int) -> int:
+    if at + digits > len(s): return -1
+    v = 0
+    loop i in [at..at + digits):
+        c = s[i]
+        if c < '0' or c > '9': return -1
+        v = v * 10 + int(c) - 48
+    v
+
+__days_in = (y: int, m: int) -> int:
+    if m == 2:
+        if (y % 4 == 0 and y % 100 != 0) or y % 400 == 0: return 29
+        return 28
+    if m == 4 or m == 6 or m == 9 or m == 11: return 30
+    31
+
+# "2026-10-14 08:15:03"
+date_text = (d: Date) -> str: "{d.year}-{d.month:02}-{d.day:02} {d.hour:02}:{d.minute:02}:{d.second:02}"
+
+# the names of a date's month and weekday, in English ("October", "Wednesday")
+month_name = (d: Date) -> str: __MONTHS[clamp(d.month, 1, 12) - 1]
+weekday_name = (d: Date) -> str: __WEEKDAYS[clamp(d.weekday, 0, 6)]
+__MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+__WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+# how many seconds east of UTC the computer's clock is at moment t (unix seconds): its time
+# zone and daylight saving time then (the TZ variable, or the system's zone)
+utc_offset = (t: int) -> int:
+    when TARGET == "wasm":
+        return int(__wasm_tz(f64(t) * 1000.0))
+    else when TARGET == "windows":
+        # (as it is now: Windows keeps the rules, not a table of when they changed)
+        tzi = fill(u8(0), 172)
+        r = GetTimeZoneInformation(data(tzi))
+        bias = __le32(tzi, 0)
+        if r == 2: bias += __le32(tzi, 168)           # daylight saving time
+        else: bias += __le32(tzi, 84)
+        return -bias * 60
+    else:
+        __tz_load()
+        if __tz_times.len() == 0 or t < __tz_times[0]:
+            if __tz_times.len() == 0 and len(__tz_rule) > 0: return __tz_posix(__tz_rule, t)
+            return __tz_first
+        # (the last change at or before t)
+        lo = 0
+        hi = __tz_times.len()
+        loop hi - lo > 1:
+            mid = (lo + hi) / 2
+            if __tz_times[mid] <= t: lo = mid
+            else: hi = mid
+        if lo == __tz_times.len() - 1 and len(__tz_rule) > 0: return __tz_posix(__tz_rule, t)
+        __tz_offs[__tz_idx[lo]]
+
+# ---- the calendar ----
+# (days since 1970-01-01 for a date of the proleptic Gregorian calendar, and back: H. Hinnant's)
+__days_from_civil = (y0: int, m: int, d: int) -> int:
+    y = y0
+    if m <= 2: y -= 1
+    era = __floor_div(y, 400)
+    yoe = y - era * 400
+    mp = m - 3
+    if m <= 2: mp = m + 9
+    doy = (153 * mp + 2) / 5 + d - 1
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+
+__date_of = (local: int, off: int) -> Date:
+    days = __floor_div(local, 86400)
+    secs = local - days * 86400
+    z = days + 719468
+    era = __floor_div(z, 146097)
+    doe = z - era * 146097
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp = (5 * doy + 2) / 153
+    d = doy - (153 * mp + 2) / 5 + 1
+    m = mp + 3
+    if mp >= 10: m = mp - 9
+    if m <= 2: y += 1
+    # (1970-01-01 was a Thursday)
+    Date(y, m, d, secs / 3600, secs % 3600 / 60, secs % 60, __floor_mod(days + 3, 7), off)
+
+__floor_div = (a: int, b: int) -> int:
+    q = a / b
+    if (a % b != 0) and ((a < 0) != (b < 0)): q -= 1
+    q
+__floor_mod = (a: int, b: int) -> int: a - __floor_div(a, b) * b
+
+__le32 = (b: u8[], at: int) -> int:
+    v = int(b[at]) | (int(b[at + 1]) << 8) | (int(b[at + 2]) << 16) | (int(b[at + 3]) << 24)
+    if v >= 0x80000000: v -= 0x100000000
+    v
+
+# ---- time zones on Linux and macOS: the TZif file of the zone (zic's format) ----
+__tz_ready = false
+__tz_times: int[]           # when the offset changed (unix seconds), in order
+__tz_idx: int[]             # which of __tz_offs it changed to
+__tz_offs: int[]
+__tz_first = 0              # the offset before the first change
+__tz_rule = ""              # after the last change: a POSIX TZ rule ("EST5EDT,M3.2.0,M11.1.0")
+
+__tz_load = ():
+    if __tz_ready: return
+    __tz_ready = true
+    path = "/etc/localtime"
+    if let tz = env("TZ"):
+        name = tz
+        if starts_with(name, ":"): name = name[1..]
+        if len(name) == 0: return
+        if starts_with(name, "/"): path = name
+        else if file_exists("/usr/share/zoneinfo/{name}"): path = "/usr/share/zoneinfo/{name}"
+        else:
+            # (a rule itself: TZ=UTC0, TZ=EST5EDT)
+            __tz_rule = name
+            return
+    b = read_bytes(path) ?? []
+    if b.len() < 44 or b[0] != 'T' or b[1] != 'Z' or b[2] != 'i' or b[3] != 'f': return
+    at = 0
+    wide = false
+    if b[4] >= '2':
+        # (version 2 and later: the 32-bit part first, then the same with 64-bit times)
+        at = 44 + __tzif_size(b, 0, 4)
+        wide = true
+        if at + 44 > b.len(): return
+    ttisutc = __be32(b, at + 20)
+    ttisstd = __be32(b, at + 24)
+    leaps = __be32(b, at + 28)
+    n = __be32(b, at + 32)
+    types = __be32(b, at + 36)
+    chars = __be32(b, at + 40)
+    tw = 4
+    if wide: tw = 8
+    p = at + 44
+    if p + __tzif_size(b, at, tw) > b.len(): return
+    loop i in [0..n):
+        if wide: __tz_times.push(__be64(b, p + i * 8))
+        else: __tz_times.push(__be32s(b, p + i * 4))
+    p += n * tw
+    loop i in [0..n): __tz_idx.push(int(b[p + i]))
+    p += n
+    loop i in [0..types): __tz_offs.push(__be32s(b, p + i * 6))
+    # (before the first change: the first type that is not daylight saving time)
+    __tz_first = 0
+    if types > 0: __tz_first = __tz_offs[0]
+    loop i in [0..types):
+        if b[p + i * 6 + 4] == 0:
+            __tz_first = __tz_offs[i]
+            break
+    p += types * 6 + chars + leaps * (tw + 4) + ttisstd + ttisutc
+    # (the footer: \n rule \n)
+    if wide and p < b.len() and b[p] == '\n':
+        e = p + 1
+        loop e < b.len() and b[e] != '\n': e += 1
+        __tz_rule = str_from_bytes(b[p + 1..e))
+    loop k in __tz_idx:
+        if k >= __tz_offs.len(): __tz_times.clear()
+
+# (the size of a TZif data block after its header at `at`, with times tw bytes wide)
+__tzif_size = (b: u8[], at: int, tw: int) -> int:
+    n = __be32(b, at + 32)
+    __be32(b, at + 20) + __be32(b, at + 24) + __be32(b, at + 28) * (tw + 4) + n * tw + n + __be32(b, at + 36) * 6 + __be32(b, at + 40)
+
+__be32 = (b: u8[], at: int) -> int: (int(b[at]) << 24) | (int(b[at + 1]) << 16) | (int(b[at + 2]) << 8) | int(b[at + 3])
+__be32s = (b: u8[], at: int) -> int:
+    v = __be32(b, at)
+    if v >= 0x80000000: v -= 0x100000000
+    v
+__be64 = (b: u8[], at: int) -> int: (__be32(b, at) << 32) | __be32(b, at + 4)
+
+# the offset a POSIX TZ rule gives at t: "STD offset [DST [offset] [,start[/time],end[/time]]]",
+# the offset west of UTC in hours[:minutes[:seconds]], the changes as Mm.w.d (day d, 0 Sunday,
+# of week w, 5 the last, of month m), Jn or n
+__tz_posix = (rule: str, t: int) -> int:
+    i = __tz_name_end(rule, 0)
+    std = 0
+    i, std = __tz_offset(rule, i)
+    std = -std
+    if i >= len(rule): return std
+    i = __tz_name_end(rule, i)
+    dst = std + 3600
+    if i < len(rule) and rule[i] != ',':
+        v = 0
+        i, v = __tz_offset(rule, i)
+        dst = -v
+    if i >= len(rule) or rule[i] != ',': return std
+    parts = split(rule[i + 1..], ",")
+    if parts.len() != 2: return std
+    y = __date_of(t + std, std).year
+    start = __tz_change(parts[0], y) - std
+    end = __tz_change(parts[1], y) - dst
+    if start < end:
+        if t >= start and t < end: return dst
+        return std
+    # (the southern hemisphere: summer across the new year)
+    if t >= end and t < start: return std
+    dst
+
+__tz_name_end = (s: str, i0: int) -> int:
+    i = i0
+    if i < len(s) and s[i] == '<':
+        loop i < len(s) and s[i] != '>': i += 1
+        return i + 1
+    loop i < len(s) and is_alpha(s[i]): i += 1
+    i
+
+# [+-]hh[:mm[:ss]] at i: (where it ends, seconds)
+__tz_offset = (s: str, i0: int) -> (int, int):
+    i = i0
+    sign = 1
+    if i < len(s) and (s[i] == '+' or s[i] == '-'):
+        if s[i] == '-': sign = -1
+        i += 1
+    v = 0
+    unit = 3600
+    loop unit >= 1:
+        n = 0
+        loop i < len(s) and is_digit(s[i]):
+            n = n * 10 + int(s[i]) - 48
+            i += 1
+        v += n * unit
+        if i < len(s) and s[i] == ':' and unit > 1:
+            i += 1
+            unit /= 60
+        else: break
+    (i, sign * v)
+
+# the local time (seconds since 1970 as if local were UTC) a change happens at in year y
+__tz_change = (spec: str, y: int) -> int:
+    at = 7200
+    s = spec
+    slash = find(s, "/")
+    if slash >= 0:
+        e = 0
+        e, at = __tz_offset(s, slash + 1)
+        s = s[..slash)
+    day = 0
+    if starts_with(s, "M"):
+        f = split(s[1..], ".")
+        if f.len() != 3: return 0
+        m = to_int(f[0]) ?? 1
+        w = to_int(f[1]) ?? 1
+        wd = to_int(f[2]) ?? 0
+        first = __days_from_civil(y, m, 1)
+        # (the month's first such weekday, then w - 1 weeks on; week 5: the last)
+        d = 1 + __floor_mod(wd - __floor_mod(first + 4, 7), 7) + (w - 1) * 7
+        last = __days_from_civil(y + m / 12, m % 12 + 1, 1) - first
+        loop d > last: d -= 7
+        day = first + d - 1
+    else if starts_with(s, "J"):
+        # (1 to 365, February 29 never counted)
+        n = to_int(s[1..]) ?? 1
+        day = __days_from_civil(y, 1, 1) + n - 1
+        leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+        if leap and n >= 60: day += 1
+    else: day = __days_from_civil(y, 1, 1) + (to_int(s) ?? 0)
+    day * 86400 + at

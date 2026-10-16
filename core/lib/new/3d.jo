@@ -1,0 +1,161 @@
+# __TITLE__: a first-person game in 3D. Walk around the yard and shoot the glowing orbs (shots
+# knock the crates about: lib/physics3d.jo).
+# Click to take the mouse (Escape gives it back), move with W A S D, jump with Space, shoot with
+# the left button. A gamepad works too: the sticks, A to jump, the right trigger to shoot.
+# Run it with `sloppy watch __NAME__.jo` and change it while it runs: each save reloads the code.
+
+build:
+    name = "__TITLE__"
+
+# ---------------- tuning ----------------
+const WALK = 6.0                # meters a second
+const JUMP = 6.5                # the speed a jump starts with, upward
+const GRAVITY = 18.0
+const EYE = 1.6                 # the eyes' height above the feet
+const LOOK = 0.0025             # radians per pixel the mouse moves
+const ORBS = 8
+
+import physics3d                # (the yard's crates and walls, and the player walking among them)
+
+window("__TITLE__", 1280, 720)
+
+struct Orb:
+    pos: vec3
+    phase: f64
+    pop = 0.0                   # shot: it fades out over a moment
+
+w = physics3d.World(gravity = vec3(0, -GRAVITY, 0))
+player = w.character(vec3(0, 0, 8), radius = 0.35)
+yaw = 0.0                       # where the player looks: turned left from -z (radians, as fly_camera) ...
+pitch = 0.0                     # ... and up or down
+crates: physics3d.Body[]
+orbs: Orb[]
+flash = 0.0                     # the shot's light, fading
+hits = 0
+run_time = 0.0
+done = false
+
+snd_shot = sfx_laser()
+snd_pop = sfx_chime()
+snd_jump = sfx_jump()
+
+# ---------------- the yard: walls (fixed) and crates (that shots push) ----------------
+walls: Vertex3D[]
+add_wall = (c: vec3, size: vec3, color: vec4):
+    w.add_box(c, size, kind = .fixed)
+    add_box(walls, c, size, color)
+w.add_box(vec3(0, -0.5, 0), vec3(40, 1, 40), kind = .fixed)          # the ground
+add_wall(vec3(0, 1.5, -20), vec3(40, 3, 1), rgb(0.55, 0.55, 0.6))
+add_wall(vec3(0, 1.5, 20), vec3(40, 3, 1), rgb(0.55, 0.55, 0.6))
+add_wall(vec3(-20, 1.5, 0), vec3(1, 3, 40), rgb(0.55, 0.55, 0.6))
+add_wall(vec3(20, 1.5, 0), vec3(1, 3, 40), rgb(0.55, 0.55, 0.6))
+walls_mesh = custom_mesh(walls)
+ground = plane_mesh(40.0)
+crate = cube_mesh(1.0)
+ball = sphere_mesh(0.4)
+gun = cube_mesh(1.0)
+
+start = ():
+    player = w.character(vec3(0, 0, 8), radius = 0.35)
+    yaw = 0.0
+    pitch = 0.0
+    seed_random(3)
+    loop c in crates: w.remove(c)
+    crates.clear()
+    loop i in [0..18):
+        s = random(1.2, 2.8)
+        c = vec3(random(-16.0, 16.0), s / 2.0, random(-16.0, 16.0))
+        if length(vec2(c.x, c.z) - vec2(0, 8)) < 3.0: continue      # (none where the player starts)
+        crates.push(w.add_box(c, vec3(s, s, s), density = 150))
+    orbs.clear()
+    loop i in [0..ORBS):
+        a = f64(i) / ORBS * TAU
+        orbs.push(Orb(vec3(sin(a) * random(6.0, 15.0), random(1.5, 4.0), cos(a) * random(6.0, 15.0)), random(0.0, TAU)))
+    hits = 0
+    run_time = 0.0
+    done = false
+start()
+
+forward = () -> vec3: vec3(-sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch))
+eye = () -> vec3: player.feet + vec3(0, EYE, 0)
+orb_at = (o: Orb) -> vec3: o.pos + vec3(0, 0.25 * sin(run_time * 2.0 + o.phase), 0)
+
+shoot = ():
+    play(snd_shot, 0.4)
+    flash = 1.0
+    o0 = eye()
+    d = forward()
+    # (what the shot meets first: a crate or wall, which stops it, or an orb before that)
+    best_t = 1000.0
+    hit = w.raycast(o0, o0 + d * 1000.0)
+    if let h = hit: best_t = h.fraction * 1000.0
+    best = -1
+    loop i in 0.. and o in orbs:
+        if o.pop > 0.0: continue
+        # (the ray o0 + d * t passes the orb's center closest at t)
+        t = dot(orb_at(o) - o0, d)
+        if t > 0.0 and t < best_t and length(o0 + d * t - orb_at(o)) < 0.5:
+            best = i
+            best_t = t
+    if best >= 0:
+        orbs[best].pop = 0.001
+        hits += 1
+        play(snd_pop, 0.6, pitch = 1.0 + 0.1 * hits)
+        if hits == ORBS: done = true
+    else if let h = hit:
+        # (a crate is knocked where it is hit)
+        if w.kind(h.body) == .dynamic: w.push(h.body, d * 400.0, h.point)
+
+update = (dt: f64):
+    if not done: run_time += dt
+    flash = max(flash - dt * 8.0, 0.0)
+    loop mut o in orbs:
+        if o.pop > 0.0: o.pop += dt
+    if mouse_pressed(.left) and not is_mouse_locked(): mouse_lock()
+    else if mouse_pressed(.left) or gamepad_pressed(.rb) or (gamepad_axis(5) > 0.5 and frame_number() % 8 == 0): shoot()
+    if key_pressed(.escape): mouse_lock(false)
+    if done and (key_pressed(.r) or gamepad_pressed(.start)): start()
+    # looking: the mouse (while it is taken) or the right stick
+    look = right_stick() * 3.0 * dt
+    if is_mouse_locked(): look += mouse_delta() * LOOK
+    yaw -= look.x
+    pitch = clamp(pitch - look.y, -1.5, 1.5)
+    # walking, where the player faces
+    axis = input_axis()
+    ahead = vec3(-sin(yaw), 0, -cos(yaw))
+    side = vec3(cos(yaw), 0, -sin(yaw))
+    move = ahead * -axis.y + side * axis.x
+    if length(move) > 1.0: move = normalize(move)
+    jump = 0.0
+    if player.on_ground and (key_pressed(.space) or gamepad_pressed(.a)):
+        jump = JUMP
+        play(snd_jump, 0.3)
+    w.walk(player, move * WALK, dt, jump = jump)
+    w.step(dt)
+
+draw = ():
+    sky(vec3(0.3, 0.5, 0.85), vec3(0.8, 0.85, 0.9))
+    sun(vec3(-0.5, 0.9, 0.6))         # (toward the sun: up, and behind the start)
+    shadows(true)
+    fog(vec3(0.8, 0.85, 0.9), 0.004)
+    e = eye()
+    camera3d(e, e + forward(), 70.0)
+    draw_mesh(ground, mat4(), rgb(0.42, 0.5, 0.36))
+    draw_mesh(walls_mesh)
+    loop c in crates: draw_mesh(crate, w.transform(c) * scaling(w.size(c)), rgb(0.62, 0.45, 0.3))
+    loop o in orbs:
+        if o.pop > 0.4: continue
+        s = 1.0 + o.pop * 4.0
+        draw_mesh(ball, translation(orb_at(o)) * scaling(vec3(s, s, s)), hsv(o.phase / TAU, 0.8, 1.0), emissive = 0.8 * (1.0 - o.pop / 0.4))
+    # the gun: fixed in front of the eyes (camera space to the world: the view's inverse)
+    view = inverse(look_at(e, e + forward(), vec3(0, 1, 0)))
+    kick = 0.06 * flash
+    draw_mesh(gun, view * translation(vec3(0.18, -0.16, -0.4 + kick)) * scaling(vec3(0.04, 0.05, 0.24)), rgb(0.45, 0.46, 0.5), in_front = true)
+    if flash > 0.0: point_light(e + forward() * 0.8, vec3(1.0, 0.8, 0.5), 6.0, flash * 2.0)
+    # on top: the crosshair and the count
+    circle(vec2(640, 360), 3, rgba(1, 1, 1, 0.8))
+    text("orbs {hits} / {ORBS}    {run_time:.1} s", vec2(24, 20), 28)
+    if not is_mouse_locked(): text_centered("click to look around", vec2(640, 420), 28, rgba(1, 1, 1, 0.7))
+    if done:
+        text_centered("all {ORBS} in {run_time:.1} s", vec2(640, 300), 56, rgb(1.0, 0.85, 0.3))
+        text_centered("R (or Start) to play again", vec2(640, 470), 28)

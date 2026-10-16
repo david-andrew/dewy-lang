@@ -6,33 +6,28 @@ It bypasses Dewy's existing semantic IR and backend pipeline. The point is to
 recover fast development while retaining useful Dewy language behavior, rather
 than reproducing internal representations or executable bytes.
 
-Build from two existing native compiler seeds:
+The compiler and libraries now live directly in [`core/`](../../core/README.md).
+Build from the included C bootstrap and an existing native Dewy parser seed:
 
 ```sh
-PYTHONPATH=. .venv/bin/python -m tools.sloppy_core.build \
-  --sloppy-root /path/to/slop-lang \
-  --sloppy-seed /path/to/sloppy \
-  --dewy /path/to/native/dewy \
-  --output /tmp/dewy-core
+python3 -m tools.sloppy_core.build \
+  --dewy /path/to/native/dewy --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core build example.dewy -o /tmp/example
 DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -n0 tests/python_misc/test_sloppy_core.py
 ```
 
-The output directory must be new. The builder archives committed Sloppy sources
-at `235e19a271bccad3fe72e36d03264807a632dc1b`; it never edits that checkout or
-incorporates its uncommitted changes. `build.json` records seed and output hashes.
-Use `--bootstrap` in place of `--sloppy-seed` to build pristine Sloppy with its
-independent C bootstrap, build the adapted core, and then have that core build
-itself. This route needs a C compiler and `make`, but no installed Sloppy binary.
-The final self-built core passes the same 77-check behavior gate. The Dewy parser
-still needs the existing native Dewy seed; this is not yet a complete C-only
-bootstrap of the combined compiler. Hashes record provenance, not a requirement
-for byte-identical self-builds.
+No separate Sloppy checkout is needed. Sources originated at
+`235e19a271bccad3fe72e36d03264807a632dc1b` and are maintained directly in this
+repository, with licenses and original file hashes retained. The old patch-based
+builder has been removed. See `core/README.md` for seeded rebuilds, source layout,
+and the independent C bootstrap route. The syntax parser still needs the existing
+native Dewy seed on its first build; this is not yet a C-only bootstrap of the
+combined compiler. Hashes record provenance, not a requirement for byte equality.
 
-The exported tree includes Sloppy's license and notices. Nothing replaces the installed Dewy
-compiler. The parser currently runs as a subprocess for each Dewy source file;
-this intentionally simple boundary can be replaced after measuring the result.
+Nothing replaces the installed Dewy compiler. The parser currently runs as a
+subprocess for each Dewy source file; this intentionally simple boundary can be
+replaced after measuring the result.
 
 The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
@@ -60,8 +55,9 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The behavior gate now contains 109 checks and takes about 6.5 seconds on the
-development machine, including separate compiler processes and program execution.
+The combined Dewy/editor/shared-core gate now contains 137 checks and takes
+about 8 seconds on the development machine, including separate compiler
+processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build
@@ -113,13 +109,12 @@ It is still a single workload, not a claim about all generated programs.
 Shared-core optimization changes also run pinned Sloppy regressions:
 
 ```sh
-DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core DEWY_SLOPPY_ROOT=/path/to/slop-lang \
+DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -n0 tests/python_misc/test_sloppy_core_upstream.py
 ```
 
-The 22 array, copy, bounds, and loop cases take about 1.3 seconds. Fixtures come
-from the pinned Git revision, so local changes in the reference checkout do not
-affect the gate.
+The 22 array, copy, bounds, and loop cases take about 1.3 seconds. Fixtures are copied from the pinned Git revision into `core/tests/upstream/`;
+the gate no longer needs the reference checkout.
 
 Fixed-path loop lowering now also runs in default development builds. It is a
 local analysis, independent of the release optimizer, and keeps runtime bounds

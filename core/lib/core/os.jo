@@ -1,0 +1,930 @@
+# Operating system access: files, arguments, environment, time.
+
+exit = (code: int):
+    # (a test that ends the program: it did not reach its end)
+    if __test_child:
+        __out_flush()
+        __write_fd(1, data("FAILED\n"), 7)
+        __write_err("    the test called exit({code}) before its end\n")
+        __exit(101)
+    when BOOTSTRAP:
+        __out_flush()
+    else:
+        __end_flush()
+    __exit(code)
+
+# command line arguments (args()[0] is the program as it was started: `sloppy tool.jo` gives "tool.jo")
+args = () -> str[]:
+    out: str[]
+    when TARGET == "wasm":
+        b = __wasm_bytes((p: *u8, cap: int): __wasm_args(p, cap))
+        if b.len() > 0:
+            loop a in split(str_from_bytes(b), "\0"): out.push(a)
+    else when TARGET == "windows":
+        return __w32_args()
+    else:
+        sp = __argv() as *int
+        argc = sp[0]
+        argv = (sp + 1) as **u8
+        loop i in [0..argc): out.push(__cstr(argv[i]))
+    out
+
+__cstr = (p: *u8) -> str:
+    if p == null: return ""
+    n = 0
+    loop p[n] != 0: n += 1
+    q = __str_new(n)
+    mem_copy(q + 24, p, n)
+    q as str
+
+# an environment variable (in a web page: the page's URL parameter of that name, where `SLOPPY_X`
+# may also be written `x`, and a bare `?x` is "1")
+env = (name: str) -> str?:
+    when TARGET == "wasm":
+        buf = fill(u8(0), 256)
+        n = __wasm_env(data(name), len(name), data(buf), 256)
+        if n < 0: return none
+        if n > 256:
+            buf = fill(u8(0), n)
+            __wasm_env(data(name), len(name), data(buf), n)
+        return str_from_bytes(buf[..n))
+    else when TARGET == "windows":
+        return __w32_env(name)
+    else:
+        sp = __argv() as *int
+        argc = sp[0]
+        envp = (sp + 2 + argc) as **u8
+        i = 0
+        loop envp[i] != null:
+            e = envp[i]
+            k = 0
+            ok = true
+            loop k < len(name):
+                if e[k] != name[k]:
+                    ok = false
+                    break
+                k += 1
+            if ok and e[k] == '=': return __cstr(e + k + 1)
+            i += 1
+    none
+
+# (a host call that fills a buffer and says how much it needed, or -1: none)
+__wasm_bytes = (f: (*u8, int) -> int) -> u8[]:
+    buf = fill(u8(0), 4096)
+    n = f(data(buf), 4096)
+    if n < 0: return []
+    if n > 4096:
+        buf = fill(u8(0), n)
+        f(data(buf), n)
+    buf.truncate(n)
+    buf
+
+# (a str passed to a C function: its bytes, which end in a zero byte, as C's strings do)
+__c_str = (s: str) -> *u8:
+    if len(s) == 0: return data("\0")
+    data(s)
+
+__zstr = (s: str) -> str:
+    # strings always carry a NUL terminator, except the empty string
+    if len(s) == 0: return "\0"
+    s
+
+# why the last file operation that failed did, in words: "no such file or directory",
+# "permission denied", "it is a directory", "the disk is full"... ("" when none has failed):
+#   if not write_file(p, text): eprint("cannot write {p}: {file_error()}")
+file_error = () -> str: __file_err
+
+__file_err = ""
+
+# (a system call's result: false, with its error kept, when it failed: -errno, as Linux's)
+__ferr = (r: int) -> bool:
+    if r >= 0: return true
+    e = -r
+    m = "error {e}"
+    if e == 2: m = "no such file or directory"
+    else if e == 13: m = "permission denied"
+    else if e == 1: m = "not permitted"
+    else if e == 17: m = "it is already there"
+    else if e == 20: m = "a part of the path is not a directory"
+    else if e == 21: m = "it is a directory"
+    else if e == 28: m = "the disk is full"
+    else if e == 30: m = "the file system is read-only"
+    else if e == 39: m = "the directory is not empty"
+    else if e == 36: m = "the name is too long"
+    else if e == 24: m = "too many files are open"
+    else if e == 18: m = "it is on another disk (copy_file, then delete_file, moves it there)"
+    else if e == 16: m = "it is in use"
+    else if e == 26: m = "it is a program that is running"
+    else if e == 40: m = "too many links in the path"
+    else if e == 5: m = "the disk could not be read or written"
+    else if e == 122: m = "the disk quota is used up"
+    __file_err = m
+    false
+
+__ferr_none = (r: int) -> str?:
+    __ferr(r)
+    none
+
+# read a whole file; none if it cannot be read (or is a directory: file_error() says why)
+read_file = (path: str) -> str?:
+    when TARGET == "wasm":
+        if not __wasm_has(path): return __ferr_none(-2)
+        return str_from_bytes(__wasm_bytes((p: *u8, cap: int): __wasm_read_file(data(path), len(path), p, cap)))
+    else when TARGET == "windows":
+        return __w32_read_file(path)
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0: return __ferr_none(fd)
+        defer syscall(3, fd)
+        size = syscall(8, fd, 0, 2)
+        if size < 0:
+            # (no size: a pipe, /dev/stdin: read until it ends)
+            out: u8[]
+            chunk = fill(u8(0), 65536)
+            loop:
+                r = syscall(0, fd, data(chunk), chunk.len())
+                if r == -21: return __ferr_none(r)
+                if r <= 0: break
+                loop i in [0..r): out.push(chunk[i])      # (not extend: the C bootstrap compiles this)
+            return str_from_bytes(out)
+        syscall(8, fd, 0, 0)
+        # (a directory: a read of nothing says so. Its size means nothing: 0 on tmpfs, 2^63 - 1
+        # on ext4)
+        if syscall(0, fd, data(path), 0) == -21: return __ferr_none(-21)
+        p = __str_new(size)
+        got = 0
+        loop got < size:
+            r = syscall(0, fd, p + 24 + got, size - got)
+            if r == -21: return __ferr_none(r)        # (EISDIR: a directory)
+            if r <= 0: break
+            got += r
+        (p as *int)[1] = got
+        p as str
+
+__stdin_buf: u8[]
+__stdin_pos = 0
+
+# a line typed in (or piped in), without its end; none when the input has ended
+read_line = () -> str?:
+    __out_flush()                   # (a prompt printed before, shown first)
+    line: u8[]
+    got = false
+    loop:
+        if __stdin_pos >= __stdin_buf.len():
+            __stdin_buf = fill(u8(0), 4096)
+            r = __read_fd(0, data(__stdin_buf), __stdin_buf.len())
+            if r <= 0:
+                __stdin_buf.clear()
+                __stdin_pos = 0
+                if not got: return none
+                break
+            __stdin_buf.truncate(r)
+            __stdin_pos = 0
+        c = __stdin_buf[__stdin_pos]
+        __stdin_pos += 1
+        got = true
+        if c == '\n': break
+        line.push(c)
+    if line.len() > 0 and line[line.len() - 1] == '\r': line.pop()
+    str_from_bytes(line)
+
+# A file open for reading a piece at a time (a log too big to load whole, the start of a file
+# to hash):
+#   if let f = open_file("big.log"):
+#       loop let line = f.read_line(): ...
+#       f.close()
+struct File:
+    handle = -1
+    buf: u8[]
+    pos = 0
+    done = false
+
+open_file = (path: str) -> File?:
+    when TARGET == "wasm":
+        if let s = read_file(path):
+            f = File(handle = 0)
+            f.buf = bytes(s)
+            f.done = true
+            return f
+        return none
+    else when TARGET == "windows":
+        h = __w32_open_file(path, false)
+        if h == null: return none
+        return File(handle = h as int)
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0:
+            __ferr(fd)
+            return none
+        # (a directory opens, and reads nothing: not a file)
+        b = [u8(0)]
+        if syscall(0, fd, data(b), 0) == -21:
+            syscall(3, fd)
+            __ferr(-21)
+            return none
+        File(handle = fd)
+
+# the next line of the file, without its end (none past the last)
+read_line = (f: mut File) -> str?:
+    loop true:
+        i = f.pos
+        loop i < f.buf.len() and f.buf[i] != '\n': i += 1
+        if i < f.buf.len() or (f.done and f.pos < f.buf.len()):
+            e = i
+            if e > f.pos and f.buf[e - 1] == '\r': e -= 1
+            line = str_from_bytes(f.buf[f.pos..e))
+            f.pos = i + 1
+            return line
+        if f.done: return none
+        __file_fill(f)
+
+# up to n more bytes of the file (fewer at its end; none left: empty)
+read_bytes = (f: mut File, n: int) -> u8[]:
+    loop f.buf.len() - f.pos < n and not f.done: __file_fill(f)
+    k = min(n, f.buf.len() - f.pos)
+    out = f.buf[f.pos..f.pos + k)
+    f.pos += k
+    out
+
+close = (f: mut File):
+    when TARGET == "windows":
+        if f.handle != -1: CloseHandle(f.handle as *u8)
+    else when TARGET != "wasm":
+        if f.handle >= 0: syscall(3, f.handle)
+    f.handle = -1
+    f.done = true
+    f.buf.clear()
+    f.pos = 0
+
+# (what was read moved to the start, and up to 64 KB more after it)
+__file_fill = (f: mut File):
+    if f.handle == -1 and not f.done:
+        f.done = true
+        return
+    if f.pos > 0:
+        f.buf = f.buf[f.pos..]
+        f.pos = 0
+    old = f.buf.len()
+    f.buf.resize(old + 65536)
+    got = 0
+    when TARGET == "windows":
+        r: u32[] = [0]
+        if ReadFile(f.handle as *u8, data(f.buf) + old, u32(65536), data(r), null) != 0: got = int(r[0])
+    else when TARGET != "wasm":
+        got = syscall(0, f.handle, data(f.buf) + old, 65536)
+    if got <= 0:
+        got = 0
+        f.done = true
+    f.buf.truncate(old + got)
+
+# a line typed by the user, after showing the prompt (Python's input): "" once the input ends.
+# In a web page, a box asks for it.
+input = (prompt: str = "") -> str:
+    write(prompt)
+    read_line() ?? ""
+
+# a whole number typed by the user, asked again until it is one
+input_int = (prompt: str = "") -> int:
+    loop true:
+        write(prompt)
+        line = read_line()
+        if line == none: panic("the input ended before a whole number came")
+        t = trim(line!)
+        if let v = to_int(t): return v
+        print("'{t}' is not a whole number: try again")
+    0
+
+# a number (12, 2.5) typed by the user, asked again until it is one
+input_float = (prompt: str = "") -> f64:
+    loop true:
+        write(prompt)
+        line = read_line()
+        if line == none: panic("the input ended before a number came")
+        t = trim(line!)
+        if let v = to_float(t): return v
+        print("'{t}' is not a number: try again")
+    0.0
+
+# all of standard input (what is piped in), until it ends
+read_stdin = () -> str:
+    __out_flush()
+    out: u8[]
+    loop i in [__stdin_pos..__stdin_buf.len()): out.push(__stdin_buf[i])
+    __stdin_buf.clear()
+    __stdin_pos = 0
+    chunk = fill(u8(0), 65536)
+    loop:
+        r = __read_fd(0, data(chunk), chunk.len())
+        if r <= 0: break
+        loop i in [0..r): out.push(chunk[i])
+    str_from_bytes(out)
+
+read_bytes = (path: str) -> u8[]?:
+    if let s = read_file(path): return bytes(s)
+    none
+
+# a web page's own address, without its ?query (to make a link to it: page_url() + "?invite=" +
+# code); "" in a native program
+page_url = () -> str:
+    when TARGET == "wasm":
+        buf = fill(u8(0), 2048)
+        n = __wasm_page_url(data(buf), buf.len())
+        if n <= 0 or n > buf.len(): return ""
+        return str_from_bytes(buf[..n))
+    else:
+        return ""
+
+# a file the program wrote, given to the person using it: in a web page, the browser downloads it
+# (a picture saved with save_png, an exported save), named `name` or as the path ends; elsewhere it
+# is already where it was written. True if the file is there
+download_file = (path: str, name: str = "") -> bool:
+    when TARGET == "wasm":
+        return __wasm_download(data(path), len(path), data(name), len(name)) == 1
+    else:
+        return file_exists(path)
+
+write_file = (path: str, contents: str) -> bool:
+    when TARGET == "wasm":
+        return __wasm_write_file(data(path), len(path), data(contents), len(contents)) == 1
+    else when TARGET == "windows":
+        return __w32_write_file(path, contents)
+    else:
+        fd = syscall(2, data(__zstr(path)), 0x241, 0x1A4)
+        if fd < 0: return __ferr(fd)
+        defer syscall(3, fd)
+        off = 0
+        n = len(contents)
+        loop off < n:
+            r = syscall(1, fd, data(contents) + off, n - off)
+            if r <= 0: return __ferr(min(r, -28))
+            off += r
+        true
+
+write_bytes = (path: str, b: u8[]) -> bool: write_file(path, str_from_bytes(b))
+
+# a directory (and not a file)
+is_dir = (path: str) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return __w32_is_dir(path)
+    else when TARGET == "macos":
+        st = fill(0, 18)                              # (struct stat: st_mode, a u16, at 4)
+        if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return false
+        return int(((data(st) as *u8 + 4) as *u16)[0]) & 0xF000 == 0x4000
+    else:
+        # (O_PATH | O_DIRECTORY: opened only to name it, so a directory that cannot be read is
+        # still one)
+        fd = syscall(2, data(__zstr(path)), 0x210000, 0)
+        if fd < 0: return false
+        syscall(3, fd)
+        true
+
+# the path is a symbolic link (to anything, or to nothing); is_dir and the rest follow links, so
+# a walk through directories that should not go round in circles asks this first
+is_symlink = (path: str) -> bool:
+    when TARGET == "wasm" or TARGET == "windows":
+        return false
+    else:
+        b = [u8(0)]
+        syscall(89, data(__zstr(path)), data(b), 1) >= 0
+
+# a file's size in bytes; none if it cannot be opened (or is a directory)
+file_size = (path: str) -> int?:
+    when TARGET == "wasm":
+        if let s = read_file(path): return len(s)
+        return none
+    else when TARGET == "windows":
+        if __w32_is_dir(path): return none
+        if let s = read_file(path): return len(s)
+        return none
+    else:
+        if is_dir(path): return none
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0: return none
+        n = syscall(8, fd, 0, 2)
+        syscall(3, fd)
+        if n < 0: return none
+        n
+
+file_exists = (path: str) -> bool:
+    when TARGET == "wasm":
+        return __wasm_has(path)
+    else when TARGET == "windows":
+        return __w32_exists(path)
+    else:
+        syscall(21, data(__zstr(path)), 0) == 0
+
+make_executable = (path: str) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return true
+    else:
+        syscall(90, data(__zstr(path)), 0x1ED) == 0
+
+delete_file = (path: str) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return __w32_delete(path)
+    else:
+        __ferr(syscall(87, data(__zstr(path))))
+
+# seconds since an arbitrary point (monotonic clock): the one to measure how long code takes
+# (elapsed() is the game's clock, which a screenshot run advances 1/60 s a frame)
+time = () -> f64:
+    when TARGET == "wasm":
+        return __wasm_now() / 1000.0
+    else when TARGET == "windows":
+        return f64(__w32_time_ns()) * 1e-9
+    else:
+        ts: (int, int)
+        syscall(228, 1, &ts)
+        f64(ts.0) + f64(ts.1) * 1e-9
+
+# nanoseconds since an arbitrary point (monotonic clock)
+time_ns = () -> int:
+    when TARGET == "wasm":
+        return int(__wasm_now() * 1000000.0)
+    else when TARGET == "windows":
+        return __w32_time_ns()
+    else:
+        ts: (int, int)
+        syscall(228, 1, &ts)
+        ts.0 * 1000000000 + ts.1
+
+@no_web("does nothing in a web page (a page cannot pause: count the time in update(dt), or use every())")
+sleep = (seconds: f64):
+    __out_flush()
+    when TARGET == "windows":
+        __w32_sleep(seconds)
+    else when TARGET != "wasm":
+        ts = (int(seconds), int((seconds - floor(seconds)) * 1e9))
+        syscall(35, &ts, 0)
+
+# print without a trailing newline
+write = (s: str): __out(data(s), len(s), true)
+
+# what print and write gave so far, written out now (output to a file or a pipe is collected
+# and written in large pieces; to a terminal it goes at once anyway)
+flush_output = (): __out_flush()
+
+# standard output is a terminal (not a file or a pipe)
+is_terminal = () -> bool: __stdout_tty()
+# print to standard error (for messages about the program, kept apart from its output), and a
+# line break
+eprint = (s: str):
+    __out_flush()
+    __write_fd(2, data(s), len(s))
+    __write_fd(2, data("\n"), 1)
+
+# (a file or a directory)
+__wasm_has = (path: str) -> bool:
+    when TARGET == "wasm":
+        b = [u8(0)]
+        if __wasm_read_file(data(path), len(path), data(b), 0) >= 0: return true
+        return __wasm_list_dir(data(path), len(path), data(b), 0) >= 0
+    else:
+        return false
+
+# names of the entries in a directory (excluding . and ..); [] for a file or a path that is not
+# there too (is_dir tells them apart)
+list_dir = (path: str) -> str[]:
+    out: str[]
+    when TARGET == "wasm":
+        b = __wasm_bytes((p: *u8, cap: int): __wasm_list_dir(data(path), len(path), p, cap))
+        if b.len() > 0:
+            loop n in split(str_from_bytes(b), "\n"): out.push(n)
+    else when TARGET == "windows":
+        return __w32_list_dir(path)
+    else when TARGET == "macos":
+        return __mac_list_dir(path)
+    else:
+        fd = syscall(2, data(__zstr(path)), 0x10000, 0)
+        if fd < 0:
+            __ferr(fd)
+            return out
+        buf = __alloc(8192)
+        loop true:
+            n = syscall(217, fd, buf, 8192)
+            if n <= 0: break
+            off = 0
+            loop off < n:
+                reclen = int(((buf + off + 16) as *u16)[0])
+                name = __cstr(buf + off + 19)
+                if name != "." and name != "..": out.push(name)
+                off += reclen
+        __free(buf)
+        syscall(3, fd)
+    out
+
+# absolute path of the running executable (a script run with `sloppy tool.jo` is built into a
+# cache first: its own path is args()[0])
+exe_path = () -> str:
+    when TARGET == "wasm":
+        a = args()
+        if a.len() > 0: return a[0]
+        return ""
+    else when TARGET == "windows":
+        return __w32_exe_path()
+    else when TARGET == "macos":
+        return __mac_exe_path()
+    else:
+        buf = __alloc(4096)
+        n = syscall(89, data("/proc/self/exe"), buf, 4095)
+        s = ""
+        if n > 0:
+            q = __str_new(n)
+            mem_copy(q + 24, buf, n)
+            s = q as str
+        __free(buf)
+        s
+
+# replace the current process with another program (returns only on failure)
+exec = (path: str, argv: str[]) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        # (Windows cannot replace a process: run the program, then end with its exit code)
+        code = __w32_run(path, argv, true)
+        if code < 0: return false
+        __w32_exit(code)
+        return true
+    else:
+        ptrs = __alloc(8 * (argv.len() + 1))
+        pp = ptrs as **u8
+        loop i in 0.. and a in argv: pp[i] = data(__zstr(a))
+        pp[argv.len()] = null
+        sp = __argv() as *int
+        argc = sp[0]
+        envp = (sp + 2 + argc) as *u8
+        syscall(59, data(__zstr(path)), ptrs, envp)
+        false
+
+# exec, the program where it was linked: the interactive prompt's session and sloppy watch's game
+# get code linked to their addresses (macOS: without its address space randomized, as debuggers
+# start programs; elsewhere they are not moved)
+__exec_unslid = (path: str, argv: str[]) -> bool:
+    when TARGET == "macos":
+        ptrs = __alloc(8 * (argv.len() + 1))
+        pp = ptrs as **u8
+        loop i in 0.. and a in argv: pp[i] = data(__zstr(a))
+        pp[argv.len()] = null
+        sp = __argv() as *int
+        envp = (sp + 2 + sp[0]) as *u8
+        attr = [0]
+        __c_spawnattr_init(data(attr) as *u8)
+        __c_spawnattr_setflags(data(attr) as *u8, i16(0x40 | 0x100))       # SETEXEC, DISABLE_ASLR
+        __c_posix_spawn(null, data(__zstr(path)), null, data(attr) as *u8, ptrs, envp)
+        return false
+    else:
+        return exec(path, argv)
+
+# start a program in the background, detached from this one: its own session, no terminal
+# (input and output go to /dev/null); returns whether it was started
+spawn_detached = (path: str, argv: str[]) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return __w32_run(path, argv, false) == 0
+    else:
+        pid = syscall(57)                            # fork
+        if pid < 0: return false
+        if pid == 0:
+            syscall(112)                             # setsid
+            fd = syscall(2, data(__zstr("/dev/null")), 2)  # open O_RDWR
+            if fd >= 0:
+                syscall(33, fd, 0)                   # dup2
+                syscall(33, fd, 1)
+                syscall(33, fd, 2)
+            exec(path, argv)
+            syscall(60, 127)                         # exit: exec failed
+        true
+
+# run a program and wait for it to end: its exit code (-1: it could not be started) and what it
+# wrote to its standard output (its errors go where this program's go). A program named without
+# a / is looked for on the PATH. args are its arguments, after its name. show = true: its output
+# goes straight to this program's as it runs (a build's progress), and the text returned is "".
+# cwd: the directory it runs in ("": this program's; a program named with a relative path is
+# found from there)
+run_program = (program: str, args: str[] = [], show: bool = false, cwd: str = "") -> (int, str):
+    argv = [program] + args
+    when TARGET == "wasm":
+        return (-1, "")
+    else when TARGET == "windows":
+        __out_flush()                                # (what was printed before it, shown first)
+        if find(program, "/") < 0 and find(program, "\\") < 0: return __w32_run_output("", argv, show, cwd)
+        return __w32_run_output(program, argv, show, cwd)
+    else:
+        path = program
+        if find(program, "/") < 0:
+            path = ""
+            loop d in split(env("PATH") ?? "/usr/bin:/bin", ":"):
+                if len(d) > 0 and file_exists("{d}/{program}"):
+                    path = "{d}/{program}"
+                    break
+            if len(path) == 0: return (-1, "")
+        __out_flush()                                # (what was printed before it, shown first)
+        rfd = -1
+        wfd = -1
+        if not show:
+            fds = [0]
+            if syscall(293, data(fds), 0x80000) != 0: return (-1, "")   # pipe2(O_CLOEXEC)
+            rfd = fds[0] & 0xFFFFFFFF
+            wfd = fds[0] >> 32
+        zcwd = __zstr(cwd)
+        pid = syscall(57)                            # fork
+        if pid < 0:
+            if not show:
+                syscall(3, rfd)
+                syscall(3, wfd)
+            return (-1, "")
+        if pid == 0:
+            if not show: syscall(33, wfd, 1)         # dup2: its output into the pipe
+            if len(cwd) > 0 and syscall(80, data(zcwd)) != 0: syscall(60, 127)    # chdir
+            exec(path, argv)
+            syscall(60, 127)                         # exit: exec failed
+        out: u8[]
+        if not show:
+            syscall(3, wfd)
+            loop true:
+                n = out.len()
+                out.resize(n + 65536)
+                r = syscall(0, rfd, data(out) + n, 65536)
+                out.resize(n + max(r, 0))
+                if r == -4: continue                 # (EINTR: again)
+                if r <= 0: break
+            syscall(3, rfd)
+        status = [0]
+        loop true:
+            if syscall(61, pid, data(status), 0, 0) != -4: break    # wait4 (EINTR: again)
+        st = status[0] & 0xFFFF
+        code = (st >> 8) & 255
+        if st & 127 != 0: code = 128 + (st & 127)    # (ended by a signal)
+        if code == 127: return (-1, str_from_bytes(out))
+        (code, str_from_bytes(out))
+
+# run a command line through the system's shell (sh; cmd on Windows): pipes, `*.jo`, `&&` work
+# as typed. Its exit code and what it wrote to its standard output; show and cwd as run_program's
+run_shell = (command: str, show: bool = false, cwd: str = "") -> (int, str):
+    when TARGET == "windows":
+        return run_program("cmd", ["/c", command], show, cwd)
+    else:
+        return run_program("/bin/sh", ["-c", command], show, cwd)
+
+chmod = (path: str, mode: int) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return true
+    else:
+        syscall(90, data(__zstr(path)), mode) == 0
+
+mkdir = (path: str) -> bool:
+    when TARGET == "wasm":
+        return true
+    else when TARGET == "windows":
+        return __w32_mkdir(path)
+    else:
+        r = syscall(83, data(__zstr(path)), 0x1ED)
+        r == -17 or __ferr(r)
+
+# make a directory and the ones it is in ("out/maps/2"); true if it is there after
+make_dirs = (path: str) -> bool:
+    if len(path) == 0 or is_dir(path): return true
+    i = len(path) - 1
+    loop i > 0 and path[i] != '/' and path[i] != '\\': i -= 1
+    if i > 0: make_dirs(path[..i))
+    mkdir(path)
+
+# remove a directory, which must be empty (delete_file for a file)
+delete_dir = (path: str) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        return RemoveDirectoryW(data(__wide(path))) != 0 or __w32_ferr()
+    else:
+        return __ferr(syscall(84, data(__zstr(path))))
+
+# move or rename a file or directory (one already at `to` is replaced: a file, or an empty
+# directory). replace = false: false instead when something is at `to` (file_error() says "it
+# is already there"), checked as it moves, so no other program can put one there in between
+rename_file = (from: str, to: str, replace: bool = true) -> bool:
+    when TARGET == "wasm":
+        return false
+    else when TARGET == "windows":
+        flags = u32(1)                                   # MOVEFILE_REPLACE_EXISTING
+        if not replace: flags = u32(0)
+        return MoveFileExW(data(__wide(from)), data(__wide(to)), flags) != 0 or __w32_ferr()
+    else:
+        if not replace: return __ferr(syscall(316, -100, data(__zstr(from)), -100, data(__zstr(to)), 1))   # renameat2(RENAME_NOREPLACE)
+        return __ferr(syscall(82, data(__zstr(from)), data(__zstr(to))))
+
+# copy a file's contents to another (made, or replaced)
+copy_file = (from: str, to: str) -> bool:
+    if let s = read_file(from): return write_file(to, s)
+    false
+
+# add to the end of a file (made if it is not there): a log
+append_file = (path: str, contents: str) -> bool:
+    when TARGET == "wasm" or TARGET == "windows":
+        old = read_file(path) ?? ""
+        return write_file(path, old + contents)
+    else:
+        fd = syscall(2, data(__zstr(path)), 0x441, 0x1A4)
+        if fd < 0: return __ferr(fd)
+        off = 0
+        n = len(contents)
+        ok = true
+        loop off < n:
+            r = syscall(1, fd, data(contents) + off, n - off)
+            if r <= 0:
+                ok = __ferr(min(r, -28))
+                break
+            off += r
+        syscall(3, fd)
+        ok
+
+# when a file or directory was last changed, in seconds since 1970 (as unix_time()); none if it
+# is not there
+file_time = (path: str) -> f64?:
+    when TARGET == "wasm":
+        return none
+    else when TARGET == "windows":
+        info = fill(u8(0), 40)                        # WIN32_FILE_ATTRIBUTE_DATA
+        if GetFileAttributesExW(data(__wide(path)), 0, data(info)) == 0: return none
+        ft = int(((data(info) + 20) as *u32)[0]) | (int(((data(info) + 24) as *u32)[0]) << 32)
+        return f64(ft) / 10000000.0 - 11644473600.0   # (100 ns steps since 1601)
+    else when TARGET == "macos":
+        st = fill(0, 18)                              # (struct stat: st_mtimespec at 48)
+        if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return none
+        return f64(st[6]) + f64(st[7]) * 1e-9
+    else:
+        fd = syscall(2, data(__zstr(path)), 0x200000, 0)   # (O_PATH: one that cannot be read too)
+        if fd < 0: return none
+        st = fill(0, 18)                              # (struct stat: st_mtime at 88, on x86-64 and arm64)
+        r = syscall(5, fd, data(st))
+        syscall(3, fd)
+        if r != 0: return none
+        f64(st[11]) + f64(st[12]) * 1e-9
+
+# every file under a directory, at any depth, as paths from it ("maps/level1.tmx"), sorted;
+# links to directories are not followed
+walk_dir = (path: str) -> str[]:
+    out: str[]
+    __walk(path, "", out)
+    out.sort()
+    out
+
+__walk = (base: str, rel: str, out: mut str[]):
+    dir = base
+    if len(rel) > 0: dir = base + "/" + rel
+    loop name in list_dir(dir):
+        r = name
+        if len(rel) > 0: r = rel + "/" + name
+        full = dir + "/" + name
+        if is_dir(full):
+            if not is_symlink(full): __walk(base, r, out)
+        else: out.push(r)
+
+# the files whose paths match a pattern: `*` is any part of a name, `?` one character, and `**`
+# any number of directories ("src/*.jo", "assets/**/*.png"), sorted. As in the shell, hidden
+# names (.git, .env) match only a pattern that starts them with a dot (".*", "**/.env")
+glob = (pattern: str) -> str[]:
+    # (the directory to start from: the part before the first * or ?)
+    k = 0
+    loop k < len(pattern) and pattern[k] != '*' and pattern[k] != '?': k += 1
+    loop k > 0 and pattern[k - 1] != '/': k -= 1
+    base = "."
+    rest = pattern
+    if k > 0:
+        base = pattern[..k - 1)
+        if len(base) == 0: base = "/"
+        rest = pattern[k..]
+    out: str[]
+    # (no / in the rest: the names in that directory alone, not all below it)
+    files: str[]
+    if find(rest, "/") < 0 and find(rest, "**") < 0:
+        loop f in list_dir(base):
+            if not is_dir(base + "/" + f): files.push(f)
+        files.sort()
+    else: files = walk_dir(base)
+    loop f in files:
+        if __glob_match(f, 0, rest, 0):
+            if k > 0: out.push(pattern[..k) + f)
+            else: out.push(f)
+    out
+
+__glob_match = (s: str, i: int, p: str, j: int) -> bool:
+    if j == len(p): return i == len(s)
+    if j + 2 < len(p) + 1 and p[j] == '*' and j + 1 < len(p) and p[j + 1] == '*':
+        # ** (and **/): any number of whole directories
+        nj = j + 2
+        if nj < len(p) and p[nj] == '/': nj += 1
+        if __glob_match(s, i, p, nj): return true
+        k = i
+        loop k < len(s):
+            # (not into hidden directories, .git's: as the shell's)
+            if s[k] == '.' and (k == 0 or s[k - 1] == '/'): return false
+            if s[k] == '/' and __glob_match(s, k + 1, p, nj): return true
+            k += 1
+        return false
+    # (* and ? do not match a hidden name's first dot: "*" is not ".env")
+    hidden = i < len(s) and s[i] == '.' and (i == 0 or s[i - 1] == '/')
+    if p[j] == '*':
+        if hidden: return __glob_match(s, i, p, j + 1)
+        k = i
+        loop true:
+            if __glob_match(s, k, p, j + 1): return true
+            if k >= len(s) or s[k] == '/': return false
+            k += 1
+    if i >= len(s): return false
+    if p[j] == '?': return s[i] != '/' and not hidden and __glob_match(s, i + 1, p, j + 1)
+    s[i] == p[j] and __glob_match(s, i + 1, p, j + 1)
+
+# the current directory
+cwd = () -> str:
+    when TARGET == "wasm":
+        return "/"
+    else when TARGET == "windows":
+        return __w32_cwd()
+    else:
+        buf = fill(u8(0), 4096)
+        n = syscall(79, data(buf), 4096)
+        if n <= 0: return "/"
+        str_from_bytes(buf[..n - 1))
+
+# a directory for temporary files (TMPDIR, else /tmp; on Windows, the user's temporary directory)
+temp_dir = () -> str:
+    when TARGET == "windows":
+        return __w32_temp_dir()
+    else:
+        if let t = env("TMPDIR"):
+            if len(t) > 0: return t
+        "/tmp"
+
+# ---------------- `sloppy test` support ----------------
+# Each test runs in a process of its own where there is fork (Linux, macOS): one that fails (a
+# failed assert, a panic) is reported, and the rest still run; elsewhere they run here in turn
+__tests_run = 0
+__tests_failed = 0
+__test_t0 = 0.0
+__test_child = false
+__testing = false                   # (a sloppy test run: window() opens nothing)
+__test_run_begin = (): __testing = true
+
+# true where the test's code is to run (the child; or here). `sloppy test file.jo words`:
+# only the tests whose names have one of the words in them
+__test_begin = (name: str) -> bool:
+    a = args()
+    if a.len() > 1:
+        found = false
+        loop i in [1..a.len()):
+            if find(name, a[i]) >= 0: found = true
+        if not found: return false
+    write("test {name} ... ")
+    __test_t0 = time()
+    when TARGET == "linux" or TARGET == "macos":
+        __out_flush()
+        pid = syscall(57)
+        if pid == 0:
+            __test_child = true
+            return true
+        if pid > 0:
+            st = [0]
+            syscall(61, pid, data(st), 0, 0)
+            __tests_run += 1
+            if st[0] & 0xFFFF == 0: print("ok ({(time() - __test_t0) * 1000:.1} ms)")
+            else:
+                # (a panic, 101, has said FAILED and why already)
+                if st[0] & 0xFFFF != 101 << 8: print("FAILED")
+                __tests_failed += 1
+            return false
+    true
+
+__test_end = ():
+    if __test_child:
+        __out_flush()
+        __exit(0)
+    __tests_run += 1
+    print("ok ({(time() - __test_t0) * 1000:.1} ms)")
+
+__test_done = (n: int):
+    a = args()
+    if a.len() > 1 and __tests_run == 0:
+        words = ""
+        loop i in [1..a.len()):
+            if i > 1: words = words + ", "
+            words = words + "'" + a[i] + "'"
+        eprint("no test's name has {words} in it (of {n} tests)")
+        exit(1)
+    if __tests_failed > 0:
+        print("{__tests_run - __tests_failed} passed, {__tests_failed} failed")
+        exit(1)
+    if __tests_run < n: print("{__tests(__tests_run)} passed ({n - __tests_run} not run: their names do not match)")
+    else: print("{__tests(n)} passed")
+
+__tests = (n: int) -> str:
+    if n == 1: return "1 test"
+    "{n} tests"

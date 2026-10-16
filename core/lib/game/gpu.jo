@@ -1,0 +1,362 @@
+# GPU programs written in Sloppy: meshes, shaders and uniform binding.
+#
+#   struct Vertex: pos: vec3; color: vec4          -> vertex attributes
+#   struct Params: mvp: mat4                        -> uniforms
+#   struct Out:    pos: vec4; color: vec4           -> first field is the clip position
+#   vs = (v: Vertex, u: Params) -> Out: Out(u.mvp * vec4(v.pos, 1), v.color)
+#   fs = (i: Out, u: Params) -> vec4: i.color
+#   prog = make_shader(shader(vs, fs))
+#   m = mesh(vertices)
+#   draw(prog, m, Params(mvp))
+#
+# Uniform fields are numbers, vectors, mat4 and Texture, or fixed-size arrays of them
+# (`bones: mat4[64]`, `lights: vec4[8]`), and GPU buffers (gpubuffer.jo: `u.particles[i]`).
+# Shader code can use fixed-size arrays, `loop` over them, and sample(), sample_lod(), texel(),
+# texture_size(), discard() (fragment) and vertex_id(), instance_id() (vertex).
+
+# produced by the compiler from shader(vs, fs)
+struct ShaderSource:
+    vs: str
+    fs: str
+    layout: str
+    cpu_vs: *u8           # the shader functions, for the software renderer
+    cpu_fs: *u8
+    out_size: int         # bytes of the vertex function's result
+    vs_args: int          # 2: vs(vertex, uniforms), 3: vs(vertex, instance, uniforms)
+    flat: str             # per 4 bytes of that result: 'f' interpolated, 'i' passed on unchanged
+    vs_spirv: str         # the stages as SPIR-V, for Vulkan (compiler/spirv.jo; "" on the web)
+    fs_spirv: str
+
+struct ShaderAttrib:
+    comps: int
+    offset: int
+
+struct ShaderUniform:
+    loc: int
+    kind: u8
+    offset: int
+    count: int            # an array (T[N] field): N, and the bytes per element
+    stride: int
+    loc2: int = -1        # a GPU buffer: its length's location (loc: its texture's)
+
+struct Shader:
+    prog: int
+    stride: int
+    attribs: ShaderAttrib[]
+    uniforms: ShaderUniform[]
+    usize: int
+    istride: int
+    iattribs: ShaderAttrib[]
+    ibase_loc: int = -1   # (OpenGL) where instance_id() starts: see draw_indirect
+
+struct Mesh:
+    vao: int
+    vbo: int
+    ibo: int
+    count: int
+    index_count: int
+    stride: int
+    mode: int
+    instance_vbo: int
+    instances: int
+    center: vec3                # a sphere around the vertices (radius < 0: not known), for
+    radius: f32 = -1.0          # leaving out what the camera cannot see (draw3d.jo)
+    gbuf: int                   # the vertices are a GPU buffer's (gpu_mesh): its number
+    keep: u8[]                  # (and what keeps that buffer alive)
+
+make_shader = (src: ShaderSource) -> Shader:
+    __gfx_init_gl_only()
+    prog = 0
+    when TARGET != "wasm":
+        if __vk: prog = __vk_program(src)
+        else: prog = gl_create_program(src.vs, src.fs)
+    else: prog = gl_create_program(src.vs, src.fs)
+    sh = Shader(prog = prog)
+    halves = split(src.layout, "|")
+    loop part in split(halves[0], ";"):
+        if starts_with(part, "A"):
+            sh.stride = to_int(part[1..]) ?? 0
+            continue
+        f = split(part, ",")
+        sh.attribs.push(ShaderAttrib(to_int(f[1]) ?? 0, to_int(f[2]) ?? 0))
+    if halves.len() > 2:
+        loop part in split(halves[2], ";"):
+            if starts_with(part, "I"):
+                sh.istride = to_int(part[1..]) ?? 0
+                continue
+            f = split(part, ",")
+            sh.iattribs.push(ShaderAttrib(to_int(f[1]) ?? 0, to_int(f[2]) ?? 0))
+    loop part in split(halves[1], ";"):
+        if starts_with(part, "U"):
+            sh.usize = to_int(part[1..]) ?? 0
+            continue
+        f = split(part, ",")
+        kind = f[1][0]
+        if kind == 'v': kind = f[1][1]
+        if kind == 'B':
+            sh.uniforms.push(ShaderUniform(gl_uniform_location(prog, "u.{f[0]}_.t_"), kind, to_int(f[2]) ?? 0, loc2 = gl_uniform_location(prog, "u.{f[0]}_.n_")))
+        else if f.len() > 3:
+            loc = gl_uniform_location(prog, "u.{f[0]}_[0]")
+            sh.uniforms.push(ShaderUniform(loc, kind, to_int(f[2]) ?? 0, to_int(f[3]) ?? 0, to_int(f[4]) ?? 0))
+        else: sh.uniforms.push(ShaderUniform(gl_uniform_location(prog, "u.{f[0]}_"), kind, to_int(f[2]) ?? 0))
+    sh.ibase_loc = gl_uniform_location(prog, "sl_ibase")
+    if __soft: __sw_program_info(prog, src)
+    sh
+
+# upload vertices (any struct type matching the shader's vertex input) and optional indices
+mesh[V] = (vertices: V[], indices: u32[] = [], mode: int = GL_TRIANGLES) -> Mesh:
+    __gfx_init_gl_only()
+    m = Mesh(mode = mode)
+    m.vao = gl_create_vertex_array()
+    glBindVertexArray(u32(m.vao))
+    m.vbo = gl_create_buffer()
+    glBindBuffer(GL_ARRAY_BUFFER, u32(m.vbo))
+    m.stride = size_of(V)
+    glBufferData(GL_ARRAY_BUFFER, vertices.len() * m.stride, data(vertices) as *u8, GL_STATIC_DRAW)
+    m.count = vertices.len()
+    if indices.len() > 0:
+        m.ibo = gl_create_buffer()
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, u32(m.ibo))
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.len() * 4, data(indices) as *u8, GL_STATIC_DRAW)
+        m.index_count = indices.len()
+    glBindVertexArray(0)
+    m
+
+update_mesh[V] = (m: mut Mesh, vertices: V[]):
+    glBindBuffer(GL_ARRAY_BUFFER, u32(m.vbo))
+    glBufferData(GL_ARRAY_BUFFER, vertices.len() * m.stride, data(vertices) as *u8, GL_DYNAMIC_DRAW)
+    m.count = vertices.len()
+
+# (base: the vertex read for vertex 0)
+__bind_attribs = (sh: Shader, m: Mesh, base: int = 0):
+    glBindVertexArray(u32(m.vao))
+    glBindBuffer(GL_ARRAY_BUFFER, u32(m.vbo))
+    loop i in 0.. and a in sh.attribs:
+        glEnableVertexAttribArray(u32(i))
+        glVertexAttribDivisor(u32(i), 0)
+        glVertexAttribPointer(u32(i), i32(a.comps), GL_FLOAT, 0, i32(m.stride), a.offset + base * m.stride)
+        glVertexAttribDivisor(u32(i), 0)
+
+__bind_uniforms = (sh: Shader, p: *u8):
+    unit = 0
+    loop u in sh.uniforms:
+        if u.loc < 0: continue
+        q = p + u.offset
+        loc = i32(u.loc)
+        k = u.kind
+        f = q as *f32
+        if u.count > 0:
+            unit = __bind_uniform_array(u, loc, q, unit)
+            continue
+        if k == 'f': glUniform1f(loc, f[0])
+        else if k == 'd': glUniform1f(loc, f32((q as *f64)[0]))
+        else if k == 'i': glUniform1i(loc, i32((q as *int)[0]))
+        else if k == 'b': glUniform1i(loc, i32(q[0]))
+        else if k == '2': glUniform2f(loc, f[0], f[1])
+        else if k == '3': glUniform3f(loc, f[0], f[1], f[2])
+        else if k == '4': glUniform4f(loc, f[0], f[1], f[2], f[3])
+        else if k == 'm': glUniformMatrix4fv(loc, 1, 0, q)
+        else if k == 'I': glUniform2iv(loc, 1, q)
+        else if k == 'B': unit = __gb_bind_gl(q, loc, u.loc2, unit)
+        else if k == 't':
+            glActiveTexture(GL_TEXTURE0 + u32(unit))
+            glBindTexture(GL_TEXTURE_2D, u32((q as *int)[0]))
+            glUniform1i(loc, i32(unit))
+            unit += 1
+
+# a uniform array (a T[N] field): returns the next free texture unit
+__bind_uniform_array = (u: ShaderUniform, loc: i32, q: *u8, unit0: int) -> int:
+    n = i32(u.count)
+    k = u.kind
+    unit = unit0
+    if k == 'f': glUniform1fv(loc, n, q)
+    else if k == '2': glUniform2fv(loc, n, q)
+    else if k == '3': glUniform3fv(loc, n, q)
+    else if k == '4': glUniform4fv(loc, n, q)
+    else if k == 'm': glUniformMatrix4fv(loc, n, 0, q)
+    else if k == 'I': glUniform2iv(loc, n, q)
+    else if k == 'd':
+        fs = fill(f32(0), u.count)
+        loop j in [0..u.count): fs[j] = f32(((q + j * u.stride) as *f64)[0])
+        glUniform1fv(loc, n, data(fs) as *u8)
+    else if k == 'i' or k == 'b' or k == 't':
+        # (ints and bools are 32-bit in GLSL; textures get a unit each)
+        ints: i32[] = fill(i32(0), u.count)
+        loop j in [0..u.count):
+            p = q + j * u.stride
+            if k == 'i': ints[j] = i32((p as *int)[0])
+            else if k == 'b': ints[j] = i32(p[0])
+            else:
+                glActiveTexture(GL_TEXTURE0 + u32(unit))
+                glBindTexture(GL_TEXTURE_2D, u32((p as *int)[0]))
+                ints[j] = i32(unit)
+                unit += 1
+        glUniform1iv(loc, n, data(ints) as *u8)
+    unit
+
+# draw a mesh with a shader; `params` is the uniforms struct the shader functions take
+draw[U] = (sh: Shader, m0: Mesh, params: U):
+    flush()
+    p = params
+    when TARGET != "wasm":
+        if __vk:
+            __vk_draw_at(sh.prog, m0.mode, __mesh_addr(m0), m0.stride, m0.count, m0.ibo, m0.index_count, (&p) as *u8, size_of(U), 0, 0, 0)
+            return
+    m = __mesh_now(m0)
+    when TARGET != "wasm":
+        if __soft:
+            __sw_draw_mesh(sh.prog, m.mode, m.vbo, m.stride, m.count, m.ibo, m.index_count, (&p) as *u8, 0, 0, 0, 0)
+            return
+    glUseProgram(u32(sh.prog))
+    __bind_uniforms_sized(sh, (&p) as *u8)
+    __bind_attribs(sh, m)
+    if m.index_count > 0:
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, u32(m.ibo))
+        glDrawElements(u32(m.mode), i32(m.index_count), GL_UNSIGNED_INT, 0)
+    else: glDrawArrays(u32(m.mode), 0, i32(m.count))
+    glBindVertexArray(0)
+
+__bind_uniforms_sized = (sh: Shader, p: *u8): __bind_uniforms(sh, p)
+
+# draw many copies of a mesh in one call; `instances` holds the per-instance shader input
+# (uploaded on every call: for instances that change rarely, keep them on the GPU with
+# instance_buffer)
+draw_instanced[U, I] = (sh: Shader, m: mut Mesh, instances: I[], params: U):
+    if instances.len() == 0: return
+    flush()
+    p = params
+    if m.instance_vbo == 0: m.instance_vbo = gl_create_buffer()
+    glBindBuffer(GL_ARRAY_BUFFER, u32(m.instance_vbo))
+    glBufferData(GL_ARRAY_BUFFER, instances.len() * size_of(I), data(instances) as *u8, GL_STREAM_DRAW)
+    __draw_inst(sh, m, m.instance_vbo, size_of(I), 0, instances.len(), (&p) as *u8, size_of(U))
+
+# per-instance shader input kept on the GPU: uploaded once (and again by set_instances),
+# drawn any number of times with draw_instanced
+struct InstanceBuffer[I]:
+    vbo: int
+    count: int
+
+instance_buffer[I] = (instances: I[]) -> InstanceBuffer[I]:
+    __gfx_init_gl_only()
+    b = InstanceBuffer[I](vbo = gl_create_buffer())
+    set_instances(b, instances)
+    b
+
+# replace what an instance buffer holds
+set_instances[I] = (b: mut InstanceBuffer[I], instances: I[]):
+    glBindBuffer(GL_ARRAY_BUFFER, u32(b.vbo))
+    glBufferData(GL_ARRAY_BUFFER, instances.len() * size_of(I), data(instances) as *u8, GL_DYNAMIC_DRAW)
+    b.count = instances.len()
+
+# draw instances first .. first + count of a buffer (count -1: to the end)
+draw_instanced[U, I] = (sh: Shader, m: Mesh, b: InstanceBuffer[I], params: U, first: int = 0, count: int = -1):
+    n = count
+    if n < 0: n = b.count - first
+    if n <= 0 or first < 0 or first + n > b.count: return
+    flush()
+    p = params
+    __draw_inst(sh, m, b.vbo, size_of(I), first, n, (&p) as *u8, size_of(U))
+
+__draw_inst = (sh: Shader, m: Mesh, vbo: int, istride: int, first: int, n: int, p: *u8, usize: int, igbuf: int = 0):
+    __draw_full(sh, m, vbo, istride, first, n, p, usize, igbuf, 0, -1, 0, 0)
+
+# a draw of mesh m0 with n instances (0: not instanced) from instance `first` of buffer vbo, or of
+# GPU buffer igbuf (or no instance data: vbo and igbuf 0); of its vertices (or indices) [from,
+# from + count) (count -1: to the end) with base added to each index, and instance_id() counting
+# from ibase. (Through Vulkan only whole meshes: draw_indirect draws parts there.)
+__draw_full = (sh: Shader, m0: Mesh, vbo: int, istride: int, first: int, n: int, p: *u8, usize: int, igbuf: int, from: int, count: int, base: int, ibase: int):
+    when TARGET != "wasm":
+        if __vk:
+            insts = 0
+            if igbuf > 0: insts = __gb[igbuf].addr + first * istride
+            else if vbo > 0: insts = __vg_buffer_addr(vbo) + first * istride
+            __vk_draw_at(sh.prog, m0.mode, __mesh_addr(m0), m0.stride, m0.count, m0.ibo, m0.index_count, p, usize, insts, istride, n)
+            return
+    m = __mesh_now(m0)
+    ivbo = vbo
+    if igbuf > 0: ivbo = __gb_gl_buffer(igbuf)
+    total = m.count
+    if m.index_count > 0: total = m.index_count
+    cnt = count
+    if cnt < 0: cnt = total - from
+    if cnt <= 0: return
+    when TARGET != "wasm":
+        if __soft:
+            nidx = 0
+            if m.index_count > 0: nidx = cnt
+            __sw_draw_mesh(sh.prog, m.mode, m.vbo, m.stride, m.count, m.ibo, nidx, p, ivbo, istride, n, first * istride, from, cnt, base, ibase)
+            return
+    glUseProgram(u32(sh.prog))
+    __bind_uniforms(sh, p)
+    if ibase != 0 and sh.ibase_loc >= 0: glUniform1i(i32(sh.ibase_loc), i32(ibase))
+    __bind_attribs(sh, m, base)
+    base_loc = sh.attribs.len()
+    if ivbo > 0:
+        glBindBuffer(GL_ARRAY_BUFFER, u32(ivbo))
+        loop i in 0.. and a in sh.iattribs:
+            loc = u32(base_loc + i)
+            glEnableVertexAttribArray(loc)
+            glVertexAttribPointer(loc, i32(a.comps), GL_FLOAT, 0, i32(sh.istride), a.offset + first * istride)
+            glVertexAttribDivisor(loc, 1)
+    ni = max(n, 1)
+    if m.index_count > 0:
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, u32(m.ibo))
+        glDrawElementsInstanced(u32(m.mode), i32(cnt), GL_UNSIGNED_INT, from * 4, i32(ni))
+    else: glDrawArraysInstanced(u32(m.mode), i32(from), i32(cnt), i32(ni))
+    if ivbo > 0:
+        loop i in [0..sh.iattribs.len()):
+            glVertexAttribDivisor(u32(base_loc + i), 0)
+            glDisableVertexAttribArray(u32(base_loc + i))
+    if ibase != 0 and sh.ibase_loc >= 0: glUniform1i(i32(sh.ibase_loc), 0)
+    glBindVertexArray(0)
+
+# texture lookup inside shader functions (maps to GLSL texture()); outside the software
+# renderer, calling it on the CPU returns white
+sample = (t: Texture, uv: vec2) -> vec4:
+    when TARGET != "wasm":
+        if __soft: return __sw_sample(t.id, uv)
+    vec4(1, 1, 1, 1)
+
+# texture lookup at a given mipmap level (maps to GLSL textureLod; the software renderer has
+# no mipmaps and samples the full-size image)
+sample_lod = (t: Texture, uv: vec2, lod: f32) -> vec4:
+    when TARGET != "wasm":
+        if __soft: return __sw_sample(t.id, uv)
+    vec4(1, 1, 1, 1)
+
+# the texel at integer coordinates p (0 to size - 1; y = 0 is the first row of the image data):
+# no filtering or wrapping (maps to GLSL texelFetch)
+texel = (t: Texture, p: ivec2) -> vec4:
+    when TARGET != "wasm":
+        if __soft: return __sw_texel(t.id, int(p.x), int(p.y))
+    vec4(1, 1, 1, 1)
+
+# a texture's size in texels (maps to GLSL textureSize)
+texture_size = (t: Texture) -> ivec2: ivec2(i32(t.width), i32(t.height))
+
+# in a fragment shader: drop this fragment (no color, no depth), e.g. for alpha-tested leaves:
+# `if c.a < 0.5: discard()`. The rest of the function still runs on the CPU; its result is unused.
+discard = ():
+    when TARGET != "wasm":
+        if __sw_tls != null: __sw_tls[__tid() * 8 + 2] = 1
+
+# in a vertex shader: the index of the vertex being shaded (GLSL gl_VertexID) and of the
+# instance (gl_InstanceID: 0 for draw, the index into the instances for draw_instanced)
+vertex_id = () -> int:
+    when TARGET != "wasm":
+        if __sw_tls != null: return __sw_tls[__tid() * 8]
+    0
+
+instance_id = () -> int:
+    when TARGET != "wasm":
+        if __sw_tls != null: return __sw_tls[__tid() * 8 + 1]
+    0
+
+# in a fragment shader: how much x changes from one pixel to the next (GLSL fwidth), e.g. for
+# edges that stay sharp at any size; 0 on the CPU
+fwidth = (x: f32) -> f32: 0.0
+
+fract = (v: vec2) -> vec2: v - floor(v)
+step = (edge: f32, x: f32) -> f32:
+    if x < edge: return 0.0
+    1.0

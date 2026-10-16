@@ -1,0 +1,866 @@
+# Sloppy core runtime: memory, refcounted objects, arrays, strings.
+# Everything here is called by compiler-generated code. Heap objects (arrays, strings)
+# share one layout: [rc: int][len: int][cap: int][data...]. rc < 0 means immortal.
+
+when TARGET == "wasm":
+    extern __wasm_grow = (pages: int) -> int
+    extern __wasm_write = (fd: int, p: *u8, n: int)
+    extern __wasm_exit = (code: int)
+    extern __wasm_now = () -> f64
+    extern __wasm_env = (name: *u8, n: int, out: *u8, cap: int) -> int
+    # files: in a web page, the page's own files (sloppy.files); under node, the real ones
+    extern __wasm_read_file = (path: *u8, n: int, out: *u8, cap: int) -> int
+    extern __wasm_write_file = (path: *u8, n: int, p: *u8, len: int) -> int
+    extern __wasm_list_dir = (path: *u8, n: int, out: *u8, cap: int) -> int
+    # a page's file offered to the browser as a download, under a name (none: the path's last part)
+    extern __wasm_download = (path: *u8, n: int, name: *u8, nn: int) -> int
+    # the page's address, without its ?query and #part
+    extern __wasm_page_url = (out: *u8, cap: int) -> int
+    extern __wasm_args = (out: *u8, cap: int) -> int
+    # standard input: under node, the real one; in a page, a box that asks (prompt), showing what
+    # the program printed last
+    extern __wasm_read_stdin = (p: *u8, n: int) -> int
+    # how long the page has been running without a break, in milliseconds (0: not told, as under node)
+    extern __wasm_busy = () -> f64
+
+# ---------------- threads (see lib/std/thread.jo) ----------------
+# Worker threads run on stacks carved out of one reserved region, so a thread's index can be
+# derived from its stack pointer: index 0 is the main thread. While a parallel job runs,
+# reference counts are updated with atomic instructions.
+const __MAX_THREADS = 64
+const __TSTACK_SHIFT = 23              # 8 MB per worker stack
+__tstack_base: *u8 = null
+__mt_active = false                   # a parallel job is running: refcounts are atomic
+
+# Loops the compiler vectorized run 256-bit instructions where the processor has AVX2, else
+# 128-bit ones (every x86-64 has SSE2): the results are the same. SLOPPY_NO_AVX=1 forces the
+# second kind (to compare, or to test them).
+__cpu_avx2 = __cpu_detect()
+__cpu_detect = () -> bool:
+    r = false
+    when TARGET != "wasm":
+        r = __cpu_features() & 1 != 0
+        if r and env("SLOPPY_NO_AVX") != none: r = false
+    r
+
+__tid = () -> int:
+    if __tstack_base == null: return 0
+    sp = __stack_ptr()
+    if sp < __tstack_base or sp >= __tstack_base + (__MAX_THREADS << __TSTACK_SHIFT): return 0
+    ((sp - __tstack_base) >> __TSTACK_SHIFT) + 1
+
+# ---------------- low level memory ----------------
+# per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
+# large blocks freed for reuse (a list), the bytes in that list]
+const __TS_WORDS = 72
+const __TS_BIG = 67
+const __BIG_KEEP = 64 << 20            # (native: at most this much is kept; a web page keeps all)
+__tstate: *int = null
+# (threads C made, which call @cabi functions: one more state, which they take turns at, by
+# __ts_lock; told apart by their stacks, which are neither the main thread's nor the workers')
+__ts_foreign: *int = null
+__ts_lock = 0
+__main_sp = 0
+__c_threads = false             # (a @cabi function has been called: from then on, by stack)
+
+__ts = () -> *int:
+    if __tstate == null: __ts_init()
+    if __c_threads: return __ts_by_stack()
+    __tstate + __tid() * __TS_WORDS
+
+@noinline
+__ts_by_stack = () -> *int:
+    when TARGET == "wasm":
+        return __tstate
+    else:
+        sp = __stack_ptr()
+        if __tstack_base != null and sp >= __tstack_base and sp < __tstack_base + (__MAX_THREADS << __TSTACK_SHIFT):
+            return __tstate + (((sp - __tstack_base) >> __TSTACK_SHIFT) + 1) * __TS_WORDS
+        a = sp as int
+        # (the main thread's stack: from where it was when the program began, down by up to 120 MB)
+        if a <= __main_sp + 65536 and a > __main_sp - (120 << 20): return __tstate
+        __ts_foreign
+
+__ts_init = ():
+    __tstate = __os_pages((__MAX_THREADS + 2) * __TS_WORDS * 8) as *int
+    __ts_foreign = __tstate + (__MAX_THREADS + 1) * __TS_WORDS
+    when TARGET != "wasm":
+        __main_sp = __stack_ptr() as int
+
+# number of live heap allocations (useful for leak tests)
+alloc_count = () -> int:
+    if __tstate == null: return 0
+    n = 0
+    loop t in [0..__MAX_THREADS + 1): n += __tstate[t * __TS_WORDS + 2]
+    n
+
+__os_pages = (size: int) -> *u8:
+    when TARGET == "wasm":
+        pages = (size + 65535) / 65536
+        p = __wasm_grow(pages)
+        if p < 0: __out_of_memory()
+        return (p * 65536) as *u8
+    else:
+        p = __os_raw_pages(size)
+        __os_list_add(p, size)
+        return p
+
+__os_free_pages = (p: *u8, size: int):
+    when TARGET != "wasm":
+        if __os_list_remove(p): return
+        __os_raw_free(p, size)
+
+# (pages not in the list below)
+__os_raw_pages = (size: int) -> *u8:
+    when TARGET == "windows":
+        return __w32_pages(size)
+    else:
+        p = syscall(9, 0, size, 3, 0x22, -1, 0)
+        if p < 0 and p > -4096: __out_of_memory()
+        # big regions: ask for transparent huge pages (far fewer page faults)
+        if size >= 2 << 20: syscall(28, p, size, 14)
+        return p as *u8
+
+__os_raw_free = (p: *u8, size: int):
+    when TARGET == "windows":
+        __w32_free_pages(p)
+    else when TARGET != "wasm":
+        syscall(11, p, size)
+
+# The memory a native program has from the system is listed, so that all of it can be copied
+# and put back (lib/std/snapshot.jo): [count, capacity, then the address and size of each]. While
+# a copy is held (__os_hold > 0), pages given back stay, their size negated: putting the copy
+# back may need them.
+__os_list: *int = null
+__os_hold = 0
+__os_list_lock = 0
+
+__os_list_add = (p: *u8, size: int):
+    lk = &__os_list_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    l = __os_list
+    if l == null or l[0] == l[1]:
+        cap = 1024
+        if l != null: cap = l[1] * 2
+        nl = __os_raw_pages(16 + cap * 16) as *int
+        nl[1] = cap
+        if l != null:
+            nl[0] = l[0]
+            mem_copy((nl + 2) as *u8, (l + 2) as *u8, l[0] * 16)
+            # (a held copy may still name the old list: it stays then)
+            if __os_hold == 0: __os_raw_free(l as *u8, 16 + l[1] * 16)
+        __os_list = nl
+        l = nl
+    n = l[0]
+    l[2 + 2 * n] = p as int
+    l[3 + 2 * n] = size
+    l[0] = n + 1
+    __atomic_cas(lk, 1, 0)
+
+# take p off the list; false if it is kept instead (a copy is held)
+__os_list_remove = (p: *u8) -> bool:
+    lk = &__os_list_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    l = __os_list
+    kept = false
+    if l != null:
+        i = 0
+        loop i < l[0]:
+            if l[2 + 2 * i] == p as int:
+                if __os_hold > 0:
+                    if l[3 + 2 * i] > 0: l[3 + 2 * i] = -l[3 + 2 * i]
+                    kept = true
+                else:
+                    n = l[0] - 1
+                    l[2 + 2 * i] = l[2 + 2 * n]
+                    l[3 + 2 * i] = l[3 + 2 * n]
+                    l[0] = n
+                break
+            i += 1
+    __atomic_cas(lk, 1, 0)
+    kept
+
+__out_of_memory = ():
+    __write_err("fatal: out of memory\n")
+    __exit(1)
+
+# smallest c with 32 << c >= n (the exponent of float(n - 1) is floor(log2(n - 1)))
+__size_class = (n: int) -> int:
+    if n <= 32: return 0
+    int((f64(n - 1) as u64) >> 52) - 1027
+
+# Allocate `size` zeroed bytes (16-byte aligned).
+__alloc = (size: int) -> *u8: __alloc_z(size, true)
+
+# Allocate `size` bytes (16-byte aligned) the caller writes before reading: what a block held
+# before it was freed is still there.
+__alloc_raw = (size: int) -> *u8: __alloc_z(size, false)
+
+# (the usual case first, small enough for release builds to inline: a block of the size class
+# freed before; the rest out of line)
+__alloc_z = (size: int, zero: bool) -> *u8:
+    n = size + 16
+    t = __ts()
+    if t == __ts_foreign: return __alloc_foreign(size, zero)
+    if n <= 262144:
+        c = __size_class(n)
+        lists = (t + 3) as **u8
+        head = lists[c]
+        if head != null:
+            t[2] += 1
+            lists[c] = (head as **u8)[0]
+            if zero: mem_set(head + 16, 0, size)
+            (head as *int)[0] = c
+            return head + 16
+    __alloc_slow(size, zero)
+
+# (a thread C made: the shared state, one thread at a time)
+@noinline
+__alloc_foreign = (size: int, zero: bool) -> *u8:
+    lk = &__ts_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    t = __ts_foreign
+    n = size + 16
+    r: *u8 = null
+    if n <= 262144:
+        c = __size_class(n)
+        lists = (t + 3) as **u8
+        head = lists[c]
+        if head != null:
+            t[2] += 1
+            lists[c] = (head as **u8)[0]
+            if zero: mem_set(head + 16, 0, size)
+            (head as *int)[0] = c
+            r = head + 16
+    if r == null: r = __alloc_slow(size, zero)
+    __atomic_cas(lk, 1, 0)
+    r
+
+__alloc_slow = (size: int, zero: bool) -> *u8:
+    t = __ts()
+    t[2] += 1
+    n = size + 16
+    if n > 262144:
+        total = (n + 65535) & ~65535
+        h = __big_take(t, total)
+        if h != null:
+            if zero: mem_set((h as *u8) + 16, 0, size)
+            return (h as *u8) + 16
+        h = __os_pages(total) as *int
+        h[0] = total
+        h[1] = -1
+        return (h as *u8) + 16
+    c = __size_class(n)
+    csize = 32 << c
+    cur = t[0] as *u8
+    if cur == null or cur + csize > t[1] as *u8:
+        chunk = 4 << 20
+        cur = __os_pages(chunk)
+        t[1] = (cur + chunk) as int
+    t[0] = (cur + csize) as int
+    (cur as *int)[0] = c
+    cur + 16
+
+__free = (p: *u8):
+    if p == null: return
+    h = (p - 16) as *int
+    t = __ts()
+    if t == __ts_foreign:
+        __free_foreign(h)
+        return
+    if h[1] == -1:
+        __free_big(h)
+        return
+    t[2] -= 1
+    c = h[0]
+    lists = (t + 3) as **u8
+    (h as **u8)[0] = lists[c]
+    lists[c] = h as *u8
+
+@noinline
+__free_foreign = (h: *int):
+    lk = &__ts_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    if h[1] == -1:
+        __free_big(h)
+        __atomic_cas(lk, 1, 0)
+        return
+    t = __ts_foreign
+    t[2] -= 1
+    c = h[0]
+    lists = (t + 3) as **u8
+    (h as **u8)[0] = lists[c]
+    lists[c] = h as *u8
+    __atomic_cas(lk, 1, 0)
+
+__free_big = (h: *int):
+    t = __ts()
+    t[2] -= 1
+    # (kept for the next large allocation: no fresh pages to fault in, and wasm memory is
+    # never given back anyway)
+    when TARGET == "wasm": __big_keep(t, h)
+    else:
+        if t[__TS_BIG + 1] + h[0] <= __BIG_KEEP: __big_keep(t, h)
+        else: __os_free_pages(h as *u8, h[0])
+
+__big_keep = (t: *int, h: *int):
+    h[2] = t[__TS_BIG]
+    t[__TS_BIG] = h as int
+    t[__TS_BIG + 1] += h[0]
+
+# the smallest kept large block of at least `total` bytes (native: at most twice that), or null
+__big_take = (t: *int, total: int) -> *int:
+    best: *int = null
+    prev: *int = null
+    best_prev: *int = null
+    h = t[__TS_BIG] as *int
+    loop h != null:
+        ok = h[0] >= total
+        when TARGET != "wasm": ok = ok and h[0] <= 2 * total
+        if ok and (best == null or h[0] < best[0]):
+            best = h
+            best_prev = prev
+        prev = h
+        h = h[2] as *int
+    if best == null: return null
+    if best_prev == null: t[__TS_BIG] = best[2]
+    else: best_prev[2] = best[2]
+    t[__TS_BIG + 1] -= best[0]
+    best
+
+# Grow an allocation to at least `size` bytes, keeping the first `used` bytes. Large blocks are
+# remapped in place (no copy); small ones stay put if their size class has room.
+__grow_alloc = (p: *u8, used: int, size: int) -> *u8:
+    h = (p - 16) as *int
+    if h[1] == -1: return __grow_big(p, used, size)
+    if size + 16 <= 32 << h[0]: return p
+    q = __alloc_raw(size)
+    mem_copy(q, p, used)
+    __free(p)
+    q
+
+# (large blocks are remapped in place: no copy)
+__grow_big = (p: *u8, used: int, size: int) -> *u8:
+    h = (p - 16) as *int
+    total = (size + 16 + 65535) & ~65535
+    if total <= h[0]: return p
+    when TARGET == "linux":
+        # (not while a copy of memory is held: the old pages must stay where they are)
+        if __os_hold == 0:
+            q = syscall(25, h, h[0], total, 1, 0)
+            if q < 0 and q > -4096: __out_of_memory()
+            if total >= 2 << 20: syscall(28, q, total, 14)       # MADV_HUGEPAGE
+            __os_list_remove(h as *u8)
+            __os_list_add(q as *u8, total)
+            (q as *int)[0] = total
+            return (q as *u8) + 16
+    r = __alloc_raw(size)
+    mem_copy(r, p, used)
+    __free(p)
+    r
+
+# usable bytes of an allocation
+__alloc_size = (p: *u8) -> int:
+    h = (p - 16) as *int
+    if h[1] == -1: return h[0] - 16
+    (32 << h[0]) - 16
+
+__free_obj = (p: *u8):
+    __free(p)
+
+__rc_inc = (p: *u8):
+    if p == null: return
+    h = p as *int
+    if h[0] > 0:
+        if __mt_active: __atomic_add(h, 1)
+        else: h[0] += 1
+
+# drop one reference; true when it was the last one (the caller frees)
+__rc_dec_test = (p: *u8) -> bool:
+    if p == null: return false
+    h = p as *int
+    if h[0] <= 0: return false
+    if __mt_active: return __atomic_add(h, -1) == 1
+    h[0] -= 1
+    h[0] == 0
+
+# release a plain object (string or array of plain values; one call at each place, not two)
+@noinline
+__rc_dec = (p: *u8):
+    if __rc_dec_test(p): __free(p)
+
+__mem_move = (dst: *u8, src: *u8, n: int):
+    if n <= 0: return
+    if dst < src or dst >= src + n:
+        mem_copy(dst, src, n)
+        return
+    i = n - 1
+    loop i >= 0:
+        dst[i] = src[i]
+        i -= 1
+
+__mem_eq = (a: *u8, b: *u8, n: int) -> bool:
+    i = 0
+    loop i + 8 <= n:
+        if ((a + i) as *int)[0] != ((b + i) as *int)[0]: return false
+        i += 8
+    loop i < n:
+        if a[i] != b[i]: return false
+        i += 1
+    true
+
+# ---------------- process ----------------
+__write_fd = (fd: int, p: *u8, n: int):
+    when TARGET == "wasm":
+        __wasm_write(fd, p, n)
+    else when TARGET == "windows":
+        __w32_write(fd, p, n)
+    else:
+        off = 0
+        loop off < n:
+            r = syscall(1, fd, p + off, n - off)
+            if r <= 0: return
+            off += r
+
+# read up to n bytes (0: the end, < 0: an error)
+# (debug web builds: the program's loops count this down, and at 0 the watchdog asks how long the
+# page has been running without a break; past 5 seconds, a loop that never ends is stopped)
+__loop_budget = 1048576
+__loop_watchdog = ():
+    __loop_budget = 1048576
+    when TARGET == "wasm":
+        if __wasm_busy() > 5000.0: panic("this has run for 5 seconds without stopping, in a web page: a loop that never ends? (the page stops it here; what it printed is above)")
+
+__read_fd = (fd: int, p: *u8, n: int) -> int:
+    when TARGET == "wasm":
+        if fd == 0: return __wasm_read_stdin(p, n)
+        return -1
+    else when TARGET == "windows":
+        return __w32_read(fd, p, n)
+    else:
+        syscall(0, fd, p, n)
+
+# Standard output: straight to a terminal (each print at once, one write), collected in a buffer
+# when it goes to a file or a pipe (much faster for many lines). The buffer is emptied before
+# anything goes to standard error (so the two keep their order), before reading input, once a
+# frame in a game, when a program sleeps or ends, and when it fills.
+__obuf: *u8 = null
+__olen = 0
+__omode = 0                     # 0: not known yet, 1: a terminal (or the web), 2: buffered
+__out_direct = false            # (threads running: each print written at once)
+const __OCAP = 65536
+
+@noinline
+__out = (p: *u8, n: int, line_end: bool):
+    # (the web's console takes lines itself; the C bootstrap's programs end without a flush)
+    when TARGET == "wasm" or BOOTSTRAP:
+        __write_fd(1, p, n)
+        return
+    else:
+        if __omode == 0:
+            __omode = 2
+            if __stdout_tty(): __omode = 1
+        if __out_direct:
+            __write_fd(1, p, n)
+            return
+        if __obuf == null: __obuf = __os_raw_pages(__OCAP)          # (outside what alloc_count counts)
+        if __olen + n > __OCAP: __out_flush()
+        if n >= __OCAP:
+            __write_fd(1, p, n)
+            return
+        mem_copy(__obuf + __olen, p, n)
+        __olen += n
+        if __omode == 1 and line_end: __out_flush()
+
+@noinline
+__out_flush = ():
+    when TARGET != "wasm":
+        if __olen > 0:
+            n = __olen
+            __olen = 0
+            __write_fd(1, __obuf, n)
+
+__stdout_tty = () -> bool:
+    when TARGET == "windows":
+        return __w32_stdout_console()
+    else when TARGET == "macos":
+        return __mac_isatty(i32(1)) == 1
+    else when TARGET == "wasm":
+        return true
+    else:
+        # (TCGETS writes what it knows of the terminal: into the buffer, not wanted yet)
+        if __obuf == null: __obuf = __os_raw_pages(__OCAP)
+        syscall(16, 1, 0x5401, __obuf) == 0
+
+@noinline
+__write_err = (s: str):
+    __out_flush()
+    __write_fd(2, data(s), len(s))
+
+# (a leaf, which inlining counts on: exit() and panics write out what print collected first)
+__exit = (code: int):
+    when TARGET == "wasm":
+        __wasm_exit(code)
+    else when TARGET == "windows":
+        __w32_exit(code)
+    else:
+        syscall(231, code)
+
+__panic = (msg: str):
+    # (in a test of `sloppy test`: its failure, told under its name)
+    if __test_child:
+        __out_flush()
+        __write_fd(1, data("FAILED\n"), 7)
+        __write_err("    ")
+    else: __write_err("panic: ")
+    __write_err(msg)
+    __write_err("\n")
+    when not BOOTSTRAP:
+        # (Windows: a debugger attached stops here: gdb and lldb have `break __panic`)
+        when TARGET == "windows":
+            __w32_debug_break()
+        __backtrace()
+        # (the interactive prompt: back to it, lib/std/repl.jo)
+        __repl_unwind()
+    # (under sloppy watch, a game pauses instead: lib/std/watch.jo)
+    when WATCH:
+        __watch_panic(msg)
+    __exit(101)
+
+__panic_bounds = (i: int, n: int, loc: str):
+    if i < 0: __panic("{loc}: index {i} out of bounds (length {n}); indexes count from 0 (the last element is xs[end], or xs.last())")
+    if n == 0: __panic("{loc}: index {i} out of bounds (length 0: it is empty)")
+    if i == n: __panic("{loc}: index {i} out of bounds (length {n}: the last is index {n - 1}, as indexes count from 0)")
+    __panic("{loc}: index {i} out of bounds (length {n})")
+
+# (shown as written inclusively, [a..b]: s[1..9] is not reported as [1..10))
+__panic_slice = (what: str, a: int, b: int, n: int):
+    if a < 0: __panic("{what} [{a}..{b - 1}] out of bounds: indexes count from 0")
+    if a > b: __panic("{what} [{a}..{b - 1}] out of bounds: it starts after it ends")
+    if n == 0: __panic("{what} [{a}..{b - 1}] out of bounds (length 0: it is empty)")
+    __panic("{what} [{a}..{b - 1}] out of bounds (length {n}: the last index is {n - 1})")
+
+# (Key(n): the number of a variant of a simple enum of n of them)
+__enum_from = (i: int, n: int, name: str) -> int:
+    if i < 0 or i >= n: __panic("{name}({i}): there is no variant number {i} ({name}'s are 0 to {n - 1})")
+    i
+
+__panic_unwrap = (loc: str):
+    __panic("{loc}: `!` found no value here (none): it was missing, as to_int of text that is not a number gives (`?? default` says what to use then)")
+
+__panic_nofn = (loc: str, what: str):
+    __panic("{loc}: {what} was never given a function to call: a field or variable of a function type starts with none (give it one first: `{what} = (): ...`)")
+
+__panic_narrow = (loc: str):
+    __panic("{loc}: this variable no longer holds the type `is` found (a closure changed it)")
+
+__div_zero = (loc: str):
+    __panic("{loc}: division by zero")
+
+__assert_fail = (msg: str, loc: str):
+    __panic("{loc}: {msg}")
+
+__print_str = (s: str):
+    __out(data(s), len(s), false)
+    __out(data("\n"), 1, true)
+
+# ---------------- arrays ----------------
+# (an array's elements past its length are not zeroed: whatever makes the array longer writes
+# them first)
+__arr_new_raw = (cap: int, es: int) -> *u8:
+    p = __alloc_raw(24 + cap * es)
+    h = p as *int
+    h[0] = 1
+    h[1] = 0
+    h[2] = cap
+    p
+
+# n zeroed elements
+__arr_repeat = (n: int, es: int) -> *u8:
+    if n <= 0: return null
+    p = __arr_new_raw(n, es)
+    (p as *int)[1] = n
+    mem_set(p + 24, 0, n * es)
+    p
+
+# n elements the caller writes
+__arr_filled = (n: int, es: int) -> *u8:
+    if n <= 0: return null
+    p = __arr_new_raw(n, es)
+    (p as *int)[1] = n
+    p
+
+# copy a shared array (caller retains elements); drops one reference to the original
+# SLOPPY_COPIES=1 (or a number of bytes, 65536 by default): each copy of an array that size or
+# bigger made because it was shared when it changed, told with where it was made (the first 50)
+__copies_min = -1
+__copies_told = 0
+
+__arr_clone = (p: *u8, es: int) -> *u8:
+    h = p as *int
+    n = h[1]
+    if n * es >= 65536 and __copies_min != 0:
+        when not BOOTSTRAP:
+            __copy_report(n, es)
+    q = __arr_new_raw(n, es)
+    (q as *int)[1] = n
+    mem_copy(q + 24, p + 24, n * es)
+    if h[0] > 0:
+        if __mt_active: __atomic_add(h, -1)
+        else: h[0] -= 1
+    q
+
+__copy_report = (n: int, es: int):
+    when not BOOTSTRAP:
+        if __copies_min < 0:
+            __copies_min = 0
+            if let v = env("SLOPPY_COPIES"):
+                __copies_min = 65536
+                if let b = to_int(v):
+                    if b > 1: __copies_min = b
+        if __copies_min == 0 or n * es < __copies_min or __copies_told >= 50: return
+        __copies_told += 1
+        __write_err("copied an array of {n} elements ({n * es / 1024} KB): it was shared (assigned or passed on) and then changed\n")
+        __backtrace()
+
+__arr_make_unique = (slot: **u8, es: int):
+    p = slot[0]
+    if p != null and (p as *int)[0] != 1: slot[0] = __arr_clone(p, es)
+
+# grow a unique array so it can hold `need` elements
+__arr_grow = (slot: **u8, es: int, need: int):
+    p = slot[0]
+    if p == null:
+        cap = need
+        if cap < 4: cap = 4
+        slot[0] = __arr_new_raw(cap, es)
+        return
+    h = p as *int
+    if h[2] >= need: return
+    cap = h[2] * 2
+    if cap < need: cap = need
+    q = __grow_alloc(p, 24 + h[1] * es, 24 + cap * es)
+    if es > 0: cap = (__alloc_size(q) - 24) / es
+    (q as *int)[2] = cap
+    slot[0] = q
+
+__arr_push_slot = (slot: **u8, es: int) -> *u8:
+    p = slot[0]
+    n = 0
+    if p != null: n = (p as *int)[1]
+    __arr_grow(slot, es, n + 1)
+    p = slot[0]
+    (p as *int)[1] = n + 1
+    p + 24 + n * es
+
+# append the elements of src (a byte copy); returns the address of the first new element
+__arr_extend = (slot: **u8, src: *u8, es: int) -> *u8:
+    n = 0
+    if src != null: n = (src as *int)[1]
+    old = 0
+    if slot[0] != null: old = (slot[0] as *int)[1]
+    if n == 0:
+        if slot[0] == null: return null
+        return slot[0] + 24 + old * es
+    __arr_grow(slot, es, old + n)
+    p = slot[0]
+    mem_copy(p + 24 + old * es, src + 24, n * es)
+    (p as *int)[1] = old + n
+    p + 24 + old * es
+
+__arr_reserve = (slot: **u8, es: int, n: int):
+    if n > 0: __arr_grow(slot, es, n)
+
+__arr_insert_slot = (slot: **u8, es: int, i: int) -> *u8:
+    p = slot[0]
+    n = 0
+    if p != null: n = (p as *int)[1]
+    if i < 0 or i > n: __panic("insert index {i} out of bounds (length {n})")
+    __arr_grow(slot, es, n + 1)
+    p = slot[0]
+    __mem_move(p + 24 + (i + 1) * es, p + 24 + i * es, (n - i) * es)
+    (p as *int)[1] = n + 1
+    mem_set(p + 24 + i * es, 0, es)
+    p + 24 + i * es
+
+__arr_remove_slot = (slot: **u8, es: int, i: int):
+    p = slot[0]
+    n = (p as *int)[1]
+    __mem_move(p + 24 + i * es, p + 24 + (i + 1) * es, (n - i - 1) * es)
+    (p as *int)[1] = n - 1
+    mem_set(p + 24 + (n - 1) * es, 0, es)
+
+__arr_resize = (slot: **u8, es: int, n: int):
+    if n < 0: __panic("resize to a negative length")
+    p = slot[0]
+    old = 0
+    if p != null: old = (p as *int)[1]
+    if n > old:
+        __arr_grow(slot, es, n)
+        p = slot[0]
+        mem_set(p + 24 + old * es, 0, (n - old) * es)
+    if slot[0] != null: (slot[0] as *int)[1] = n
+
+__arr_slice = (p: *u8, a: int, b: int, es: int) -> *u8:
+    n = 0
+    if p != null: n = (p as *int)[1]
+    if a < 0 or b > n or a > b: __panic_slice("slice", a, b, n)
+    if a == b: return null
+    q = __arr_new_raw(b - a, es)
+    (q as *int)[1] = b - a
+    mem_copy(q + 24, p + 24 + a * es, (b - a) * es)
+    q
+
+__arr_concat = (a: *u8, b: *u8, es: int) -> *u8:
+    na = 0
+    nb = 0
+    if a != null: na = (a as *int)[1]
+    if b != null: nb = (b as *int)[1]
+    if na + nb == 0: return null
+    q = __arr_new_raw(na + nb, es)
+    (q as *int)[1] = na + nb
+    if na > 0: mem_copy(q + 24, a + 24, na * es)
+    if nb > 0: mem_copy(q + 24 + na * es, b + 24, nb * es)
+    q
+
+# ---------------- strings ----------------
+__str_new = (n: int) -> *u8:
+    p = __alloc(24 + n + 1)
+    h = p as *int
+    h[0] = 1
+    h[1] = n
+    h[2] = n + 1
+    p
+
+__str_concat = (a: str, b: str) -> str:
+    la = len(a)
+    lb = len(b)
+    if la == 0: return b
+    if lb == 0: return a
+    p = __str_new(la + lb)
+    mem_copy(p + 24, data(a), la)
+    mem_copy(p + 24 + la, data(b), lb)
+    p as str
+
+__str_eq = (a: str, b: str) -> bool:
+    n = len(a)
+    if n != len(b): return false
+    if n == 0: return true
+    pa = data(a)
+    pb = data(b)
+    if pa == pb: return true
+    __mem_eq(pa, pb, n)
+
+__str_cmp = (a: str, b: str) -> int:
+    la = len(a)
+    lb = len(b)
+    n = la
+    if lb < n: n = lb
+    pa = data(a)
+    pb = data(b)
+    i = 0
+    loop i < n:
+        ca = pa[i]
+        cb = pb[i]
+        if ca != cb:
+            if ca < cb: return -1
+            return 1
+        i += 1
+    if la < lb: return -1
+    if la > lb: return 1
+    0
+
+__str_slice = (s: str, a: int, b: int) -> str:
+    n = len(s)
+    if a < 0 or b > n or a > b: __panic_slice("string slice", a, b, n)
+    if a == 0 and b == n: return s
+    if a == b: return ""
+    p = __str_new(b - a)
+    mem_copy(p + 24, data(s) + a, b - a)
+    p as str
+
+__str_append = (slot: *str, t: str):
+    lt = len(t)
+    if lt == 0: return
+    ps = slot as **u8
+    p = ps[0]
+    if p == null:
+        slot[0] = t
+        return
+    h = p as *int
+    n = h[1]
+    if h[0] == 1 and h[2] > n + lt:
+        mem_copy(p + 24 + n, data(t), lt)
+        h[1] = n + lt
+        p[24 + n + lt] = 0
+        return
+    cap = (n + lt) * 2 + 1
+    q = __alloc(24 + cap)
+    qh = q as *int
+    qh[0] = 1
+    qh[1] = n + lt
+    qh[2] = cap
+    mem_copy(q + 24, p + 24, n)
+    mem_copy(q + 24 + n, data(t), lt)
+    __rc_dec(p)
+    ps[0] = q
+
+__str_from_bytes = (b: u8[]) -> str:
+    p = b as *u8
+    if p == null: return ""
+    h = p as *int
+    n = h[1]
+    if h[2] > n and h[0] == 1:
+        p[24 + n] = 0
+        __rc_inc(p)
+        return p as str
+    q = __str_new(n)
+    mem_copy(q + 24, p + 24, n)
+    q as str
+
+__str_hash = (s: str) -> u64: __hash_bytes(data(s), len(s))
+
+__hash_bytes = (p: *u8, n: int) -> u64:
+    h: u64 = 14695981039346656037
+    i = 0
+    loop i < n:
+        h = ((h xor u64(p[i]))) * 1099511628211
+        i += 1
+    (h xor (h >> 29))
+
+# ---------------- string building ----------------
+__buf_reserve = (buf: mut u8[], extra: int) -> *u8:
+    slot = &buf as **u8
+    __arr_make_unique(slot, 1)
+    n = len(buf)
+    __arr_grow(slot, 1, n + extra + 1)
+    slot[0]
+
+__buf_append_raw = (buf: mut u8[], src: *u8, n: int):
+    if n <= 0: return
+    old = len(buf)
+    p = __buf_reserve(buf, n)
+    mem_copy(p + 24 + old, src, n)
+    (p as *int)[1] = old + n
+
+__buf_byte = (buf: mut u8[], b: int):
+    old = len(buf)
+    p = __buf_reserve(buf, 1)
+    p[24 + old] = u8(b & 255)
+    (p as *int)[1] = old + 1
+
+__buf_append_str = (buf: mut u8[], s: str):
+    __buf_append_raw(buf, data(s), len(s))
+
+# take ownership of a byte buffer and turn it into a string
+__buf_finish = (b: *u8) -> str:
+    if b == null: return ""
+    h = b as *int
+    n = h[1]
+    if h[2] > n:
+        b[24 + n] = 0
+        return b as str
+    q = __str_new(n)
+    mem_copy(q + 24, b + 24, n)
+    __free(b)
+    q as str

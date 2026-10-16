@@ -1,0 +1,449 @@
+# sloppy fmt: Sloppy code laid out one way. Only spaces change: each block indented four spaces
+# further than the one it is in (lines continued inside brackets move with their statement), one
+# space around binary operators and after commas and colons, none inside brackets or around `.`
+# and `..`, no spaces at the ends of lines, at most two blank lines in a row, one line break at
+# the end. Line breaks, strings and comments stay as they are (a comment after code keeps its
+# column where it can). The result must lex to the same tokens as the original, or the file is
+# left alone.
+
+use 'util.jo'
+use 'lex.jo'
+use 'ide.jo'
+
+# classes of the pieces of a line
+const FK_WORD = 0       # a name, keyword or number
+const FK_STR = 1
+const FK_OPEN = 2
+const FK_CLOSE = 3
+const FK_COMMA = 4      # , ;
+const FK_COLON = 5
+const FK_DOT = 6
+const FK_DOTDOT = 7     # .. ...
+const FK_OP = 8
+const FK_POST = 9       # ? ! after a value
+const FK_AT = 10
+const FK_COMMENT = 11
+const FK_NL = 12        # a line break (s: where the next line's indentation starts)
+const FK_CONT = 13      # \ at the end of a line
+
+struct FTok:
+    k: int
+    s: int
+    e: int
+    unary = false       # (an operator before its operand: - * & ~)
+    sep = false         # (a sign starting another element of an array: [a -b])
+    keep = false        # the space before it as it was (0 or 1): where the parser asks about it
+
+f_src = ""
+f_toks: FTok[]
+
+# operators of two or three characters, longest first
+F_OPS = ["<<=", ">>=", "->", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>", "??", "**"]
+
+f_scan = ():
+    s = f_src
+    n = len(s)
+    f_toks = []
+    i = 0
+    loop i < n:
+        c = s[i]
+        if c == ' ' or c == '\t' or c == '\r':
+            i += 1
+            continue
+        if c == '\n':
+            f_toks.push(FTok(FK_NL, i + 1, i + 1))
+            i += 1
+            continue
+        if c == '\\' and i + 1 < n and (s[i + 1] == '\n' or s[i + 1] == '\r'):
+            f_toks.push(FTok(FK_CONT, i, i + 1))
+            i += 1
+            continue
+        if c == '#':
+            e = i
+            loop e < n and s[e] != '\n': e += 1
+            f_toks.push(FTok(FK_COMMENT, i, e))
+            i = e
+            continue
+        if ide_str_start(s, i):
+            e = ide_skip_str(s, i)
+            f_toks.push(FTok(FK_STR, i, e))
+            i = e
+            continue
+        if c >= '0' and c <= '9':
+            e = i + 1
+            if c == '0' and e < n and (s[e] == 'x' or s[e] == 'X' or s[e] == 'b' or s[e] == 'B' or s[e] == 'o' or s[e] == 'O'):
+                e += 1
+                loop e < n and (is_ident_char(s[e])): e += 1
+            else:
+                loop e < n and (s[e] >= '0' and s[e] <= '9' or s[e] == '_'): e += 1
+                if e + 1 < n and s[e] == '.' and s[e + 1] >= '0' and s[e + 1] <= '9':
+                    e += 1
+                    loop e < n and (s[e] >= '0' and s[e] <= '9' or s[e] == '_'): e += 1
+                if e + 1 < n and (s[e] == 'e' or s[e] == 'E') and (s[e + 1] >= '0' and s[e + 1] <= '9' or (s[e + 1] == '-' or s[e + 1] == '+') and e + 2 < n and s[e + 2] >= '0' and s[e + 2] <= '9'):
+                    e += 2
+                    loop e < n and s[e] >= '0' and s[e] <= '9': e += 1
+                loop e < n and is_ident_char(s[e]): e += 1     # (a unit)
+            f_toks.push(FTok(FK_WORD, i, e))
+            i = e
+            continue
+        if is_ident_start(c):
+            e = i + 1
+            loop e < n and is_ident_char(s[e]): e += 1
+            w = s[i..e)
+            if (w == "and" or w == "or" or w == "xor") and e < n and s[e] == '=' and (e + 1 >= n or s[e + 1] != '='):
+                # (and=, or=, xor=: compound assignments, only without a space)
+                f_toks.push(FTok(FK_OP, i, e + 1))
+                i = e + 1
+                continue
+            f_toks.push(FTok(FK_WORD, i, e))
+            i = e
+            continue
+        if c == '[' and i + 2 < n and s[i + 1] == ']' and s[i + 2] == '=' and i > 0 and s[i - 1] == '(':
+            # (the name of the operator that sets an element: ([]=))
+            f_toks.push(FTok(FK_WORD, i, i + 3))
+            i += 3
+            continue
+        k = FK_OP
+        len_ = 1
+        if c == '(' or c == '[' or c == '{{': k = FK_OPEN
+        else if c == ')' or c == ']' or c == '}}': k = FK_CLOSE
+        else if c == ',' or c == ';': k = FK_COMMA
+        else if c == ':': k = FK_COLON
+        else if c == '@': k = FK_AT
+        else if c == '.':
+            k = FK_DOT
+            if i + 1 < n and s[i + 1] == '.':
+                k = FK_DOTDOT
+                len_ = 2
+                if i + 2 < n and s[i + 2] == '.': len_ = 3
+            else if i + 1 < n and (s[i + 1] == '+' or s[i + 1] == '-' or s[i + 1] == '*' or s[i + 1] == '/' or s[i + 1] == '%' or s[i + 1] == '^' or s[i + 1] == '<' or s[i + 1] == '>' or i + 2 < n and (s[i + 1] == '=' or s[i + 1] == '!') and s[i + 2] == '='):
+                # (a dotted operator: .+ .* .== .<= ...)
+                k = FK_OP
+                len_ = 2
+                if i + 2 < n and s[i + 2] == '=' and s[i + 1] != '+' and s[i + 1] != '-' and s[i + 1] != '*' and s[i + 1] != '/' and s[i + 1] != '%' and s[i + 1] != '^': len_ = 3
+                # (xs .+= 1: the = only without a space)
+                if i + len_ < n and s[i + len_] == '=' and (i + len_ + 1 >= n or s[i + len_ + 1] != '='): len_ += 1
+        else:
+            loop o in F_OPS:
+                if i + len(o) <= n and s[i..i + len(o)) == o:
+                    len_ = len(o)
+                    break
+            if len_ == 1 and (c == '?' or c == '!'): k = FK_POST
+        f_toks.push(FTok(k, i, i + len_))
+        i += len_
+
+f_text = (t: FTok) -> str: f_src[t.s..t.e)
+
+# a keyword that is a value (an operand), not a word an operand follows
+f_value_kw = (w: str) -> bool: w == "true" or w == "false" or w == "none" or w == "null"
+f_is_kw = (w: str) -> bool: keywords.get(w) != none and not f_value_kw(w)
+
+# does an operator after t act on what comes before it (t ends a value)?
+f_ends_value = (t: FTok) -> bool:
+    if t.k == FK_WORD: return not f_is_kw(f_text(t))
+    t.k == FK_STR or t.k == FK_CLOSE or t.k == FK_POST
+
+# the spaces between a and b on a line
+f_gap = (a: FTok, b: FTok) -> int:
+    if b.keep: return min(b.s - a.e, 1)
+    if b.sep: return 1
+    if a.k == FK_OPEN or b.k == FK_CLOSE or b.k == FK_COMMA or b.k == FK_COLON: return 0
+    if a.k == FK_COMMA or a.k == FK_COLON: return 1
+    if a.k == FK_DOTDOT and b.k == FK_WORD and f_is_kw(f_text(b)): return 1       # (0.. and x in xs)
+    if a.k == FK_AT or a.k == FK_DOT or a.k == FK_DOTDOT or b.k == FK_DOTDOT: return 0
+    if a.k == FK_OP and a.unary: return 0
+    if b.k == FK_POST and f_ends_value(a): return 0
+    if b.k == FK_DOT:
+        if f_ends_value(a): return 0
+        return 1
+    if b.k == FK_OPEN and f_src[b.s] != '{{' and f_ends_value(a): return 0     # a call, an index
+    if b.k == FK_OPEN and a.k == FK_POST: return 0
+    1
+
+# mark each operator that comes before its operand (nothing comes before a statement's first token)
+f_mark_unary = ():
+    prev = -1
+    d = 0
+    arr: bool[]         # by open bracket: an array literal
+    first = true        # the first token of a line
+    cont = false        # the line before ended with \
+    loop i in [0..f_toks.len()):
+        t = f_toks[i]
+        if t.k == FK_NL:
+            first = true
+            continue
+        if t.k == FK_COMMENT: continue
+        if t.k == FK_CONT:
+            cont = true
+            continue
+        if first and d == 0 and not cont: prev = -1
+        first = false
+        cont = false
+        if t.k == FK_OP:
+            c = f_src[t.s]
+            if t.e - t.s == 1 and (c == '-' or c == '+' or c == '*' or c == '&' or c == '~') or f_text(t) == "**":
+                f_toks[i].unary = prev < 0 or not f_ends_value(f_toks[prev])
+                # (in an array, a sign with a space before it and none after starts an element)
+                if (c == '-' or c == '+') and arr.len() > 0 and arr[arr.len() - 1] and prev >= 0 and t.s > f_toks[prev].e and i + 1 < f_toks.len() and f_toks[i + 1].s == t.e:
+                    f_toks[i].unary = true
+                    f_toks[i].sep = true
+        # (whether ( or [ after a value has a space before it: a call or an index, or another element)
+        if t.k == FK_OPEN and prev >= 0 and f_ends_value(f_toks[prev]) and f_src[t.s] != '{{': f_toks[i].keep = true
+        if t.k == FK_OPEN:
+            d += 1
+            # (an array, not an index: [ not right after a value)
+            arr.push(f_src[t.s] == '[' and (prev < 0 or not f_ends_value(f_toks[prev]) or t.s > f_toks[prev].e))
+            # (a unit after a number or an array, 9.81(m/s^2), [1 2](mm): as it is written)
+            if f_src[t.s] == '(' and prev >= 0 and t.s == f_toks[prev].e and (f_toks[prev].k == FK_WORD and f_src[f_toks[prev].s] >= '0' and f_src[f_toks[prev].s] <= '9' or f_src[f_toks[prev].s] == ']'):
+                k = i + 1
+                dd = 1
+                loop k < f_toks.len() and dd > 0 and f_toks[k].k != FK_NL:
+                    if f_toks[k].k == FK_OPEN: dd += 1
+                    else if f_toks[k].k == FK_CLOSE: dd -= 1
+                    f_toks[k].keep = true
+                    k += 1
+        else if t.k == FK_CLOSE and d > 0:
+            d -= 1
+            arr.pop()
+        prev = i
+
+f_depth_at: int[]       # brackets open after each token
+
+f_depths = ():
+    f_depth_at = []
+    d = 0
+    loop t in f_toks:
+        if t.k == FK_OPEN: d += 1
+        else if t.k == FK_CLOSE and d > 0: d -= 1
+        f_depth_at.push(d)
+
+# the width of the indentation at s (tabs to the next multiple of 4)
+f_indent_width = (s: int) -> int:
+    w = 0
+    i = s
+    loop i < len(f_src):
+        c = f_src[i]
+        if c == ' ': w += 1
+        else if c == '\t': w = (w + 4) & ~3
+        else: break
+        i += 1
+    w
+
+# the indentation of the next line with code after the line break at token j (-1: none)
+f_next_indent = (j: int) -> int:
+    k = j
+    loop k < f_toks.len():
+        if f_toks[k].k == FK_NL and k + 1 < f_toks.len() and f_toks[k + 1].k != FK_NL and f_toks[k + 1].k != FK_COMMENT: return f_indent_width(f_toks[k].s)
+        k += 1
+    -1
+
+# the column (in bytes) of offset p on its line
+f_col = (p: int) -> int:
+    a = p
+    loop a > 0 and f_src[a - 1] != '\n': a -= 1
+    p - a
+
+fmt_text = (src: str) -> str:
+    f_src = src
+    f_scan()
+    f_depths()
+    f_mark_unary()
+    crlf = find(src, "\r\n") >= 0
+    out = ""
+    stack = [0]         # the statements' indentation widths in the original, by block level
+    delta = 0           # how far this statement's lines move
+    depth = 0
+    cont = false        # the line goes on from the one before (a \ at its end)
+    blanks = 0
+    i = 0
+    line_start = 0
+    loop i <= f_toks.len():
+        # one physical line: tokens up to the next line break
+        j = i
+        loop j < f_toks.len() and f_toks[j].k != FK_NL: j += 1
+        if j == i:
+            blanks += 1
+        else:
+            if blanks > 0 and len(out) > 0:
+                loop _ in [0..min(blanks, 2)): out += "\n"
+            blanks = 0
+            ow = f_indent_width(line_start)
+            iw = 0
+            if f_toks[i].k == FK_COMMENT and depth == 0 and not cont:
+                # a comment line: as deep as the block it is at the indentation of (or the block
+                # the next line starts), else where it was (moved as the line before)
+                k = stack.index_of(ow)
+                if k >= 0: iw = 4 * k
+                else if ow > stack[stack.len() - 1] and f_next_indent(j) == ow: iw = 4 * stack.len()
+                else: iw = max(0, ow + delta)
+            else if depth == 0 and not cont:
+                if ow > stack[stack.len() - 1]: stack.push(ow)
+                else:
+                    loop stack.len() > 1 and ow < stack[stack.len() - 1]: stack.pop()
+                    if ow != stack[stack.len() - 1]: return src         # (inconsistent: the lexer says so)
+                iw = 4 * (stack.len() - 1)
+                delta = iw - ow
+            else: iw = max(0, ow + delta)
+            line = ""
+            loop _ in [0..iw): line += " "
+            loop k in [i..j):
+                t = f_toks[k]
+                if t.k == FK_COMMENT:
+                    s = trim_right(f_text(t))
+                    if k == i: line += s
+                    else:
+                        # (keep the comment's column, if the code leaves room for it)
+                        gap = t.s - f_toks[k - 1].e
+                        want = f_col(t.s) + iw - ow
+                        if gap <= 1: line += " "
+                        else:
+                            loop len(line) < want or len(line) < len(trim_right(line)) + 2: line += " "
+                        line += s
+                    continue
+                if k > i:
+                    g = f_gap(f_toks[k - 1], t)
+                    if t.k == FK_CONT: g = 1
+                    loop _ in [0..g): line += " "
+                line += f_text(t)
+            out += trim_right(line)
+            out += "\n"
+            cont = f_toks[j - 1].k == FK_CONT
+            depth = f_depth_at[j - 1]
+        if j >= f_toks.len(): break
+        line_start = f_toks[j].s
+        i = j + 1
+    # (CRLF files stay so, strings over several lines included)
+    if crlf: out = out.replace("\r\n", "\n").replace("\n", "\r\n")
+    out
+
+trim_right = (s: str) -> str:
+    e = len(s)
+    loop e > 0 and (s[e - 1] == ' ' or s[e - 1] == '\t' or s[e - 1] == '\r'): e -= 1
+    s[..e)
+
+# the tokens the lexer makes of src, as text, with what the parser asks about the spaces between
+# them (parse.jo, space_before): before ( or [ after a value (a call or an index, or another
+# element of an array, or a unit), before the = of and=, or=, xor= and .+=, and around a sign in
+# an array ([a -b] is two elements)
+fmt_tokens = (file: int, src: str) -> str[]:
+    toks = lex(file, src)
+    out: str[]
+    arr: bool[]
+    loop i in 0.. and t in toks:
+        k = t.kind
+        sig = "{int(k)} {src[int(t.start)..int(t.start) + int(t.len))}"
+        pv = Tok.newline
+        if i > 0: pv = toks[i - 1].kind
+        after_value = i > 0 and fmt_value_end(pv)
+        if (k == .lparen or k == .lbrack) and after_value: sig += " s{fmt_space(toks, i)}"
+        if k == .assign and (pv == .kw_and or pv == .kw_or or pv == .kw_xor or pv == .dotop): sig += " s{fmt_space(toks, i)}"
+        if (k == .minus or k == .plus) and arr.len() > 0 and arr[arr.len() - 1] and i + 1 < toks.len():
+            sig += " m{fmt_space(toks, i) and not fmt_space(toks, i + 1)}"
+        if k == .lparen or k == .lbrace: arr.push(false)
+        else if k == .lbrack: arr.push(not after_value or fmt_space(toks, i))
+        else if (k == .rparen or k == .rbrack or k == .rbrace) and arr.len() > 0: arr.pop()
+        out.push(sig)
+    out
+
+fmt_value_end = (k: Tok) -> bool:
+    k == .ident or k == .int_lit or k == .float_lit or k == .str_lit or k == .rparen or k == .rbrack or k == .rbrace or k == .question or k == .bang or k == .kw_true or k == .kw_false or k == .kw_none or k == .kw_null
+
+# as parse.jo's space_before
+fmt_space = (toks: Token[], i: int) -> bool:
+    if i == 0: return true
+    prev_end = int(toks[i - 1].start) + int(toks[i - 1].len)
+    s = int(toks[i].start)
+    if toks[i].kind == .str_lit: s -= 1
+    if toks[i - 1].kind == .str_lit: prev_end += 1
+    s > prev_end
+
+fmt_jbuf: *u8 = null
+fmt_failed = false      # a file did not lex, or could not be formatted
+
+# the tokens, or none when the text does not lex (the lexer has said why)
+fmt_lexes = (path: str, src: str) -> str[]?:
+    files.push(SrcFile(path, ".", src))
+    f = files.len() - 1
+    when not BOOTSTRAP:
+        if fmt_jbuf == null: fmt_jbuf = __alloc(192)
+        if __setjmp(fmt_jbuf) == 0:
+            __repl_jmp = fmt_jbuf
+            toks = fmt_tokens(f, src)
+            __repl_jmp = null
+            files.pop()
+            return toks
+        __repl_jmp = null
+        files.pop()
+        return none
+    else:
+        toks = fmt_tokens(f, src)
+        files.pop()
+        return toks
+
+# src formatted, or src itself where it does not lex or formatting would change its tokens
+fmt_checked = (path: str, src: str) -> str:
+    a = fmt_lexes(path, src) ?? ["?"]
+    if a == ["?"]:
+        fmt_failed = true
+        return src
+    out = fmt_text(src)
+    if out == src: return src
+    b = fmt_lexes(path, out) ?? ["?"]
+    if a != b:
+        fmt_failed = true
+        eprint("sloppy fmt: {path}: left as it is (formatting it would have changed its code: a bug in sloppy fmt)")
+        return src
+    out
+
+fmt_walk = (d: str, out: mut str[]):
+    loop n in list_dir(d):
+        if starts_with(n, ".") or n == "build" or n == "node_modules": continue
+        full = d + "/" + n
+        if ends_with(n, ".jo"): out.push(full)
+        else if find_byte(n, '.') < 0 or file_exists(full + "/."): fmt_walk(full, out)
+
+# sloppy fmt [--check] files or directories... | sloppy fmt - (standard input to standard output)
+fmt_main = (a: str[]):
+    loop path in a[2..):
+        if ends_with(path, ".dewy"):
+            eprint("Dewy formatting is not implemented in this core experiment")
+            exit(2)
+    check = false
+    paths: str[]
+    loop x in a[2..):
+        if x == "--check": check = true
+        else: paths.push(x)
+    if paths.len() == 0:
+        eprint("usage: sloppy fmt [--check] file.jo or directory...   (sloppy fmt -: standard input to standard output)")
+        exit(2)
+    if paths.len() == 1 and paths[0] == "-":
+        buf: u8[]
+        loop true:
+            n = buf.len()
+            buf.resize(n + 65536)
+            r = __read_fd(0, data(buf) + n, 65536)
+            if r <= 0:
+                buf.resize(n)
+                break
+            buf.resize(n + r)
+        write(fmt_checked("<stdin>", str_from_bytes(buf)))
+        if fmt_failed: exit(1)
+        return
+    todo: str[]
+    loop p in paths:
+        if ends_with(p, ".jo") or not file_exists(p + "/."): todo.push(p)
+        else: fmt_walk(p, todo)
+    changed = 0
+    loop p in todo:
+        src = read_file(p) ?? ""
+        if len(src) == 0 and not file_exists(p):
+            eprint("sloppy fmt: cannot read {p}")
+            exit(1)
+        out = fmt_checked(p, src)
+        if out == src: continue
+        changed += 1
+        if check: print(p)
+        else if not write_file(p, out):
+            eprint("sloppy fmt: cannot write {p}")
+            exit(1)
+    if check and changed > 0 or fmt_failed: exit(1)

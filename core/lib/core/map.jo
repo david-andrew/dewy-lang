@@ -1,0 +1,304 @@
+# Hash map {K: V}: insertion ordered, open addressing over a dense entry list.
+# The first two fields must stay `keys` and `vals` (the compiler iterates them in for loops, of
+# a map with nothing gone: __map_live, __map_tidy).
+# A removed entry stays in place, marked gone (so the others keep theirs), its slot a tombstone
+# (1 << 32: probes go on past it); when half of them are gone, they are taken out at once.
+
+struct Map[K, V]:
+    keys: K[]
+    vals: V[]
+    slots: u64[]      # 0 = empty, otherwise the entry's hash's upper 32 bits | entry index + 1
+    hashes: u64[]
+    gone: bool[]      # (entries removed since the last compaction: true; shorter than keys when
+                      # entries were added after the last removal)
+    ngone: int
+
+# full 64-bit avalanche (murmur3 finalizer): every key bit affects the low bits used for slots,
+# so keys like multiples of 4096 or float bit patterns spread out
+hash = (x: int) -> u64: hash(u64(x))
+
+hash = (x: u64) -> u64:
+    h = (x xor (x >> 33))
+    h = h * 0xFF51AFD7ED558CCD
+    h = (h xor (h >> 33))
+    h = h * 0xC4CEB9FE1A85EC53
+    (h xor (h >> 33))
+
+hash = (x: bool) -> u64:
+    if x: return 1
+    0
+
+hash = (x): __hash_value(x)
+
+# xs[i] where the library knows i is in bounds (the compiler leaves out the check; the C
+# bootstrap compiler calls this)
+__at[T] = (xs: T[], i: int) -> T: xs[i]
+
+# (slots has a power-of-two length when not empty, its entries are 0 or an entry index + 1
+# with the upper half of the entry's hash above it, and keys, vals and hashes have an element per
+# entry: every index here is in bounds. A slot whose hash half differs is passed over without
+# looking at the entry, which is elsewhere in memory)
+# k's entry, or -2 - the empty slot where it would go (-1 when there are no slots yet)
+__map_probe[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
+    ns = m.slots.len()
+    if ns == 0: return -1
+    mask = ns - 1
+    i = int(h) & mask
+    hi = h & 0xFFFFFFFF00000000
+    loop true:
+        s = __at(m.slots, i)
+        if s == 0: return -2 - i
+        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
+            e = int(s & 0xFFFFFFFF) - 1
+            if __at(m.keys, e) == k: return e
+        i = (i + 1) & mask
+
+__map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
+    ns = m.slots.len()
+    if ns == 0: return -1
+    mask = ns - 1
+    i = int(h) & mask
+    hi = h & 0xFFFFFFFF00000000
+    loop true:
+        s = __at(m.slots, i)
+        if s == 0: return -1
+        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
+            e = int(s & 0xFFFFFFFF) - 1
+            if __at(m.keys, e) == k: return e
+        i = (i + 1) & mask
+
+__map_rehash[K, V] = (m: mut Map[K, V], ns: int):
+    m.slots.clear()
+    m.slots.resize(ns)
+    mask = ns - 1
+    ng = m.gone.len()
+    loop e in 0.. and h in m.hashes:
+        if e < ng and __at(m.gone, e): continue
+        i = int(h) & mask
+        loop m.slots[i] != 0: i = (i + 1) & mask
+        m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(e + 1)
+
+([]=)[K, V] = (m: mut Map[K, V], k: K, v: V):
+    h = hash(k)
+    e = __map_probe(m, k, h)
+    if e >= 0:
+        m.vals[e] = v
+        return
+    __map_add(m, k, v, h, -2 - e)
+
+# the entry of k, for changing m[k] in place (m[k] += 1, m[k].push(x), m[k].hp -= 5): a missing
+# key is added, its value starting as V's zero value (or the default d, for a struct with
+# default field values)
+__map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
+    h = hash(k)
+    e = __map_probe(m, k, h)
+    if e >= 0: return e
+    z: V
+    __map_add(m, k, z, h, -2 - e)
+    m.keys.len() - 1
+
+__map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
+    h = hash(k)
+    e = __map_probe(m, k, h)
+    if e >= 0: return e
+    __map_add(m, k, d, h, -2 - e)
+    m.keys.len() - 1
+
+# room for n entries without growing (when many are to come)
+reserve[K, V] = (m: mut Map[K, V], n: int):
+    m.keys.reserve(n)
+    m.vals.reserve(n)
+    m.hashes.reserve(n)
+    ns = 8
+    loop ns * 3 < (n + 1) * 4: ns *= 2
+    if ns > m.slots.len(): __map_rehash(m, ns)
+
+# a new entry (k is not in m; slot: the empty slot a probe for it ended at, or -1)
+__map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
+    n = m.keys.len()
+    slot = slot0
+    if (n + 1) * 4 > m.slots.len() * 3 and m.ngone > 0:
+        # (what is gone taken out first: there may be room then)
+        __map_compact(m)
+        n = m.keys.len()
+        slot = -1
+    if (n + 1) * 4 > m.slots.len() * 3:
+        ns = m.slots.len() * 2
+        if ns < 8: ns = 8
+        m.keys.push(k)
+        m.vals.push(v)
+        m.hashes.push(h)
+        __map_rehash(m, ns)
+        return
+    m.keys.push(k)
+    m.vals.push(v)
+    m.hashes.push(h)
+    i = slot
+    if i < 0:
+        mask = m.slots.len() - 1
+        i = int(h) & mask
+        loop m.slots[i] != 0: i = (i + 1) & mask
+    m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(n + 1)
+
+([])[K, V] = (m: Map[K, V], k: K) -> V:
+    e = __map_find(m, k, hash(k))
+    if e < 0: panic("the map has no key {k}{__near_key(m, k)}: m.get(k) gives none for a missing key, and m.has(k) asks whether it is there")
+    __at(m.vals, e)
+
+# (assets["playr.png"]: the key written nearly as one that is there)
+__near_key[K, V] = (m: Map[K, V], k: K) -> str:
+    want = "{k}"
+    best = ""
+    bd = 3
+    i = 0
+    loop i < m.keys.len():
+        if i >= m.gone.len() or not m.gone[i]:
+            s = "{__at(m.keys, i)}"
+            d = __text_distance(want, s, bd)
+            if d < bd:
+                bd = d
+                best = s
+        i += 1
+    if len(best) == 0: return ""
+    " (did you mean {best}?)"
+
+# how many characters differ, up to limit (more: limit)
+__text_distance = (a: str, b: str, limit: int) -> int:
+    if abs(len(a) - len(b)) >= limit: return limit
+    prev = fill(0, len(b) + 1)
+    cur = fill(0, len(b) + 1)
+    j = 0
+    loop j <= len(b):
+        prev[j] = j
+        j += 1
+    i = 1
+    loop i <= len(a):
+        cur[0] = i
+        j = 1
+        loop j <= len(b):
+            c = 1
+            if a[i - 1] == b[j - 1]: c = 0
+            cur[j] = min(min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + c)
+            j += 1
+        t = prev
+        prev = cur
+        cur = t
+        i += 1
+    min(prev[len(b)], limit)
+
+get[K, V] = (m: Map[K, V], k: K) -> V?:
+    e = __map_find(m, k, hash(k))
+    if e < 0: return none
+    __at(m.vals, e)
+
+get[K, V] = (m: Map[K, V], k: K, default: V) -> V:
+    e = __map_find(m, k, hash(k))
+    if e < 0: return default
+    __at(m.vals, e)
+
+contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
+has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
+len[K, V] = (m: Map[K, V]) -> int: m.keys.len() - m.ngone
+is_empty[K, V] = (m: Map[K, V]) -> bool: m.keys.len() == m.ngone
+keys[K, V] = (m: Map[K, V]) -> K[]:
+    if m.ngone == 0: return m.keys
+    __map_live(m).keys
+values[K, V] = (m: Map[K, V]) -> V[]:
+    if m.ngone == 0: return m.vals
+    __map_live(m).vals
+
+clear[K, V] = (m: mut Map[K, V]):
+    m.keys.clear()
+    m.vals.clear()
+    m.slots.clear()
+    m.hashes.clear()
+    m.gone.clear()
+    m.ngone = 0
+
+# remove a key; returns true if it was present. The others keep their order.
+remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
+    ns = m.slots.len()
+    if ns == 0: return false
+    h = hash(k)
+    mask = ns - 1
+    i = int(h) & mask
+    hi = h & 0xFFFFFFFF00000000
+    loop true:
+        s = m.slots[i]
+        if s == 0: return false
+        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
+            e = int(s & 0xFFFFFFFF) - 1
+            if m.keys[e] == k:
+                # (a tombstone where its slot was; the entry gone, letting go of what it held)
+                m.slots[i] = 0x100000000
+                if m.gone.len() < m.keys.len(): m.gone.resize(m.keys.len())
+                m.gone[e] = true
+                zk: K
+                zv: V
+                m.keys[e] = zk
+                m.vals[e] = zv
+                m.ngone += 1
+                if m.ngone * 2 > m.keys.len(): __map_compact(m)
+                return true
+        i = (i + 1) & mask
+    false
+
+# the gone entries taken out, and the slots made again
+__map_compact[K, V] = (m: mut Map[K, V]):
+    if m.ngone == 0: return
+    ng = m.gone.len()
+    w = 0
+    loop e in [0..m.keys.len()):
+        if e < ng and m.gone[e]: continue
+        if w != e:
+            m.keys[w] = m.keys[e]
+            m.vals[w] = m.vals[e]
+            m.hashes[w] = m.hashes[e]
+        w += 1
+    m.keys.resize(w)
+    m.vals.resize(w)
+    m.hashes.resize(w)
+    m.gone.clear()
+    m.ngone = 0
+    __map_rehash(m, m.slots.len())
+
+# the same keys with equal values (in any order)
+# (not for sloppy0: it would take the generic (==) for all structs)
+when not BOOTSTRAP:
+    (==)[K, V] = (a: Map[K, V], b: Map[K, V]) -> bool:
+        if a.len() != b.len(): return false
+        ng = a.gone.len()
+        loop i in 0.. and k in a.keys:
+            if i < ng and a.gone[i]: continue
+            e = __map_find(b, k, __at(a.hashes, i))
+            if e < 0 or not (__at(b.vals, e) == __at(a.vals, i)): return false
+        true
+
+# (a loop over a map goes over one with nothing gone: this one, or a copy without them)
+__map_live[K, V] = (m: Map[K, V]) -> Map[K, V]:
+    if m.ngone == 0: return m
+    c = m
+    __map_compact(c)
+    c
+
+# (a `loop mut` over a map: the map itself made so first)
+__map_tidy[K, V] = (m: mut Map[K, V]): __map_compact(m)
+
+__fmt[K, V] = (buf: mut u8[], m: Map[K, V]):
+    __buf_byte(buf, '{{')
+    ng = m.gone.len()
+    first = true
+    loop i in 0.. and k in m.keys:
+        if i < ng and m.gone[i]: continue
+        if not first: __buf_append_str(buf, ", ")
+        first = false
+        __fmt_elem(buf, k)
+        __buf_append_str(buf, ": ")
+        __fmt_elem(buf, m.vals[i])
+    __buf_byte(buf, '}}')
+
+# ({loop w in words: w: len(w)}: a map from its (key, value) pairs; a later key replaces an earlier)
+__map_of[K, V] = (pairs: (K, V)[]) -> {K: V}:
+    m: {K: V}
+    loop p in pairs: m[p.0] = p.1
+    m

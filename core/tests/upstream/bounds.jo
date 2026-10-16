@@ -1,0 +1,47 @@
+# loops over 0..xs.len() skip provably redundant bounds checks; the results must not change
+total = (v: int[]) -> int:
+    s = 0
+    n = v.len()
+    loop i in [0..n): s += v[i]
+    loop i in [0..v.len()): s += v[i] * 2
+    loop i in [1..n): s += v[i - 1]
+    s
+xs = [1, 2, 3, 4]
+print(total(xs), total([]))
+ys = [5, 6, 7]
+loop i in [0..ys.len()):
+    if i == 1: ys.push(9)
+    print(ys[i])
+empty: int[]
+loop i in [0..empty.len()): print(empty[i])
+zs = [1, 2, 3]
+m = zs.len()
+loop i in [0..m): print(zs[i])
+sq = fill(0, 6)
+loop i in [0..sq.len()): sq[i] = i * i
+print(sq)
+grid = fill(fill(0, 2), 3)
+loop r in [0..grid.len()):
+    grid[r][1] = r
+    grid[r].push(7)
+print(grid)
+w = [1, 2, 3]
+loop i in [0..w.len()):
+    w[i] += 1
+    if i == 0: w = [9, 9, 9, 9, 9]
+print(w)
+# mut parameters: only when the function calls nothing that could resize the caller's array
+g: int[] = [1, 2, 3, 4]
+bump = (xs: mut int[]):
+    n = xs.len()
+    loop i in [0..n):
+        loop j in [i + 1..n): xs[j] += xs[i]
+shrink_global = (): g.pop()
+bump2 = (xs: mut int[]):
+    loop i in [0..xs.len()):
+        if i == 0: shrink_global()
+        if i < xs.len(): xs[i] += 1
+bump(mut g)
+print(g)
+bump2(mut g)
+print(g)
