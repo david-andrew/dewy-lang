@@ -110,6 +110,25 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
         et = 0
 ''')
     checker.write_text(text)
+    lsp = output / 'compiler/lsp.jo'
+    text = lsp.read_text()
+    format_anchor = 'on_formatting = (id: int, params: int) -> int:\n    d = text_params_doc(params)\n    if d < 0: return lsp_reply(id, "null")\n'
+    assert text.count(format_anchor) == 1
+    text = text.replace(format_anchor, format_anchor + '    if ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")\n')
+    discovery_anchor = '        if ends_with(n, ".jo"): ws_files.push(full)\n'
+    assert text.count(discovery_anchor) == 1
+    text = text.replace(discovery_anchor, '        if ends_with(n, ".jo") or ends_with(n, ".dewy"): ws_files.push(full)\n')
+    lsp.write_text(text)
+    formatter = output / 'compiler/fmt.jo'
+    text = formatter.read_text()
+    format_anchor = 'fmt_main = (a: str[]):\n'
+    assert text.count(format_anchor) == 1
+    text = text.replace(format_anchor, format_anchor + '''    loop path in a[2..):
+        if ends_with(path, ".dewy"):
+            eprint("Dewy formatting is not implemented in this core experiment")
+            exit(2)
+''')
+    formatter.write_text(text)
     binary = binary_dir / 'dewy-core'
     result = subprocess.run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
                             cwd=output, env=env, capture_output=True, text=True, timeout=180, check=False)
@@ -132,6 +151,7 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
         'adapter_sha256': identity(adapter), 'core_sha256': identity(binary),
         'parser_source_sha256': identity(source), 'patched_parser_sha256': identity(original),
         'patched_checker_sha256': identity(checker),
+        'patched_lsp_sha256': identity(lsp), 'patched_formatter_sha256': identity(formatter),
         'bootstrap_generations_sha256': bootstrap_hashes,
     }, indent=2) + '\n')
     return binary

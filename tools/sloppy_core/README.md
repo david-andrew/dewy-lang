@@ -57,13 +57,26 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The behavior gate now contains 93 checks and takes about 5.3 seconds on the
+The behavior gate now contains 95 checks and takes about 5.8 seconds on the
 development machine, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build
 instructions are in `examples/sloppy_core/`.
 Evidence is in `dewy/audits/2026-10-16/source-core/`.
+
+For the editor protocol gate, include
+`tests/python_misc/test_sloppy_core_editor.py` in the pytest command above.
+`dewy-core check file.dewy` checks all source functions, including unused ones,
+and performs lowering checks without code emission. Five-process medians were
+62 ms for the particle benchmark and 121 ms for the paddle game.
+`dewy-core lsp` serves diagnostics, hover types, and definitions for unsaved
+Dewy text. The parser reads the compiler's snapshot through a Linux anonymous
+file; the experimental compiler host currently requires Linux. Syntax errors
+use the core's diagnostic transport, including original file/byte locations.
+Hover text still uses the core's type spelling. Formatting Dewy is deliberately
+unavailable: the CLI rejects it and LSP returns no edits, instead of applying
+Sloppy's syntax formatter. Other inherited editor features remain experimental.
 
 The existing nested-record particle benchmark runs unchanged except for its
 platform harness import: `benchmark_harness.jo` replaces raw compiler-specific

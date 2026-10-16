@@ -23,6 +23,13 @@
 - `collections-build.json`, `collections-tests.log`: 93 checks in 5.34 seconds,
   adding aliases, callable types (including mutable arguments), union narrowing,
   dictionary value copies, typed empty dictionaries, and key/value iteration.
+- `editor-build.json`, `editor-tests.log`: 95 checks in 5.81 seconds. The LSP
+  gate opens unsaved source, requests hover/definition, introduces semantic and
+  syntax errors, and clears them without saving the file. Dewy formatting is
+  disabled in the inherited formatter. Parser snapshots use Linux memfd files.
+- `editor-checks.json`: five fresh `check` processes per workload, with OS caches
+  retained. Medians: particle source 62 ms; paddle game 121 ms. This includes
+  checking unused source functions and lowering without emission.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame

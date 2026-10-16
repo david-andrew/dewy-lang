@@ -222,3 +222,16 @@ def test_core_game_renderer(compiler, tmp_path):
     data = screenshot.read_bytes()
     assert data[:8] == b'\x89PNG\r\n\x1a\n'
     assert struct.unpack('>II', data[16:24]) == (1280, 720)
+
+
+def test_core_check_and_format_boundary(compiler, tmp_path):
+    source = tmp_path / 'main.dewy'
+    text = 'unused=()=>missing\nmain=()=>42'
+    source.write_text(text)
+    checked = subprocess.run([compiler, 'check', source], capture_output=True,
+                             text=True, timeout=10, check=False)
+    assert checked.returncode != 0 and 'unknown' in checked.stderr, checked.stdout + checked.stderr
+    formatted = subprocess.run([compiler, 'fmt', source], capture_output=True,
+                               text=True, timeout=10, check=False)
+    assert formatted.returncode != 0 and 'not implemented' in formatted.stderr
+    assert source.read_text() == text

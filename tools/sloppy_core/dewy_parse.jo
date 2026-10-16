@@ -581,8 +581,31 @@ dw_block = (id: int) -> int:
 
 dewy_parse_file = (file: int) -> int[]:
     parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
-    status, output = run_program(parser, [files[file].path, "--dump"])
-    if status != 0: exit(status)
+    # Parse the compiler's source snapshot, including unsaved editor text.
+    # A Linux anonymous file avoids named temporary files and argument-size
+    # limits. The parent keeps it open until the child has finished reading.
+    fd = syscall(319, data(__zstr("dewy-syntax")), 1)  # memfd_create(MFD_CLOEXEC)
+    if fd < 0: fatal(mkpos(file, 0), "could not create the parser's source snapshot")
+    source = files[file].src
+    written = 0
+    loop written < len(source):
+        count = syscall(1, fd, data(source) + written, len(source) - written)
+        if count == -4: continue
+        if count <= 0:
+            syscall(3, fd)
+            fatal(mkpos(file, 0), "could not write the parser's source snapshot")
+        written += count
+    snapshot = "/proc/{syscall(39)}/fd/{fd}"
+    status, output = run_program(parser, [files[file].path, "--snapshot", snapshot])
+    syscall(3, fd)
+    if status != 0:
+        if starts_with(output, "error\t"):
+            fields = split(trim(output), "\t")
+            if fields.len() == 3:
+                payload = parse_json(fields[2])
+                if payload is not JsonError:
+                    fatal(mkpos(file, to_int(fields[1]) ?? 0), payload.as_str() ?? "invalid Dewy syntax")
+        fatal(mkpos(file, 0), "Dewy syntax parser failed (exit {status})")
     dewy_syntax = [DewySyntax()]
     dewy_record_names = []
     stack: int[]

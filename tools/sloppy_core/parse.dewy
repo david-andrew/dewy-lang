@@ -1,6 +1,6 @@
 # Syntax-only boundary: use Dewy's existing parser, exporting byte positions
 # for the compact engine. No semantic prelude is loaded at program runtime.
-from reporting import SrcFile
+from reporting import SrcFile, Error
 import p"../../dewy/bootstrap/parser/p0.dewy" as parser
 import p"../../dewy/bootstrap/parser/t1.dewy" as tokens
 import p"../../dewy/bootstrap/parser/cli.dewy" as cli
@@ -13,16 +13,31 @@ dump=(nodes:array<tokens.Token> roots:array<addr> offsets:array<addr> depth:addr
         dump(nodes parser.children_of(node) offsets depth+1)
     }
 }
+read_input=(args:array<string>):>cli.Input|Error=>{
+    if args.length =? 4 and args[2] =? '--snapshot' {
+        let body=p(args[3]).read_text
+        if body isnt? string return Error[title='Could not read source snapshot']
+        return cli.Input[SrcFile[args[1] body] 'p0' true]
+    }
+    return cli.read_input(args 'p0')
+}
 main=(args:array<string>):>int64=>{
-    let input=cli.read_input(args 'p0')
+    let input=read_input(args)
     if input isnt? cli.Input {input.fail}
-    let parsed=parser.parse(input.srcfile)
-    if parsed is? tokens.TokenError {parsed.fail}
     let offsets:array<addr>=[0]
     let offset:addr=0
     loop grapheme in input.srcfile.body {
         offset+=(grapheme as array<uint8>).length
         offsets.push(offset)
+    }
+    let parsed=parser.parse(input.srcfile)
+    if parsed is? tokens.TokenError {
+        let start:addr=0
+        if parsed.pointers.length >? 0 {start=parsed.pointers[0].span.start}
+        if start >=? offsets.length {start=offsets.length-1}
+        $runtime_assert start <? offsets.length
+        printl"error\t{offsets[start]}\t{_quoted(parsed.title)}"
+        return 1
     }
     dump(parsed.nodes [parsed.root] offsets 0)
     return 0
