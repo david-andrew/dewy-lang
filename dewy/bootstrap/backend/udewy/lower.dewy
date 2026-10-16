@@ -93,6 +93,7 @@ State:type = [
     shared_string_descriptors:bool=false
     layout_context:layouts.Context=layouts.Context[]
     record_layouts:dict<addr layouts.Record>=[]
+    layout_keys:dict<addr string>=[]
     links:subtyping.Graph=subtyping.default_links
     brand_numbers:dict<string brands.NumberedBrand>=[]
     # Checked descriptions stay stable while lowering only appends runtime
@@ -1931,7 +1932,16 @@ record_unique_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
 # cell of tagged layouts), not field names. Two types with one layout share
 # one helper. A minted record stays its own: releasing it dispatches over
 # its brand family.
-layout_key = (type:addr node:hir.AST @state:State):>string => layout_key_inner(type node set[] @state)
+layout_key = (type:addr node:hir.AST @state:State):>string => {
+    # The checked type graph and brand registry stay fixed during lowering.
+    # Cache only complete roots: recursive keys contain path-relative cycle
+    # markers, so a nested traversal cannot reuse another root's key.
+    let cached=state.layout_keys.get(type)
+    if cached isnt? none return cached
+    let key=layout_key_inner(type node set[] @state)
+    if state.problem is? none {state.layout_keys[type]=key}
+    return key
+}
 layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>string => {
     let plain=types.unfold(types.strip_refinement(type state.type_nodes) state.type_nodes)
     if plain in? visiting return "@{plain}"

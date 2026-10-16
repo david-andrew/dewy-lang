@@ -202,3 +202,17 @@ Also compact the frontend's allocation-heavy type/HIR representation and
 repeated traversals.
 The backend boundary is now executable at compiler scale, but these measurements
 do not justify changing parsing or other user-visible language rules.
+
+### Complete layout-key memoization
+
+The native lowerer now retains successful complete layout keys in its own
+compilation state. Nested recursive traversals remain uncached because their
+cycle markers depend on the current root. Failed queries remain uncached so
+diagnostics keep the requesting source location.
+
+Three fresh self-builds per compiler, alternating order and run sequentially,
+produce six byte-identical binaries. Median lowering time falls from 14.310 to
+13.697 s, with reported allocation traffic falling from 9,514,974,200 to
+9,081,905,368 bytes. Whole-build medians are 39.147 and 38.993 s: this is a
+modest local improvement, not a solution to cold-build latency or peak memory.
+[Commands, hashes and all samples](layout-key-cache.json).

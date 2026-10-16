@@ -32,12 +32,29 @@ main=():>int64=>{{
     let b=lower.runtime_type(text node @next)
     $runtime_assert types.is_primitive(types.node_at(first.type_nodes a) 'uint32')
     $runtime_assert types.is_primitive(types.node_at(next.type_nodes b) 'int64')
+    let word_key=lower.layout_key(word node @first)
+    let text_key=lower.layout_key(text node @next)
+    $runtime_assert word_key not=? text_key
     # Appending descriptions must preserve earlier answers. A nested record
     # validates each field and retains the same concrete representation.
     let array=types.array_type(text none @next.type_nodes)
     let record=types.object_type([types.ObjectField['items' array]] none false [] [] @next.type_nodes)
     $runtime_assert lower.runtime_type(record node @next) =? b
     $runtime_assert lower.runtime_type(text node @next) =? b
+    $runtime_assert lower.layout_key(text node @next) =? text_key
+    $runtime_assert lower.layout_key(word node @first) =? word_key
+    # A complete root key must not borrow the cycle markers of a traversal
+    # that reaches it through another root. Recursive arrays keep records
+    # finite, while still making these two traversal paths different.
+    let recursive=types.named_type('Recursive' 123 @next.type_nodes)
+    let children=types.array_type(recursive none @next.type_nodes)
+    let tree=types.object_type([types.ObjectField['children' children]] none false [] [] @next.type_nodes)
+    types.resolve_alias(recursive tree @next.type_nodes)
+    let tree_key=lower.layout_key(tree node @next)
+    let children_key=lower.layout_key(children node @next)
+    $runtime_assert tree_key =? lower.layout_key_inner(tree node set[] @next)
+    $runtime_assert children_key =? lower.layout_key_inner(children node set[] @next)
+    $runtime_assert tree_key =? lower.layout_key(tree node @next)
     $runtime_assert lower.cell_members(text @next) is? none
     let optional=types.union([text types.primitive('none' @next.type_nodes)] @next.type_nodes)
     let members=lower.cell_members(optional @next)
@@ -49,10 +66,10 @@ main=():>int64=>{{
     $runtime_assert again isnt? none and again.length =? 2
     $runtime_assert lower.cell_members(text @next) is? none
     let invalid=types.primitive('no_runtime_representation' @next.type_nodes)
-    lower.runtime_type(invalid node @next);
+    lower.layout_key(invalid node @next);
     $runtime_assert next.problem isnt? none
     next.problem=none
-    lower.runtime_type(invalid hir.Void[Span[5 6] word] @next);
+    lower.layout_key(invalid hir.Void[Span[5 6] word] @next);
     $runtime_assert next.problem isnt? none
     let problem=next.problem
     $runtime_assert problem isnt? none and problem.pointers.length >? 0
