@@ -33,7 +33,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      DEWY_CORE_COMPILER: ${{ runner.temp }}/dewy-core/bin/dewy-core
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +47,8 @@ jobs:
       - name: Bootstrap the complete compiler from C
         run: python -m tools.sloppy_core.build --bootstrap --output "$RUNNER_TEMP/dewy-core"
       - name: Check language, native/web games, editor and live reload
+        env:
+          DEWY_CORE_COMPILER: ${{ runner.temp }}/dewy-core/bin/dewy-core
         run: |
           python -m pytest -q -o addopts='' --junitxml=core-results.xml \
             tests/python_misc/test_sloppy_core.py \
