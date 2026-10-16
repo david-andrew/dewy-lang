@@ -270,3 +270,16 @@ Refinement/structural patterns and proof-based coverage remain unsupported.
 A fresh C bootstrap passes all 348 checks in 27.20 seconds
 (`match-build.json`, `match-tests.log`). No legacy semantic engine or binary
 parity gate is involved.
+
+## Optimizer scratch allocation
+
+Cleanup sized a fresh slot lookup table by the high-water size of a reusable
+register-use array, so every later small function inherited the cost of the
+largest earlier function. It now allocates only for the current function.
+Eight alternating measured release builds per compiler/workload (after warm-up,
+one emission worker) gave median game build times of 337.89 → 321.70 ms,
+compiler self-build times of 1.295 → 1.273 s, and particle builds of
+92.13 → 92.30 ms (effectively unchanged). See
+`optimizer-scratch-benchmark.json` for every sample and compiler identities.
+This changes scratch allocation, not optimization decisions. All 348 checks
+pass in 26.59 seconds (`optimizer-scratch-tests.log`).

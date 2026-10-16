@@ -1329,7 +1329,9 @@ o_cleanup = (code: Ins[]) -> Ins[]:
     slot_refs = fill(0, ir.slot_size.len())
     loop ins in code:
         if ins.op == .slot: slot_refs[int(ins.a)] += 1
-    slot_of: int[] = fill(-1, o_nuse.len())
+    # Scratch arrays retain their high-water capacity; only this function's
+    # registers need entries here, even after a much larger function.
+    slot_of: int[] = fill(-1, ir.vtypes.len())
     loop ins in code:
         if ins.op == .slot and int(ins.dst) < slot_of.len(): slot_of[int(ins.dst)] = int(ins.a)
     loop ins in code:

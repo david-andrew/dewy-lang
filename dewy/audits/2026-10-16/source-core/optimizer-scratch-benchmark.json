@@ -1,0 +1,98 @@
+{
+  "method": "Sequential alternating builds, one emission worker; first pair discarded, eight samples per compiler/workload; OS caches retained; no concurrent CPU tests or builds.",
+  "baseline_revision": "acb38344",
+  "candidate_change": "Size optimizer cleanup slot_of by ir.vtypes.len(), not the largest historical o_nuse.len().",
+  "compiler_sha256": {
+    "dewy-core": "3d09f8e631404e21b505a40eb874b44275120f10334208b032b5e3f4e1c115f7",
+    "dewy-core-scratch": "8a6e8642a4bebf46d4ca5aaf3cfabd0c11e2efaa8d22398f00dd532ffca7a513"
+  },
+  "results": [
+    {
+      "source": "examples/sloppy_core/paddle.dewy",
+      "samples_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": [
+          0.34955053904559463,
+          0.3436331650009379,
+          0.3206900228979066,
+          0.34337260108441114,
+          0.3323868699371815,
+          0.33780709304846823,
+          0.33754357090219855,
+          0.33796376502141356
+        ],
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": [
+          0.3222456600051373,
+          0.3345588599331677,
+          0.31973926501814276,
+          0.3211450360249728,
+          0.3121547190239653,
+          0.32015030505135655,
+          0.33944730600342155,
+          0.3592260080622509
+        ]
+      },
+      "median_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": 0.3378854290349409,
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": 0.32169534801505506
+      }
+    },
+    {
+      "source": "core/compiler/main.jo",
+      "samples_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": [
+          1.2966388879576698,
+          1.292866401025094,
+          1.294405038934201,
+          1.296119039063342,
+          1.2956293310271576,
+          1.257352869026363,
+          1.283724128967151,
+          1.3122271479805931
+        ],
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": [
+          1.247107277973555,
+          1.25046110607218,
+          1.264947296003811,
+          1.2551364080281928,
+          1.301444606971927,
+          1.37690843292512,
+          1.2844365029595792,
+          1.281302256975323
+        ]
+      },
+      "median_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": 1.2950171849806793,
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": 1.273124776489567
+      }
+    },
+    {
+      "source": "/tmp/dewy-source-core/particles/records_nested.dewy",
+      "samples_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": [
+          0.09235484199598432,
+          0.09081854997202754,
+          0.09676787001080811,
+          0.09013290400616825,
+          0.09390156902372837,
+          0.09510224999394268,
+          0.091010253992863,
+          0.0918969139456749
+        ],
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": [
+          0.08830618404317647,
+          0.09702908806502819,
+          0.09296084195375443,
+          0.08987065101973712,
+          0.09600560402031988,
+          0.09486535901669413,
+          0.09164244902785867,
+          0.09158969100099057
+        ]
+      },
+      "median_seconds": {
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core": 0.0921258779708296,
+        "/tmp/dewy-source-core/match-c-bootstrap/bin/dewy-core-scratch": 0.09230164549080655
+      }
+    }
+  ]
+}
