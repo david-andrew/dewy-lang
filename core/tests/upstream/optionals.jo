@@ -1,0 +1,60 @@
+# optionals, tuples, generics, defer
+find_idx = (xs: int[], x: int) -> int?:
+    loop i in 0.. and v in xs:
+        if v == x: return i
+    none
+
+xs = [4, 8, 15, 16, 23, 42]
+print(find_idx(xs, 15) ?? -1, find_idx(xs, 7) ?? -1)
+if let i = find_idx(xs, 23): print("found at", i)
+r = find_idx(xs, 42)
+print(r != none, r!, r == none)
+maybe: str? = none
+print(maybe ?? "nothing")
+maybe = "something"
+print(maybe ?? "nothing", maybe!.len())
+take = (q: mut int[]) -> int?:
+    if q.len() == 0: return none
+    q.pop()
+q = [1, 2, 3]
+total = 0
+loop let v = take(q):
+    total += v
+print(total, q.len())
+
+divmod = (a: int, b: int) -> (int, int): (a / b, a % b)
+d, m = divmod(17, 5)
+print(d, m)
+t = (1, "one", 1.5)
+print(t.0, t.1, t.2)
+
+largest[T] = (xs: T[]) -> T:
+    best = xs[0]
+    loop x in xs:
+        if x > best: best = x
+    best
+print(largest([3, 9, 2]), largest([1.5, -2.0]), largest(["pear", "apple"]))
+
+struct Stack[T]:
+    items: T[]
+
+push[T] = (s: mut Stack[T], x: T): s.items.push(x)
+pop[T] = (s: mut Stack[T]) -> T: s.items.pop()
+
+st = Stack[str]()
+st.push("a")
+st.push("b")
+print(st.pop(), st.items.len())
+
+swap = (a, b): (b, a)
+print(swap(1, 2), swap("x", 3.5))
+
+with_defer = () -> int:
+    n = 0
+    defer print("deferred 1")
+    defer print("deferred 2")
+    loop i in [0..3):
+        defer print("loop", i)
+        n += i
+    n
+print(with_defer())

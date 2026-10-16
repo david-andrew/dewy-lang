@@ -1,0 +1,28 @@
+# comparing an optional with none narrows it, as `is` does; `is not` is `not (... is ...)`
+# requires: sloppy
+f = (x: int?) -> int:
+    if x == none: return 0
+    x + 1
+g = (x: int?) -> str:
+    if x != none: return "got {x * 2}"
+    "nothing"
+h = (x: int | str) -> str:
+    if x is not str: return "number {x + 1}"
+    "text {x}"
+print(f(3), f(none))
+print(g(5), g(none))
+print(h(4), h("hi"))
+m: {str: int} = {"a": 1}
+v = m.get("a")
+if v != none and v > 0: print("positive", v)
+w = m.get("b")
+if w is not none: print("unexpected")
+else: print("no b")
+xs = [3, 1, 4, 1, 5, 9, 2, 6]
+seed_random(1)
+ys = xs                                 # (a copy: arrays are values)
+shuffle(ys)
+print(sorted(ys) == sorted(xs), random_item(xs) in xs)
+r = rng(5)
+r.shuffle(ys)
+print(sorted(ys) == sorted(xs), r.next_item(xs) in xs)

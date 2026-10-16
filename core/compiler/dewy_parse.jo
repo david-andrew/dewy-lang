@@ -105,6 +105,10 @@ dw_type = (id: int) -> int:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
         return n
+    if dewy_syntax[id].kind == "Postfix" and dw_op(id) == "?":
+        n = mk(.topt, pos)
+        nodes[n].a = i32(dw_type(dw_child(id, 1)))
+        return n
     if dw_op(id) == ":>":
         params = dw_child(id, 1)
         if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
@@ -240,6 +244,7 @@ dw_expr = (id: int) -> int:
     pos = dewy_syntax[id].pos
     op = dw_op(id)
     if k == "Identifier":
+        if text == "none": return mk(.none_lit, pos)
         n = mk(.ident, pos)
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n

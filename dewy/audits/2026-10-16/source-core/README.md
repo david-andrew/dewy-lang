@@ -151,3 +151,14 @@ The transport test covers opt-in/trust, source snapshots, diagnostics, Unicode
 locations, hover, definitions, syntax recovery, restart and document close, and
 verifies the file on disk was not changed. No desktop extension-host certification
 or marketplace publication is claimed.
+
+## Optional values
+
+Dewy's `T?`, `T | none`, and `none` now use the core's optional representation,
+including narrowing, dictionary lookups, arrays and managed record copies.
+Numeric literals can now match optional union parameters: overload selection
+previously only considered optional numeric types directly. Four pinned upstream
+optional/union fixture pairs were added alongside the Dewy cases. The existing
+`dewy/tests/optional_values.dewy` runs unchanged. All 211 combined checks pass in
+13.94 seconds (`optionals-tests.log`), including native/web debug/release optional
+union and managed-copy checks and the new VS Code client test.

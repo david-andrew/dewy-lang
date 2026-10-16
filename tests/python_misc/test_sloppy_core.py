@@ -46,6 +46,19 @@ value=(x:Choice):>int64=>if x is? int64 x else 0
 main=()=>value(42)+value("ignored")''',
     'union-inverse': '''value=(x:int64|string):>int64=>if x isnt? int64 0 else x
 main=()=>value(42)+value("ignored")''',
+    'optional-return': '''choose=(yes:bool):>int64?=>if yes 42 else none
+main=()=>{let a=choose(true) let b=choose(false)
+return if a is? int64 and b is? none a else 1}''',
+    'optional-union': '''value=(x:(int64|string)?):>int64=>if x is? int64 x else if x is? string 2 else 0
+main=()=>value(40)+value("two")+value(none)''',
+    'optional-dictionary': '''main=()=>{let d=["a"->42] let hit=d.get("a") let miss=d.get("b")
+return if hit isnt? none and miss is? none hit else 1}''',
+    'optional-managed-copy': '''Item:type=[values:array<int64>]
+main=()=>{let a:Item?=Item[[20 22]] let b=a
+if b is? Item b.values[0]=99
+return if a is? Item a.values[0]+a.values[1] else 1}''',
+    'optional-array': '''main=()=>{let xs:array<int64?>=[20 none 22] let sum:int64=0
+loop x in xs {if x is? int64 sum+=x} return sum}''',
     'function-type': '''Fn:type=(x:int64):>int64
 apply=(f:Fn x:int64):>int64=>f(x)
 main=()=>apply((x:int64)=>x+2 40)''',
@@ -365,7 +378,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source'])
+@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -396,3 +409,16 @@ def test_core_slice_bounds_panic(compiler, tmp_path):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode != 0 and 'slice' in ran.stderr, ran.stdout + ran.stderr
+
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_existing_optional_program(compiler, tmp_path, release):
+    source = Path(__file__).resolve().parents[2] / 'dewy/tests/optional_values.dewy'
+    binary = tmp_path / 'optional'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

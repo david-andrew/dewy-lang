@@ -33,7 +33,7 @@ The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, based integer and decimal
 scientific literals, floating-point records,
-arrays and dictionaries with value copies, array slices, type aliases, callable types, union
+arrays and dictionaries with value copies, array slices, optional values, type aliases, callable types, union
 narrowing, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
 array/range iteration, import aliases, forward local record declarations, and
@@ -56,8 +56,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 186 checks and takes
-about 12 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 211 checks and takes
+about 14 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -114,7 +114,8 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -n0 tests/python_misc/test_sloppy_core_upstream.py
 ```
 
-The 22 array, copy, bounds, and loop cases take about 1.3 seconds. Fixtures are copied from the pinned Git revision into `core/tests/upstream/`;
+The focused shared-core gate covers arrays, copies, bounds, loops, optionals and
+unions in both build modes. Fixtures are copied from the pinned Git revision into `core/tests/upstream/`;
 the gate no longer needs the reference checkout.
 
 Fixed-path loop lowering now also runs in default development builds. It is a
@@ -147,3 +148,8 @@ The source value is held across bound evaluation, so calls in bounds can mutate
 or replace the original array without changing the value being sliced. Invalid
 bounds panic at runtime. String slices remain unavailable until the grapheme
 boundary is implemented; stored range values are a separate, unfinished feature.
+
+Optional types accept `T?` and `T | none`, with `none` values and `is?`/`isnt?`
+narrowing. This includes dictionary `.get`, arrays of optional values, optional
+unions, and independent copies of optional records. The earlier compiler's
+`dewy/tests/optional_values.dewy` runs unchanged in both build modes.

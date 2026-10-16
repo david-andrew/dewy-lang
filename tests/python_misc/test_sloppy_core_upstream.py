@@ -1,4 +1,4 @@
-"""Focused pinned-core regressions for changes to shared lowering/optimization."""
+"""Focused pinned-core regressions for changes to shared checking and lowering."""
 import os
 import subprocess
 from pathlib import Path
@@ -6,12 +6,13 @@ from pathlib import Path
 import pytest
 
 CASES = ('arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
-         'loop_combined_mut', 'loop_kv_mut', 'arg_alias_copy', 'loop_and_unpack')
+         'loop_combined_mut', 'loop_kv_mut', 'arg_alias_copy', 'loop_and_unpack',
+         'optionals', 'unions', 'narrow_none', 'union_infer')
 
 
 @pytest.mark.parametrize('name', CASES)
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_pinned_core_loops(tmp_path, name, release):
+def test_pinned_core_behavior(tmp_path, name, release):
     compiler = os.environ.get('DEWY_CORE_COMPILER')
     if not compiler:
         pytest.skip('set DEWY_CORE_COMPILER for core regression checks')

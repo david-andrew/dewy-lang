@@ -1,0 +1,13 @@
+# A value made a member of a union whose members inference worked out (T | E with T = int)
+# requires: sloppy
+struct E:
+    msg: str
+apply[T] = (f: () -> (T | E)) -> T | E: f()
+main = ():
+    r: int | E = apply((): 42)
+    print(r)
+    s: str | E = apply((): "hi")
+    print(s)
+    match r:
+        int: print("int", r + 1)
+        E: print("E")
