@@ -84,7 +84,7 @@ Sloppy's syntax formatter. Other inherited editor features remain experimental.
 The existing nested-record particle benchmark runs unchanged except for its
 platform harness import: `benchmark_harness.jo` replaces raw compiler-specific
 syscalls with the core library. Three cold builds and five runs at each of five
-sizes per build give these medians (OS caches retained, one compiler worker):
+sizes per build gave these initial medians (OS caches retained, one compiler worker):
 
 | Compiler | Whole build | Million-particle kernel |
 | --- | ---: | ---: |
@@ -95,8 +95,8 @@ sizes per build give these medians (OS caches retained, one compiler worker):
 | C (`cc -O2`) | 94 ms | 170 ms |
 
 All 375 runs matched checksums, including empty and single-element arrays.
-The source core is about 18.5× faster to compile this supported workload; it
-does not yet beat the existing opt-in dense runtime. These are workload results,
+The initial source core was about 18.5× faster to compile this supported workload;
+its initial runtime did not beat the existing opt-in dense runtime. These are workload results,
 not a self-hosting or full-language speedup claim. Reproduce with
 `tools/compare_sloppy.py --source-core /path/to/bin/dewy-core`, selecting
 `--dewy-source dewy/benchmarks/apps/records_nested.dewy` and the desired modes.
@@ -120,3 +120,11 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core DEWY_SLOPPY_ROOT=/path/to/slop-l
 The 22 array, copy, bounds, and loop cases take about 1.3 seconds. Fixtures come
 from the pinned Git revision, so local changes in the reference checkout do not
 affect the gate.
+
+Fixed-path loop lowering now also runs in default development builds. It is a
+local analysis, independent of the release optimizer, and keeps runtime bounds
+checks for indices that have not been proved safe. On the particle workload,
+three builds and 300 alternating executions show development runtime improving
+from 624 ms to 396 ms (37%), for a build change from 71 ms to 73 ms. Release was
+203 ms and C 174 ms in that run. All checksums matched, and the combined 131-check
+Dewy/editor/shared-core gate passed in 7.8 seconds.

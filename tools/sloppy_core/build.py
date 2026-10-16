@@ -144,6 +144,9 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
     formatter.write_text(text)
     lower = output / 'compiler/lower.jo'
     text = lower.read_text()
+    fixed_anchor = 'fp_begin = (s: int, l: int, bound: int, place: int) -> int:\n    if not opt_release: return 0\n'
+    assert text.count(fixed_anchor) == 1
+    text = text.replace(fixed_anchor, 'fp_begin = (s: int, l: int, bound: int, place: int) -> int:\n')
     length_anchor = '    if id == .len or id == .arrcap:\n        p = gen_borrowed(args[0]).v\n'
     assert text.count(length_anchor) == 1
     text = text.replace(length_anchor, '''    if id == .len or id == .arrcap:

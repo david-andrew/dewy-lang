@@ -45,17 +45,25 @@ measured compile-time budgets.
 [`tools/sloppy_core/README.md`](../tools/sloppy_core/README.md). It retains Dewy's
 syntax parser and maps its output directly into pinned Sloppy AST/checking,
 runtime, code generation, and libraries. It bypasses the old semantic IR, proof
-pipeline, and backend bridge. The tested slice includes typed functions, value
-copies, explicit place arguments, nested records, floats, imports, and combined
-iterator loops. Its 25 behavior checks run in about 1.2 seconds.
+pipeline, and backend bridge. The tested slice includes inferred/generic functions, closures, value
+copies, explicit place arguments, dense nested records, floats, dictionaries,
+unions, imports and combined iterator loops. A native/web paddle game uses the
+inherited graphics/input/font runtime. The editor checks unsaved Dewy source and
+serves diagnostics, hover and definitions. A C-bootstrap-to-self-build path is
+working for the compact core; the syntax parser still needs a native Dewy seed.
 
-The original nested-particle algorithm, changing only its platform harness
-import, builds in 90 ms in release mode versus 1.66 seconds for current Dewy.
-The million-particle kernel takes 257 ms versus 706 ms for boxed Dewy, 218 ms
-for opt-in dense Dewy, and 170 ms for C. All 375 measured executions agree.
+The latest combined language/editor/shared-core gate has 131 checks and takes
+7.8 seconds. The original nested-particle algorithm, changing only its platform
+harness import, builds in about 73 ms by default and 82 ms in release, versus
+1.66 seconds for the earlier Dewy compiler. The latest million-particle kernel
+medians are 396 ms by default and 203 ms in release, versus C at 174 ms in the
+same comparison; all 300 comparative executions agreed. Earlier Dewy results
+were 706 ms boxed and 218 ms with opt-in dense records.
+
 This supports moving application development onto the new core while improving
-runtime code generation and filling useful language gaps. It does not establish
-full compatibility, self-hosting, or release certification.
+code generation and filling useful language gaps. It does not establish full
+compatibility or release certification. Detailed measurements and limitations
+are recorded in the source-core README and audit directory.
 
 ## What the comparison establishes
 

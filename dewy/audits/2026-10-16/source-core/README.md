@@ -62,3 +62,14 @@ That fix is covered by the native/wasm model tests; the drawing example does not
 use inverted comparisons. Native build phase times were 93.9/52.5/3.4 ms
 (check/codegen/write); web times were 69.7/10.8/16.3 ms. These are initial single
 observations, not a benchmark series. No full-language certification is claimed.
+
+## Fast default builds
+
+Fixed-path loop analysis now runs in development builds as well as release.
+This reuses stable array pointers, lengths and uniqueness checks without running
+the full optimizer. `default-loops-particles.json` records three builds of each
+core mode and 300 alternating executions across five sizes. Default kernel time
+fell from 624 ms to 396 ms, while whole compilation moved from 71 ms to 73 ms.
+Release was 203 ms and C (`-O2`) 174 ms in this run. Every checksum agreed.
+`default-loops-tests.log` records 131 Dewy, LSP and pinned upstream checks passing
+in 7.77 seconds, including mutation from loop conditions and bodies.
