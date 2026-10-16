@@ -6,6 +6,8 @@ use 'compiler/opt.jo'
 use 'compiler/ir.jo'
 use 'compiler/lower.jo'
 use 'compiler/elf.jo'
+use 'compiler/inline.jo'
+use 'order.jo'
 
 bridge_bytes: u8[]
 bridge_at = 0
@@ -35,6 +37,22 @@ bridge_ops: Op[] = [.iconst, .mov, .add, .sub, .mul, .divs, .divu, .rems, .remu,
     .faddr, .call, .calli, .syscall, .block, .loop, .if_, .else_, .end, .br,
     .brif, .ret, .trap, .intr]
 
+# The same callee-first, bounded inlining policy as the pinned compiler. Raw
+# pointer aliasing stays conservative. Functions allocating on the stack are
+# excluded by Sloppy's existing rule against inlining call-like intrinsics.
+bridge_inline = ():
+    snap = rel_fns
+    can = fill(0, snap.len())
+    loop k in 0.. and f in snap: can[k] = inlinable(f)
+    loop k in callee_order(snap):
+        ir = snap[k]
+        kc_fn += 1
+        if inline_into(k, snap, can):
+            optimize()
+            snap[k] = ir
+            can[k] = inlinable(ir)
+    rel_fns = snap
+
 main = () -> int:
     av = args()
     if av.len() != 4:
@@ -43,7 +61,10 @@ main = () -> int:
     bridge_bytes = read_bytes(av[1]) ?? panic("cannot read Dewy IR")
     if bridge_bytes.len() < 8 or str_from_bytes(bridge_bytes[..8)) != "DWYSLP01": panic("invalid Dewy IR header")
     bridge_at = 8
-    data_size = bridge_count()
+    data_size = bridge_word()
+    # BSS is not stored in the wire file. Large static buffers can exceed the
+    # entire input size; x64's relative addressing still bounds this experiment.
+    if data_size < 8 or data_size > 2147483647: panic("unsupported Dewy BSS size")
     init = bridge_count()
     entry_fn = bridge_count()
     rodata = bridge_blob()
@@ -76,9 +97,13 @@ main = () -> int:
             imm = bridge_word()
             ir.code.push(Ins(bridge_ops[op], i32(VI), i32(dst), i32(a), i32(b0), i32(c), imm))
         lfuncs.push(LFunc(kind = LK_HELPER, name = name))
-        # Sloppy's ordinary local cleanup; no frontend-dependent inlining or
-        # loop vectorization. Both modes get cleanup; release changes allocation.
+        # Sloppy's ordinary local cleanup in both modes.
         optimize()
+        rel_collect()
+    if opt_release: bridge_inline()
+    loop f in rel_fns:
+        ir = f
+        if opt_release: ir.code = o_licm(ir.code)
         x64_function()
     if bridge_at != bridge_bytes.len(): panic("trailing Dewy IR data")
     if init >= count or entry_fn >= count: panic("invalid entry function")

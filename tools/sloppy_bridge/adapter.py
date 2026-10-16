@@ -305,7 +305,7 @@ class Adapter:
         self.end_function()
         out = bytearray(b'DWYSLP01')
 
-        def word(n): out.extend(struct.pack('<q', wrap_i64(n)))
+        def word(n): out.extend(struct.pack('<q', n))
         def blob(data):
             word(len(data))
             out.extend(data)
@@ -325,6 +325,9 @@ class Adapter:
             word(len(fn.args))
             for arg in fn.args: word(arg)
             word(len(fn.code))
+            instruction = struct.Struct('<6q')
             for ins in fn.code:
-                for part in ins: word(part)
+                # Immediates were normalized when emitted; pack one instruction
+                # at a time instead of allocating/wrapping six separate words.
+                out.extend(instruction.pack(*ins))
         return bytes(out)

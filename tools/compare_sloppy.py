@@ -17,6 +17,7 @@ import shutil
 import signal
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -61,6 +62,7 @@ def main() -> None:
     parser.add_argument('--dewy', type=Path, required=True, help='native Dewy executable')
     parser.add_argument('--udewy', type=Path, help='defaults to udewy beside --dewy')
     parser.add_argument('--sloppy-root', type=Path, required=True)
+    parser.add_argument('--sloppy-emitter', type=Path, help='also measure the checked Dewy → Sloppy IR bridge')
     parser.add_argument('--output', type=Path, required=True, help='new JSON result file')
     parser.add_argument('--builds', type=int, default=3)
     parser.add_argument('--runs', type=int, default=5)
@@ -91,9 +93,17 @@ def main() -> None:
                     ['records.dewy', 'records.jo', 'records.c', 'harness.dewy', 'harness.h']],
         'builds': {}, 'runs': {},
     }
+    modes = ['C', 'sloppy-debug', 'sloppy-release', 'dewy-native']
+    if args.sloppy_emitter:
+        emitter = args.sloppy_emitter.resolve(strict=True)
+        result['tools']['sloppy-emitter'] = file_identity(emitter)
+        manifest = emitter.parent / 'build.json'
+        if manifest.is_file(): result['emitter_build'] = json.loads(manifest.read_text())
+        modes.extend(['dewy-sloppy-debug', 'dewy-sloppy-release'])
+        env['PYTHONPATH'] = str(ROOT)
     checksums: dict[int, str] = {}
     with tempfile.TemporaryDirectory(prefix='dewy-sloppy-') as scratch:
-        for mode in ['C', 'sloppy-debug', 'sloppy-release', 'dewy-native']:
+        for mode in modes:
             builds = result['builds'][mode] = []
             runs = result['runs'][mode] = []
             for sample in range(args.builds):
@@ -106,12 +116,21 @@ def main() -> None:
                     command = [str(sloppy), 'build', str(SOURCES / 'records.jo'), '-o', str(binary)]
                     if mode == 'sloppy-release':
                         command.append('--release')
+                elif mode.startswith('dewy-sloppy'):
+                    bridge_work = work / 'bridge'
+                    binary = bridge_work / 'program'
+                    command = [sys.executable, '-m', 'tools.sloppy_bridge.run', str(SOURCES / 'records.dewy'),
+                               '--dewy', str(dewy), '--emitter', str(emitter), '--output', str(bridge_work)]
+                    if mode.endswith('release'): command.append('--release')
                 else:
                     # Mirror the CLI's documented artifact layout for an external source.
                     from udewy.cache import cache_artifact
                     binary = work / cache_artifact(SOURCES / 'records.dewy', cwd=work)
                     command = [str(dewy), '--timings', '-c', str(SOURCES / 'records.dewy')]
                 built = invoke(command, work, env, 180)
+                if mode.startswith('dewy-sloppy'):
+                    built['stages'] = json.loads((bridge_work / 'measurement.json').read_text())
+                    built['frontend_log'] = (bridge_work / 'frontend.log').read_text()
                 if mode == 'dewy-native' and 'native route:' in built['stdout']:
                     raise RuntimeError(f'Dewy fell back from native emission: {built["stdout"]}')
                 builds.append(built)
@@ -140,6 +159,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     # tools/ is not a package; allow importing the repository's cache layout.
-    import sys
     sys.path.insert(0, str(ROOT))
     main()

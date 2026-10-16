@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.python_misc.test_dewy_bytecode import CASES as STREAM_CASES
+from tests.python_misc.test_lifecycle_consumption import CASES as LIFECYCLE_CASES
+from tests.python_misc.test_resource_copy_contracts import SOURCE as RESOURCE_COPY
 from tools.sloppy_bridge.adapter import Adapter
 from tools.sloppy_bridge.run import compile_program
 from udewy import p0, t1
@@ -55,6 +58,14 @@ def test_existing_backend_abi_cases(emitter, tmp_path, mode, name):
 
 
 EDGE_CASES = {
+    'large-static': '''
+const buffer:int=__static_alloca__(1048576)
+let main=():>int=>{
+    if __load__(buffer+900000) not=? 0 {return 1}
+    __store__(42 buffer+900000)
+    return __load__(buffer+900000)-42
+}
+''',
     'division': '''
 let check=(x:int y:int):>int=>{
     if x // y not=? -1 or x % y not=? x {return 1}
@@ -142,6 +153,25 @@ def test_word_abi_and_control(emitter, tmp_path, mode, name):
 
 
 DEWY_CASES = {
+    **STREAM_CASES,
+    'resource-copy': RESOURCE_COPY,
+    'drop-on-loop-exit': LIFECYCLE_CASES[0],
+    'move-hook': LIFECYCLE_CASES[2],
+    'argument-alias': '''
+Entry:type=[value:int64]
+Bag:type=[items:array<Entry>]
+observe=(before:array<Entry> @bag:Bag):>int64=>{
+    $runtime_assert before.length >? 0 and bag.items.length >? 0
+    bag.items[0].value=9
+    return before[0].value
+}
+main=():>int64=>{
+    let bag=Bag[[Entry[7]]]
+    let observed=observe(bag.items @bag)
+    $runtime_assert bag.items.length >? 0
+    return if observed=?7 and bag.items[0].value=?9 42 else 1
+}
+''',
     'records-copy-growth': '''
 Particle:type=[x:int64 y:int64]
 main=():>int64=>{

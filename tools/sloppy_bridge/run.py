@@ -58,7 +58,8 @@ def compile_program(source: Path, compiler: Path, emitter: Path, work: Path, *, 
                    'binary_bytes': binary.stat().st_size,
                    'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
                    'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
-                   'emitter_sha256': hashlib.sha256(emitter.read_bytes()).hexdigest()}
+                   'emitter_sha256': hashlib.sha256(emitter.read_bytes()).hexdigest(),
+                   'adapter_sha256': hashlib.sha256(Path(__file__).with_name('adapter.py').read_bytes()).hexdigest()}
     (work / 'measurement.json').write_text(json.dumps(measurement, indent=2) + '\n')
     return binary, measurement
 
