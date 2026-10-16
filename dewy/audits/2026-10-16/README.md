@@ -407,3 +407,32 @@ execution, nested mutation/copies/growth, and an exposed element address that
 must survive array growth. The native smoke gate passes **39 tests in
 21.05 s**. [Focused log](nested-dense-tests.log),
 [smoke log](nested-dense-smoke.log). Dense storage remains opt-in.
+
+### Binding page experiment (not retained)
+
+Replacing the binding registry's two hash tables with indexed optional-binding
+pages and a bounded direct directory made one million cross-page lookups fall
+from **130.9 to 106.8 ms** (five alternating runs, identical independently
+computed checksums, zero loop allocation for both). A sparse fallback handled
+very large identities without growing the directory to their address.
+[Lookup samples](binding-pages-lookup.json).
+
+The end-to-end result did not justify retaining the implementation. One cold
+self-build pair on the same frozen source was **38.40 / 38.22 s**, with peak
+RSS **2,656,296 / 2,655,160 KiB**. Both rebuilt compilers executed a program
+returning 42. Three warm tiny-build medians were **309 / 341 ms**; snapshot
+decoding remained about 90 ms. This is no demonstrated compiler improvement.
+The representation and cache-format changes were reverted. The benchmark and
+faster focused tests remain. [Self-build pilot](binding-pages-selfbuild.json),
+[tiny-build samples](binding-pages-tiny.json).
+
+The experimental compiler passed **41 smoke tests in 26.73 s** and **six
+focused tests in 94.13 s**, including C snapshot compilation, generated-code
+freshness, sparse identities, value snapshots and the Sloppy backend.
+[Smoke log](binding-pages-smoke.log), [focused log](binding-pages-focused.log).
+These logs describe the discarded candidate, not a new release certification.
+
+The experiment also exposed a separate real defect: copying a dictionary after
+popping an array-valued entry dereferenced a cleared array descriptor. The
+array copy helper now preserves internal zero handles. Its regression executes
+on native x86, C and the Sloppy bridge; the direct smoke gate includes it.

@@ -3,8 +3,8 @@
 import subprocess
 from pathlib import Path
 
-from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
+from driver_artifacts import isolated_codegen
+
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
@@ -66,6 +66,19 @@ main = ():>int64 => {
     if bindings.route_at(registry route) is? none return 28
     if near =? later or beyond =? later return 29
     if bindings.allocate_param(@registry 'next' 0 loc) not=? 524291 return 30
+    # Sparse page holes and the unused zero identity remain absent. Switching
+    # between sparse pages must preserve both presence and builtin metadata.
+    if bindings.has_binding(registry 0) or bindings.has_binding(registry 524286) return 31
+    if bindings.find_binding(registry 524288) isnt? none return 32
+    let builtin=bindings.binding_at(registry near)
+    builtin.builtin=true
+    bindings.store_binding(@registry near builtin)
+    if not bindings.builtin_binding(registry near) or bindings.builtin_binding(registry beyond) return 33
+    let missing=bindings.find_binding(registry 281474976710655)
+    if missing isnt? none return 34
+    bindings.store_binding(@registry 281474976710655 bindings.Binding[281474976710655 'sparse' 'value' loc])
+    bindings.store_binding(@registry first bindings.binding_at(registry first))
+    if bindings.binding_at(registry 281474976710655).name not=? 'sparse' return 35
 
     let nodes:array<hir.AST> = []
     let root = hir.append_node(@nodes hir.ExpressedIdentifier[loc=loc value_type=0 name='x' binding_id=first])
@@ -88,7 +101,7 @@ main = ():>int64 => {
     source = tmp_path / 'bindings.dewy'
     source.write_text(program)
     lowered = tmp_path / 'bindings.udewy'
-    lowered.write_text(codegen(SrcFile.from_path(source)))
+    isolated_codegen(lowered, source, debug_locations=False)
     assert entry_point(lowered, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(lowered).resolve()], check=False, capture_output=True, timeout=30)
     assert result.returncode == 42, result.stderr.decode()
@@ -97,7 +110,7 @@ main = ():>int64 => {
 def test_route_queries_do_not_copy_unrelated_roots(tmp_path):
     source = ROOT / 'tests/fixtures/native_root_routes.dewy'
     output = tmp_path / 'root-routes.udewy'
-    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    isolated_codegen(output, source, debug_locations=False)
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], check=False,
                             capture_output=True, text=True, timeout=10)
@@ -106,19 +119,13 @@ def test_route_queries_do_not_copy_unrelated_roots(tmp_path):
 
 
 def test_native_binding_snapshot_pages(tmp_path):
-    from test_bootstrap_structural_text import build_program_driver
-
-    binary = build_program_driver(tmp_path)
     source = ROOT / 'tests/fixtures/native_binding_snapshots.dewy'
-    compiled = subprocess.run([binary, source, ROOT / 'library', tmp_path / 'prelude-cache'],
-                              capture_output=True, text=True, timeout=120)
-    assert compiled.returncode == 0, compiled.stderr
     output = tmp_path / 'pages.udewy'
-    output.write_text(compiled.stdout)
+    isolated_codegen(output, source, debug_locations=False)
     for target in ('x86_64', 'c'):
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         for args in ([], ['large']):
             result = subprocess.run([cache_artifact(output).resolve(), *args],
-                                    capture_output=True, text=True, timeout=15)
+                                    capture_output=True, text=True, timeout=15, check=False)
             assert result.returncode == 42, (target, args, result)
             assert 0 < int(result.stdout) < 4_000_000

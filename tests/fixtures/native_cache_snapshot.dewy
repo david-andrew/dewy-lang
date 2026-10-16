@@ -41,6 +41,9 @@ main=():>int64=>{
     # copy to check that its pages remain independent of the saved snapshot.
     let last:addr=0
     loop i in 0..129 {last=bindings.allocate_param(@session.registry 'parameter' word span)}
+    let sparse:addr=281474976710655
+    bindings.store_binding(@session.registry sparse bindings.Binding[sparse 'sparse' 'value' span])
+    bindings.store_binding(@session.registry binding record)
     session.local_place_roots[binding]=last
     let route=bindings.route_id(@session.registry binding ['field'] word span)
     session.methods['deleted']=contexts.MethodEntry[binding]
@@ -75,6 +78,7 @@ main=():>int64=>{
     if inferred isnt? hir.FunctionCall or not inferred.implicit_copy return 41
     if copy.methods.length not=? 1 or 'retained' not in? copy.methods return 10
     if not bindings.has_binding(copy.registry last) return 20
+    if bindings.binding_at(copy.registry sparse).name not=? 'sparse' return 44
     if bindings.binding_at(copy.registry last).name not=?'parameter' return 21
     if bindings.route_at(copy.registry route) is?none return 22
     let prior=copy.registry
