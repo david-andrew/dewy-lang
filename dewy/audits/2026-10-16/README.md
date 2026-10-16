@@ -315,3 +315,19 @@ The primitive codec runs on x86 and C, covering all truncated word lengths,
 unaligned words, invalid UTF-8, and malformed values. Shared-cache recovery
 and transitive invalidation tests also pass: **3 tests in 48.96 s**, including
 a fresh compiler-sized cache driver. [Test log](cache-word-tests.log).
+
+### Prune unused runtime helpers before normalization
+
+Ordinary builds now retain only reachable lowered functions before
+normalization, using the walk already used for proof-only bodies. Previously
+normal builds retained the entire declared helper set. Source checking still
+runs before this pass; global startup, callbacks, generated helpers, and argv
+decoding are roots. Debug builds retain their existing behavior.
+
+Three alternating warm runs give **438 ms before / 376 ms after** for the
+tiny program, and normalization **44.4 / 4.6 ms**. Executable size falls from
+131,152 to 53,496 bytes. Each newly built program executes with its changed
+expected result. [Samples and identities](runtime-pruning.json).
+
+The remaining allocator functions in a tiny executable are reachable from
+prelude global initialization; eliminating those needs a separate change.
