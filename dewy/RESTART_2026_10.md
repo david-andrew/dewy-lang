@@ -215,3 +215,18 @@ Sloppy's pinned register IR/optimizer/x86 emitter. Its 22 focused tests pass
 in 10.59 s. This establishes an executable boundary without changing language
 rules; it retains the old boxed layouts and frontend costs. It is opt-in,
 Linux x86-64 only, and does not yet carry debug metadata or every intrinsic.
+
+The completed probe now also compiles the full Dewy compiler. Its final
+33-test acceptance selection passes with that Sloppy-built compiler, and it
+rebuilds a native Dewy compiler byte-identical to the certified reference's
+output. The Sloppy backend itself has an independent pinned C-seeded fixed
+point. No compiler was installed or made the default.
+
+The decision is to keep the boundary and move **above old runtime lowering**,
+not ship a backend-only replacement. The final 450-run comparison improves
+million-particle time from 710.5 to 609.4 ms with unchanged boxed layouts,
+against 172.7 ms for Sloppy's dense counterpart. Cold builds remain slower
+(1.99 versus 1.74 s), and the Sloppy-built Dewy compiler self-builds in 47.79 s
+versus the reference's 38.21 s. Compact frontend data and typed dense aggregate
+lowering remain necessary. See the
+[full experiment evidence and next boundary](audits/2026-10-16/README.md#checked-dewy-through-sloppys-backend).

@@ -92,3 +92,8 @@ repeated matched measurements are the next experiment, not a claim that this
 bridge by itself meets the restart budgets. The comparison runner accepts
 `--sloppy-emitter /path/to/dewy-sloppy-emit` to include both bridge modes in
 the same checksum-checked C/Sloppy/Dewy experiment.
+
+The [recorded final comparison](../../dewy/audits/2026-10-16/README.md#checked-dewy-through-sloppys-backend)
+includes 450 matching runs and compiler-sized validation. It does not meet
+the restart performance budgets: retain the service as the backend for a typed
+aggregate experiment, rather than changing the default compiler route.

@@ -115,3 +115,90 @@ separation from the pre-existing `DEWY_TEST_NATIVE` program-output override.
 [Harness log](harness-tests.log). Relevant Python lint checks, shell syntax
 and `git diff --check` also pass. The full suite and release certification
 were **not rerun for this harness branch**.
+
+## Checked Dewy through Sloppy's backend
+
+The [bridge](../../../tools/sloppy_bridge/README.md) now adapts checked UBC2
+into Sloppy's register IR. The production compiler and language rules remain
+unchanged. The emitter uses pinned Sloppy source, with a small dynamic-stack
+allocation extension; its final seed was built from the pinned C bootstrap.
+Sloppy generations two and three matched byte-for-byte
+([bootstrap identity](bridge-bootstrap.json)).
+
+Final comparison: three fresh builds and five runs per build/size, for all six
+modes and sizes 0, 1, 10, 100,000 and 1,000,000. **All 450 checksums match.**
+No other compiler/test jobs from this task ran during these measurements.
+These are a new run, not mixed with the earlier four-mode results above.
+
+| Mode | Cold build median | 100,000 records | 1,000,000 records | Peak run RSS |
+| --- | ---: | ---: | ---: | ---: |
+| C `-O2` | 96.2 ms | 10.411 ms | 166.303 ms | 32.2 MiB |
+| Sloppy debug, dense | 36.1 ms | 32.628 ms | 358.818 ms | 34.0 MiB |
+| Sloppy release, dense | 55.6 ms | 13.355 ms | 172.685 ms | 34.0 MiB |
+| Dewy native, boxed | 1737.5 ms | 68.621 ms | 710.454 ms | 76.8 MiB |
+| Dewy → Sloppy debug, boxed | 2015.0 ms | 58.713 ms | 626.181 ms | 76.8 MiB |
+| Dewy → Sloppy release, boxed | 1988.7 ms | 58.470 ms | 609.351 ms | 76.8 MiB |
+
+[Raw commands, samples, source and compiler identities](bridge-particles.json).
+Bridge release stage medians are 1.7182 s for existing Dewy checking/lowering/
+stream emission, 0.1146 s for Python adaptation and 0.0211 s for native
+codegen. The externally timed build also includes Python startup/shutdown;
+stage medians need not sum to its median. Release includes bounded inlining,
+loop-invariant arithmetic and allocation, but not loop versioning/vectorization.
+
+This improves the large particle kernel about 14%, while compilation is slower
+and memory is effectively unchanged. Sloppy's ordinary dense-record program is
+still about 3.5 times faster than the bridge at a million particles. This
+supports changing typed aggregate lowering/representation, not promoting a
+backend-only swap. It does **not** isolate boxing as the sole cause of the gap:
+generated helpers, alias rules and optimization opportunities also differ.
+
+### The compiler itself
+
+The bridge compiled all of `dewy/bootstrap/main.dewy`. The first end-to-end
+build took 59.25 s: 40.25 s existing frontend/lowering/stream, 15.60 s adaptation,
+3.40 s codegen, with peak process RSS 3,121,876 KiB (about 2.98 GiB).
+[Build metadata](bridge-compiler-build.json),
+[frontend phase/memory counters](bridge-compiler-frontend.log).
+
+Batching instruction serialization subsequently reduced adaptation to 11.07 s
+on the same saved stream, producing **identical IR bytes** (134,106,356 bytes).
+Final backend re-emission took 4.06 s. This reused the checked intermediate;
+it is not a second measured end-to-end build.
+[Re-emission and binary identities](bridge-compiler-reemit.json).
+
+The final Sloppy-built compiler and the certified reference each rebuilt Dewy
+through the existing native route, in fresh directories with fresh preludes.
+They emitted **byte-identical native compilers**, SHA256
+`2325266bdb913f38f17b5bfe2dd17676ffbfe9fdf3f9d84619d6efe38c97a10b`.
+Both outputs run `--version`. The reference took 38.21 s; the Sloppy-built
+compiler took 47.79 s, about 25% slower. These are single final self-build
+samples, not a statistical self-build benchmark.
+[Commands, full counters, hashes and equality result](bridge-compiler-self-check.json).
+
+The final emitter and Sloppy-built Dewy compiler pass **33 focused tests in
+33.66 s**: words/division/booleans, short-circuiting, calls and stack arguments,
+repeated dynamic allocation, sized memory, large BSS and static relocations;
+checked strings/containers/functions; record growth/copies, subtypes,
+alias-sensitive arguments, resource copy and move/drop hooks; rejected bounds
+proofs including unused invalid functions and invalidated indices.
+[Test log](bridge-tests.log). The compiler equality check is additional
+coverage, **not full integration certification**. Neither compiler was installed
+or made the default.
+
+### Decision
+
+Keep this as a bounded backend service and acceptance harness. Do not extend
+the UBC adapter into a second general language frontend. The next dense-record
+slice must branch before pointer/ownership lowering in
+`bootstrap/backend/udewy/graph.dewy`, retaining the complete validation pipeline
+and explicit initialization, effect and copy-policy obligations. Preserve type
+IDs, aggregate layouts and value/place identity into Sloppy's IR/runtime.
+Start with fixed scalar records, then apply the copy/alias/growth/resource
+counterexamples before widening supported types. Unsupported cases must remain
+explicitly unsupported; never silently lower their semantics differently.
+
+Also compact the frontend's allocation-heavy type/HIR representation and
+repeated traversals.
+The backend boundary is now executable at compiler scale, but these measurements
+do not justify changing parsing or other user-visible language rules.
