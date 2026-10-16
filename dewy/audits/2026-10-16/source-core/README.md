@@ -387,3 +387,32 @@ named and anonymous record values are not added here.
 A fresh C bootstrap takes 17.68 seconds and passes all 513 checks in 36.17 seconds
 (`records-build.json`, `records-tests.log`). This adds record representation to
 the existing compact type system; it does not restore the old proof engine.
+
+
+## Dependent default arguments
+
+Defaults referring to earlier parameters now use ordinary compiler-generated
+value bindings instead of cloning the supplied expression. Calls such as
+`combine(next())` evaluate the explicit argument once, and later arguments cannot
+change that captured value. Explicit values are bound in source order, followed
+by omitted defaults in parameter order. The default expression is checked in its
+declaring module with earlier bindings in scope, so local shadowing, nested calls
+and escaping closures use normal lexical semantics. A direct `b=a` default can
+infer its type from `a`. Managed values use existing ownership/lifetime lowering.
+
+The before probes rejected both a computed argument and a caller local used by
+a later default. Focused tests now cover those, chains, reordered named arguments,
+managed copies and returns, numeric conversion, global initialization, nested
+calls, lexical shadowing, and closures that outlive the call. Imports from both
+Dewy and implementation-language modules keep declaration-site global lookup.
+Dependent defaults with mutable `@` parameters currently produce an explicit
+diagnostic directing the caller to supply those arguments; place capture is not
+silently approximated as a value copy.
+
+A fresh C bootstrap took 17.36 seconds and passed 570 checks in 39.54 seconds;
+three additional import/editor checks passed in 0.54 seconds. The gate now has
+573 checks (`defaults-build.json`, `defaults-tests.log`,
+`defaults-extra-tests.log`). Six sequential alternating release builds after a
+warmup pair gave median paddle build times of 288.46 ms before / 300.23 ms after,
+and compiler self-build times of 1.334 s / 1.302 s. These small desktop differences
+are recorded without claiming a speedup (`defaults-performance.json`).

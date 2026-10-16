@@ -1003,15 +1003,21 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         return
     coerce(a, pt)
 
-default_arg = (decl: int, i: int, pt: int, given: int[] = []) -> int:
+default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false) -> int:
     d = clone(int(nodes[kid(decl, i)].b))
     # (h: f64 = w: a default naming an earlier parameter takes that argument)
-    if given.len() > 0: subst_params(d, decl, given)
+    if given.len() > 0 and not captured: subst_params(d, decl, given)
     saved = cx
     ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
+    mark = scope_mark()
+    if captured:
+        loop j in 0.. and value in given:
+            name = int(nodes[kid(decl, j)].name)
+            push_scope_sym(name, new_sym(name, .local, int(nodes[value].sym), kid(decl, j)))
     check_expr(d, pt)
     coerce(d, pt)
+    scope_reset(mark)
     ctxs.pop()
     cx = saved
     d
@@ -1034,6 +1040,43 @@ subst_params = (n: int, decl: int, given: int[]):
         subst_params(int(nodes[n].c), decl, given)
         if k != .partial: subst_params(int(nodes[n].d), decl, given)
     loop i in [0..nkids(n)): subst_params(kid(n, i), decl, given)
+
+default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bool:
+    if n == 0: return false
+    if nodes[n].kind == .ident:
+        if hidden.contains(int(nodes[n].name)): return false
+        loop i in [0..before):
+            if nodes[n].name == nodes[kid(decl, i)].name: return true
+        return false
+    if nodes[n].kind == .lambda:
+        local_hidden = hidden
+        loop param in kids(n):
+            if default_uses_params(int(nodes[param].b), decl, before, local_hidden): return true
+            local_hidden.push(int(nodes[param].name))
+        return default_uses_params(int(nodes[n].b), decl, before, local_hidden)
+    if nodes[n].kind == .block:
+        local_hidden = hidden
+        loop statement in kids(n):
+            if default_uses_params(statement, decl, before, local_hidden): return true
+            if nodes[statement].kind == .vardecl: local_hidden.push(int(nodes[statement].name))
+        return false
+    if default_uses_params(int(nodes[n].a), decl, before, hidden) or default_uses_params(int(nodes[n].b), decl, before, hidden): return true
+    if default_uses_params(int(nodes[n].c), decl, before, hidden) or default_uses_params(int(nodes[n].d), decl, before, hidden): return true
+    loop child in kids(n):
+        if default_uses_params(child, decl, before, hidden): return true
+    false
+
+capture_default_arg = (a: int, pt: int, statements: mut int[]) -> int:
+    local = new_local(0, pt, nodes[a].pos)
+    locals[local].flags = i32(LF_DECL | LF_QUIET | LF_READ)
+    binding = mk(.vardecl, nodes[a].pos)
+    nodes[binding].a = i32(type_node_of(pt, nodes[a].pos))
+    nodes[binding].b = i32(a)
+    nodes[binding].sym = i32(local)
+    nodes[binding].type = i32(pt)
+    add_flag(binding, NF_CHECKED)
+    statements.push(binding)
+    mk_ident_local(local, nodes[a].pos)
 
 # an argument that can be computed twice: a literal, a variable, a field of one
 simple_arg = (v: int) -> bool:
@@ -1384,6 +1427,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         if is_lit(dv): cd.binds[int(types[p].id)] = lit_default(dv)
         else if dk == .bool_lit: cd.binds[int(types[p].id)] = T_BOOL
         else if dk == .str_lit: cd.binds[int(types[p].id)] = T_STR
+        else if dk == .ident and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            loop j in [0..i):
+                if nodes[dv].name != nodes[kid(decl, j)].name: continue
+                earlier = subst_partial(cd.sig.params[j], cd.binds)
+                if not has_var(earlier): cd.binds[int(types[p].id)] = earlier
     loop i in [0..int(cd.sig.ntp)):
         b = cd.binds[i]
         if b == 0:
@@ -1400,12 +1448,36 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
     if ide_on:
         if nodes[n].a != 0: ide_fn_ref(nodes[int(nodes[n].a)].pos, name, f)
         ide_named_args(args, decl, IK_PARAM, fns[f].ptypes)
+    capture_defaults = false
+    if not partial and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        loop i in [0..np):
+            if cd.args[i] == 0 and default_uses_params(int(nodes[kid(decl, i)].b), decl, i): capture_defaults = true
+    if capture_defaults and cd.sig.mutmask != 0:
+        fatal(nodes[n].pos, "defaults referring to earlier parameters cannot yet be combined with mutable arguments; supply those defaults explicitly")
+    captured: int[]
+    statements: int[]
+    if capture_defaults:
+        captured = fill(0, np)
+        # Explicit values first, in written order; defaults follow in parameter
+        # order. These ordinary locals provide both snapshots and ownership.
+        loop source in args:
+            a = unnamed(source)
+            loop i in [0..np):
+                if cd.args[i] != a: continue
+                finish_arg(a, fns[f].ptypes[i], false)
+                captured[i] = capture_default_arg(a, fns[f].ptypes[i], statements)
+                break
     fin: int[]
     loop i in [0..np):
         a = cd.args[i]
         is_mut = has_flag(kid(decl, i), NF_MUT)
         if a == 0:
-            fin.push(default_arg(decl, i, fns[f].ptypes[i], fin))
+            a = default_arg(decl, i, fns[f].ptypes[i], fin, capture_defaults)
+            if capture_defaults: a = capture_default_arg(a, fns[f].ptypes[i], statements)
+            fin.push(a)
+            continue
+        if capture_defaults:
+            fin.push(captured[i])
             continue
         finish_arg(a, fns[f].ptypes[i], is_mut)
         fin.push(a)
@@ -1415,8 +1487,17 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
     nodes[n].kind = .call
     nodes[n].a = 0
     if partial: return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
-    save_call_order(n, args, fin)
+    if not capture_defaults: save_call_order(n, args, fin)
     nodes[n].type = fns[f].ret
+    if capture_defaults:
+        call = nodes.len()
+        nodes.push(nodes[n])
+        result = mk(.exprstmt, nodes[n].pos)
+        nodes[result].a = i32(call)
+        statements.push(result)
+        nodes[n] = Node(kind = .block, pos = nodes[n].pos, type = fns[f].ret)
+        if tkind(int(fns[f].ret)) != .void_ and int(fns[f].ret) != T_NEVER: nodes[n].aux = 1
+        set_list(n, statements)
     int(fns[f].ret)
 
 value_call = (n: int, callee: int, args: int[]) -> int:

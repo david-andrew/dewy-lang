@@ -34,6 +34,46 @@ return if text =? "result 42" 42 else 1}''',
     'generic-function': '''twice=(x)=>x+x
 main=()=>if twice(21) =? 42 and twice(1.25) =? 2.5 42 else 1''',
     'default-argument': 'add=(x y=2)=>x+y\nmain=()=>add(40)',
+    'default-reference-call': '''let count:int64=0
+next=()=>{count+=1 return 21}
+combine=(a:int64 b:int64=a)=>a+b
+main=()=>{let result=combine(next()) return if count =? 1 result else 1}''',
+    'default-reference-snapshot': '''combine=(a:int64 b:int64 c:int64=a)=>a+c+b
+main=()=>{let x:int64=21 return combine(x {x=99 0})}''',
+    'default-reference-chain': '''let count:int64=0
+next=()=>{count+=1 return 14}
+combine=(a:int64=next() b:int64=a c:int64=b)=>a+b+c
+main=()=>{let value=combine() return if count =? 1 value else 1}''',
+    'default-reference-generic': '''combine=(a b=a)=>a+b
+main=()=>combine(21)''',
+    'default-reference-named': '''let count:int64=0
+next=()=>{count+=1 return count}
+combine=(a:int64 b:int64 c:int64=a)=>a*10+b+c
+main=()=>if combine(b=next() a=next()) =? 23 and count =? 2 42 else 1''',
+    'default-reference-nested': '''identity=(value:int64)=>value
+combine=(a:int64 b:int64=identity(a))=>a+b
+main=()=>{let x:int64=21 return combine(x)}''',
+    'default-reference-managed': '''combine=(a:array<int64> b:array<int64>=a)=>{
+b[0]=99 return a[0]+a[1]}
+main=()=>combine([20 22])''',
+    'default-reference-field': '''Item:type=[value:int64]
+combine=(a:Item b:int64=a.value)=>a.value+b
+main=()=>combine(Item[21])''',
+    'default-reference-return-managed': '''copy=(a:array<int64> b:array<int64>=a)=>b
+main=()=>{let values=copy([20 22]) return values[0]+values[1]}''',
+    'default-reference-global': '''combine=(a:int64 b:int64=a)=>a+b
+let answer=combine(21)
+main=()=>answer''',
+    'default-reference-float': '''combine=(a:float64 b:float64=a)=>a+b
+main=()=>if combine(21) =? 42.0 42 else 1''',
+    'default-reference-closure': '''Getter:type=():>int64
+combine=(a:int64 getter:Getter=()=>a)=>a+getter()
+main=()=>combine(21)''',
+    'default-reference-closure-return': '''Getter:type=():>int64
+create=(a:int64 getter:Getter=()=>a):>Getter=>getter
+main=()=>{let getter=create(42) return getter()}''',
+    'default-reference-shadow': '''combine=(a:int64 b:int64={let a:int64=2 a} c:int64=a)=>a+c+b
+main=()=>combine(20)''',
     'named-interleaved': '''add=(x:int64 y:int64=2 z:int64)=>x+y+z
 main=()=>add(y=2 20 20)''',
     'named-order': '''let sequence:int64=0
@@ -303,6 +343,7 @@ ERRORS = {
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
     'effect-contract': ('main=():>int64 & no_effects=>42', 'does not yet support'),
     'missing-name': ('# 🙂\nmain=():>int64=>missing', 'unknown'),
+    'default-reference-mutable': ('f=(@a:int64 b:int64=a)=>b\nmain=()=>{let a:int64=42 return f(@a)}', 'supply those defaults explicitly'),
     'record-duplicate': ('main=()=>{let value=[x=1 x=2] return 0}', 'duplicate record field'),
     'record-unknown-field': ('Value:type=[x:int64]\nmain=()=>{let v:Value=[y=42] return 0}', 'unknown'),
     'record-mixed-elements': ('main=()=>{let v=[x=42 2] return 0}', 'record item'),
@@ -387,6 +428,23 @@ def test_core_imports(compiler, tmp_path, extension, style):
     }
     declaration, expression = forms[style]
     source.write_text(f'{declaration}\nmain=():>int64=>{expression}')
+    binary = tmp_path / 'main'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+def test_core_imported_dependent_default(compiler, tmp_path, extension):
+    dependency = tmp_path / f'helper.{extension}'
+    dependency.write_text('let offset:int64=2\ncombine=(a:int64 b:int64=a+offset)=>a+b'
+                          if extension == 'dewy' else
+                          'offset: int = 2\ncombine = (a: int, b: int = a + offset) -> int: a + b\n')
+    source = tmp_path / 'main.dewy'
+    source.write_text(f'''from p"helper.{extension}" import combine
+let offset:int64=99
+main=()=>{{let value:int64=20 return combine(value)}}''')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -571,7 +629,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')

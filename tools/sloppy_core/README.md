@@ -74,6 +74,14 @@ the next unassigned parameter. Explicit Dewy arguments evaluate in source order,
 followed by omitted defaults in parameter order, including record construction.
 Already evaluated scalar and managed values survive changes made by later
 arguments. Named arguments on first-class function values remain unsupported.
+Defaults may refer to earlier parameters: `combine=(a b=a)=>a+b` accepts
+`combine(next())` and evaluates `next()` once. Explicit values are captured in
+source order, followed by defaults in parameter order. Defaults resolve globals
+in the declaring module, respect local shadowing, and may capture earlier values
+in returned closures. A directly referenced parameter also supplies the inferred
+default type; more complex defaults can use an explicit annotation. Combining
+dependent defaults with mutable `@` arguments is currently diagnosed; supply
+those arguments explicitly.
 
 Numeric `as` performs value conversion, including integer/float and float-width
 conversions. Float-to-integer conversions truncate toward zero and saturate to
@@ -95,8 +103,8 @@ types; annotate the record when a field is an otherwise untyped empty collection
 Named record types remain distinct, and structural conversions between already
 constructed named and anonymous values are not implemented.
 
-The combined Dewy/editor/shared-core gate now contains 513 checks and takes
-about 36 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 573 checks and takes
+about 40 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
