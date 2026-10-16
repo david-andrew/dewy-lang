@@ -112,6 +112,21 @@ let c:int16=-32768 let d:uint16=0xffff
 return if (a as int64) =? -128 and (b as int64) =? 255 and (c as int64) =? -32768 and (d as int64) =? 65535 42 else 1}''',
     'scientific': '''main=()=>if 4.2e1 =? 42.0 and 420e-1 =? 42.0 and 4_200e-2 =? 42.0 and 42e+0 =? 42.0 42 else 1''',
     'unary-plus': 'positive=(x:int64)=>+x\nmain=()=>positive(42)',
+    'panic-ended-search': '''find_value=(xs:array<int64> target:int64):>int64=>{loop x in xs {if x =? target return x} panic("missing")}
+main=()=>find_value([20 42] 42)''',
+    'grapheme-length': 'main=()=>if "".length =? 0 and "é👩‍👩‍👧‍👦🇺🇸".length =? 3 and "ASCII".length =? 5 and "\\r\\n".length =? 1 42 else 1',
+    'grapheme-index': 'main=()=>{let s="Aé👩‍👩‍👧‍👦🇺🇸" return if s[1] =? "é" and s[2] =? "👩‍👩‍👧‍👦" and s[3] =? "🇺🇸" 42 else 1}',
+    'grapheme-slices': '''main=()=>{let s="Aé👩‍👩‍👧‍👦🇺🇸"
+return if s[1..2] =? "é👩‍👩‍👧‍👦" and s[1..3) =? "é👩‍👩‍👧‍👦" and s[..0] =? "A" and s[3..] =? "🇺🇸" and s[..] =? s and s[2..2) =? "" and s[4..] =? "" 42 else 1}''',
+    'grapheme-loop': '''main=()=>{let s="é👩‍👩‍👧‍👦🇺🇸" let text="" let count:int64=0
+loop cluster in s {text+=cluster count+=1}
+return if text =? s and count =? 3 42 else 1}''',
+    'grapheme-zipped-loop': '''main=()=>{let text="" let count:int64=0
+loop a in "é👩‍👩‍👧‍👦🇺🇸" and b in "123" {if b =? "2" continue text+=a count+=1}
+return if text =? "é🇺🇸" and count =? 2 42 else 1}''',
+    'grapheme-bound-side-effect': '''let text="é👩‍👩‍👧‍👦"
+start=()=>{text="replacement" return 1}
+main=()=>{let part=text[start()..] return if part =? "👩‍👩‍👧‍👦" and text =? "replacement" 42 else 1}''',
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
@@ -128,8 +143,6 @@ ERRORS = {
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
     'unbounded-int': ('main=():>int=>42', 'unbounded integer'),
     'integer-division': ('main=():>int64=>85/2', 'integer /'),
-    'grapheme-length': ('main=():>int64=>"é🙂".length', 'grapheme string length'),
-    'grapheme-index': ('main=():>int64=>{let s="é🙂" printl(s[0]) return 42}', 'grapheme string indexing'),
     'literal-too-large': ('main=()=>18446744073709551616', 'exceeds uint64'),
     'hex-too-large': ('main=()=>0x10000000000000000', 'exceeds uint64'),
     'negative-too-large': ('main=()=>-9223372036854775809', 'exceeds int64'),
@@ -378,7 +391,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source'])
+@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -422,3 +435,86 @@ def test_core_existing_optional_program(compiler, tmp_path, release):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_grapheme_conformance(compiler, tmp_path, release, target):
+    """Independent Unicode expectations, with one compiler process per mode/target."""
+    root = Path(__file__).resolve().parents[2]
+    cases = [(b'', [0])]
+    for line in (root / 'tests/data/GraphemeBreakTest-16.0.0.txt').read_text().splitlines():
+        tokens = line.split('#')[0].split()
+        if not tokens:
+            continue
+        data = bytearray()
+        boundaries = []
+        for token in tokens:
+            if token == '÷':
+                boundaries.append(len(data))
+            elif token != '×':
+                data.extend(chr(int(token, 16)).encode())
+        cases.append((bytes(data), boundaries))
+    # Exhaust the ASCII shortcut, including the CR/LF exception.
+    cases.extend((bytes([a, b]), [0, 2] if (a, b) == (13, 10) else [0, 1, 2])
+                 for a in range(128) for b in range(128))
+    cases.extend((data, None) for data in [b'\x80', b'\xc0\xaf', b'\xc1\xbf', b'\xc2',
+                 b'\xe0\x80\x80', b'\xed\xa0\x80', b'\xf0\x80\x80\x80', b'\xf4\x90\x80\x80',
+                 b'\xf5\x80\x80\x80', b'\xe2\x82', b'\xc2A', b'\xff'])
+    (tmp_path / 'cases.bin').write_bytes(b''.join(struct.pack('<I', len(data)) + data for data, _ in cases))
+    expected = ['invalid' if boundaries is None else ','.join(map(str, boundaries)) for _, boundaries in cases]
+    source = tmp_path / 'conformance.jo'
+    source.write_text('''main = ():
+    data_ = embed("cases.bin")
+    offset = 0
+    loop offset < data_.len():
+        size = __grapheme_word(data_, offset)
+        offset += 4
+        text = str_from_bytes(data_[offset..offset + size))
+        offset += size
+        if let bounds = grapheme_boundaries(text):
+            assert(__dewy_string_length(text) == bounds.len() - 1)
+            clusters = graphemes(text)
+            assert(clusters.len() == bounds.len() - 1)
+            assert(join(clusters, "") == text)
+            loop i in [0..clusters.len()):
+                assert(__dewy_string_index(text, i) == clusters[i])
+                assert(__dewy_string_slice(text, i, i + 1, false, true) == clusters[i])
+                assert(__dewy_string_slice(text, i, i, true, true) == clusters[i])
+            parts: str[]
+            loop boundary in bounds: parts.push("{boundary}")
+            print(join(parts, ","))
+        else: print("invalid")
+''')
+    binary = tmp_path / 'conformance'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web conformance')
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('expression', ['s[2]', 's[-1]', 's[0..2]', 's[2..1)', 's[0..9223372036854775807]'])
+def test_core_grapheme_bounds_panic(compiler, tmp_path, expression):
+    source = tmp_path / 'bounds.dewy'
+    source.write_text(f'main=()=>{{let s="é🙂" printl({expression})}}')
+    binary = tmp_path / 'bounds'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0 and 'out of bounds' in ran.stderr, ran.stdout + ran.stderr

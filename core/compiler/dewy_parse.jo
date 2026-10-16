@@ -550,7 +550,17 @@ dw_iterable = (id: int, slice: bool = false) -> int:
         inclusive = wrapper == "[]:"
         id = dw_unwrap(dw_child(id, 0))
     if slice and dw_name(id) == "..": return mk(.range, dewy_syntax[id].pos)
-    if dw_op(id) != "RangeJuxtapose": return dw_expr(id)
+    if dw_op(id) != "RangeJuxtapose":
+        value = dw_expr(id)
+        if slice: return value
+        # Resolve iterable strings once, before combined-loop desugaring. Other
+        # iterable types keep their existing representation without a wrapper.
+        call = mk(.call, dewy_syntax[id].pos)
+        callee = mk(.ident, dewy_syntax[id].pos)
+        nodes[callee].name = i32(intern("__dewy_iter"))
+        nodes[call].a = i32(callee)
+        set_list(call, [value])
+        return call
     size = dewy_syntax[id].children.len()
     n = mk(.range, dewy_syntax[id].pos)
     at = 1

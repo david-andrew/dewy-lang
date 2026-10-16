@@ -1,0 +1,140 @@
+# Unicode 16 extended grapheme clusters, adapted from library/unicode/graphemes.dewy.
+# Strings keep the compact byte representation. This cursor streams boundaries;
+# no per-string boundary descriptor or host Unicode service is required.
+struct __GraphemeCursor:
+    offset: int
+    previous: int
+    regional_run: int
+    indic_context: int
+    pictographic_chain: bool
+    zwj_after_pictographic: bool
+
+__grapheme_word = (table: u8[], offset: int) -> int:
+    int(table[offset]) | (int(table[offset + 1]) << 8) | (int(table[offset + 2]) << 16) | (int(table[offset + 3]) << 24)
+
+# Sorted nine-byte records: little-endian start, end, property.
+__grapheme_property = (table: u8[], scalar: int) -> int:
+    lo = 0
+    hi = table.len() / 9
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        at = mid * 9
+        if scalar < __grapheme_word(table, at): hi = mid
+        else if scalar > __grapheme_word(table, at + 4): lo = mid + 1
+        else: return int(table[at + 8])
+    0
+
+# The next boundary, or -1 for malformed UTF-8. Context is retained across
+# boundaries (notably for regional-indicator pairs). The scalar at the next
+# boundary is consumed on the following call.
+__grapheme_next = (s: str, c: mut __GraphemeCursor) -> int:
+    start = c.offset
+    loop c.offset < len(s):
+        offset = c.offset
+        first = int(s[offset])
+        scalar = first
+        count = 1
+        minimum = 0
+        if first >= 0xc2 and first <= 0xdf: scalar = first & 0x1f; count = 2; minimum = 0x80
+        else if first >= 0xe0 and first <= 0xef: scalar = first & 0x0f; count = 3; minimum = 0x800
+        else if first >= 0xf0 and first <= 0xf4: scalar = first & 0x07; count = 4; minimum = 0x10000
+        else if first >= 0x80: return -1
+        if count > len(s) - offset: return -1
+        loop i in [1..count):
+            next = int(s[offset + i])
+            if next < 0x80 or next > 0xbf: return -1
+            scalar = (scalar << 6) + (next & 0x3f)
+        if scalar < minimum or scalar > 0x10ffff or scalar >= 0xd800 and scalar <= 0xdfff: return -1
+        current = 0
+        indic = 0
+        pictographic = false
+        if scalar < 128:
+            if scalar == 13: current = 1
+            else if scalar == 10: current = 2
+            else if scalar < 32 or scalar == 127: current = 3
+        else:
+            current = __grapheme_property(embed("unicode/grapheme_break.bin"), scalar)
+            indic = __grapheme_property(embed("unicode/indic_conjunct_break.bin"), scalar)
+            pictographic = __grapheme_property(embed("unicode/extended_pictographic.bin"), scalar) == 1
+        previous = c.previous
+        boundary = true
+        if previous == 1 and current == 2: boundary = false
+        else if previous == 1 or previous == 2 or previous == 3 or current == 1 or current == 2 or current == 3: boundary = true
+        else if previous == 4 and (current == 4 or current == 5 or current == 7 or current == 8): boundary = false
+        else if (previous == 7 or previous == 5) and (current == 5 or current == 6): boundary = false
+        else if (previous == 8 or previous == 6) and current == 6: boundary = false
+        else if current == 9 or current == 10 or current == 11: boundary = false
+        else if previous == 12: boundary = false
+        else if indic == 1 and c.indic_context == 2: boundary = false
+        else if pictographic and previous == 10 and c.zwj_after_pictographic: boundary = false
+        else if previous == 13 and current == 13 and c.regional_run % 2 == 1: boundary = false
+        if offset > start and boundary: return offset
+        c.regional_run = if current == 13: c.regional_run + 1 else: 0
+        c.zwj_after_pictographic = current == 10 and c.pictographic_chain
+        if current != 9: c.pictographic_chain = pictographic
+        if indic == 1: c.indic_context = 1
+        else if indic == 3 and c.indic_context > 0: c.indic_context = 2
+        else if indic != 2: c.indic_context = 0
+        c.previous = current
+        c.offset += count
+    c.offset
+
+# Byte offsets, including zero and the final byte length; none for invalid UTF-8.
+grapheme_boundaries = (s: str) -> int[]?:
+    c = __GraphemeCursor()
+    out = [0]
+    loop c.offset < len(s):
+        next_byte = __grapheme_next(s, c)
+        if next_byte < 0: return none
+        out.push(next_byte)
+    out
+
+# An explicit collection of grapheme strings, also used by Dewy loop snapshots.
+graphemes = (s: str) -> str[]:
+    c = __GraphemeCursor()
+    out: str[]
+    loop c.offset < len(s):
+        start = c.offset
+        next_byte = __grapheme_next(s, c)
+        if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+        out.push(s[start..next_byte))
+    out
+
+__dewy_string_length = (s: str) -> int:
+    c = __GraphemeCursor()
+    count = 0
+    loop c.offset < len(s):
+        if __grapheme_next(s, c) < 0: panic("invalid UTF-8 in grapheme operation")
+        count += 1
+    count
+
+__dewy_string_index = (s: str, index: int) -> str:
+    if index < 0: panic("string index out of bounds")
+    c = __GraphemeCursor()
+    at = 0
+    loop c.offset < len(s):
+        start = c.offset
+        next_byte = __grapheme_next(s, c)
+        if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+        if at == index: return s[start..next_byte)
+        at += 1
+    panic("string index out of bounds")
+
+__dewy_string_slice = (s: str, lo: int, hi: int, inclusive: bool, has_stop: bool) -> str:
+    if lo < 0 or has_stop and (hi < 0 or inclusive and hi == 9223372036854775807): panic("string slice out of bounds")
+    stop = hi
+    if has_stop and inclusive: stop += 1
+    if has_stop and lo > stop: panic("string slice out of bounds")
+    c = __GraphemeCursor()
+    at = 0
+    start_byte = -1
+    loop true:
+        if at == lo: start_byte = c.offset
+        if has_stop and at == stop:
+            if start_byte < 0: panic("string slice out of bounds")
+            return s[start_byte..c.offset)
+        if c.offset == len(s): break
+        if __grapheme_next(s, c) < 0: panic("invalid UTF-8 in grapheme operation")
+        at += 1
+    if has_stop or start_byte < 0: panic("string slice out of bounds")
+    s[start_byte..]

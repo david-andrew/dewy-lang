@@ -36,7 +36,7 @@ The current slice supports typed and inferred functions, generic calls, default
 arguments, closures with captured state, higher-order calls, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, based integer and decimal
 scientific literals, floating-point records,
-arrays and dictionaries with value copies, array slices, optional values, type aliases, callable types, union
+arrays and dictionaries with value copies, array slices, grapheme string operations, optional values, type aliases, callable types, union
 narrowing, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
 array/range iteration, import aliases, forward local record declarations, and
@@ -48,7 +48,7 @@ UTF-8 source locations are retained. A semicolon explicitly discards a result.
 This is an opt-in compiler experiment, not a full language implementation or a
 release-certified replacement. The core supplies runtime bounds checks, not the
 old proof engine. Proof directives, effect contracts, unbounded integer types,
-grapheme string length/indexing, and unsupported syntax produce diagnostics.
+and unsupported syntax produce diagnostics.
 Signed floor division/modulo currently use the core's int64 helpers. Floating
 point `/` is supported; integer `/` is rejected until its result semantics are
 implemented. Ambiguous syntax
@@ -59,8 +59,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 219 checks and takes
-about 15 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 254 checks and takes
+about 18 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -150,10 +150,26 @@ Array slices support inclusive `xs[a..b]`, exclusive `xs[a..b)`, omitted bounds
 and `xs[..]`. Slices are independent values, including nested managed elements.
 The source value is held across bound evaluation, so calls in bounds can mutate
 or replace the original array without changing the value being sliced. Invalid
-bounds panic at runtime. String slices remain unavailable until the grapheme
-boundary is implemented; stored range values are a separate, unfinished feature.
+bounds panic at runtime. String slices use grapheme boundaries too; stored range values remain a separate,
+unfinished feature.
 
 Optional types accept `T?` and `T | none`, with `none` values and `is?`/`isnt?`
 narrowing. This includes dictionary `.get`, arrays of optional values, optional
 unions, and independent copies of optional records. The earlier compiler's
 `dewy/tests/optional_values.dewy` runs unchanged in both build modes.
+
+Dewy string `.length`, `len(s)`, indexing, slicing and loop iteration now use
+Unicode 16 extended grapheme clusters. Combining marks, emoji ZWJ sequences,
+regional indicators, Indic conjuncts and CR/LF follow the existing Unicode
+conformance corpus. The compact byte representation remains: length scans,
+index/slice scan up to the requested boundary, and string loops currently
+materialize one grapheme array per iterable. Explicit `bytes(s)` exposes bytes;
+implementation `.jo` libraries retain byte-oriented operations. Text supplied by
+those libraries is validated as it is scanned; malformed UTF-8 panics in Dewy
+operations, while `grapheme_boundaries(s)` returns `none`. No global boundary cache
+or old string descriptor is required.
+
+The conformance check batches 17,490 inputs per mode/target (the 1,093 official
+cases, all ASCII pairs, empty input and malformed UTF-8) into one program build.
+It runs on native and WebAssembly in debug/release without importing the earlier
+compiler or its Unicode implementation into the test runner.

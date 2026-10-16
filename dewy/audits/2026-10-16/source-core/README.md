@@ -190,3 +190,34 @@ it does not replace substrings in user names or modify internal type identities.
 All 219 checks pass in 14.95 seconds (`editor-types-tests.log`). The initial CI
 workflow was rejected before jobs started because `runner.temp` was used at job
 scope; moving it to step scope fixes the workflow expression.
+
+## Grapheme-aware strings on compact storage
+
+The earlier scanner's Unicode 16 rules and property data now run on the compact
+byte-string representation. Dewy length, index, slice and ordinary/combined loop
+iteration use graphemes. Index/slice scan only as far as necessary; length scans
+the string. Iteration currently materializes one array of graphemes per iterable,
+so repeated loop indexing does not rescan the string. `.jo` libraries keep byte
+semantics. Invalid UTF-8 returns `none` from the boundary API and panics when
+encountered by ordinary grapheme operations. This is not an eager validation or
+boundary-cache invariant on every core string.
+
+The independent conformance driver derives expectations from the existing
+official 1,093-case corpus and adds all ASCII pairs, empty text and invalid UTF-8:
+17,490 cases on each native/web debug/release combination, batched into four
+builds. Dewy-expression regressions exercise emoji, combining marks, slices,
+combined loops and source replacement during bound evaluation. These tests also
+exposed a WebAssembly backend omission: noreturn calls require an explicit wasm
+unreachable instruction after release optimization removes their following code.
+That is fixed and a small panic-ended-search regression covers it independently.
+
+The complete C bootstrap and 254-check gate pass (`graphemes-build.json`,
+`graphemes-tests.log`, 17.91 seconds for tests). Seven alternating fresh-process
+release builds found particle medians of 91.80 ms before and 93.35 ms after, and
+paddle medians of 336.89 ms before and 332.89 ms after, with OS caches retained
+and one worker (`graphemes-build-times.json`). These observations show no large
+compile-time penalty; they do not establish a general performance bound.
+
+Hosted CI for the preceding editor checkpoint also passed: [run 38972007553](https://github.com/david-andrew/dewy-lang/actions/runs/38972007553),
+44 seconds including setup, complete C bootstrap and all 219 checks. Its exact
+commit and step outcomes are recorded in `ci-editor-types.json`.

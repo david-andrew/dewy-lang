@@ -47,7 +47,7 @@ syntax parser and maps its output directly into pinned Sloppy AST/checking,
 runtime, code generation, and libraries. It bypasses the old semantic IR, proof
 pipeline, and backend bridge. The tested slice includes inferred/generic functions, closures, value
 copies, explicit place arguments, dense nested records, floats, dictionaries,
-unions, optionals, array slices, imports and combined iterator loops. A native/web paddle game uses the
+unions, optionals, array/string slices, grapheme-aware strings, imports and combined iterator loops. A native/web paddle game uses the
 inherited graphics/input/font runtime. The editor checks unsaved Dewy source and
 serves diagnostics, hover and definitions through the opt-in VS Code client.
 Project templates and native live reload support application work. The complete
@@ -57,7 +57,7 @@ using the earlier compiler pair.
 
 The compiler sources and libraries now live directly under `core/`, without a
 patch generator or separate Sloppy checkout. The latest combined
-language/editor/watch/shared-core gate has 219 checks and takes about 15 seconds.
+language/editor/watch/shared-core gate has 254 checks and takes about 18 seconds.
 A separate compact-core CI workflow builds from C and runs this gate. The original nested-particle algorithm, changing only its platform
 harness import, builds in about 73 ms by default and 82 ms in release, versus
 1.66 seconds for the earlier Dewy compiler. The latest million-particle kernel

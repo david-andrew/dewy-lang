@@ -13,7 +13,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir
+    read_fields, default_init, embed_dir, dewy_iter
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
@@ -24,6 +24,7 @@ struct Intrinsic:
     arr: bool
 
 intrinsics = [
+    Intrinsic("__dewy_iter", .dewy_iter, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -2777,12 +2778,22 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].a = 0
     nargs = args.len()
     r = T_VOID
-    if id == .len or id == .arrcap:
+    if id == .dewy_iter:
+        nargs_check(n, nargs, 1, 1, "__dewy_iter")
+        t = arg_type(args, 0, 0)
+        add_flag(args[0], NF_CHECKED)
+        if tkind(t) == .str_:
+            nodes[n] = nodes[bc_call("graphemes", args, nodes[n].pos)]
+        else: nodes[n] = nodes[args[0]]
+        return check_expr(n, expected)
+    else if id == .len or id == .arrcap:
         nargs_check(n, nargs, 1, 1, "len")
         t = arg_type(args, 0, 0)
         if is_soa(t): return check_soa_method(n, args[0], intern("len"), [], expected)
-        if types[t].kind == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
-            fatal(nodes[n].pos, "Dewy core experiment does not yet support grapheme string length")
+        if id == .len and types[t].kind == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            add_flag(args[0], NF_CHECKED)
+            nodes[n] = nodes[bc_call("__dewy_string_length", args, nodes[n].pos)]
+            return check_expr(n, expected)
         if types[t].kind != .array and types[t].kind != .str_: fatal(nodes[n].pos, "len() expects an array or string, found {type_str(t)}")
         r = T_INT
     else if id == .push:
@@ -4341,7 +4352,26 @@ check_expr = (n: int, expected: int) -> int:
         bk = types[bt].kind
         b = int(nodes[n].b)
         if bk == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
-            fatal(nodes[n].pos, "Dewy core experiment does not yet support grapheme string indexing")
+            base = last_checked
+            add_flag(base, NF_CHECKED)
+            pos = nodes[n].pos
+            call = 0
+            if b != 0 and nodes[b].kind == .range:
+                lo = int(nodes[b].a)
+                hi = int(nodes[b].b)
+                has_stop = hi != 0
+                if lo == 0: lo = mk(.int_lit, pos)
+                if hi == 0: hi = mk(.int_lit, pos)
+                incl = mk(.bool_lit, pos)
+                nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
+                stop = mk(.bool_lit, pos)
+                nodes[stop].ival = if has_stop: 1 else: 0
+                call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
+            else:
+                if b == 0: fatal(pos, "invalid string index")
+                call = bc_call("__dewy_string_index", [base, b], pos)
+            nodes[n] = nodes[call]
+            return check_expr(n, expected)
         if bk == .typeval and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
             nodes[n].kind = .call
             nodes[n].b = 0

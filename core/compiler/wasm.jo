@@ -572,6 +572,10 @@ emit_wins = (ins: Ins):
             op(0x10)
             uleb(wb, wfn_index[lf])
             call_result(ins, lf)
+            # Wasm imports/functions have no noreturn type. The optimizer may
+            # remove everything after a panic call, so express that fact here
+            # for the validator as well as the runtime.
+            if ins.c == 1: op(0x00)
         calli, callc:
             emit_call_args(a, bb, -1)
             addr32(int(ins.c))
