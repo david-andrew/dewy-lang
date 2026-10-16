@@ -57,7 +57,7 @@ using the earlier compiler pair.
 
 The compiler sources and libraries now live directly under `core/`, without a
 patch generator or separate Sloppy checkout. The latest combined
-language/editor/watch/shared-core gate has 279 checks and takes about 20 seconds.
+language/editor/watch/shared-core gate has 282 checks and takes about 23 seconds.
 A separate compact-core CI workflow builds from C and runs this gate. The original nested-particle algorithm, changing only its platform
 harness import, builds in about 73 ms by default and 82 ms in release, versus
 1.66 seconds for the earlier Dewy compiler. The latest million-particle kernel

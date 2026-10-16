@@ -118,3 +118,60 @@ def test_core_watch_game(compiler, tmp_path):
         assert after > before, watcher.output
     finally:
         watcher.close()
+
+
+def test_core_watch_function_asset(compiler, tmp_path):
+    source = tmp_path / 'main.dewy'
+    asset = tmp_path / 'label.txt'
+    save(asset, 'first asset')
+    save(source, 'main=()=>{let bytes=$include_bytes(p"label.txt") printl(str_from_bytes(bytes))}')
+    watcher = Watch(compiler, source)
+    try:
+        watcher.expect('first asset')
+        save(asset, 'second asset')
+        watcher.expect('second asset', timeout=3)
+    finally:
+        watcher.close()
+
+
+@pytest.mark.parametrize('imported', [False, True], ids=['local', 'imported'])
+def test_core_watch_derived_asset(compiler, tmp_path, imported):
+    source = tmp_path / 'game.dewy'
+    asset_dir = tmp_path / 'assets' if imported else tmp_path
+    asset_dir.mkdir(exist_ok=True)
+    asset = asset_dir / 'label.txt'
+    save(asset, 'one')
+    declaration = '$include_bytes(p"label.txt") as content\n'
+    if imported:
+        save(asset_dir / 'content.dewy', declaration)
+        declaration = 'from p"assets/content.dewy" import content\n'
+    save(source, declaration + '''let decoded=str_from_bytes(content)
+let label="asset="+decoded
+let count:int64=0
+update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label} allocations={alloc_count()}" sleep(0.005)}
+draw=():>void=>clear(BLACK)
+''')
+    watcher = Watch(compiler, source, game=True)
+    try:
+        before = int(watcher.expect(r'tick (\d+) asset=one').group(1))
+        save(asset, 'two')
+        watcher.expect(r'reloaded in \d+ ms:')
+        match = watcher.expect(r'tick (\d+) asset=two allocations=(\d+)', timeout=3)
+        after, allocations = map(int, match.groups())
+        assert after > before, watcher.output
+        for label in ['three', 'four']:
+            save(asset, label)
+            watcher.expect(r'reloaded in \d+ ms:')
+            match = watcher.expect(r'tick (\d+) asset=' + label + r' allocations=(\d+)')
+            count, live = map(int, match.groups())
+            assert count > after and live == allocations, watcher.output
+            after = count
+        asset.unlink()
+        watcher.expect('cannot read')
+        watcher.expect('keeps running the last version')
+        assert int(watcher.expect(r'tick (\d+) asset=four').group(1)) > after
+        save(asset, 'restored')
+        watcher.expect(r'reloaded in \d+ ms:')
+        assert int(watcher.expect(r'tick (\d+) asset=restored').group(1)) > after
+    finally:
+        watcher.close()

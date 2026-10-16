@@ -44,6 +44,7 @@ intrinsics = [
 ]
 
 last_checked = 0
+embedded_files: str[]          # actual compile-time inputs, including those used inside functions
 
 register_intrinsics = ():
     loop i in 0.. and it in intrinsics:
@@ -2923,6 +2924,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         rel = name_of(int(nodes[a].sval))
         path = rel
         if not is_abs_path(rel): path = "{files[pos_file(nodes[n].pos)].dir}/{rel}"
+        path = ide_norm(path)
+        if not embedded_files.contains(path): embedded_files.push(path)
         d = read_file(path)
         if d == none:
             # (Cat1.png for cat1.png: a file's name with its capitals another way)

@@ -59,8 +59,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 279 checks and takes
-about 20 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 282 checks and takes
+about 23 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -181,3 +181,11 @@ based strings (`0b`, `0q`, `0o`, `0x`, `0u`, `0g`) pack bits into independent by
 arrays, including Dewy's zero-padded final partial byte. `text as array<uint8>`
 encodes bytes, and `bytes as string|none` (or `string?`) checks UTF-8 and returns
 `none` for malformed data. Both conversions preserve independent values.
+
+Native watch tracks embedded files inside functions as well as declarations.
+Changing a global initializer also refreshes initializers that directly read it,
+in dependency order, including across imports. Repeated same-layout replacements
+release old managed values; unrelated live state remains. The watch gate checks
+asset deletion/recovery, stable live allocation counts and a counter continuing
+across repeated asset edits. Dependency discovery does not yet follow arbitrary
+global reads hidden inside initializer helper functions.

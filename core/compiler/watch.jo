@@ -249,14 +249,48 @@ wk_sig = (t0: int, depth: int) -> str:
         "{out})"
     else: type_str(t)
 
+# A global's initializer also depends on the globals whose values it reads.
+# Hash their declarations, not their live contents: an asset change refreshes
+# derived images/text, while an ordinary frame's state changes do not reset it.
+w_decl_hashes: {int: int} = {}
+w_decl_stack: int[]
+w_decl_deps: {int: int[]} = {}
+
+wk_init_refs = (n: int, refs: mut int[]):
+    if n <= 0 or n >= nodes.len(): return
+    k = nodes[n].kind
+    # Making a closure does not execute its body; its code is patched separately.
+    if k == .lambda or k == .fnref: return
+    if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        if not refs.contains(g): refs.push(g)
+    wk_init_refs(int(nodes[n].a), refs)
+    wk_init_refs(int(nodes[n].b), refs)
+    wk_init_refs(int(nodes[n].c), refs)
+    wk_init_refs(int(nodes[n].d), refs)
+    loop i in [0..nkids(n)): wk_init_refs(kid(n, i), refs)
+    loop i in [0..nkids2(n)): wk_init_refs(kid2(n, i), refs)
+
 # a global's declaration, as text without comments (a change re-runs it)
 wk_decl_hash = (g: int) -> int:
+    if let h = w_decl_hashes.get(g): return h
+    if w_decl_stack.contains(g): return wh_str(WH0, wk_glob(g))
     d = int(globals[g].decl)
     if d == 0: return 0
+    w_decl_stack.push(g)
     h = wk_text_hash(nodes[d].pos, WH0)
     # and what it is made from that is not its text: the GPU programs made from shader functions,
     # and files named in it (an image loaded with embed or read_bytes...)
-    wk_extra(int(nodes[d].b), int(globals[g].mod), h)
+    h = wk_extra(int(nodes[d].b), int(globals[g].mod), h)
+    refs: int[]
+    wk_init_refs(int(nodes[d].b), refs)
+    w_decl_deps[g] = refs
+    loop other in refs:
+        h = wh_str(h, wk_glob(other))
+        h = wh_int(h, wk_decl_hash(other))
+    w_decl_stack.pop()
+    w_decl_hashes[g] = h
+    h
 
 # the text of the statement or declaration at p (without comments)
 wk_text_hash = (p: int, h0: int) -> int:
@@ -367,6 +401,8 @@ wm_files_collect = ():
     wm_files = []
     loop m in modules: wm_files.push(files[int(m.file)].path)
     loop a in w_assets:
+        if not wm_files.contains(a): wm_files.push(a)
+    loop a in embedded_files:
         if not wm_files.contains(a): wm_files.push(a)
 
 gsize = (g: int) -> int:
@@ -553,7 +589,20 @@ watch_globals_to_init = () -> int[]:
         if globals[k].decl == 0: continue
         out.push(k)
     out.sort()
-    out
+    # Module registration order can differ from initialization order. Initialize
+    # changed dependencies before their consumers, including across imports.
+    ordered: int[]
+    seen: int[]
+    loop g in out: wk_init_order(g, out, seen, ordered)
+    ordered
+
+wk_init_order = (g: int, selected: int[], seen: mut int[], out: mut int[]):
+    if seen.contains(g): return
+    seen.push(g)
+    if let deps = w_decl_deps.get(g):
+        loop other in deps:
+            if selected.contains(other): wk_init_order(other, selected, seen, out)
+    out.push(g)
 
 # (after the program's functions are lowered) a function initializing them, lowered too (the
 # globals it refers to have room already: the modules' own initialization refers to them)
@@ -561,6 +610,22 @@ watch_lower_inits = ():
     decls: int[]
     loop g in watch_globals_to_init():
         d = int(globals[g].decl)
+        if nodes[d].b != 0 and nkids(d) == 0:
+            if let old = wm_gidx.get(wk_glob(g)):
+                if wm_gsig[old] == wk_sig(int(globals[g].type), 0):
+                    # Reusing live storage is an assignment, not first-time
+                    # initialization: retain the new value and release the old.
+                    id = mk(.ident, nodes[d].pos)
+                    nodes[id].name = globals[g].name
+                    nodes[id].sym = i32(g)
+                    nodes[id].aux = i32(int(SK.global))
+                    nodes[id].type = globals[g].type
+                    add_flag(id, NF_CHECKED)
+                    assign = mk(.assign, nodes[d].pos)
+                    nodes[assign].op = i32(int(Tok.assign))
+                    nodes[assign].a = i32(id)
+                    nodes[assign].b = nodes[d].b
+                    d = assign
         if not decls.contains(d): decls.push(d)
     w_init_inst = new_inst(FK_INIT, 0, "watch_init")
     b = mk(.block, 0)
@@ -862,7 +927,7 @@ watch_main = (path: str, args: str[]):
                         w32_dir_count[d] = w32_sources_in(d)
                 else if dirs.get(d) == none:
                     dirs[d] = true
-                    wd = syscall(254, _ino, data(__zstr(d)), 0x8 | 0x80 | 0x100)  # CLOSE_WRITE, MOVED_TO, CREATE
+                    wd = syscall(254, _ino, data(__zstr(d)), 0x8 | 0x40 | 0x80 | 0x100 | 0x200)  # writes, moves, creation and deletion
                     if wd >= 0: w_wds[wd] = d
         # wait for a change, the program ending, or a command
         ev = 0

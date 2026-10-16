@@ -238,3 +238,20 @@ A read-only survey of 211 existing Dewy source fixtures took 9.18 seconds
 (`existing-syntax-survey.json`). It is a gap inventory, not a compatibility score:
 many fixtures intentionally exercise rejection, proof features, or implementation
 contracts. It identified practical asset/string interfaces to carry forward.
+
+## Asset reload, derived state and ownership
+
+Before the fix, function-local embedded files were not watched, and changing a
+global asset refreshed its bytes but left derived text stale (`asset-watch-before.log`).
+The compiler now records actual embedded inputs. Watch initializer hashes include
+direct global dependencies and reinitialize in dependency order across imports.
+Replacing an existing same-layout global uses ownership-aware assignment instead
+of first-time initialization, releasing its old managed value. Closure bodies are
+not initializer reads; arbitrary helper-function global reads are not yet followed.
+
+Tests change assets repeatedly by atomic rename, verify derived values refresh,
+the live frame counter advances, and allocation counts stay steady. Deleting an
+asset shows the compiler error while retaining the working game; restoring it
+recovers. The existing layout-migration and compiler-error reload tests still
+pass. A fresh C bootstrap passes all 282 checks in 22.53 seconds
+(`asset-watch-build.json`, `asset-watch-tests.log`).
