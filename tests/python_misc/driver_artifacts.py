@@ -57,7 +57,8 @@ def _builder_identity() -> dict:
     if not compiler.is_file() or not os.access(compiler, os.X_OK):
         raise ValueError(f'DEWY_TEST_DRIVER_COMPILER is not executable: {compiler}')
     return {'kind': 'native', 'path': str(compiler),
-            'sha256': hashlib.sha256(compiler.read_bytes()).hexdigest()}
+            'sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
+            'dense_records': os.environ.get('DEWY_DENSE_RECORDS') == '1'}
 
 
 def _native_run(compiler: Path, source: Path, work: Path, arguments: list[str], route: str) -> str:

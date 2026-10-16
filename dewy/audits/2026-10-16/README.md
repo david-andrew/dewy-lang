@@ -254,3 +254,25 @@ place mutation, insert/pop/truncate, narrow fields, spread/iteration, returned
 snapshots, aliasing arguments, plus the existing bridge resource/rejection
 cases. [Test log](dense-tests.log). This is development validation, not a full
 release certification run.
+
+### Dense kernel entry setup
+
+Simple indexed kernels now acquire unique array storage once on entry and
+reuse the buffer address and length. A structural HIR check excludes resizing,
+whole-array copies, captures, raw access, and calls that can acquire another
+owner. User-defined functions with operator names do not count as builtins.
+The caller still observes independent value snapshots when its array detaches.
+
+The final three-build/five-run comparison covers 225 executions at five sizes,
+all with matching checksums. At one million particles, native Dewy falls from
+698.7 to **223.9 ms** (3.12 times faster), while C takes about 173 ms. At
+100,000 particles the new path takes 18.6 ms; it still has headroom against C.
+Cold builds remain approximately 1.74 s. A smaller comparison found Sloppy's
+release backend slower on this kernel than the native emitter, so backend
+replacement is not the leading performance route.
+
+[Full kernel samples](kernel-particles.json). The combined kernel/cache/harness
+gate passes **34 tests in 19.83 s**, including an interior snapshot that must
+prevent entry-only detachment and a source function shadowing an operator.
+[Test log](kernel-cache-tests.log). Test-driver cache keys now distinguish
+the dense-representation switch.

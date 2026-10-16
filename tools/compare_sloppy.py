@@ -69,6 +69,7 @@ def main() -> None:
     parser.add_argument('--builds', type=int, default=3)
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--sizes', type=int, nargs='+', default=[0, 1, 10, 100_000, 1_000_000])
+    parser.add_argument('--modes', nargs='+', help='measure only these mode names (default: all enabled modes)')
     args = parser.parse_args()
     if args.builds < 1 or args.runs < 1 or any(n < 0 or n > 1_000_000_000 for n in args.sizes):
         parser.error('builds/runs must be positive; sizes must be in 0..1000000000')
@@ -106,6 +107,11 @@ def main() -> None:
     if args.dense_records:
         modes.extend(mode.replace('dewy-', 'dewy-dense-', 1) for mode in modes.copy()
                      if mode.startswith('dewy-'))
+    if args.modes:
+        unavailable = set(args.modes) - set(modes)
+        if unavailable:
+            parser.error(f'modes unavailable with these options: {sorted(unavailable)}; available: {modes}')
+        modes = list(dict.fromkeys(args.modes))
     checksums: dict[int, str] = {}
     with tempfile.TemporaryDirectory(prefix='dewy-sloppy-') as scratch:
         for mode in modes:
@@ -116,6 +122,7 @@ def main() -> None:
             for sample in range(args.builds):
                 work = Path(scratch) / f'{mode}-{sample}'
                 work.mkdir()
+                mode_env['DEWY_PRELUDE_CACHE_DIR'] = str(work / '__dewycache__/prelude')
                 binary = work / 'records'
                 if mode == 'C':
                     command = [str(cc), '-O2', str(SOURCES / 'records.c'), '-o', str(binary)]

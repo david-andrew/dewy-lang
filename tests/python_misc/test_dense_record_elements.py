@@ -52,6 +52,24 @@ main=():>int64=>{{
     views.dict_type(word pair @table);
     let dictionary=elements.select([] layouts.Context[] @table)
     $runtime_assert pair not in? dictionary.dense and small in? dictionary.dense
+    let empty=types.primitive('void' @table)
+    let accesses:array<hir.AST>=[
+        hir.ExpressedIdentifier[loc pairs 'xs' 77]
+        hir.Integer[loc word '0d' 0]
+        hir.Index[loc pair 0 1 0]
+        hir.MemberAccess[loc word 2 'x']
+        hir.MemberAssign[loc empty 3 1]
+    ]
+    $runtime_assert elements.kernel_parameter(4 77 accesses table)
+    accesses.push(hir.CopyValue[loc pairs 0])
+    accesses.push(hir.Block[loc empty [4 5] false])
+    $runtime_assert not elements.kernel_parameter(6 77 accesses table)
+    # Operator spelling alone is not a purity guarantee: a source function
+    # may shadow a builtin and acquire an owner through a global.
+    accesses.push(hir.ExpressedIdentifier[loc word '__add__' 88])
+    accesses.push(hir.FunctionCall[loc empty 7 [] []])
+    accesses.push(hir.Block[loc empty [4 8] false])
+    $runtime_assert not elements.kernel_parameter(9 77 accesses table [88->'source_function'])
     return 42
 }}
 ''')
@@ -61,6 +79,40 @@ main=():>int64=>{{
 
 
 CASES = {
+    'kernel-entry-detach': '''
+Pair:type=[x:int64 y:int64]
+step=(@xs:array<Pair>):>void=>{
+    loop i in 0.. and i <? xs.length {xs[i].x+=1 xs[i].y+=2}
+}
+main=():>int64=>{
+    let xs:array<Pair>=[Pair[10 20] Pair[1 2]]
+    let saved=xs.copy
+    step(@xs)
+    step(@xs)
+    $runtime_assert xs.length >? 0 and saved.length >? 0
+    if xs[0].x not=? 12 or xs[0].y not=? 24 or saved[0].x not=? 10 or saved[0].y not=? 20 return 1
+    let empty:array<Pair>=[]
+    step(@empty)
+    return 42
+}
+''',
+    'kernel-interior-snapshot': '''
+Entry:type=[value:int64]
+let saved:array<Entry>=[]
+save=(xs:array<Entry>):>void=>{saved=xs.copy}
+step=(@xs:array<Entry>):>void=>{
+    loop i in 0.. and i <? xs.length {
+        save(xs)
+        xs[i].value+=1
+    }
+}
+main=():>int64=>{
+    let xs:array<Entry>=[Entry[20]]
+    step(@xs)
+    $runtime_assert xs.length >? 0 and saved.length >? 0
+    return if xs[0].value =? 21 and saved[0].value =? 20 42 else 1
+}
+''',
     'copy-grow-place': '''
 Pair:type=[x:int64 y:int64]
 write=(@pair:Pair):>void=>{pair.x=99}

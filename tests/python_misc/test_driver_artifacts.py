@@ -112,6 +112,7 @@ def test_pruning_spares_entries_in_use(tmp_path, monkeypatch):
 
 
 def test_native_compiler_content_changes_shared_identity(tmp_path, monkeypatch):
+    monkeypatch.delenv('DEWY_DENSE_RECORDS', raising=False)
     monkeypatch.setenv('DEWY_TEST_DRIVER_DIR', str(tmp_path / 'store'))
     monkeypatch.setenv('DEWY_TEST_DRIVER_CACHE', '1')
     compiler = tmp_path / 'dewy'
@@ -125,7 +126,9 @@ def test_native_compiler_content_changes_shared_identity(tmp_path, monkeypatch):
     native = driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log))
     compiler.write_text('other compiler')
     rebuilt = driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log))
-    assert len({hosted, native, rebuilt}) == 3 and len(log) == 3
+    monkeypatch.setenv('DEWY_DENSE_RECORDS', '1')
+    dense = driver_artifacts.shared_driver('probe', source, {}, _builder(tmp_path, log))
+    assert len({hosted, native, rebuilt, dense}) == 4 and len(log) == 4
 
 
 @pytest.mark.parametrize('debug', [False, True])

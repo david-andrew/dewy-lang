@@ -52,6 +52,7 @@ ScalarProjection:type = const [function:addr read:addr fields:array<ProjectionFi
 # was copied, at which kind of site, and why no borrow or move applied.
 PlacementNote:type = const [loc:Span source:addr? reason:string]
 CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false runtime_sized:bool=true policy_exempt:bool=false]
+StableArray:type = const [descriptor:addr data:addr length:addr]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -96,6 +97,7 @@ State:type = [
     record_layouts:dict<addr layouts.Record>=[]
     layout_keys:dict<addr string>=[]
     element_plan:elements.Plan=elements.Plan[]
+    stable_arrays:dict<addr StableArray>=[]
     links:subtyping.Graph=subtyping.default_links
     brand_numbers:dict<string brands.NumberedBrand>=[]
     # Checked descriptions stay stable while lowering only appends runtime
@@ -593,6 +595,10 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.ArrayLength {
         let prefix:array<addr>=[]
         let source=hir.node_at(state.input.nodes node.array)
+        if source is? hir.ExpressedIdentifier and source.binding_id isnt? none {
+            let stable=state.stable_arrays.get(source.binding_id)
+            if stable isnt? none return stable.length
+        }
         if source is? hir.ForwardingAccess and storage_borrows.common_array_field(source state.input.nodes state.type_nodes) {
             # The measure is read immediately; no descriptor leaves this
             # expression or survives another operand's evaluation.
@@ -645,6 +651,10 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Integer return put(hir.Integer[node.loc type node.prefix node.value] @state)
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
     if node is? hir.ExpressedIdentifier {
+        if node.binding_id isnt? none {
+            let stable=state.stable_arrays.get(node.binding_id)
+            if stable isnt? none return stable.descriptor
+        }
         let receiver_symbol=state.receiver_symbol
         let receiver_type=state.receiver_type
         let sibling:string?=if node.binding_id is? none none else state.receiver_fields.get(node.binding_id)
@@ -1849,6 +1859,11 @@ array_element_address = (descriptor:addr index:addr node:hir.Index @state:State)
     let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let data=read_word(descriptor 0 node @state)
+    let source=hir.node_at(state.input.nodes node.array)
+    if source is? hir.ExpressedIdentifier and source.binding_id isnt? none {
+        let stable=state.stable_arrays.get(source.binding_id)
+        if stable isnt? none {data=stable.data}
+    }
     let offset=word_op('__mul__' index word(layout.size node @state) node @state)
     return word_op('__add__' data offset node @state)
 }
@@ -2131,11 +2146,13 @@ array_unique_body = (source:addr element:addr node:hir.AST @state:State):>addr =
 # A mutable array route names where its descriptor handle lives: a local
 # (possibly boxed) binding, or a field/element slot address. Detaching a
 # shared descriptor stores the replacement through that same route.
-ArrayRoute:type = [place:addr? target:addr? fallback:addr?]
+ArrayRoute:type = [place:addr? target:addr? fallback:addr? unique:bool=false]
 array_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
     let node=hir.node_at(state.input.nodes id)
     if array_valued(stored_type(id @state) state) {
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            let stable=state.stable_arrays.get(node.binding_id)
+            if stable isnt? none return ArrayRoute[none none stable.descriptor true]
             let target=binding_storage(node stored_type(id @state) @state)
             if node.binding_id in? state.boxed return ArrayRoute[snapshot(target @prefix @state) none none]
             return ArrayRoute[none target none]
@@ -2170,7 +2187,7 @@ route_store = (route:ArrayRoute descriptor:addr node:hir.AST @prefix:array<addr>
 }
 detach_array = (route:ArrayRoute element:addr node:hir.AST @prefix:array<addr> @state:State):>addr => {
     let descriptor=route_descriptor(route node @prefix @state)
-    if state.allocator is? none return descriptor
+    if state.allocator is? none or route.unique return descriptor
     prefix.push(assign_value(descriptor array_unique(descriptor element node @state) node @state))
     route_store(route descriptor node @prefix @state)
     return descriptor
@@ -5702,6 +5719,7 @@ function_value = (id:addr node:hir.AST @state:State):>addr => {
     return code_reference(id node @state)
 }
 function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProjection?=none):>addr => {
+    state.stable_arrays=[]
     if node.rest_args isnt? none return reject(node 'rest parameter legalization' @state)
     if aggregate(node.rettype @state) and state.allocator is? none return reject(node 'aggregate results need the prelude arena allocator' @state)
     let arguments:array<hir.Param>=[]
@@ -6049,9 +6067,24 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         let type=if binding in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
         arguments.push(hir.Param[symbol('capture' binding @state) type binding])
     }
+    if capture.captures.length =? 0 and state.allocator isnt? none and types.is_primitive(types.node_at(state.type_nodes node.rettype) 'void') {
+        loop argument in parameters(node) {
+            if not argument.place or argument.binding_id is? none continue
+            let array=array_type(argument.value_type state)
+            if array is? none or not dense_element(array.element state) continue
+            if not elements.kernel_parameter(node.body argument.binding_id state.input.nodes state.type_nodes state.symbols) continue
+            let slot=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) symbol(argument.name argument.binding_id @state) argument.binding_id] @state)
+            let descriptor=snapshot(array_unique(read_word(slot 0 node @state) array.element node @state) @prologue @state)
+            prologue.push(store_word(descriptor slot 0 node @state))
+            let data=snapshot(read_word(descriptor layouts.array_descriptor.data node @state) @prologue @state)
+            let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prologue @state)
+            state.stable_arrays[argument.binding_id]=StableArray[descriptor data length]
+        }
+    }
     state.result_projection=projection
     let body=owned_value(node.body @state)
     state.result_projection=none
+    state.stable_arrays=[]
     if state.loop_prologue.length >? 0 {
         let initialized=state.loop_prologue.copy
         loop item in prologue {initialized.push(item)}
