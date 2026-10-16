@@ -255,3 +255,18 @@ asset shows the compiler error while retaining the working game; restoring it
 recovers. The existing layout-migration and compiler-error reload tests still
 pass. A fresh C bootstrap passes all 282 checks in 22.53 seconds
 (`asset-watch-build.json`, `asset-watch-tests.log`).
+
+## Compact match dispatch
+
+Dewy's typed, literal and catch-all arms now project into the existing compact
+match machinery. Type aliases resolve before selecting union tags; optional and
+boolean coverage uses finite cases. The scrutinee is evaluated once, and named
+Dewy bindings use ordinary value-copy initialization. Native/WebAssembly,
+debug/release checks cover dispatch, generics, narrowing, managed copies,
+fall-through chains and early returns. Three pinned upstream fixtures cover the
+shared enum, integer switch, payload and field/global narrowing machinery.
+Refinement/structural patterns and proof-based coverage remain unsupported.
+
+A fresh C bootstrap passes all 348 checks in 27.20 seconds
+(`match-build.json`, `match-tests.log`). No legacy semantic engine or binary
+parity gate is involved.

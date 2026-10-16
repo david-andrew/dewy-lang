@@ -3762,6 +3762,8 @@ check_match = (m: int, expected: int) -> int:
     result = 0
     first_val = 0
     has_wild = false
+    finite_seen = 0
+    dewy = ends_with(files[pos_file(nodes[m].pos)].path, ".dewy")
     seen: bool[]
     if types[st].kind == .enum_:
         check_struct_fields(int(types[st].st))
@@ -3780,6 +3782,49 @@ check_match = (m: int, expected: int) -> int:
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind
+            # Dewy bindings are ordinary independent values initialized from the
+            # once-evaluated scrutinee. Type patterns reuse union tag dispatch.
+            binding = 0
+            value = 0
+            if dewy and (pk == .ptype or pk == .plit or pk == .pwild):
+                binding = int(nodes[p].name)
+                nodes[p].name = 0
+                if binding != 0: value = mk_ident_local(hidden, nodes[p].pos)
+            if pk == .ptype:
+                pt = prune(resolve_type(int(nodes[p].a)))
+                if type_eq(pt, st):
+                    nodes[p].kind = .pwild
+                else if is_union(st) and union_index(st, pt) >= 0:
+                    vi = union_index(st, pt)
+                    si = int(types[st].st)
+                    nodes[p].kind = .pvariant
+                    nodes[p].name = variants[int(structs[si].variants) + vi].name
+                    if binding != 0:
+                        e = mk(.narrow, nodes[p].pos)
+                        nodes[e].a = i32(value)
+                        nodes[e].aux = i32(vi)
+                        nodes[e].type = i32(pt)
+                        add_flag(e, NF_CHECKED)
+                        value = e
+                else if types[st].kind == .opt and type_eq(pt, telem(st)):
+                    finite_seen |= 1
+                    if binding != 0:
+                        e = mk(.unwrap, nodes[p].pos)
+                        nodes[e].a = i32(value)
+                        nodes[e].type = i32(pt)
+                        add_flag(e, NF_CHECKED)
+                        value = e
+                else: fatal(nodes[p].pos, "type pattern {type_str(pt, true)} is not a member of {type_str(st, true)}")
+                pk = nodes[p].kind
+            if binding != 0:
+                d = mk(.vardecl, nodes[p].pos)
+                nodes[d].name = i32(binding)
+                nodes[d].b = i32(value)
+                body = int(nodes[arm].b)
+                statements = [d]
+                loop statement in kids(body): statements.push(statement)
+                set_list(body, statements)
+            if pk == .ptype: continue
             if pk == .pwild:
                 has_wild = true
                 arm_wild = true
@@ -3824,6 +3869,10 @@ check_match = (m: int, expected: int) -> int:
                 nodes[p].a = i32(d)
             if pk == .plit:
                 e = int(nodes[p].a)
+                if dewy and is_union(st): fatal(nodes[p].pos, "literal patterns on unions are not yet supported; use a type arm first")
+                if types[st].kind == .opt and nodes[e].kind == .none_lit: finite_seen |= 2
+                if st == T_BOOL and nodes[e].kind == .bool_lit:
+                    finite_seen |= if nodes[e].ival != 0: 1 else: 2
                 check_expr(e, st)
                 coerce(e, st)
                 if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
@@ -3872,7 +3921,7 @@ check_match = (m: int, expected: int) -> int:
             coerce_hint = ""
         scope_reset(amark)
     scope_reset(mark)
-    exhaustive = has_wild
+    exhaustive = has_wild or finite_seen == 3
     if not exhaustive and types[st].kind == .enum_:
         exhaustive = true
         loop s in seen:
@@ -3880,7 +3929,7 @@ check_match = (m: int, expected: int) -> int:
     nodes[m].aux2 = i32(int(exhaustive))
     # (an enum's or a union's match names each of its variants, or has `_:`; a statement too, so
     # that a state added later is not left out quietly)
-    if is_stmt and (exhaustive or types[st].kind != .enum_):
+    if is_stmt and (exhaustive or (not dewy and types[st].kind != .enum_)):
         nodes[m].type = i32(T_VOID)
         return T_VOID
     if not exhaustive:
@@ -3892,6 +3941,7 @@ check_match = (m: int, expected: int) -> int:
                 if len(miss) > 0: miss += ", "
                 miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
             fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a `_:` arm for the rest)")
+        if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
         fatal(nodes[m].pos, "match expression is not exhaustive (add a `_:` arm)")
     if result == 0: result = T_NEVER
     if expected != 0 and result != T_NEVER:

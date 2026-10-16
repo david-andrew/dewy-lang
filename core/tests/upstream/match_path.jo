@@ -1,0 +1,20 @@
+# match narrows a field path (b.x) or a global in each arm, as it does a local
+# requires: sloppy
+struct B:
+    x: int | str
+g: int | str = "hello"
+f = (b: B) -> int:
+    match b.x:
+        int: b.x + 1
+        str: b.x.len()
+main = ():
+    print(f(B(7)), f(B("abc")))
+    match g:
+        int: print("int", g + 1)
+        _: print("other", g.len())
+    b = B(3)
+    match b.x:
+        int:
+            b.x = "now a string"
+            print(b.x)
+        str: print("str")

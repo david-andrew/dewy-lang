@@ -1,0 +1,68 @@
+# match: simple enums, payload enums, integer patterns (dense -> jump table, sparse -> chain)
+enum Dir: north, east, south, west
+
+turn = (d: Dir) -> Dir:
+    match d:
+        north: .east
+        east: .south
+        south: .west
+        west: .north
+
+enum Shape:
+    circle(r: f64)
+    rect(w: f64, h: f64)
+    tri(a: f64, b: f64, c: f64)
+    empty
+
+area = (s: Shape) -> f64:
+    match s:
+        circle(r): 3.0 * r * r
+        rect(w, h): w * h
+        tri(a, b, c):
+            p = (a + b + c) / 2
+            sqrt(p * (p - a) * (p - b) * (p - c))
+        empty: 0
+
+name = (n: int) -> str:
+    match n:
+        0: "zero"
+        1: "one"
+        2, 3: "two-or-three"
+        4: "four"
+        5: "five"
+        6..9: "six-to-nine"
+        _: "many"
+
+sparse = (n: int) -> int:
+    match n:
+        -100: 1
+        7: 2
+        1000000: 3
+        _: 0
+
+letter = (c: u8) -> str:
+    match c:
+        'a': "A"
+        'b': "B"
+        'c': "C"
+        'd': "D"
+        _: "?"
+
+d = Dir.north
+loop i in [0..5):
+    print(d)
+    d = turn(d)
+shapes = [Shape.circle(1), Shape.rect(2, 3), Shape.tri(3, 4, 5), Shape.empty]
+loop s in shapes: print(area(s))
+loop i in [-1..12): print(i, name(i))
+print(sparse(-100), sparse(7), sparse(1000000), sparse(8))
+print(letter('a'), letter('d'), letter('z'))
+# match as a statement with side effects and fallthrough to nothing
+count = 0
+loop i in [0..20):
+    match i % 4:
+        0: count += 1
+        1: count += 10
+        2: count += 100
+        _: pass
+print(count)

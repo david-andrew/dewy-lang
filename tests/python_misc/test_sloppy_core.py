@@ -60,6 +60,39 @@ if b is? Item b.values[0]=99
 return if a is? Item a.values[0]+a.values[1] else 1}''',
     'optional-array': '''main=()=>{let xs:array<int64?>=[20 none 22] let sum:int64=0
 loop x in xs {if x is? int64 sum+=x} return sum}''',
+    'match-union': '''Count:type=int64
+classify=(v:bool|Count|string):>int64=>match v {
+<bool>=>10 n:Count=>n s:string=>s.length}
+main=()=>classify(true)+classify(29)+classify("abc")''',
+    'match-integers': '''pick=(v:int64)=>match v {<-1>=>1 answer:42=>answer <3>=>3 rest=>rest+1}
+main=()=>pick(-1)+pick(42)-pick(3)+pick(1)''',
+    'match-strings': '''pick=(s:string)=>match s {<"yes">=>40 <"no">=>0 _=>2}
+main=()=>pick("yes")+pick("maybe")+pick("no")''',
+    'match-bools': '''pick=(b:bool)=>match b {<true>=>40 <false>=>2}
+main=()=>pick(true)+pick(false)''',
+    'match-optional': '''pick=(v:int64?)=>match v {<none>=>2 n:int64=>n}
+main=()=>pick(40)+pick(none)''',
+    'match-else-chain': '''pick=(v:int64|string flag:bool)=>match v {n:int64=>n} else if flag 2 else 0
+main=()=>pick(40 false)+pick("text" true)+pick("text" false)''',
+    'match-generic': '''identity=(v)=>match v {x=>x}
+main=()=>identity(39)+identity("abc").length''',
+    'match-union-narrow': '''pick=(v:int64|string)=>match v {<int64>=>v _=>v.length}
+main=()=>pick(39)+pick("abc")''',
+    'match-single-arm': 'main=()=>match 42 n:int64=>n',
+    'match-evaluate-once': '''let calls:int64=0
+next=()=>{calls+=1 return 40}
+main=()=>{let value=match next() {<0>=>0 n:int64=>n} return value+calls*2}''',
+    'match-copy': '''Item:type=[values:array<int64>]
+main=()=>{let a:Item|string=Item[[20 22]]
+let result=match a {b:Item=>{b.values[0]=99 b.values[1]} <string>=>0}
+return if a is? Item a.values[0]+result else 1}''',
+    'match-optional-copy': '''Numbers:type=array<int64>
+main=()=>{let a:Numbers?=[20 22]
+let result=match a {b:Numbers=>{b[0]=99 b[1]} <none>=>0}
+return if a is? Numbers a[0]+result else 1}''',
+    'match-return': '''pick=(v:int64|string):>int64=>{match v {n:int64=>return n s:string=>return s.length}}
+main=()=>pick(39)+pick("abc")''',
+    'match-statement': '''main=()=>{let result:int64=0 match true {<true>=>{result=42} <false>=>{result=1}} return result}''',
     'function-type': '''Fn:type=(x:int64):>int64
 apply=(f:Fn x:int64):>int64=>f(x)
 main=()=>apply((x:int64)=>x+2 40)''',
@@ -149,6 +182,10 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'match-incomplete': ('main=()=>match 42 {<42>=>42}', 'not exhaustive'),
+    'match-incomplete-statement': ('main=()=>{match true {<true>=>42} return 42}', 'not exhaustive'),
+    'match-wrong-type': ('main=()=>match 42 {n:string=>n.length _=>42}', 'not a member'),
+    'match-refinement': ('main=()=>match 42 {n:int64<n >? 0>=>n _=>0}', 'does not yet support'),
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
     'unbounded-int': ('main=():>int=>42', 'unbounded integer'),
     'integer-division': ('main=():>int64=>85/2', 'integer /'),
@@ -403,7 +440,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith('match-')], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')

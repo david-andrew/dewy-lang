@@ -1,0 +1,21 @@
+# requires: sloppy
+# enums (simple and with fields) as members of unions; E.v and .v (also .v(args)) as arguments
+enum E: a, b(x: int)
+enum F: p, q
+check = (v: E | F | str) -> str:
+    match v:
+        E:
+            match v:
+                .a: return "E.a"
+                .b(x): return "E.b {x}"
+        F:
+            if v == .p: return "F.p"
+            "F.q"
+        str: "text {v}"
+print(check(E.b(4)), check(F.q), check("hi"), check(E.a), check(.p), check(.b(7)))
+w: E | int = E.a
+if w is E: print("is E")
+w = 3
+if w is int: print(w + 1)
+g: F | str = .q
+print(g)

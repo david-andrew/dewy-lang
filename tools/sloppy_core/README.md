@@ -37,7 +37,7 @@ arguments, closures with captured state, higher-order calls, mutable `@` argumen
 independent value parameters, fixed-width arithmetic, based integer and decimal
 scientific literals, floating-point records,
 arrays and dictionaries with value copies, array slices, grapheme string operations, optional values, type aliases, callable types, union
-narrowing, nested record mutation, conditionals, while loops,
+narrowing, typed/literal/catch-all `match` arms, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
 array/range iteration, import aliases, forward local record declarations, and
 combined `and` loop headers. Combined loops reuse
@@ -56,11 +56,20 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
+`match value { name:Type => body <literal> => body _ => fallback }` supports
+exact union member types (including aliases), concrete types, optional payloads,
+integer/string/boolean literals, and named catch-alls. `else` and `else if` attach
+a fallback. The scrutinee is evaluated once; bindings are independent values.
+Boolean and optional coverage is checked directly, and union coverage reuses the
+core's tag checker. Other matches require a catch-all. Refinement, structural,
+sequence, union-subset and literal-on-union patterns are not implemented yet;
+there is no proof-engine dependency.
+
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 282 checks and takes
-about 23 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 348 checks and takes
+about 27 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

@@ -7,7 +7,7 @@ import pytest
 
 CASES = ('arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
          'loop_combined_mut', 'loop_kv_mut', 'arg_alias_copy', 'loop_and_unpack',
-         'optionals', 'unions', 'narrow_none', 'union_infer')
+         'optionals', 'unions', 'narrow_none', 'union_infer', 'match', 'match_path', 'enum_union')
 
 
 @pytest.mark.parametrize('name', CASES)

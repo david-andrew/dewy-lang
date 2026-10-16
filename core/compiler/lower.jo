@@ -1330,6 +1330,7 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
     st = prune(st0)
     k = nodes[p].kind
     if k == .pwild: return e_iconst(1)
+    if k == .ptype: return e_load(VI, hidden_addr, tsize(telem(st)), 1)
     if k == .pvariant:
         si = int(types[st].st)
         layout(st)
