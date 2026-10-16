@@ -23,6 +23,12 @@ Graphemes: 4 1
 Optional match: 4
 ```
 
+For day-to-day work in the checkout, `python3 -m tools.core test` builds or reuses
+an up-to-date compiler and runs the focused gate. `python3 -m tools.core run
+examples/sloppy_core/tour.dewy` runs the tour with the same cached toolchain.
+The explicit `/tmp/dewy-core/bin/dewy-core` commands below also work with a
+standalone build.
+
 ## Run, check and build
 
 ```sh

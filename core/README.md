@@ -10,7 +10,33 @@ The supported language and measured results are documented in
 experimental subset, not a replacement for the published Dewy compiler.
 Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 
-## Build
+## Work on this checkout
+
+```sh
+python3 -m tools.core test                       # current compiler + focused gate
+python3 -m tools.core test -k record             # select relevant checks
+python3 -m tools.core watch examples/sloppy_core/paddle.dewy
+python3 -m tools.core check examples/sloppy_core/tour.dewy
+python3 -m tools.core build examples/sloppy_core/tour.dewy --release -o /tmp/tour
+python3 -m tools.core path                       # executable for editor settings
+python3 -m tools.core --bootstrap test           # also verify the independent C seed
+```
+
+The first command builds from C. Later commands reuse the compiler when its
+sources/libraries/build inputs are unchanged, or rebuild with the previous core.
+Failed builds stop the command and leave the previous toolchain intact; tests
+never silently fall back to it. Changes during a build also stop publication.
+Concurrent invocations share a build lock and use separate immutable snapshots.
+The cache and build logs live in `__dewycache__/compact-core/`; removing that
+generated directory resets it. No installed compiler is changed.
+
+`test` uses the checkout's `.venv/bin/python` when available, otherwise the current
+Python. Install pytest in that environment and have Node available for the web
+checks. Extra arguments go to pytest; compiler commands forward their arguments.
+The initial build needs Python, a C compiler and `make`. CI always bootstraps
+independently from C, regardless of the local cache.
+
+## Build a standalone toolchain
 
 From the repository root, using Python, a C compiler and `make`:
 
@@ -64,12 +90,13 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   tests/python_misc/test_sloppy_core.py \
   tests/python_misc/test_sloppy_core_editor.py \
   tests/python_misc/test_sloppy_core_watch.py \
-  tests/python_misc/test_sloppy_core_upstream.py
+  tests/python_misc/test_sloppy_core_upstream.py \
+  tests/python_misc/test_core_dev.py
 ```
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 739-check gate normally takes about a minute locally. It tests expected Dewy
+the earlier compiler suite. The 751-check gate normally takes about a minute locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.

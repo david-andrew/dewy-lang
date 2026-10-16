@@ -5,6 +5,8 @@ name: Compact core
     paths:
       - 'core/**'
       - 'tools/sloppy_core/**'
+      - 'tools/core.py'
+      - 'tests/python_misc/test_core_dev.py'
       - 'examples/sloppy_core/**'
       - 'tests/python_misc/test_sloppy_core*.py'
       - 'tests/fixtures/core_editor/**'
@@ -22,6 +24,8 @@ name: Compact core
     paths:
       - 'core/**'
       - 'tools/sloppy_core/**'
+      - 'tools/core.py'
+      - 'tests/python_misc/test_core_dev.py'
       - 'examples/sloppy_core/**'
       - 'tests/python_misc/test_sloppy_core*.py'
       - 'tests/fixtures/core_editor/**'
@@ -70,7 +74,8 @@ jobs:
             tests/python_misc/test_sloppy_core.py \
             tests/python_misc/test_sloppy_core_editor.py \
             tests/python_misc/test_sloppy_core_watch.py \
-            tests/python_misc/test_sloppy_core_upstream.py
+            tests/python_misc/test_sloppy_core_upstream.py \
+            tests/python_misc/test_core_dev.py
       - name: Preserve test results and build provenance
         if: always()
         uses: actions/upload-artifact@v4

@@ -513,3 +513,24 @@ passes all 739 checks (`watch-recovery-build.json`, `watch-recovery-tests.log`).
 The bootstrap took 28.76 seconds and the gate 102.97 seconds while other desktop
 work was consuming CPU and filesystem resources; these are loaded-machine
 validation timings, not a latency comparison.
+
+
+## One-command development gate
+
+`python3 -m tools.core test` now builds the current compact compiler when needed
+and runs only its focused suite. Cached build identities cover compiler, library,
+bootstrap and builder inputs. Changed sources rebuild with the previous core;
+`--bootstrap` independently starts from C. Failed/incomplete builds never replace
+the current cache entry or silently run tests against an older compiler. A build
+lock prevents duplicate concurrent builds, while immutable toolchain directories
+keep already-running invocations stable. Compiler commands replace the Python
+driver process so signals and LSP streams reach the compiler directly.
+
+Twelve focused driver checks cover reuse, source/library/bootstrap/builder
+invalidation, missing/corrupted seeds, forced bootstrap, failure retention,
+concurrent source edits, gate environment and cache path containment. The full
+command bootstrapped from C in 19.11 seconds and passed all 751 checks in 56.75
+seconds (`dev-driver-tests.log`). Subsequent `path` and `run` commands reused the
+same cache entry; the executable tour printed the expected six lines. A single
+cached path lookup took 0.13 seconds including Python startup/input hashing;
+compiler latency measurements continue to invoke the executable directly.

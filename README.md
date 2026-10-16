@@ -17,11 +17,21 @@ The `restart/sloppy-frontend` branch develops a faster implementation in
 It already runs native/web game examples and has a focused validation gate taking
 seconds. It is an experimental subset; see its README for building and limitations.
 The [compact-core language guide](core/LANGUAGE.md) includes an executable tour
-and the native/web game workflow.
+and the native/web game workflow. From a checkout, the everyday commands are:
+
+```sh
+python3 -m tools.core test
+python3 -m tools.core run examples/sloppy_core/paddle.dewy
+```
+
+The driver builds a local compiler when its sources change and reuses it otherwise.
+It runs the focused core gate; the published installer below still installs the
+previous implementation.
 
 ### dewy
 
-The main compiler lives under [dewy/](dewy/)
+The previous compiler lives under [dewy/](dewy/), retained as a language-design
+and behavior reference during development of the compact core.
 
 A VS Code extension with a TextMate grammar for Dewy lives under [dewy/vscode-dewy/](dewy/vscode-dewy/) (not yet published to the marketplace; install it from the folder with `code --install-extension` after packaging, or symlink it into `~/.vscode/extensions`).
 
