@@ -1009,7 +1009,9 @@ loop_prepass = ():
         if op == .end:
             open.pop()
             continue
-        d = o_operands(ins)
+        # Loop effects need the destination, not a materialized operand list.
+        d = -1
+        if o_defines(op): d = int(ins.dst)
         kill = 0
         if op == .store:
             m = int(ins.c)

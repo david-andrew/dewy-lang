@@ -89,6 +89,24 @@ Dewy formatting, package editing, an interactive prompt and automatic updates
 are not yet exposed; their inherited versions would produce or install the
 wrong language.
 
+## Measure compilation
+
+Compare two compiler executables with warm caches and sequential, alternating
+samples (one emission worker by default):
+
+```sh
+python3 -m tools.sloppy_core.benchmark_compile /tmp/new/bin/dewy-core \
+  --baseline /tmp/old/bin/dewy-core --output /tmp/compile-times.json
+```
+
+The default workloads cover the tour, physics checking/building, native/web
+paddle builds and compiler self-compilation. Use `--workload physics --samples 9`
+for a focused comparison. Keep the source tree fixed during a run and avoid
+other CPU-heavy work. The report records all samples, binary/source identities,
+working-tree state and system load; small desktop differences are not a speedup
+claim. `build ... --time` reports checking, lowering/code generation and output
+times. `SLOPPY_PAR_TIME=1` adds optimizer and emission timing.
+
 ## Editor
 
 The repository's [VS Code extension](../dewy/vscode-dewy/README.md) can use this

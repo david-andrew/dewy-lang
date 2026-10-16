@@ -466,3 +466,20 @@ syntax form outside the small seed's grammar; using an ordinary assignment
 resolved that without changing the language. The final bootstrap takes 17.61
 seconds and all 729 checks pass in 49.81 seconds (`unpack-build.json`,
 `unpack-tests.log`), including the updated physics renderer.
+
+
+## Optimizer measurement and operand-list cleanup
+
+Phase instrumentation identifies release optimization/inlining as a substantial
+remaining game-build cost. The loop-effects prepass only needs instruction
+destinations; it now uses the existing destination classifier rather than
+constructing unused operand lists. The 36 pinned shared-core regressions pass.
+A larger pass-fusion experiment was discarded because it did not establish a
+reliable improvement.
+
+`loop-defs-performance.json` contains nine alternating measurements after warmup
+with one emission worker. Physics medians were 565.92/558.53 ms and paddle
+481.24/518.38 ms before/after. Other work heavily loaded the desktop during this
+run; these results do **not** establish a latency improvement. The reusable
+`tools.sloppy_core.benchmark_compile` command now records raw samples, identities
+and load so future comparisons are easier to reproduce and interpret.
