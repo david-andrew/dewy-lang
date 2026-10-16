@@ -46,7 +46,17 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
     text = original.read_text()
     anchor = 'parse_file = (file: int) -> int[]:\n'
     assert text.count(anchor) == 1
-    text = "use 'dewy_parse.jo'\n" + text.replace(anchor, anchor + '    if ends_with(files[file].path, ".dewy"): return dewy_parse_file(file)\n')
+    text = "use 'dewy_parse.jo'\n" + text.replace(anchor, anchor + '''    if ends_with(files[file].path, ".dewy"):
+        first = nodes.len()
+        decls = dewy_parse_file(file)
+        i = nodes.len() - 1
+        loop i >= first:
+            if nodes[i].kind == .loopx:
+                lowered = desugar_loopx(i)
+                nodes[i] = nodes[lowered]
+            i -= 1
+        return decls
+''')
     original.write_text(text)
     checker = output / 'compiler/expr.jo'
     text = checker.read_text()

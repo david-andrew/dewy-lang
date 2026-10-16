@@ -63,6 +63,7 @@ def main() -> None:
     parser.add_argument('--udewy', type=Path, help='defaults to udewy beside --dewy')
     parser.add_argument('--sloppy-root', type=Path, required=True)
     parser.add_argument('--sloppy-emitter', type=Path, help='also measure the checked Dewy → Sloppy IR bridge')
+    parser.add_argument('--source-core', type=Path, help='also build Dewy syntax through the compact Sloppy core')
     parser.add_argument('--dense-records', action='store_true',
                         help='also measure the opt-in dense Dewy representation on each Dewy backend')
     parser.add_argument('--output', type=Path, required=True, help='new JSON result file')
@@ -110,6 +111,13 @@ def main() -> None:
     if args.dense_records:
         modes.extend(mode.replace('dewy-', 'dewy-dense-', 1) for mode in modes.copy()
                      if mode.startswith('dewy-'))
+    if args.source_core:
+        core = args.source_core.resolve(strict=True)
+        result['tools']['source-core'] = file_identity(core)
+        result['core_build'] = json.loads((core.parent.parent / 'build.json').read_text())
+        result['sources'].append(file_identity(ROOT / 'tools/sloppy_core/benchmark_harness.jo'))
+        result['core_source_change'] = 'only harness.dewy import replaced with benchmark_harness.jo; original algorithm unchanged'
+        modes.extend(['core-debug', 'core-release'])
     if args.modes:
         unavailable = set(args.modes) - set(modes)
         if unavailable:
@@ -133,6 +141,15 @@ def main() -> None:
                     command = [str(sloppy), 'build', str(SOURCES / 'records.jo'), '-o', str(binary)]
                     if mode == 'sloppy-release':
                         command.append('--release')
+                elif mode.startswith('core-'):
+                    mode_env['SLOPPY_LIB'] = str(core.parent.parent / 'lib')
+                    original = dewy_source.read_text()
+                    assert original.count('p"harness.dewy"') == 1
+                    source = work / dewy_source.name
+                    source.write_text(original.replace('p"harness.dewy"', 'p"benchmark_harness.jo"'))
+                    shutil.copy2(ROOT / 'tools/sloppy_core/benchmark_harness.jo', work)
+                    command = [str(core), 'build', str(source), '--time', '-o', str(binary)]
+                    if mode == 'core-release': command.append('--release')
                 elif backend_mode.startswith('dewy-sloppy'):
                     bridge_work = work / 'bridge'
                     binary = bridge_work / 'program'

@@ -1,0 +1,14 @@
+# Platform boundary for the unchanged Dewy particle algorithm. The original
+# harness uses compiler-specific raw syscalls; this uses the core's library.
+size_argument = (values: str[], fallback: int) -> int:
+    if values.len() < 2: return fallback
+    text = values[1]
+    value = 0
+    loop byte in text:
+        if byte < 48 or byte > 57: return fallback
+        value = value * 10 + int(byte) - 48
+        if value > 1000000000: return fallback
+    value
+
+clock = () -> int: time_ns()
+mix = (hash: int, value: int) -> int: __floor_mod(hash * 31 + value, 1000000007)

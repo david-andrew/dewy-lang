@@ -21,6 +21,15 @@ main=():>int64=>{let xs:array<int64>=[42] bump(xs); return xs[0]}''',
 main=():>int64=>{let v=Vector[1.25 2.5] return if v.x*2.0 =? v.y 42 else 1}''',
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
+    'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
+    'range-ends': '''main=():>int64=>{let sum:int64=0 loop i in 0..3 {sum+=i}
+loop i in [0..3) {sum+=i} loop i in [0..3] {sum+=i} return sum+27}''',
+    'combined-continue': '''main=():>int64=>{let sum:int64=0
+loop i in 0.. and i <? 8 {if i =? 3 continue if i =? 6 break sum+=i} return sum+30}''',
+    'zipped-continue': '''main=():>int64=>{let sum:int64=0
+loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
+    'nested-combined': '''main=():>int64=>{let sum:int64=0
+loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
@@ -66,3 +75,17 @@ def test_core_rejects(compiler, tmp_path, name):
     assert built.returncode != 0 and diagnostic in built.stderr, built.stdout + built.stderr
     assert str(source) in built.stderr
     assert not binary.exists()
+
+
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+def test_core_imports(compiler, tmp_path, extension):
+    dependency = tmp_path / f'helper.{extension}'
+    dependency.write_text('twice=(x:int64):>int64=>x*2' if extension == 'dewy'
+                          else 'twice = (x: int) -> int: x * 2')
+    source = tmp_path / 'main.dewy'
+    source.write_text(f'from p"helper.{extension}" import twice\nmain=():>int64=>twice(21)')
+    binary = tmp_path / 'main'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    assert subprocess.run([binary], timeout=10, check=False).returncode == 42

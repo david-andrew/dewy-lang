@@ -311,6 +311,9 @@ dw_stmt = (id: int, top: bool = false) -> int:
         return s
     if k == "KeywordExpr":
         word = dewy_syntax[dw_child(id, 0)].text
+        if word == "from" or word == "import":
+            if not top: return dw_fail(id, "local imports")
+            return dw_import(id)
         if word == "return":
             n = mk(.return_, pos)
             if dewy_syntax[id].children.len() > 1: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
@@ -371,6 +374,67 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
     return n
 
+dw_import = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    n = mk(.import_, pos)
+    spec = dw_unwrap(dw_child(id, 1))
+    if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use p\"file.dewy\" or p\"file.jo\"")
+    path = dw_unwrap(dw_child(spec, 2))
+    if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral module path")
+    value = dewy_syntax[path].text
+    nodes[n].sval = i32(intern(value))
+    nodes[n].name = i32(intern(strip_ext(file_name(value))))
+    nodes[n].aux2 = 1
+    if dewy_syntax[dw_child(id, 0)].text == "from":
+        if dewy_syntax[id].children.len() != 4: return dw_fail(id, "this import")
+        nodes[n].aux = 2
+        selected = dw_unwrap(dw_child(id, 3))
+        imported: int[]
+        if dw_op(selected) == ",":
+            loop i in [1..dewy_syntax[selected].children.len()): imported.push(dw_expr(dw_child(selected, i)))
+        else: imported.push(dw_expr(selected))
+        loop item in imported:
+            if nodes[item].kind != .ident: return dw_fail(selected, "this imported name")
+        set_list(n, imported)
+    else if dewy_syntax[id].children.len() != 2: return dw_fail(id, "this import alias")
+    return n
+
+dw_iterable = (id: int) -> int:
+    let id = dw_unwrap(id)
+    inclusive = true
+    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and dw_op(dw_child(id, 0)) == "RangeJuxtapose":
+        wrapper = dewy_syntax[id].text
+        if wrapper != "[]:" and wrapper != "[):": return dw_fail(id, "this range boundary")
+        inclusive = wrapper == "[]:"
+        id = dw_unwrap(dw_child(id, 0))
+    if dw_op(id) != "RangeJuxtapose": return dw_expr(id)
+    size = dewy_syntax[id].children.len()
+    if (size != 3 and size != 4) or dw_name(dw_child(id, 2)) != "..": return dw_fail(id, "this range")
+    n = mk(.range, dewy_syntax[id].pos)
+    nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+    if size == 4: nodes[n].b = i32(dw_expr(dw_child(id, 3)))
+    if inclusive: add_flag(n, NF_INCLUSIVE)
+    return n
+
+dw_loop_head = (id: int) -> int:
+    let id = dw_unwrap(id)
+    op = dw_op(id)
+    n = mk(.lhead, dewy_syntax[id].pos)
+    if op == "in":
+        nodes[n].op = 1
+        binder = dw_child(id, 1)
+        if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
+        set_list(n, [dw_expr(binder)])
+        nodes[n].a = i32(dw_iterable(dw_child(id, 2)))
+    else if op == "and":
+        nodes[n].op = 2
+        nodes[n].a = i32(dw_loop_head(dw_child(id, 1)))
+        nodes[n].b = i32(dw_loop_head(dw_child(id, 2)))
+    else:
+        nodes[n].op = 4
+        nodes[n].a = i32(dw_expr(id))
+    return n
+
 dw_flow = (id: int, at: int) -> int:
     items = dewy_syntax[id].children
     if at >= items.len(): return 0
@@ -380,7 +444,17 @@ dw_flow = (id: int, at: int) -> int:
     if word != "if" and word != "loop": return dw_block(arm)
     if dewy_syntax[arm].children.len() != 3: return dw_fail(arm, "this flow arm")
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
-    nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
+    if word == "loop":
+        head = dw_loop_head(dw_child(arm, 1))
+        if nodes[head].op == 1:
+            nodes[n].kind = .for_
+            nodes[n].a = nodes[head].a
+            set_list(n, kids(head))
+        else if nodes[head].op == 4: nodes[n].a = nodes[head].a
+        else:
+            nodes[n].kind = .loopx
+            nodes[n].a = i32(head)
+    else: nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
     nodes[n].b = i32(dw_block(dw_child(arm, 2)))
     if at + 1 < items.len():
         if word == "loop": return dw_fail(arm, "loop/else")

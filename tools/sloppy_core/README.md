@@ -29,7 +29,10 @@ this intentionally simple boundary can be replaced after measuring the result.
 The first slice supports explicitly typed functions, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, floating-point records,
 arrays with value copies, nested record mutation, conditionals, while loops,
-interpolated strings, and entry-point arguments. Native parser diagnostics and
+interpolated strings, entry-point arguments, file imports (Dewy and Sloppy),
+array/range iteration, and combined `and` loop headers. Combined loops reuse
+the core's lowering, including correct advancement on `continue`.
+Native parser diagnostics and
 UTF-8 source locations are retained. A semicolon explicitly discards a result.
 
 This is an opt-in compiler experiment, not a full language implementation or a
@@ -42,7 +45,26 @@ currently prefers the unique candidate with fewer juxtaposed multiplications;
 ties are rejected. This is a deliberate experimental simplification of the old
 semantic disambiguator, not a claim to support every juxtaposition case.
 
-The initial behavior gate contains 18 cases and runs in under a second on the
+The behavior gate now contains 25 cases and takes about 1.2 seconds on the
 development machine, including separate compiler processes and program execution.
-Evidence is in `dewy/audits/2026-10-16/source-core/`. Subsequent workload measurements
-must distinguish this supported slice from the old compiler's broader features.
+Evidence is in `dewy/audits/2026-10-16/source-core/`.
+
+The existing nested-record particle benchmark runs unchanged except for its
+platform harness import: `benchmark_harness.jo` replaces raw compiler-specific
+syscalls with the core library. Three cold builds and five runs at each of five
+sizes per build give these medians (OS caches retained, one compiler worker):
+
+| Compiler | Whole build | Million-particle kernel |
+| --- | ---: | ---: |
+| Current Dewy, boxed default | 1,656 ms | 706 ms |
+| Current Dewy, opt-in dense records | 1,703 ms | 218 ms |
+| Source core, debug | 72 ms | 617 ms |
+| Source core, release | 90 ms | 257 ms |
+| C (`cc -O2`) | 94 ms | 170 ms |
+
+All 375 runs matched checksums, including empty and single-element arrays.
+The source core is about 18.5× faster to compile this supported workload; it
+does not yet beat the existing opt-in dense runtime. These are workload results,
+not a self-hosting or full-language speedup claim. Reproduce with
+`tools/compare_sloppy.py --source-core /path/to/bin/dewy-core`, selecting
+`--dewy-source dewy/benchmarks/apps/records_nested.dewy` and the desired modes.

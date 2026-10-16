@@ -31,11 +31,31 @@ the application requirements from the start; floating-point execution,
 closures, dense records, interop and a usable game loop must become near-term
 customers of the architecture, rather than waiting for an ideal proof engine.
 
-This changes the **order of implementation**, not Dewy's language contract.
-The existing Phase 1 guarantees and their regressions remain requirements.
-Additional proof sophistication should earn its place by enabling ordinary
-programs within measured compile-time budgets. A budget-exhausted query stays
-unknown; it cannot silently authorize an operation.
+The existing guarantees are design references, not a requirement to recreate
+every old mechanism before the new implementation becomes useful. The user
+explicitly permits breaking changes that improve the route to the intended
+language. Keep supported behavior clear and reject unsupported explicit proof
+contracts rather than pretending that runtime checks discharge them. Additional
+proof sophistication should earn its place by enabling ordinary programs within
+measured compile-time budgets.
+
+### Source-level restart checkpoint
+
+`restart/sloppy-frontend` now carries an opt-in source-level core, documented in
+[`tools/sloppy_core/README.md`](../tools/sloppy_core/README.md). It retains Dewy's
+syntax parser and maps its output directly into pinned Sloppy AST/checking,
+runtime, code generation, and libraries. It bypasses the old semantic IR, proof
+pipeline, and backend bridge. The tested slice includes typed functions, value
+copies, explicit place arguments, nested records, floats, imports, and combined
+iterator loops. Its 25 behavior checks run in about 1.2 seconds.
+
+The original nested-particle algorithm, changing only its platform harness
+import, builds in 90 ms in release mode versus 1.66 seconds for current Dewy.
+The million-particle kernel takes 257 ms versus 706 ms for boxed Dewy, 218 ms
+for opt-in dense Dewy, and 170 ms for C. All 375 measured executions agree.
+This supports moving application development onto the new core while improving
+runtime code generation and filling useful language gaps. It does not establish
+full compatibility, self-hosting, or release certification.
 
 ## What the comparison establishes
 
