@@ -54,5 +54,26 @@ let main=():>int64=>{
     let wide_limb=codec.Reader[0x"01 00 01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00"]
     codec.read_bigint(@wide_limb);
     if not wide_limb.failed return 20
+    # Every short word is rejected before the native word load, including
+    # the zero-byte buffer. A word may start at any byte alignment.
+    let full=0x"ef cd ab 89 67 45 23 01"
+    loop size in 0..7 {
+        let prefix:array<uint8>=[]
+        loop index in 0.. and index <? size {prefix.push(0)}
+        let partial=codec.Reader[prefix]
+        codec.read_word(@partial);
+        if not partial.failed return 21
+    }
+    let past=codec.Reader[full position=9]
+    codec.read_word(@past);
+    if not past.failed return 22
+    let unaligned=codec.Reader[0x"00 ef cd ab 89 67 45 23 01" position=1]
+    if codec.read_word(@unaligned) not=?0x0123456789abcdef or not codec.complete(unaligned) return 23
+    let block=codec.Reader[0x"03 00 00 00 00 00 00 00 aa bb cc"]
+    let extracted=codec.read_bytes(@block)
+    if not codec.complete(block) return 24
+    $runtime_assert extracted.length =? 3 and block.bytes.length =? 11
+    extracted[0]=0
+    if block.bytes[8] not=?170 return 25
     return 42
 }

@@ -244,7 +244,7 @@ ensure_prelude = (@engine:Engine):>Error? => {
     }
     if cached isnt? none {
         let restore_started=timing.start(engine.timings)
-        let restored=cache.restore(cached)
+        let restored=cache.restore(cached timings=engine.timings)
         timing.finish('prelude_restore' restore_started)
         if restored isnt? none {
             engine.session=restored.session

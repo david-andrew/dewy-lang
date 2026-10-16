@@ -7,6 +7,7 @@ import p"cache_bytes.dewy" as bytes
 import p"../targets.dewy" as targets
 import p"../invocation/platform.dewy" as platform
 import p"../paths.dewy" as paths
+import p"../timing.dewy" as timing
 import p"validation_analysis.dewy" as analysis
 import p"hir.dewy" as hir
 
@@ -123,8 +124,10 @@ inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
     }
     return true
 }
-restore = (entry:Entry):>state.PreludeSnapshot? => {
+restore = (entry:Entry timings:bool=false):>state.PreludeSnapshot? => {
+    let read_started=timing.start(timings)
     let contents=p(entry.path).read_bytes
+    timing.finish('prelude_restore.read' read_started)
     if contents isnt? array<uint8> return none
     # The reader owns the file buffer; later checks read through that owner.
     let input=bytes.Reader[contents]
@@ -133,10 +136,16 @@ restore = (entry:Entry):>state.PreludeSnapshot? => {
     let checksum=bytes.read_word(@input)
     # Decode the payload where it lies in the file's bytes, not a copy.
     let length=bytes.read_count(@input)
+    let checksum_started=timing.start(timings)
     if input.failed or input.position+length not=? input.bytes.length or fingerprint_from(input.bytes input.position) not=? checksum return none
+    timing.finish('prelude_restore.checksum' checksum_started)
+    let decode_started=timing.start(timings)
     let snapshot=codec.decode_from(@input)
+    timing.finish('prelude_restore.decode' decode_started)
     if snapshot is? codec.CacheMiss return none
+    let inputs_started=timing.start(timings)
     if not inputs_match(snapshot entry) return none
+    timing.finish('prelude_restore.inputs' inputs_started)
     return snapshot
 }
 store = (entry:Entry snapshot:state.PreludeSnapshot):>void => {

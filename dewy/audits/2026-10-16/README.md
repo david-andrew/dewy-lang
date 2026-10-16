@@ -297,3 +297,21 @@ entry recovery, and explicit cache isolation. The remaining warm-build cost
 is substantial: one sample spends 226 ms restoring the prelude, 80 ms in
 validation, and 122 ms in lowering. This cache change removes repeated work;
 it does not make the frontend representation compact.
+
+### Bounded cache word reads
+
+Restore phase timings isolate file reading, checksumming, decoding, and
+input validation. Native/C cache decoding now checks the remaining length
+once and borrows the byte buffer for an unaligned word load. Other targets
+keep the portable byte loop. This is an internal implementation choice.
+
+Three alternating warm tiny-program runs per compiler give median total
+compilation **465 ms before / 429 ms after**, with decoding **182 / 148 ms**.
+The first iteration is excluded: the new compiler had no prelude entry.
+Each build uses a fresh directory and changed source, and its result is
+executed. [Samples and compiler identities](cache-word-reads.json).
+
+The primitive codec runs on x86 and C, covering all truncated word lengths,
+unaligned words, invalid UTF-8, and malformed values. Shared-cache recovery
+and transitive invalidation tests also pass: **3 tests in 48.96 s**, including
+a fresh compiler-sized cache driver. [Test log](cache-word-tests.log).

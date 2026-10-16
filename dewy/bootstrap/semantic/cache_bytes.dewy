@@ -46,6 +46,17 @@ let read_byte = (@input:Reader):>uint8 => {
     return value
 }
 let read_word = (@input:Reader):>uint64 => {
+    if input.failed return 0
+    if input.position >? input.bytes.length or input.bytes.length-input.position <? 8 {input.failed=true return 0}
+    # The native compiler's cache is little-endian. Borrow the backing bytes
+    # only for this bounded load; no pointer survives a reader operation.
+    if $target in? ['x86_64' 'c'] {
+        let buffer=input.bytes
+        let position=input.position as int64
+        let loaded=$lend(buffer) {__load_i64__(__load_i64__(buffer)+position) transmute uint64}
+        input.position+=8
+        return loaded
+    }
     let value:uint64=0
     let shift:uint8=0
     loop i in 0..7 {
