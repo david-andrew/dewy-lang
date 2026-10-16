@@ -1,0 +1,60 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________ test_core_watch_missing_input[existing-directory-asset] ____________
+
+compiler = PosixPath('/tmp/dewy-source-core/unpack-c-bootstrap/bin/dewy-core-watch')
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-149/test_core_watch_missing_input_0')
+kind = 'asset', directory_exists = True
+
+    @pytest.mark.parametrize('kind', ['asset', 'import'])
+    @pytest.mark.parametrize('directory_exists', [False, True], ids=['missing-directory', 'existing-directory'])
+    def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists):
+        directory = tmp_path / 'inputs' / 'nested'
+        if directory_exists:
+            directory.mkdir(parents=True)
+        source = tmp_path / 'main.dewy'
+        if kind == 'asset':
+            save(source, 'main=()=>printl(str_from_bytes($include_bytes(p"inputs/nested/value.txt")))')
+            dependency = directory / 'value.txt'
+            contents = 'recovered input'
+        else:
+            save(source, 'from p"inputs/nested/helper.dewy" import label\nmain=()=>printl(label())')
+            dependency = directory / 'helper.dewy'
+            contents = 'label=()=>"recovered input"'
+        watcher = Watch(compiler, source)
+        try:
+            watcher.expect('waiting for changes')
+            directory.mkdir(parents=True, exist_ok=True)
+            save(dependency, contents)
+>           watcher.expect('recovered input', timeout=3)
+
+tests/python_misc/test_sloppy_core_watch.py:184: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_sloppy_core_watch.Watch object at 0x7f61515d30e0>
+pattern = 'recovered input', timeout = 3
+
+    def expect(self, pattern, timeout=10):
+        end = time.monotonic() + timeout
+        while True:
+            found = re.search(pattern, self.output[self.position:])
+            if found:
+                self.position += found.end()
+                return found
+            remaining = end - time.monotonic()
+            assert remaining > 0, f'Expected {pattern!r}:\n{self.output}'
+            ready, _, _ = select.select([self.process.stdout], [], [], remaining)
+>           assert ready, f'Expected {pattern!r}:\n{self.output}'
+E           AssertionError: Expected 'recovered input':
+E             dewy-core watch: /tmp/pytest-of-david/pytest-149/test_core_watch_missing_input_0/main.dewy (saving a file reloads it; r + enter restarts, q + enter quits)
+E             /tmp/pytest-of-david/pytest-149/test_core_watch_missing_input_0/main.dewy:1:32: error: embed: cannot read '/tmp/pytest-of-david/pytest-149/test_core_watch_missing_input_0/inputs/nested/value.txt'
+E                 main=()=>printl(str_from_bytes($include_bytes(p"inputs/nested/value.txt")))
+E                                                ^
+E             dewy-core watch: waiting for changes
+E             
+E           assert []
+
+tests/python_misc/test_sloppy_core_watch.py:37: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core_watch.py::test_core_watch_missing_input[existing-directory-asset]
+1 failed in 3.38s

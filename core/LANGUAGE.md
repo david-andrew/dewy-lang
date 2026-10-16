@@ -33,7 +33,8 @@ Optional match: 4
 /tmp/hello
 ```
 
-`watch` reruns a terminal program after edits. `check` reports errors without
+`watch` reruns a terminal program after edits and retries failed builds when a
+missing imported file or embedded asset appears. `check` reports errors without
 emitting an executable. `build --time` reports compiler phase timings. Use
 `--release` for optimized programs; development builds are the default.
 

@@ -129,8 +129,8 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 734 checks and takes
-about 50 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 739 checks and takes
+about a minute on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

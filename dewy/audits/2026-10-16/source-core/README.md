@@ -494,3 +494,22 @@ before sending a game patch, including newly introduced input directories.
 The watch suite passes all six checks, including a new program that updates its
 own embedded input immediately on startup. The separate optimizer cleanup's
 733-check hosted gate also passed (`38982258675`).
+
+
+## Recovering missing watch inputs
+
+Failed compiler children now return their discovered source/asset paths through
+a separate small input manifest. The watcher keeps the last successful game's
+link map and state, installs watches for these new dependencies, and retries when
+they appear. Missing directory chains are watched through the nearest existing
+ancestor. Readiness messages follow watch installation. The polling fallback
+keeps the original full input path even when its parent is missing.
+
+Four initial-build regressions cover missing assets/imports with existing and
+missing parent directories; a live-game regression introduces a new missing asset
+and checks state preservation through recovery. The pre-fix compiler fails the
+initial missing-asset test (`watch-recovery-before.log`). A fresh C bootstrap
+passes all 739 checks (`watch-recovery-build.json`, `watch-recovery-tests.log`).
+The bootstrap took 28.76 seconds and the gate 102.97 seconds while other desktop
+work was consuming CPU and filesystem resources; these are loaded-machine
+validation timings, not a latency comparison.

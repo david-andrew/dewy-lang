@@ -904,14 +904,16 @@ watch_main = (path: str, args: str[]):
     fresh = true
     loop true:
         start = false
+        failed = false
         if fresh:
             watch_stop()
             if watch_compile(path, true):
                 start = true
                 fresh = false
-            else: eprint("dewy-core watch: waiting for changes")
+            else: failed = true
         watch_observe(path, _ino)
         if start: watch_run()
+        else if failed: eprint("dewy-core watch: waiting for changes")
         # wait for a change, the program ending, or a command
         ev = 0
         when TARGET == "windows":
@@ -945,6 +947,7 @@ watch_main = (path: str, args: str[]):
                 watch_send(t0)
                 if wm_top != top0: eprint("dewy-core watch: (top-level statements changed: they ran once, at start; {w_r} starts the program again)")
             else:
+                watch_observe(path, _ino)
                 eprint("dewy-core watch: the program keeps running the last version that compiled")
                 # (and shows the errors)
                 w_patch = []
@@ -970,23 +973,32 @@ watch_observe = (path: str, ino: int):
     if fl.len() == 0: fl.push(path)
     loop f in fl:
         d = w_dir(f)
-        w_watched["{d}/{w_base(f)}"] = true
+        input = "{d}/{w_base(f)}"
+        w_watched[input] = true
+        # A missing input can also have missing parent directories. Watch the
+        # nearest existing ancestor and wake when its next path component appears.
+        loop not is_dir(d):
+            parent = w_dir(d)
+            if parent == d: break
+            w_watched["{parent}/{w_base(d)}"] = true
+            d = parent
         when TARGET == "windows":
-            w32_note_file("{d}/{w_base(f)}")
+            w32_note_file(input)
             if w_dirs.get(d) == none:
                 w_dirs[d] = true
                 w32_dir_count[d] = w32_sources_in(d)
         else:
             # (macOS: files watched by when they were last written, as on Windows)
             if ino < 0:
-                w32_note_file("{d}/{w_base(f)}")
+                w32_note_file(input)
                 if w_dirs.get(d) == none:
                     w_dirs[d] = true
                     w32_dir_count[d] = w32_sources_in(d)
             else if w_dirs.get(d) == none:
-                w_dirs[d] = true
                 wd = syscall(254, ino, data(__zstr(d)), 0x8 | 0x40 | 0x80 | 0x100 | 0x200)  # writes, moves, creation and deletion
-                if wd >= 0: w_wds[wd] = d
+                if wd >= 0:
+                    w_dirs[d] = true
+                    w_wds[wd] = d
 
 w_dir = (f: str) -> str:
     s = rfind(f, "/")
@@ -1079,11 +1091,34 @@ w_base = (f: str) -> str:
 # build in a copy of this process; the errors go to the terminal (and are kept for the game)
 w_errors = ""
 
+# Failed builds still discover dependencies. Keep that small input list separate
+# from the successful link map so recovery never replaces a running game's state.
+w_failed_path = ""
+w_missing_inputs: str[]
+watch_missing_input = (path: str):
+    if watch_build: w_missing_inputs.push(path)
+
+watch_save_failed_inputs = ():
+    if len(w_failed_path) == 0: return
+    inputs: str[]
+    loop f in files: inputs.push(f.path)
+    loop f in embedded_files: inputs.push(f)
+    loop f in w_assets: inputs.push(f)
+    loop f in w_missing_inputs: inputs.push(f)
+    write_file(w_failed_path, inputs.join("\n"))
+
+watch_read_failed_inputs = (path: str):
+    loop f in split(read_file(path) ?? "", "\n"):
+        if len(f) > 0 and not wm_files.contains(f): wm_files.push(f)
+    delete_file(path)
+
 watch_compile = (path: str, first: bool) -> bool:
     when TARGET == "windows":
         return w32_compile(path, first)
     else:
         res = "{w_cache}/watch-{w_self_id()}.res"
+        failed_inputs = "{res}.inputs"
+        delete_file(failed_inputs)
         ep: i32[] = [-1, -1]
         syscall(293, data(ep), 0x80000)
         pid = syscall(57)
@@ -1091,6 +1126,7 @@ watch_compile = (path: str, first: bool) -> bool:
             syscall(33, int(ep[1]), 2)
             watch_first = first
             watch_build = true
+            w_failed_path = failed_inputs
             if first: wm_clear()
             bss_reserve = WATCH_DATA_RESERVE
             out = compile(path, w_out)
@@ -1109,6 +1145,7 @@ watch_compile = (path: str, first: bool) -> bool:
         st = [0]
         syscall(61, pid, data(st), 0, 0)
         if st[0] != 0:
+            watch_read_failed_inputs(failed_inputs)
             w_log("the build ended with status {st[0]}")
             return false
         ok = watch_read_result(res)
@@ -1490,6 +1527,7 @@ w32_compile = (path: str, first: bool) -> bool:
         res = "{w_cache}/watch-{w_self_id()}.res"
         if not first: watch_write_result(state)
         delete_file(res)
+        delete_file("{res}.inputs")
         sa = fill(0, 3)
         sa[0] = 24
         sa[2] = 1
@@ -1529,7 +1567,9 @@ w32_compile = (path: str, first: bool) -> bool:
         GetExitCodeProcess(pi[0] as *u8, data(code))
         CloseHandle(pi[0] as *u8)
         delete_file(state)
-        if code[0] != 0: return false
+        if code[0] != 0:
+            watch_read_failed_inputs("{res}.inputs")
+            return false
         ok = watch_read_result(res)
         delete_file(res)
         return ok
@@ -1540,6 +1580,7 @@ w32_compile = (path: str, first: bool) -> bool:
 watch_build_child = (path: str, state: str, res: str, first: bool, out: str):
     watch_first = first
     watch_build = true
+    w_failed_path = "{res}.inputs"
     if first: wm_clear()
     else: watch_read_result(state)
     bss_reserve = WATCH_DATA_RESERVE

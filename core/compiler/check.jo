@@ -1,3 +1,4 @@
+use 'watch.jo'
 use 'frontend.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
 
@@ -775,7 +776,9 @@ register_decls = (m: int, decls: int[]):
                     pn = rel[..sl)
                     if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
                     if let pd = pkg_dirs.get(pn): path = "{pd}/{rel[sl + 1..]}"
-                if not file_exists(path): fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
+                if not file_exists(path):
+                    watch_missing_input(path)
+                    fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
             else if pkg_dirs.get(rel) != none or pkg_errs.get(rel) != none:
                 # a package (pkg.jo): its main file
                 if let why = pkg_errs.get(rel): fatal(nodes[d].pos, why)

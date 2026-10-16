@@ -1,5 +1,6 @@
 # Shared compiler utilities: string interning, source files, diagnostics.
 
+use 'watch.jo'
 use 'ide.jo'
 
 struct SrcFile:
@@ -158,6 +159,7 @@ call_args_text = (p: int) -> str:
 # the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
 stop = (code: int):
     when not BOOTSTRAP:
+        if code != 0: watch_save_failed_inputs()
         __repl_unwind()
     exit(code)
 

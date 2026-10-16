@@ -69,7 +69,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 734-check gate takes about 50 seconds locally. It tests expected Dewy
+the earlier compiler suite. The 739-check gate normally takes about a minute locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -82,7 +82,9 @@ initializer resets that global and initializers that directly read it; new recor
 literal defaults. Embedded asset changes are watched even inside functions. Derived globals refresh
 in dependency order, including through imports, and same-layout replacements
 release their previous managed values. Deleting/restoring a watched asset keeps
-the last working game and recovers automatically. Arbitrary initializer reads
+the last working game and recovers automatically. Failed builds also watch newly
+referenced inputs: creating a missing asset, imported file or parent directory
+retries the build, including on first launch. Arbitrary initializer reads
 inside helper functions and more complex reload scenarios remain experimental.
 
 Dewy formatting, package editing, an interactive prompt and automatic updates

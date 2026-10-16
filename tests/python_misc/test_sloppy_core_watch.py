@@ -161,6 +161,55 @@ main=():>void=>{
         watcher.close()
 
 
+@pytest.mark.parametrize('kind', ['asset', 'import'])
+@pytest.mark.parametrize('directory_exists', [False, True], ids=['missing-directory', 'existing-directory'])
+def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists):
+    directory = tmp_path / 'inputs' / 'nested'
+    if directory_exists:
+        directory.mkdir(parents=True)
+    source = tmp_path / 'main.dewy'
+    if kind == 'asset':
+        save(source, 'main=()=>printl(str_from_bytes($include_bytes(p"inputs/nested/value.txt")))')
+        dependency = directory / 'value.txt'
+        contents = 'recovered input'
+    else:
+        save(source, 'from p"inputs/nested/helper.dewy" import label\nmain=()=>printl(label())')
+        dependency = directory / 'helper.dewy'
+        contents = 'label=()=>"recovered input"'
+    watcher = Watch(compiler, source)
+    try:
+        watcher.expect('waiting for changes')
+        directory.mkdir(parents=True, exist_ok=True)
+        save(dependency, contents)
+        watcher.expect('recovered input', timeout=3)
+    finally:
+        watcher.close()
+
+
+def test_core_watch_new_missing_asset_preserves_game(compiler, tmp_path):
+    source = tmp_path / 'game.dewy'
+    program = '''let label="original"
+let count:int64=0
+update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label}" sleep(0.005)}
+draw=():>void=>clear(BLACK)
+'''
+    save(source, program)
+    watcher = Watch(compiler, source, game=True)
+    try:
+        before = int(watcher.expect(r'tick (\d+) original').group(1))
+        save(source, program.replace('"original"', 'str_from_bytes($include_bytes(p"new/assets/label.txt"))'))
+        watcher.expect('keeps running the last version')
+        after = int(watcher.expect(r'tick (\d+) original').group(1))
+        assert after > before, watcher.output
+        directory = tmp_path / 'new' / 'assets'
+        directory.mkdir(parents=True)
+        save(directory / 'label.txt', 'restored')
+        watcher.expect(r'reloaded in \d+ ms:')
+        assert int(watcher.expect(r'tick (\d+) restored').group(1)) > after, watcher.output
+    finally:
+        watcher.close()
+
+
 @pytest.mark.parametrize('imported', [False, True], ids=['local', 'imported'])
 def test_core_watch_derived_asset(compiler, tmp_path, imported):
     source = tmp_path / 'game.dewy'
