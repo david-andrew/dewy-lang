@@ -179,3 +179,14 @@ The maintainer regeneration command was exercised separately and completed in
 and program development do not. No executable byte parity gate was introduced.
 The independent `Compact core` workflow builds from C and checks language,
 native/web applications, editor transport and reload under a five-minute limit.
+
+## Dewy editor type displays
+
+The editor now prints fixed-width and collection types in Dewy syntax, recursively
+through optionals, unions and callable types. Function hovers use `@` parameters
+and `:>` results, including generic instances and functions imported from `.jo`.
+Defaulted parameters are marked `= …`. Rendering walks the type representation;
+it does not replace substrings in user names or modify internal type identities.
+All 219 checks pass in 14.95 seconds (`editor-types-tests.log`). The initial CI
+workflow was rejected before jobs started because `runner.temp` was used at job
+scope; moving it to step scope fixes the workflow expression.

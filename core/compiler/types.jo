@@ -538,25 +538,25 @@ layout = (t0: int):
     types[t].flags = i32(f)
 
 # a type followed by [] or ? or |: function types and unions need parentheses there
-type_str_postfix = (t: int) -> str:
-    if tkind(t) == .fn_ or is_union(t): return "({type_str(t)})"
-    type_str(t)
+type_str_postfix = (t: int, dewy: bool = false) -> str:
+    if tkind(t) == .fn_ or is_union(t): return "({type_str(t, dewy)})"
+    type_str(t, dewy)
 
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
 # (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
 ts_depth = 0
 ts_left = 0
 
-type_str = (t0: int) -> str:
+type_str = (t0: int, dewy: bool = false) -> str:
     if ts_depth == 0: ts_left = 150
     if ts_left <= 0: return "…"
     ts_left -= 1
     ts_depth += 1
-    s = type_str_in(t0)
+    s = type_str_in(t0, dewy)
     ts_depth -= 1
     s
 
-type_str_in = (t0: int) -> str:
+type_str_in = (t0: int, dewy: bool) -> str:
     t = prune(t0)
     if t == 0: return "?"
     ti = types[t]
@@ -566,17 +566,23 @@ type_str_in = (t0: int) -> str:
             "void"
         bool_: "bool"
         int_:
+            if dewy:
+                if ti.sign: return "int{ti.bits}"
+                return "uint{ti.bits}"
             if t == T_INT: return "int"
             if ti.sign: return "i{ti.bits}"
             "u{ti.bits}"
         float_:
+            if dewy: return "float{ti.bits}"
             if ti.bits == 64: return "f64"
             "f32"
-        str_: "str"
-        array: "{type_str_postfix(int(ti.elem))}[]"
-        fixed: "{type_str_postfix(int(ti.elem))}[{ti.bits}]"
-        ptr: "*{type_str(int(ti.elem))}"
-        opt: "{type_str_postfix(int(ti.elem))}?"
+        str_: if dewy: "string" else: "str"
+        array:
+            if dewy: return "array<{type_str(int(ti.elem), dewy)}>"
+            "{type_str_postfix(int(ti.elem), dewy)}[]"
+        fixed: "{type_str_postfix(int(ti.elem), dewy)}[{ti.bits}]"
+        ptr: "*{type_str(int(ti.elem), dewy)}"
+        opt: "{type_str_postfix(int(ti.elem), dewy)}?"
         null_: "null"
         range: "range"
         none_lit: "none"
@@ -592,31 +598,39 @@ type_str_in = (t0: int) -> str:
             s = "("
             if ti.kind == .cfn: s = "cfn("
             loop i in [0..int(ti.nargs)):
-                if i > 0: s += ", "
-                if int(ti.mutmask) & (1 << i) != 0: s += "mut "
-                s += type_str(targ(t, i))
+                if i > 0: s += if dewy: " " else: ", "
+                if int(ti.mutmask) & (1 << i) != 0: s += if dewy: "@" else: "mut "
+                if dewy: s += "arg{i}: "
+                s += type_str(targ(t, i), dewy)
             s += ")"
-            if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem))
+            if dewy: s += ":>" + type_str(int(ti.elem), dewy)
+            else if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem), dewy)
             else if ti.kind == .fn_: s += " -> void"
             s
         tuple:
             s = "("
             loop i in [0..int(ti.nargs)):
                 if i > 0: s += ", "
-                s += type_str(targ(t, i))
+                s += type_str(targ(t, i), dewy)
             s + ")"
         struct_, enum_:
             si = int(ti.st)
             nm = structs[si].name
+            if dewy and structs[si].union_:
+                parts: str[]
+                loop i in [0..int(structs[si].ntargs)): parts.push(type_str_postfix(struct_targ(si, i), true))
+                return join(parts, " | ")
             if structs[si].union_ or structs[si].soa_: return nm
-            if nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0))}[,]"
-            if nm == "Map" and int(structs[si].ntargs) == 2: return "\{{type_str(struct_targ(si, 0))}: {type_str(struct_targ(si, 1))}}"
+            if dewy and nm == "Map" and int(structs[si].ntargs) == 2:
+                return "dict<{type_str(struct_targ(si, 0), true)} {type_str(struct_targ(si, 1), true)}>"
+            if nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0), dewy)}[,]"
+            if nm == "Map" and int(structs[si].ntargs) == 2: return "\{{type_str(struct_targ(si, 0), dewy)}: {type_str(struct_targ(si, 1), dewy)}}"
             s = nm
             if int(structs[si].ntargs) > 0:
                 s += "["
                 loop i in [0..int(structs[si].ntargs)):
                     if i > 0: s += ", "
-                    s += type_str(struct_targ(si, i))
+                    s += type_str(struct_targ(si, i), dewy)
                 s += "]"
             s
 

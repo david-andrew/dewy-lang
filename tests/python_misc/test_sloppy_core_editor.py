@@ -128,3 +128,36 @@ def test_vscode_core_client(tmp_path):
                             text=True, timeout=20, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'restart and close passed' in result.stdout
+
+
+@pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
+    ('', 'let value:uint64=42 return value as int64', 'value', 'uint64'),
+    ('', 'let value:array<string>=["answer"] return value.length', 'value', 'array<string>'),
+    ('', 'let value:dict<string array<int16>>=[] return value.length', 'value', 'dict<string array<int16>>'),
+    ('', 'let value:(int64|string)?=none return if value is? none 42 else 1', 'value', '(int64 | string)?'),
+    ('Fn:type=(@x:int64):>void\n', 'let value:Fn=(@x:int64):>void=>{x+=1} let n:int64=41 value(@n) return n', 'value', '(@arg0: int64):>void'),
+    ('bump=(@x:int64 n:int64=2):>void=>{x+=n}\n', 'let n:int64=40 bump(@n) return n', 'bump', 'bump = (@x: int64 n: int64 = …):>void'),
+    ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: float64):>float64'),
+    ('from p"support.jo" import answer\n', 'return answer(40)', 'answer', 'answer = (x: int64 n: int64 = …):>int64'),
+])
+def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if not compiler:
+        pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
+    # Imported implementation code is displayed in the language being edited.
+    (tmp_path / 'support.jo').write_text('answer = (x: int, n: int = 2) -> int: x + n\n')
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>42')
+    text = declarations + 'main=()=>{' + body + '}\n'
+    before = text[:text.rindex(name)]
+    pos = {'line': before.count('\n'), 'character': len(before.rsplit('\n', 1)[-1])}
+    client = Client(Path(compiler).resolve(strict=True), tmp_path)
+    try:
+        diagnostics = client.set_text(source.as_uri(), text, 1)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        hover = client.request('textDocument/hover', {'textDocument': {'uri': source.as_uri()}, 'position': pos})
+        contents = hover['contents']['value']
+        assert contents.startswith('```dewy\n'), contents
+        assert expected in contents, contents
+    finally:
+        client.close()

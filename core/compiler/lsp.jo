@@ -363,7 +363,7 @@ jn_raw = (v: int) -> str:
     if jn[v].kind == .str_: return jq(jn[v].s)
     jn[v].s
 
-lsp_log = (s: str): eprint("sloppy lsp: {s}")
+lsp_log = (s: str): eprint("dewy-core lsp: {s}")
 
 # ---------------- positions ----------------
 # LSP positions are lines and UTF-16 code units
@@ -985,7 +985,7 @@ publish = (d: int):
         if b == a and a < len(text) and text[a] != '\n': b = a + 1
         sev = 1
         if x.warning: sev = 2
-        item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"sloppy\",\"message\":{jq(x.msg)}\}"
+        item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{jq(x.msg)}\}"
         lst = by_path.get(x.path) ?? []
         lst.push(item)
         by_path[x.path] = lst
@@ -1094,7 +1094,9 @@ on_hover = (id: int, params: int) -> int:
         code = dc.snippet
         doc = dc.doc
         k = dc.kind
-        if k == IK_FN and len(x.info) > 0:
+        if k == IK_FN and len(x.info) > 0 and ends_with(docs[d].path, ".dewy"):
+            code = dc.name + " = " + x.info
+        else if k == IK_FN and len(x.info) > 0:
             # the types it was used with (the result's when inferred; generic parameters')
             hdr = dc.snippet
             ip = x.info
@@ -1109,7 +1111,8 @@ on_hover = (id: int, params: int) -> int:
         if k != IK_FN and k != IK_STRUCT and k != IK_ENUM: code = "({kind_name(k)}) {code}"
     else if len(x.info) > 0: code = x.info
     if len(code) == 0: return lsp_reply(id, "null")
-    md = "```sloppy\n{code}\n```"
+    language = if ends_with(docs[d].path, ".dewy"): "dewy" else: "sloppy"
+    md = "```{language}\n{code}\n```"
     if len(doc) > 0: md += "\n---\n" + doc
     lsp_reply(id, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{jq(md)}\}\}")
 
@@ -2188,7 +2191,7 @@ lsp_main = ():
         params = jget(root, "params")
         if method == "initialize":
             ws_init(params)
-            lsp_reply(id, "\{\"capabilities\":{capabilities},\"serverInfo\":\{\"name\":\"sloppy\"\}\}")
+            lsp_reply(id, "\{\"capabilities\":{capabilities},\"serverInfo\":\{\"name\":\"dewy-core\"\}\}")
         else if method == "initialized": pass
         else if method == "shutdown":
             shutdown = true

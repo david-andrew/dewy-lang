@@ -453,19 +453,25 @@ trail_sig = (k: int) -> str:
         s += type_str(zonk(fns[f].ptypes[i]))
     s + ")"
 
+# Display types for the edited language, including imported implementation declarations.
+ide_type_str = (t: int) -> str: type_str(t, ends_with(ide_doc, ".dewy"))
+
 # a function instance's signature: (a: int, b: str) -> int
 ide_fn_sig = (f: int) -> str:
+    dewy = ends_with(ide_doc, ".dewy")
     d = int(fns[f].decl)
     s = "("
     loop i in [0..fns[f].ptypes.len()):
-        if i > 0: s += ", "
+        if i > 0: s += if dewy: " " else: ", "
         if i < nkids(d):
-            if has_flag(kid(d, i), NF_MUT): s += "mut "
+            if has_flag(kid(d, i), NF_MUT): s += if dewy: "@" else: "mut "
             s += name_of(int(nodes[kid(d, i)].name)) + ": "
-        s += type_str(zonk(fns[f].ptypes[i]))
+        s += ide_type_str(zonk(fns[f].ptypes[i]))
+        if dewy and i < nkids(d) and nodes[kid(d, i)].b != 0: s += " = …"
     s += ")"
     r = zonk(int(fns[f].ret))
-    if r != 0 and tkind(r) != .void_: s += " -> " + type_str(r)
+    if dewy: s += ":>" + ide_type_str(r)
+    else if r != 0 and tkind(r) != .void_: s += " -> " + ide_type_str(r)
     s
 
 # Enum.variant(fields) = value
@@ -484,7 +490,7 @@ ide_variant_text = (ed: int, vd: int) -> str:
 
 ide_type_info = (t: int) -> str:
     if t == 0: return ""
-    type_str(zonk(t))
+    ide_type_str(zonk(t))
 
 ide_ref_name = (p: int) -> str:
     src = files[pos_file(p)].src
@@ -664,7 +670,7 @@ ide_finish = ():
         if p < 0: continue
         t = zonk(int(lc.type))
         lbl = ""
-        if not has_var(prune(t)): lbl = ": " + type_str(t)
+        if not has_var(prune(t)): lbl = ": " + ide_type_str(t)
         ide_hint_agree(hints, order, p + len(name_of(int(lc.name))), lbl)
     loop f in ide_hint_fns:
         d = int(fns[f].decl)
@@ -673,7 +679,9 @@ ide_finish = ():
         if i < 0: continue
         r = zonk(int(fns[f].ret))
         lbl = ""
-        if r != 0 and tkind(r) != .void_ and not has_var(prune(r)): lbl = " -> " + type_str(r)
+        if r != 0 and tkind(r) != .void_ and not has_var(prune(r)):
+            arrow = if ends_with(ide_doc, ".dewy"): ":>" else: " -> "
+            lbl = arrow + ide_type_str(r)
         ide_hint_agree(hints, order, mkpos(pos_file(nodes[d].pos), i), lbl)
     loop p in order:
         if len(hints[p]) > 0: ide_emit("H\t{ide_pos_str(p)}\t{ide_esc(hints[p])}")
@@ -687,7 +695,7 @@ ide_hint_local = (s: int, l: int):
     k = nodes[b].kind
     if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit: return
     # Point(...), vec2(...), f32(...): the type is written already
-    t = type_str(zonk(int(locals[l].type)))
+    t = ide_type_str(zonk(int(locals[l].type)))
     src = files[pos_file(nodes[s].pos)].src
     i = pos_off(nodes[s].pos)
     e = ide_line_end(src, i)
@@ -756,9 +764,9 @@ ide_sym_detail = (s: int) -> (int, str):
     sk = syms[s].kind
     if sk == .local:
         l = int(syms[s].ref)
-        return (ide_local_kind(ide_local_root(l)), type_str(zonk(int(locals[l].type))))
-    if sk == .global: return (IK_GLOBAL, type_str(zonk(int(globals[int(syms[s].ref)].type))))
-    if sk == .const_: return (IK_CONST, type_str(zonk(int(globals[int(syms[s].ref)].type))))
+        return (ide_local_kind(ide_local_root(l)), ide_type_str(zonk(int(locals[l].type))))
+    if sk == .global: return (IK_GLOBAL, ide_type_str(zonk(int(globals[int(syms[s].ref)].type))))
+    if sk == .const_: return (IK_CONST, ide_type_str(zonk(int(globals[int(syms[s].ref)].type))))
     if sk == .fns:
         d = int(syms[s].decl)
         if d != 0: return (IK_FN, ide_fn_header(d))
@@ -841,12 +849,12 @@ ide_complete_members = (t0: int):
         loop i in [0..int(structs[si].nfields)):
             fi = int(structs[si].fields) + i
             seen[int(fields[fi].name)] = true
-            ide_emit("C\t{ide_esc(name_of(int(fields[fi].name)))}\t{IK_FIELD}\t{ide_esc(type_str(zonk(int(fields[fi].type))))}")
+            ide_emit("C\t{ide_esc(name_of(int(fields[fi].name)))}\t{IK_FIELD}\t{ide_esc(ide_type_str(zonk(int(fields[fi].type))))}")
     if k == .vec and t != T_MAT4:
         names_ = ["x", "y", "z", "w"]
-        loop i in [0..vec_n(t)): ide_emit("C\t{names_[i]}\t{IK_FIELD}\t{type_str(vec_comp_type(t))}")
+        loop i in [0..vec_n(t)): ide_emit("C\t{names_[i]}\t{IK_FIELD}\t{ide_type_str(vec_comp_type(t))}")
     if k == .tuple:
-        loop i in [0..int(types[t].nargs)): ide_emit("C\t{i}\t{IK_FIELD}\t{type_str(zonk(targ(t, i)))}")
+        loop i in [0..int(types[t].nargs)): ide_emit("C\t{i}\t{IK_FIELD}\t{ide_type_str(zonk(targ(t, i)))}")
     if k == .fixed: ide_emit("C\tlen\t{IK_FN}\tlen() -> int")
     loop nm in method_names(t):
         if seen.get(nm) != none or not is_ident_start(name_of(nm)[0]): continue
@@ -876,6 +884,6 @@ ide_complete_variants = (et: int):
         si = int(types[t].st)
         loop v in [0..int(structs[si].nvariants)):
             vi = int(structs[si].variants) + v
-            ide_emit("C\t{ide_esc(name_of(int(variants[vi].name)))}\t{IK_VARIANT}\t{ide_esc(type_str(t))}")
+            ide_emit("C\t{ide_esc(name_of(int(variants[vi].name)))}\t{IK_VARIANT}\t{ide_esc(ide_type_str(t))}")
     ide_flush()
     stop(0)

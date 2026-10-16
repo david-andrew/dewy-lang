@@ -59,8 +59,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 211 checks and takes
-about 14 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 219 checks and takes
+about 15 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -77,7 +77,8 @@ and performs lowering checks without code emission. Five-process medians were
 Dewy text. The parser reads the compiler's snapshot through a Linux anonymous
 file; the experimental compiler host currently requires Linux. Syntax errors
 use the core's diagnostic transport, including original file/byte locations.
-Hover text still uses the core's type spelling. Formatting Dewy is deliberately
+Hover text uses Dewy type spellings and function signatures, including for
+imported implementation-language functions. Defaulted parameters are marked `= …`. Formatting Dewy is deliberately
 unavailable: the CLI rejects it and LSP returns no edits, instead of applying
 Sloppy's syntax formatter. Other inherited editor features remain experimental.
 
