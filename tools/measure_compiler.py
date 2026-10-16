@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import gc
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
-import signal
 import shutil
+import signal
 import subprocess
 import sys
-import gc
 import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -271,7 +271,8 @@ def main() -> int:
         work.mkdir()
         # Hosted parse/prelude caches live in a private per-user store by
         # default; give each run its own, so a cold run stays cold.
-        run_env = env | {'DEWY_HOSTED_CACHE_DIR': str(work / 'hosted-cache')}
+        run_env = env | {'DEWY_HOSTED_CACHE_DIR': str(work / 'hosted-cache'),
+                         'DEWY_PRELUDE_CACHE_DIR': str(work / '__dewycache__/prelude')}
         command = ['/usr/bin/time', '-f', '%M', '-o', 'rss-kib.txt', *compiler,
                    *(['--timings'] if args.phase_timings else []), '--target', args.target, '-c', str(source)]
         priming = None

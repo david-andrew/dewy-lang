@@ -252,3 +252,15 @@ This switch is an experimental implementation boundary, not a new language
 feature. Resource-bearing records, subtype families, dictionaries, sorting,
 and raw exposure retain the current representation for now. That fallback is
 temporary scope control, not a commitment to preserve their internal ABI.
+
+Entry setup for simple dense kernels now brings the native million-particle
+result to **223.9 ms versus 698.7 ms boxed**, with C at 172.5 ms. The Sloppy
+backend is slower on this version; retain the native emitter as the leading
+path and reuse Sloppy ideas where measurements support them.
+
+Checked native preludes now live in the user cache directory rather than in
+each build directory. Fresh projects/tests reuse validated library inputs:
+after one initial check, the tiny-program median drops from **1.662 s to
+0.462 s**. Cold measurement tools still isolate the cache. A combined focused
+gate passes 34 tests in 19.83 s. The remaining frontend cost—particularly the
+allocation-heavy prelude restoration—still needs architectural work.

@@ -16,10 +16,12 @@ def test_measurement_cache_state(tmp_path, mode, invocations):
     compiler = tmp_path / 'compiler'
     compiler.write_text(f'''#!{sys.executable}
 import json
+import os
 import sys
 from pathlib import Path
 from udewy.cache import cache_artifact
 source = Path(sys.argv[-1])
+assert Path(os.environ['DEWY_PRELUDE_CACHE_DIR']) == Path.cwd() / '__dewycache__/prelude'
 binary = cache_artifact(source)
 # An up-to-date executable would bypass compilation; the warm tool must
 # remove it while retaining the parse/prelude cache.

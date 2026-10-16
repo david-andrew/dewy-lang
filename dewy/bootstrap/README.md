@@ -1,12 +1,17 @@
 # Bootstrap compiler
 
-The parsing pipeline is implemented in Dewy, using the hosted
-`dewy/parser/{t0,t1,t2,p0}.py` stages as its behavioral reference. Semantic
-analysis and code generation are being ported in executable slices; the
-whole Dewy compiler is not yet self-hosting. See
-[IMPLEMENTATION.md](IMPLEMENTATION.md) for the current boundary, and
-[../ROADMAP.md](../ROADMAP.md) for what follows once the pair is verified
-and performant.
+The native compiler is implemented in Dewy and self-hosts. The hosted Python
+implementation remains a reference and recovery route. Current performance
+work, measured results, and the Sloppy-derived experiment are described in
+[the restart plan](../RESTART_2026_10.md). Older stage-by-stage port notes below
+document how the implementation developed.
+
+The native CLI shares its checked-prelude cache across projects and fresh
+build directories. It uses `$XDG_CACHE_HOME/dewy/prelude`, or
+`$HOME/.cache/dewy/prelude`. `DEWY_PRELUDE_CACHE_DIR` selects another directory;
+`DEWY_NO_PRELUDE_CACHE=1` disables it. Compiler identity and transitive library
+contents are checked before reuse. Program compilation still runs normally.
+Benchmark tools explicitly isolate this cache for cold measurements.
 
 ## Implementation progress
 

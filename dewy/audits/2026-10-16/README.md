@@ -276,3 +276,24 @@ gate passes **34 tests in 19.83 s**, including an interior snapshot that must
 prevent entry-only detachment and a source function shadowing an operator.
 [Test log](kernel-cache-tests.log). Test-driver cache keys now distinguish
 the dense-representation switch.
+
+### Shared native prelude cache
+
+The native CLI now uses the user cache directory for checked preludes, with
+`DEWY_PRELUDE_CACHE_DIR` available for explicit isolation. Existing compiler
+identity, transitive source validation, checksums, and atomic writes remain
+in force. This changes where reusable analysis lives, not whether each user
+program is compiled. Cold benchmark tools explicitly select an empty cache.
+
+Five fresh project directories with the old CLI each rebuilt the prelude:
+median **1.662 s** for a tiny program. With the new CLI, the first directory
+took 1.649 s; five further fresh directories with changed program source took
+a median **0.462 s** (72% less time), each reusing the checked library and
+executing the newly compiled result. Runs were sequential without other
+compiler/test work from this task. [All samples](shared-prelude-latency.json).
+
+The CLI test checks reuse across directories, changed program output, corrupt
+entry recovery, and explicit cache isolation. The remaining warm-build cost
+is substantial: one sample spends 226 ms restoring the prelude, 80 ms in
+validation, and 122 ms in lowering. This cache change removes repeated work;
+it does not make the frontend representation compact.
