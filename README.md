@@ -16,6 +16,8 @@ The `restart/sloppy-frontend` branch develops a faster implementation in
 [core/](core/README.md), derived from Sloppy with Dewy syntax and language behavior.
 It already runs native/web game examples and has a focused validation gate taking
 seconds. It is an experimental subset; see its README for building and limitations.
+The [compact-core language guide](core/LANGUAGE.md) includes an executable tour
+and the native/web game workflow.
 
 ### dewy
 

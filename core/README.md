@@ -8,6 +8,7 @@ there is no generated patch layer and no separate Sloppy checkout is required.
 The supported language and measured results are documented in
 [the implementation notes](../tools/sloppy_core/README.md). This is still an
 experimental subset, not a replacement for the published Dewy compiler.
+Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 
 ## Build
 

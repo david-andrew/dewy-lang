@@ -1,5 +1,9 @@
 # Dewy on the compact core
 
+Start with [`tour.dewy`](tour.dewy) and the [language guide](../../core/LANGUAGE.md)
+for a terminal example of functions, records, copies, comprehensions, Unicode
+text, optional values and destructuring.
+
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
 code are Dewy. The pinned Sloppy platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.

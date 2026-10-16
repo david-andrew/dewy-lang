@@ -1,0 +1,27 @@
+# Run with dewy-core tour.dewy. Arrays and records have independent value copies.
+Point:type=[x:int64 y:int64=22]
+combine=(a b=a)=>a+b
+
+main=():>void=>{
+    let values=[20 22]
+    let copy=values
+    copy[0]=99
+    let [left right]=values
+    printl"Independent array: {left+right}"
+
+    let point:Point=[x=20]
+    let [y x]=point
+    printl"Record fields: {x+y}"
+    printl"Dependent default: {combine(21)}"
+
+    let doubled=[loop value in values value*2]
+    let selected=[loop value in doubled if value >? 40 value]
+    printl"Filtered comprehension: {selected[0]}"
+
+    let lengths=[loop word in ["café" "🙂"] word->word.length]
+    printl"Graphemes: {lengths["café"]} {lengths["🙂"]}"
+
+    let found=lengths.get("café")
+    let size=match found {n:int64=>n <none>=>0}
+    printl"Optional match: {size}"
+}
