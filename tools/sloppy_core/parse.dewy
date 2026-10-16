@@ -1,0 +1,29 @@
+# Syntax-only boundary: use Dewy's existing parser, exporting byte positions
+# for the compact engine. No semantic prelude is loaded at program runtime.
+from reporting import SrcFile
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/parser/t1.dewy" as tokens
+import p"../../dewy/bootstrap/parser/cli.dewy" as cli
+
+dump=(nodes:array<tokens.Token> roots:array<addr> offsets:array<addr> depth:addr):>void=>{
+    loop id in roots {
+        let node=tokens.node_at(nodes id)
+        $runtime_assert node.loc.start <? offsets.length and node.loc.stop <? offsets.length
+        printl"{depth}\t{node.kind}\t{offsets[node.loc.start]}\t{offsets[node.loc.stop]}\t{_quoted(parser.token_payload(node))}"
+        dump(nodes parser.children_of(node) offsets depth+1)
+    }
+}
+main=(args:array<string>):>int64=>{
+    let input=cli.read_input(args 'p0')
+    if input isnt? cli.Input {input.fail}
+    let parsed=parser.parse(input.srcfile)
+    if parsed is? tokens.TokenError {parsed.fail}
+    let offsets:array<addr>=[0]
+    let offset:addr=0
+    loop grapheme in input.srcfile.body {
+        offset+=(grapheme as array<uint8>).length
+        offsets.push(offset)
+    }
+    dump(parsed.nodes [parsed.root] offsets 0)
+    return 0
+}

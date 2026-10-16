@@ -1,0 +1,432 @@
+# Dewy's syntax tree projected into the pinned core's compact AST.
+# This is an explicitly limited source-level experiment, not Sloppy syntax
+# accepted under a different extension. Unknown Dewy forms fail at their source.
+use 'util.jo'
+use 'ast.jo'
+use 'lex.jo'
+
+struct DewySyntax:
+    kind: str
+    text: str
+    pos: int
+    children: int[]
+
+dewy_syntax: DewySyntax[]
+dewy_record_names: int[]
+
+dw_child = (id: int, at: int) -> int: dewy_syntax[id].children[at]
+dw_multiplications = (id: int) -> int:
+    score = if dewy_syntax[id].text == "MultiplyJuxtapose": 1 else: 0
+    loop child in dewy_syntax[id].children: score += dw_multiplications(child)
+    score
+
+dw_unwrap = (id: int) -> int:
+    let id = id
+    loop true:
+        if dewy_syntax[id].kind == "Atom": id = dw_child(id, 0)
+        else if dewy_syntax[id].kind == "Ambiguous":
+            best = -1
+            score = 1000000000
+            tied = false
+            loop child in dewy_syntax[id].children:
+                next = dw_multiplications(child)
+                if next < score:
+                    best = child
+                    score = next
+                    tied = false
+                else if next == score: tied = true
+            if best < 0 or tied: return dw_fail(id, "an ambiguous expression; use explicit multiplication or parentheses")
+            id = best
+        else: return id
+    id
+dw_name = (id: int) -> str:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == "Identifier": return dewy_syntax[id].text
+    ""
+dw_op = (id: int) -> str:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == "BinOp" and dewy_syntax[dw_child(id, 0)].kind == "CombinedAssignmentOp": return dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "="
+    if dewy_syntax[id].kind == "BinOp" or dewy_syntax[id].kind == "Prefix" or dewy_syntax[id].kind == "Postfix" or dewy_syntax[id].kind == "Flat": return dewy_syntax[dw_child(id, 0)].text
+    ""
+dw_fail = (id: int, what: str) -> int:
+    fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
+    0
+
+dw_type = (id: int) -> int:
+    let id = dw_unwrap(id)
+    pos = dewy_syntax[id].pos
+    name = dw_name(id)
+    if name != "":
+        if name == "int64": name = "i64"
+        else if name == "uint64": name = "u64"
+        else if name == "int32": name = "i32"
+        else if name == "uint32": name = "u32"
+        else if name == "uint8": name = "u8"
+        else if name == "float64": name = "f64"
+        else if name == "float32": name = "f32"
+        else if name == "string": name = "str"
+        else if name == "int" or name == "uint": return dw_fail(id, "unbounded integer types; use an explicit fixed width in this experiment")
+        n = mk(.tname, pos)
+        nodes[n].name = i32(intern(name))
+        return n
+    if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "array":
+        args = dw_child(id, 2)
+        if dewy_syntax[args].children.len() != 1: return dw_fail(id, "array type constraints")
+        n = mk(.tarray, pos)
+        nodes[n].a = i32(dw_type(dw_child(args, 0)))
+        return n
+    return dw_fail(id, "this type expression")
+
+dw_param = (id: int, kind: NK) -> int:
+    let id = id
+    pos = dewy_syntax[id].pos
+    initial = 0
+    if dw_op(id) == "=":
+        initial = dw_child(id, 2)
+        id = dw_child(id, 1)
+    if dw_op(id) != ":": return dw_fail(id, "untyped parameters or fields")
+    lhs = dw_child(id, 1)
+    by_place = dw_op(lhs) == "@"
+    if by_place: lhs = dw_child(lhs, 1)
+    name = dw_name(lhs)
+    if name == "": return dw_fail(lhs, "destructured parameters")
+    n = mk(kind, pos)
+    nodes[n].name = i32(intern(name))
+    nodes[n].a = i32(dw_type(dw_child(id, 2)))
+    if initial != 0: nodes[n].b = i32(dw_expr(initial))
+    if by_place: add_flag(n, NF_MUT)
+    return n
+
+dw_function = (id: int, name: str) -> int:
+    signature = dw_child(id, 1)
+    if dw_op(signature) != ":>": return dw_fail(id, "functions without explicit return types")
+    params = dw_child(signature, 1)
+    if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
+    n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
+    nodes[n].name = i32(intern(name))
+    result = dw_child(signature, 2)
+    if dw_name(result) == "void": add_flag(n, NF_VOID)
+    else: nodes[n].a = i32(dw_type(result))
+    ps: int[]
+    loop p in dewy_syntax[params].children: ps.push(dw_param(p, .param))
+    body = dw_block(dw_child(id, 2))
+    prefix: int[]
+    loop param in ps:
+        if has_flag(param, NF_MUT): continue
+        local = mk(.vardecl, nodes[param].pos)
+        nodes[local].name = nodes[param].name
+        value = mk(.ident, nodes[param].pos)
+        nodes[value].name = nodes[param].name
+        if name == "main":
+            if ps.len() != 1: return dw_fail(id, "multiple entry-point parameters")
+            nodes[value].name = i32(intern("args"))
+            call = mk(.call, nodes[param].pos)
+            nodes[call].a = i32(value)
+            value = call
+            nodes[local].a = nodes[param].a
+        nodes[local].b = i32(value)
+        prefix.push(local)
+    if name == "main":
+        loop param in ps:
+            if has_flag(param, NF_MUT): return dw_fail(id, "a mutable entry-point parameter")
+        ps = []
+    set_list(n, ps)
+    loop statement in kids(body): prefix.push(statement)
+    set_list(body, prefix)
+    nodes[n].b = i32(body)
+    return n
+
+dw_binary_token = (op: str, id: int) -> Tok:
+    match op:
+        "+": .plus
+        "-": .minus
+        "*", "MultiplyJuxtapose": .star
+        "//": .slash
+        "%": .percent
+        "=?": .eq
+        "not=?": .ne
+        "<?": .lt
+        "<=?": .le
+        ">?": .gt
+        ">=?": .ge
+        "<<": .shl
+        ">>": .shr
+        "and": .amp
+        "or": .pipe
+        "xor": .caret
+        _:
+            dw_fail(id, "operator '{op}'")
+            .eof
+
+dw_expr = (id: int) -> int:
+    let id = dw_unwrap(id)
+    k = dewy_syntax[id].kind
+    text = dewy_syntax[id].text
+    pos = dewy_syntax[id].pos
+    op = dw_op(id)
+    if k == "Identifier":
+        n = mk(.ident, pos)
+        nodes[n].name = i32(intern(if text == "printl": "print" else: text))
+        return n
+    if k == "Integer":
+        if not starts_with(text, "0d:"): return dw_fail(id, "nondecimal literals")
+        n = mk(.int_lit, pos)
+        parsed = to_int(replace(text[3..], "_", ""))
+        if parsed == none: return dw_fail(id, "an integer literal outside int64")
+        nodes[n].ival = parsed!
+        add_flag(n, NF_LITERAL)
+        return n
+    if k == "Real":
+        parts = split(text, "|")
+        if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
+        number = parts[0][3..]
+        if parts[1] != "":
+            if not starts_with(parts[1], "0d:"): return dw_fail(id, "nondecimal real fractions")
+            number = number + "." + parts[1][3..]
+        if parts[2] != "": return dw_fail(id, "real literal exponents")
+        value = to_float(replace(number, "_", ""))
+        if value == none: return dw_fail(id, "this real literal")
+        n = mk(.float_lit, pos)
+        nodes[n].fval = value!
+        add_flag(n, NF_LITERAL)
+        return n
+    if k == "IString":
+        n = mk(.str_lit, pos)
+        nodes[n].aux = 1
+        pieces: int[]
+        loop child in dewy_syntax[id].children:
+            if dewy_syntax[child].kind == "StringChunk":
+                part = mk(.str_lit, dewy_syntax[child].pos)
+                nodes[part].sval = i32(intern(dewy_syntax[child].text))
+                pieces.push(part)
+            else:
+                if dewy_syntax[child].kind != "Block" or dewy_syntax[child].children.len() != 1: return dw_fail(child, "this string interpolation")
+                part = mk(.pair, dewy_syntax[child].pos)
+                nodes[part].a = i32(dw_expr(dw_child(child, 0)))
+                nodes[part].sval = -1
+                pieces.push(part)
+        set_list(n, pieces)
+        return n
+    if k == "Bool":
+        n = mk(.bool_lit, pos)
+        nodes[n].ival = if text == "true": 1 else: 0
+        return n
+    if k == "String":
+        n = mk(.str_lit, pos)
+        nodes[n].sval = i32(intern(text))
+        return n
+    if k == "Block":
+        children = dewy_syntax[id].children
+        if text == "():" and children.len() == 1: return dw_expr(children[0])
+        if text == "[]:":
+            n = mk(.array, pos)
+            xs: int[]
+            loop child in children: xs.push(dw_expr(child))
+            set_list(n, xs)
+            return n
+        if text == "{{}}:": return dw_block(id)
+        return dw_fail(id, "this expression block")
+    if k == "Prefix":
+        e = dw_expr(dw_child(id, 1))
+        if op == "@":
+            add_flag(e, NF_MUT)
+            return e
+        n = mk(if op == "not": NK.not_ else: NK.unary, pos)
+        if op != "-" and op != "not" and op != "+": return dw_fail(id, "prefix '{op}'")
+        nodes[n].op = i32(int(if op == "-": Tok.minus else: Tok.plus))
+        nodes[n].a = i32(e)
+        return n
+    if k == "Flow": return dw_flow(id, 0)
+    if k == "BinOp":
+        left = dw_child(id, 1)
+        right = dw_child(id, 2)
+        if op == "=>": return dw_function(id, "")
+        if op == "//" or op == "%":
+            fn = mk(.ident, pos)
+            nodes[fn].name = i32(intern(if op == "//": "__floor_div" else: "__floor_mod"))
+            n = mk(.call, pos)
+            nodes[n].a = i32(fn)
+            set_list(n, [dw_expr(left), dw_expr(right)])
+            return n
+        if op == ".":
+            name = dw_name(right)
+            if name == "": return dw_fail(id, "computed member names")
+            n = mk(.field, pos)
+            nodes[n].a = i32(dw_expr(left))
+            nodes[n].name = i32(intern(if name == "length": "len" else: name))
+            if name == "length":
+                c = mk(.call, pos)
+                nodes[c].a = i32(n)
+                return c
+            return n
+        if op == "as":
+            n = mk(.cast, pos)
+            nodes[n].a = i32(dw_expr(left))
+            nodes[n].b = i32(dw_type(right))
+            return n
+        if starts_with(op, "CallJuxtapose") or op == "IndexJuxtapose":
+            xs = dewy_syntax[right].children
+            bracket = dewy_syntax[right].kind == "Block" and dewy_syntax[right].text == "[]:"
+            if bracket and not (intern(dw_name(left)) in dewy_record_names):
+                if xs.len() != 1: return dw_fail(id, "multidimensional indexing")
+                n = mk(.index, pos)
+                nodes[n].a = i32(dw_expr(left))
+                nodes[n].b = i32(dw_expr(xs[0]))
+                return n
+            n = mk(.call, pos)
+            nodes[n].a = i32(dw_expr(left))
+            callee = int(nodes[n].a)
+            if nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
+            args: int[]
+            if dewy_syntax[right].kind != "Block": args.push(dw_expr(right))
+            else:
+                loop child in xs:
+                    if dw_op(child) == "=":
+                        a = mk(.namedarg, dewy_syntax[child].pos)
+                        nodes[a].name = i32(intern(dw_name(dw_child(child, 1))))
+                        nodes[a].a = i32(dw_expr(dw_child(child, 2)))
+                        args.push(a)
+                    else: args.push(dw_expr(child))
+            set_list(n, args)
+            return n
+        n = mk(if op == "and": NK.and_ else if op == "or": NK.or_ else: NK.binary, pos)
+        nodes[n].op = i32(int(dw_binary_token(op, id)))
+        nodes[n].a = i32(dw_expr(left))
+        nodes[n].b = i32(dw_expr(right))
+        return n
+    return dw_fail(id, "syntax '{k}'")
+
+dw_stmt = (id: int, top: bool = false) -> int:
+    let id = dw_unwrap(id)
+    pos = dewy_syntax[id].pos
+    k = dewy_syntax[id].kind
+    if dw_op(id) == "SemicolonJuxtapose":
+        s = dw_stmt(dw_child(id, 1), top)
+        if nodes[s].kind == .exprstmt:
+            n = mk(.assign, pos)
+            nodes[n].op = i32(int(Tok.assign))
+            nodes[n].a = i32(mk(.hole, pos))
+            nodes[n].b = nodes[s].a
+            return n
+        return s
+    if k == "KeywordExpr":
+        word = dewy_syntax[dw_child(id, 0)].text
+        if word == "return":
+            n = mk(.return_, pos)
+            if dewy_syntax[id].children.len() > 1: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+            return n
+        if word == "let" or word == "const": return dw_declare(dw_child(id, 1), word == "const", top)
+        if word == "break": return mk(.break_, pos)
+        if word == "continue": return mk(.continue_, pos)
+        return dw_fail(id, "statement '{word}'")
+    if k == "Flow":
+        n = dw_flow(id, 0)
+        add_flag(n, NF_STMT)
+        return n
+    if dw_op(id) in ["+=", "-=", "*=", "//=", "%="]:
+        n = mk(.assign, pos)
+        op = dw_op(id)
+        if op == "//=" or op == "%=": return dw_fail(id, "compound floor division or modulo")
+        nodes[n].op = i32(int(if op == "+=": Tok.pluseq else if op == "-=": Tok.minuseq else: Tok.stareq))
+        nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+        nodes[n].b = i32(dw_expr(dw_child(id, 2)))
+        return n
+    if dw_op(id) == "=" or dw_op(id) == ":":
+        if top or dw_op(id) == ":": return dw_declare(id, false, top)
+        n = mk(.assign, pos)
+        nodes[n].op = i32(int(Tok.assign))
+        nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+        nodes[n].b = i32(dw_expr(dw_child(id, 2)))
+        return n
+    n = mk(.exprstmt, pos)
+    nodes[n].a = i32(dw_expr(id))
+    return n
+
+dw_declare = (id: int, constant: bool, top: bool) -> int:
+    let id = dw_unwrap(id)
+    initial = 0
+    lhs = id
+    if dw_op(id) == "=":
+        lhs = dw_child(id, 1)
+        initial = dw_child(id, 2)
+    annotation = 0
+    if dw_op(lhs) == ":":
+        annotation = dw_child(lhs, 2)
+        lhs = dw_child(lhs, 1)
+    name = dw_name(lhs)
+    if name == "": return dw_fail(lhs, "this declaration")
+    if initial != 0 and dw_op(initial) == "=>": return dw_function(initial, name)
+    if annotation != 0 and dw_name(annotation) == "type":
+        if initial == 0 or dewy_syntax[initial].text != "[]:": return dw_fail(id, "this type declaration")
+        n = mk(.struct_, dewy_syntax[id].pos)
+        nodes[n].name = i32(intern(name))
+        fields: int[]
+        loop field in dewy_syntax[initial].children: fields.push(dw_param(field, .vardecl))
+        set_list(n, fields)
+        dewy_record_names.push(intern(name))
+        return n
+    n = mk(if constant: NK.const_ else: NK.vardecl, dewy_syntax[id].pos)
+    nodes[n].name = i32(intern(name))
+    if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+    if initial != 0: nodes[n].b = i32(dw_expr(initial))
+    return n
+
+dw_flow = (id: int, at: int) -> int:
+    items = dewy_syntax[id].children
+    if at >= items.len(): return 0
+    arm = items[at]
+    if dewy_syntax[arm].kind != "KeywordExpr": return dw_block(arm)
+    word = dewy_syntax[dw_child(arm, 0)].text
+    if word != "if" and word != "loop": return dw_block(arm)
+    if dewy_syntax[arm].children.len() != 3: return dw_fail(arm, "this flow arm")
+    n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
+    nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
+    nodes[n].b = i32(dw_block(dw_child(arm, 2)))
+    if at + 1 < items.len():
+        if word == "loop": return dw_fail(arm, "loop/else")
+        rest = dw_flow(id, at + 1)
+        if nodes[rest].kind != .block:
+            block = mk(.block, dewy_syntax[arm].pos)
+            set_list(block, [rest])
+            rest = block
+        nodes[n].c = i32(rest)
+    return n
+
+dw_block = (id: int) -> int:
+    n = mk(.block, dewy_syntax[id].pos)
+    statements: int[]
+    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "{{}}:":
+        loop child in dewy_syntax[id].children: statements.push(dw_stmt(child))
+    else: statements.push(dw_stmt(id))
+    set_list(n, statements)
+    return n
+
+dewy_parse_file = (file: int) -> int[]:
+    parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
+    status, output = run_program(parser, [files[file].path, "--dump"])
+    if status != 0: exit(status)
+    dewy_syntax = [DewySyntax()]
+    dewy_record_names = []
+    stack: int[]
+    root = 0
+    loop line in split(output, "\n"):
+        if line == "": continue
+        fields = split(line, "\t")
+        if fields.len() != 5: fatal(mkpos(file, 0), "invalid syntax transport")
+        depth = to_int(fields[0]) ?? -1
+        start = to_int(fields[2]) ?? -1
+        payload = parse_json(fields[4])
+        if payload is JsonError: fatal(mkpos(file, 0), "invalid syntax payload")
+        text = payload.as_str() ?? ""
+        if depth < 0 or depth > stack.len() or start < 0: fatal(mkpos(file, 0), "invalid syntax location")
+        stack.truncate(depth)
+        id = dewy_syntax.len()
+        dewy_syntax.push(DewySyntax(fields[1], text, mkpos(file, start)))
+        if stack.len() > 0: dewy_syntax[stack[stack.len() - 1]].children.push(id)
+        else: root = id
+        stack.push(id)
+    if root == 0: fatal(mkpos(file, 0), "missing syntax root")
+    decls: int[]
+    loop child in dewy_syntax[root].children: decls.push(dw_stmt(child, true))
+    dewy_syntax = []
+    return decls
