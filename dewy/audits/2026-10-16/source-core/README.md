@@ -14,6 +14,12 @@
   defaults, aliases, forward record declarations, and live loop bounds when an
   array grows. Value cases now run in debug and release; model tests run both
   modes on both native and wasm targets.
+- `bootstrap-build.json`, `bootstrap-tests.log`: independent C bootstrap →
+  pristine pinned Sloppy → adapted core → core self-build. The last executable
+  passes all 77 checks in 4.51 seconds. The syntax parser still comes from the
+  recorded native Dewy seed. The C bootstrap's smaller accepted syntax could
+  not compile the adapter directly; building pristine Sloppy first avoids
+  constraining adapter implementation to that bootstrap subset.
 - `paddle-native.png`, `paddle-web.png`: inspected integration screenshots, not
   golden images constraining future rendering. The native frame used software
   rendering, 30 frames, and scripted mouse input at (800,620); the web frame

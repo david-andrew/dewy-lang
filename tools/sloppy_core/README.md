@@ -22,7 +22,15 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 The output directory must be new. The builder archives committed Sloppy sources
 at `235e19a271bccad3fe72e36d03264807a632dc1b`; it never edits that checkout or
 incorporates its uncommitted changes. `build.json` records seed and output hashes.
-The exported tree includes Sloppy's license. Nothing replaces the installed Dewy
+Use `--bootstrap` in place of `--sloppy-seed` to build pristine Sloppy with its
+independent C bootstrap, build the adapted core, and then have that core build
+itself. This route needs a C compiler and `make`, but no installed Sloppy binary.
+The final self-built core passes the same 77-check behavior gate. The Dewy parser
+still needs the existing native Dewy seed; this is not yet a complete C-only
+bootstrap of the combined compiler. Hashes record provenance, not a requirement
+for byte-identical self-builds.
+
+The exported tree includes Sloppy's license and notices. Nothing replaces the installed Dewy
 compiler. The parser currently runs as a subprocess for each Dewy source file;
 this intentionally simple boundary can be replaced after measuring the result.
 

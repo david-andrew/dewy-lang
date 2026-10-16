@@ -18,12 +18,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 
-def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None = None) -> Path:
+def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None = None,
+          *, bootstrap: bool = False) -> Path:
     sloppy_root, dewy, output = sloppy_root.resolve(), dewy.resolve(), output.resolve()
     seed = (sloppy_seed or sloppy_root / 'bin/sloppy').resolve()
     output.mkdir(parents=True, exist_ok=False)
     archive = subprocess.check_output(['git', '-C', str(sloppy_root), 'archive', PIN,
-                                       'compiler', 'lib', 'LICENSE'])
+                                       'compiler', 'lib', 'stage0', 'LICENSE', 'NOTICE'])
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(output, filter='data')
     binary_dir = output / 'bin'
@@ -40,6 +41,26 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
         raise RuntimeError(result.stdout + result.stderr)
     parser = binary_dir / 'dewy-parse'
     shutil.copy2(work / cache_artifact(source, cwd=work), parser)
+    env = env | {'SLOPPY_LIB': str(output / 'lib'), 'SLOPPY_EMIT_WORKERS': '1'}
+    bootstrap_hashes = []
+    if bootstrap:
+        # The C implementation supports the bootstrap subset, so first build
+        # pristine Sloppy, then use it for the Dewy adapter and core.
+        stage0 = output / 'stage0/sloppy0'
+        first = binary_dir / 'sloppy-bootstrap'
+        commands = [
+            ['make', '-s', '-C', str(output / 'stage0')],
+            [str(stage0), str(output / 'compiler/main.jo'), '-o', str(first)],
+        ]
+        for index, command in enumerate(commands):
+            result = subprocess.run(command, cwd=output, env=env, capture_output=True,
+                                    text=True, timeout=180, check=False)
+            (output / f'bootstrap-{index}.log').write_text(result.stdout + result.stderr)
+            if result.returncode:
+                raise RuntimeError(result.stdout + result.stderr)
+        bootstrap_hashes = [hashlib.sha256(path.read_bytes()).hexdigest()
+                            for path in (stage0, first)]
+        seed = first
     adapter = output / 'compiler/dewy_parse.jo'
     shutil.copy2(HERE / 'dewy_parse.jo', adapter)
     original = output / 'compiler/parse.jo'
@@ -82,12 +103,20 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
 ''' + arithmetic_anchor)
     checker.write_text(text)
     binary = binary_dir / 'dewy-core'
-    env = env | {'SLOPPY_LIB': str(output / 'lib'), 'SLOPPY_EMIT_WORKERS': '1'}
     result = subprocess.run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
                             cwd=output, env=env, capture_output=True, text=True, timeout=180, check=False)
     (output / 'core-build.log').write_text(result.stdout + result.stderr)
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
+    if bootstrap:
+        first_core = binary_dir / 'dewy-core-bootstrap'
+        binary.rename(first_core)
+        bootstrap_hashes.append(hashlib.sha256(first_core.read_bytes()).hexdigest())
+        result = subprocess.run([first_core, 'build', output / 'compiler/main.jo', '-o', binary],
+                                cwd=output, env=env, capture_output=True, text=True, timeout=180, check=False)
+        (output / 'self-build.log').write_text(result.stdout + result.stderr)
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
     identity = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     (output / 'build.json').write_text(json.dumps({
         'sloppy_revision': PIN, 'sloppy_seed_sha256': identity(seed),
@@ -95,6 +124,7 @@ def build(sloppy_root: Path, dewy: Path, output: Path, sloppy_seed: Path | None 
         'adapter_sha256': identity(adapter), 'core_sha256': identity(binary),
         'parser_source_sha256': identity(source), 'patched_parser_sha256': identity(original),
         'patched_checker_sha256': identity(checker),
+        'bootstrap_generations_sha256': bootstrap_hashes,
     }, indent=2) + '\n')
     return binary
 
@@ -103,7 +133,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sloppy-root', type=Path, required=True)
     parser.add_argument('--dewy', type=Path, required=True)
-    parser.add_argument('--sloppy-seed', type=Path)
+    seeds = parser.add_mutually_exclusive_group()
+    seeds.add_argument('--sloppy-seed', type=Path)
+    seeds.add_argument('--bootstrap', action='store_true', help='build the core from the pinned independent C bootstrap')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    print(build(args.sloppy_root, args.dewy, args.output, args.sloppy_seed))
+    print(build(args.sloppy_root, args.dewy, args.output, args.sloppy_seed, bootstrap=args.bootstrap))
