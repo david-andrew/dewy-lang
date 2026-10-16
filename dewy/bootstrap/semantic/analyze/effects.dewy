@@ -44,6 +44,14 @@ Analysis:type = [
     value_casts_escape:bool=true
     transfers:dict<addr array<EffectTransfer>>=[]
 ]
+# Owned by one validation of a frozen graph. Consumers share discovery and
+# parameter effects; no result survives HIR edits or another compilation.
+Prepared:type = const [analysis:Analysis summaries:ProgramEffects]
+prepare_roots = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.Table):>Prepared => {
+    let analysis=collect_roots(roots nodes)
+    let summaries=analyze_collected(analysis.copy() nodes type_nodes)
+    return Prepared[analysis summaries]
+}
 ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
 ArgumentPair:type = const [argument:addr parameter:addr?]
 Pairing:type = [target:addr pairs:array<ArgumentPair>]
@@ -815,28 +823,21 @@ read_only_places = (root:addr nodes:array<hir.AST> type_nodes:types.Table):>set<
 }
 # Imported functions and generated helpers can live in different modules.
 # Solve the frozen loaded graph once, then lend the result to every module.
-read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
+read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.Table prepared:Prepared?=none):>set<addr> => {
     let calls:array<addr>=[]
-    let pending=roots.copy
-    let seen:set<addr>=set[]
-    loop pending.length >? 0 {
-        let id=pending.pop
-        if id in? seen continue
-        seen.push(id)
+    let analysis=if prepared is? none collect_roots(roots.copy() nodes) else prepared.analysis.copy()
+    loop id in analysis.calls {
         let node=hir.node_at(nodes id)
-        if node is? hir.FunctionCall {
-            let has_place=false
-            loop arg in node.pos_args {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
-            loop arg in node.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
-            if has_place {calls.push(id)}
-        }
-        hir.push_children(node @pending)
+        $runtime_assert node is? hir.FunctionCall
+        let has_place=false
+        loop arg in node.pos_args {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
+        loop arg in node.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
+        if has_place {calls.push(id)}
     }
     let safe:set<addr>=set[]
     if calls.length =? 0 return safe
     let unsafe:set<addr>=set[]
-    let analysis=collect_roots(roots.copy() nodes)
-    let summaries=analyze_collected(analysis.copy nodes type_nodes)
+    let summaries=if prepared is? none analyze_collected(analysis.copy nodes type_nodes) else prepared.summaries.copy()
     loop id in calls {
         let call=hir.node_at(nodes id)
         $runtime_assert call is? hir.FunctionCall

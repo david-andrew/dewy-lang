@@ -279,3 +279,11 @@ use position/velocity vectors directly. The matched nested workload runs in
 21 seconds. Building the compiler with the earlier flat dense representation
 works but did not improve its self-build time; compact compiler metadata is
 the next representation target.
+
+Indexed binding pages improved an isolated lookup loop but not compiler build
+time, so that representation experiment was discarded. Sharing the frozen
+call graph and parameter effects across validation passes is retained: a
+cold compiler-sized pilot fell from 38.89 to 37.72 seconds, with validation
+itself down from 11.87 to 10.77 seconds. Small builds remain about 300 ms.
+The next target is duplicate legalization/optimization work before native
+emission; these incremental gains do not yet meet the restart's build budgets.

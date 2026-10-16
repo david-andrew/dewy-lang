@@ -436,3 +436,26 @@ The experiment also exposed a separate real defect: copying a dictionary after
 popping an array-valued entry dereferenced a cleared array descriptor. The
 array copy helper now preserves internal zero handles. Its regression executes
 on native x86, C and the Sloppy bridge; the direct smoke gate includes it.
+
+### Shared validation effects
+
+One validation now discovers and solves parameter effects once for its frozen
+checked graph. Nominal-place checking, storage-lifetime checking, read-only
+bounds facts and public-effect checking share that result. It is local to the
+validation call; HIR rewriting and later compilations cannot reuse stale data.
+Read-only-place discovery also uses the collected call list instead of walking
+the whole graph again. The individual checker entry points remain usable.
+
+A sequential cold self-build pilot on the same frozen source improved from
+**38.89 to 37.72 s**. Validation fell from **11.87 to 10.77 s**; lowering was
+unchanged at about 13.7 s. Both rebuilt compilers compile and execute a program
+returning 42. This is a modest single-pair result, not a claim to have reached
+Sloppy's compilation speeds. Warm small-build medians were effectively
+unchanged (**306 / 304 ms**, three alternating samples).
+[Self-build](shared-effects-selfbuild.json), [small builds](shared-effects-tiny.json).
+
+The direct native smoke gate plus ten cross-module/effect/nominal tests pass:
+**52 tests in 29.42 s**. The added tests cover private mutation, imported
+writes, unused invalid imported contracts, transitive calls, unknown and pure
+callbacks, nominal-owner replacement, and generic effect guarantees.
+[Test log](shared-effects-tests.log).

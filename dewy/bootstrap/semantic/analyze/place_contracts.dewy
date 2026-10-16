@@ -53,7 +53,7 @@ signature_arguments = (call:hir.FunctionCall signature:types.FunctionType nodes:
     }
     return result
 }
-validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Session):>Error? => {
+validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Session prepared:access.Prepared?=none):>Error? => {
     let candidates:array<Candidate>=[]
     # Traversal consumes its worklist; retain the roots for effect collection.
     let pending=roots.copy()
@@ -74,10 +74,10 @@ validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Sessi
     if candidates.length =? 0 return none
     let ids:array<addr>=[]
     loop root in roots {ids.push(root.id)}
-    let analysis=access.collect_roots(ids session.hir)
+    let analysis=if prepared is? none access.collect_roots(ids.copy() session.hir) else prepared.analysis.copy()
     # Solving updates summaries and worklists. Preserve the discovery graph
     # below for direct target resolution while the solver owns its state.
-    let effects=access.analyze_collected(analysis.copy() session.hir session.types)
+    let effects=if prepared is? none access.analyze_collected(analysis.copy() session.hir session.types) else prepared.summaries.copy()
     loop candidate in candidates {
         let call=hir.node_at(session.hir candidate.id)
         $runtime_assert call is? hir.FunctionCall

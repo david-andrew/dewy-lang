@@ -394,9 +394,9 @@ visit = (id:addr input:Input @scan:Scan):>void => {
 # Validation and omitted-row inference share this same checked call graph.
 Inventory:type = const [bodies:dict<addr rows.Contract> projections:dict<string inference.Projection> scopes:array<ScopeContract>=[]]
 body_name=(id:addr):>string=>"{inference.PREFIX}body:{id}"
-inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>Inventory => {
-    let analysis=access.collect_roots(roots session.hir)
-    let access_summaries=access.analyze_collected(analysis.copy session.hir session.types)
+inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[] prepared:access.Prepared?=none):>Inventory => {
+    let analysis=if prepared is? none access.collect_roots(roots.copy() session.hir) else prepared.analysis.copy()
+    let access_summaries=if prepared is? none access.analyze_collected(analysis.copy session.hir session.types) else prepared.summaries.copy()
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let storage_proofs=storage_borrows.prove(analysis access_summaries session.hir session.types session.registry)
     let borrowed=storage_proofs.arguments
@@ -484,7 +484,7 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     return summaries
 }
 
-validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:array<Warning> word_iterators:set<addr>=set[]):>Error? => {
+validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:array<Warning> word_iterators:set<addr>=set[] prepared:access.Prepared?=none):>Error? => {
     let requested=false
     let constrained:array<addr>=[]
     let pending=roots.copy
@@ -536,7 +536,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:
         if edge.required isnt? none and not rows.implies(none edge.required) and (not inference.pending(edge.required) or edge.required.excluded.length >? 0) {required=true}
     }
     if not written and not required and not requested return none
-    let graph=inventory(roots.copy() session word_iterators)
+    let graph=inventory(roots.copy() session word_iterators prepared=prepared)
     let summaries=graph.bodies
     loop [id body] in summaries {definitions[body_name(id)]=body}
     loop id in bodies {

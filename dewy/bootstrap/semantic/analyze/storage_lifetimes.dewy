@@ -59,7 +59,7 @@ select_entry=(id:addr visit:Visit session:contexts.Session @selections:array<Sel
         }
     }
 }
-validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.Session):>Error?=>{
+validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.Session read_only:set<addr> | none=none):>Error?=>{
     let candidates:array<Candidate>=[]
     let selections:array<Selection>=[]
     let private:dict<addr set<addr>>=[]
@@ -150,7 +150,7 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
     loop selection in selections {if selection.binding isnt? none {tracked.push(selection.binding)}}
     loop [alias target] in aliases {if target in? tracked {tracked.push(alias)}}
     let writes=effects.analyze_global_writes_in(ids session.hir tracked registry=session.registry)
-    let readonly=effects.read_only_places_in(ids session.hir session.types)
+    let readonly=if read_only is? none effects.read_only_places_in(ids session.hir session.types) else read_only.copy()
     # Place selection is not a write; nested argument calls still execute
     # before entry use and cannot invalidate its containing dictionary.
     loop selections.length >? 0 {
