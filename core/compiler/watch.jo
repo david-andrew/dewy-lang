@@ -885,6 +885,8 @@ w_args: str[]
 w_ext = ""      # the main file's extension: other files with it are sources too
 w_cache = "/tmp/dewy-core-cache"
 
+w_dirs: {str: bool} = {}
+
 watch_main = (path: str, args: str[]):
     w_cache = os_path(temp_dir()) + "/dewy-core-cache"
     mkdir(w_cache)
@@ -896,39 +898,20 @@ watch_main = (path: str, args: str[]):
     _ino = -1
     when TARGET == "linux":
         _ino = syscall(294, 0x800 | 0x80000)          # inotify_init1(IN_NONBLOCK | IN_CLOEXEC)
-    dirs: {str: bool} = {}
+    w_dirs = {}
     keys = "{w_r} restarts, q{w_enter} quits"
     eprint("dewy-core watch: {path} (saving a file reloads it; {keys})")
     fresh = true
     loop true:
+        start = false
         if fresh:
             watch_stop()
             if watch_compile(path, true):
-                watch_run()
+                start = true
                 fresh = false
             else: eprint("dewy-core watch: waiting for changes")
-        # (each time: a build may name files it did not before)
-        fl = wm_files
-        if fl.len() == 0: fl.push(path)
-        loop f in fl:
-            d = w_dir(f)
-            w_watched["{d}/{w_base(f)}"] = true
-            when TARGET == "windows":
-                w32_note_file("{d}/{w_base(f)}")
-                if dirs.get(d) == none:
-                    dirs[d] = true
-                    w32_dir_count[d] = w32_sources_in(d)
-            else:
-                # (macOS: files watched by when they were last written, as on Windows)
-                if _ino < 0:
-                    w32_note_file("{d}/{w_base(f)}")
-                    if dirs.get(d) == none:
-                        dirs[d] = true
-                        w32_dir_count[d] = w32_sources_in(d)
-                else if dirs.get(d) == none:
-                    dirs[d] = true
-                    wd = syscall(254, _ino, data(__zstr(d)), 0x8 | 0x40 | 0x80 | 0x100 | 0x200)  # writes, moves, creation and deletion
-                    if wd >= 0: w_wds[wd] = d
+        watch_observe(path, _ino)
+        if start: watch_run()
         # wait for a change, the program ending, or a command
         ev = 0
         when TARGET == "windows":
@@ -958,6 +941,7 @@ watch_main = (path: str, args: str[]):
                     eprint("dewy-core watch: update or draw was added or removed: starting the program again")
                     fresh = true
                     continue
+                watch_observe(path, _ino)
                 watch_send(t0)
                 if wm_top != top0: eprint("dewy-core watch: (top-level statements changed: they ran once, at start; {w_r} starts the program again)")
             else:
@@ -977,6 +961,32 @@ watch_main = (path: str, args: str[]):
         else if ev == 4:
             watch_stop()
             exit(0)
+
+# Install monitoring before running new code: even a program's first output can
+# cause an immediate edit (or the program itself can write an embedded asset).
+watch_observe = (path: str, ino: int):
+    # (each time: a build may name files it did not before)
+    fl = wm_files
+    if fl.len() == 0: fl.push(path)
+    loop f in fl:
+        d = w_dir(f)
+        w_watched["{d}/{w_base(f)}"] = true
+        when TARGET == "windows":
+            w32_note_file("{d}/{w_base(f)}")
+            if w_dirs.get(d) == none:
+                w_dirs[d] = true
+                w32_dir_count[d] = w32_sources_in(d)
+        else:
+            # (macOS: files watched by when they were last written, as on Windows)
+            if ino < 0:
+                w32_note_file("{d}/{w_base(f)}")
+                if w_dirs.get(d) == none:
+                    w_dirs[d] = true
+                    w32_dir_count[d] = w32_sources_in(d)
+            else if w_dirs.get(d) == none:
+                w_dirs[d] = true
+                wd = syscall(254, ino, data(__zstr(d)), 0x8 | 0x40 | 0x80 | 0x100 | 0x200)  # writes, moves, creation and deletion
+                if wd >= 0: w_wds[wd] = d
 
 w_dir = (f: str) -> str:
     s = rfind(f, "/")

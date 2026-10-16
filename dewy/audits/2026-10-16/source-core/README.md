@@ -483,3 +483,14 @@ with one emission worker. Physics medians were 565.92/558.53 ms and paddle
 run; these results do **not** establish a latency improvement. The reusable
 `tools.sloppy_core.benchmark_compile` command now records raw samples, identities
 and load so future comparisons are easier to reproduce and interpret.
+
+
+## Watch startup ordering
+
+A full local run exposed a startup race: the program could print its first
+output before its file watches existed, and an immediate embedded-asset edit was
+lost. The driver now installs watches before launching a fresh program and
+before sending a game patch, including newly introduced input directories.
+The watch suite passes all six checks, including a new program that updates its
+own embedded input immediately on startup. The separate optimizer cleanup's
+733-check hosted gate also passed (`38982258675`).

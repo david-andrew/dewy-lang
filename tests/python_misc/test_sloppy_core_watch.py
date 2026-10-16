@@ -136,6 +136,31 @@ def test_core_watch_function_asset(compiler, tmp_path):
         watcher.close()
 
 
+def test_core_watch_startup_asset_write(compiler, tmp_path):
+    # The program can update a watched input immediately on startup. Several
+    # input directories make installing watches after launch especially racy.
+    declarations = []
+    for index in range(32):
+        directory = tmp_path / f'input{index}'
+        directory.mkdir()
+        save(directory / 'value.txt', 'first')
+        declarations.append(f'let input{index}=$include_bytes(p"input{index}/value.txt")')
+    source = tmp_path / 'main.dewy'
+    save(source, '\n'.join(declarations) + '''
+main=():>void=>{
+    let label=str_from_bytes(input31)
+    if label =? "first" {write_file("input31/value.txt" "second");}
+    printl(label)
+}
+''')
+    watcher = Watch(compiler, source)
+    try:
+        watcher.expect('first')
+        watcher.expect('second', timeout=3)
+    finally:
+        watcher.close()
+
+
 @pytest.mark.parametrize('imported', [False, True], ids=['local', 'imported'])
 def test_core_watch_derived_asset(compiler, tmp_path, imported):
     source = tmp_path / 'game.dewy'
