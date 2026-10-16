@@ -3,6 +3,7 @@ import os
 import shutil
 import struct
 import subprocess
+import zlib
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -127,6 +128,14 @@ return if text =? "é🇺🇸" and count =? 2 42 else 1}''',
     'grapheme-bound-side-effect': '''let text="é👩‍👩‍👧‍👦"
 start=()=>{text="replacement" return 1}
 main=()=>{let part=text[start()..] return if part =? "👩‍👩‍👧‍👦" and text =? "replacement" 42 else 1}''',
+    'binary-literals': '''main=()=>{let a=0x"ab_cd" let b=0b"101" let c=0q"123" let d=0o"123" let e=0u"v" let f=0g"aA=="
+return if a.length =? 2 and a[0] =? 171 and a[1] =? 205 and b[0] =? 160 and c[0] =? 108 and d[0] =? 41 and d[1] =? 128 and e[0] =? 248 and f[0] =? 42 and f[1] =? 64 42 else 1}''',
+    'utf8-decode': '''main=()=>{let text=0x"65cc81f09f9982" as string|none
+let bad=0x"eda080" as string|none let empty=0x"" as string?
+return if text is? string and text =? "é🙂" and text.length =? 2 and bad is? none and empty is? string and empty =? "" 42 else 1}''',
+    'utf8-copy': '''main=()=>{let original="hé" let bytes=original as array<uint8>
+let decoded=bytes as string|none bytes[0]=120 let again=original as array<uint8>
+return if decoded is? string and decoded =? original and again[0] =? 104 and bytes[0] =? 120 42 else 1}''',
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
@@ -150,6 +159,9 @@ ERRORS = {
     'narrow-literal-overflow': ('main=()=>{let x:uint8=256 return x}', 'does not fit'),
     'float-literal-overflow': ('main=()=>1e309', 'exceeds float64'),
     'unary-plus-text': ('main=()=>+"text"', "needs a number"),
+    'reserved-binary-base': ('main=()=>0d"123"', 'based-string packing'),
+    'binary-padding': ('main=()=>0g"=a"', 'padding'),
+    'missing-asset': ('main=()=>{$include_bytes(p"missing.bin") as bytes return bytes.length}', 'cannot read'),
     'proof-directive': ('$assert true\nmain=():>int64=>42', 'does not yet support'),
     'effect-contract': ('main=():>int64 & no_effects=>42', 'does not yet support'),
     'missing-name': ('# 🙂\nmain=():>int64=>missing', 'unknown'),
@@ -391,7 +403,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search'])
+@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -426,14 +438,27 @@ def test_core_slice_bounds_panic(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_existing_optional_program(compiler, tmp_path, release):
-    source = Path(__file__).resolve().parents[2] / 'dewy/tests/optional_values.dewy'
+@pytest.mark.parametrize('name', ['optional_values', 'include_bytes'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_existing_program(compiler, tmp_path, release, name, target):
+    source = Path(__file__).resolve().parents[2] / f'dewy/tests/{name}.dewy'
     binary = tmp_path / 'optional'
     flags = ['--release'] if release else []
+    node = shutil.which('node')
+    if target == 'wasm':
+        if node is None: pytest.skip('Node is needed for web execution')
+        flags += ['--target', 'wasm']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
-                           text=True, timeout=30, check=False)
+                           text=True, timeout=30, cwd=tmp_path, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
@@ -472,7 +497,9 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
         offset += 4
         text = str_from_bytes(data_[offset..offset + size))
         offset += size
+        decoded = __dewy_decode_utf8(bytes(text))
         if let bounds = grapheme_boundaries(text):
+            assert(decoded != none and decoded! == text)
             assert(__dewy_string_length(text) == bounds.len() - 1)
             clusters = graphemes(text)
             assert(clusters.len() == bounds.len() - 1)
@@ -484,7 +511,9 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
             parts: str[]
             loop boundary in bounds: parts.push("{boundary}")
             print(join(parts, ","))
-        else: print("invalid")
+        else:
+            assert(decoded == none)
+            print("invalid")
 ''')
     binary = tmp_path / 'conformance'
     flags = ['--release'] if release else []
@@ -518,3 +547,43 @@ def test_core_grapheme_bounds_panic(compiler, tmp_path, expression):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode != 0 and 'out of bounds' in ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_embedded_png(compiler, tmp_path, release, target):
+    """A Dewy asset declaration feeds the inherited image decoder on both targets."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+
+    asset = tmp_path / 'pixel.png'
+    asset.write_bytes(b'\x89PNG\r\n\x1a\n'
+                      + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
+                      + chunk(b'IDAT', zlib.compress(bytes([0, 42, 0, 0, 255])))
+                      + chunk(b'IEND', b''))
+    source = tmp_path / 'image.dewy'
+    source.write_text('''$include_bytes(p"pixel.png") as pixel
+main=()=>{let image=load_image(pixel)
+return if image.width =? 1 and image.height =? 1 and image.pixels.length =? 4 image.pixels[0] as int64 else 1}
+''')
+    binary = tmp_path / 'image'
+    flags = ['--release'] if release else []
+    node = shutil.which('node')
+    if target == 'wasm':
+        if node is None:
+            pytest.skip('Node is needed for web execution')
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    # The emitted program is self-contained; decoding must not read the source asset.
+    asset.unlink()
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

@@ -100,6 +100,15 @@ graphemes = (s: str) -> str[]:
         out.push(s[start..next_byte))
     out
 
+# Checked decoding retains an independent byte-string value. There is no host
+# decoder or replacement-character policy: malformed input returns none.
+__dewy_decode_utf8 = (source: u8[]) -> str?:
+    text = str_from_bytes(source)
+    cursor = __GraphemeCursor()
+    loop cursor.offset < len(text):
+        if __grapheme_next(text, cursor) < 0: return none
+    text
+
 __dewy_string_length = (s: str) -> int:
     c = __GraphemeCursor()
     count = 0

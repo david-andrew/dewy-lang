@@ -4744,6 +4744,14 @@ check_expr = (n: int, expected: int) -> int:
             return tt
         fk = types[ft].kind
         tk = types[tt].kind
+        if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+            helper = ""
+            if fk == .array and telem(ft) == T_U8 and tk == .opt and telem(tt) == T_STR: helper = "__dewy_decode_utf8"
+            else if fk == .str_ and tk == .array and telem(tt) == T_U8: helper = "bytes"
+            if helper != "":
+                add_flag(a, NF_CHECKED)
+                nodes[n] = nodes[bc_call(helper, [a], nodes[n].pos)]
+                return check_expr(n, expected)
         ok = false
         if (fk == .ptr or fk == .int_ or fk == .null_ or fk == .cfn) and (tk == .ptr or tk == .int_ or tk == .cfn): ok = true
         if (fk == .int_ or fk == .float_) and (tk == .int_ or tk == .float_):

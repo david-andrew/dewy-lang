@@ -59,8 +59,8 @@ semantic disambiguator, not a claim to support every juxtaposition case.
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 254 checks and takes
-about 18 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 279 checks and takes
+about 20 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -173,3 +173,11 @@ The conformance check batches 17,490 inputs per mode/target (the 1,093 official
 cases, all ASCII pairs, empty input and malformed UTF-8) into one program build.
 It runs on native and WebAssembly in debug/release without importing the earlier
 compiler or its Unicode implementation into the test runner.
+
+`$include_bytes(p"assets/file.png")` embeds source-relative bytes; the statement
+form `$include_bytes(p"…") as name` binds them. The inherited image/audio loaders
+accept those byte arrays, including in self-contained web builds. Power-of-two
+based strings (`0b`, `0q`, `0o`, `0x`, `0u`, `0g`) pack bits into independent byte
+arrays, including Dewy's zero-padded final partial byte. `text as array<uint8>`
+encodes bytes, and `bytes as string|none` (or `string?`) checks UTF-8 and returns
+`none` for malformed data. Both conversions preserve independent values.

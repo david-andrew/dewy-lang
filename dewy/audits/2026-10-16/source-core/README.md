@@ -221,3 +221,20 @@ compile-time penalty; they do not establish a general performance bound.
 Hosted CI for the preceding editor checkpoint also passed: [run 38972007553](https://github.com/david-andrew/dewy-lang/actions/runs/38972007553),
 44 seconds including setup, complete C bootstrap and all 219 checks. Its exact
 commit and step outcomes are recorded in `ci-editor-types.json`.
+
+## Embedded assets and checked UTF-8 decoding
+
+Dewy's `$include_bytes` expression and binding forms now use the core embedding
+machinery with paths relative to the originating source. Based strings pack
+power-of-two digits into bytes. String/byte-array conversion preserves value
+independence, and decoding to `string|none` validates UTF-8. The Unicode
+conformance batch also exercises this checked decoding on every valid/invalid
+input, on both targets and in both modes. The original `include_bytes.dewy`
+program runs unchanged. A generated 1×1 PNG is embedded and its source deleted
+before native/web execution; the inherited decoder returns the expected pixel.
+All 279 checks pass in 19.78 seconds (`assets-tests.log`, `assets-build.json`).
+
+A read-only survey of 211 existing Dewy source fixtures took 9.18 seconds
+(`existing-syntax-survey.json`). It is a gap inventory, not a compatibility score:
+many fixtures intentionally exercise rejection, proof features, or implementation
+contracts. It identified practical asset/string interfaces to carry forward.

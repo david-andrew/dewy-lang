@@ -81,6 +81,73 @@ dw_unsigned = (text: str, id: int) -> u64:
         value = value * base + u64(digit)
     value
 
+# Power-of-two based strings pack digits most-significant-bit first. The final
+# partial byte is zero padded, as in the existing Dewy literal design.
+dw_binary = (id: int) -> int:
+    text = dewy_syntax[id].text
+    prefix = text[..3)
+    alphabet = ""
+    width = 0
+    match prefix:
+        "0b:": alphabet = "01"; width = 1
+        "0q:": alphabet = "0123"; width = 2
+        "0o:": alphabet = "01234567"; width = 3
+        "0x:": alphabet = "0123456789abcdef"; width = 4
+        "0u:": alphabet = "0123456789abcdefghijklmnopqrstuv"; width = 5
+        "0g:": alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"; width = 6
+        _: return dw_fail(id, "this based-string packing")
+    digits = text[3..]
+    if width != 6: digits = lower(digits)
+    pending = 0
+    bits = 0
+    padded = false
+    packed: u8[]
+    loop c in digits:
+        if c == '_' and width != 6: continue
+        if c == '=' and width == 6: padded = true; continue
+        if padded: fatal(dewy_syntax[id].pos, "based-string padding must be at the end")
+        digit = find_byte(alphabet, c)
+        if width == 6 and c == '-': digit = 62
+        if width == 6 and c == '_': digit = 63
+        if digit < 0: fatal(dewy_syntax[id].pos, "invalid based-string digit")
+        pending = (pending << width) | digit
+        bits += width
+        if bits >= 8:
+            bits -= 8
+            packed.push(u8(pending >> bits))
+            pending &= (1 << bits) - 1
+    if bits > 0: packed.push(u8(pending << (8 - bits)))
+    pos = dewy_syntax[id].pos
+    value = mk(.str_lit, pos)
+    nodes[value].sval = i32(intern(str_from_bytes(packed)))
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("bytes"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [value])
+    call
+
+dw_is_include = (id: int) -> bool:
+    if not starts_with(dw_op(id), "CallJuxtapose"): return false
+    tag = dw_unwrap(dw_child(id, 1))
+    dewy_syntax[tag].kind == "Metatag" and dewy_syntax[tag].text == "include_bytes"
+
+dw_include = (id: int) -> int:
+    arg = dw_unwrap(dw_child(id, 2))
+    if dewy_syntax[arg].kind != "Block" or dewy_syntax[arg].children.len() != 1:
+        return dw_fail(id, "$include_bytes without one literal path")
+    path = dw_unwrap(dw_child(arg, 0))
+    if dw_op(path) != "CallJuxtapose" or dw_name(dw_child(path, 1)) != "p":
+        return dw_fail(path, "$include_bytes without a p\"path\" literal")
+    path = dw_unwrap(dw_child(path, 2))
+    if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral asset path")
+    callee = mk(.ident, dewy_syntax[id].pos)
+    nodes[callee].name = i32(intern("embed"))
+    call = mk(.call, dewy_syntax[id].pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [dw_expr(path)])
+    call
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -243,6 +310,8 @@ dw_expr = (id: int) -> int:
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     op = dw_op(id)
+    if dw_is_include(id): return dw_include(id)
+    if k == "BasedString": return dw_binary(id)
     if k == "Identifier":
         if text == "none": return mk(.none_lit, pos)
         n = mk(.ident, pos)
@@ -414,6 +483,13 @@ dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
     k = dewy_syntax[id].kind
+    if dw_op(id) == "as" and dw_is_include(dw_child(id, 1)):
+        name = dw_name(dw_child(id, 2))
+        if name == "": return dw_fail(id, "this asset binding")
+        n = mk(.vardecl, pos)
+        nodes[n].name = i32(intern(name))
+        nodes[n].b = i32(dw_include(dw_child(id, 1)))
+        return n
     if dw_op(id) == "SemicolonJuxtapose":
         s = dw_stmt(dw_child(id, 1), top)
         if nodes[s].kind == .exprstmt:
