@@ -40,6 +40,7 @@ function splitArguments(line) {
 
 function activate(context) {
     const vscode = require('vscode');
+    require('./core-client').activate(context, vscode);
     context.subscriptions.push(vscode.commands.registerCommand('dewy.programArguments', async () => {
         const typed = await vscode.window.showInputBox({
             prompt: 'Command-line arguments for the program (split like a shell)',
@@ -71,6 +72,6 @@ function activate(context) {
     }
 }
 
-function deactivate() {}
+function deactivate() { require('./core-client').deactivate(); }
 
 module.exports = { activate, deactivate, splitArguments };

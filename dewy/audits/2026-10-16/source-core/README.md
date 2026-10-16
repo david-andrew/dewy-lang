@@ -134,3 +134,20 @@ WebAssembly, in both build modes. A bad dynamic bound produces a slice panic.
 All 186 combined checks pass in 12.07 seconds (`slices-tests.log`), including the
 upstream loop/container regressions and live reload. `slices-build.json` identifies
 the compiler. Stored range values and grapheme string slicing remain unsupported.
+
+## VS Code integration
+
+The existing extension now has an opt-in `dewy.core.path` setting and a small
+client derived from the pinned Sloppy extension, with its MIT notice retained.
+It exposes diagnostics, hover and definitions for file-backed Dewy documents,
+sends unsaved text, watches Dewy/implementation imports, and supports restart and
+configuration changes. No compiler is downloaded or installed. It starts the
+configured executable only in a trusted workspace; an empty path disables it.
+
+`vscode-client-tests.log` records three checks passing in 1.37 seconds: the direct
+LSP protocol test, the actual extension transport against the native compiler
+with VS Code API doubles, and the existing debugger argument-splitting test.
+The transport test covers opt-in/trust, source snapshots, diagnostics, Unicode
+locations, hover, definitions, syntax recovery, restart and document close, and
+verifies the file on disk was not changed. No desktop extension-host certification
+or marketplace publication is claimed.

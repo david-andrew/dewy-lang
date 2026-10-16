@@ -1,8 +1,8 @@
 {
   "name": "dewy",
   "displayName": "dewy",
-  "description": "Syntax highlighting and debugging for the Dewy programming language",
-  "version": "0.1.7",
+  "description": "Dewy syntax highlighting, debugging, and optional compact-core diagnostics, hover and definitions",
+  "version": "0.2.0",
   "publisher": "RedFoxLabs",
   "engines": {
     "vscode": "^1.75.0"
@@ -10,7 +10,8 @@
   "main": "./extension.js",
   "activationEvents": [
     "onDebugResolve:lldb",
-    "onDebugResolve:cppdbg"
+    "onDebugResolve:cppdbg",
+    "onLanguage:dewy"
   ],
   "categories": [
     "Programming Languages"
@@ -23,7 +24,9 @@
     "images/dewy_logo_128x128.png",
     "images/dewy-file.png",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "core-client.js",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "contributes": {
     "languages": [
@@ -109,6 +112,10 @@
       {
         "command": "dewy.programArguments",
         "title": "Dewy: Program Arguments"
+      },
+      {
+        "command": "dewy.core.restartServer",
+        "title": "Dewy: Restart Core Language Server"
       }
     ],
     "menus": {
@@ -118,11 +125,31 @@
           "when": "false"
         }
       ]
+    },
+    "configuration": {
+      "title": "Dewy",
+      "properties": {
+        "dewy.core.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the experimental dewy-core executable. Empty disables compiler-backed editor features. The toolchain must include bin/dewy-parse and lib/.",
+          "scope": "machine-overridable"
+        }
+      }
     }
   },
   "license": "GPL-3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/david-andrew/dewy-lang"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Highlighting is available; the optional core language server starts after workspace trust is granted.",
+      "restrictedConfigurations": [
+        "dewy.core.path"
+      ]
+    }
   }
 }

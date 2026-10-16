@@ -112,3 +112,19 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert source.read_text() == 'main=()=>42'
     finally:
         client.close()
+
+
+def test_vscode_core_client(tmp_path):
+    """Run the actual extension transport with VS Code API doubles and a native server."""
+    import shutil
+    node = shutil.which('node')
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if node is None or not compiler:
+        pytest.skip('Node and DEWY_CORE_COMPILER are needed for the editor client')
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run([node, root / 'tests/fixtures/core_editor/client.cjs',
+                             root / 'dewy/vscode-dewy/core-client.js',
+                             Path(compiler).resolve(), tmp_path], capture_output=True,
+                            text=True, timeout=20, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'restart and close passed' in result.stdout

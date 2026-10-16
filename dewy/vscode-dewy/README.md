@@ -4,6 +4,7 @@ Syntax highlighting and basic editor support for the **Dewy** programming langua
 
 ## Features
 
+- Optional compact-core diagnostics, hover types and go-to-definition for saved `.dewy` paths, including unsaved edits
 - Syntax highlighting for `.dewy` files
 - Bracket matching + auto-closing (`()`, `[]`, `{}`, `""`, `''`)
 - Line comments with `#` and nestable block comments with `#{ ... }#`
@@ -13,6 +14,35 @@ Syntax highlighting and basic editor support for the **Dewy** programming langua
 
 - Open a `.dewy` file and VS Code should automatically use the `dewy` language mode.
 - If it doesn't, use the language picker and choose `dewy`.
+
+## Compact-core editor features
+
+On the `restart/sloppy-frontend` branch, build the experimental compiler following
+[`core/README.md`](../../core/README.md), then set its executable in VS Code:
+
+```json
+{
+    "dewy.core.path": "/tmp/dewy-core/bin/dewy-core"
+}
+```
+
+The toolchain needs its sibling `dewy-parse` and `../lib/`. The setting is empty
+by default: highlighting and the existing debugger integration continue to work
+without selecting the experimental compiler. With it configured, the extension
+starts `dewy-core lsp` in a trusted workspace and sends the current editor text,
+including unsaved changes. Save a new buffer to a `.dewy` path before using these
+features. Compiler messages appear in Problems; transport errors appear in the
+**Dewy Core** output channel. **Dewy: Restart Core Language Server** restarts it.
+Changing the compiler-path setting also restarts the server; clearing it stops it.
+
+The core supports a growing language subset and reports unsupported forms. Hover
+text currently uses the implementation core's type spelling. Completion, rename,
+semantic highlighting and formatting are not enabled by this client yet. The
+existing native-debugger configuration below still targets the earlier compiler.
+
+The client adapts Sloppy's small JSON-RPC implementation and adds no npm runtime
+dependencies. Tests run its actual transport against the native language server
+with VS Code API doubles; this is not a desktop extension-host certification.
 
 ## Highlighted language constructs
 
@@ -53,9 +83,10 @@ See the Reference's [Debugging](https://dewy-lang.org/reference/debugging.html) 
 
 ## Limitations and roadmap
 
-This extension currently provides a TextMate grammar + language configuration (highlighting, brackets, comments, folding). Highlighting is purely lexical: it cannot tell a type name from a variable outside annotation positions, resolve overloads, or know which `[…]` is an array, object, dictionary, or set literal.
-
-Once the bootstrap Dewy compiler exists, this grammar will be combined with a proper Dewy language server (LSP) that provides semantic highlighting from the type checker, go-to-definition, hover types (including refinements and inferred integer representations), member listing, rename, diagnostics, and formatting. The TextMate grammar will remain as the fast first pass and as the fallback for editors without LSP support.
+The TextMate grammar is the fast lexical first pass. The optional core client
+adds diagnostics, hover and definitions from the compiler. The grammar cannot
+resolve overloads or distinguish every bracket use; richer semantic editor
+features can be enabled as their Dewy behavior is verified.
 
 ## Repository
 

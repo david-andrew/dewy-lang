@@ -1,0 +1,113 @@
+// VS Code API boundary doubles; requests and diagnostics use the real native LSP.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL, fileURLToPath } = require('node:url');
+const cp = require('node:child_process');
+let spawned = 0;
+const spawn = cp.spawn;
+cp.spawn = (...args) => { spawned++; return spawn(...args); };
+const [extension, compiler, directory] = process.argv.slice(2);
+const client = require(extension);
+let setting = '';
+let body = '# 🙂\nlet answer:int64=42\nmain=()=>answer';
+const disk = 'main=()=>missing_on_disk';
+const source = path.join(directory, 'editor.dewy');
+fs.writeFileSync(source, disk);
+const events = new Map();
+const on = (name) => (callback) => {
+    const callbacks = events.get(name) || new Set();
+    callbacks.add(callback); events.set(name, callbacks);
+    return { dispose: () => callbacks.delete(callback) };
+};
+const fire = (name, value) => { for (const callback of events.get(name) || []) callback(value); };
+const uri = (text) => ({ scheme: 'file', fsPath: fileURLToPath(text), toString: () => text });
+const document = { uri: uri(pathToFileURL(source).href), languageId: 'dewy', version: 1, getText: () => body };
+const values = new Map();
+const notices = [];
+const log = [];
+const commands = new Map();
+const providers = {};
+const disposable = { dispose() {} };
+class Position { constructor(line, character) { Object.assign(this, { line, character }); } }
+class Range { constructor(start, end) { Object.assign(this, { start, end }); } }
+class Location { constructor(uri, range) { Object.assign(this, { uri, range }); } }
+class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
+class MarkdownString { constructor(value) { this.value = value; } }
+class Hover { constructor(contents) { this.contents = contents; } }
+const vscode = {
+    Position, Range, Location, Diagnostic, MarkdownString, Hover, Uri: { parse: uri },
+    window: { createOutputChannel: () => ({ ...disposable, append: (s) => log.push(s), appendLine: (s) => log.push(s) }) },
+    languages: {
+        createDiagnosticCollection: () => ({
+            ...disposable,
+            set: (u, ds) => { values.set(u.toString(), ds); notices.push(ds); },
+            clear: () => values.clear(), delete: (u) => values.delete(u.toString()),
+        }),
+        registerHoverProvider: (_selector, p) => { providers.hover = p; return disposable; },
+        registerDefinitionProvider: (_selector, p) => { providers.definition = p; return disposable; },
+    },
+    commands: { registerCommand: (name, fn) => { commands.set(name, fn); return disposable; } },
+    workspace: {
+        isTrusted: false,
+        workspaceFolders: [{ uri: uri(pathToFileURL(directory).href), name: 'editor test' }],
+        textDocuments: [document], getConfiguration: () => ({ get: () => setting }),
+        createFileSystemWatcher: () => ({ ...disposable, onDidCreate: on('create'), onDidChange: on('disk'), onDidDelete: on('delete') }),
+        onDidOpenTextDocument: on('open'), onDidChangeTextDocument: on('change'), onDidCloseTextDocument: on('close'),
+        onDidSaveTextDocument: on('save'), onDidChangeConfiguration: on('configuration'),
+        onDidGrantWorkspaceTrust: on('trust'), onDidChangeWorkspaceFolders: on('folders'),
+    },
+};
+const context = { subscriptions: [] };
+async function until(predicate) {
+    const deadline = Date.now() + 8000;
+    while (!predicate()) {
+        assert(Date.now() < deadline, `Timed out; diagnostics: ${JSON.stringify(notices)}; log: ${log.join('')}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+}
+async function change(text, predicate) {
+    body = text;
+    document.version++;
+    const seen = notices.length;
+    fire('change', { document, contentChanges: [{ text }] });
+    await until(() => notices.length > seen && predicate(notices.at(-1)));
+}
+(async () => {
+    try {
+        client.activate(context, vscode);
+        assert.equal(spawned, 0);
+        setting = compiler;
+        fire('configuration', { affectsConfiguration: () => true });
+        assert.equal(spawned, 0, 'untrusted workspace started a compiler');
+        vscode.workspace.isTrusted = true;
+        fire('trust');
+        await until(() => notices.length > 0);
+        assert.deepEqual(notices.at(-1), [], 'did not check the unsaved snapshot');
+        const hover = await providers.hover.provideHover(document, new Position(2, 9));
+        assert.match(hover.contents.value, /int|i64/);
+        const definitions = await providers.definition.provideDefinition(document, new Position(2, 9));
+        assert.equal((Array.isArray(definitions) ? definitions[0] : definitions).range.start.line, 1);
+        await change('# 🙂\nmain=()=>unknown_editor', (ds) => ds.some((d) => d.message.includes('unknown_editor')));
+        assert.equal(notices.at(-1)[0].range.start.line, 1);
+        await change('main=()=>{', (ds) => ds.length > 0 && !ds[0].message.includes('unknown_editor'));
+        await change('main=()=>42', (ds) => ds.length === 0);
+        const seen = notices.length;
+        commands.get('dewy.core.restartServer')();
+        await until(() => notices.length > seen);
+        assert.deepEqual(notices.at(-1), []);
+        assert.equal(spawned, 2);
+        vscode.workspace.textDocuments = [];
+        fire('close', document);
+        assert(!values.has(document.uri.toString()));
+        setting = '';
+        fire('configuration', { affectsConfiguration: () => true });
+        assert.equal(spawned, 2);
+        assert.equal(await providers.hover.provideHover(document, new Position(0, 0)), null);
+        assert.equal(fs.readFileSync(source, 'utf8'), disk, 'editor integration modified the file');
+        console.log('core editor: opt-in, trust, snapshots, diagnostics, hover, definition, restart and close passed');
+    } finally {
+        client.deactivate();
+        for (const item of context.subscriptions.reverse()) item.dispose();
+    }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

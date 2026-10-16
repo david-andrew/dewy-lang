@@ -79,6 +79,14 @@ Dewy formatting, package editing, an interactive prompt and automatic updates
 are not yet exposed; their inherited versions would produce or install the
 wrong language.
 
+## Editor
+
+The repository's [VS Code extension](../dewy/vscode-dewy/README.md) can use this
+compiler for unsaved diagnostics, hover and definitions. Set `dewy.core.path` to
+the built executable, for example `/tmp/dewy-core/bin/dewy-core`. An empty setting
+keeps compiler-backed features disabled. The client is dependency-free and has a
+native-server integration test in the editor gate above.
+
 ## Source layout and bootstrap
 
 - `compiler/frontend.jo` dispatches Dewy and implementation-language source.
