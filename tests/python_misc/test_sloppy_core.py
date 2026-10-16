@@ -245,6 +245,53 @@ main=()=>get([])''',
 let a=xs[1..2] let b=xs[1..3) let c=xs[..1] let d=xs[2..] let e=xs[..]
 let empty=xs[2..2) a[0]=0
 return if b[0]+b[1] =? 42 and c.length =? 2 and d[0] =? 22 and e.length =? 4 and empty.length =? 0 and xs[1] =? 20 42 else 1}''',
+    'comprehension-basic': '''main=()=>{let values=[loop i in [0..4) i*7]
+let total:int64=0 loop value in values total+=value return total}''',
+    'comprehension-filter': '''main=()=>{let values=[loop x in [10 20 12 99] if x <? 90 x]
+return values[0]+values[1]+values[2]}''',
+    'comprehension-branches': '''main=()=>{let values=[loop x in [1 2 3] if x =? 1 10 else if x =? 2 20 else 12]
+return values[0]+values[1]+values[2]}''',
+    'comprehension-nested-loop': '''main=()=>{let values=[loop x in [1 2] loop y in [3 4] x*y]
+let total:int64=0 loop value in values total+=value return total*2}''',
+    'comprehension-block': '''main=()=>{let values=[loop x in [10 11] {let twice=x*2 twice}]
+return values[0]+values[1]}''',
+    'comprehension-control': '''main=()=>{let values=[loop x in 0.. {if x =? 0 continue if x >? 3 break x*7}]
+return values[0]+values[1]+values[2]}''',
+    'comprehension-graphemes': '''main=()=>{let values=[loop i in 0.. and c in "é🙂a" i+c.length]
+return (values[0]+values[1]+values[2])*7}''',
+    'comprehension-records': '''main=()=>{let values=[loop x in [20 22] [value=x]]
+return values[0].value+values[1].value}''',
+    'comprehension-copy': '''main=()=>{let original=[[values=[20 22]]]
+let copied=[loop item in original item] copied[0].values[0]=99
+return original[0].values[0]+original[0].values[1]}''',
+    'comprehension-dictionary': '''main=()=>{let values=[loop key in ["a" "b"] key->21]
+return values["a"]+values["b"]}''',
+    'comprehension-dictionary-update': '''main=()=>{let values=[loop x in [1 2] "same"->x]
+return values["same"]+40}''',
+    'comprehension-context': '''main=()=>{let values:array<uint8>=[loop i in [0..3) 14]
+return (values[0] as int64)+(values[1] as int64)+(values[2] as int64)}''',
+    'comprehension-argument': '''total=(values:array<uint8>)=>(values[0] as int64)+(values[1] as int64)+(values[2] as int64)
+main=()=>total([loop i in [0..3) 14])''',
+    'comprehension-nested-array': '''main=()=>{let values=[loop x in [10 11] [loop y in [1 1] x*y]]
+return values[0][0]+values[0][1]+values[1][0]+values[1][1]}''',
+    'comprehension-empty': '''main=()=>{let values:array<int64>=[loop i in [0..0) {}]
+return values.length+42}''',
+    'comprehension-match': '''main=()=>{let values=[loop x in [1 2] match x {<1>=>20 _=>22}]
+return values[0]+values[1]}''',
+    'comprehension-once': '''let calls:int64=0
+items=()=>{calls+=1 return [20 22]}
+main=()=>{let values=[loop x in items() x] return if calls =? 1 values[0]+values[1] else 1}''',
+    'comprehension-statements': '''main=()=>{let total:int64=0
+let values:array<int64>=[loop x in [20 22] {total+=x}]
+return total+values.length}''',
+    'comprehension-default': '''total=(a:int64 values:array<int64>=[loop i in [0..a) 14])=>{let result:int64=0
+loop value in values result+=value return result}
+main=()=>total(3)''',
+    'default-reference-shadow-only': '''combine=(a:int64 b:int64={let a:int64=2 a})=>a+b
+main=()=>combine(40)''',
+    'default-reference-loop-shadow': '''total=(@i:int64 values:array<int64>=[loop i in [0..3) 14])=>{let result:int64=0
+loop value in values result+=value return result+i}
+main=()=>{let i:int64=0 return total(@i)}''',
     'slice-managed-elements': '''Item:type=[values:array<int64> name:string]
 main=()=>{let a=[Item[[20 22] "answer"]] let b=a[..] b[0].values[0]=99
 a.clear() return if b[0].name =? "answer" b[0].values[1]+20 else 1}''',
@@ -348,6 +395,7 @@ ERRORS = {
     'record-unknown-field': ('Value:type=[x:int64]\nmain=()=>{let v:Value=[y=42] return 0}', 'unknown'),
     'record-mixed-elements': ('main=()=>{let v=[x=42 2] return 0}', 'record item'),
     'record-untyped-empty-array': ('main=()=>{let v=[items=[]] return 0}', 'type annotation'),
+    'comprehension-mixed': ('main=()=>[loop i in [1 2] if i =? 1 "a"->2 else 3]', 'cannot mix'),
     'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
     'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
@@ -629,7 +677,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
@@ -664,7 +712,7 @@ def test_core_slice_bounds_panic(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.parametrize('name', ['optional_values', 'include_bytes', 'array_moves', 'object_fields', 'object_nested'])
+@pytest.mark.parametrize('name', ['optional_values', 'include_bytes', 'array_moves', 'object_fields', 'object_nested', 'array_elements'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_existing_program(compiler, tmp_path, release, name, target):
     source = Path(__file__).resolve().parents[2] / f'dewy/tests/{name}.dewy'

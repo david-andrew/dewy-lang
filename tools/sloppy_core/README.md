@@ -103,8 +103,25 @@ types; annotate the record when a field is an otherwise untyped empty collection
 Named record types remain distinct, and structural conversions between already
 constructed named and anonymous values are not implemented.
 
-The combined Dewy/editor/shared-core gate now contains 573 checks and takes
-about 40 seconds on the development machine, including separate compiler
+Comprehensions build arrays or dictionaries eagerly:
+
+```dewy
+let squares = [loop i in [0..10) i*i]
+let selected = [loop x in squares if x >? 20 x]
+let lengths = [loop word in ["café" "🙂"] word -> word.length]
+```
+
+Nested loops, combined loop headers, branches, `match`, and block bodies work
+through the ordinary control-flow lowering. A block's final value is collected;
+assignments, declarations, `break` and `continue` do not add an element. An `if`
+without `else` filters elements. Array annotations and parameter types supply
+element context, including empty comprehensions. Inputs are evaluated according
+to the normal loop rules and collected managed values remain independent copies.
+Dictionary comprehensions currently collect pairs and use the core's map builder;
+later entries replace earlier values for the same key.
+
+The combined Dewy/editor/shared-core gate now contains 664 checks and takes
+about 46 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

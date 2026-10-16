@@ -371,6 +371,9 @@ dw_expr = (id: int) -> int:
         children = dewy_syntax[id].children
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
+            if children.len() == 1 and dewy_syntax[children[0]].kind == "Flow":
+                first = dw_child(children[0], 0)
+                if dewy_syntax[first].kind == "KeywordExpr" and dewy_syntax[dw_child(first, 0)].text == "loop": return dw_comprehension(children[0])
             is_map = children.len() > 0 and dw_op(children[0]) == "->"
             is_record = children.len() > 0 and dw_op(children[0]) == "="
             n = mk(if is_map: NK.map_lit else if is_record: NK.record_lit else: NK.array, pos)
@@ -717,7 +720,7 @@ dw_pattern = (id: int) -> int:
     if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
     p
 
-dw_match = (id: int) -> int:
+dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.match_, dewy_syntax[id].pos)
     nodes[n].a = i32(dw_expr(dw_child(id, 1)))
     body = dw_child(id, 2)
@@ -728,21 +731,21 @@ dw_match = (id: int) -> int:
         if dw_op(source) != "=>": return dw_fail(source, "a match arm without =>")
         arm = mk(.arm, dewy_syntax[source].pos)
         set_list(arm, [dw_pattern(dw_child(source, 1))])
-        nodes[arm].b = i32(dw_block(dw_child(source, 2)))
+        nodes[arm].b = i32(dw_block(dw_child(source, 2), accumulator, map))
         xs.push(arm)
     set_list(n, xs)
     n
 
-dw_flow = (id: int, at: int) -> int:
+dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     items = dewy_syntax[id].children
     if at >= items.len(): return 0
     arm = items[at]
-    if dewy_syntax[arm].kind != "KeywordExpr": return dw_block(arm)
+    if dewy_syntax[arm].kind != "KeywordExpr": return dw_block(arm, accumulator, map)
     word = dewy_syntax[dw_child(arm, 0)].text
     if word == "match":
-        n = dw_match(arm)
+        n = dw_match(arm, accumulator, map)
         if at + 1 < items.len():
-            rest = dw_flow(id, at + 1)
+            rest = dw_flow(id, at + 1, accumulator, map)
             if nodes[rest].kind != .block:
                 block = mk(.block, nodes[rest].pos)
                 set_list(block, [dw_flow_stmt(rest)])
@@ -754,7 +757,7 @@ dw_flow = (id: int, at: int) -> int:
             xs.push(fallback)
             set_list(n, xs)
         return n
-    if word != "if" and word != "loop": return dw_block(arm)
+    if word != "if" and word != "loop": return dw_block(arm, accumulator, map)
     if dewy_syntax[arm].children.len() != 3: return dw_fail(arm, "this flow arm")
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
     if word == "loop":
@@ -768,10 +771,10 @@ dw_flow = (id: int, at: int) -> int:
             nodes[n].kind = .loopx
             nodes[n].a = i32(head)
     else: nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
-    nodes[n].b = i32(dw_block(dw_child(arm, 2)))
+    nodes[n].b = i32(dw_block(dw_child(arm, 2), accumulator, map))
     if at + 1 < items.len():
         if word == "loop": return dw_fail(arm, "loop/else")
-        rest = dw_flow(id, at + 1)
+        rest = dw_flow(id, at + 1, accumulator, map)
         if nodes[rest].kind != .block:
             block = mk(.block, dewy_syntax[arm].pos)
             set_list(block, [dw_flow_stmt(rest)])
@@ -779,14 +782,106 @@ dw_flow = (id: int, at: int) -> int:
         nodes[n].c = i32(rest)
     return n
 
-dw_block = (id: int) -> int:
+dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.block, dewy_syntax[id].pos)
     statements: int[]
     if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "{{}}:":
-        loop child in dewy_syntax[id].children: statements.push(dw_stmt(child))
+        children = dewy_syntax[id].children
+        loop i in 0.. and child in children:
+            if accumulator != 0 and i + 1 == children.len(): statements.push(dw_collect(child, accumulator, map))
+            else: statements.push(dw_stmt(child))
+    else if accumulator != 0: statements.push(dw_collect(id, accumulator, map))
     else: statements.push(dw_stmt(id))
     set_list(n, statements)
     return n
+
+# Comprehensions use ordinary loops, conditionals and push calls, following the
+# implementation-language frontend. No lazy runtime or separate ownership path.
+dw_collection_kind = (id: int) -> int:
+    let id = dw_unwrap(id)
+    kind = dewy_syntax[id].kind
+    children = dewy_syntax[id].children
+    candidates: int[]
+    if kind == "Flow":
+        loop arm in children:
+            if dewy_syntax[arm].kind == "KeywordExpr":
+                word = dewy_syntax[dw_child(arm, 0)].text
+                if word == "match":
+                    body = dw_child(arm, 2)
+                    arms = [body]
+                    if dewy_syntax[body].kind == "Block": arms = dewy_syntax[body].children
+                    loop branch in arms:
+                        if dw_op(branch) != "=>": return dw_fail(branch, "a match arm without =>")
+                        candidates.push(dw_child(branch, 2))
+                else: candidates.push(dw_child(arm, 2))
+            else: candidates.push(arm)
+    else if kind == "Block" and dewy_syntax[id].text == "{{}}:":
+        if children.len() == 0: return 0
+        candidates.push(children[children.len() - 1])
+    else:
+        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%="]: return 0
+        return if dw_op(id) == "->": 2 else: 1
+    result = 0
+    loop candidate in candidates:
+        next = dw_collection_kind(candidate)
+        if next == 0: continue
+        if result != 0 and result != next: fatal(dewy_syntax[candidate].pos, "a comprehension cannot mix array elements and dictionary entries")
+        result = next
+    result
+
+dw_collect = (id: int, accumulator: int, map: bool) -> int:
+    let id = dw_unwrap(id)
+    kind = dewy_syntax[id].kind
+    if kind == "Flow":
+        n = dw_flow(id, 0, accumulator, map)
+        add_flag(n, NF_STMT)
+        return dw_flow_stmt(n)
+    if kind == "Block" and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
+    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%="]: return dw_stmt(id)
+    pos = dewy_syntax[id].pos
+    value = 0
+    if map:
+        if dw_op(id) != "->": return dw_fail(id, "a dictionary comprehension element without ->")
+        value = mk(.tuple, pos)
+        set_list(value, [dw_expr(dw_child(id, 1)), dw_expr(dw_child(id, 2))])
+    else: value = dw_expr(id)
+    receiver = mk(.ident, pos)
+    nodes[receiver].name = i32(accumulator)
+    add_flag(receiver, NF_MUT)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(receiver)
+    nodes[callee].name = i32(intern("push"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [value])
+    statement = mk(.exprstmt, pos)
+    nodes[statement].a = i32(call)
+    statement
+
+dw_comprehension = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    map = dw_collection_kind(id) == 2
+    # `$` cannot begin an ordinary identifier, so this binding cannot capture a
+    # user-written name, including one inside a nested comprehension.
+    accumulator = intern("$dewy_collection_{nodes.len()}")
+    decl = mk(.vardecl, pos)
+    nodes[decl].name = i32(accumulator)
+    nodes[decl].b = i32(mk(.array, pos))
+    body = dw_collect(id, accumulator, map)
+    result = mk(.exprstmt, pos)
+    value = mk(.ident, pos)
+    nodes[value].name = i32(accumulator)
+    nodes[result].a = i32(value)
+    block = mk(.block, pos)
+    set_list(block, [decl, body, result])
+    add_flag(block, NF_COMPREHENSION)
+    if not map: return block
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("__map_of"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [block])
+    call
 
 dewy_parse_file = (file: int) -> int[]:
     parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")

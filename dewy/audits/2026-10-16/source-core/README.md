@@ -416,3 +416,27 @@ three additional import/editor checks passed in 0.54 seconds. The gate now has
 warmup pair gave median paddle build times of 288.46 ms before / 300.23 ms after,
 and compiler self-build times of 1.334 s / 1.302 s. These small desktop differences
 are recorded without claiming a speedup (`defaults-performance.json`).
+
+
+## Array and dictionary comprehensions
+
+Dewy `[loop ... value]` now uses Sloppy's approach of an accumulator, ordinary
+control flow, and pushes. Dictionary entries use `key -> value` and the existing
+map builder. The frontend supports nested/combined loops, filters, branches,
+match, block bodies, break/continue and grapheme iteration. Final assignment or
+declaration statements do not emit values; contextual array types also work for
+empty results and typed parameters. Generated accumulator names cannot collide
+with source names. Inputs follow normal loop evaluation and managed elements
+keep the existing independent-copy semantics.
+
+The original `array_elements.dewy` runs unchanged on native and web in both
+modes. Additional checks cover arrays, dictionaries, duplicate keys, narrowing
+context, empty results, nested arrays, records, managed copies, side effects,
+control flow, defaults and editor type displays. The default interaction exposed
+a remaining shadow-only case: defaults with no free earlier parameter must avoid
+the legacy substitution path altogether. Scope analysis now also treats loop and
+match binders as local, and the regression is covered.
+
+A fresh C bootstrap takes 17.69 seconds and passes all 664 checks in 45.57 seconds
+(`comprehensions-build.json`, `comprehensions-tests.log`). No runtime generator or
+new ownership model was added.

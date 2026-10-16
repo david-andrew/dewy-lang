@@ -638,6 +638,7 @@ ctx_dependent = (a: int) -> bool:
     if k == .call and nodes[a].type == 0 and nodes[int(nodes[a].a)].kind == .dotname: return true     # .v(args)
     if k == .lambda or k == .none_lit or k == .hole: return true
     if k == .record_lit: return true
+    if k == .block and has_flag(a, NF_COMPREHENSION): return true
     if k == .array:
         if nkids(a) == 0: return nodes[a].b == 0
         # ([.key(.space), .button(.a)]: its elements take their type from the parameter's)
@@ -892,7 +893,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .opt: return 0
             if pk == .param: return 3
             return -1
-        if k == .array:
+        if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
             if pk == .array: return 0
             if nkids(a) == 0 and dewy_record_target(p) != 0 and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"): return 0
             if pk == .param: return 3
@@ -1059,6 +1060,19 @@ default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bo
         loop statement in kids(n):
             if default_uses_params(statement, decl, before, local_hidden): return true
             if nodes[statement].kind == .vardecl: local_hidden.push(int(nodes[statement].name))
+        return false
+    if nodes[n].kind == .for_:
+        if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
+        local_hidden = hidden
+        loop binder in kids(n): local_hidden.push(int(nodes[binder].name))
+        return default_uses_params(int(nodes[n].b), decl, before, local_hidden)
+    if nodes[n].kind == .match_:
+        if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
+        loop arm in kids(n):
+            local_hidden = hidden
+            loop pattern in kids(arm):
+                if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
+            if default_uses_params(int(nodes[arm].b), decl, before, local_hidden): return true
         return false
     if default_uses_params(int(nodes[n].a), decl, before, hidden) or default_uses_params(int(nodes[n].b), decl, before, hidden): return true
     if default_uses_params(int(nodes[n].c), decl, before, hidden) or default_uses_params(int(nodes[n].d), decl, before, hidden): return true
@@ -1449,7 +1463,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         if nodes[n].a != 0: ide_fn_ref(nodes[int(nodes[n].a)].pos, name, f)
         ide_named_args(args, decl, IK_PARAM, fns[f].ptypes)
     capture_defaults = false
-    if not partial and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+    dewy_call = ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+    if not partial and dewy_call:
         loop i in [0..np):
             if cd.args[i] == 0 and default_uses_params(int(nodes[kid(decl, i)].b), decl, i): capture_defaults = true
     if capture_defaults and cd.sig.mutmask != 0:
@@ -1472,7 +1487,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         a = cd.args[i]
         is_mut = has_flag(kid(decl, i), NF_MUT)
         if a == 0:
-            a = default_arg(decl, i, fns[f].ptypes[i], fin, capture_defaults)
+            earlier = if dewy_call and not capture_defaults: [] else: fin
+            a = default_arg(decl, i, fns[f].ptypes[i], earlier, capture_defaults)
             if capture_defaults: a = capture_default_arg(a, fns[f].ptypes[i], statements)
             fin.push(a)
             continue
@@ -5070,7 +5086,10 @@ check_expr = (n: int, expected: int) -> int:
             check_expr(ca, 0)
             nodes[n].a = i32(last_checked)
         t = ntype(n)
-    else if k == .block: t = check_block(n, expected, true)
+    else if k == .block:
+        if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .array:
+            nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))
+        t = check_block(n, expected, true)
     else if k == .matrix: return check_matrix(n, expected)
     else: fatal(nodes[n].pos, "invalid expression")
     nodes[n].type = i32(t)

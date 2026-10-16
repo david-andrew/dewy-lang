@@ -55,6 +55,7 @@ const NF_VOID = 4194304       # a function written `-> void` (it returns nothing
 const NF_ALIASDECL = 8388608  # a vardecl whose name stands for the place b (`mut x in xs` in a combined loop)
 const NF_LAZY = 16777216      # a library function's body not parsed yet: tokens from ival in lazy_toks[aux] (parse.jo)
 const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused
+const NF_COMPREHENSION = 67108864 # block: first declaration is the collection accumulator
 
 struct Node:
     kind: NK
