@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Validation tiers (dewy/ROADMAP.md, "Immediate work order", step 2).
 #
+#   certify.sh focused TEST_PATH_OR_NODE [PYTEST_ARGS...]
+#       Run only the selected tests, serially by default (override with -n).
+#       DEWY_TEST_DRIVER_COMPILER=/path/to/dewy uses native-built compiler drivers;
+#       leave it unset for the independent hosted route. This is a development
+#       feedback loop, not a replacement for integration certification.
+#
 #   certify.sh local [PYTEST_ARGS...]
-#       The per-batch gate: the non-slow pytest suite on 8 workers. Hosted-built
+#       The broader gate: the non-slow pytest suite on 8 workers. Compiler
 #       test drivers are shared by content identity (tests/python_misc/
 #       driver_artifacts.py), so unchanged compiler sources are not rebuilt.
 #
@@ -24,11 +30,17 @@ python=${PYTHON:-$root/.venv/bin/python}
 [[ -x $python ]] || python=$(command -v python3)
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,26p' "${BASH_SOURCE[0]}" >&2
     exit 2
 }
 
 case ${1:-} in
+focused)
+    shift
+    [[ $# -ge 1 && $1 != -* ]] || usage
+    cd -- "$root"
+    exec "$python" -m pytest -q -p no:cacheprovider -n 0 --durations=10 "$@"
+    ;;
 local)
     shift
     cd -- "$root"
@@ -77,7 +89,7 @@ integration)
     step copy-parity bash -c "$python tools/copy_report.py --json dewy/bootstrap/main.dewy > '$output/copies-hosted.json' &&
         $python tools/copy_report.py --json --compiler '$output/native/dewy' dewy/bootstrap/main.dewy > '$output/copies-native.json' &&
         $python tools/copy_parity.py '$output/copies-hosted.json' '$output/copies-native.json' --classes tests/fixtures/copy_parity_classes.json --list 40"
-    step full-pytest bash -c 'ulimit -S -v unlimited && exec env DEWY_TEST_DRIVER_CACHE=0 "$@"' full-pytest \
+    step full-pytest bash -c 'ulimit -S -v unlimited && exec env -u DEWY_TEST_DRIVER_COMPILER DEWY_TEST_DRIVER_CACHE=0 "$@"' full-pytest \
         "$python" -m pytest tests -q -p no:cacheprovider -n 8 \
         --dist loadfile -o faulthandler_timeout=900 --basetemp "$output/pytest-tmp"
     git -C "$root" worktree remove --force "$source" > /dev/null 2>&1 || true

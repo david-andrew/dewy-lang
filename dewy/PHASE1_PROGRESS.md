@@ -100,10 +100,19 @@ finished, or explicitly reassigned, before Phase 1 closes.
 
 | # | Item | Status |
 | --- | --- | --- |
-| I1 | Independent hosted seed → native three-generation fixed point at the closing revision | **open** (last: `9df1d08f`) |
-| I2 | Complete paired manifest at the same revision (698 cases now) | **open** (last complete: 668 at `9df1d08f`) |
-| I3 | Full pytest at the same revision | **open** (last: 6,092 passed + 4 rechecked, older source) |
-| I4 | Performance evidence at the same revision (cold/warm build, memory, allocation) | **open**; the throughput campaign runs alongside |
+| I1 | Independent hosted seed → native three-generation fixed point at the closing revision | **done at `15e57975`**; saved integration evidence recovered 2026-10-16 |
+| I2 | Complete paired manifest at the same revision (698 cases now) | **done at `15e57975`**; all 698 passed |
+| I3 | Full pytest at the same revision | **done at `15e57975`**; 6,496 passed, 13 skipped |
+| I4 | Performance evidence at the same revision (cold/warm build, memory, allocation) | **partial**; fresh cold self-build 39.0 s / 2.52 GiB and phase allocation counters recorded 2026-10-16; fresh warm self-build still unmeasured |
+
+Recovery on 2026-10-16 found the complete prior certification in
+`../dewy-build-artifacts/integration-15e57975/`. The native pair's source
+manifest matches the current compiler/library, and its binary manifest
+verifies. [Saved summary, manifests and fresh measurements](audits/2026-10-16/README.md)
+make that evidence discoverable without reconstructing old sessions. These
+three completed rows certify the paused revision, **not the new restart
+harness changes**. Those changes have their own focused validation; Phase 1
+is not newly declared closed by this ledger correction.
 
 Continuing goals that are **not** exit criteria: the full ideal solver, every
 lifetime shape, general owner-directed promotion, and the open resource-

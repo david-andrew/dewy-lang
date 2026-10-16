@@ -3,11 +3,9 @@ import os
 from pathlib import Path
 import subprocess
 
-from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
-from driver_artifacts import hosted_driver
+from driver_artifacts import compiler_driver
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -128,5 +126,5 @@ def check_prelude_cache(binary, work):
 
 
 def test_native_prelude_cache_invalidation(tmp_path):
-    driver = hosted_driver('prelude-cache', ROOT / 'tests/fixtures/bootstrap_prelude_cache.dewy', tmp_path, debug_locations=False)
+    driver = compiler_driver('prelude-cache', ROOT / 'tests/fixtures/bootstrap_prelude_cache.dewy', tmp_path, debug_locations=False)
     check_prelude_cache(driver, tmp_path / 'work')

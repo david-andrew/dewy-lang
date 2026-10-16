@@ -68,3 +68,23 @@ checks the prelude; that fresh figure is recorded with each set of results.
 
 See [`RESULTS.md`](RESULTS.md): the baseline and each later checkpoint, with
 the source revision, machine and toolchains.
+
+## Sloppy comparison
+
+`records.jo` performs the same particle updates as `records.dewy` and
+`records.c`, using ordinary indexed array operations and the same checksum.
+From the repository root:
+
+```sh
+python tools/compare_sloppy.py --dewy /path/to/current/dewy \
+  --sloppy-root /path/to/slop-lang --output /tmp/particles.json
+```
+
+This separate runner measures **fresh builds including the prelude** for
+Dewy native, Sloppy debug/release and C `-O2`. It preserves all timing samples,
+compiler hashes and checkout state in JSON. Every built program must agree
+on checksums at every size, including zero and one element. Sloppy's dense
+records and runtime bounds checks differ from Dewy's boxed records and proven
+bounds; the measured difference includes representation and semantic costs,
+not just instruction selection. No Sloppy installation is needed for the
+existing benchmark runner or Dewy's ordinary tests.

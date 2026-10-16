@@ -5,6 +5,27 @@ This is the Dewy compiler. It targets udewy, which then targets specific backend
 
 [ROADMAP.md](ROADMAP.md) is the high-level roadmap for after the native bootstrap is closed: the order in which the remaining language pieces land and why. [status.md](status.md) tracks feature-by-feature implementation status; [bootstrap/IMPLEMENTATION.md](bootstrap/IMPLEMENTATION.md) logs the bootstrap effort itself.
 
+The [October restart plan](RESTART_2026_10.md) compares Dewy with Sloppy and
+sets out the performance-core experiment and faster development workflow.
+
+## Focused compiler checks
+
+Run the relevant file or pytest node while iterating:
+
+```sh
+tools/certify.sh focused tests/python_misc/test_bootstrap_type_interning.py
+```
+
+To build compiler test drivers with a known native compiler, set
+`DEWY_TEST_DRIVER_COMPILER=/absolute/path/to/dewy` for that command. Execution
+drivers then build directly to machine code; tests of emitted text retain
+their backend checks. Hosted oracle calls remain independent. Unset the
+variable to use hosted-built drivers. Driver reuse is keyed by inputs and
+compiler content; `DEWY_TEST_DRIVER_CACHE=0` disables reuse for measurements.
+
+`certify.sh local` runs the broader non-slow suite; `certify.sh integration`
+retains the independent hosted seed, fixed-point, parity and full-suite gates.
+
 ## Design notes
 
 [Idiomatic facts and user-defined invariants](semantic/idiomatic_facts.md) explores

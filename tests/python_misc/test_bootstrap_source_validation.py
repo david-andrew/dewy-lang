@@ -4,11 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
-from udewy.cache import cache_artifact
-from udewy.frontend import EntryPointOptions, entry_point
-from driver_artifacts import hosted_driver
+from driver_artifacts import compiler_driver
 
 ROOT = Path(__file__).resolve().parents[2]
 STORED_HANDLE = (ROOT / 'tests/fixtures/native_stored_refinement_contracts.dewy').read_text()
@@ -17,7 +13,7 @@ STORED_HANDLE = (ROOT / 'tests/fixtures/native_stored_refinement_contracts.dewy'
 @pytest.fixture(scope='module')
 def source_validation_binary(tmp_path_factory):
     work = tmp_path_factory.mktemp('source-validation')
-    return hosted_driver('source-validation', ROOT / 'tests/fixtures/bootstrap_source_validation.dewy', work, debug_locations=False)
+    return compiler_driver('source-validation', ROOT / 'tests/fixtures/bootstrap_source_validation.dewy', work, debug_locations=False)
 
 
 def test_native_stored_refinement_contracts(source_validation_binary, tmp_path):

@@ -5,13 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
 from dewy.semantic.hir_display import type_to_dewy
-from udewy.cache import cache_artifact
-from driver_artifacts import shared_driver
-from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import compiler_driver
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
@@ -367,10 +364,5 @@ def _native_driver(tmp_path):
     if _NATIVE_DRIVER is None:
         _NATIVE_DRIVER = False
         source = ROOT / 'tests/fixtures/bootstrap_source_check.dewy'
-        def build():
-            output = tmp_path / 'source-checker.udewy'
-            output.write_text(codegen(SrcFile.from_path(source)))
-            assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-            return cache_artifact(output).resolve()
-        _NATIVE_DRIVER = shared_driver('source-check', source, {}, build)
+        _NATIVE_DRIVER = compiler_driver('source-check', source, tmp_path)
     return _NATIVE_DRIVER

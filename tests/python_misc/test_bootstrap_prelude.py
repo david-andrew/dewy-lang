@@ -2,11 +2,7 @@
 import subprocess
 from pathlib import Path
 
-from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
-from udewy.cache import cache_artifact
-from driver_artifacts import shared_driver
-from udewy.frontend import EntryPointOptions, entry_point
+from driver_artifacts import compiler_driver
 
 ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = None
@@ -16,12 +12,7 @@ def module_driver(tmp_path):
     global _DRIVER
     if _DRIVER is None:
         source = ROOT / 'tests/fixtures/bootstrap_module_check.dewy'
-        def build():
-            output = tmp_path / 'module-checker.udewy'
-            output.write_text(codegen(SrcFile.from_path(source)))
-            assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-            return cache_artifact(output).resolve()
-        _DRIVER = shared_driver('module-check', source, {}, build)
+        _DRIVER = compiler_driver('module-check', source, tmp_path)
     return _DRIVER
 
 

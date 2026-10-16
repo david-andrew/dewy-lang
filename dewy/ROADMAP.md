@@ -1,5 +1,12 @@
 # Dewy roadmap after the native bootstrap
 
+**Restart, 2026-10-16:** [the Sloppy comparison and restart plan](RESTART_2026_10.md)
+prioritizes fast focused validation, an identical application benchmark, and a
+bounded experiment using Sloppy's implementation core. It preserves the
+semantic requirements below while proposing a shorter route to a usable
+compiler and games/numerics applications. Experimental performance targets
+and historical certification evidence remain distinct.
+
 This is the high-level roadmap for taking the language from "a native
 compiler pair exists" to a practical compiler and the language as it was
 intended. It records the order in which the remaining pieces should land,

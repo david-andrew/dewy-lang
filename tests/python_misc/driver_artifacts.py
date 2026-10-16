@@ -1,4 +1,4 @@
-"""Hosted-built native test drivers, shared by content across workers and sessions.
+"""Compiler test drivers, shared by content across workers and sessions.
 
 Several test groups compile a compiler-sized driver program with the hosted
 compiler before running their cases through it. Rebuilding one per pytest
@@ -17,6 +17,12 @@ Only the executable is shared, never analysis state.
 `DEWY_TEST_DRIVER_CACHE=0` disables sharing, so certification runs build
 every driver independently. `DEWY_TEST_DRIVER_DIR` relocates the store
 (default: `~/.cache/dewy/test-drivers`).
+
+`DEWY_TEST_DRIVER_COMPILER=/absolute/path/to/dewy` selects native emission of driver
+sources. It does not replace the hosted compiler calls used as test oracles.
+The selected executable's content is part of every shared driver identity;
+a native failure is a failure, never a silent hosted fallback. Leave it unset
+for independent hosted-seeded validation (including release certification).
 """
 from __future__ import annotations
 
@@ -26,12 +32,14 @@ import json
 import os
 import pickle
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import warnings
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 _INPUT_DIRECTORIES = ('dewy', 'udewy', 'library')
@@ -39,6 +47,71 @@ _INPUT_SUFFIXES = {'.py', '.dewy', '.udewy', '.bin', '.c', '.h', '.json', '.s', 
 _KEEP = 12
 _inputs_digest: str | None = None
 _held: dict[Path, object] = {}   # entry -> its lock file, held shared until exit
+
+
+def _builder_identity() -> dict:
+    configured = os.environ.get('DEWY_TEST_DRIVER_COMPILER')
+    if not configured:
+        return {'kind': 'hosted'}
+    compiler = Path(configured).expanduser().resolve(strict=True)
+    if not compiler.is_file() or not os.access(compiler, os.X_OK):
+        raise ValueError(f'DEWY_TEST_DRIVER_COMPILER is not executable: {compiler}')
+    return {'kind': 'native', 'path': str(compiler),
+            'sha256': hashlib.sha256(compiler.read_bytes()).hexdigest()}
+
+
+def _native_run(compiler: Path, source: Path, work: Path, arguments: list[str], route: str) -> str:
+    backend = shutil.which('true')
+    if backend is None:
+        raise RuntimeError('native driver builds require the true executable')
+    env = dict(os.environ, DEWY_LIBRARY_ROOT=str(ROOT / 'library'),
+               DEWY_UDEWY=backend, DEWY_EMIT=route, DEWY_FAILURE_LOG='0')
+    result = subprocess.run([str(compiler), *arguments, str(source)], cwd=work, env=env,
+                            capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode:
+        raise RuntimeError(f'native driver build failed ({result.returncode}): {source}\n'
+                           f'{result.stdout}{result.stderr}')
+    return result.stdout + result.stderr
+
+
+def _native_codegen(compiler: Path, output: Path, source: Path, *,
+                    target: str = 'x86_64', debug_locations: bool = True) -> None:
+    """Use the CLI's text emitter; the test still chooses and runs its backend.
+
+    The backend handoff is deliberately a no-op, as in the bootstrap script's
+    deferred backend handoff. Requiring a newly emitted file independently of
+    the exit status prevents a successful no-op from passing as an emission.
+    Each build gets a fresh workspace, so neither stale artifacts nor concurrent
+    builds can satisfy that check. Imports resolve from the original source.
+    """
+    from udewy.cache import cache_artifact
+
+    source = source.resolve(strict=True)
+    output = output.resolve()
+    mode = ['debug', '--build'] if debug_locations else ['-c']
+    with tempfile.TemporaryDirectory(prefix='dewy-driver-', dir=output.parent) as scratch:
+        work = Path(scratch)
+        emitted = work / cache_artifact(source, '.debug.udewy' if debug_locations else '.udewy', cwd=work)
+        diagnostic = _native_run(compiler, source, work, [*mode, '--target', target], 'udewy')
+        if not emitted.is_file() or not emitted.stat().st_size:
+            raise RuntimeError(f'native compiler did not emit driver source: {source}\n{diagnostic}')
+        shutil.copyfile(emitted, output)
+
+
+def _native_driver(compiler: Path, source: Path, work: Path, name: str) -> Path:
+    """Build an execution-only driver directly, without a hosted backend pass."""
+    from udewy.cache import cache_artifact
+
+    source = source.resolve(strict=True)
+    output = work.resolve() / f'{name}-driver.native'
+    with tempfile.TemporaryDirectory(prefix='dewy-driver-', dir=work) as scratch:
+        cwd = Path(scratch)
+        binary = cwd / cache_artifact(source, cwd=cwd)
+        diagnostic = _native_run(compiler, source, cwd, ['-c', '--target', 'x86_64'], 'native')
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise RuntimeError(f'native compiler did not build an executable driver: {source}\n{diagnostic}')
+        shutil.copy2(binary, output)
+    return output
 
 
 def _toolchain_digest() -> str:
@@ -115,12 +188,16 @@ def _isolated(build: Callable[[], Path]) -> Path:
 
 
 def isolated_codegen(output: Path, source: Path, **options) -> None:
-    """Write the hosted compiler's µDewy for `source` to `output`, compiled in a forked child.
+    """Write µDewy for `source`, using the selected driver compiler.
 
     Tests that build a compiler-sized driver themselves call this instead of
     `output.write_text(codegen(SrcFile.from_path(source)))`, so the hosted
     compile's memory is released when it ends (see `_isolated`).
     """
+    builder = _builder_identity()
+    if builder['kind'] == 'native':
+        _native_codegen(Path(builder['path']), output, source, **options)
+        return
     def build() -> Path:
         from dewy.backend.udewy import codegen
         from dewy.reporting import SrcFile
@@ -140,9 +217,10 @@ def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Pa
     """
     if not enabled():
         return _isolated(build)
+    builder = _builder_identity()
     identity = hashlib.sha256(json.dumps({
         'name': name, 'source': str(source.resolve()) if located else None, 'text': source.read_text(),
-        'options': options, 'inputs': _toolchain_digest(),
+        'options': options, 'inputs': _toolchain_digest(), 'builder': builder,
     }, sort_keys=True).encode()).hexdigest()[:32]
     entry = _store() / f'{name}-{identity}'
     executable = entry / 'driver'
@@ -162,7 +240,7 @@ def shared_driver(name: str, source: Path, options: dict, build: Callable[[], Pa
                     os.replace(staged, executable)
                     (entry / 'identity.json').write_text(json.dumps({
                         'name': name, 'source': str(source), 'options': options,
-                        'inputs': _toolchain_digest(), 'built': time.time(),
+                        'inputs': _toolchain_digest(), 'builder': builder, 'built': time.time(),
                     }, indent=2))
             except BaseException:
                 lock.close()
@@ -210,16 +288,26 @@ def _prune(store: Path) -> None:
             continue
 
 
-def hosted_driver(name: str, source: Path, work: Path, *, debug_locations: bool = True, debug_info: bool = True) -> Path:
-    """Compile the driver `source` with the hosted compiler, shared by identity."""
-    from dewy.backend.udewy import codegen
-    from dewy.reporting import SrcFile
+def compiler_driver(name: str, source: Path, work: Path, *, debug_locations: bool = False,
+                    debug_info: bool = False, located: bool = True) -> Path:
+    """Build an execution driver directly; metadata requests retain the text route.
+
+    Test assertions run the executable, not its debug metadata. Hosted mode
+    remains independently seeded; native mode does not rebuild that executable
+    a second time through the hosted µDewy backend.
+    """
     from udewy.cache import cache_artifact
     from udewy.frontend import EntryPointOptions, entry_point
 
+    builder = _builder_identity()
+    direct = builder['kind'] == 'native' and not debug_locations and not debug_info
+
     def build() -> Path:
+        if direct:
+            return _native_driver(Path(builder['path']), source, work, name)
         output = work / f'{name}-driver.udewy'
-        output.write_text(codegen(SrcFile.from_path(source), debug_locations=debug_locations))
+        isolated_codegen(output, source, debug_locations=debug_locations)
         assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=debug_info)) == 0
         return cache_artifact(output).resolve()
-    return shared_driver(name, source, {'debug_locations': debug_locations, 'debug_info': debug_info}, build)
+    return shared_driver(name, source, {'debug_locations': debug_locations, 'debug_info': debug_info,
+                                       'direct': direct}, build, located=located)
