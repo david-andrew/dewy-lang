@@ -43,7 +43,7 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     let native_route=route not=? 'bytecode' and route not=? 'udewy' and request.command is? 'run'
     let native_code=native_route and request.target =? 'x86_64'
     let native_wasm=native_route and request.target =? 'wasm32'
-    let result=graph.compile(entry @engine timings=request.timings native_code=native_code native_wasm=native_wasm)
+    let result=graph.compile(entry @engine timings=request.timings native_code=native_code native_wasm=native_wasm dense_records=environment('DEWY_DENSE_RECORDS') =? '1')
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
     if route =? 'native' and result.lowered.refused not=? '' {printl("native route: {result.lowered.refused}")}

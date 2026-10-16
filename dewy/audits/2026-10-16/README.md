@@ -216,3 +216,41 @@ produce six byte-identical binaries. Median lowering time falls from 14.310 to
 9,081,905,368 bytes. Whole-build medians are 39.147 and 38.993 s: this is a
 modest local improvement, not a solution to cold-build latency or peak memory.
 [Commands, hashes and all samples](layout-key-cache.json).
+
+### Dense scalar-record arrays
+
+`DEWY_DENSE_RECORDS=1` selects inline array storage using checked type IDs
+and HIR before legalization. Value copies acquire independent record storage;
+array detachment copies scalar bytes; growth relocates the buffer; field
+mutation reaches an inline place. Pop snapshots the value before shifting
+the remaining elements. The public source syntax and validation remain intact.
+
+The initial slice is flat fixed-width integer/bool records without lifecycle
+hooks or dynamic brands. Unsupported representations and operations retain
+boxed storage. This is a temporary development boundary, not an internal ABI
+compatibility requirement.
+
+Three fresh builds and five runs per size/build across nine modes give **675
+checksum-checked executions**. All measurements run sequentially without
+other compiler/test jobs from this task. Cold builds include a fresh prelude.
+
+| Mode | Cold build median | Million-particle kernel |
+| --- | ---: | ---: |
+| C -O2 | 90.7 ms | 172.5 ms |
+| Sloppy release | 51.5 ms | 173.8 ms |
+| Dewy boxed, native | 1749.3 ms | 702.6 ms |
+| Dewy dense, native | 1704.5 ms | 435.6 ms |
+| Dewy boxed, Sloppy release | 2011.7 ms | 632.0 ms |
+| Dewy dense, Sloppy release | 1977.1 ms | 448.4 ms |
+
+Dense native storage is 38% faster on this kernel and cuts peak run RSS from
+76.8 to 62.6 MiB. This still misses the runtime target, and barely changes
+cold compilation. Repeated runtime ownership checks and the old frontend
+remain targets; this does not justify spending time preserving their design.
+
+[Full samples](dense-particles.json), [source identities](dense-source-sha256.txt).
+The 44-test focused gate passes in 49.46 s: planner selection, copy/growth,
+place mutation, insert/pop/truncate, narrow fields, spread/iteration, returned
+snapshots, aliasing arguments, plus the existing bridge resource/rejection
+cases. [Test log](dense-tests.log). This is development validation, not a full
+release certification run.

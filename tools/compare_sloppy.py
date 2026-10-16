@@ -63,6 +63,8 @@ def main() -> None:
     parser.add_argument('--udewy', type=Path, help='defaults to udewy beside --dewy')
     parser.add_argument('--sloppy-root', type=Path, required=True)
     parser.add_argument('--sloppy-emitter', type=Path, help='also measure the checked Dewy → Sloppy IR bridge')
+    parser.add_argument('--dense-records', action='store_true',
+                        help='also measure the opt-in dense Dewy representation on each Dewy backend')
     parser.add_argument('--output', type=Path, required=True, help='new JSON result file')
     parser.add_argument('--builds', type=int, default=3)
     parser.add_argument('--runs', type=int, default=5)
@@ -101,9 +103,14 @@ def main() -> None:
         if manifest.is_file(): result['emitter_build'] = json.loads(manifest.read_text())
         modes.extend(['dewy-sloppy-debug', 'dewy-sloppy-release'])
         env['PYTHONPATH'] = str(ROOT)
+    if args.dense_records:
+        modes.extend(mode.replace('dewy-', 'dewy-dense-', 1) for mode in modes.copy()
+                     if mode.startswith('dewy-'))
     checksums: dict[int, str] = {}
     with tempfile.TemporaryDirectory(prefix='dewy-sloppy-') as scratch:
         for mode in modes:
+            backend_mode = mode.replace('dewy-dense-', 'dewy-', 1)
+            mode_env = {**env, 'DEWY_DENSE_RECORDS': '1' if mode.startswith('dewy-dense-') else '0'}
             builds = result['builds'][mode] = []
             runs = result['runs'][mode] = []
             for sample in range(args.builds):
@@ -116,7 +123,7 @@ def main() -> None:
                     command = [str(sloppy), 'build', str(SOURCES / 'records.jo'), '-o', str(binary)]
                     if mode == 'sloppy-release':
                         command.append('--release')
-                elif mode.startswith('dewy-sloppy'):
+                elif backend_mode.startswith('dewy-sloppy'):
                     bridge_work = work / 'bridge'
                     binary = bridge_work / 'program'
                     command = [sys.executable, '-m', 'tools.sloppy_bridge.run', str(SOURCES / 'records.dewy'),
@@ -127,18 +134,19 @@ def main() -> None:
                     from udewy.cache import cache_artifact
                     binary = work / cache_artifact(SOURCES / 'records.dewy', cwd=work)
                     command = [str(dewy), '--timings', '-c', str(SOURCES / 'records.dewy')]
-                built = invoke(command, work, env, 180)
-                if mode.startswith('dewy-sloppy'):
+                built = invoke(command, work, mode_env, 180)
+                built['dense_records'] = mode_env['DEWY_DENSE_RECORDS'] == '1'
+                if backend_mode.startswith('dewy-sloppy'):
                     built['stages'] = json.loads((bridge_work / 'measurement.json').read_text())
                     built['frontend_log'] = (bridge_work / 'frontend.log').read_text()
-                if mode == 'dewy-native' and 'native route:' in built['stdout']:
+                if backend_mode == 'dewy-native' and 'native route:' in built['stdout']:
                     raise RuntimeError(f'Dewy fell back from native emission: {built["stdout"]}')
                 builds.append(built)
                 # Execute every build, not only the last one. All modes and inputs
                 # must agree, including zero/one-element edge cases.
                 for size in args.sizes:
                     for repeat in range(args.runs):
-                        run = invoke([str(binary), str(size)], work, env, 60)
+                        run = invoke([str(binary), str(size)], work, mode_env, 60)
                         fields = run['stdout'].split()
                         if len(fields) != 2 or not all(field.isdecimal() for field in fields):
                             raise RuntimeError(f'{mode}: invalid benchmark output: {run["stdout"]!r}')

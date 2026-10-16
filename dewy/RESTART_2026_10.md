@@ -7,6 +7,15 @@ existing binary identify that binary separately from its source revision.
 
 ## Recommendation
 
+User clarification during implementation: preserve the useful user-facing
+language experience, not byte-identical executables, internal ABIs, existing
+data structures, or every historical compiler behavior. Breaking internal
+changes are welcome when they shorten the route to the intended language.
+Use representative programs and focused language tests as development gates;
+do not turn old implementation details into migration requirements. The
+earlier byte comparison was a convenient check of a local memoization change,
+not an acceptance criterion for the replacement architecture.
+
 Use Sloppy as the implementation reference for Dewy's performance core and
 application/tooling layer. Develop a bounded integration experiment on a new
 branch, preserving this compiler as an executable semantic reference. The
@@ -230,3 +239,16 @@ against 172.7 ms for Sloppy's dense counterpart. Cold builds remain slower
 versus the reference's 38.21 s. Compact frontend data and typed dense aggregate
 lowering remain necessary. See the
 [full experiment evidence and next boundary](audits/2026-10-16/README.md#checked-dewy-through-sloppys-backend).
+
+The first typed representation change now works: `DEWY_DENSE_RECORDS=1`
+selects dense arrays of flat scalar records from checked HIR, before runtime
+lowering. The same change feeds the native emitter and Sloppy bridge. It
+reduces the million-particle native kernel from 702.6 to 435.6 ms and peak
+process memory from 76.8 to 62.6 MiB in the matched comparison. Its 44-test
+development gate passes. Compilation remains around 1.7 s cold; the remaining
+runtime overhead and frontend cost still need substantial work.
+
+This switch is an experimental implementation boundary, not a new language
+feature. Resource-bearing records, subtype families, dictionaries, sorting,
+and raw exposure retain the current representation for now. That fallback is
+temporary scope control, not a commitment to preserve their internal ABI.

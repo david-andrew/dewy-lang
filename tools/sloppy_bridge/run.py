@@ -52,6 +52,7 @@ def compile_program(source: Path, compiler: Path, emitter: Path, work: Path, *, 
         raise RuntimeError(f'Sloppy emission failed:\n{generated.stdout}{generated.stderr}')
     finished = time.perf_counter()
     measurement = {'source': str(source), 'command': command, 'emission': emission,
+                   'dense_records': env.get('DEWY_DENSE_RECORDS') == '1',
                    'frontend_lower_stream_s': frontend - start, 'adapt_s': adapted - frontend,
                    'codegen_s': finished - adapted, 'total_s': finished - start,
                    'stream_bytes': stream_path.stat().st_size, 'ir_bytes': ir_file.stat().st_size,

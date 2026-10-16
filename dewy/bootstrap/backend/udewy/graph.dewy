@@ -154,7 +154,7 @@ runtime_helpers = (engine:modules.Engine):>dict<string addr> => {
 # selection, and startup is checked with the explicit entry export. Keep the
 # lower-level checked-HIR entry available for focused legalization tests.
 Compilation:type = const [lowered:lower.Result analysis:validation.Result]
-compile = (entry:addr @engine:modules.Engine timings:bool=false native_code:bool=false native_wasm:bool=false):>Compilation|Error => {
+compile = (entry:addr @engine:modules.Engine timings:bool=false native_code:bool=false native_wasm:bool=false dense_records:bool=false):>Compilation|Error => {
     let validation_started=timing.start(timings)
     let validated=validation.validate(@engine)
     timing.finish('validation' validation_started)
@@ -176,7 +176,7 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false native_code:bool
     timing.finish('initialization_and_reachability' preparation_started)
     if error isnt? none return error
     let lowering_started=timing.start(timings)
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir.copy() engine.session.types.copy() sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands.copy() engine.session.error_types.copy()] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings checked_root=prepared.checked_root native_code=native_code native_wasm=native_wasm)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir.copy() engine.session.types.copy() sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands.copy() engine.session.error_types.copy()] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings checked_root=prepared.checked_root native_code=native_code native_wasm=native_wasm dense_records=dense_records)
     timing.finish('lowering' lowering_started)
     if lowered is? Error return lowered
     return Compilation[lowered validated]

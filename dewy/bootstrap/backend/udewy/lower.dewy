@@ -4,6 +4,7 @@ import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"statements.dewy" as statements
 import p"layouts.dewy" as layouts
+import p"elements.dewy" as elements
 import p"copy_policy.dewy" as copy_policy
 import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
@@ -94,6 +95,7 @@ State:type = [
     layout_context:layouts.Context=layouts.Context[]
     record_layouts:dict<addr layouts.Record>=[]
     layout_keys:dict<addr string>=[]
+    element_plan:elements.Plan=elements.Plan[]
     links:subtyping.Graph=subtyping.default_links
     brand_numbers:dict<string brands.NumberedBrand>=[]
     # Checked descriptions stay stable while lowering only appends runtime
@@ -428,7 +430,7 @@ expression = (id:addr @state:State):>addr => {
         if array_frame isnt? none {
             let type=array_type(node.value_type state)
             $runtime_assert type isnt? none and type.length isnt? none
-            let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+            let layout=element_layout(type.element @state)
             if layout is? layouts.Pending return reject(node layout.detail @state)
             let source_id=node.value
             let source=hir.node_at(state.input.nodes source_id)
@@ -616,7 +618,7 @@ expression = (id:addr @state:State):>addr => {
         let descriptor=snapshot(receiver.value @prefix @state)
         let pointer=array_element_address(descriptor expression(node.index @state) node @state)
         let stored=stored_type(id @state)
-        let value=read_value(array_load(pointer stored node @state) stored node.value_type node @state)
+        let value=read_value(element_load(pointer stored node @state) stored node.value_type node @state)
         return finish_read(value receiver node @prefix @state)
     }
     if node is? hir.IndexAssign {
@@ -635,8 +637,8 @@ expression = (id:addr @state:State):>addr => {
         # Raw exposure pins the entire container tree. An untracked pointer
         # can still name the previous record or cell after this replacement.
         let tracked=compare('__ne__' read_word(descriptor layouts.array_descriptor.owner node @state) word(-1 node @state) node @state)
-        prefix.push(conditional(tracked release_value(array_load(pointer stored node @state) stored node @state) node @state))
-        prefix.push(array_store(replacement pointer stored node @state))
+        if not dense_element(stored state) {prefix.push(conditional(tracked release_value(array_load(pointer stored node @state) stored node @state) node @state))}
+        prefix.push(element_store(replacement pointer stored node @state))
         return put(hir.Block[node.loc type prefix false] @state)
     }
     if node is? hir.Void return put(hir.Void[node.loc type] @state)
@@ -946,7 +948,7 @@ place_address = (id:addr @state:State):>addr => {
     if node is? hir.Index {
         if state.allocator isnt? none and inline_record(node.value_type @state) return write_route(id @state)
         let pointer=array_index(node @state writable=true)
-        return if inline_place(stored_type(id @state) @state) array_load(pointer stored_type(id @state) node @state) else pointer
+        return if inline_place(stored_type(id @state) @state) element_load(pointer stored_type(id @state) node @state) else pointer
     }
     return reject(node 'an addressable place route' @state)
 }
@@ -1569,7 +1571,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
 shareable_read = (id:addr @state:State):>bool => {
     if state.allocator is? none return false
     let node=hir.node_at(state.input.nodes id)
-    if node is? hir.Index return true
+    if node is? hir.Index return not dense_element(stored_type(id @state) state)
     # A record union field holds its own headed block, like an element.
     if node is? hir.MemberAccess and record_union(stored_type(id @state) @state) isnt? none return true
     if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
@@ -1676,6 +1678,28 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
     if layout is? none return reject(node 'array element store representation' @state)
     return intrinsic_call("__store_{if layout.signed 'i' else 'u'}{layout.bits}__" [value pointer] types.primitive('void' @state.type_nodes) node @state)
 }
+# Array storage and local handle slots are different places. Dense elements
+# borrow their buffer's bytes; an owning store copies the scalar fields and
+# releases the incoming headed record. Local slots retain the existing ABI.
+dense_element = (type:addr state:State):>bool => views.structural_base(type state.type_nodes) in? state.element_plan.dense
+element_layout = (type:addr @state:State):>layouts.Storage|layouts.Pending => {
+    let dense=state.element_plan.dense.get(views.structural_base(type state.type_nodes))
+    if dense isnt? none return dense
+    return layouts.element(type @state.type_nodes nominals=state.layout_context.nominals)
+}
+element_load = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    return if dense_element(type state) pointer else array_load(pointer type node @state)
+}
+element_store = (value:addr pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    if not dense_element(type state) return array_store(value pointer type node @state)
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let destination=snapshot(pointer @prefix @state)
+    prefix.push(object_write(destination source type node @state))
+    prefix.push(release_value(source type node @state))
+    return sequence(prefix node @state)
+}
+element_key = (type:addr node:hir.AST @state:State):>string => "{if dense_element(type state) 'dense:' else ''}{layout_key(type node @state)}"
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
     if type is? types.ObjectType|types.ArrayType|types.MetaType or cell_members(element @state) isnt? none or record_union(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) or unit_type(element state) return read_word(pointer 0 node @state)
@@ -1713,7 +1737,7 @@ static_array = (argument:addr @state:State):>addr? => {
     # to an optional or union parameter is wrapped, never bare.
     let type=array_type(hir.node_at(state.input.nodes argument).value_type state)
     if type is? none return none
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending or layout.size not=? 8 return none
     let strings=owned_string(type.element state)
     let words:array<addr>=[]
@@ -1732,7 +1756,7 @@ static_array = (argument:addr @state:State):>addr? => {
 array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     let type=array_type(node.value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let spread=false
     loop item in node.items { if hir.node_at(state.input.nodes item) is? hir.Spread { spread=true } }
@@ -1753,7 +1777,7 @@ array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     }
     let offset:addr=0
     loop item in node.items {
-        memory.prefix.push(array_store(owned_value(item @state 'placed in an array literal') address(memory.data offset node @state) type.element node @state))
+        memory.prefix.push(element_store(owned_value(item @state 'placed in an array literal') address(memory.data offset node @state) type.element node @state))
         offset+=layout.size
     }
     memory.prefix.push(memory.descriptor)
@@ -1787,7 +1811,7 @@ spread_array_literal = (node:hir.ArrayLiteral element:addr stride:addr @state:St
         let destination=word_op('__add__' memory.data word_op('__mul__' cursor stride_word node @state) node @state)
         let advance=put(hir.Assign[node.loc empty cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
         if source is? none {
-            prefix.push(array_store(owned_value(item @state 'placed in an array literal') destination element node @state))
+            prefix.push(element_store(owned_value(item @state 'placed in an array literal') destination element node @state))
             prefix.push(advance)
             continue
         }
@@ -1795,9 +1819,9 @@ spread_array_literal = (node:hir.ArrayLiteral element:addr stride:addr @state:St
         let count=read_word(source layouts.array_descriptor.length node @state)
         let running=intrinsic_call('__lt__' [index count] bool_type node @state)
         let origin=word_op('__add__' read_word(source 0 node @state) word_op('__mul__' index stride_word node @state) node @state)
-        let value=copy_value(array_load(origin element node @state) element node @state)
+        let value=copy_value(element_load(origin element node @state) element node @state)
         let step=put(hir.Assign[node.loc empty index '=' word_op('__add__' index word(1 node @state) node @state)] @state)
-        let body=sequence([array_store(value destination element node @state) step advance] node @state)
+        let body=sequence([element_store(value destination element node @state) step advance] node @state)
         prefix.push(put(hir.Flow[node.loc empty [put(hir.LoopArm[node.loc empty running body] @state)] none] @state))
     }
     prefix.push(memory.descriptor)
@@ -1822,7 +1846,7 @@ array_index = (node:hir.Index @state:State writable:bool=false):>addr => {
 array_element_address = (descriptor:addr index:addr node:hir.Index @state:State):>addr => {
     let type=array_type(hir.node_at(state.input.nodes node.array).value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let data=read_word(descriptor 0 node @state)
     let offset=word_op('__mul__' index word(layout.size node @state) node @state)
@@ -1845,7 +1869,7 @@ finish_copy = (name:string parameter:string body:addr node:hir.AST @state:State)
 }
 array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
     if state.allocator is? none return array_copy_body(value type node @state)
-    let key="array:{layout_key(type.element node @state)}"
+    let key="array:{element_key(type.element node @state)}"
     let name=state.copy_helpers.get(key)
     if name is? none {
         let generated_name=fresh('copy_array' @state)
@@ -1947,7 +1971,7 @@ layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>str
     if plain in? visiting return "@{plain}"
     if owned_string(plain state) return 's'
     let array=array_type(plain state)
-    if array isnt? none {visiting.push(plain) return "a<{layout_key_inner(array.element node visiting @state)}>"}
+    if array isnt? none {visiting.push(plain) return "a<{if dense_element(array.element state) 'dense:' else ''}{layout_key_inner(array.element node visiting @state)}>"}
     let members=cell_members(plain @state)
     if members isnt? none {
         visiting.push(plain)
@@ -2073,7 +2097,7 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
 }
 array_unique = (descriptor:addr element:addr node:hir.AST @state:State):>addr => {
     if state.allocator is? none return descriptor
-    let key="unique:{layout_key(element node @state)}"
+    let key="unique:{element_key(element node @state)}"
     let name=state.copy_helpers.get(key)
     if name is? none {
         let generated=fresh('unique_array' @state)
@@ -2211,7 +2235,7 @@ pin_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
         copied.push(assign_value(value array_copy_storage(value array node @state) node @state))
         body.push(conditional(compare('__ne__' owner word(1 node @state) node @state) sequence(copied node @state) node @state))
         body.push(store_word(word(-1 node @state) value layouts.array_descriptor.owner node @state))
-        if aggregate(array.element @state) {
+        if aggregate(array.element @state) and not dense_element(array.element state) {
             let index=snapshot(word(0 node @state) @body @state)
             let child=array_load(dict_element_pointer(value index array.element node @state) array.element node @state)
             let pinned=pin_value(child array.element node @state)
@@ -2282,7 +2306,10 @@ record_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
             if node.binding_id in? state.boxed return ArrayRoute[snapshot(target @prefix @state) none none]
             return ArrayRoute[none target none]
         }
-        if node is? hir.Index return ArrayRoute[snapshot(array_index(node @state writable=true) @prefix @state) none none]
+        if node is? hir.Index {
+            let pointer=snapshot(array_index(node @state writable=true) @prefix @state)
+            return if dense_element(stored state) ArrayRoute[none none pointer] else ArrayRoute[pointer none none]
+        }
         if node is? hir.DictLookup and node.proven return ArrayRoute[dict_entry_slot(node @prefix @state) none none]
         if node is? hir.MemberAccess {
             let pointer=snapshot(field_pointer(node @state writable=true) @prefix @state)
@@ -2326,7 +2353,7 @@ write_route = (id:addr @state:State detach:bool=true):>addr => {
         prefix.push(detach_record(route node.value_type node @prefix @state))
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
-    if node is? hir.Index return read_value(array_load(array_index(node @state writable=true) stored node @state) stored node.value_type node @state)
+    if node is? hir.Index return read_value(element_load(array_index(node @state writable=true) stored node @state) stored node.value_type node @state)
     if node is? hir.MemberAccess return read_value(field_read(field_pointer(node @state writable=true detach=detach) stored node @state) stored node.value_type node @state)
     return expression(id @state)
 }
@@ -2340,12 +2367,12 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State 
     # buffer's allocation anchor alone does not cover copied tag cells or
     # recursively allocated children. Match the hosted clone-owner context.
     let previous:addr?=none
-    if detach and aggregate(type.element @state) and state.runtime_helpers.get('_allocator_enter_for') isnt? none {
+    if detach and aggregate(type.element @state) and not dense_element(type.element state) and state.runtime_helpers.get('_allocator_enter_for') isnt? none {
         previous=snapshot(string_runtime('_allocator_enter_for' [descriptor] node @state) @prefix @state)
     }
     let source=snapshot(intrinsic_call('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let length=snapshot(intrinsic_call('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let memory=array_memory(length layout.size node @state anchor=if detach and state.allocator isnt? none descriptor else none)
     loop item in memory.prefix {prefix.push(item)}
@@ -2354,7 +2381,7 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State 
         let symbol=state.symbols.get(counter)
         if symbol isnt? none {prefix.push(intrinsic_call(symbol [word_op('__mul__' length word(layout.size node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))}
     }
-    if aggregate(type.element @state) {
+    if aggregate(type.element @state) and not dense_element(type.element state) {
         if state.allocator is? none return reject(node 'owned aggregate array elements need the prelude arena allocator' @state)
         let cursor=snapshot(word(0 node @state) @prefix @state)
         let offset=word_op('__mul__' cursor word(layout.size node @state) node @state)
@@ -4175,7 +4202,7 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
 # Callers detach the descriptor before trimming it.
 array_trim = (descriptor:addr length:addr element:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
-    if releasable(element @state) {
+    if releasable(element @state) and not dense_element(element state) {
         let cursor=snapshot(length @prefix @state)
         let stop=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
         let value=dict_element(descriptor cursor element node @state)
@@ -4185,7 +4212,7 @@ array_trim = (descriptor:addr length:addr element:addr node:hir.AST @state:State
     return sequence(prefix node @state)
 }
 push_helper = (element:addr stride:addr call:hir.AST @state:State):>string => {
-    let key="push:{layout_key(element call @state)}"
+    let key="push:{element_key(element call @state)}"
     let existing=state.copy_helpers.get(key)
     if existing isnt? none return existing
     let generated=fresh('push' @state)
@@ -4202,7 +4229,7 @@ push_helper = (element:addr stride:addr call:hir.AST @state:State):>string => {
     let new_length=snapshot(word_op('__add__' length word(1 call @state) call @state) @prefix @state)
     prefix.push(array_reserve(descriptor new_length stride call @state))
     let data=read_word(descriptor layouts.array_descriptor.data call @state)
-    prefix.push(array_store(value word_op('__add__' data word_op('__mul__' length word(stride call @state) call @state) call @state) element call @state))
+    prefix.push(element_store(value word_op('__add__' data word_op('__mul__' length word(stride call @state) call @state) call @state) element call @state))
     prefix.push(store_word(new_length descriptor layouts.array_descriptor.length call @state))
     let body=put(hir.Block[call.loc void_type prefix false] @state)
     let signature=types.function_type([types.PosOrKwArg[descriptor_name word_type] types.PosOrKwArg[value_name value_type]] [] none void_type [] @state.type_nodes)
@@ -4216,7 +4243,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State r
     if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'lend_write' 'set_length' 'insert'] return reject(call "array {method.name} lowering" @state)
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(call layout.detail @state)
     let prefix:array<addr>=[]
     let route=array_route(method.array @prefix @state)
@@ -4275,7 +4302,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State r
             prefix.push(counted_bytes(data address(data layout.size call @state) bytes offset call @state backwards=true))
         }
         $runtime_assert 'value' in? arguments
-        prefix.push(array_store(arguments['value'] word_op('__add__' data offset call @state) type.element call @state))
+        prefix.push(element_store(arguments['value'] word_op('__add__' data offset call @state) type.element call @state))
     } else {
         new_length=snapshot(word_op('__sub__' length word(1 call @state) call @state) @prefix @state)
         let index=arguments.get('idx')
@@ -4283,7 +4310,8 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State r
         $runtime_assert index isnt? none
         let data=snapshot(read_word(descriptor layouts.array_descriptor.data call @state) @prefix @state)
         let offset=word_op('__mul__' index word(layout.size call @state) call @state)
-        result=snapshot(array_load(word_op('__add__' data offset call @state) type.element call @state) @prefix @state)
+        let popped=element_load(word_op('__add__' data offset call @state) type.element call @state)
+        result=snapshot(if dense_element(type.element state) object_copy(popped type.element call @state) else popped @prefix @state)
         let start=word_op('__add__' offset word(layout.size call @state) call @state)
         let stop=word_op('__mul__' length word(layout.size call @state) call @state)
         prefix.push(counted_bytes(data word_op('__sub__' data word(layout.size call @state) call @state) start stop call @state))
@@ -4321,7 +4349,7 @@ sort_key = (value:addr type:addr mask:addr node:hir.AST @state:State):>addr => {
 array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
     $runtime_assert type isnt? none
-    let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(type.element @state)
     if layout is? layouts.Pending return reject(call layout.detail @state)
     let boolean=types.primitive('bool' @state.type_nodes)
     let unsigned=types.primitive('uint64' @state.type_nodes)
@@ -4852,7 +4880,8 @@ getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
 element_route = (route:borrowing.Route):>bool => route.fields.length >? 0 and route.fields[route.fields.length-1] =? '[]'
 # Array elements of this type hold a one-word handle to separate storage.
 element_handle = (type:addr @state:State):>bool => {
-    let layout=layouts.element(type @state.type_nodes nominals=state.layout_context.nominals)
+    if dense_element(type state) return false
+    let layout=element_layout(type @state)
     if layout is? layouts.Pending or layout.size not=? 8 return false
     return object_valued(type @state) or cell_members(type @state) isnt? none
 }
@@ -5791,7 +5820,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         $runtime_assert literal is? hir.ArrayLiteral
         let type=array_type(literal.value_type state)
         $runtime_assert type isnt? none
-        let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+        let layout=element_layout(type.element @state)
         if layout is? layouts.Pending return reject(literal layout.detail @state)
         let name=fresh('selection_frame' @state)
         let word_type=types.primitive('int64' @state.type_nodes)
@@ -5836,7 +5865,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         $runtime_assert literal is? hir.ArrayLiteral|hir.CopyValue
         let type=array_type(literal.value_type state)
         $runtime_assert type isnt? none and type.length isnt? none
-        let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+        let layout=element_layout(type.element @state)
         if layout is? layouts.Pending return reject(literal layout.detail @state)
         let name=fresh('array_frame' @state)
         let word_type=types.primitive('int64' @state.type_nodes)
@@ -6088,9 +6117,10 @@ validate_required_views = (root:addr @state:State):>void => {
     state.view_writes=[] state.mutated_roots=set[]
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false native_wasm:bool=false):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none native_code:bool=false native_wasm:bool=false dense_records:bool=false):>Result|Error => {
     let captures_started=timing.start(timings)
     let state=State[input source type_nodes=input.types.copy allocator=allocator runtime_helpers=runtime_helpers.copy layout_context=layout_context links=links.copy debug_names=debug_names explicit_copy_sources=explicit_copy_sources.copy]
+    if dense_records {state.element_plan=elements.select(input.nodes layout_context @state.type_nodes)}
     # Older seeds and prelude-free kernels retain the six-word allocation
     # ABI. Install retain/drop together with prefix allocation, once per
     # lowering, so every value boundary agrees about descriptor ownership.
@@ -6578,12 +6608,12 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
         }
         let array=array_type(source.value_type state)
         if array isnt? none {
-            let layout=layouts.element(array.element @state.type_nodes nominals=state.layout_context.nominals)
+            let layout=element_layout(array.element @state)
             if layout is? layouts.Pending return IteratorStep[prefix reject(node layout.detail @state)]
             length=snapshot(read_word(sequence layouts.array_descriptor.length node @state) @prefix @state)
             let data=snapshot(read_word(sequence 0 node @state) @prefix @state)
             let pointer=word_op('__add__' data word_op('__mul__' cursor word(layout.size node @state) node @state) node @state)
-            value=array_load(pointer array.element node @state)
+            value=element_load(pointer array.element node @state)
         } else if string_type(source.value_type state) {
             prefix.push(ensure_segmented(sequence node @state))
             length=snapshot(read_word(sequence layouts.string_descriptor.grapheme_length node @state) @prefix @state)
@@ -7253,19 +7283,19 @@ dict_set_field = (parts:DictParts name:string value:addr node:hir.AST @state:Sta
     return store_word(value parts.pointer offset node @state)
 }
 dict_element_pointer = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => {
-    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     return word_op('__add__' read_word(descriptor layouts.array_descriptor.data node @state) word_op('__mul__' index word(layout.size node @state) node @state) node @state)
 }
-dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => array_load(dict_element_pointer(descriptor index element node @state) element node @state)
+dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => element_load(dict_element_pointer(descriptor index element node @state) element node @state)
 data_element = (data:addr index:addr element:addr node:hir.AST @state:State):>addr => {
-    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
-    return array_load(word_op('__add__' data word_op('__mul__' index word(layout.size node @state) node @state) node @state) element node @state)
+    return element_load(word_op('__add__' data word_op('__mul__' index word(layout.size node @state) node @state) node @state) element node @state)
 }
 # Dictionary arrays are detached by dict_array before any element store.
 dict_store_element = (descriptor:addr index:addr value:addr element:addr node:hir.AST @state:State):>addr => {
-    return array_store(value dict_element_pointer(descriptor index element node @state) element node @state)
+    return element_store(value dict_element_pointer(descriptor index element node @state) element node @state)
 }
 # A container field holding a possibly shared descriptor: detach it and
 # store the private descriptor back into the field before mutating it.
@@ -7279,7 +7309,7 @@ dict_array = (parts:DictParts name:string element:addr node:hir.AST @prefix:arra
     return descriptor
 }
 dict_push = (descriptor:addr value:addr element:addr node:hir.AST @state:State):>addr => {
-    let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
+    let layout=element_layout(element @state)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let prefix:array<addr>=[]
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
@@ -7737,7 +7767,7 @@ dict_empty = (type:addr node:hir.AST @prefix:array<addr> @state:State):>DictPart
         let element=types.primitive('int64' @state.type_nodes)
         if field =? 'keys' {element=entries.key}
         else if field =? 'values' and entries.value isnt? none {element=entries.value}
-        let storage=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
+        let storage=element_layout(element @state)
         if storage is? layouts.Pending {reject(node storage.detail @state); return parts}
         let memory=array_memory(word(0 node @state) storage.size node @state)
         loop statement in memory.prefix {prefix.push(statement)}
@@ -7907,7 +7937,7 @@ release_body_inner = (pointer:addr type:addr node:hir.AST @state:State):>addr =>
         # Other handles keep a shared descriptor alive: only drop this one.
         let last:array<addr>=[]
         let owned:array<addr>=[]
-        if releasable(array.element @state) {
+        if releasable(array.element @state) and not dense_element(array.element state) {
             let length=snapshot(read_word(pointer layouts.array_descriptor.length node @state) @owned @state)
             let index=snapshot(word(0 node @state) @owned @state)
             let element=array_load(word_op('__add__' data word_op('__mul__' index word(8 node @state) node @state) node @state) array.element node @state)
