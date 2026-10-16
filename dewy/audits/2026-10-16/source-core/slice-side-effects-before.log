@@ -1,0 +1,52 @@
+..F..F                                                                   [100%]
+=================================== FAILURES ===================================
+_______________ test_core_values[debug-slice-bound-side-effect] ________________
+
+compiler = PosixPath('/tmp/dewy-source-core/slice-baseline/bin/dewy-core')
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-87/test_core_values_debug_slice_b0')
+name = 'slice-bound-side-effect', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(compiler, tmp_path, name, release):
+        source = tmp_path / f'{name}.dewy'
+        source.write_text(CASES[name])
+        binary = tmp_path / name
+        flags = ['--release'] if release else []
+        built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                               text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        result = subprocess.run([binary, 'extra'], capture_output=True, text=True, timeout=10, check=False)
+>       assert result.returncode == 42, (result.returncode, result.stdout, result.stderr)
+E       AssertionError: (121, '', '')
+E       assert 121 == 42
+E        +  where 121 = CompletedProcess(args=[PosixPath('/tmp/pytest-of-david/pytest-87/test_core_values_debug_slice_b0/slice-bound-side-effect'), 'extra'], returncode=121, stdout='', stderr='').returncode
+
+tests/python_misc/test_sloppy_core.py:149: AssertionError
+______________ test_core_values[release-slice-bound-side-effect] _______________
+
+compiler = PosixPath('/tmp/dewy-source-core/slice-baseline/bin/dewy-core')
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-87/test_core_values_release_slice1')
+name = 'slice-bound-side-effect', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(compiler, tmp_path, name, release):
+        source = tmp_path / f'{name}.dewy'
+        source.write_text(CASES[name])
+        binary = tmp_path / name
+        flags = ['--release'] if release else []
+        built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
+                               text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        result = subprocess.run([binary, 'extra'], capture_output=True, text=True, timeout=10, check=False)
+>       assert result.returncode == 42, (result.returncode, result.stdout, result.stderr)
+E       AssertionError: (121, '', '')
+E       assert 121 == 42
+E        +  where 121 = CompletedProcess(args=[PosixPath('/tmp/pytest-of-david/pytest-87/test_core_values_release_slice1/slice-bound-side-effect'), 'extra'], returncode=121, stdout='', stderr='').returncode
+
+tests/python_misc/test_sloppy_core.py:149: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-slice-bound-side-effect]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-slice-bound-side-effect]
+2 failed, 4 passed, 146 deselected in 0.57s

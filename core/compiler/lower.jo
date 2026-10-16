@@ -2738,7 +2738,12 @@ gen_slice = (e: int) -> Val:
     a = int(nodes[e].a)
     bt = prune(ntype(a))
     r = int(nodes[e].b)
-    p = gen_borrowed(a).v
+    # Bounds can call code that mutates or replaces the source. Keep the value
+    # read before those calls alive, independently of the original variable.
+    source = gen_owned(a)
+    borrow(source, bt)
+    p = vreg(VI)
+    e_mov(p, source.v)
     lo = 0
     if nodes[r].a != 0: lo = gen_expr(int(nodes[r].a)).v
     else: lo = e_iconst(0)

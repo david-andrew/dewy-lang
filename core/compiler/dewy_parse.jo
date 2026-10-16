@@ -377,14 +377,17 @@ dw_expr = (id: int) -> int:
             return n
         if starts_with(op, "CallJuxtapose") or op == "IndexJuxtapose":
             xs = dewy_syntax[right].children
-            bracket = dewy_syntax[right].kind == "Block" and dewy_syntax[right].text == "[]:"
+            bracket = dewy_syntax[right].kind == "Block" and dewy_syntax[right].text in ["[]:", "[):"]
             n = mk(if bracket: NK.index else: NK.call, pos)
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             args: int[]
             if dewy_syntax[right].kind != "Block": args.push(dw_expr(right))
+            else if bracket and xs.len() == 1 and (dw_op(xs[0]) == "RangeJuxtapose" or dw_name(xs[0]) == ".."):
+                args.push(dw_iterable(right, true))
             else:
+                if dewy_syntax[right].text == "[):": return dw_fail(right, "an exclusive index without a range")
                 loop child in xs:
                     if dw_op(child) == "=":
                         a = mk(.namedarg, dewy_syntax[child].pos)
@@ -533,20 +536,25 @@ dw_import_name = (id: int) -> int:
     if alias != "": nodes[n].aux = i32(intern(alias))
     return n
 
-dw_iterable = (id: int) -> int:
+dw_iterable = (id: int, slice: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
-    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and dw_op(dw_child(id, 0)) == "RangeJuxtapose":
+    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
         wrapper = dewy_syntax[id].text
         if wrapper != "[]:" and wrapper != "[):": return dw_fail(id, "this range boundary")
         inclusive = wrapper == "[]:"
         id = dw_unwrap(dw_child(id, 0))
+    if slice and dw_name(id) == "..": return mk(.range, dewy_syntax[id].pos)
     if dw_op(id) != "RangeJuxtapose": return dw_expr(id)
     size = dewy_syntax[id].children.len()
-    if (size != 3 and size != 4) or dw_name(dw_child(id, 2)) != "..": return dw_fail(id, "this range")
     n = mk(.range, dewy_syntax[id].pos)
-    nodes[n].a = i32(dw_expr(dw_child(id, 1)))
-    if size == 4: nodes[n].b = i32(dw_expr(dw_child(id, 3)))
+    at = 1
+    if dw_name(dw_child(id, at)) != "..":
+        nodes[n].a = i32(dw_expr(dw_child(id, at)))
+        at += 1
+    else if not slice: return dw_fail(id, "a loop range without a start")
+    if at >= size or dw_name(dw_child(id, at)) != ".." or size > at + 2: return dw_fail(id, "this range")
+    if size == at + 2: nodes[n].b = i32(dw_expr(dw_child(id, at + 1)))
     if inclusive: add_flag(n, NF_INCLUSIVE)
     return n
 

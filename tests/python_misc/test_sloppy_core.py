@@ -62,6 +62,19 @@ let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
     'arrays': '''main=():>int64=>{let a:array<int64>=[20 22] let b=a b[0]=0 return a[0]+a[1]}''',
+    'array-slices': '''main=()=>{let xs:array<int64>=[10 20 22 99]
+let a=xs[1..2] let b=xs[1..3) let c=xs[..1] let d=xs[2..] let e=xs[..]
+let empty=xs[2..2) a[0]=0
+return if b[0]+b[1] =? 42 and c.length =? 2 and d[0] =? 22 and e.length =? 4 and empty.length =? 0 and xs[1] =? 20 42 else 1}''',
+    'slice-managed-elements': '''Item:type=[values:array<int64> name:string]
+main=()=>{let a=[Item[[20 22] "answer"]] let b=a[..] b[0].values[0]=99
+a.clear() return if b[0].name =? "answer" b[0].values[1]+20 else 1}''',
+    'slice-bound-side-effect': '''let xs:array<int64>=[]
+start=()=>{xs[0]=99 return 0}
+main=()=>{xs.push(20) xs.push(22) let a=xs[start()..] return a[0]+a[1]}''',
+    'slice-replaced-source': '''let xs:array<int64>=[]
+start=()=>{xs=[] xs.push(99) xs.push(100) return 0}
+main=()=>{xs.push(20) xs.push(22) let a=xs[start()..] return a[0]+a[1]}''',
     'branches-loops': '''main=():>int64=>{let i:int64=0 loop i <? 3 {i+=1} return if i =? 3 42 else 1}''',
     'place': '''bump=(@x:int64):>void=>{x+=2}
 main=():>int64=>{let x:int64=40 bump(@x) return x}''',
@@ -352,9 +365,9 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific'])
+@pytest.mark.parametrize('name', ['unsigned-constant-math', 'narrow-integers', 'scientific', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_numeric_web(compiler, tmp_path, name, release):
+def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')
     if node is None:
         pytest.skip('Node is needed to execute the generated web runner')
@@ -371,3 +384,15 @@ def test_core_numeric_web(compiler, tmp_path, name, release):
     runner.write_text('\n'.join(scripts.parts))
     ran = subprocess.run([node, runner], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+
+def test_core_slice_bounds_panic(compiler, tmp_path):
+    source = tmp_path / 'bounds.dewy'
+    source.write_text('end=()=>9\nmain=()=>{let xs=[20 22] return xs[0..end()].length}')
+    binary = tmp_path / 'bounds'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0 and 'slice' in ran.stderr, ran.stdout + ran.stderr

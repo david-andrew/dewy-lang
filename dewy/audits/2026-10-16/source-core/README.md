@@ -122,3 +122,15 @@ to bitwise inversion; nonnumeric operands are rejected.
 high unsigned constant arithmetic, narrow types and scientific literals. The
 compiler is identified by `numeric-build.json`. Runtime integer arithmetic is
 still fixed-width/wrapping; this is not an unbounded-number implementation.
+
+## Array slices
+
+Inclusive/exclusive end bounds, omitted bounds, full slices and independent
+nested values now work through Dewy syntax. The pre-fix side-effect regression
+(`slice-side-effects-before.log`) returned 121 instead of 42 when a bound call
+mutated a uniquely owned source array. Shared lowering now holds the source value
+across bound evaluation. Mutation and replacement cases pass natively and in
+WebAssembly, in both build modes. A bad dynamic bound produces a slice panic.
+All 186 combined checks pass in 12.07 seconds (`slices-tests.log`), including the
+upstream loop/container regressions and live reload. `slices-build.json` identifies
+the compiler. Stored range values and grapheme string slicing remain unsupported.
