@@ -1892,7 +1892,10 @@ array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr =
         state.copy_helpers[key]=generated_name
         let parameter=fresh('copy_source' @state)
         let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
-        let body=array_copy_body(source type node @state)
+        # Dictionary value storage retains cleared slots after pop, and a
+        # partially moved aggregate can contain a cleared array field. These
+        # are internal empty handles, not descriptors to inspect or retain.
+        let body=when_present(source array_copy_body(source type node @state) node @state)
         finish_copy(generated_name parameter body node @state)
     }
     $runtime_assert name isnt? none

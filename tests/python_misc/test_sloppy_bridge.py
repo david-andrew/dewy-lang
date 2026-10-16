@@ -153,6 +153,19 @@ def test_word_abi_and_control(emitter, tmp_path, mode, name):
 
 
 DEWY_CASES = {
+    'array-dictionary-tombstones': '''
+main=():>int64=>{
+    let pages:dict<int64 array<int64>>=[0->[42] 1->[7]]
+    let removed=pages.pop(0 default=[])
+    let saved=pages.copy
+    pages[2]=[9]
+    $runtime_assert removed.length =? 1 and 1 in? saved and 2 in? pages
+    let old=saved[1]
+    let added=pages[2]
+    $runtime_assert old.length =? 1 and added.length =? 1
+    return if removed[0] =? 42 and old[0] =? 7 and added[0] =? 9 and 2 not in? saved 42 else 1
+}
+''',
     **STREAM_CASES,
     'resource-copy': RESOURCE_COPY,
     'drop-on-loop-exit': LIFECYCLE_CASES[0],

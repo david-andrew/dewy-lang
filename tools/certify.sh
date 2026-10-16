@@ -53,6 +53,7 @@ smoke)
     exec "$python" -m pytest -q -p no:cacheprovider -n 0 --durations=5 \
         tests/python_misc/test_native_validation_smoke.py \
         tests/python_misc/test_native_runtime_reachability.py \
+        tests/python_misc/test_native_array_copy.py \
         tests/python_misc/test_native_cli_shared_prelude.py \
         tests/python_misc/test_dense_record_elements.py::test_dense_record_values \
         -k 'not bridge' "$@"
