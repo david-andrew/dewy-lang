@@ -386,7 +386,19 @@ collect_atom = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @n
     i = first.next
     let needs_import:bool = kw.name =? 'from'
     let has_from:bool = false
-    if i <? items.length { has_from = is_stop(compound.node_at(nodes items[i]) set['from']) }
+    if i <? items.length {
+        let following=compound.node_at(nodes items[i])
+        has_from = is_stop(following set['from'])
+        if has_from {
+            # Optional reverse-import syntax ends at a newline. Otherwise a
+            # namespace import absorbs the next statement's `from` clause.
+            let previous=compound.node_at(nodes first.id)
+            $runtime_assert previous.loc.stop <=? following.loc.start <=? srcfile.body.length
+            loop char in srcfile.body[previous.loc.stop..following.loc.start) {
+                if char is? '\n' | '\r\n' {has_from=false}
+            }
+        }
+    }
     if needs_import or kw.name =? 'import' and has_from {
         if i >=? items.length return compound.lexical_error(srcfile kw.loc 'Expected `import` after `from`')
         if needs_import and not is_stop(compound.node_at(nodes items[i]) set['import']) return compound.lexical_error(srcfile kw.loc 'Expected `import` after `from`')

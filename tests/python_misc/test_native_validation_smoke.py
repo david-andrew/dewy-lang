@@ -20,6 +20,11 @@ CASES += [pytest.param(source, 'may change its receiver', id=f'sort-invalid-{i}'
 CASES += [pytest.param(source, 'invalidate a selected dictionary entry', id=f'entry-invalid-{i}')
           for i, source in enumerate(ENTRY_ERRORS)]
 CASES += [pytest.param('main=():>int64=>42', None, id='scalar')]
+CASES += [pytest.param('''from reporting import Error
+import math as numbers
+from reporting import Span
+main=():>int64=>{let span=Span[0 42] return span.stop as int64}
+''', None, id='adjacent-import-forms')]
 CASES += [pytest.param(source, None, id=name) for name, source in DEWY_CASES.items()]
 
 

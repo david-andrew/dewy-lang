@@ -4,11 +4,10 @@ import json
 import subprocess
 from pathlib import Path
 
-from dewy.backend.udewy import codegen
-from dewy.reporting import SrcFile
+from driver_artifacts import isolated_codegen
+
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
-from driver_artifacts import isolated_codegen
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
@@ -18,6 +17,10 @@ CASES = [
     'from units import (Duration as Time Length)',
     'import (Duration Length as Distance) from units',
     'import p"relative.dewy" as helper',
+    'import p"relative.dewy" as helper\nfrom units import Duration',
+    'import units\n\nfrom other import Value',
+    'import units\r\nfrom other import Value',
+    'import (Duration\nLength as Distance) from units',
 ]
 
 
@@ -38,8 +41,9 @@ main = ():>int64 => {{
         let session=contexts.Session[]
         let context=contexts.begin(source parsed.nodes @session)
         let root=tokens.node_at(parsed.nodes parsed.root)
-        $runtime_assert root is? parser.Block and root.inner.length =? 1
-        let spec=imports.read(root.inner[0] context session)
+        $runtime_assert root is? parser.Block
+        loop item in root.inner {{
+        let spec=imports.read(item context session)
         if spec is? Error {{ spec.fail return 1 }}
         $runtime_assert spec isnt? none
         let library=imports.library_name(spec.path parsed.nodes)
@@ -48,6 +52,7 @@ main = ():>int64 => {{
         else if spec.names is? none {{ parts.push('all') }}
         else {{ loop name in spec.names {{ parts.push("{{name.source}}:{{name.local}}") }} }}
         printl(parts.join('|'))
+        }}
     }}
     return 0
 }}
@@ -61,4 +66,8 @@ main = ():>int64 => {{
         'units|all', 'linux/system|namespace:system', 'units|Duration:Duration',
         'units|Duration:Time|Length:Length', 'units|Duration:Duration|Length:Distance',
         'path|namespace:helper',
+        'path|namespace:helper', 'units|Duration:Duration',
+        'units|all', 'other|Value:Value',
+        'units|all', 'other|Value:Value',
+        'units|Duration:Duration|Length:Distance',
     ]
