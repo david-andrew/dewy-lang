@@ -16,6 +16,39 @@ CASES = {
     'generic-function': '''twice=(x)=>x+x
 main=()=>if twice(21) =? 42 and twice(1.25) =? 2.5 42 else 1''',
     'default-argument': 'add=(x y=2)=>x+y\nmain=()=>add(40)',
+    'named-interleaved': '''add=(x:int64 y:int64=2 z:int64)=>x+y+z
+main=()=>add(y=2 20 20)''',
+    'named-order': '''let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+combine=(a:int64 b:int64)=>a*10+b
+main=()=>if combine(b=next() a=next()) =? 21 and sequence =? 2 42 else 1''',
+    'named-default-order': '''let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+combine=(a:int64=next() b:int64=next())=>a*10+b
+main=()=>if combine(b=next()) =? 21 and sequence =? 2 42 else 1''',
+    'named-constructor-order': '''Pair:type=[a:int64 b:int64]
+let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+main=()=>{let p=Pair[b=next() a=next()] return if p.a*10+p.b =? 21 42 else 1}''',
+    'named-managed-order': '''let values:array<int64>=[40]
+replace=()=>{values=[99] return 2}
+combine=(n:int64 xs:array<int64>)=>xs[0]+n
+main=()=>combine(xs=values n=replace())''',
+    'named-place': '''add=(x:int64 @out:int64):>void=>{out+=x}
+main=()=>{let answer:int64=40 add(out=@answer 2) return answer}''',
+    'named-generic-order': '''let sequence:int64=0
+next=()=>{sequence+=1 return sequence}
+combine=(a b)=>a*10+b
+main=()=>if combine(b=next() a=next()) =? 21 and sequence =? 2 42 else 1''',
+    'named-record-snapshot': '''Item:type=[values:array<int64>]
+let item=Item[[40]]
+replace=()=>{item=Item[[99]] return 2}
+combine=(n:int64 old:Item)=>old.values[0]+n
+main=()=>combine(old=item n=replace())''',
+    'argument-float-snapshot': '''add=(x:float64 y:float64)=>x+y
+main=()=>{let x:float64=40.0 return if add(x {x=99.0 2.0}) =? 42.0 42 else 1}''',
+    'argument-snapshot': '''add=(x:int64 y:int64)=>x+y
+main=()=>{let x:int64=40 return add(x {x=99 2})}''',
     'default-field': 'Value:type=[x:int64=42]\nmain=()=>Value[].x',
     'closure': 'main=()=>{let x:int64=40 let f=(n:int64)=>x+n return f(2)}',
     'closure-state': '''main=()=>{let x:int64=40 let f=()=>{x+=1 return x}
@@ -182,6 +215,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'named-duplicate': ('add=(x:int64 y:int64)=>x+y\nmain=()=>add(40 x=2)', 'given twice'),
     'match-incomplete': ('main=()=>match 42 {<42>=>42}', 'not exhaustive'),
     'match-incomplete-statement': ('main=()=>{match true {<true>=>42} return 42}', 'not exhaustive'),
     'match-wrong-type': ('main=()=>match 42 {n:string=>n.length _=>42}', 'not a member'),
@@ -440,7 +474,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith('match-')], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')

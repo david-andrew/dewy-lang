@@ -65,11 +65,17 @@ core's tag checker. Other matches require a catch-all. Refinement, structural,
 sequence, union-subset and literal-on-union patterns are not implemented yet;
 there is no proof-engine dependency.
 
+Named and positional call arguments may be interleaved; positional values fill
+the next unassigned parameter. Explicit Dewy arguments evaluate in source order,
+followed by omitted defaults in parameter order, including record construction.
+Already evaluated scalar and managed values survive changes made by later
+arguments. Named arguments on first-class function values remain unsupported.
+
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
 
-The combined Dewy/editor/shared-core gate now contains 348 checks and takes
-about 27 seconds on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 389 checks and takes
+about 30 seconds on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

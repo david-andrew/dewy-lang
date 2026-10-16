@@ -283,3 +283,19 @@ compiler self-build times of 1.295 → 1.273 s, and particle builds of
 `optimizer-scratch-benchmark.json` for every sample and compiler identities.
 This changes scratch allocation, not optimization decisions. All 348 checks
 pass in 26.59 seconds (`optimizer-scratch-tests.log`).
+
+## Named calls and argument snapshots
+
+Mixed named/positional calls no longer overwrite already filled parameter slots.
+Dewy calls and constructors keep parameter slots canonical while evaluating
+explicit arguments in source order, then omitted defaults in parameter order.
+Lowering captures scalar vregs before later arguments can reassign their locals;
+managed-value borrowing follows the actual evaluation order. Focused tests cover
+side effects, generics, defaults, constructors, mutable parameters, scalar locals,
+and retained arrays/records on native and web, in debug and release.
+
+The new regression cases exposed 24 failing target/mode combinations before the
+fix. A fresh C bootstrap passes all 389 checks in 29.85 seconds
+(`call-order-build.json`, `call-order-tests.log`). Six alternating measured
+release game builds after warm-up gave 323.06 ms before and 324.04 ms after
+(`call-order-perf.json`), effectively unchanged.

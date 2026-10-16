@@ -764,7 +764,30 @@ tuple_off = (t: int, idx: int) -> int:
     off
 
 # ---------------- calls ----------------
-call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: int = 0):
+call_eval_order = (n: int) -> int[]:
+    order: int[]
+    metadata = int(nodes[n].c)
+    if metadata != 0:
+        loop e in kids(metadata): order.push(nodes[e].ival)
+    else:
+        loop i in [0..nkids(n)): order.push(i)
+    order
+
+call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: int = 0, order: int[] = []):
+    if order.len() > 0:
+        ordered_args: int[]
+        ordered_types: int[]
+        ordered_mut = 0
+        loop i in 0.. and slot in order:
+            ordered_args.push(args[slot])
+            ordered_types.push(ptypes[slot])
+            if mutmask & (1 << slot) != 0: ordered_mut |= 1 << i
+        values: int[]
+        call_args(ordered_args, ordered_types, ordered_mut, values, callee)
+        base = out.len()
+        out.resize(base + order.len())
+        loop i in 0.. and slot in order: out[base + slot] = values[i]
+        return
     any_mut = mutmask != 0
     if any_mut: mut_alias_check(args, mutmask, callee)
     loop i in 0.. and a in args:
@@ -778,6 +801,12 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         pt = ntype(a)
         if i < ptypes.len(): pt = ptypes[i]
         val = gen_expr(a)
+        # A scalar can live in a local's mutable vreg. Capture its value before
+        # a later argument reassigns that local, just as we retain managed data.
+        if i + 1 < args.len() and vc(pt) != VC_AGG and val.v >= 0 and not is_kv(val.v):
+            saved = vreg(vt_of(pt))
+            e_mov(saved, val.v)
+            val.v = saved
         if not val.owned and is_managed(pt) and (any_mut or borrow_may_change(a, args, i, callee)): val = own(val, pt)
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
@@ -1122,7 +1151,7 @@ race_scan = (n: int, f: int, who: str, captures: bool):
     loop i in [0..nkids(n)): race_scan(kid(n, i), f, who, captures)
     loop i in [0..nkids2(n)): race_scan(kid2(n, i), f, who, captures)
 
-gen_direct_call = (f: int, args: int[]) -> Val:
+gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     ret = int(fns[f].ret)
     rslot = -1
     argv: int[]
@@ -1130,7 +1159,7 @@ gen_direct_call = (f: int, args: int[]) -> Val:
         rslot = new_temp(ret)
         argv.push(e_slot(rslot))
     mark = copy_backs.len()
-    call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f)
+    call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f, order)
     rv = e_call(lf_of_inst(f), argv, ret_vt(ret))
     copy_back(mark)
     finish_call(ret, rv, rslot)
@@ -2558,7 +2587,9 @@ gen_expr = (e: int) -> Val:
         aux = int(nodes[e].aux)
         if aux == 0:
             if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
-            r = gen_direct_call(int(nodes[e].sym), kids(e))
+            order: int[]
+            if nodes[e].c != 0: order = call_eval_order(e)
+            r = gen_direct_call(int(nodes[e].sym), kids(e), order)
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 1:
@@ -2572,7 +2603,7 @@ gen_expr = (e: int) -> Val:
             s = new_temp(t)
             d = e_slot(s)
             e_zero(d, tsize(t))
-            loop i in [0..int(structs[si].nfields)):
+            loop i in call_eval_order(e):
                 a = kid(e, i)
                 if a == 0: continue
                 f = int(structs[si].fields) + i
@@ -2594,7 +2625,7 @@ gen_expr = (e: int) -> Val:
             d = e_slot(s)
             e_zero(d, tsize(t))
             e_store(d, 0, e_iconst(v), 4)
-            loop i in [0..int(variants[vi].nfields)):
+            loop i in call_eval_order(e):
                 f = int(variants[vi].fields) + i
                 val = gen_owned(kid(e, i))
                 store_val(int(fields[f].type), d, int(fields[f].offset), val.v)
