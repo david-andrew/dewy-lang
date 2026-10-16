@@ -7,11 +7,11 @@ recover fast development while retaining useful Dewy language behavior, rather
 than reproducing internal representations or executable bytes.
 
 The compiler and libraries now live directly in [`core/`](../../core/README.md).
-Build from the included C bootstrap and an existing native Dewy parser seed:
+Build entirely from the included C bootstrap sources:
 
 ```sh
 python3 -m tools.sloppy_core.build \
-  --dewy /path/to/native/dewy --bootstrap --output /tmp/dewy-core
+  --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core build example.dewy -o /tmp/example
 DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -n0 tests/python_misc/test_sloppy_core.py
@@ -21,9 +21,12 @@ No separate Sloppy checkout is needed. Sources originated at
 `235e19a271bccad3fe72e36d03264807a632dc1b` and are maintained directly in this
 repository, with licenses and original file hashes retained. The old patch-based
 builder has been removed. See `core/README.md` for seeded rebuilds, source layout,
-and the independent C bootstrap route. The syntax parser still needs the existing
-native Dewy seed on its first build; this is not yet a C-only bootstrap of the
-combined compiler. Hashes record provenance, not a requirement for byte equality.
+and the independent C bootstrap route. The syntax parser has its own compressed C seed,
+so a clean bootstrap no longer needs an older Dewy compiler. Regeneration of that
+parser seed remains a maintainer operation using the older compiler pair; see
+`core/bootstrap/README.md`. Hashes record provenance, not a byte-equality gate.
+The complete build steps took about 24 seconds on the development machine.
+
 
 Nothing replaces the installed Dewy compiler. The parser currently runs as a
 subprocess for each Dewy source file; this intentionally simple boundary can be

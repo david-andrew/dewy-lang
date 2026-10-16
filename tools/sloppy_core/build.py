@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from udewy.cache import cache_artifact
@@ -35,10 +38,15 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(DEWY_LIBRARY_ROOT=str(ROOT / 'library'), SLOPPY_LIB=str(output / 'lib'),
                SLOPPY_EMIT_WORKERS='1')
+    steps = []
 
     def run(command, log, cwd=output):
+        started = time.perf_counter()
         result = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
                                 text=True, timeout=180, check=False)
+        steps.append({'command': [str(arg) for arg in command],
+                      'wall_seconds': time.perf_counter() - started,
+                      'returncode': result.returncode})
         (output / log).write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError(f'{log}:\n{result.stdout}{result.stderr}')
@@ -46,15 +54,18 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
     native_parser = binary_dir / 'dewy-parse'
     if parser is not None:
         shutil.copy2(parser.resolve(strict=True), native_parser)
-    else:
-        if dewy is None:
-            raise ValueError('provide a native parser or a Dewy compiler seed')
+    elif dewy is not None:
         dewy = dewy.resolve(strict=True)
         work = output / 'parser-build'
         work.mkdir()
         source = HERE / 'parse.dewy'
         run([dewy, '-c', source], 'parser-build.log', cwd=work)
         shutil.copy2(work / cache_artifact(source, cwd=work), native_parser)
+    else:
+        source = output / 'bootstrap/dewy_parse.c'
+        source.write_bytes(gzip.decompress((output / 'bootstrap/dewy_parse.c.gz').read_bytes()))
+        cc = shlex.split(os.environ.get('CC', 'cc'))
+        run([*cc, '-std=c99', '-O1', source, '-o', native_parser, '-lm'], 'parser-c-build.log')
     bootstrap_hashes = []
     if bootstrap:
         # Build the implementation-language frontend first. This permits the
@@ -86,13 +97,14 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
         'parser_source_sha256': identity(HERE / 'parse.dewy') if dewy else None,
         'sources_sha256': sources,
         'bootstrap_generations_sha256': bootstrap_hashes,
+        'build_steps': steps,
     }, indent=2) + '\n')
     return binary
 
 
 if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
-    parsers = cli.add_mutually_exclusive_group(required=True)
+    parsers = cli.add_mutually_exclusive_group()
     parsers.add_argument('--dewy', type=Path, help='native Dewy seed used to build the syntax parser')
     parsers.add_argument('--parser', type=Path, help='reuse an already built dewy-parse binary')
     seeds = cli.add_mutually_exclusive_group(required=True)

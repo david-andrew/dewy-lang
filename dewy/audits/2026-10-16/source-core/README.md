@@ -162,3 +162,20 @@ optional/union fixture pairs were added alongside the Dewy cases. The existing
 `dewy/tests/optional_values.dewy` runs unchanged. All 211 combined checks pass in
 13.94 seconds (`optionals-tests.log`), including native/web debug/release optional
 union and managed-copy checks and the new VS Code client test.
+
+## Complete C bootstrap and independent CI
+
+The syntax parser now has a compressed generated C snapshot with source and
+generator provenance under `core/bootstrap/`. The default bootstrap needs Python,
+a C compiler and make, with no prebuilt Dewy/Sloppy executable. The 24.40 seconds
+of build steps include the syntax parser, stage zero, implementation frontend,
+full frontend and self-build (`complete-c-build.json`). The resulting toolchain
+passes all 211 checks in 14.19 seconds (`complete-c-tests.log`). Repeating with
+pytest plugin autoload disabled, as in the new CI workflow, passes in 14.46 seconds
+(`complete-c-ci-tests.log`). These are local results, not hosted CI certification.
+
+The maintainer regeneration command was exercised separately and completed in
+17.92 seconds. It still uses the earlier native compiler pair; ordinary builds
+and program development do not. No executable byte parity gate was introduced.
+The independent `Compact core` workflow builds from C and checks language,
+native/web applications, editor transport and reload under a five-minute limit.

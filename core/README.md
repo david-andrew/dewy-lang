@@ -11,12 +11,11 @@ experimental subset, not a replacement for the published Dewy compiler.
 
 ## Build
 
-From the repository root, using a working native Dewy compiler to build the
-syntax parser, and a C compiler plus `make` for the compact core:
+From the repository root, using Python, a C compiler and `make`:
 
 ```sh
 python3 -m tools.sloppy_core.build \
-  --dewy /path/to/native/dewy --bootstrap --output /tmp/dewy-core
+  --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core --version
 /tmp/dewy-core/bin/dewy-core new /tmp/my-dewy-game
 /tmp/dewy-core/bin/dewy-core watch /tmp/my-dewy-game/main.dewy
@@ -25,7 +24,9 @@ python3 -m tools.sloppy_core.build \
   --target wasm -o /tmp/paddle
 ```
 
-The output directory must be new. It contains a standalone `bin/` and `lib/`,
+No prebuilt Dewy or Sloppy compiler, or separate reference checkout, is needed.
+The complete C-bootstrap build steps took about 24 seconds on the development
+machine. The output directory must be new. It contains a standalone `bin/` and `lib/`,
 source snapshots, build logs and a hash manifest. No installed compiler is
 changed. Python is build tooling only; program compilation and execution are
 native. The compiler host currently requires Linux x86-64; native Linux and web
@@ -57,14 +58,16 @@ from Sloppy retain their names for now.
 
 ```sh
 DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
-  .venv/bin/python -m pytest -q -n0 \
+  .venv/bin/python -m pytest -q -o addopts='' \
   tests/python_misc/test_sloppy_core.py \
   tests/python_misc/test_sloppy_core_editor.py \
   tests/python_misc/test_sloppy_core_watch.py \
   tests/python_misc/test_sloppy_core_upstream.py
 ```
 
-The gate tests expected Dewy behavior, native/web game simulation, a headless
+Only pytest and Node (for web/client tests) are needed for this gate. The
+`Compact core` GitHub workflow bootstraps from C and runs it independently of
+the earlier compiler suite. The gate tests expected Dewy behavior, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
 
@@ -99,8 +102,10 @@ native-server integration test in the editor gate above.
 - `bootstrap/frontend.jo` selects only the implementation-language parser for
   the initial bootstrap generation. That compiler then builds the complete
   frontend, which builds itself again.
-- `../tools/sloppy_core/parse.dewy` is the native syntax-parser driver. This is
-  the remaining bootstrap dependency on the older Dewy compiler.
+- `bootstrap/dewy_parse.c.gz` is the standalone C syntax-parser seed. Its
+  [regeneration instructions](bootstrap/README.md) and source provenance are
+  included. The parser source still lives in `dewy/bootstrap/parser/`, with
+  the driver at `../tools/sloppy_core/parse.dewy`.
 
 The C bootstrap intentionally implements a smaller language. The frontend seam
 allows the main compiler to evolve without implementing every feature twice.
