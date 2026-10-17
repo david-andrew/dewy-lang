@@ -186,6 +186,24 @@ def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists):
         watcher.close()
 
 
+def test_core_watch_named_language_fallback(compiler, tmp_path):
+    source = tmp_path / 'main.dewy'
+    jo = tmp_path / 'helper.jo'
+    dewy = tmp_path / 'helper.dewy'
+    save(source, 'from helper import label\nmain=()=>printl(label())')
+    watcher = Watch(compiler, source)
+    try:
+        watcher.expect('waiting for changes')
+        save(jo, 'label = (): "implementation fallback"')
+        watcher.expect('implementation fallback', timeout=3)
+        save(dewy, 'label=()=>"preferred Dewy module"')
+        watcher.expect('preferred Dewy module', timeout=3)
+        dewy.unlink()
+        watcher.expect('implementation fallback', timeout=3)
+    finally:
+        watcher.close()
+
+
 def test_core_watch_new_missing_asset_preserves_game(compiler, tmp_path):
     source = tmp_path / 'game.dewy'
     program = '''let label="original"

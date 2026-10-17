@@ -1,6 +1,8 @@
 """Expected user behavior for the experimental source-level core."""
 import base64
+import math
 import os
+import random
 import re
 import shutil
 import struct
@@ -41,6 +43,65 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'bigint-parse': '''from bigint import bigint, parse_bigint
+main=()=>{
+loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if parse_bigint(text) isnt? none return 1}
+let zero=bigint("-0000") let positive=bigint("+00042") let negative=bigint("-00042")
+return if "{zero}" =? "0" and "{positive}" =? "42" and "{negative}" =? "-42" and zero.gcd(zero) =? 0 42 else 2
+}''',
+    'bigint-conversions': '''from bigint import bigint
+main=()=>{
+if bigint(-9223372036854775808).to_int64() not=? -9223372036854775808 return 1
+if bigint(9223372036854775807).to_int64() not=? 9223372036854775807 return 2
+if bigint(18446744073709551615).to_uint64() not=? 18446744073709551615 return 3
+if bigint("9223372036854775808").to_int64() isnt? none return 4
+if bigint("-9223372036854775809").to_int64() isnt? none return 5
+if bigint("18446744073709551616").to_uint64() isnt? none return 6
+if bigint(-1).to_uint64() isnt? none return 7
+return if bigint(0).to_int64() =? 0 and bigint(0).to_uint64() =? 0 42 else 8
+}''',
+    'bigint-powers': '''from bigint import bigint
+main=()=>{
+let large=bigint(2).pow(100)
+if "{large}" not=? "1267650600228229401496703205376" return 1
+if "{bigint(-3).pow(101)}" not=? "-1546132562196033993109383389296863818106322566003" return 2
+return if bigint(0).pow(0) =? 1 and bigint(0).pow(10) =? 0 and bigint(-1).pow(21) =? -1 42 else 3
+}''',
+    'bigint-mixed-and-copies': '''from bigint import bigint
+main=()=>{
+let value=bigint("123456789012345678901234567890") let copy=value
+let values=[value value] values[0]+=42 values[1]*=2
+if values[0]-42 not=? value or values[1]//2 not=? value or copy not=? value return 1
+let wide:uint64=18446744073709551615
+if value+wide not=? wide+value or value*wide not=? wide*value return 2
+if (wide-value)+value not=? wide or value+(-7) not=? -7+value return 3
+if not (7 <? value) or not (value >? 7) or not (value >=? value) return 4
+return if "{value}" =? "123456789012345678901234567890" 42 else 5
+}''',
+    'bigint-map-keys': '''from bigint import bigint
+main=()=>{let keys=[bigint("12345678901234567890")->42 bigint(0)->1]
+let another=bigint("12345678901234567889")+1
+return if keys[another] =? 42 and keys[bigint("-000")] =? 1 42 else 1}''',
+    'bigint-lifetime': '''from bigint import bigint
+work=():>void=>{
+let original=bigint("123456789012345678901234567890")
+loop i in [1..12) {let value=(original+i)*3 let parts=value.divmod(bigint(i+1))
+let text="{parts.quotient}" if text.length =? 0 panic("missing digits")}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..40) {work()}
+return if alloc_count() =? before 42 else 1}''',
+    'bigint-literal-floor': '''from bigint import bigint
+main=()=>{let value=bigint("123456789012345678901234567891")
+if "{value//2}" not=? "61728394506172839450617283945" or value%2 not=? 1 return 1
+if "{(-value)//2}" not=? "-61728394506172839450617283946" or (-value)%2 not=? 1 return 2
+return if value//1 =? value and value%1 =? 0 and value%8 =? 3 42 else 3}''',
+    'overload-group-unsigned-literal': '''choose=((value:int64)=>1)&((value:uint64)=>42)
+main=()=>if choose(42) =? 1 choose(18446744073709551615) else 2''',
+    'generic-operator-floor': '''Box:type=[value:int64]
+__floordiv__=(a:Box b:int64)=>Box[a.value+b]
+__mod__=(a:Box b:int64)=>Box[a.value+b]
+main=()=>{let box=Box[40] let a=box//2 let b=box%8
+return if a.value =? 42 and b.value =? 48 42 else 1}''',
     'overload-group-arity': '''let choose = (():>int64=>40) & ((value:int64):>int64=>value+2)
 main=()=>choose()+choose(0)''',
     'overload-group-types': '''const measure = (((value:int64)=>value) & ((text:string)=>text.length))
@@ -785,6 +846,168 @@ def test_core_values(value_batches, name, release):
     assert code == '42', f'{name}: {code}\n{output}'
     if name == 'unicode':
         assert output == 'é🙂 42\n'
+
+
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+@pytest.mark.parametrize('both', [False, True], ids=['fallback', 'preferred'])
+def test_core_named_module_languages(compiler, tmp_path, extension, both):
+    other = 'jo' if extension == 'dewy' else 'dewy'
+    (tmp_path / f'helper.{other}').write_text('answer=()=>41' if other == 'dewy' else 'answer = (): 41')
+    expected = 41
+    if both:
+        expected = 42
+        (tmp_path / f'helper.{extension}').write_text('answer=()=>42' if extension == 'dewy' else 'answer = (): 42')
+    source = tmp_path / f'main.{extension}'
+    if extension == 'dewy':
+        source.write_text(f'from helper import answer\nmain=()=>if answer() =? {expected} 42 else 1')
+    else:
+        source.write_text(f'from helper import answer\nmain = (): if answer() == {expected}: 42 else: 1')
+    binary = tmp_path / 'imports'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+def test_core_bundled_module_path(compiler, tmp_path, extension):
+    (tmp_path / 'bigint.dewy').write_text('bigint=(value)=>0')
+    (tmp_path / 'bigint.jo').write_text('bigint = (value): 0')
+    source = tmp_path / f'main.{extension}'
+    if extension == 'dewy':
+        source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=()=>if bigint(42).to_int64() =? 42 42 else 1')
+    else:
+        source.write_text('from "@lib/bigint.dewy" import bigint\nmain = (): if bigint(42).to_int64() == 42: 42 else: 1')
+    binary = tmp_path / 'bundled'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('expression, diagnostic', [
+    ('bigint(42)//bigint(0)', 'big integer division by zero'),
+    ('bigint(42)%0', 'big integer division by zero'),
+    ('bigint(2).pow(-1)', 'big integer exponent must be nonnegative'),
+    ('bigint("12x")', 'invalid decimal integer'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_errors(compiler, tmp_path, expression, diagnostic, target, release):
+    source = tmp_path / 'invalid.dewy'
+    source.write_text(f'from bigint import bigint\nmain=():>void=>{{printl"{{{expression}}}"}}')
+    binary = tmp_path / 'invalid'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web bigint checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'invalid.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0
+    assert diagnostic in ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_example(compiler, tmp_path, target, release):
+    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/exact_integers.dewy'
+    binary = tmp_path / 'exact'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web bigint checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'exact.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    quotient, remainder = divmod(-123456789012345678901234567890, 9876543210987654321)
+    assert ran.stdout.splitlines() == [f'100! = {math.factorial(100)}',
+                                      f'Ways to choose 50 of 100: {math.comb(100, 50)}',
+                                      f'Floor quotient: {quotient}; remainder: {remainder}',
+                                      'Reconstruction: true', f'2^256 = {2**256}']
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_arithmetic(compiler, tmp_path, target, release):
+    boundary = [0, 1, -1, 2, -2]
+    for bits in [31, 32, 63, 64, 96, 128]:
+        boundary.extend([2**bits-1, 2**bits, 2**bits+1, -(2**bits-1), -(2**bits+1)])
+    divisors = [1, -1, 3, -3, 2**32-1, -(2**32-1), 2**32+1, -(2**32+1), 2**96-1, -(2**96+1)]
+    pairs = [(a, b) for a in boundary for b in divisors]
+    # Algorithm D: a low divisor limb forces the final add-back; a quotient
+    # estimate at the limb base forces the estimate correction before subtract.
+    base = 2**32
+    for divisor in [base**2 * (base//2) + 1, base**2 - 1, base**2 + base - 1]:
+        for multiplier in [2, base - 1, base, base + 1]:
+            for offset in [-1, 0, 1]:
+                numerator = divisor * multiplier + offset
+                pairs.extend((a, b) for a in [numerator, -numerator] for b in [divisor, -divisor])
+    rng = random.Random(42026)
+    for _ in range(128):
+        a = rng.getrandbits(rng.choice([32, 64, 128, 256, 512]))
+        b = rng.getrandbits(rng.choice([32, 64, 128, 256])) or 1
+        pairs.append((a * rng.choice([-1, 1]), b * rng.choice([-1, 1])))
+    (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b}' for a, b in pairs))
+    source = tmp_path / 'bigint.dewy'
+    source.write_text('''from bigint import BigInt, bigint
+main=():>void=>{
+let input=$include_bytes(p"cases.txt") as string|none
+if input is? none panic("invalid test data")
+loop line in input.split("\n") {
+    let fields=line.split(" ")
+    let a=bigint(fields[0]) let b=bigint(fields[1])
+    let parts=a.divmod(b)
+    if a//b not=? parts.quotient or a%b not=? parts.remainder panic("division operators disagree")
+    printl"{a+b}|{a-b}|{a*b}|{parts.quotient}|{parts.remainder}|{a.gcd(b)}|{a <? b}|{a =? b}"
+}
+}
+''')
+    expected = ['|'.join(map(str, [a+b, a-b, a*b, a//b, a%b, math.gcd(a, b)]))
+                + f'|{str(a < b).lower()}|{str(a == b).lower()}' for a, b in pairs]
+    binary = tmp_path / 'bigint'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web bigint checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'bigint.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -1652,7 +1875,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

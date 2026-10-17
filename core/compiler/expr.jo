@@ -929,7 +929,8 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         if union_target(a, ntype(a), p) >= 0: return 1
         return -1
     if is_lit(a):
-        # an integer literal goes to int, then another integer type, then f64, then f32
+        # Prefer the literal's default integer width/sign, but only among types
+        # that can represent it (large Dewy literals default to uint64).
         if pk == .param:
             b = binds[int(types[p].id)]
             if b == 0: return 3
@@ -938,8 +939,8 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         if is_union(p) and has_var(p): return match_type(pat, lit_default(a), binds, 0)
         if pk == .int_:
             if nodes[a].kind == .int_lit:
-                if p == T_INT: return 0
                 if not lit_fits(a, p): return -1
+                if p == lit_default(a): return 0
                 return 1
             return -1
         if pk == .float_:
@@ -1888,12 +1889,51 @@ collect_fns = (name: int, out: mut int[]):
     collect_in(prelude, name, out)
     hide_private = false
 
+dewy_floor_call = (n: int, name: int, args: int[], expected: int) -> int:
+    literal_divisor = nodes[args[1]].kind == .int_lit
+    checked: int[]
+    loop arg in args:
+        check_expr(arg, 0)
+        checked.push(last_checked)
+        add_flag(last_checked, NF_CHECKED)
+    a = checked[0]
+    b = checked[1]
+    modulo = name == intern("__floor_mod")
+    if is_struct_like(ntype(a)) or is_struct_like(ntype(b)):
+        op = if modulo: "%" else: "//"
+        nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b))
+        result = op_overload(n, op)
+        if result == 0: fatal(nodes[n].pos, "operator {op} is not defined for {type_str(ntype(a))} and {type_str(ntype(b))}")
+        return result
+    # Only built-in arithmetic may replace a literal divisor with a shift or
+    # mask. Custom protocols receive the original operand, including 1 or 2^k.
+    helper = name
+    divisor = nodes[b].ival
+    if literal_divisor and nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
+        if modulo:
+            helper = intern("__floor_mod_pow2")
+            nodes[b].ival = divisor - 1
+        else:
+            helper = intern("__floor_div_pow2")
+            shift = 0
+            loop divisor > 1:
+                divisor = divisor >> 1
+                shift += 1
+            nodes[b].ival = shift
+    if nodes[n].a != 0: nodes[int(nodes[n].a)].name = i32(helper)
+    declarations: int[]
+    collect_fns(helper, declarations)
+    resolve_fn_call(n, helper, declarations, checked, expected)
+
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
         if ufcs and args.len() > 0:
             check_expr(args[0], 0)
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
+    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod")) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
+            return dewy_floor_call(n, name, args, expected)
     ii = intrinsic_of(name)
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0:
         a0 = args[0]
@@ -3590,6 +3630,8 @@ dewy_operator_name = (op: str, unary: bool) -> str:
         "-": "__sub__"
         "*": "__mul__"
         "/": "__truediv__"
+        "//": "__floordiv__"
+        "%": "__mod__"
         "==": "__eq__"
         "!=": "__ne__"
         "<": "__lt__"

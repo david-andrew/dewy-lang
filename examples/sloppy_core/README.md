@@ -34,6 +34,14 @@ from oldest to newest. Invalid capacity or indices panic. Use the factory to
 construct it; its public storage fields are implementation details. Copying is
 cheap until a copy is modified, when ordinary array value semantics apply.
 
+[`exact_integers.dewy`](exact_integers.dewy) uses the bundled `bigint` module to
+compute 100!, choose 50 items from 100, perform signed floor division and print
+2^256. Its arithmetic and decimal formatting are exact on native and web.
+
+```sh
+python3 -m tools.core run examples/sloppy_core/exact_integers.dewy
+```
+
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
 code are Dewy. The pinned Sloppy platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.

@@ -400,6 +400,9 @@ draw_present = () -> bool:
 wm_files_collect = ():
     wm_files = []
     loop m in modules: wm_files.push(files[int(m.file)].path)
+    # A newly created, higher-priority named module can replace a fallback.
+    loop p in w_missing_inputs:
+        if not wm_files.contains(p): wm_files.push(p)
     loop a in w_assets:
         if not wm_files.contains(a): wm_files.push(a)
     loop a in embedded_files:

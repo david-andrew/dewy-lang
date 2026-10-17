@@ -636,6 +636,15 @@ __never_skip = (decl: int) -> bool:
     nm == "main" or nm == "update" or nm == "draw"
 
 # ---------------- modules ----------------
+module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: bool = false) -> str:
+    extensions = if dewy: [".dewy", ".jo"] else: [".jo", ".dewy"]
+    loop extension in extensions:
+        path = stem + extension
+        if path == exclude: continue
+        if file_exists(path): return path
+        if watch_candidates: watch_missing_input(path)
+    ""
+
 find_module = (path: str) -> int:
     loop i in 0.. and m in modules:
         if files[int(m.file)].path == path: return i
@@ -768,11 +777,14 @@ register_decls = (m: int, decls: int[]):
             if nodes[d].aux2 == 1:
                 # use 'file.jo': relative to the importing file
                 path = rel
-                if not is_abs_path(rel): path = "{modules[m].dir}/{rel}"
-                if len(modules[m].dir) == 0: path = rel
+                bundled = starts_with(rel, "@lib/")
+                if bundled: path = "{lib_dir}/{rel[5..]}"
+                else:
+                    if not is_abs_path(rel): path = "{modules[m].dir}/{rel}"
+                    if len(modules[m].dir) == 0: path = rel
                 # ('package/file.jo': a file of a package)
                 sl = find(rel, "/")
-                if not file_exists(path) and sl > 0:
+                if not bundled and not file_exists(path) and sl > 0:
                     pn = rel[..sl)
                     if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
                     if let pd = pkg_dirs.get(pn): path = "{pd}/{rel[sl + 1..]}"
@@ -786,18 +798,21 @@ register_decls = (m: int, decls: int[]):
                 path = pkg_main(rel, pd) ?? ""
                 if len(path) == 0: fatal(nodes[d].pos, "package '{rel}' has no main file ({rel}.jo, or only one .jo file at its root): import one of its files, as import '{rel}/file.jo'")
             else:
-                # a standard-library module by name: lib/NAME.jo or lib/{std,game,core}/NAME.jo (a
-                # file of that name beside the program first, unless it is this one: physics.jo's
-                # own `import physics` is the library's)
-                if path == files[int(modules[m].file)].path or rfind(files[int(modules[m].file)].path, "/{rel}.jo") == len(files[int(modules[m].file)].path) - len(rel) - 4: path = ""
+                # Named modules may be written in either language. Prefer the
+                # importer's language within each directory; local files win.
+                # Exclude the importing file itself (physics.dewy may import
+                # the bundled physics implementation).
+                current = files[int(modules[m].file)].path
+                dewy = ends_with(current, ".dewy")
+                path = module_source("{modules[m].dir}/{rel}", dewy, current, true)
                 # (a file beside it with a library module's name: that file, said once)
-                if file_exists(path) and not pos_in_lib(nodes[d].pos) and file_exists("{lib_dir}/{rel}.jo"):
+                if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source("{lib_dir}/{rel}", dewy)) > 0:
                     warn(nodes[d].pos, "this imports {path}, not the library's {rel} (a file beside this one has its name)")
-                if not file_exists(path): path = "{lib_dir}/{rel}.jo"
-                if not file_exists(path): path = "{lib_dir}/std/{rel}.jo"
-                if not file_exists(path): path = "{lib_dir}/game/{rel}.jo"
-                if not file_exists(path): path = "{lib_dir}/core/{rel}.jo"
-                if not file_exists(path):
+                if len(path) == 0: path = module_source("{lib_dir}/{rel}", dewy)
+                if len(path) == 0: path = module_source("{lib_dir}/std/{rel}", dewy)
+                if len(path) == 0: path = module_source("{lib_dir}/game/{rel}", dewy)
+                if len(path) == 0: path = module_source("{lib_dir}/core/{rel}", dewy)
+                if len(path) == 0:
                     pym = ""
                     if rel == "re": pym = ": regular expressions are there without an import, `regex(r\"\\d+\")`"
                     else if rel == "sys": pym = ": `args()` is the command line, `exit(code)` ends the program"

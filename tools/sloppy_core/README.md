@@ -196,8 +196,40 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,221 checks and took
-63 seconds in the latest development run, including separate compiler
+The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
+base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
+records and no refinement-proof representation. Constructors accept signed and
+unsigned machine words or decimal text; checked word conversions, interpolation,
+comparisons, arithmetic, floor division/modulo, nonnegative powers and GCD work
+on native and web. This explicit `BigInt` type does not yet replace fixed-width
+integer defaults or add automatic widening. See the language guide and
+`examples/sloppy_core/exact_integers.dewy`.
+
+The differential gate compares 622 signed operand pairs against Python integers,
+including limb boundaries, random values up to 512 bits and Algorithm D quotient
+correction/add-back cases, in native/web debug/release builds. It also checks
+invalid input, zero division, checked conversions, map keys and allocation balance.
+Named imports now find either `.dewy` or `.jo`, preferring the importing language
+within each search directory; watch tracks a missing higher-priority candidate.
+An explicit `p"@lib/physics.jo"` path selects the bundled implementation even
+when a neighboring Dewy game has the same basename.
+
+`python3 -m tools.sloppy_core.benchmark_bigint COMPILER --output /tmp/bigint.json`
+measures factorial arithmetic, 512-bit division and 2048-bit decimal round trips.
+Use `--baseline OLDER_COMPILER` to compare compatible toolchains. Seven warmed,
+alternating runs of 2,000 iterations gave factorial medians of 107.70 ms before
+removing redundant proof-era guards and 86.48 ms after (about 20% less time).
+Division medians were 3.73/3.29 ms; decimal round trips were 139.45/139.64 ms.
+These compare two versions of this library on a shared desktop, not Python/GMP
+runtime performance. Python independently validates every measured checksum.
+Raw timings, compiler/library hashes and complete programs are recorded in
+`bigint-runtime.json` in the source-core audit. Seven warmed builds of the exact
+integer example took a median 91.84 ms (92.26 ms before cleanup); tour builds
+were 85.06/82.22 ms. These small differences do not establish a compilation
+speed change. See `bigint-compile.json`.
+
+The combined Dewy/editor/shared-core gate now contains 1,288 checks and took
+73 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

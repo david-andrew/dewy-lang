@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKLOADS = {
     'tour': ('build', 'examples/sloppy_core/tour.dewy', '--release'),
     'history': ('build', 'examples/sloppy_core/history.dewy', '--release'),
+    'exact-integers': ('build', 'examples/sloppy_core/exact_integers.dewy', '--release'),
     'entities': ('build', 'examples/sloppy_core/entities.dewy', '--release'),
     'physics-check': ('check', 'examples/sloppy_core/physics.dewy'),
     'physics': ('build', 'examples/sloppy_core/physics.dewy', '--release'),

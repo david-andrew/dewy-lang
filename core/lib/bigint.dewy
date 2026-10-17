@@ -1,0 +1,495 @@
+# Exact integers, using ordinary owned arrays on the compact runtime.
+# Magnitude arithmetic is adapted from library/bigint.dewy in this repository.
+# Limbs are little-endian base 2^32, held in uint64 words for full products.
+# The representation is internal: construct through bigint / parse_bigint.
+BigInt:type=[_sign:int64=0 _limbs:array<uint64>]
+const _LIMB_BASE:uint64=4294967296
+const _LIMB_MASK:uint64=4294967295
+
+let _bigint_trim = (@limbs:array<uint64>):>void => {
+    loop limbs.length >? 0 and limbs[limbs.length - 1] =? 0 {
+        limbs.pop()
+    }
+}
+
+let _mag_compare = (a:array<uint64> b:array<uint64>):>int64 => {
+    if a.length >? b.length { return 1 }
+    if a.length <? b.length { return -1 }
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        if a[i] >? b[i] { return 1 }
+        if a[i] <? b[i] { return -1 }
+    }
+    return 0
+}
+
+
+let _mag_add = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let carry:uint64 = 0
+    let i:int64 = 0
+    loop i <? a.length or i <? b.length {
+        let sum:uint64 = carry
+        if i <? a.length { sum = sum + a[i] }
+        if i <? b.length { sum = sum + b[i] }
+        result.push(sum and _LIMB_MASK)
+        carry = sum >> 32
+        i = i + 1
+    }
+    if carry not=? 0 { result.push(carry) }
+    return result
+}
+
+let _mag_sub = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let borrow:uint64 = 0
+    let i:int64 = 0
+    loop i <? a.length {
+        let top:uint64 = a[i] + _LIMB_BASE
+        let subtract:uint64 = borrow
+        if i <? b.length { subtract = subtract + b[i] }
+        let diff:uint64 = top - subtract
+        result.push(diff and _LIMB_MASK)
+        borrow = 1 - (diff >> 32)
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+
+let _mag_mul = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    let result:array<uint64> = []
+    let n:int64 = 0
+    loop n <? a.length + b.length { result.push(0)  n = n + 1 }
+    let i:int64 = 0
+    loop i <? a.length {
+        let carry:uint64 = 0
+        let j:int64 = 0
+        loop j <? b.length {
+            let k:int64 = i + j
+            let t:uint64 = a[i] * b[j] + result[k] + carry
+            result[k] = t and _LIMB_MASK
+            carry = t >> 32
+            j = j + 1
+        }
+        # Earlier rows stop before this slot, so it is still zero.
+        result[i + b.length] = carry
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+let _mag_shift_left = (limbs:array<uint64> bits:int64):>array<uint64> => {
+    if limbs.length =? 0 { return [] }
+    let limb_shift:int64 = bits // 32
+    let bit_shift:uint64 = (bits % 32) as uint64
+    let result:array<uint64> = []
+    let n:int64 = 0
+    loop n <? limb_shift { result.push(0)  n = n + 1 }
+    let carry:uint64 = 0
+    let i:int64 = 0
+    loop i <? limbs.length {
+        let t:uint64 = (limbs[i] << bit_shift) or carry
+        result.push(t and _LIMB_MASK)
+        carry = t >> 32
+        i = i + 1
+    }
+    if carry not=? 0 { result.push(carry) }
+    return result
+}
+
+
+let _mag_shift_right = (limbs:array<uint64> bits:int64):>array<uint64> => {
+    let limb_shift:int64 = bits // 32
+    let bit_shift:uint64 = (bits % 32) as uint64
+    let result:array<uint64> = []
+    let i:int64 = limb_shift
+    loop i <? limbs.length {
+        let value:uint64 = limbs[i] >> bit_shift
+        let next:int64 = i + 1
+        if next <? limbs.length {
+            if bit_shift not=? 0 { value = value or ((limbs[next] << (32 - bit_shift)) and _LIMB_MASK) }
+        }
+        result.push(value)
+        i = i + 1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+let _mag_trailing_zeros = (limbs:array<uint64>):>int64 => {
+    let count:int64 = 0
+    let i:int64 = 0
+    loop i <? limbs.length {
+        let limb:uint64 = limbs[i]
+        if limb =? 0 {
+            count = count + 32
+        } else {
+            loop (limb and 1) =? 0 {
+                limb = limb >> 1
+                count = count + 1
+            }
+            return count
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+let _limb_leading_zeros = (limb:uint64):>int64 => {
+    let count:int64 = 0
+    loop (limb and 2147483648) =? 0 and count <? 32 {
+        limb = limb << 1
+        count = count + 1
+    }
+    return count
+}
+
+let _MagDivMod:type = [quotient:array<uint64> remainder:array<uint64>]
+
+let _mag_divmod_limb = (a:array<uint64> divisor:uint64):>_MagDivMod => {
+    let quotient:array<uint64> = []
+    let n:int64 = 0
+    loop n <? a.length { quotient.push(0)  n = n + 1 }
+    let remainder:uint64 = 0
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        let value:uint64 = (remainder << 32) or a[i]
+        quotient[i] = value // divisor
+        remainder = value % divisor
+    }
+    _bigint_trim(@quotient)
+    if remainder =? 0 { return [quotient = quotient remainder = []] }
+    return [quotient = quotient remainder = [remainder]]
+}
+
+
+let _mag_mod_limb = (a:array<uint64> divisor:uint64):>uint64 => {
+    let remainder:uint64 = 0
+    let i:int64 = a.length
+    loop i >? 0 {
+        i = i - 1
+        remainder = ((remainder << 32) or a[i]) % divisor
+    }
+    return remainder
+}
+
+# Knuth Algorithm D. Inputs are canonical and b is nonzero; normalization
+# leaves its top limb in [2^31, 2^32), and u gets one extra leading limb.
+let _mag_divmod = (a:array<uint64> b:array<uint64>):>_MagDivMod => {
+    if _mag_compare(a b) <? 0 { return [quotient = [] remainder = a] }
+    if b.length =? 1 { return _mag_divmod_limb(a b[0]) }
+    let shift:int64 = _limb_leading_zeros(b[b.length - 1])
+    let v:array<uint64> = _mag_shift_left(b shift)
+    let u:array<uint64> = _mag_shift_left(a shift)
+    loop u.length <? a.length + 1 { u.push(0) }
+    let n:int64 = v.length
+    let m:int64 = u.length - n - 1
+    let quotient:array<uint64> = []
+    let k:int64 = 0
+    loop k <=? m { quotient.push(0)  k = k + 1 }
+    let v_top:uint64 = v[n - 1]
+    let v_next:uint64 = v[n - 2]
+    let j:int64 = m
+    loop j >=? 0 {
+        # Estimate from the top two remainder limbs over the top divisor limb.
+        let top:int64 = j + n
+        let numerator:uint64 = (u[top] << 32) or u[top - 1]
+        let qhat:uint64 = numerator // v_top
+        let rhat:uint64 = numerator % v_top
+        loop qhat >=? _LIMB_BASE or qhat * v_next >? ((rhat << 32) or u[top - 2]) {
+            qhat = qhat - 1
+            rhat = rhat + v_top
+            if rhat >=? _LIMB_BASE { break }
+        }
+        # Multiply and subtract qhat * v from u[j .. j + n].
+        let borrow:uint64 = 0
+        let carry:uint64 = 0
+        let i:int64 = 0
+        loop i <? n {
+            let at:int64 = i + j
+            let product:uint64 = qhat * v[i] + carry
+            carry = product >> 32
+            let difference:uint64 = u[at] + _LIMB_BASE - (product and _LIMB_MASK) - borrow
+            u[at] = difference and _LIMB_MASK
+            borrow = 1 - (difference >> 32)
+            i = i + 1
+        }
+        let difference:uint64 = u[top] + _LIMB_BASE - carry - borrow
+        u[top] = difference and _LIMB_MASK
+        borrow = 1 - (difference >> 32)
+        if borrow not=? 0 {
+            # The estimate was one too big: add the divisor back.
+            qhat = qhat - 1
+            let add_carry:uint64 = 0
+            i = 0
+            loop i <? n {
+                let at:int64 = i + j
+                let t:uint64 = u[at] + v[i] + add_carry
+                u[at] = t and _LIMB_MASK
+                add_carry = t >> 32
+                i = i + 1
+            }
+            u[top] = (u[top] + add_carry) and _LIMB_MASK
+        }
+        quotient[j] = qhat
+        j = j - 1
+    }
+    _bigint_trim(@quotient)
+    let remainder:array<uint64> = []
+    let low:int64 = 0
+    loop low <? n {
+        remainder.push(u[low])
+        low = low + 1
+    }
+    return [quotient = quotient remainder = _mag_shift_right(remainder shift)]
+}
+
+let _limb_gcd = (a:uint64 b:uint64):>uint64 => {
+    loop b not=? 0 {
+        let t:uint64 = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+
+let _mag_gcd = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+    if a.length =? 0 { return b }
+    if b.length =? 0 { return a }
+    if a.length =? 1 {
+        let limb:uint64 = a[0]
+        return [_limb_gcd(limb _mag_mod_limb(b limb))]
+    }
+    if b.length =? 1 {
+        let limb:uint64 = b[0]
+        return [_limb_gcd(limb _mag_mod_limb(a limb))]
+    }
+    let zeros_a:int64 = _mag_trailing_zeros(a)
+    let zeros_b:int64 = _mag_trailing_zeros(b)
+    let common:int64 = zeros_a
+    if zeros_b <? common { common = zeros_b }
+    let x:array<uint64> = _mag_shift_right(a zeros_a)
+    let y:array<uint64> = _mag_shift_right(b zeros_b)
+    loop y.length >? 0 {
+        # both odd: the difference of the larger and the smaller is even
+        if _mag_compare(x y) >? 0 {
+            x = _mag_sub(x y)
+            x = _mag_shift_right(x _mag_trailing_zeros(x))
+        } else {
+            y = _mag_sub(y x)
+            if y.length >? 0 { y = _mag_shift_right(y _mag_trailing_zeros(y)) }
+        }
+    }
+    return _mag_shift_left(x common)
+}
+
+let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
+    let chunks:array<uint64> = []          # least significant chunk first
+    let current:array<uint64> = limbs      # divided in place
+    loop current.length >? 0 {
+        # short division by 10^9, most significant limb first: each quotient
+        # limb depends only on the limb it replaces and the running remainder
+        let i:int64 = current.length
+        let remainder:uint64 = 0
+        loop i >? 0 {
+            i = i - 1
+            let value:uint64 = (remainder << 32) or current[i]
+            current[i] = value // 1000000000
+            remainder = value % 1000000000
+        }
+        _bigint_trim(@current)
+        chunks.push(remainder)
+    }
+    return chunks
+}
+
+
+_pack=(negative:bool limbs:array<uint64>):>BigInt=>{
+    _bigint_trim(@limbs)
+    if limbs.length =? 0 return BigInt[]
+    return BigInt[_sign=if negative -1 else 1 _limbs=limbs]
+}
+
+_from_unsigned=(value:uint64 negative:bool=false):>BigInt=>{
+    if value =? 0 return BigInt[]
+    let low=value and _LIMB_MASK
+    let high=value >> 32
+    return _pack(negative if high =? 0 [low] else [low high])
+}
+
+bigint = ((value:uint64):>BigInt=>_from_unsigned(value))
+       & ((value:int64):>BigInt=>{
+            let magnitude=value as uint64
+            if value <? 0 magnitude=0-magnitude
+            return _from_unsigned(magnitude value <? 0)
+         })
+       & ((value:string):>BigInt=>{
+            let parsed=parse_bigint(value)
+            if parsed is? none panic("invalid decimal integer")
+            return parsed
+         })
+
+# Strict decimal text, with an optional leading sign. No float conversion.
+parse_bigint=(text:string):>BigInt|none=>{
+    let digits=bytes(text)
+    if digits.length =? 0 return none
+    let negative=digits[0] =? 45
+    let start:int64=0
+    if negative or digits[0] =? 43 start=1
+    if start =? digits.length return none
+    let limbs:array<uint64>=[]
+    loop i in [start..digits.length) {
+        if digits[i] <? 48 or digits[i] >? 57 return none
+        let carry:uint64=(digits[i]-48) as uint64
+        loop j in [0..limbs.length) {
+            let value=limbs[j]*10+carry
+            limbs[j]=value and _LIMB_MASK
+            carry=value >> 32
+        }
+        if carry not=? 0 limbs.push(carry)
+    }
+    return _pack(negative limbs)
+}
+
+_compare=(a:BigInt b:BigInt):>int64=>{
+    if a._sign not=? b._sign return if a._sign <? b._sign -1 else 1
+    if a._sign =? 0 return 0
+    return a._sign*_mag_compare(a._limbs b._limbs)
+}
+
+_neg=(a:BigInt):>BigInt=>BigInt[_sign=-a._sign _limbs=a._limbs]
+_add=(a:BigInt b:BigInt):>BigInt=>{
+    if a._sign =? 0 return b
+    if b._sign =? 0 return a
+    if a._sign =? b._sign return _pack(a._sign <? 0 _mag_add(a._limbs b._limbs))
+    let order=_mag_compare(a._limbs b._limbs)
+    if order =? 0 return BigInt[]
+    if order >? 0 return _pack(a._sign <? 0 _mag_sub(a._limbs b._limbs))
+    return _pack(b._sign <? 0 _mag_sub(b._limbs a._limbs))
+}
+_sub=(a:BigInt b:BigInt):>BigInt=>_add(a _neg(b))
+_mul=(a:BigInt b:BigInt):>BigInt=>{
+    if a._sign =? 0 or b._sign =? 0 return BigInt[]
+    return _pack(a._sign not=? b._sign _mag_mul(a._limbs b._limbs))
+}
+
+BigIntDivision:type=[quotient:BigInt remainder:BigInt]
+divmod=(a:BigInt b:BigInt):>BigIntDivision=>{
+    if b._sign =? 0 panic("big integer division by zero")
+    if a._sign =? 0 return BigIntDivision[]
+    let parts=_mag_divmod(a._limbs b._limbs)
+    let negative=a._sign not=? b._sign
+    let quotient=_pack(negative parts.quotient)
+    let remainder=_pack(a._sign <? 0 parts.remainder)
+    if negative and remainder._sign not=? 0 {
+        quotient=_sub(quotient bigint(1))
+        remainder=_add(remainder b)
+    }
+    return BigIntDivision[quotient remainder]
+}
+
+pow=(base:BigInt exponent:int64):>BigInt=>{
+    if exponent <? 0 panic("big integer exponent must be nonnegative")
+    let result=bigint(1)
+    let factor=base
+    loop exponent >? 0 {
+        if (exponent and 1) =? 1 result=_mul(result factor)
+        exponent=exponent >> 1
+        if exponent >? 0 factor=_mul(factor factor)
+    }
+    return result
+}
+abs=(value:BigInt):>BigInt=>{
+    if value._sign <? 0 return _neg(value)
+    return value
+}
+gcd=(a:BigInt b:BigInt):>BigInt=>_pack(false _mag_gcd(a._limbs b._limbs))
+
+# Checked conversions; a value outside the requested word does not truncate.
+to_uint64=(value:BigInt):>uint64|none=>{
+    if value._sign <? 0 or value._limbs.length >? 2 return none
+    let word:uint64=0
+    if value._limbs.length >? 0 word=value._limbs[0]
+    if value._limbs.length >? 1 word=word or (value._limbs[1] << 32)
+    return word
+}
+to_int64=(value:BigInt):>int64|none=>{
+    let magnitude=to_uint64(abs(value))
+    if magnitude is? none return none
+    if value._sign <? 0 {
+        if magnitude >? 9223372036854775808 return none
+        return -(magnitude as int64)
+    }
+    if magnitude >? 9223372036854775807 return none
+    return magnitude as int64
+}
+
+str=(value:BigInt):>string=>{
+    if value._sign =? 0 return "0"
+    let parts:array<string>=[]
+    if value._sign <? 0 parts.push("-")
+    let chunks=_bigint_decimal_chunks(value._limbs)
+    let i=chunks.length
+    loop i >? 0 {
+        i-=1
+        let chunk=chunks[i]
+        if i not=? chunks.length-1 {
+            let pad:uint64=100000000
+            loop pad >? chunk and pad >? 1 {
+                parts.push("0")
+                pad=pad//10
+            }
+        }
+        parts.push("{chunk}")
+    }
+    return parts.join("")
+}
+__unary_sub__=(a:BigInt):>BigInt=>_neg(a)
+
+__add__ = ((a:BigInt b:BigInt):>BigInt=>_add(a b))
+    & ((a:BigInt b:int64):>BigInt=>_add(a bigint(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_add(bigint(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_add(a bigint(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_add(bigint(a) b))
+
+__sub__ = ((a:BigInt b:BigInt):>BigInt=>_sub(a b))
+    & ((a:BigInt b:int64):>BigInt=>_sub(a bigint(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_sub(bigint(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_sub(a bigint(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_sub(bigint(a) b))
+
+__mul__ = ((a:BigInt b:BigInt):>BigInt=>_mul(a b))
+    & ((a:BigInt b:int64):>BigInt=>_mul(a bigint(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_mul(bigint(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_mul(a bigint(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_mul(bigint(a) b))
+
+__eq__ = ((a:BigInt b:BigInt):>bool=>_compare(a b) =? 0)
+    & ((a:BigInt b:int64):>bool=>_compare(a bigint(b)) =? 0)
+    & ((a:int64 b:BigInt):>bool=>_compare(bigint(a) b) =? 0)
+    & ((a:BigInt b:uint64):>bool=>_compare(a bigint(b)) =? 0)
+    & ((a:uint64 b:BigInt):>bool=>_compare(bigint(a) b) =? 0)
+
+__lt__ = ((a:BigInt b:BigInt):>bool=>_compare(a b) <? 0)
+    & ((a:BigInt b:int64):>bool=>_compare(a bigint(b)) <? 0)
+    & ((a:int64 b:BigInt):>bool=>_compare(bigint(a) b) <? 0)
+    & ((a:BigInt b:uint64):>bool=>_compare(a bigint(b)) <? 0)
+    & ((a:uint64 b:BigInt):>bool=>_compare(bigint(a) b) <? 0)
+
+__floordiv__ = ((a:BigInt b:BigInt):>BigInt=>divmod(a b).quotient)
+    & ((a:BigInt b:int64):>BigInt=>divmod(a bigint(b)).quotient)
+    & ((a:int64 b:BigInt):>BigInt=>divmod(bigint(a) b).quotient)
+    & ((a:BigInt b:uint64):>BigInt=>divmod(a bigint(b)).quotient)
+    & ((a:uint64 b:BigInt):>BigInt=>divmod(bigint(a) b).quotient)
+
+__mod__ = ((a:BigInt b:BigInt):>BigInt=>divmod(a b).remainder)
+    & ((a:BigInt b:int64):>BigInt=>divmod(a bigint(b)).remainder)
+    & ((a:int64 b:BigInt):>BigInt=>divmod(bigint(a) b).remainder)
+    & ((a:BigInt b:uint64):>BigInt=>divmod(a bigint(b)).remainder)
+    & ((a:uint64 b:BigInt):>BigInt=>divmod(bigint(a) b).remainder)

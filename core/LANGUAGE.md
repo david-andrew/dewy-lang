@@ -95,12 +95,51 @@ types are `float32` and `float64`. Ordinary integer literals default to `int64`
 when they fit. Use `as` for numeric value conversion. Integer `//` is floor
 division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support signed `int64` and unsigned `uint64`, preserving the full
-unsigned range; narrower operands retain the existing integer widening rules. Floating-point `/` is available. Integer `/` and unbounded integers
-are not implemented in this core yet.
+unsigned range; narrower operands retain the existing integer widening rules.
+Floating-point `/` is available; built-in integer `/` is not implemented yet.
+Use the bundled `BigInt` library for exact integers beyond a machine word.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
 for general multiplication. A semicolon discards an expression's result.
+
+## Exact large integers
+
+```dewy
+from bigint import BigInt, bigint, parse_bigint
+main=():>void=>{
+    let value=bigint("123456789012345678901234567890")
+    printl"{value*value}"
+    printl"{bigint(2).pow(256)}"
+    let parts=(-value).divmod(bigint(7))
+    printl"{parts.quotient} {parts.remainder}"
+}
+```
+
+`bigint` constructs from `int64`, `uint64` or signed decimal text. `parse_bigint`
+returns `BigInt|none` for text that may be invalid; the constructor panics on
+invalid text. Parsing is strict: an optional leading `+`/`-` and ASCII decimal
+digits, with no whitespace or separators. Leading zeros are accepted.
+
+`BigInt` supports `+`, `-`, `*`, unary `-`, comparisons, `//` and `%`, including
+mixed signed/unsigned machine-word operands in either order. Division rounds
+down and the remainder has the divisor's sign. `.divmod(other)` computes both
+results together. Parenthesize a negative numerator as `(-value)//other`:
+Dewy's unary minus binds below multiplication and division.
+
+`.pow(nonnegative_exponent)`, `.abs()` and `.gcd(other)` operate exactly;
+`gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
+panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
+truncate. Interpolation formats decimal text. Values are independent copies and
+can be dictionary keys; construct them through `bigint`, keeping `_sign` and
+`_limbs` as internal representation details.
+
+This is an explicit library type. Ordinary fixed-width arithmetic does not
+automatically widen, and oversized numeric literals, rational `/`, bigint
+bitwise operations and power syntax are not yet implemented. The inherited
+`big` module is a separate approximate-number library for idle games.
+[The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
+100!, a binomial coefficient and signed long division.
 
 ## Records and collections
 
@@ -183,6 +222,7 @@ record type is sufficient. Built-in scalar operations keep their built-in behavi
 | Operation | Record protocol |
 | --- | --- |
 | `+`, binary `-`, `*`, `/` | `__add__`, `__sub__`, `__mul__`, `__truediv__` |
+| `//`, `%` | `__floordiv__`, `__mod__` |
 | unary `-` | `__unary_sub__` |
 | `=?`, `not=?` | `__eq__`, `__ne__` |
 | `<?`, `<=?`, `>?`, `>=?` | `__lt__`, `__le__`, `__gt__`, `__ge__` |
@@ -191,8 +231,9 @@ record type is sufficient. Built-in scalar operations keep their built-in behavi
 Comparisons must return `bool`. When absent, `not=?` derives from `__eq__`,
 and `<=?`, `>?`, `>=?` derive from `__lt__`. Derived comparisons preserve written
 operand evaluation order. Arithmetic compound assignments reuse the corresponding
-operator. Logical `and`/`or`/`not`, floor division/modulo and power do not yet have
-custom record protocols in this implementation.
+operator. Floor protocols receive the written divisor, including literal powers
+of two; the built-in shift/mask optimizations do not change custom operands.
+Logical `and`/`or`/`not` and power do not yet have custom record protocols.
 
 [The bounded history example](../examples/sloppy_core/history.dewy) uses a
 [generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),
@@ -329,8 +370,14 @@ import p"model.dewy" as model
 from p"helpers.dewy" import advance, fresh
 ```
 
-Bare names import bundled libraries; `p"..."` names a file. Both `.dewy` and the
-inherited `.jo` library modules can be imported.
+Bare names search beside the importing file, then the bundled library folders;
+`p"..."` names a file explicitly. Within each folder, a Dewy importer prefers
+`.dewy` and falls back to `.jo`; a Jo importer prefers `.jo`. The importing file
+itself is skipped, so `physics.dewy` can import the bundled `physics` library.
+Watch mode notices creation/removal of a preferred local module and reloads it.
+Use `import p"@lib/physics.jo" as physics` to select a bundled library explicitly,
+even when a neighboring file has the same name. `@lib/` resolves inside the
+active toolchain's library directory and also works with selected imports.
 
 Start a game with the built-in template, then edit it while it runs:
 
@@ -347,7 +394,7 @@ input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, f
 audio, physics and other platform libraries come with the toolchain.
 
 This remains a developing subset of Dewy. The earlier proof/effect system,
-unbounded arithmetic, general structural conversions and every historical
+automatic numeric widening, general structural conversions and every historical
 juxtaposition form have not been recreated. See the
 [implementation notes](../tools/sloppy_core/README.md) for current boundaries,
 validation and measured performance.

@@ -497,21 +497,6 @@ dw_expr = (id: int) -> int:
             a = dw_expr(left)
             b = dw_expr(right)
             name = if op == "//": "__floor_div" else: "__floor_mod"
-            # Floor division by positive 2^k is an arithmetic shift; floor
-            # modulo is a mask, including for negative numerators. Selecting
-            # tiny typed helpers preserves the ordinary argument checks.
-            divisor = nodes[b].ival
-            if nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
-                if op == "%":
-                    name = "__floor_mod_pow2"
-                    nodes[b].ival = divisor - 1
-                else:
-                    name = "__floor_div_pow2"
-                    shift = 0
-                    loop divisor > 1:
-                        divisor = divisor >> 1
-                        shift += 1
-                    nodes[b].ival = shift
             callee = mk(.ident, pos)
             nodes[callee].name = i32(intern(name))
             n = mk(.call, pos)
