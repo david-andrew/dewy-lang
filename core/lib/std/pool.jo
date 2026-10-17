@@ -44,6 +44,12 @@ has[T] = (p: Pool[T], h: Handle) -> bool: h.slot >= 0 and h.slot < p.__where.len
 # the index of h's thing in items now (-1 when it is gone)
 index_of[T] = (p: Pool[T], h: Handle) -> int: if has(p, h): p.__where[h.slot] else: -1
 
+# The compiler uses this checked index for direct updates of an existing item.
+# The array access keeps its bounds check: `items` is publicly accessible.
+__pool_index[T] = (p: Pool[T], h: Handle) -> int:
+    if not has(p, h): panic("this handle's thing is gone from the pool (removed, or never there): check `pool.has(h)` first")
+    p.__where[h.slot]
+
 # h's thing (panics when it is gone: has(h) first, or get)
 ([])[T] = (p: Pool[T], h: Handle) -> T:
     if not has(p, h): panic("this handle's thing is gone from the pool (removed, or never there): check `pool.has(h)` first, or use `pool.get(h)`")

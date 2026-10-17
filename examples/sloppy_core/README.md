@@ -19,6 +19,22 @@ Replacement health: 100
 Old handle valid: false
 ```
 
+[`pool_inventory.dewy`](pool_inventory.dewy) measures repeated scalar updates
+inside managed inventories through stable handles, while keeping an independent
+snapshot. It prints the updated checksum, snapshot checksum and kernel time in
+nanoseconds. Run the paired benchmark with independent Python checks:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_pool /tmp/dewy-core/bin/dewy-core \
+  --baseline /tmp/previous-core/bin/dewy-core --output /tmp/pool-results.json
+```
+
+Seven alternating native release runs at one million updates measured 100.48 ms
+before direct Pool updates and 23.96 ms after, about 4.2× faster for this workload.
+The snapshot is retained throughout the measured loop. This is a before/after
+comparison of the same Dewy program; native/web correctness is tested separately.
+See [the source-core audit](../../dewy/audits/2026-10-17/README.md).
+
 [`history.dewy`](history.dewy) demonstrates a bounded game-position history.
 Its [`ring.dewy`](ring.dewy) module is a generic container written entirely in
 Dewy: `push` overwrites the oldest entry when full, `ring[i]` uses its indexing

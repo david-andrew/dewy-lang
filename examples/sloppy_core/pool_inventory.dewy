@@ -1,0 +1,36 @@
+# Repeated entity updates through stable handles, while retaining a snapshot.
+Entity:type=[inventory:array<int64>]
+
+mutate_inventory=(@entities:Pool<Entity> handles:array<Handle> count:int64):>void=>{
+    loop i in [0..count) {
+        let entity=i%64 let slot=(i//64)%32 let delta=i%7+1
+        entities[handles[entity]].inventory[slot]+=delta
+    }
+}
+
+inventory_checksum=(entities:Pool<Entity>):>int64=>{
+    let result:int64=3
+    loop entity in entities.items {
+        loop amount in entity.inventory {result=(result*31+amount)%1000000007}
+    }
+    return result
+}
+
+main=(argv:array<string>):>void=>{
+    let count:int64=1000000
+    if argv.length >? 1 {
+        let parsed=to_int(argv[1])
+        if parsed is? none panic("expected an update count")
+        count=parsed
+    }
+    if count <? 0 panic("update count must be nonnegative")
+    let entities:Pool<Entity>=[] let handles:array<Handle>=[]
+    loop i in [0..64) {
+        handles.push(entities.add(Entity[[loop j in [0..32) 0]]))
+    }
+    let snapshot=entities
+    let started=time_ns()
+    mutate_inventory(@entities handles count)
+    let finished=time_ns()
+    printl"{inventory_checksum(entities)} {inventory_checksum(snapshot)} {finished-started}"
+}

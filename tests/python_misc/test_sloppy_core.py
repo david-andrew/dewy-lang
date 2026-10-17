@@ -523,6 +523,61 @@ let pool:Pool<array<int64>>=[] let h=pool.add([20])
 let array=[pool] let map=["entry"->pool]
 array[0][h][0]=42 map["entry"][h][0]+=22
 return if array[0][h][0] =? 42 and map["entry"][h][0] =? 42 and pool[h][0] =? 20 42 else 1}''',
+    'generic-pool-direct-snapshots': '''Item:type=[values:array<int64> health:int64=10]
+main=()=>{
+let original_values=[20 22] let pool:Pool<Item>=[]
+let a=pool.add(Item[original_values]) let b=pool.add(Item[original_values])
+let snapshot=pool let delta:int64=2
+pool[a].values[0]+=delta pool[b].values[1]=40 pool[a].health-=delta
+let pools=[pool] let at:int64=0
+pools[at][a].values[0]=42
+return if original_values =? [20 22] and snapshot[a].values =? [20 22]
+and snapshot[b].values =? [20 22] and pool[a].values =? [22 22]
+and pool[b].values =? [20 40] and pool[a].health =? 8
+and pools[0][a].values =? [42 22] 42 else 1
+}''',
+    'generic-pool-direct-helper-shadow': '''main=()=>{
+let __pool_index=(p:Pool<array<int64>> h:Handle):>int64=>1
+let pool:Pool<array<int64>>=[] let a=pool.add([20]) let b=pool.add([30])
+pool[a][0]=42
+return if pool[a][0] =? 42 and pool[b][0] =? 30 and __pool_index(pool a) =? 1 42 else 1
+}''',
+    'generic-pool-direct-custom-setter': '''let writes:int64=0
+__setindex__=(@pool:Pool<array<int64>> h:Handle value:array<int64>):>void=>{
+writes+=1 pool.items[pool.index_of(h)]=value
+}
+main=()=>{let pool:Pool<array<int64>>=[] let h=pool.add([20])
+pool[h][0]+=22
+return if pool[h][0] =? 42 and writes =? 1 42 else 1}''',
+    'generic-pool-direct-side-effects': '''Item:type=[values:array<int64> health:int64=10]
+let pool:Pool<Item>=[] let handle:Handle=[] let other:Handle=[]
+change=():>int64=>{pool[handle].health=99 handle=other return 22}
+main=()=>{let first=pool.add(Item[[20]]) other=pool.add(Item[[1]]) handle=first
+pool[handle].values[0]+=change()
+return if pool[first].values[0] =? 42 and pool[first].health =? 10
+and pool[other].values[0] =? 1 and handle =? other 42 else 1}''',
+    'generic-pool-direct-custom-getter': '''let reads:int64=0
+__index__=(pool:Pool<array<int64>> h:Handle):>array<int64>=>{
+reads+=1 return pool.items[pool.index_of(h)]
+}
+main=()=>{let pool:Pool<array<int64>>=[] let h=pool.add([20])
+pool[h][0]+=22
+return if reads =? 1 and pool.items[0][0] =? 42 42 else 1}''',
+    'generic-pool-direct-impostor': '''Pool:type=<T>[items:array<T>]
+let writes:int64=0
+__index__=<T>(p:Pool<T> i:int64):>T=>p.items[i]
+__setindex__=<T>(@p:Pool<T> i:int64 value:T):>void=>{writes+=1 p.items[i]=value}
+main=()=>{let pool=Pool<array<int64>>[[[20]]]
+pool[0][0]+=22 return if writes =? 1 and pool.items[0][0] =? 42 42 else 1}''',
+    'generic-pool-direct-lifetime': '''Item:type=[values:array<int64>]
+exercise=():>void=>{let pool:Pool<Item>=[] let h=pool.add(Item[[1 2 3]])
+let saved=pool
+loop i in [0..20) {pool[h].values[0]+=1 pool[h].values[1]=i}
+if saved[h].values not=? [1 2 3] panic("snapshot changed")
+}
+main=()=>{exercise() let before=alloc_count()
+loop i in [0..20) {exercise()}
+return if alloc_count() =? before 42 else 1}''',
     'generic-type-defaults': '''empty=<T>():>array<T>=>[]
 fallback=<T>(values:array<T>=empty<T>()):>array<T>=>values
 Bucket:type=<T>[values:array<T>=empty<T>()]
@@ -2145,6 +2200,50 @@ return if empty.len() =? 1 and empty[0] =? 42 42 else 4
         assert ran.returncode != 0
         message = 'ring capacity must be positive' if case == 'capacity' else 'ring index out of bounds'
         assert message in ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('case', ['stale', 'missing', 'storage-bounds', 'rhs-removes-item'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_pool_update_errors(compiler, tmp_path, case, target, release):
+    declarations = ''
+    setup = 'let pool:Pool<array<int64>>=[] let h=pool.add([20])'
+    update = 'pool[h][0]=42'
+    if case == 'stale':
+        setup += ' pool.remove(h) pool.add([1])'
+    elif case == 'missing':
+        setup += ' h=Handle[]'
+    elif case == 'storage-bounds':
+        setup += ' pool.items.clear()'
+    else:
+        declarations = '''let pool:Pool<array<int64>>=[] let h:Handle=[]
+erase=():>int64=>{pool.remove(h) return 22}
+'''
+        setup = 'h=pool.add([20])'
+        update = 'pool[h][0]+=erase()'
+    source = tmp_path / 'invalid.dewy'
+    source.write_text(declarations + f'main=()=>{{{setup} {update} return 0}}')
+    binary = tmp_path / 'invalid'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web pool update checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'invalid.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0, 'invalid pool update unexpectedly succeeded'
+    expected = 'out of bounds' if case == 'storage-bounds' else 'gone from the pool'
+    assert expected in ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('setter', [False, True], ids=['missing-setter', 'readonly-receiver'])

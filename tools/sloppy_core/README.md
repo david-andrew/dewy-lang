@@ -369,13 +369,38 @@ mixed differences do not establish an overall speedup. The retained change
 removes repeated classification work. See `source-language-compile.json`,
 `source-language-build.json` and `source-language-full-tests.log`.
 
-The combined Dewy/editor/shared-core gate now contains 1,564 checks and takes
+The bundled `Pool` now updates scalar fields/elements directly when its getter
+and setter are the library implementations and every index/right operand is an
+ordinary read. It uses a qualified library helper to validate the handle, then
+the existing array place lowering, including bounds checks and copy-on-write.
+Custom indexers, side-effecting calls and other complex updates retain
+read/edit/writeback. The fast path removes an avoidable nested-array copy on
+each ordinary inventory edit while preserving independent snapshots.
+
+The new `benchmark_pool.py` runs `pool_inventory.dewy`: 64 entities, each with 32
+integer inventory slots, one million updates, and a snapshot retained throughout.
+Seven alternating native release runs measured **100.48 / 23.96 ms** before/after,
+about **4.2× faster for this workload**. Python independently validates the final
+data and unchanged snapshot, including empty/small preflights. Kernel timing
+excludes setup and checksums. This is not a claim about every Pool operation or
+web performance. Seven compile pairs were pool inventory 54.01/54.49 ms, entities
+77.95/76.73 ms, physics 342.57/334.09 ms and self-build 1,318.76/1,330.85 ms;
+mixed small differences do not establish a compilation speed change.
+
+A fresh C bootstrap and all 1,608 checks pass in 74.10 seconds. The focused
+82-check selection takes 3.99 seconds and covers copies, allocation lifetime,
+custom accessors, side effects, stale handles and bounds failures on native/web
+in debug/release. Evidence and complete benchmark inputs are in
+[`dewy/audits/2026-10-17/`](../../dewy/audits/2026-10-17/README.md).
+
+The combined Dewy/editor/shared-core gate now contains 1,608 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build
 instructions are in `examples/sloppy_core/`.
-Evidence is in `dewy/audits/2026-10-16/source-core/`.
+Evidence is in `dewy/audits/2026-10-16/source-core/` and
+`dewy/audits/2026-10-17/source-core/`.
 
 At the first batching checkpoint, the ordinary value gate retained 674 individual
 debug/release/native/web pytest checks while grouping up to 16 independent

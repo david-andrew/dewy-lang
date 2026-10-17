@@ -2091,11 +2091,55 @@ index_update_capture = (ix: int, stmts: mut int[]) -> int:
     nodes[ix].b = i32(comp_ident(name, pos))
     name
 
+# Reads that cannot run user code or change the place being updated. Checked
+# custom indexing is a call and deliberately does not qualify.
+pool_update_read = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
+    if k == .field: return pool_update_read(int(nodes[n].a))
+    if k == .index and nodes[n].b != 0:
+        return tkind(ntype(int(nodes[n].a))) == .array and pool_update_read(int(nodes[n].a)) and pool_update_read(int(nodes[n].b))
+    false
+
+pool_library_fn = (f: int) -> bool:
+    if f <= 0: return false
+    d = int(fns[f].decl)
+    d != 0 and decl_in_prelude(d) and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/pool.jo"
+
+pool_direct_update = (s: int, ix: int, bt: int) -> bool:
+    if types[bt].kind != .struct_ or structs[int(types[bt].st)].name != "Pool": return false
+    # Do not bypass a user getter or setter, even for the bundled Pool type.
+    get = clone(ix)
+    check_expr(get, 0)
+    get = last_checked
+    if nodes[get].kind != .call or nodes[get].aux != 0 or nkids(get) != 2 or not pool_library_fn(int(nodes[get].sym)): return false
+    ht = ntype(kid(get, 1))
+    vt = ntype(get)
+    if resolve_by_types(intern("__setindex__"), [bt, ht, vt], nodes[s].pos, false) != 0: return false
+    if not pool_library_fn(resolve_by_types(intern("[]="), [bt, ht, vt], nodes[s].pos, false)): return false
+    # The old read/edit/writeback remains necessary when evaluation can change
+    # the pool or invoke a custom arithmetic operator. Start with scalar writes
+    # whose operands are ordinary reads; complex updates retain their behavior.
+    lt = check_expr(clone(int(nodes[s].a)), 0)
+    if not is_numeric(prune(lt)) and tkind(lt) != .bool_: return false
+    check_expr(clone(int(nodes[s].b)), 0)
+    if not pool_update_read(last_checked): return false
+    loop part in index_update_path(int(nodes[s].a)):
+        if nodes[part].kind != .index: continue
+        if nodes[part].b == 0: return false
+        check_expr(clone(int(nodes[part].b)), 0)
+        if not pool_update_read(last_checked): return false
+        if part != ix:
+            pt = check_expr(clone(int(nodes[part].a)), 0)
+            if tkind(pt) != .array: return false
+    true
+
 elem_field_assign = (s: int) -> int:
     if has_flag(s, NF_INDEX_CAPTURED): return 0
     lhs = int(nodes[s].a)
     path = index_update_path(lhs)
     ix = 0
+    direct_pool = -1
     i = path.len() - 1
     loop i >= 0:
         candidate = path[i]
@@ -2107,6 +2151,7 @@ elem_field_assign = (s: int) -> int:
         bt = prune(check_expr(clone(int(nodes[candidate].a)), 0))
         if types[bt].kind == .struct_ and not is_map_type(bt) and not is_soa(bt) and not is_part_index(candidate):
             ix = candidate
+            if pool_direct_update(s, ix, bt): direct_pool = module_of_type(bt)
             break
     if ix == 0: return 0
     pos = nodes[s].pos
@@ -2119,6 +2164,24 @@ elem_field_assign = (s: int) -> int:
         if nodes[part].kind == .index and nodes[part].b != 0:
             index_update_capture(part, stmts)
     iname = index_update_capture(ix, stmts)
+    if direct_pool >= 0:
+        recv = int(nodes[ix].a)
+        # Qualify the library helper so a local function with the same name
+        # cannot intercept the compiler-generated lookup.
+        ensure_bundled_import("std/pool.jo", "$dewy_pool", pos)
+        library = bc_ident("$dewy_pool", pos)
+        checked_index = mk(.call, pos)
+        nodes[checked_index].a = i32(bc_field(library, "__pool_index", pos))
+        set_list(checked_index, [clone(recv), comp_ident(iname, pos)])
+        storage = bc_field(recv, "items", pos)
+        nodes[ix] = Node(kind = .index, pos = pos, a = i32(storage), b = i32(checked_index))
+        c0 = nodes.len()
+        nodes.push(nodes[s])
+        stmts.push(c0)
+        blk0 = mk(.block, pos)
+        set_list(blk0, stmts)
+        check_stmt(blk0)
+        return blk0
     if ix == lhs:
         c0 = nodes.len()
         nodes.push(nodes[s])

@@ -337,10 +337,15 @@ composes through nested pools. Receiver indices and the custom key are evaluated
 once and retained for writeback, even if the right side changes an index variable.
 A selected import of a container type makes its indexing operators available.
 
-Read/edit/writeback retains value semantics; it is not a zero-copy borrow. Updating
-a managed collection inside a custom getter can copy that collection, as an
-explicit read/edit/writeback would. For bulk pool iteration, use its `items` array
-when stable-handle lookup is unnecessary.
+Custom read/edit/writeback retains value semantics and can copy a managed
+collection. The bundled `Pool` has a faster path for scalar field/element writes
+whose indices and right side are ordinary reads, such as
+`pool[handle].inventory[slot] += damage`. It updates the stored item directly,
+validating the handle and retaining array bounds and copy-on-write checks.
+Snapshots remain independent. Calls or custom indexers keep read/edit/writeback;
+for a computed amount, calculating `let damage=...` before the assignment makes
+the simple update available. For bulk iteration, use `pool.items` when stable
+handle lookup is unnecessary.
 
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as

@@ -20,6 +20,7 @@ WORKLOADS = {
     'exact-rationals': ('build', 'examples/sloppy_core/exact_rationals.dewy', '--release'),
     'exact-integers': ('build', 'examples/sloppy_core/exact_integers.dewy', '--release'),
     'entities': ('build', 'examples/sloppy_core/entities.dewy', '--release'),
+    'pool-inventory': ('build', 'examples/sloppy_core/pool_inventory.dewy', '--release'),
     'physics-check': ('check', 'examples/sloppy_core/physics.dewy'),
     'physics': ('build', 'examples/sloppy_core/physics.dewy', '--release'),
     'paddle': ('build', 'examples/sloppy_core/paddle.dewy', '--release'),
