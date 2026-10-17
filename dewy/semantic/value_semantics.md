@@ -2,9 +2,16 @@
 
 Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
+The [language goals](../GOALS.md) clarify the long-term storage policy:
+copy-on-write stays the default for ordinary arrays and strings, small values
+stay inline, and stricter guarantees about allocation, detachment and panics
+belong to an opt-in systems lane. The implementation details below describe the
+earlier compiler pair unless stated otherwise; they are not a feature inventory
+for the compact-core restart.
+
 Both compilers preserve independent values across ordinary bindings,
 assignments, arguments and returns. The implementation combines proven
-borrows and moves with a provisional copy-on-write fallback. Fixed local
+borrows and moves with copy-on-write for ordinary arrays and strings. Fixed local
 storage may live in the frame when lifetime analysis proves it cannot escape.
 
 A fixed temporary record passed to a known read-only function can also lend
@@ -128,7 +135,7 @@ snapshot[0] = replacement     # original keeps its old value
 
 The receiver is evaluated once. This requests an independent value, not a
 particular allocation or an eager byte-for-byte clone: a dying fresh result
-can transfer its storage, and the provisional copy-on-write implementation
+can transfer its storage, and the copy-on-write implementation
 can share storage until a write. Checked IR and copy reports retain the
 explicit intent. A record's own `copy` field or method takes precedence over
 the synthesized operation. Strings retain their contents independently of

@@ -132,9 +132,10 @@ Simple value-oriented code should benefit from inferred borrows, moves,
 placement, efficient containers and good generated code. Requiring pervasive
 explicit views, manual `.copy()` annotations or raw handles to obtain ordinary
 performance would miss this goal. Preserve value semantics, facts and effect
-contracts while removing their avoidable implementation costs. Copy-on-write
-remains provisional: its deferred copies and latency spikes leave predictable,
-near-zero-cost storage behavior an open long-term design question.
+contracts while removing their avoidable implementation costs. As clarified in
+[Language goals](GOALS.md), copy-on-write remains the default for ordinary arrays
+and strings. Predictable allocation, detachment and panic behavior belong to a
+separate opt-in systems lane; ordinary game code does not need that lane.
 
 **Local representation and private call specialization (accepted 2026-09-30):**
 choose physical forms from proven uses, with explicit conversion where broader
@@ -911,8 +912,11 @@ The intended design is recorded in `status.md` ("Ownership and storage
 model") and `semantic/value_semantics.md`: one owner per value, moves by
 last-use liveness, borrows where proven read-only, deterministic release,
 placement (stack, static, scoped arena) as a proof-gated optimization.
-Copy-on-write is a provisional bootstrap accelerator
-(`bootstrap/PERFORMANCE.md`), not the long-term mechanism.
+Copy-on-write remains the long-term default for ordinary arrays and strings,
+with small values kept inline. The bootstrap experience below explains its
+initial adoption, not a plan to remove it. The stricter opt-in systems lane
+requires explicit or proven storage operations where hidden cost is forbidden;
+see [Language goals](GOALS.md).
 
 **What went wrong last time.** The model was not the problem. The analysis
 could not justify enough borrows and moves, so lowering fell back to "copy to
