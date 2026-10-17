@@ -256,3 +256,43 @@ are not an overall compilation improvement claim.
 The independent C bootstrap passed **1,807 checks in 59.46 s**.
 [Full gate](source-core/unit-range-full.log),
 [build manifest](source-core/unit-range-build.json).
+
+## Discarded loop-analysis scratch experiment
+
+An experiment replaced per-scan boolean arrays with reusable generation marks
+and removed tiny child-list allocations. Seven alternating compile pairs gave
+tour 48.05/49.19 ms, physics 289.93/293.25 ms, and self-build 1,101.75/1,093.93 ms
+wall time. CPU results were similarly small/mixed. The experiment passed its
+242-check focused gate, but did not establish a useful speedup and was reverted.
+No scratch arrays or new generation state were retained in production.
+[Samples](source-core/analysis-scratch-rejected.json).
+
+## Combined range headers and longest-input iteration
+
+Combined ranges now capture their starts once and stop at inclusive integer
+maxima without wrapping. Open counters report exhaustion. A range followed by
+conditions uses the single-range lowering; ordinary zero-based sequence indexes
+retain their existing fast path. A condition before a binder continues to see
+outer variables, including when the binder uses the same name.
+
+Dewy also now exposes the core's `or` iterator headers: all inputs advance until
+the longest finishes, with `none` for each exhausted input. An exhausted range
+arm remains exhausted. Pure boolean `or` conditions keep their ordinary behavior.
+The language guide describes these forms. The [previous compiler](source-core/combined-range-before.log)
+fails the computed-start/evaluation-order case.
+
+The focused **186-check gate passed in 7.38 s**, covering native/web debug/release,
+integer widths, optional arms, string graphemes, snapshots, empty inputs,
+conditions, source order, shadowing, and `continue`.
+[Focused gate](source-core/combined-range-focused.log).
+
+The fresh C bootstrap passed **1,864 checks in 61.63 s**.
+[Full gate](source-core/combined-range-full.log),
+[build manifest](source-core/combined-range-build.json).
+Seven compile pairs with the final compiler measured tour **51.18/49.37 ms**,
+physics **290.97/293.22 ms**, and self-build **1,108.23/1,097.61 ms** wall time.
+CPU medians were 50.29/48.70, 288.44/290.69 and 1,100.55/1,090.44 ms. These small
+mixed changes do not support an overall speed claim.
+[Final samples](source-core/combined-range-compile.json).
+An [earlier run](source-core/combined-range-compile-initial.json), before the
+last shadowing guard, encountered substantially higher shared-machine load.

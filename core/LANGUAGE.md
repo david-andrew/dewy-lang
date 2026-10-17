@@ -401,9 +401,8 @@ let odd_squares=[loop i in [1,3..10] i*i]
 The step is the second value minus the first; it can ascend or descend but must
 be nonzero. `]` includes the endpoint and `)` excludes it. Starting values and
 the endpoint evaluate once in source order. Iteration uses counters without
-building an intermediate array. Single-header bounded integer loops terminate safely at the integer type's
-limits, including an inclusive maximum endpoint. Open-ended single-header
-ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
+building an intermediate array. Bounded integer loops terminate safely at the integer type's limits, including
+an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
 integer type; `break` and `continue` work normally.
 Stepped ranges currently require a single loop header; combining them with other
 iterators/conditions, stepped slicing and stepped membership are not implemented.
@@ -415,6 +414,20 @@ loop i in 0.. and character in "café 🙂" {
     printl"{i}: {character}"
 }
 ```
+
+`and` stops when an input ends or a condition fails. `or` keeps going until
+all its inputs end; each exhausted input supplies `none`:
+
+```dewy
+loop left in [10 20] or right in [1 2 3] {
+    if left isnt? none {printl(left)}
+    if right isnt? none {printl(right)}
+}
+```
+
+Inputs and range bounds are evaluated once, in source order. Conditions run
+from left to right and can refer to earlier bindings. An `or` group accepts
+iterator bindings; ordinary boolean `or` still works in a condition.
 
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. String loops stream from an independent input snapshot;

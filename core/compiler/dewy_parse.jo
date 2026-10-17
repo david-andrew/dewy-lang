@@ -4,6 +4,7 @@
 use 'util.jo'
 use 'ast.jo'
 use 'lex.jo'
+use 'parse.jo'
 
 struct DewySyntax:
     kind: str
@@ -845,10 +846,11 @@ dw_loop_head = (id: int) -> int:
             binders.push(dw_expr(binder))
         set_list(n, binders)
         nodes[n].a = i32(dw_iterable(dw_child(id, 2)))
-    else if op == "and":
-        nodes[n].op = 2
+    else if op == "and" or op == "or":
+        nodes[n].op = if op == "and": 2 else: 3
         nodes[n].a = i32(dw_loop_head(dw_child(id, 1)))
         nodes[n].b = i32(dw_loop_head(dw_child(id, 2)))
+        return head_collapse(n)
     else:
         nodes[n].op = 4
         nodes[n].a = i32(dw_expr(id))

@@ -1072,6 +1072,65 @@ loop i in [zero..18446744073709551615] {unsigned.push(i) if unsigned.length =? 3
 return if total =? 24 and signed =? [low low+1 low+2]
 and unsigned =? [zero zero+1 zero+2] 42 else 1
 }''',
+    'unit-range-combined-limits': '''count=<T>(start:T end:T):>int64=>{
+let result:int64=0
+loop i in [start..end] and j in [0..5) {result+=1 i=start if result >? 4 panic("range did not stop")}
+return result
+}
+main=()=>{
+let total=count(125 as int8 127 as int8)+count(253 as uint8 255 as uint8)
+let high:int64=9223372036854775807 let top:uint64=18446744073709551615
+ total+=count(high-2 high)+count(top-2 top)
+let conditional:int64=0
+loop i in [high-2..high] and i >=? 0 {conditional+=1}
+return if total =? 12 and conditional =? 3 42 else 1
+}''',
+    'unit-range-combined-optional': '''main=()=>{
+let top:uint8=255 let rows:int64=0 let missing:int64=0 let total:int64=0
+loop i in [top..top] or x in [10 20 12] {
+    rows+=1
+    if rows >? 4 panic("range did not stay exhausted")
+    if i is? none {missing+=1} else {if i not=? top return 1}
+    if x isnt? none {total+=x}
+}
+let empty:int64=0
+loop i in [top..top) or x in [1 2] {if i isnt? none return 2 empty+=1}
+return if rows =? 3 and missing =? 2 and total =? 42 and empty =? 2 42 else 3
+}''',
+    'unit-range-combined-booleans': '''main=()=>{
+let count:int64=0
+loop count <? 2 or count <? 3 {count+=1}
+let sum:int64=0
+loop i in [0..10) and (i <? 2 or i =? 2) {sum+=i}
+return if count =? 3 and sum =? 3 42 else 1
+}''',
+    'unit-range-combined-snapshots': '''main=()=>{
+let numbers=[10 20] let text="á🙂!" let total:int64=0 let rows:int64=0 let letters:int64=0
+loop number in numbers or character in text {
+    rows+=1 numbers.clear() text=""
+    if number isnt? none {total+=number}
+    if character isnt? none {letters+=character.length}
+}
+let empty:array<int64>=[]
+loop a in empty or b in empty {return 1}
+return if rows =? 3 and total =? 30 and letters =? 3 42 else 2
+}''',
+    'unit-range-combined-shadow': '''main=()=>{
+let value:int64=0 let count:int64=0
+loop value =? 0 and value in [20 22] {count+=1}
+loop value =? 0 and value in [1..2] {count+=1}
+loop value =? 0 and value in [10 11] and i in 0.. {count+=1}
+return if count =? 6 and value =? 0 42 else 1
+}''',
+    'unit-range-combined-order': '''let calls:int64=0
+start=()=>{calls+=1 return 10}
+main=()=>{
+let values=[20 22] let sum:int64=0
+loop i in start().. and x in values {sum+=i+x}
+let high:uint8=255 let last:int64=0
+loop x in [1] and i in high.. {last=i as int64}
+return if sum =? 63 and calls =? 1 and last =? 255 42 else 1
+}''',
     'unit-range-order': '''let order:int64=0
 bound=(tag:int64 value:int64)=>{order=order*10+tag return value}
 main=()=>{
@@ -1165,6 +1224,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'combined-or-condition': ('main=()=>{loop i in [0..3) or true {printl(i)}}', 'only loop variables'),
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
     'stepped-range-membership': ('main=()=>2 in? [0,2..10]', 'stepped slices or membership'),
     'stepped-range-slice': ('main=()=>{let xs=[0 1 2 3] return xs[0,2..3].length}', 'stepped slices or membership'),
@@ -1380,6 +1440,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_rational_errors': 'rational',
                   'test_core_stepped_range_errors': 'range',
                   'test_core_unit_range_errors': 'range',
+                  'test_core_combined_range_errors': 'range',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
@@ -2004,6 +2065,21 @@ loop line in input.split("\\n") {
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_unit_range_errors(error_batches, body, target, release):
+    ran = error_batches('range', body, release, target)
+    assert ran.returncode != 0, ran.stdout + ran.stderr
+    assert 'range exhausted its integer type' in ran.stdout + ran.stderr
+    assert len(ran.stdout.splitlines()) == 2
+
+
+@pytest.mark.parametrize('body', [
+    f'let start:{kind}={start} let count:int64=0 loop i in [start..] {join} j in [0..4) {{printl(i) count+=1 if count >? 3 {{return}}}}'
+    for join in ['and', 'or']
+    for kind, start in [('int8', 126), ('uint8', 254),
+                        ('int64', 9223372036854775806), ('uint64', 18446744073709551614)]
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_combined_range_errors(error_batches, body, target, release):
     ran = error_batches('range', body, release, target)
     assert ran.returncode != 0, ran.stdout + ran.stderr
     assert 'range exhausted its integer type' in ran.stdout + ran.stderr

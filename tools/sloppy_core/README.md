@@ -422,7 +422,14 @@ strides over a stable array extent also omit redundant bounds checks: a repeated
 every-third-slot update with a live snapshot measured 44.81/24.55 ms before/after
 (about 1.8×), with 1,763 checks passing from a fresh C bootstrap.
 
-The combined Dewy/editor/shared-core gate now contains over 1,700 checks and takes
+Combined loop headers also accept `or`, continuing until every input is
+exhausted and supplying `none` for exhausted arms. Range starts evaluate once;
+bounded ranges stop at integer maxima and open counters report exhaustion.
+Range-plus-condition loops use the counted lowering, and zero-based sequence
+indexes retain their fast path. The October 17 audit records the 1,864-check
+C-bootstrap gate and the paired compilation measurements.
+
+The combined Dewy/editor/shared-core gate now contains over 1,800 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

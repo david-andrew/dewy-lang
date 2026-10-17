@@ -2002,6 +2002,11 @@ lx_int = (v: int, pos: int) -> int:
     add_flag(n, NF_LITERAL)
     n
 
+lx_bool = (value: bool, pos: int) -> int:
+    n = mk(.bool_lit, pos)
+    nodes[n].ival = if value: 1 else: 0
+    n
+
 lx_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     n = mk(.binary, pos)
     nodes[n].op = i32(int(op))
@@ -2086,7 +2091,35 @@ desugar_loopx = (lx: int) -> int:
                 else if not is_open_range(t):
                     seq = t
                     nseq += 1
+                else:
+                    lo = int(nodes[int(nodes[t].a)].a)
+                    # Only a literal zero is exactly the sequence index.
+                    # Other offsets need one evaluation and checked exhaustion.
+                    if nodes[lo].kind != .int_lit or nodes[lo].ival != 0: ok = false
+        # A range followed only by conditions is still a single range loop.
+        # Keep its typed/counting lowering and evaluate conditions in the body.
+        # Restrict this to a leading binder so earlier conditions cannot see a
+        # newly shadowing name that was not in scope at their source position.
+        first = terms[0]
+        direct_range = nodes[first].op == 1 and nodes[int(nodes[first].a)].kind == .range and nkids(first) == 1 and not has_flag(first, NF_MUT)
+        loop i in [1..terms.len()):
+            if nodes[terms[i]].op != 4: direct_range = false
+        if direct_range:
+            f = mk(.for_, pos)
+            nodes[f].a = nodes[first].a
+            set_list(f, kids(first))
+            stmts: int[]
+            loop i in [1..terms.len()): stmts.push(lx_if(lx_not(int(nodes[terms[i]].a), pos), mk(.break_, pos), pos))
+            loop item in kids(body): stmts.push(item)
+            nodes[f].b = i32(lx_block(stmts, pos))
+            return f
+        # The sequence element is bound by the outer for. A condition before
+        # that binder must still resolve any same-named outer variable.
         if ok and nseq == 1:
+            loop t in terms:
+                if t == seq: break
+                if nodes[t].op == 4: ok = false
+        if ok and nseq == 1 and nodes[int(nodes[seq].a)].kind != .range:
             f = mk(.for_, pos)
             ixname = intern("__ix" + tag)
             pre: int[]
@@ -2188,23 +2221,46 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
         return 0
     if nodes[it].kind == .range:
         if has_flag(it, NF_STEP): fatal(nodes[it].pos, "stepped ranges are only supported in single loops for now")
-        cur = "__r" + id
-        setup.push(lx_let(intern(cur), lx_bin(.minus, int(nodes[it].a), lx_int(1, pos), pos), pos))
-        if nodes[it].b != 0: setup.push(lx_let(intern("__e" + id), int(nodes[it].b), pos))
-        head.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
+        cur = "$range" + id
+        first = "$range_first" + id
+        setup.push(lx_let(intern(cur), int(nodes[it].a), pos))
+        setup.push(lx_let(intern(first), lx_bool(true, pos), pos))
+        advance: int[]
         cond = 0
         if nodes[it].b != 0:
-            cmp = Tok.gt
-            if not has_flag(it, NF_INCLUSIVE): cmp = .ge
-            cond = lx_bin(cmp, lx_ident(cur, pos), lx_ident("__e" + id, pos), pos)
+            end = "$range_end" + id
+            done = "$range_done" + id
+            setup.push(lx_let(intern(end), int(nodes[it].b), pos))
+            inclusive = has_flag(it, NF_INCLUSIVE)
+            cmp = if inclusive: Tok.gt else: Tok.ge
+            setup.push(lx_let(intern(done), lx_bin(cmp, lx_ident(cur, pos), lx_ident(end, pos), pos), pos))
+            inc = lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos)
+            if inclusive:
+                # Test the final value before incrementing; the endpoint may
+                # be the integer maximum. An exhausted OR arm stays exhausted.
+                last = lx_if(lx_bin(.eq, lx_ident(cur, pos), lx_ident(end, pos), pos), lx_assign(lx_ident(done, pos), .assign, lx_bool(true, pos), pos), pos)
+                nodes[last].c = i32(lx_block([inc], pos))
+                advance.push(last)
+            else:
+                advance.push(inc)
+                advance.push(lx_assign(lx_ident(done, pos), .assign, lx_bin(.ge, lx_ident(cur, pos), lx_ident(end, pos), pos), pos))
+            head.push(lx_if(lx_not(lx_ident(first, pos), pos), lx_if(lx_not(lx_ident(done, pos), pos), lx_block(advance, pos), pos), pos))
+            cond = lx_ident(done, pos)
+        else:
+            previous = "$range_previous" + id
+            advance.push(lx_let(intern(previous), lx_ident(cur, pos), pos))
+            advance.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
+            message = mk(.str_lit, pos)
+            nodes[message].sval = i32(intern("range exhausted its integer type"))
+            exhausted = lx_expr_stmt(lx_call("$dewy_range_exhausted", [message], pos), pos)
+            advance.push(lx_if(lx_bin(.le, lx_ident(cur, pos), lx_ident(previous, pos), pos), exhausted, pos))
+            head.push(lx_if(lx_not(lx_ident(first, pos), pos), lx_block(advance, pos), pos))
+        head.push(lx_assign(lx_ident(first, pos), .assign, lx_bool(false, pos), pos))
         if not optional:
             if cond != 0: head.push(lx_if(cond, mk(.break_, pos), pos))
             head.push(lx_let(v, lx_ident(cur, pos), pos))
             return 0
-        if cond == 0:
-            tr = mk(.bool_lit, pos)
-            nodes[tr].ival = 1
-            head.push(lx_let(has, tr, pos))
+        if cond == 0: head.push(lx_let(has, lx_bool(true, pos), pos))
         else: head.push(lx_let(has, lx_not(cond, pos), pos))
         head.push(lx_let(v, lx_opt_value(has, lx_ident(cur, pos), pos), pos))
         return has
