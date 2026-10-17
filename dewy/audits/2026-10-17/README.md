@@ -419,3 +419,32 @@ The tradeoff is a small compilation cost. Seven pairs measured tour
 48.81/49.22, 290.51/291.35 and 1,111.18/1,137.78 ms. The transformation has a
 fixed 32-instruction search limit and an eight-operation speculation budget.
 [Compile samples](source-core/integer-select-compile-initial.json).
+
+## Discarded floor-arithmetic mask trial
+
+A branch-free sign correction for signed floor division/modulo passed the
+90-check arithmetic/application selection, but three paired runtime samples
+made helpers slower (**997.55/1049.25 ms**). Text was effectively unchanged
+(**285.84/282.25 ms**) under varying load. The trial was reverted; ordinary
+branches remain in these helpers. [Samples](source-core/floor-mask-rejected.json).
+
+## Reuse allocated registers for integer selection
+
+The x86 selection emitter now reads its true value and condition directly from
+their allocated registers, loading scratch registers only for spilled/constant
+operands. The false value stays in a reserved scratch register until all operands
+have been read, so overlapping result/input allocations remain safe.
+
+The **126-check focused gate passed in 3.77 s**. The fresh C bootstrap passed
+**1,942 checks in 61.83 s**. [Focused gate](source-core/select-registers-focused.log),
+[full gate](source-core/select-registers-full.log),
+[build manifest](source-core/select-registers-build.json).
+Seven paired helper runs improved **992.67 to 924.04 ms**, about **6.9% less time**,
+with C at 789.15 ms and all checksums matching.
+[Runtime samples](source-core/select-registers-runtime.json).
+
+Seven compile pairs measured baseline/candidate tour **49.24/49.38 ms**, physics
+**299.79/294.43 ms**, and self-build **1,164.64/1,121.82 ms** wall time. CPU medians
+were 48.54/48.67, 296.27/290.92 and 1150.80/1109.24 ms. These show no compilation
+regression in this run; host load and the different workload sizes limit broader
+claims. [Compile samples](source-core/select-registers-compile.json).

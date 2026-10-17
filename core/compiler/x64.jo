@@ -2274,11 +2274,11 @@ emit_ins = (pos: int, ins: Ins):
             # Integer select: a is the condition, b/c the true/false values.
             # Load all inputs before writing a potentially overlapping result.
             ld(RAX, int(ins.c))
-            ld(RCX, bb)
-            ld(RDX, a)
-            op_rr(0x85, true, RDX, RDX)
-            rex(true, RAX, 0, RCX, false)
-            b(0x0F); b(0x45); modrr(RAX, RCX)       # cmovne rax, rcx
+            yes = reg_of(bb, RCX)
+            cond = reg_of(a, RDX)
+            op_rr(0x85, true, cond, cond)
+            rex(true, RAX, 0, yes, false)
+            b(0x0F); b(0x45); modrr(RAX, yes)       # cmovne rax, yes
             st(d, RAX)
 
 # jumps taken when condition `cc` is false (fixup positions appended to fx)

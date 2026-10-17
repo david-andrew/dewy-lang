@@ -77,15 +77,18 @@ immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
 
-Recent warmed measurements put the tour build near 60 ms, the physics release
-build near 340 ms and compiler self-build near 1.6 seconds. Sharing flat loop
-metadata reduced the latter by about 7% in two paired comparisons. Small integer conditional expressions now use conditional moves: the helper
-application improved from 1.196 to 0.995 seconds in seven paired samples, at a
-measured 2.4% compiler self-build cost. Compilation and runtime changes are
-measured separately; inconclusive experiments are removed. Continue application development on this core while filling useful
-language gaps and improving measured bottlenecks. It is still experimental,
-with explicit unsupported-feature diagnostics rather than full old-compiler
-compatibility or release certification.
+Recent warmed measurements put the tour build near 50 ms, the physics release
+build near 300 ms and compiler self-build near 1.1–1.2 seconds. Sharing flat loop
+metadata reduced the latter by about 7% in two paired comparisons. Small integer
+conditional expressions now use conditional moves: the helper application
+improved from 1.196 to 0.995 seconds in seven paired samples, at a measured 2.4%
+compiler self-build cost. Removing redundant register copies then improved it
+from 0.993 to 0.924 seconds in another seven-pair comparison, without a measured
+compilation regression. Compilation and runtime changes are measured separately;
+inconclusive experiments are removed. Continue application development on this
+core while filling useful language gaps and improving measured bottlenecks. It
+is still experimental, with explicit unsupported-feature diagnostics rather than
+full old-compiler compatibility or release certification.
 
 ## What the comparison establishes
 
