@@ -30,3 +30,26 @@ an overall compile-time change. Raw wall and CPU samples are in
 Reproduce with `python3 -m tools.sloppy_core.benchmark_pool`, supplying the new
 compiler, `--baseline` and `--output`. The source is
 [`pool_inventory.dewy`](../../../examples/sloppy_core/pool_inventory.dewy).
+
+## Scalar expressions in Pool updates
+
+The direct path also accepts checked scalar arithmetic, numeric conversions and
+boolean expressions. Overloaded operators become calls during checking and keep
+read/edit/writeback, including when nested inside an arithmetic expression.
+Short-circuit expressions containing calls also retain that fallback.
+
+The inventory example now adds `delta+1` inside the assignment, with the same
+Python reference results. Seven alternating warmed native release samples gave
+**140.82 / 37.01 ms** before/after, about **3.8×** for this expression workload.
+Other projects were using substantial CPU (load average about 8.95), so these
+absolute times should not be compared with the quieter earlier measurements.
+No compile-latency conclusion is drawn from this run.
+[Runtime evidence](source-core/pool-expression-runtime.json).
+
+The fresh C bootstrap passed **1,621 checks in 103.18 s** under that contention;
+the focused selection passed **58 checks in 3.38 s**. This includes float and
+integer arithmetic, arithmetic indices, snapshots, overloaded-operator side
+effects and short-circuit behavior, on native/web in debug/release.
+[Build manifest](source-core/pool-expression-build.json),
+[full gate](source-core/pool-expression-full.log),
+[focused gate](source-core/pool-expression-focused.log).

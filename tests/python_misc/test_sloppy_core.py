@@ -536,6 +536,35 @@ and snapshot[b].values =? [20 22] and pool[a].values =? [22 22]
 and pool[b].values =? [20 40] and pool[a].health =? 8
 and pools[0][a].values =? [42 22] 42 else 1
 }''',
+    'generic-pool-direct-expressions': '''Item:type=[values:array<int64> speed:float32 active:bool]
+main=()=>{
+let pool:Pool<Item>=[] let h=pool.add(Item[[20 22] 2.0 false]) let saved=pool
+let slot:int64=0 let delta:int64=3 let factor:float32=4.0
+pool[h].values[slot+1]+=delta*7-1
+pool[h].values[-slot]=-(delta-23)
+pool[h].speed+=factor*(delta as float32)
+pool[h].active=not (delta <? 0) and (slot =? 0 or delta <? 0)
+return if pool[h].values =? [20 42] and pool[h].speed =? 14.0 and pool[h].active
+and saved[h].values =? [20 22] and saved[h].speed =? 2.0 and not saved[h].active 42 else 1
+}''',
+    'generic-pool-direct-expression-effects': '''Item:type=[values:array<int64> health:int64=10]
+Amount:type=[value:int64]
+let pool:Pool<Item>=[] let h:Handle=[]
+__add__=(a:Amount b:Amount):>int64=>{pool[h].health=99 return a.value+b.value}
+main=()=>{h=pool.add(Item[[20]]) let a=Amount[10] let b=Amount[11]
+pool[h].values[0]+=1+(a+b)
+return if pool[h].values[0] =? 42 and pool[h].health =? 10 42 else 1}
+''',
+    'generic-pool-direct-short-circuit': '''Item:type=[active:bool health:int64=10]
+let pool:Pool<Item>=[] let h:Handle=[] let calls:int64=0
+touch=():>bool=>{calls+=1 pool[h].health=99 return true}
+main=()=>{h=pool.add(Item[false]) let yes=true let no=false
+pool[h].active=yes or touch()
+pool[h].active=no and touch()
+if calls not=? 0 return 1
+pool[h].active=no or touch()
+return if calls =? 1 and pool[h].active and pool[h].health =? 10 42 else 1}
+''',
     'generic-pool-direct-helper-shadow': '''main=()=>{
 let __pool_index=(p:Pool<array<int64>> h:Handle):>int64=>1
 let pool:Pool<array<int64>>=[] let a=pool.add([20]) let b=pool.add([30])

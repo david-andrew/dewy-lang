@@ -2093,12 +2093,25 @@ index_update_capture = (ix: int, stmts: mut int[]) -> int:
 
 # Reads that cannot run user code or change the place being updated. Checked
 # custom indexing is a call and deliberately does not qualify.
+pool_update_scalar = (n: int) -> bool:
+    t = prune(ntype(n))
+    is_numeric(t) or tkind(t) == .bool_
+
 pool_update_read = (n: int) -> bool:
     k = nodes[n].kind
     if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
     if k == .field: return pool_update_read(int(nodes[n].a))
     if k == .index and nodes[n].b != 0:
         return tkind(ntype(int(nodes[n].a))) == .array and pool_update_read(int(nodes[n].a)) and pool_update_read(int(nodes[n].b))
+    # Inspect checked scalar operators: an overloaded operator has become a
+    # call. Do not admit aggregate comparisons or conversions on this basis.
+    if k == .unary or k == .not_ or k == .conv:
+        a = int(nodes[n].a)
+        return pool_update_scalar(n) and pool_update_scalar(a) and pool_update_read(a)
+    if k == .binary or k == .and_ or k == .or_:
+        a = int(nodes[n].a)
+        b = int(nodes[n].b)
+        return pool_update_scalar(n) and pool_update_scalar(a) and pool_update_scalar(b) and pool_update_read(a) and pool_update_read(b)
     false
 
 pool_library_fn = (f: int) -> bool:
@@ -2119,7 +2132,7 @@ pool_direct_update = (s: int, ix: int, bt: int) -> bool:
     if not pool_library_fn(resolve_by_types(intern("[]="), [bt, ht, vt], nodes[s].pos, false)): return false
     # The old read/edit/writeback remains necessary when evaluation can change
     # the pool or invoke a custom arithmetic operator. Start with scalar writes
-    # whose operands are ordinary reads; complex updates retain their behavior.
+    # whose operands are scalar expressions over ordinary reads.
     lt = check_expr(clone(int(nodes[s].a)), 0)
     if not is_numeric(prune(lt)) and tkind(lt) != .bool_: return false
     check_expr(clone(int(nodes[s].b)), 0)

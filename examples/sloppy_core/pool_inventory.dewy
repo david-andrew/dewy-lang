@@ -3,8 +3,8 @@ Entity:type=[inventory:array<int64>]
 
 mutate_inventory=(@entities:Pool<Entity> handles:array<Handle> count:int64):>void=>{
     loop i in [0..count) {
-        let entity=i%64 let slot=(i//64)%32 let delta=i%7+1
-        entities[handles[entity]].inventory[slot]+=delta
+        let entity=i%64 let slot=(i//64)%32 let delta=i%7
+        entities[handles[entity]].inventory[slot]+=delta+1
     }
 }
 

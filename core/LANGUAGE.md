@@ -339,12 +339,14 @@ A selected import of a container type makes its indexing operators available.
 
 Custom read/edit/writeback retains value semantics and can copy a managed
 collection. The bundled `Pool` has a faster path for scalar field/element writes
-whose indices and right side are ordinary reads, such as
-`pool[handle].inventory[slot] += damage`. It updates the stored item directly,
+whose indices and right side are ordinary reads or scalar arithmetic/boolean
+expressions, such as `pool[handle].inventory[slot+1] += damage*multiplier`.
+It updates the stored item directly,
 validating the handle and retaining array bounds and copy-on-write checks.
-Snapshots remain independent. Calls or custom indexers keep read/edit/writeback;
-for a computed amount, calculating `let damage=...` before the assignment makes
-the simple update available. For bulk iteration, use `pool.items` when stable
+Snapshots remain independent. Calls, overloaded operators and custom indexers
+keep read/edit/writeback; for a function result, calculating `let damage=...`
+before the assignment makes the simple update available. For bulk iteration,
+use `pool.items` when stable
 handle lookup is unnecessary.
 
 Arrays and records retain independent values when copied, including nested
