@@ -469,3 +469,29 @@ allocation counts, asset deletion/recovery, and counters/closures retaining stat
 [Focused gate](source-core/watch-helper-focused.log). The fresh C bootstrap
 passed **1,947 checks in 89.79 s**. [Full gate](source-core/watch-helper-full.log),
 [build manifest](source-core/watch-helper-build.json).
+
+## Discarded specialization for positive literal divisors
+
+A second floor-arithmetic trial specialized positive non-power-of-two literal
+divisors using reflected unsigned magnitudes. It passed the fresh C-bootstrap
+gate (**1,947 checks in 76.89 s**) and the independent integer oracles, including
+additional literal divisors. [Trial gate](source-core/floor-positive-full.log),
+[trial build](source-core/floor-positive-rejected-build.json).
+
+Text improved in three comparisons: **396.97/362.72 ms** (three pairs),
+**389.72/327.96 ms** (seven pairs), then **259.42/243.23 ms** (five pairs using
+the C-bootstrapped candidate). Shared-machine load varied substantially between
+runs. The final full application comparison showed costs elsewhere: arrays
+**239.52/253.04 ms** and graph **591.17/622.16 ms**; helpers **916.76/914.24 ms**
+and records **161.97/161.22 ms** were close. All checksums matched C.
+[Initial run](source-core/floor-positive-runtime-initial.json),
+[repeat](source-core/floor-positive-runtime.json),
+[final applications](source-core/floor-positive-runtime-final.json).
+
+Seven compile pairs also put self-build at **1150.76/1189.41 ms** wall and
+1129.47/1169.60 ms CPU; tour was **49.70/49.74 ms**, physics **344.01/339.86 ms**.
+[Compile samples](source-core/floor-positive-compile.json). The mixed application
+tradeoff and compiler cost do not justify another arithmetic specialization.
+The implementation was reverted. The expanded independent arithmetic oracle
+remains; its eight native/web checks pass on the restored compiler in 2.80 s.
+[Restored implementation gate](source-core/floor-positive-restored.log).

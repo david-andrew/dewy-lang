@@ -2459,8 +2459,8 @@ def test_core_unsigned_floor_arithmetic(compiler, tmp_path, target, release):
     numerators = [0, 1, 2, 127, 255, 65535, (1 << 32) - 1, 1 << 32,
                   (1 << 63) - 1, 1 << 63, maximum - 1, maximum]
     denominators = [1, 2, 3, 255, 1000000007, (1 << 32) - 1, 1 << 32, 1 << 63, maximum]
-    powers = [1 << shift for shift in range(64)]
-    constants = '\n'.join(f'printl"{{a//{b}}} {{a%{b}}}"' for b in powers)
+    literal_divisors = [*[1 << shift for shift in range(64)], 3, 5, 7, 31, 255, 1000, 1000000007]
+    constants = '\n'.join(f'printl"{{a//{b}}} {{a%{b}}}"' for b in literal_divisors)
     source = tmp_path / 'unsigned.dewy'
     source.write_text(f'''main=():>void=>{{
 let values:array<uint64>=[{' '.join(map(str, numerators))}]
@@ -2475,7 +2475,7 @@ loop a in values {{
 }}
 }}
 ''')
-    expected = [f'{a // b} {a % b}' for a in numerators for b in denominators + powers]
+    expected = [f'{a // b} {a % b}' for a in numerators for b in denominators + literal_divisors]
     binary = tmp_path / 'unsigned'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2505,7 +2505,8 @@ def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
     numerators = [minimum, minimum + 1, -1000000007, -129, -7, -1, 0, 1, 7, 129, 1000000007, maximum - 1, maximum]
     denominators = [minimum, minimum + 1, -1000000007, -129, -3, -1, 1, 2, 3, 129, 1000000007, maximum]
     powers = [1 << shift for shift in range(63)]
-    constants = powers + [-3, 3, -129, 129, -1000000007, 1000000007, minimum, maximum]
+    constants = powers + [-3, 3, 5, 7, 9, 10, 31, 63, 1000, 2147483647,
+                          -129, 129, -1000000007, 1000000007, minimum, maximum]
     constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in constants)
     source = tmp_path / 'floor.dewy'
     source.write_text(f'''main=():>void=>{{
