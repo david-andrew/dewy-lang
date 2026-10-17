@@ -1,0 +1,24 @@
+{
+  "base_revision": "99b4da3ee1ef92bce03bef0992a3062a0e8497bf",
+  "final_toolchain": {
+    "source_identity": "7d9273e3dbdf39ae6994105152203b9398ab318f3ec7bd5c9d20e26b48e40adb",
+    "binary": "build-1792257731484481103/bin/dewy-core",
+    "binary_sha256": "86eb8b3ee516f5cc02a86c85bc61ac5e05cdab9c0c980c7b04a5981ee562cc8b"
+  },
+  "scripts": {
+    "dead_nop_trial.py": "import json\nimport os\nimport shutil\nimport subprocess\nfrom pathlib import Path\n\nroot = Path.cwd()\nstate = json.loads((root/'__dewycache__/compact-core/current.json').read_text())\nseed = root/'__dewycache__/compact-core'/state['binary']\ntrial = Path('/tmp/dewy-source-core/dead-nop-trial')\ntrial.mkdir(exist_ok=True)\nshutil.copytree(root/'core/compiler', trial/'compiler', dirs_exist_ok=True)\n(trial/'bin').mkdir(exist_ok=True)\nif not (trial/'lib').exists():\n    (trial/'lib').symlink_to(root/'core/lib', target_is_directory=True)\np = trial/'compiler/opt.jo'\ns = p.read_text()\ns = s.replace('    keep = fill(true, o_out.len())\\n', '', 1)\ns = s.replace('                keep[i] = false\\n', '                o_out[i].op = .nop\\n', 1)\na = s.index('    code: Ins[]\\n    code.reserve(o_out.len())')\nb = s.index('\\n# ---------------- loop-invariant', a)\ns = s[:a] + '    ir.code = o_cleanup(o_out)\\n' + s[b:]\na = s.index('o_cleanup = (code: Ins[])')\ns = s[:a] + s[a:].replace('        op = ins.op\\n', '        op = ins.op\\n        if op == .nop: continue\\n', 1)\np.write_text(s)\nenv = {k:v for k,v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}\nenv['SLOPPY_EMIT_WORKERS'] = '1'\nsubprocess.run([str(seed), 'build', str(trial/'compiler/main.jo'), '-o', str(trial/'bin/dewy-core')], check=True, env=env)\nprint(trial/'bin/dewy-core')\n",
+    "dead_nop_cleanup_trial.py": "import json\nimport os\nimport shutil\nimport subprocess\nfrom pathlib import Path\nroot=Path.cwd()\nstate=json.loads((root/'__dewycache__/compact-core/current.json').read_text())\nseed=root/'__dewycache__/compact-core'/state['binary']\nbase=Path('/tmp/dewy-source-core/dead-nop-trial')\ntrial=Path('/tmp/dewy-source-core/dead-nop-cleanup-trial')\ntrial.mkdir(exist_ok=True)\nshutil.copytree(base/'compiler',trial/'compiler',dirs_exist_ok=True)\n(trial/'bin').mkdir(exist_ok=True)\nif not (trial/'lib').exists(): (trial/'lib').symlink_to(root/'core/lib',target_is_directory=True)\np=trial/'compiler/opt.jo'\ns=p.read_text()\ns=s.replace('''    loop ins in code:\n        if ins.op == .slot: slot_refs[int(ins.a)] += 1\n''','',1)\ns=s.replace('''        if ins.op == .slot and int(ins.dst) < slot_of.len(): slot_of[int(ins.dst)] = int(ins.a)''','''        if ins.op == .slot:\n            slot_refs[int(ins.a)] += 1\n            if int(ins.dst) < slot_of.len(): slot_of[int(ins.dst)] = int(ins.a)''',1)\np.write_text(s)\nenv={k:v for k,v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}\nenv['SLOPPY_EMIT_WORKERS']='1'\nsubprocess.run([str(seed),'build',str(trial/'compiler/main.jo'),'-o',str(trial/'bin/dewy-core')],check=True,env=env)\nprint(trial/'bin/dewy-core')\n"
+  },
+  "paired_cpu_ratios": {
+    "dead-nop-compile.json": {
+      "tour": 0.9924059428873937,
+      "dunes": 0.984592749571328,
+      "compiler": 0.9634663440149362
+    },
+    "dead-nop-cleanup-compile.json": {
+      "tour": 1.00433191522377,
+      "dunes": 0.9916373877772481,
+      "compiler": 0.9899658720356062
+    }
+  }
+}

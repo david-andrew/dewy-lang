@@ -1250,22 +1250,17 @@ optimize = ():
     loop ins in o_out:
         o_operands(ins)
         loop u in o_buf: o_nuse[u] += 1
-    keep = fill(true, o_out.len())
     i = o_out.len() - 1
     loop i >= 0:
         ins = o_out[i]
         if o_pure(ins.op):
             d = int(ins.dst)
             if o_nuse[d] == 0:
-                keep[i] = false
+                o_out[i].op = .nop
                 o_operands(ins)
                 loop u in o_buf: o_nuse[u] -= 1
         i -= 1
-    code: Ins[]
-    code.reserve(o_out.len())
-    loop j in 0.. and ins in o_out:
-        if keep[j]: code.push(ins)
-    ir.code = o_cleanup(code)
+    ir.code = o_cleanup(o_out)
 
 # ---------------- loop-invariant code motion ----------------
 # Arithmetic in a loop whose operands the loop does not change is moved in front of it (of the
@@ -1475,15 +1470,16 @@ o_cleanup = (code: Ins[]) -> Ins[]:
     depth = 0
     # how many instructions take the address of each frame slot
     slot_refs = fill(0, ir.slot_size.len())
-    loop ins in code:
-        if ins.op == .slot: slot_refs[int(ins.a)] += 1
     # Scratch arrays retain their high-water capacity; only this function's
     # registers need entries here, even after a much larger function.
     slot_of: int[] = fill(-1, ir.vtypes.len())
     loop ins in code:
-        if ins.op == .slot and int(ins.dst) < slot_of.len(): slot_of[int(ins.dst)] = int(ins.a)
+        if ins.op == .slot:
+            slot_refs[int(ins.a)] += 1
+            if int(ins.dst) < slot_of.len(): slot_of[int(ins.dst)] = int(ins.a)
     loop ins in code:
         op = ins.op
+        if op == .nop: continue
         if dead:
             if op == .block or op == .loop or op == .if_:
                 depth += 1

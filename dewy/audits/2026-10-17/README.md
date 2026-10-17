@@ -873,3 +873,29 @@ keeps both bootstrap paths supported.
 [Focused gate](source-core/compound-focused.log),
 [full gate](source-core/compound-full.log),
 [build manifest](source-core/compound-build.json).
+
+## Less copying during optimizer cleanup
+
+Dead instructions are marked in the existing output buffer and skipped by the
+cleanup pass. This removes a keep bitmap and an intermediate instruction array.
+The two cleanup scans that collect frame-slot references and register mappings
+now share one traversal. The optimizer performs the same dead-use propagation
+and cleanup transformations. No new optimization pass is added.
+
+An initial seven-pair trial removed the intermediate buffer. The final version
+also combined the slot scans and was measured in eleven alternating pairs. Its
+median paired CPU ratios (candidate/baseline) were **0.999 tour, 0.992 Dunes,
+0.990 self-build**: a modest roughly 1% gain on the larger builds, no meaningful
+change for the tour. Raw self-build medians differed more, **1774.15/1668.23 ms
+CPU**, but paired samples show that changing host load influenced that apparent
+gain. The retained change is a small reduction in copying and allocations, not
+a broad compilation-speed breakthrough.
+[Initial samples](source-core/dead-nop-compile.json),
+[combined cleanup samples](source-core/dead-nop-cleanup-compile.json),
+[reproduction scripts and paired ratios](source-core/dead-nop-trials.json).
+
+The first prototype passed **582 focused checks in 11.41 s**; the final source
+passed the independent C bootstrap and **2,310 checks in 121.53 s**.
+[Focused gate](source-core/dead-nop-focused.log),
+[full gate](source-core/dead-nop-full.log),
+[build manifest](source-core/dead-nop-build.json).
