@@ -1472,11 +1472,18 @@ o_if_select = (out: mut Ins[], start: int) -> bool:
     loop ins in replacement: out.push(ins)
     true
 
+# A branch to a block's end can make that end reachable even when its body
+# cannot fall through. Branches to loop headers do not reach the loop's end.
+o_live_exit = (distance: int, kinds: Op[], exits: mut bool[]):
+    target = kinds.len() - 1 - distance
+    if target >= 0 and kinds[target] != .loop: exits[target] = true
+
 o_cleanup = (code: Ins[]) -> Ins[]:
     out: Ins[]
     out.reserve(code.len())
     kinds: Op[]          # open constructs
     starts: int[]        # ... and where in out they start
+    exits: bool[]        # reachable branches/then arms arriving at each end
     dead = false
     depth = 0
     # how many instructions take the address of each frame slot
@@ -1499,12 +1506,27 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                 if depth > 0:
                     if op == .end: depth -= 1
                     continue
-                dead = false
             else: continue
+        if op == .else_:
+            top = kinds.len() - 1
+            exits[top] = exits[top] or not dead
+            kinds[top] = .else_
+            dead = false
+        else if op == .end:
+            top = kinds.len() - 1
+            # An if without else also reaches its end through its false arm.
+            dead = dead and not exits[top] and kinds[top] != .if_
+        else if op == .br or op == .brif:
+            o_live_exit(int(ins.imm), kinds, exits)
+        else if op == .brtable:
+            o_live_exit(int(ins.imm), kinds, exits)
+            loop i in [0..int(ins.b)):
+                o_live_exit(int(ir.args[int(ins.c) + i]), kinds, exits)
         if op == .end and out.len() > 0:
             if kinds[kinds.len() - 1] == .block and o_if_select(out, starts[starts.len() - 1]):
                 kinds.pop()
                 starts.pop()
+                exits.pop()
                 continue
             last = out[out.len() - 1]
             if last.op == .br and last.imm == 0 and kinds[kinds.len() - 1] != .loop: out.pop()
@@ -1517,6 +1539,7 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                     out.pop()
                     kinds.pop()
                     starts.pop()
+                    exits.pop()
                     out.push(Ins(.brif, 0, 0, prev.a, 0, 0, last.imm - 1))
                     continue
             # `block { ...; brif c, 0; br d }` (c a comparison used only there) is
@@ -1544,6 +1567,7 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                         out.remove(st)
                         kinds.pop()
                         starts.pop()
+                        exits.pop()
                         out.push(Ins(.brif, 0, 0, i32(c), 0, 0, d))
                         continue
         if op == .mov and out.len() > 0:
@@ -1580,10 +1604,15 @@ o_cleanup = (code: Ins[]) -> Ins[]:
         if op == .block or op == .loop or op == .if_:
             kinds.push(op)
             starts.push(out.len() - 1)
+            exits.push(false)
         else if op == .end:
             kinds.pop()
             starts.pop()
-        else if op == .br or op == .ret or op == .trap or (op == .call and ins.c == 1):
+            exits.pop()
+            # Structured validators do not infer that every incoming path
+            # terminates. Keep that fact explicit after closing the construct.
+            if dead: out.push(Ins(.trap, 0, 0, 0, 0, 0, 0))
+        else if op == .br or op == .brtable or op == .ret or op == .trap or (op == .call and ins.c == 1):
             dead = true
             depth = 0
     out

@@ -255,6 +255,19 @@ in 61.98 seconds. Five paired fresh-build CPU measurements pinned to CPU 2 are
 neutral: tour 0.999, Dunes 1.000 and compiler 1.001. See `dictionary-zip-*` in
 the source-core audits.
 
+IR cleanup tracks reachable exits through nested blocks, both conditional arms
+and jump tables. An inner `end` no longer revives code after an unconditional
+exit to an outer block. Loop backedges remain distinct from exits, and explicit
+unreachable markers keep WebAssembly validation sound. Tests cover nested
+returns, managed values, labeled exits and jump-table returns, and check that
+unreachable printing is absent from the emitted IR. All 3,074 checks pass from
+C in 54.03 seconds. Five paired application CPU ratios are 0.998 (helpers),
+1.003 (arrays), 0.987 (records), 0.995 (text) and 0.982 (graph); there is no broad
+runtime speedup claim. Fresh-build CPU ratios are 1.002 for the tour and 1.004
+for the compiler. The noisy initial Dunes ratio of 1.070 becomes 1.002 in a
+seven-pair follow-up. All measurements use CPU 2; see `reachability-*` in the
+source-core audits.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

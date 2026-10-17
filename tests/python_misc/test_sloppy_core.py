@@ -22,6 +22,52 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'optimizer-nested-exits': '''reachability_probe=(first:bool second:bool):>int64=>{
+if first {if second return 20 else return 21} else {return 22}
+printl"unreachable tail"
+return 99
+}
+main=()=>{
+loop first in [false true] {loop second in [false true] {
+let expected=if first (if second 20 else 21) else 22
+if reachability_probe(first second) not=? expected return 1
+}}
+return 42}''',
+    'optimizer-nested-exit-rejoin': '''work=(mode:int64):>int64=>{
+let result:int64=0
+$outer
+loop i in [0..4) {
+loop j in [0..3) {
+if mode =? 0 {if j =? 1 break $outer else continue}
+else {if j =? 1 break else result+=1}
+result+=100
+}
+result+=10
+}
+return result
+}
+main=()=>{return if work(0)=?0 and work(1)=?444 42 else 1}''',
+    'optimizer-nested-exit-managed': '''pick=(mode:int64 values:array<int64>):>array<int64>=>{
+let local=values local.push(22)
+if mode >? 0 {if mode >? 1 return local else return values}
+else {local[0]=99 return local}
+panic("unreachable managed tail")
+}
+main=()=>{let values=[20]
+loop i in [0..100) {
+if pick(2 values) not=? [20 22] or pick(1 values) not=? [20]
+or pick(0 values) not=? [99 22] or values not=? [20] return 1
+}
+return 42}''',
+    'optimizer-jump-table-exits': '''pick=(value:int64):>int64=>{
+match value {<0>=>{return 10} <1>=>{return 11} <2>=>{return 12}
+<3>=>{return 13} _=>{return 14}}
+panic("unreachable match tail")
+}
+main=()=>{loop i in [-2..6) {
+if pick(i) not=? (if i >=? 0 and i <? 4 i+10 else 14) return 1
+}
+return 42}''',
     'optimizer-constant-selections': '''choose=(flag:bool a:int64 b:int64):>int64=>if flag a else b
 offset=(flag:bool x:int64):>int64=>if flag x+1 else x-1
 known=(flag:bool x:int64):>int64=>{
@@ -3874,6 +3920,23 @@ loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_nested_exit_cleanup(compiler, tmp_path, target, release):
+    source = tmp_path / 'nested_exit.dewy'
+    source.write_text(CASES['optimizer-nested-exits'])
+    flags = ['--ir', *(['--release'] if release else [])]
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'nested_exit', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_reachability_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'nested-return function was not emitted'
+    assert ' = call ' not in probe[0], 'unreachable printing remained after nested returns'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm', 'linux-arm64'])
