@@ -479,6 +479,25 @@ let port = to_int(env("PORT") ?? "47200") ?? 47200
 The left operand must be optional; use `mapping.get(key) ?? fallback` for an
 optional dictionary lookup. Direct indexing returns the stored element itself.
 
+Records with `len(container)` and `__index__(container index)` work as finite
+indexed sequences in loops and comprehensions. Length describes integer positions
+from zero through `len(container)-1`. For example:
+
+```dewy
+Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+let values=[loop value in Series[40 3] value] # [40 41 42]
+```
+
+The source expression evaluates once and iteration retains its value; modifying
+the original container leaves that input intact. Ordinary loops, counters,
+combined `and`/`or` headers, destructuring, labels and fallback arms work with
+these sequences. To edit the original container, use its indexed assignments.
+The [Ring example](../examples/sloppy_core/ring.dewy) and
+[history program](../examples/sloppy_core/history.dewy) use this interface across
+module imports without a separate iterator allocation.
+
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 

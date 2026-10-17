@@ -974,3 +974,24 @@ custom-container updates, invalid bounds/lengths and formatter execution.
 [toolchain metadata](source-core/slice-update-validation.json).
 The preceding final range-selection commit also passed its
 [full CI bootstrap gate](https://github.com/david-andrew/dewy-lang/actions/runs/39055201117).
+
+## Iteration over user-written indexed containers
+
+Records that provide `len` and `__index__` now work directly in loops and
+comprehensions. The checker retains the source value, captures its length and
+reuses ordinary counted-loop lowering; no intermediate collection or iterator
+object is created. The existing loop machinery supplies labels, fallback arms,
+cleanup and iteration-local closure captures. Combined headers resolve length
+through the receiver's method module, so selected imports retain the interface.
+
+The Ring/history example now iterates the saved position history directly.
+Validation covers generic containers, one source evaluation, snapshot isolation
+while the original grows, comprehensions, counted/combined headers, unpacking,
+labels, fallback arms, managed cleanup and imported Ring operations. **84 focused
+checks passed in 9.00 s**. The independent C-bootstrap gate passed **2,507 checks
+in 107.00 s**. A strengthened per-closure value check passed **4 native/web
+debug/release checks in 1.36 s**.
+[Focused gate](source-core/sequence-focused.log),
+[full bootstrap gate](source-core/sequence-full.log),
+[closure checks](source-core/sequence-closures.log),
+[toolchain metadata](source-core/sequence-validation.json).

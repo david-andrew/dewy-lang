@@ -3228,7 +3228,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
                 add_flag(args[0], NF_MUT)
             nodes[n] = nodes[bc_call(name, [args[0]], pos)]
         else if id == .dewy_iter_done:
-            nodes[n] = nodes[bc_bin(.ge, args[1], bc_call("len", [args[0]], pos), pos)]
+            length = if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
+            nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
         else:
             ix = mk(.index, pos)
             nodes[ix].a = i32(args[0])

@@ -1870,11 +1870,48 @@ dewy_cursor_loop = (s: int) -> bool:
     check_stmt(s)
     true
 
+# Indexed user containers use their existing len / [] operations. Retain the
+# input value and length once, then reuse the ordinary counted-loop lowering.
+dewy_sequence_loop = (s: int) -> bool:
+    it = int(nodes[s].a)
+    if nodes[it].kind == .range: return false
+    t = prune(ntype(it))
+    if types[t].kind != .struct_ or is_map_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
+    pos = nodes[s].pos
+    if has_flag(s, NF_MUT): fatal(pos, "custom sequence iteration yields values; update the container through its indices")
+    tag = "__sequence{bc_count}"
+    bc_count += 1
+    add_flag(it, NF_CHECKED)
+    seq = bc_let(tag, it, pos)
+    index = tag + "i"
+    bindings = kids(s)
+    counted = bindings.len() == 2 and nodes[s].ival == 1
+    if counted: index = name_of(int(nodes[bindings[0]].name))
+    read = lx_index(bc_ident(tag, pos), bc_ident(index, pos), pos)
+    binding = mk(.vardecl, pos)
+    nodes[binding].b = i32(read)
+    if bindings.len() == 1 or counted:
+        nodes[binding].name = nodes[bindings[bindings.len() - 1]].name
+    else: set_list(binding, bindings)
+    body = lx_block([binding] + kids(int(nodes[s].b)), pos)
+    range = mk(.range, pos)
+    nodes[range].a = i32(bc_int(0, pos))
+    nodes[range].b = i32(bc_method(bc_ident(tag, pos), "len", [], pos))
+    counted_loop = mk(.for_, pos)
+    nodes[counted_loop].a = i32(range)
+    nodes[counted_loop].b = i32(body)
+    nodes[counted_loop].sval = nodes[s].sval
+    set_list(counted_loop, [bc_ident(index, pos)])
+    nodes[s] = nodes[lx_block([seq, counted_loop], pos)]
+    check_stmt(s)
+    true
+
 check_for = (s: int):
     soa_loop(s)
     unpack_loop(s)
     if dewy_cursor_loop(s): return
     if map_tidy_first(s): return
+    if dewy_sequence_loop(s): return
     mark = scope_mark()
     enter_loop()
     it = int(nodes[s].a)

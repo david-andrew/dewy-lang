@@ -20,6 +20,72 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sequence-unpack': '''Series:type=[values:array<array<int64>>]
+len=(s:Series)=>s.values.length
+__index__=(s:Series index:int64)=>s.values[index]
+main=()=>{let total=0 loop [a b] in Series[[[10 11] [9 12]]] total+=a+b return total}''',
+    'sequence-closures': '''Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let callbacks=[loop x in Series[13 3] ()=>x]
+return if callbacks[0]() =? 13 and callbacks[1]() =? 14 and callbacks[2]() =? 15 42 else 1}''',
+    'sequence-basic': '''Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let total=0 loop x in Series[13 3] total+=x return total}''',
+    'sequence-once': '''Series:type=[first:int64 count:int64]
+let made:int64=0 let lengths:int64=0 let reads:int64=0
+make=()=>{made+=1 return Series[13 3]}
+len=(s:Series)=>{lengths+=1 return s.count}
+__index__=(s:Series index:int64)=>{reads+=1 return s.first+index}
+main=()=>{let total=0 loop x in make() total+=x
+return if total =? 42 and made =? 1 and lengths =? 1 and reads =? 3 42 else 1}''',
+    'sequence-snapshot': '''Series:type=[values:array<int64>]
+len=(s:Series)=>s.values.length
+__index__=(s:Series index:int64)=>s.values[index]
+let source=Series[[20 22]]
+main=()=>{source.values.push(0) let total=0
+loop x in source {total+=x source.values[0]=999 source.values.push(1)}
+return if total =? 42 and source.values.length =? 6 42 else 1}''',
+    'sequence-comprehension': '''Series:type=<T>[values:array<T>]
+len=<T>(s:Series<T>)=>s.values.length
+__index__=<T>(s:Series<T> index:int64):>T=>s.values[index]
+main=()=>{let source=Series<string>[["a" "bb" "ccc"]]
+let lengths=[loop text in source text.length]
+return if lengths =? [1 2 3] 42 else 1}''',
+    'sequence-counted': '''Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let total=0 loop i in 0.. and x in Series[12 3] total+=i+x return total}''',
+    'sequence-combined': '''Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let both=0 let either=0
+loop x in Series[13 3] and y in Series[1 2] both+=x+y
+loop x in Series[13 3] or y in Series[1 2] either+=(x??0)+(y??0)
+return if both =? 30 and either =? 45 42 else 1}''',
+    'sequence-flow': '''Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let total=0
+loop x in Series[0 0] {total=999} else {total+=40}
+$outer loop x in Series[0 3] {
+    loop y in Series[0 3] {
+        total+=1
+        if x =? 0 continue $outer
+        break $outer
+    }
+}
+return total}''',
+    'sequence-cleanup': '''Series:type=<T>[values:array<T>]
+len=<T>(s:Series<T>)=>s.values.length
+__index__=<T>(s:Series<T> index:int64):>T=>s.values[index]
+work=():>string=>{let source=Series<string>[["a" "b"]] source.values.push("c")
+loop text in source {if text =? "a" continue return text} else {return "empty"}
+return "end"}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=? "b" return 1}
+return if alloc_count() =? before 42 else 2}''',
     'slice-update-bounds': '''main=()=>{
 let xs=[10 20 30 40 50] xs.push(60) let saved=xs
 xs[1..2]=[1 2] xs[..1)=3 xs[4..]=42 xs[3..3)=[]
@@ -3483,7 +3549,7 @@ def test_core_operator_imports(compiler, tmp_path, name, imports, target, releas
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('case', ['history', 'managed-values', 'capacity', 'negative-index', 'past-end'])
+@pytest.mark.parametrize('case', ['history', 'managed-values', 'iteration', 'capacity', 'negative-index', 'past-end'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_ring_example(compiler, tmp_path, case, target, release):
@@ -3492,6 +3558,19 @@ def test_core_ring_example(compiler, tmp_path, case, target, release):
     source = tmp_path / 'main.dewy'
     if case == 'history':
         source.write_text((examples / 'history.dewy').read_text())
+    elif case == 'iteration':
+        source.write_text('''from p"ring.dewy" import new_ring
+main=()=>{
+let ring=new_ring<int64>(4) loop i in [0..6) ring.push(i)
+let saved=ring let sum=0 let both=0 let either=0
+loop x in ring and y in [20 22] both+=x+y
+loop x in ring or y in [20 22] either+=(x??0)+(y??0)
+let tripled=[loop x in ring 3x]
+loop x in ring {sum+=x ring.push(99)}
+return if sum =? 14 and both =? 47 and either =? 56
+and tripled =? [6 9 12 15] and saved[0] =? 2 and ring[0] =? 99 42 else 1
+}
+''')
     elif case == 'managed-values':
         source.write_text('''from p"ring.dewy" import new_ring
 main=()=>{
@@ -3534,8 +3613,8 @@ return if empty.len() =? 1 and empty[0] =? 42 42 else 4
     if case == 'history':
         assert ran.returncode == 0, ran.stdout + ran.stderr
         assert ran.stdout == ('History length: 4\nOldest position: 6, 3\n'
-                              'Newest position: 112, 6\nRewind position: 12, 6\n')
-    elif case == 'managed-values':
+                              'Newest position: 112, 6\nRewind position: 12, 6\nRecorded total: 54\n')
+    elif case in ('managed-values', 'iteration'):
         assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
     else:
         assert ran.returncode != 0
@@ -4113,7 +4192,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

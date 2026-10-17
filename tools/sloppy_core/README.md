@@ -159,8 +159,13 @@ writeback. Fixed-width results wrap to the destination width; exact `/=` needs
 a fractional destination (or floating operands and a floating destination).
 
 `examples/sloppy_core/ring.dewy` is a generic bounded container implemented in
-Dewy. Its history example covers wraparound, nested indexed edits and independent
-snapshots. Native/web debug/release checks also cover managed elements, capacity
+Dewy. Its history example covers wraparound, nested indexed edits, independent
+snapshots and direct iteration. Indexed records with `len` and `__index__` now
+use the existing counted-loop lowering: retain the source, capture its length,
+and read positions in order. Comprehensions, combined headers, tuple/array
+unpacking, labels and fallback arms compose with it. Method lookup makes a
+selected import of the container constructor sufficient for its length/index
+operations. Native/web debug/release checks also cover managed elements, capacity
 one, empty length, invalid capacity and invalid indices. The checker now rejects
 non-void/non-integer entry-point results, which previously could emit invalid
 WebAssembly for an aggregate result.
