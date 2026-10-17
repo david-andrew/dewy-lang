@@ -533,3 +533,10 @@ high; these are current build observations, not before/after improvements.
 
 ![Dunes in WebGL](source-core/dunes-web.png)
 ![Dunes in the native software renderer](source-core/dunes-native.png)
+
+Live shader editing is also checked with a 64×64 software-rendered scene. Editing
+an imported fragment shader changes the sampled pixel from red to blue to green,
+recreates the generated GPU program, and preserves the running frame counter.
+The focused check passed in **4.15 s** on the busy development host.
+[Reload gate](source-core/shader-watch.log). This exercises actual rendered colors
+and resource replacement rather than matching generated shader text.

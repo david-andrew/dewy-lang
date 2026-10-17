@@ -319,3 +319,46 @@ draw=():>void=>clear(BLACK)
         assert after > before, watcher.output
     finally:
         watcher.close()
+
+
+def test_core_watch_shader(compiler, tmp_path):
+    """Reload both GPU source and software shader functions without resetting play."""
+    shader = tmp_path / 'shaders.dewy'
+
+    def shading(color):
+        return '''V:type=[pos:vec2]
+U:type=[scale:float32]
+Out:type=[pos:vec4]
+vs=(v:V u:U):>Out=>Out(vec4(v.pos*u.scale 0 1))
+fs=(v:Out u:U):>vec4=>''' + color + '\n'
+
+    save(shader, shading('vec4(1 0 0 1)'))
+    source = tmp_path / 'game.dewy'
+    save(source, '''from p"shaders.dewy" import V, U, vs, fs
+let shading=shader(vs fs)
+let program=make_shader(shading)
+let triangle=mesh([V(vec2(-1 -1)) V(vec2(3 -1)) V(vec2(-1 3))])
+let count:int64=0
+main=():>void=>window("Shader reload" 64 64)
+update=(dt:float64):>void=>{count+=1 sleep(0.005)}
+draw=():>void=>{
+clear(BLACK) draw(program triangle U(1))
+if count%10 =? 0 {
+let pixels=screenshot().pixels
+let index=(32*64+32)*4
+printl"tick {count} program={program.prog} color={pixels[index]},{pixels[index+1]},{pixels[index+2]}"
+}
+}
+''')
+    watcher = Watch(compiler, source, game=True)
+    try:
+        before = watcher.expect(r'tick (\d+) program=(\d+) color=255,0,0')
+        for color, pixel in [('vec4(0 0 1 1)', '0,0,255'), ('vec4(0 1 0 1)', '0,255,0')]:
+            save(shader, shading(color))
+            watcher.expect(r'reloaded in \d+ ms:')
+            after = watcher.expect(r'tick (\d+) program=(\d+) color=' + pixel)
+            assert int(after[1]) > int(before[1]), watcher.output
+            assert after[2] != before[2], 'The generated GPU program must also be recreated'
+            before = after
+    finally:
+        watcher.close()

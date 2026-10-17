@@ -551,6 +551,8 @@ typed input/output records and texture uniforms. The compiler generates GPU
 shader code and the software renderer can execute the same shader functions.
 See [its model module](../examples/sloppy_core/dunes_model.dewy) for terrain,
 animated meshes and custom sand/shadow and beacon shaders.
+Native `watch` refreshes shaders after edits, including imported shader functions,
+while preserving unrelated game state.
 
 This remains a developing subset of Dewy. The earlier proof/effect system,
 automatic numeric widening, general structural conversions and every historical
