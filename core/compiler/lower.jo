@@ -1141,7 +1141,7 @@ race_target = (t: int, f: int, who: str, captures: bool, pos: int):
 
 race_scan = (n: int, f: int, who: str, captures: bool):
     if n == 0: return
-    loop called in set_value_calls(n): race_named(called, who)
+    loop called in collection_value_calls(n): race_named(called, who)
     k = nodes[n].kind
     if k == .lambda: return
     if k == .assign: race_target(int(nodes[n].a), f, who, captures, nodes[n].pos)
@@ -3501,7 +3501,7 @@ may_write_root = (n: int, rn: int) -> bool:
     glob = nodes[rn].aux == i32(int(SK.global))
     mutparam = not glob and int(locals[int(nodes[rn].sym)].flags) & LF_MUTPARAM != 0
     if not mwr_direct and (glob or mutparam):
-        loop f in set_value_calls(n):
+        loop f in collection_value_calls(n):
             w = fn_writes(f)
             if w.all or (glob and w.globals.contains(int(nodes[rn].sym))) or (mutparam and w.globals.len() > 0): return true
     if k == .assign:
@@ -3549,7 +3549,7 @@ calls_leave = (n: int, rn: int, written: bool) -> bool:
     if n <= 0: return true
     k = nodes[n].kind
     if k == .lambda: return true
-    loop f in set_value_calls(n):
+    loop f in collection_value_calls(n):
         w = fn_writes(f)
         if w.all: return false
         if nodes[rn].aux == i32(int(SK.global)):
@@ -3645,7 +3645,7 @@ fw_scan = (n: int, w: mut FnWrites):
     if n <= 0: return
     k = nodes[n].kind
     if k == .lambda: return
-    loop f in set_value_calls(n):
+    loop f in collection_value_calls(n):
         if not w.calls.contains(f): w.calls.push(f)
     if k == .ident and nodes[n].aux == i32(int(SK.global)) and not w.mentions.contains(int(nodes[n].sym)): w.mentions.push(int(nodes[n].sym))
     if k == .assign: fw_global(int(nodes[n].a), w)
@@ -3733,7 +3733,7 @@ fr_scan = (n: int, out: mut int[]):
 # the first call in n (not in a function written in it) of a function that may resize global g
 lm_resizing_call = (n: int, g: int) -> int:
     if n <= 0: return 0
-    loop called in set_value_calls(n):
+    loop called in collection_value_calls(n):
         if fn_resizes(called).contains(g): return n
     k = nodes[n].kind
     if k == .lambda: return 0
@@ -5006,15 +5006,15 @@ helper_arruniq = (t: int):
     endc()
     e_ret(r)
 
-# Set member equality/hash can call user-defined key operations. Keep the
+# Collection equality/hash can call user-defined member operations. Keep the
 # enclosing value alive and independent throughout those calls, including a
 # surrounding array whose owner a callback could replace. When all reachable
 # member operations leave global state alone, helpers keep the pure read path.
-set_member_cache: {int: int[]} = {}
+collection_member_cache: {int: int[]} = {}
 
-helper_set_members = (t: int) -> int[]:
-    if dewy_set_equal_fns.len() == 0: return []
-    if let cached = set_member_cache.get(t): return cached
+helper_collection_members = (t: int) -> int[]:
+    if collection_equal_fns.len() == 0: return []
+    if let cached = collection_member_cache.get(t): return cached
     result: int[]
     pending = [t]
     seen: {int: bool} = {}
@@ -5022,7 +5022,7 @@ helper_set_members = (t: int) -> int[]:
         current = prune(pending.pop())
         if seen.has(current): continue
         seen[current] = true
-        if is_dewy_set_type(current):
+        if is_value_collection_type(current):
             result.push(current)
             continue
         k = types[current].kind
@@ -5036,21 +5036,21 @@ helper_set_members = (t: int) -> int[]:
                 vi = int(structs[si].variants) + i
                 loop j in [0..int(variants[vi].nfields)):
                     pending.push(int(fields[int(variants[vi].fields) + j].type))
-    set_member_cache[t] = result
+    collection_member_cache[t] = result
     result
 
-helper_set_snapshot = (t: int, hashing: bool = false) -> bool:
-    loop member in helper_set_members(t):
-        f = dewy_set_equal_fns[member]
-        if hashing: f = dewy_set_hash_fns[member]
+helper_collection_snapshot = (t: int, hashing: bool = false) -> bool:
+    loop member in helper_collection_members(t):
+        f = collection_equal_fns[member]
+        if hashing: f = collection_hash_fns[member]
         writes = fn_writes(f)
         if writes.all or writes.globals.len() > 0: return true
     false
 
 # Calls made by generated aggregate helpers still participate in ordinary
 # alias/effect analysis, just like calls written explicitly in the source.
-set_value_calls = (n: int) -> int[]:
-    if dewy_set_equal_fns.len() == 0: return []
+collection_value_calls = (n: int) -> int[]:
+    if collection_equal_fns.len() == 0: return []
     t = 0
     hashing = false
     if nodes[n].kind == .intrinsic and nodes[n].aux == i32(int(IN.hash)) and nkids(n) > 0:
@@ -5061,9 +5061,9 @@ set_value_calls = (n: int) -> int[]:
         if op == .eq or op == .ne: t = ntype(int(nodes[n].a))
     if t == 0: return []
     result: int[]
-    loop member in helper_set_members(t):
-        if hashing: result.push(dewy_set_hash_fns[member])
-        else: result.push(dewy_set_equal_fns[member])
+    loop member in helper_collection_members(t):
+        if hashing: result.push(collection_hash_fns[member])
+        else: result.push(collection_equal_fns[member])
     result
 
 helper_value_snapshot = (t: int, source: int) -> int:
@@ -5077,13 +5077,13 @@ helper_eq = (t: int):
     ir.ret = VI
     a = ps[0]
     b = ps[1]
-    snapshot = helper_set_snapshot(t)
+    snapshot = helper_collection_snapshot(t)
     if snapshot:
         a = helper_value_snapshot(t, a)
         b = helper_value_snapshot(t, b)
-    if is_dewy_set_type(t):
-        f = dewy_set_equal_fns.get(t) ?? 0
-        if f == 0: ice("set equality was not checked")
+    if is_value_collection_type(t):
+        f = collection_equal_fns.get(t) ?? 0
+        if f == 0: ice("collection equality was not checked")
         result = e_call(lf_of_inst(f), [a, b], VI)
         if snapshot:
             drop_at(a, t)
@@ -5179,11 +5179,11 @@ helper_hash = (t: int):
     ps = helper_params(1)
     ir.ret = VI
     a = ps[0]
-    snapshot = helper_set_snapshot(t, true)
+    snapshot = helper_collection_snapshot(t, true)
     if snapshot: a = helper_value_snapshot(t, a)
-    if is_dewy_set_type(t):
-        f = dewy_set_hash_fns.get(t) ?? 0
-        if f == 0: ice("set hashing was not checked")
+    if is_value_collection_type(t):
+        f = collection_hash_fns.get(t) ?? 0
+        if f == 0: ice("collection hashing was not checked")
         result = e_call(lf_of_inst(f), [a], VI)
         if snapshot: drop_at(a, t)
         e_ret(result)

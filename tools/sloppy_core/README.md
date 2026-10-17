@@ -323,6 +323,17 @@ source while a borrowed argument remains in use. The independent C gate passes
 3,238 checks in 53.98 seconds. Five paired fresh-build CPU ratios are neutral:
 tour 0.999, Dunes 1.000, compiler 0.991. See `hash-discovery-*`.
 
+Dictionaries now retain their association-based equality inside arrays, records,
+optionals and unions. Their new order-independent hash lets equivalent maps act
+as keys or set members despite different insertion/deletion histories and
+capacities. This reuses the collection helper/effect machinery introduced for
+sets, including snapshots when key or value callbacks can mutate the source.
+Checks cover nested custom keys/values and mutation during both comparison and
+hashing. The independent C gate passes 3,258 checks in 42.71 seconds. Five paired
+fresh-build CPU ratios are 1.000 for the tour, 1.018 for Dunes and 1.011 for the
+compiler; this is a behavior improvement, not a compilation speedup.
+See `map-values-*` for the full gate and samples.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

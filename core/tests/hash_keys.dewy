@@ -5,9 +5,10 @@ __eq__=(a:Key b:Key):>bool=>a.value =? b.value
 let hash_calls:int64=0
 let armed=false
 let current:array<set<Key>>=[]
+let current_maps:array<dict<int64 Key>>=[]
 hash=(key:Key):>uint64=>{
     hash_calls+=1
-    if armed {armed=false current.clear()}
+    if armed {armed=false current.clear() current_maps.clear()}
     return (key.value as uint64).hash()
 }
 

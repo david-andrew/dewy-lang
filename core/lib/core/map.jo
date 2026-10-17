@@ -280,6 +280,19 @@ __map_compact[K, V] = (m: mut Map[K, V]):
 # the same keys with equal values (in any order)
 # (not for sloppy0: it would take the generic (==) for all structs)
 when not BOOTSTRAP:
+    # Hash each key/value association, then combine entries without depending
+    # on insertion order, capacity or removed slots. Keys and values use their
+    # own hash methods, matching the equality operations below.
+    hash[K, V] = (m: Map[K, V]) -> u64:
+        total: u64 = 0
+        ng = m.gone.len()
+        loop i in 0.. and k in m.keys:
+            if i < ng and __at(m.gone, i): continue
+            kh = k.hash()
+            vh = __at(m.vals, i).hash()
+            total += hash(kh xor ((vh << 1) | (vh >> 63)))
+        hash(total xor u64(m.len()))
+
     (==)[K, V] = (a: Map[K, V], b: Map[K, V]) -> bool:
         if a.len() != b.len(): return false
         ng = a.gone.len()

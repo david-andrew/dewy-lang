@@ -526,6 +526,11 @@ argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
 
+Dictionaries compare by their key/value associations, ignoring insertion order,
+capacity and removed entries. This also holds when they are nested inside other
+values. Their hashes follow the same rule, so dictionaries can be set members
+or dictionary keys; changing a copy leaves an already-inserted key independent.
+
 Sets retain distinct members in insertion order:
 
 ```dewy

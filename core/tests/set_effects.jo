@@ -4,9 +4,11 @@ struct Key:
 
 armed = false
 current: Set[Key][]
+current_maps: {int: Key}[]
 
 (==) = (a: Key, b: Key) -> bool:
     if armed:
         armed = false
         current.clear()
+        current_maps.clear()
     a.value == b.value

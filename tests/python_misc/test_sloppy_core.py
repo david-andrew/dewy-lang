@@ -22,6 +22,51 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'dictionary-equality-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''through=(values:array<dict<int64 set_effects.Key>>):>int64=>{
+let other=[[2->set_effects.Key[22] 1->set_effects.Key[20]]]
+if values not=?other return 1
+let noise=[[3->set_effects.Key[99]]]
+return if noise.length=?1 values[0].length*21 else 2
+}
+main=()=>{
+set_effects.current_maps=[[1->set_effects.Key[20] 2->set_effects.Key[22]]]
+set_effects.armed=true
+let result=through(set_effects.current_maps)
+return if set_effects.current_maps.length=?0 and not set_effects.armed result else 3}'''),
+    'dictionary-hash-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'"\n'+'''through=(values:array<dict<int64 hash_keys.Key>>):>int64=>{
+let code=hash(values)
+let noise=[[3->hash_keys.Key[99 "other"]]]
+return if noise.length=?1 and code=?hash(values) values[0].length*21 else 1
+}
+main=()=>{
+hash_keys.current_maps=[[1->hash_keys.Key[20 "a"] 2->hash_keys.Key[22 "b"]]]
+hash_keys.armed=true
+let result=through(hash_keys.current_maps)
+return if hash_keys.current_maps.length=?0 and not hash_keys.armed result else 2}'''),
+    'dictionary-value-equality': '''main=()=>{
+let first=["a"->[20] "b"->[22]]
+let second=["b"->[22] "gone"->[0] "a"->[20]]
+second.remove("gone") second.reserve(100)
+if first not=?second or [first] not=?[second] return 1
+if [mapping=first] not=?[mapping=second] return 2
+let optional:dict<string array<int64>>?=first
+if optional not=?second return 3
+let variant:dict<string array<int64>>|string=first
+let other:dict<string array<int64>>|string=second
+if variant not=?other return 4
+let values=[first->42]
+let saved=second second["a"].push(99)
+return if second not in? values values[saved] else 5}''',
+    'dictionary-empty-hash': '''main=()=>{
+let first:dict<int64 string>=[] let second:dict<int64 string>=[]
+second.reserve(100) second[7]="gone" second.remove(7)
+let values=set[first second]
+return if values.length=?1 and [first]=?[second] 42 else 1}''',
+    'dictionary-custom-nested-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key\n'+'''main=()=>{
+let first=[Key[20 "a"]->Key[22 "b"]]
+let second=[Key[20 "other"]->Key[22 "labels"]]
+let values=[[mapping=first]->42]
+return values[[mapping=second]]}'''),
     'dictionary-custom-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key\n'+'''main=()=>{
 let values:dict<Key int64>=[]
 values[Key[7 "first"]]=20

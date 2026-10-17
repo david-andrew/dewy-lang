@@ -3324,6 +3324,15 @@ is_dewy_set_type = (t: int) -> bool:
     d = int(structs[st].decl)
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_sets.jo"
 
+is_value_collection_type = (t: int) -> bool:
+    if is_dewy_set_type(t): return true
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != "Map": return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
+
 check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].kind = .intrinsic
     nodes[n].aux = i32(int(id))
