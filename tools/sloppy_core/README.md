@@ -149,7 +149,10 @@ Dewy and `.jo` clients share specialization and dispatch. Comparisons require
 order. Record `and`/`or`/`not` use `__and__`/`__or__`/`__not__`; binary record
 operators evaluate both arguments once in source order. Built-in boolean
 `and`/`or` keep short-circuit evaluation. Floor division/modulo and power use
-their corresponding protocols too.
+their corresponding protocols too. Compound `//=`, `%=`, `/=` and `^=` use
+those same numeric and record operations, with index capture and custom-index
+writeback. Fixed-width results wrap to the destination width; exact `/=` needs
+a fractional destination (or floating operands and a floating destination).
 
 `examples/sloppy_core/ring.dewy` is a generic bounded container implemented in
 Dewy. Its history example covers wraparound, nested indexed edits and independent

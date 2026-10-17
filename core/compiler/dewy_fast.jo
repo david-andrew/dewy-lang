@@ -164,7 +164,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             value = source[start..i)
         else:
             # Longest spelling wins. Dewy's comparison ? belongs to the operator.
-            loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "%=", "//", "<<", ">>", "..", "|>", "<|"]:
+            loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "//", "<<", ">>", "..", "|>", "<|"]:
                 if dn_matches(source, start, stop, op):
                     value = op
                     i += len(op)
@@ -207,7 +207,7 @@ dn_operator = (kind: str, op: str, left: int, right: int, offset: int) -> int:
 # boundary between values ends an element; applications use adjacent brackets.
 dn_power = (op: str) -> int:
     match op:
-        "=", "+=", "-=", "*=", "/=", "//=", "%=", "<<=", ">>=": 10
+        "=", "+=", "-=", "*=", "/=", "^=", "//=", "%=", "<<=", ">>=": 10
         "->": 20
         "=>": 30
         ":>": 40

@@ -20,6 +20,86 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'compound-value-parameter': 'halve=(x:int64)=>{x//=2 x}\nmain=()=>{let x=84 return if halve(x) =? 42 and x =? 84 42 else 1}',
+    'compound-custom-width': '''Box:type=[value:int8]
+__index__=(box:Box i:int64):>int8=>box.value
+__setindex__=(@box:Box i:int64 value:int8):>void=>{box.value=value}
+main=()=>{let box=Box[-128] box[0]//=-1 box[0]%=3
+return if box.value =? 1 42 else 1}''',
+    'compound-protocols': '''Box:type=[value:int64]
+__floordiv__=(a:Box b:int64)=>Box[a.value+b]
+__mod__=(a:Box b:int64)=>Box[a.value+b]
+__truediv__=(a:Box b:int64)=>Box[a.value+b]
+__pow__=(a:Box b:int64)=>Box[a.value+b]
+main=()=>{let value=Box[10] value//=2 value%=8 value/=2 value^=20 return value.value}''',
+    'compound-managed-lifetime': '''work=():>void=>{
+let values=[3/2] values.push(5/2) let saved=values
+loop i in [0..20) {values[0]/=3 values[0]^=(-1)}
+if saved not=? [3/2 5/2] panic("snapshot changed")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..10) work()
+return if alloc_count() =? before 42 else 1}''',
+    'compound-floor-signs': '''main=()=>{
+let a=-7 let b=7 let c=-7 let d=7
+let e=-7 let f=7 let g=-7 let h=7
+a//=3 b//=-3 c//=-3 d//=3
+e%=3 f%=-3 g%=-3 h%=3
+return if [a b c d e f g h] =? [-3 -3 2 2 2 -2 -1 1] 42 else 1
+}''',
+    'compound-widths': '''main=()=>{
+let a:int8=-128 let b:uint64=18446744073709551615 let c:int64=-9223372036854775808
+let d:int16=-17 let e:uint8=3
+a//=-1 b//=2 c//=-1 d%=8 e^=3
+return if a =? -128 and b =? 9223372036854775807 and c =? -9223372036854775808
+and d =? 7 and e =? 27 42 else 1
+}''',
+    'compound-exact': '''main=()=>{
+let fraction=3/2 fraction/=3 fraction^=(-2)
+let big=123456789012345678901234567890 big//=10 big%=100 big^=2
+let float:float32=9.0 float/=2 float^=2
+return if fraction =? 4 and big =? 7921 and float =? 20.25 42 else 1
+}''',
+    'compound-order': '''let value:int64=84 let calls:int64=0
+change=()=>{calls+=1 value=999 return 2}
+main=()=>{value//=change() return if value =? 42 and calls =? 1 42 else 1}''',
+    'compound-array-place': '''let values:array<int64>=[84 100] let index:int64=0 let calls:int64=0
+pick=()=>{calls+=1 return index}
+change=()=>{index=1 values[0]=999 return 2}
+main=()=>{values.push(200) let saved=values
+values[pick()]//=change()
+return if values =? [42 100 200] and saved =? [84 100 200] and calls =? 1 42 else 1}''',
+    'compound-index-variable': '''let values:array<int64>=[84 100] let index:int64=0
+change=()=>{index=1 return 2}
+main=()=>{values.push(200) values[index]//=change()
+return if values =? [42 100 200] 42 else 1}''',
+    'compound-nested-place': '''Item:type=[values:array<int64>]
+let order:int64=0
+outer=()=>{order=order*10+1 return 0}
+inner=()=>{order=order*10+2 return 0}
+right=()=>{order=order*10+3 return 2}
+main=()=>{let values=[Item[[84]] Item[[10]]] values.push(Item[[20]])
+values[outer()].values[inner()]//=right()
+return if order =? 123 and values[0].values[0] =? 42 42 else 1}''',
+    'compound-custom-index': '''Box:type=[values:array<int64>]
+let reads:int64=0 let writes:int64=0 let index:int64=0
+__index__=(box:Box i:int64):>int64=>{reads+=1 return box.values[i]}
+__setindex__=(@box:Box i:int64 value:int64):>void=>{writes+=1 box.values[i]=value}
+change=()=>{index=1 return 2}
+main=()=>{let box=Box[[84 100]] box[index]//=change()
+return if box.values =? [42 100] and reads =? 1 and writes =? 1 42 else 1}''',
+    'compound-map': '''let key:string="first"
+change=()=>{key="second" return 2}
+main=()=>{let values=["first"->84 "second"->100] let saved=values
+values[key]//=change() values["missing"]%=3
+return if values["first"] =? 42 and values["second"] =? 100 and values["missing"] =? 0
+and saved["first"] =? 84 and saved.length =? 2 42 else 1}''',
+    'compound-pool': '''main=()=>{
+let pool:Pool<array<int64>>=[] let h=pool.add([84]) let saved=pool
+pool[h][0]//=2
+return if pool[h][0] =? 42 and saved[h][0] =? 84 42 else 1}''',
+    'compound-generic': '''update=<T>(@value:T divisor:T):>void=>{value//=divisor value%=divisor value^=3}
+main=()=>{let a=-17 update(@a 3) let b=123456789012345678901234567890 let expected=(b//3%3)^3 update(@b 3)
+return if a =? 0 and b =? expected 42 else 1}''',
     'loop-else-conditions': '''main=()=>{
 let total=0 let calls=0
 loop {calls+=1; false} {total=999} else {total+=10}
@@ -1782,6 +1862,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'compound-integer-exact-division': ('main=()=>{let x=42 x/=2 return x}', 'expected int, found Rational'),
     'loop-else-value': ('main=()=>{let x=loop false {1} else 42 return x}', 'loop used as a value'),
     'loop-else-binder-scope': ('main=()=>{loop x in [0..0) {} else {return x} return 42}', "unknown name 'x'"),
     'loop-else-label-scope': ('main=()=>{$outer loop false {} else {break $outer} return 42}', 'outside of a loop'),
@@ -2017,13 +2098,14 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_stepped_range_errors': 'range',
                   'test_core_unit_range_errors': 'range',
                   'test_core_combined_range_errors': 'range',
+                  'test_core_compound_errors': 'compound',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['body'] if family in ('range', 'bounds') else params['expression']
+        expression = params['body'] if family in ('range', 'bounds', 'compound') else params['expression']
         case = family, expression
-        if family in ('range', 'bounds'):
+        if family in ('range', 'bounds', 'compound'):
             sources[case] = f'main=():>void=>{{{expression}}}'
         else:
             sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
@@ -3456,6 +3538,19 @@ def test_core_applications(compiler, tmp_path, name, target, release):
     assert elapsed >= 0
 
 
+@pytest.mark.parametrize('body, diagnostic', [
+    ('let value=42 value//=0', 'division by zero'),
+    ('let value=-42 value%=0', 'division by zero'),
+    ('let value=3/2 value/=0', 'division by zero'),
+    ('let value=2 value^=(-1)', 'negative integer exponent'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_compound_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('compound', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
 @pytest.mark.parametrize('name', ERRORS)
 def test_core_rejects(compiler, tmp_path, name):
     body, diagnostic = ERRORS[name]
@@ -3872,7 +3967,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

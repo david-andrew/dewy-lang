@@ -852,3 +852,24 @@ Seven warmed release builds measured medians of **376.86 ms native** and
 **167.46 ms web** (CPU **371.72/165.33 ms**). These describe this application's
 build cost, not a comparison with another compiler or a runtime performance gain.
 [Compile samples](source-core/netpong-compile.json).
+
+## Compound numeric updates
+
+The compact frontend now supports `//=`, `%=`, `/=` and `^=` by routing the
+checked update through the same helpers and custom protocols as ordinary Dewy
+arithmetic. Assignment retains its destination type, including wrapping back to
+a narrow integer width. Exact division requires a fractional destination; it
+does not silently truncate into an integer. Custom index getters/setters and
+nested writeback compose with these updates. Index expressions, including names
+changed by the right operand, are captured once in source order.
+
+The checks cover negative operands, integer limits, exact fractions and large
+integers, floating powers/division, generic and custom operators, dictionaries,
+arrays, pools, managed snapshots and cleanup, errors, and formatter execution.
+**119 focused checks passed in 4.37 s**. The independent C bootstrap and full
+gate passed **2,310 checks in 87.70 s**. The C seed also caught a parser difference
+in a new implementation-language call; parenthesizing its conditional argument
+keeps both bootstrap paths supported.
+[Focused gate](source-core/compound-focused.log),
+[full gate](source-core/compound-full.log),
+[build manifest](source-core/compound-build.json).

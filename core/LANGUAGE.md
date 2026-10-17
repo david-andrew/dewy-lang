@@ -128,7 +128,15 @@ like repeated fixed-width multiplication; negative exponents panic with guidance
 to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `BigInt` powers remain exact for nonnegative exponents;
 `Rational` supports signed exponents. All these types define zero to the zero
-power as one. `^=` is not implemented yet.
+power as one.
+
+Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
+ordinary forms. The destination keeps its type; fixed-width integer results wrap
+back to that width. `let x=7; x//=2` stores `3`, while `let x=7/1; x/=2` stores
+`7/2`. Integer `/=` cannot store a fraction in an integer variable: use `//=`
+or start with a fractional value. Arrays, record fields, dictionary entries and
+custom indexed values support these updates; indices evaluate once, before the
+old value and right operand. Existing copies retain their independent values.
 
 ## Exact large integers
 

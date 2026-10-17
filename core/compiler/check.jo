@@ -2035,6 +2035,27 @@ compound_op = (op: int) -> int:
         shreq: int(Tok.shr)
         _: 0
 
+# Dewy's arithmetic helpers implement floor division, exact division and power.
+# Keep the update as an assignment until its place and indices are resolved.
+compound_value = (s: int, left: int, right: int) -> int:
+    if nodes[s].sval != 0:
+        return bc_call(name_of(int(nodes[s].sval)), [left, right], nodes[s].pos)
+    n = mk(.binary, nodes[s].pos)
+    nodes[n].op = i32(compound_op(int(nodes[s].op)))
+    nodes[n].a = i32(left)
+    nodes[n].b = i32(right)
+    n
+
+compound_checked = (s: int, left: int, right: int, target: int) -> int:
+    n = compound_value(s, left, right)
+    result = prune(check_expr(n, 0))
+    t = prune(target)
+    # Built-in compound arithmetic keeps the destination's fixed width,
+    # just as += does, even when a library helper computes in 64 bits.
+    if nodes[s].sval != 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))):
+        if result != t: wrap_conv(last_checked, (if is_int(t): CV.int_ else: CV.float_), t)
+    coerce(last_checked, target)
+
 # the variable a narrowing alias (see narrow_var) stands for, or 0
 narrowed_var = (l: int) -> int:
     if int(locals[l].flags) & LF_ALIAS == 0: return 0
@@ -2385,11 +2406,13 @@ check_assign = (s: int) -> int:
                     cl: int[]
                     loop x in ixs: cl.push(clone(x))
                     set_list(get, cl)
-                bin = mk(.binary, nodes[s].pos)
-                nodes[bin].op = i32(compound_op(op))
-                nodes[bin].a = i32(get)
-                nodes[bin].b = i32(val)
-                val = bin
+                if nodes[s].sval != 0:
+                    gt = check_expr(get, 0)
+                    get = last_checked
+                    add_flag(get, NF_CHECKED)
+                    val = compound_checked(s, get, val, gt)
+                    add_flag(val, NF_CHECKED)
+                else: val = compound_value(s, get, val)
             set_list(call, [recv] + ixs + [val])
             # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
             if nodes[recv].kind != .call: clear_flag(recv, NF_CHECKED)
@@ -2441,14 +2464,14 @@ check_assign = (s: int) -> int:
         nodes[s].aux = 2
         return s
     bop = compound_op(op)
-    if types[l].kind == .ptr:
+    if types[l].kind == .ptr and nodes[s].sval == 0:
         check_expr(int(nodes[s].b), T_INT)
         nodes[s].b = i32(coerce(last_checked, T_INT))
         nodes[s].aux = 3
         return s
-    if not is_numeric(l) and types[l].kind != .bool_:
-        # operator overload (and vectors): x = x op y. An index that is not a name or a number
-        # is computed once, before (xs[f(0)].v += d calls f once); x, checked, is read as it is
+    if nodes[s].sval != 0 or (not is_numeric(l) and types[l].kind != .bool_):
+        # Helper calls, overloads and vectors: x = operation(x, y). Capture
+        # indices before reading x, including names the right side may change.
         pos = nodes[s].pos
         pre: int[]
         x = lhs
@@ -2456,7 +2479,7 @@ check_assign = (s: int) -> int:
             if nodes[x].kind == .index and nodes[x].b != 0:
                 ib = int(nodes[x].b)
                 ik = nodes[ib].kind
-                if ik != .ident and ik != .int_lit:
+                if ik != .int_lit:
                     elem_tmp_n += 1
                     nm = intern("__index{elem_tmp_n}")
                     d = mk(.vardecl, pos)
@@ -2470,14 +2493,9 @@ check_assign = (s: int) -> int:
                     check_expr(idn, 0)
                     nodes[x].b = i32(last_checked)
             x = int(nodes[x].a)
-        rd = clone(lhs)
+        rd = copy_place(lhs)
         add_flag(rd, NF_CHECKED)
-        bin = mk(.binary, pos)
-        nodes[bin].op = i32(bop)
-        nodes[bin].a = i32(rd)
-        nodes[bin].b = nodes[s].b
-        check_expr(bin, 0)
-        nodes[s].b = i32(coerce(last_checked, lt))
+        nodes[s].b = i32(compound_checked(s, rd, int(nodes[s].b), lt))
         nodes[s].op = i32(int(Tok.assign))
         if pre.len() == 0: return s
         # (the statement, moved, after the index's variables)
