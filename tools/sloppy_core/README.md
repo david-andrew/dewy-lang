@@ -293,8 +293,20 @@ and compiler self-build 1,187.41/1,224.69 ms (before/after). The self-build was
 about 3% slower in this run; retain that tradeoff alongside the runtime result.
 See `block-cse-compile.json`.
 
+The available-expression lookup now reads operand versions directly and reuses
+its hash-table slot when inserting a new value, removing the temporary operand
+list and repeated hash probes from that path. Five alternating warmed build
+pairs measured physics at 359.01/339.90 ms and compiler self-build at
+1339.46/1305.96 ms (before/after). CPU-time medians were 353.31/334.67 ms and
+1315.22/1282.47 ms respectively: modest improvements of about 5% and 2.5% in
+this run. Earlier partial prototypes were inconclusive. `benchmark_compile.py`
+now retains user-plus-system CPU time alongside elapsed time, making scheduler
+delays easier to distinguish on the shared desktop. It sums the compiler and
+its waited-for children, so multiple emission workers can exceed elapsed time.
+See `cse-probe-compile.json` in the source-core audit.
+
 The combined Dewy/editor/shared-core gate now contains 1,451 checks and took
-58 seconds in the latest development run, including separate compiler
+73 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

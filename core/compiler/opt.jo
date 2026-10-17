@@ -413,7 +413,9 @@ ht_slot = (k1: int, k2: int, k3: int) -> int:
 
 # gen: memory generation the entry depends on (-1: none); va, vb: operand versions
 ht_find = (k1: int, k2: int, k3: int, gen: int, va: int, vb: int) -> int:
-    i = ht_slot(k1, k2, k3)
+    ht_available(ht_slot(k1, k2, k3), gen, va, vb)
+
+ht_available = (i: int, gen: int, va: int, vb: int) -> int:
     if ht_epoch[i] != o_epoch: return -1
     scope = int(ht_scope[i])
     loop not o_open[scope]:
@@ -444,18 +446,16 @@ kill_all = ():
     o_genh += 1
 
 ht_put_gen = (k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
-    ht_put(k1, k2, k3, v)
-    i = ht_slot(k1, k2, k3)
-    ht_gen[i] = gen
-    ht_va[i] = i32(va)
-    ht_vb[i] = i32(vb)
+    ht_insert(ht_slot(k1, k2, k3), k1, k2, k3, v, gen, va, vb)
 
 load_key1 = (ty: int, mode: int, addr: int) -> int: int(Op.load) | (ty << 8) | ((mode & 4095) << 12) | (addr << 24)
 
 ht_put = (k1: int, k2: int, k3: int, v: int):
-    i = ht_slot(k1, k2, k3)
-    ht_va[i] = 0
-    ht_vb[i] = 0
+    ht_put_gen(k1, k2, k3, v, o_gen, 0, 0)
+
+ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
+    ht_va[i] = i32(va)
+    ht_vb[i] = i32(vb)
     ht_epoch[i] = o_epoch
     ht_k1[i] = k1
     ht_k2[i] = k2
@@ -463,20 +463,24 @@ ht_put = (k1: int, k2: int, k3: int, v: int):
     ht_val[i] = i32(v)
     ht_scope[i] = i32(o_scopes[o_scopes.len() - 1])
     ht_nbr[i] = o_nbr
-    ht_gen[i] = o_gen
+    ht_gen[i] = gen
 
 # a value that is defined once and never read before its definition
 stable = (v: int) -> bool: o_ndef[v] == 1 and o_first[v] > o_defpos[v]
 
-cse_op = (op: Op) -> bool:
+# Available expressions have at most two register operands, always a then b.
+# Read their versions directly instead of filling the general operand buffer
+# for every expression. -1 means the instruction is not an available value.
+cse_arity = (op: Op, mode: int) -> int:
     match op:
-        iconst, fconst, slot, gaddr, daddr, faddr, load: true
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, mulhs, mulhu: true
-        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
-        fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
-        feq, fne, flt, fle, fgt, fge: true
-        sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: true
-        _: false
+        iconst, fconst, slot, gaddr, daddr, faddr: 0
+        load: if mode & M_INDEX != 0: 2 else: 1
+        neg, not_, fneg, fsqrt, ffloor, fceil, fabs, ftrunc: 1
+        sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: 1
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, mulhs, mulhu: 2
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 2
+        fadd, fsub, fmul, fdiv, fmin, fmax, feq, fne, flt, fle, fgt, fge: 2
+        _: -1
 
 o_defines = (op: Op) -> bool:
     match op:
@@ -530,19 +534,20 @@ o_emit = (ins0: Ins):
             else: ins.b = i32(idx)
         ins.a = i32(a)
     if o_cse:
-        if cse_op(op):
+        arity = cse_arity(op, int(ins.c))
+        if arity >= 0:
             d = int(ins.dst)
-            o_operands(ins)
             va = 0
             vb = 0
-            if o_buf.len() > 0: va = int(o_ver[o_buf[0]])
-            if o_buf.len() > 1: vb = int(o_ver[o_buf[1]])
+            if arity > 0: va = int(o_ver[int(ins.a)])
+            if arity > 1: vb = int(o_ver[int(ins.b)])
             k1 = int(op) | (int(ins.ty) << 8) | ((int(ins.c) & 4095) << 12) | (int(ins.a) << 24)
             k2 = int(ins.b)
             k3 = ins.imm
             gen = -1
             if op == .load: gen = mem_gen(int(ins.c))
-            e = ht_find(k1, k2, k3, gen, va, vb)
+            slot = ht_slot(k1, k2, k3)
+            e = ht_available(slot, gen, va, vb)
             if e >= 0 and vtype(e) == vtype(d):
                 if stable(d):
                     o_repl[d] = i32(e)
@@ -553,7 +558,7 @@ o_emit = (ins0: Ins):
                 o_push(Ins(.mov, i32(vtype(d)), i32(d), i32(e), 0, 0, 0))
                 return
             if stable(d):
-                ht_put_gen(k1, k2, k3, d, gen, va, vb)
+                ht_insert(slot, k1, k2, k3, d, gen, va, vb)
                 o_dop[d] = i32(int(op))
                 o_da[d] = ins.a
                 o_db[d] = ins.b

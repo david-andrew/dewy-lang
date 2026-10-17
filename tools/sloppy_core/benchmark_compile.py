@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import resource
 import statistics
 import subprocess
 import tempfile
@@ -43,6 +44,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'workers': workers,
         'samples': samples,
         'warmups_per_compiler': 1,
+        'cpu_time_definition': 'User + system CPU seconds for the compiler and its waited-for children; '
+                               'may exceed wall time with multiple emission workers.',
         'compilers': {label: {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
                       for label, path in compilers.items()},
         'workloads': {},
@@ -52,28 +55,38 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             args = list(WORKLOADS[name])
             source = ROOT / args[1]
             measured = {label: [] for label in compilers}
+            cpu_measured = {label: [] for label in compilers}
             if args[0] == 'build':
                 args.extend(['-o', str(Path(directory) / name)])
             labels = list(compilers)
             for sample in range(samples + 1):
                 order = labels if sample % 2 == 0 else labels[::-1]
                 for label in order:
+                    cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
                     started = time.perf_counter()
                     run = subprocess.run([str(compilers[label]), *args], cwd=ROOT, env=env,
                                          capture_output=True, text=True, timeout=120, check=False)
                     elapsed = time.perf_counter() - started
+                    cpu_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+                    cpu_elapsed = (cpu_after.ru_utime + cpu_after.ru_stime
+                                   - cpu_before.ru_utime - cpu_before.ru_stime)
                     if run.returncode:
                         raise RuntimeError(f'{label} {name}:\n{run.stdout}{run.stderr}')
                     if sample:
                         measured[label].append(elapsed)
+                        cpu_measured[label].append(cpu_elapsed)
             medians = {label: statistics.median(values) for label, values in measured.items()}
+            cpu_medians = {label: statistics.median(values) for label, values in cpu_measured.items()}
             result['workloads'][name] = {
                 'arguments': list(WORKLOADS[name]),
                 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
                 'seconds': measured,
                 'median_seconds': medians,
+                'cpu_seconds': cpu_measured,
+                'median_cpu_seconds': cpu_medians,
             }
-            print(name + ': ' + ', '.join(f'{label} {elapsed * 1000:.2f} ms'
+            print(name + ': ' + ', '.join(f'{label} {elapsed * 1000:.2f} ms wall / '
+                                         f'{cpu_medians[label] * 1000:.2f} ms CPU'
                                          for label, elapsed in medians.items()), flush=True)
     result['load_average_end'] = os.getloadavg()
     return result

@@ -801,3 +801,28 @@ block-prefix CSE compiler: tour 58.28/57.24 ms, physics 383.18/335.89 ms, and
 compiler self-build 1280.32/1251.35 ms (before/after). These shared-desktop
 measurements show no observed regression; this feature is not credited with a
 compilation speedup.
+
+## Available-expression lookup cost
+
+`cse-probe-build.json` and `cse-probe-full-tests.log` record an independent C
+bootstrap and all 1,451 checks passing in 72.55 seconds. The available-expression
+path reads its zero, one or two register versions directly instead of populating
+the general operand buffer. A lookup retains its hash slot for insertion;
+entries still check their scope, branch prefix, operand versions and memory
+generation. The previous insertion path could probe the same key three times.
+
+`cse-arity-compile-initial.json` and `cse-arity-compile.json` record an intermediate
+prototype which removed operand-list construction and one repeated probe. Mixed
+results, including a slightly slower self-build, did not establish a general
+improvement. `cse-probe-compile.json` measures the retained single-probe path in
+five alternating warmed builds: physics 359.01/339.90 ms wall time and
+353.31/334.67 ms CPU; compiler self-build 1339.46/1305.96 ms wall time and
+1315.22/1282.47 ms CPU (before/after). These are modest local improvements,
+about 5% and 2.5%, with shared-desktop uncertainty. No runtime speedup is claimed.
+The measurement compiler was seeded; the final C bootstrap independently builds
+the same sources and passes the complete behavior gate.
+
+Compile benchmarks now record process CPU time alongside elapsed time, including
+waited-for children. This helps identify scheduling delays; it does not remove
+frequency, thermal, cache or memory-contention variation. CPU time may exceed
+wall time when multiple workers are selected.
