@@ -166,6 +166,9 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             # Longest spelling wins. Dewy's comparison ? belongs to the operator.
             loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "??", "//", "<<", ">>", "..", "|>", "<|"]:
                 if dn_matches(source, start, stop, op):
+                    # Adjacent generic closers followed by a function arrow:
+                    # `array<array<T>>=>` is `>>` then `=>`, not `>>=` then `>`.
+                    if op == ">>=" and dn_matches(source, start, stop, ">>=>"): continue
                     value = op
                     i += len(op)
                     break

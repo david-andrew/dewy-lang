@@ -22,6 +22,15 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'generic-nested-return-adjacency': '''pair=():>array<array<int64>>=>[[20 22]]
+deep=():>array<array<array<array<int64>>>>=>[[[[20 22]]]]
+main=()=>{
+let shifted:int64=84 shifted>>=1
+if shifted not=? 42 return 1
+return pair()[0][0]+deep()[0][0][0][1]}''',
+    'generic-nested-return-type-parameter': '''wrap=<T>(value:T):>array<array<T>>=>[[value]]
+main=()=>{let narrow:int8=20 let wide:uint64=22
+return (wrap(narrow)[0][0] as int64)+(wrap(wide)[0][0] as int64)}''',
     'unpack-dictionary': '''main=()=>{
 let [[first x] [second y]]=["a"->20 "b"->22]
 return if first=?"a" and second=?"b" x+y else 1}''',
@@ -46,7 +55,7 @@ let [[_ first] [_ second]]=values
 let snapshot=first first[0]=99 values["b"][0]=88
 return if values["a"][0]=?20 and second[0]=?22 snapshot[0]+second[0] else 1}''',
     'unpack-dictionary-global': '''let calls:int64=0
-source=():>dict<uint64 array<int64>> =>{calls+=1 return [uint64.max->[20 22]]}
+source=():>dict<uint64 array<int64>>=>{calls+=1 return [uint64.max->[20 22]]}
 let [[key [left right]]]=source()
 main=()=>{return if calls=?1 and key=?uint64.max left+right else 1}''',
     'unpack-dictionary-nested': '''main=()=>{
