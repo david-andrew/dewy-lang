@@ -188,14 +188,29 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,150 checks and took
-129 seconds in the latest development run, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,156 checks and took
+74 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build
 instructions are in `examples/sloppy_core/`.
 Evidence is in `dewy/audits/2026-10-16/source-core/`.
+
+The ordinary value gate retains 674 individual debug/release/native/web pytest
+checks but groups up to 16 independent modules into each build and execution.
+It uses 44 compiler launches instead of 674. Selection happens before grouping,
+so `-k` still gives a small reproducer, and each case's full result and captured
+output are checked separately. Harness checks exercise module isolation, output
+attribution, incorrect results, compile failures and panics. Process-specific
+and integration tests keep their dedicated runs.
+
+One sequential comparison with the same compiler and identical case-source
+hashes took 73.49 seconds before batching and 7.93 seconds after, including pytest
+startup. This is about 9.3× faster for the 674 value checks; it is a shared-desktop
+measurement of orchestration, not a compiler performance claim. See
+`value-batch-timing.json` in the source-core audit for commands, counts, hashes,
+system load and limits.
 
 For the editor protocol gate, include
 `tests/python_misc/test_sloppy_core_editor.py` in the pytest command above.

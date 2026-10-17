@@ -1,0 +1,103 @@
+{
+  "compiler": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792200110851831503/bin/dewy-core",
+  "compiler_sha256": "9a1b27bda975b24a1c6dfecae5138fbaac89c245d24c79ab8ce4ea32d3cc5099",
+  "baseline_revision": "905fd17aeb88e7564af2ac2bdb71f47f0d4ddaa0",
+  "selection": "test_core_values or test_core_value_web",
+  "batch_size": 16,
+  "limits": [
+    "One sequential before/after pair on a shared desktop.",
+    "Same compiler and value programs; only orchestration changes.",
+    "Warm filesystem/toolchain caches; no bootstrap included."
+  ],
+  "runs": {
+    "before": {
+      "command": [
+        "/var/home/david/dev/dewy-lang/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-c",
+        "/var/home/david/dev/dewy-lang/pyproject.toml",
+        "-o",
+        "addopts=",
+        "/tmp/dewy-source-core/value_before.py",
+        "-k",
+        "test_core_values or test_core_value_web",
+        "--junitxml=/tmp/dewy-source-core/value-batch-before.xml"
+      ],
+      "source_sha256": "3755641fc6bc62b9eb59ca8713ffd7c7f8ade3e459e47162d8cc730f46092c0a",
+      "wall_seconds": 73.49029534508009,
+      "returncode": 0,
+      "load_average_start": [
+        9.38818359375,
+        9.642578125,
+        8.265625
+      ],
+      "load_average_end": [
+        10.29296875,
+        9.90478515625,
+        8.4609375
+      ],
+      "tests": 674,
+      "failures": 0,
+      "errors": 0,
+      "case_sources_sha256": "fb7a3a5677dc4c606f1501860ca1e384dafc358a2472aed40cec7c36943bf8e7"
+    },
+    "after": {
+      "command": [
+        "/var/home/david/dev/dewy-lang/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-c",
+        "/var/home/david/dev/dewy-lang/pyproject.toml",
+        "-o",
+        "addopts=",
+        "/var/home/david/dev/dewy-lang/tests/python_misc/test_sloppy_core.py",
+        "-k",
+        "test_core_values or test_core_value_web",
+        "--junitxml=/tmp/dewy-source-core/value-batch-after.xml"
+      ],
+      "source_sha256": "f7039a47f07b21a3568fb83c48f6d1b81a9ccab9f212fb846c6e3f95b06deed1",
+      "wall_seconds": 7.933974800049327,
+      "returncode": 0,
+      "load_average_start": [
+        10.29296875,
+        9.90478515625,
+        8.4609375
+      ],
+      "load_average_end": [
+        10.85693359375,
+        10.0400390625,
+        8.5205078125
+      ],
+      "tests": 674,
+      "failures": 0,
+      "errors": 0,
+      "case_sources_sha256": "fb7a3a5677dc4c606f1501860ca1e384dafc358a2472aed40cec7c36943bf8e7"
+    }
+  },
+  "native_cases": 197,
+  "web_cases": 140,
+  "modes": [
+    "debug",
+    "release"
+  ],
+  "compiler_launches": {
+    "before": 674,
+    "after": 44
+  },
+  "full_gate_observations": {
+    "before": {
+      "tests": 1150,
+      "pytest_seconds": 128.92,
+      "log": "protocol-full-tests.log"
+    },
+    "after": {
+      "tests": 1156,
+      "pytest_seconds": 73.76,
+      "log": "value-batch-full-tests.log"
+    },
+    "limits": "Separate full runs under changing desktop load, with six additional batch-harness checks after."
+  }
+}

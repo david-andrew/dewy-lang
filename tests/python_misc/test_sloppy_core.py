@@ -641,20 +641,123 @@ def test_core_frontend_selection(compiler, tmp_path, mode):
         assert checked.returncode == 1 and 'DEWY_CORE_FRONTEND' in checked.stderr, checked.stderr
 
 
+def run_value_batch(compiler, directory, cases, release, target):
+    """Keep source modules independent while amortizing compiler/runtime startup."""
+    imports, body = [], []
+    names = list(cases)
+    for i, (name, source) in enumerate(cases.items()):
+        (directory / f'{name}.dewy').write_text(source)
+        imports.append(f'from p"{name}.dewy" import (main as case_{i})')
+        body.extend([f'printl"__DEWY_CASE_BEGIN__:{name}"',
+                     f'let result_{i}=case_{i}()',
+                     f'printl"__DEWY_CASE_END__:{name}:{{result_{i}}}"'])
+    source = directory / 'batch.dewy'
+    source.write_text('\n'.join(imports) + '\nmain=():>void=>{\n' + '\n'.join(body) + '\n}\n')
+    binary = directory / 'batch'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    if built.returncode:
+        message = f'Batch build failed; sources in {directory}\n{built.stdout}{built.stderr}'
+        return {name: (None, message) for name in names}
+    command = [binary, 'extra']
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed to execute the generated web runner')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = directory / 'batch.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    if ran.returncode:
+        message = f'Batch exited {ran.returncode}; sources in {directory}\n{ran.stdout}{ran.stderr}'
+        return {name: (None, message) for name in names}
+    outcomes = {}
+    active, output = None, []
+    for line in ran.stdout.splitlines(keepends=True):
+        if line.startswith('__DEWY_CASE_BEGIN__:'):
+            active = line.strip().removeprefix('__DEWY_CASE_BEGIN__:')
+            output = []
+        elif line.startswith('__DEWY_CASE_END__:'):
+            name, code = line.strip().removeprefix('__DEWY_CASE_END__:').rsplit(':', 1)
+            if name == active:
+                outcomes[name] = (code, ''.join(output))
+            active = None
+        elif active is not None:
+            output.append(line)
+    for name in names:
+        if name not in outcomes:
+            outcomes[name] = (None, f'Missing result for {name}; sources in {directory}\n{ran.stdout}{ran.stderr}')
+    return outcomes
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_value_batch_results(compiler, tmp_path, target):
+    cases = {
+        'first': 'value=1\nmain=()=>{value+=1 printl"first 🙂" return 42}',
+        'wrong': 'value=40\nmain=()=>{printl"wrong result" return 17}',
+        'last': 'value=40\nmain=()=>if value =? 40 42 else 1',
+    }
+    outcomes = run_value_batch(compiler, tmp_path, cases, False, target)
+    assert outcomes == {'first': ('42', 'first 🙂\n'), 'wrong': ('17', 'wrong result\n'),
+                        'last': ('42', '')}
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('failure', ['compile', 'runtime'])
+def test_core_value_batch_failures(compiler, tmp_path, target, failure):
+    bad = ('main=()=>missing_batch_name' if failure == 'compile'
+           else 'main=()=>{panic("intentional batch stop") return 42}')
+    outcomes = run_value_batch(compiler, tmp_path,
+                               {'first': 'main=()=>42', 'bad': bad, 'last': 'main=()=>42'}, False, target)
+    assert all(code is None for code, _ in outcomes.values())
+    for _, diagnostic in outcomes.values():
+        assert str(tmp_path) in diagnostic
+        assert ('bad.dewy' if failure == 'compile' else 'intentional batch stop') in diagnostic
+
+
+@pytest.fixture(scope='module')
+def value_batches(compiler, tmp_path_factory, request):
+    # Collection has already applied -k / node selection. Compile only selected
+    # cases, in groups of at most 16, and cache each group for its individual IDs.
+    selected = {}
+    for item in request.session.items:
+        if item.module is not request.module:
+            continue
+        target = {'test_core_values': 'native', 'test_core_value_web': 'wasm'}.get(item.originalname)
+        if target is not None:
+            params = item.callspec.params
+            selected.setdefault((target, params['release']), []).append(params['name'])
+    groups = {}
+    for (target, release), names in selected.items():
+        for start in range(0, len(names), 16):
+            group = tuple(names[start:start + 16])
+            for name in group:
+                groups[target, release, name] = group
+    cached = {}
+
+    def result(name, release, target):
+        group = groups[target, release, name]
+        key = target, release, group
+        if key not in cached:
+            directory = tmp_path_factory.mktemp(f'values-{target}-{"release" if release else "debug"}')
+            cached[key] = run_value_batch(compiler, directory, {n: CASES[n] for n in group}, release, target)
+        return cached[key][name]
+
+    return result
+
+
 @pytest.mark.parametrize('name', CASES)
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_values(compiler, tmp_path, name, release):
-    source = tmp_path / f'{name}.dewy'
-    source.write_text(CASES[name])
-    binary = tmp_path / name
-    flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
-                           text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    result = subprocess.run([binary, 'extra'], capture_output=True, text=True, timeout=10, check=False)
-    assert result.returncode == 42, (result.returncode, result.stdout, result.stderr)
+def test_core_values(value_batches, name, release):
+    code, output = value_batches(name, release, 'native')
+    assert code == '42', f'{name}: {code}\n{output}'
     if name == 'unicode':
-        assert result.stdout == 'é🙂 42\n'
+        assert output == 'é🙂 42\n'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -1473,23 +1576,9 @@ def test_core_new_unknown_template(compiler, tmp_path):
 
 @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_value_web(compiler, tmp_path, name, release):
-    node = shutil.which('node')
-    if node is None:
-        pytest.skip('Node is needed to execute the generated web runner')
-    source = tmp_path / 'numeric.dewy'
-    source.write_text(CASES[name])
-    binary = tmp_path / 'numeric'
-    flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', binary, *flags],
-                           capture_output=True, text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    scripts = Scripts()
-    scripts.feed(binary.with_suffix('.html').read_text())
-    runner = tmp_path / 'runner.cjs'
-    runner.write_text('\n'.join(scripts.parts))
-    ran = subprocess.run([node, runner], capture_output=True, text=True, timeout=10, check=False)
-    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+def test_core_value_web(value_batches, name, release):
+    code, output = value_batches(name, release, 'wasm')
+    assert code == '42', f'{name}: {code}\n{output}'
 
 
 

@@ -96,10 +96,18 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 1,150-check gate took 129 seconds in the latest local run. It tests expected Dewy
+the earlier compiler suite. The 1,156-check gate took 74 seconds in the latest local run. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
+
+Ordinary value checks compile groups of up to 16 source modules and execute one
+program per group. They retain separate pytest IDs and expected results: `-k`
+selects only the requested cases before grouping. A failure reports the generated
+source directory; rerun with `-k <case-name>` for a single-case reproducer. Each
+case has its own module globals, and returned values/output are checked per case.
+Process failures and build failures fail the batch. Diagnostic, panic, editor,
+watch and game integration checks keep their dedicated processes.
 
 `check file.dewy` and `lsp` use the same compiler as `build`. `new <directory> [game|program]` creates a Dewy starting point with build/run
 instructions. `watch` reruns terminal programs and reloads native game code in
