@@ -558,6 +558,52 @@ loop a in [{' '.join(map(str, numerators))}] {{
     assert ran.stdout.splitlines() == expected
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_scalar_conditional_results(compiler, tmp_path, target, release):
+    source = tmp_path / 'conditional.dewy'
+    source.write_text('''let calls:int64=0
+pick=(yes:bool x:int8 y:int8):>int8=>if yes {calls+=1 x} else {calls+=10 y}
+floating=(yes:bool x:float32 y:float32):>float32=>if yes x else y
+early=(x:int64):>int64=>if x <? 0 {return -x} else if x =? 0 7 else {let values=[x 2] values[0]+values[1]}
+main=():>void=>{
+    let total:int64=0
+    loop i in [0..100) {
+        let value:int8=pick(i%2 =? 0 (-128) 127)
+        total+=value as int64
+    }
+    let real=floating(true 1.25 8.5)+floating(false 1.25 8.5)
+    let wide:uint64=if total <? 0 18446744073709551615 as uint64 else 0 as uint64
+    let truth=if calls =? 550 total =? -50 else false
+    let jumped:int64=0
+    loop i in [0..10) {
+        jumped+=if i =? 2 {continue} else if i =? 5 {break} else i
+    }
+    printl"{total} {calls} {real} {wide} {truth} {jumped} {early(-3)+early(0)+early(30)}"
+}
+''')
+    binary = tmp_path / 'conditional'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web conditional checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'conditional.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.split() == ['-50', '550', '9.75', '18446744073709551615', 'true', '8', '42']
+
+
 @pytest.mark.parametrize('operator', ['//', '%'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])

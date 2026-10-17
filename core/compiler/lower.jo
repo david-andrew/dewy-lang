@@ -1334,15 +1334,16 @@ gen_interp = (e: int) -> Val:
     V(r, true)
 
 # ---------------- value blocks ----------------
-gen_value_block = (b: int, rs: int, rt_: int):
+gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
     scope_push()
     n = nkids(b)
     loop i in [0..n):
         s = kid(b, i)
-        if i == n - 1 and nodes[b].aux != 0 and rs >= 0:
+        if i == n - 1 and nodes[b].aux != 0 and (rs >= 0 or rv >= 0):
             stmt_begin()
             val = gen_owned(int(nodes[s].a))
-            store_val(rt_, e_slot(rs), 0, val.v)
+            if rv >= 0: e_mov(rv, norm(val.v, rt_))
+            else: store_val(rt_, e_slot(rs), 0, val.v)
             stmt_end()
             continue
         gen_stmt(s)
@@ -3011,9 +3012,16 @@ jump_if_true = (e: int, level: int):
 gen_if = (e: int, t: int) -> Val:
     val = vc(t) != VC_VOID and t != T_NEVER and not has_flag(e, NF_STMT)
     rs = -1
+    rv = -1
     if val:
-        rs = new_temp(t)
-        e_zero(e_slot(rs), tsize(t))
+        # Scalar results need no address. Keep the join value in a vreg so
+        # each loop iteration does not spill an expression to a stack slot.
+        if vc(t) != VC_AGG and not is_managed(t):
+            rv = vreg(vt_of(t))
+            e_mov(rv, zero_val(t))
+        else:
+            rs = new_temp(t)
+            e_zero(e_slot(rs), tsize(t))
     has_else = nodes[e].c != 0
     blk()
     end_level = ctl
@@ -3021,7 +3029,7 @@ gen_if = (e: int, t: int) -> Val:
     else_level = ctl
     jump_if_false(int(nodes[e].a), else_level)
     enter_cond()
-    if val: gen_value_block(int(nodes[e].b), rs, t)
+    if val: gen_value_block(int(nodes[e].b), rs, t, rv)
     else:
         scope_push()
         gen_block_stmts(int(nodes[e].b))
@@ -3029,13 +3037,14 @@ gen_if = (e: int, t: int) -> Val:
     if has_else:
         br_to(end_level)
         endc()
-        if val: gen_value_block(int(nodes[e].c), rs, t)
+        if val: gen_value_block(int(nodes[e].c), rs, t, rv)
         else:
             scope_push()
             gen_block_stmts(int(nodes[e].c))
             scope_pop()
     leave_cond()
     endc()
+    if rv >= 0: return V(rv, false)
     if val: return result_from_slot(rs, t)
     V(-1, false)
 

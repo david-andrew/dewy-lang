@@ -614,3 +614,29 @@ generation), one build timing per binary, and source/compiler/build identities.
 Only the platform harness import and old `addr` index annotation are adapted.
 C graph storage is flat and uses a handwritten table; Dewy's per-node arrays and
 insertion-ordered dictionary have different representation/library costs.
+
+## Scalar conditional results
+
+`scalar-if-build.json` and `scalar-if-full-tests.log` record a fresh C bootstrap
+and all 862 checks passing in 64.67 seconds. Scalar `if` results now flow through
+virtual registers instead of a zeroed stack temporary, stores in each branch,
+and a reload. Aggregate/managed results keep their existing ownership path.
+Coverage includes signed narrow values, uint64's high bit, float32, booleans,
+nested branches, branch-local arrays, early return, break/continue and side effects
+on native and web in debug/release modes.
+
+`scalar-if-application-performance.json` compares the preceding floor-arithmetic
+compiler with this lowering change, using five alternating warmed samples and
+matching checksums throughout. Helper kernel medians improved from 1242.68 to
+1005.27 ms (19%); C was 836.11 ms. Arrays were unchanged (288.38/289.81 ms),
+records 215.23/207.90 ms, text 355.17/345.35 ms and graph 746.77/694.80 ms.
+Only the large helper improvement is claimed here; the desktop was shared with
+other running work. See raw kernel/wall samples and source/build identities in
+the report. These measurements used the seeded compiler, before the independent
+C bootstrap recorded above.
+
+`scalar-if-compile.json` uses seven alternating samples per workload. Compiler
+latency is effectively unchanged: physics builds 349.93/349.16 ms, paddle
+306.50/308.22 ms, compiler self-build 1365.10/1377.14 ms. This change is retained
+for its simpler scalar lowering and generated-program improvement, not as a
+compiler-speed claim.
