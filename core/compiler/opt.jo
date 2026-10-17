@@ -630,6 +630,17 @@ o_simplify = (ins0: Ins, pos: int):
     if int(ins.ty) != VI or d < 0:
         o_emit(ins)
         return
+    # Inlining can make a previously dynamic scalar choice constant. Its
+    # inputs were already evaluated, so replacing the selection by a move
+    # preserves their effects; ordinary dead-code removal handles pure inputs.
+    if op == .select:
+        if bb == int(ins.c) or is_k(a) or fact_true(a) or fact_false(a):
+            yes = bb == int(ins.c) or (is_k(a) and o_cval[a] != 0) or fact_true(a)
+            value = if yes: bb else: int(ins.c)
+            o_simplify(Ins(.mov, VI, i32(d), i32(value), 0, 0, 0), pos)
+            return
+        o_emit(ins)
+        return
     # unary integer ops
     if op == .neg or op == .not_ or op == .sext8 or op == .sext16 or op == .sext32 or op == .zext8 or op == .zext16 or op == .zext32:
         if is_k(a):

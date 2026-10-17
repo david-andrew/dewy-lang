@@ -22,6 +22,22 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'optimizer-constant-selections': '''choose=(flag:bool a:int64 b:int64):>int64=>if flag a else b
+offset=(flag:bool x:int64):>int64=>if flag x+1 else x-1
+known=(flag:bool x:int64):>int64=>{
+if flag return choose(flag x 99)
+return choose(flag 99 x)
+}
+main=()=>{
+let calls:int64=0
+let next=():>int64=>{calls+=1 return calls}
+if choose(true next() next()) not=? 1 or calls not=? 2 return 1
+if choose(false next() next()) not=? 4 or calls not=? 4 return 2
+let value:int64=20 let saved=choose(true value 99) value=22
+if saved+value not=? 42 return 3
+if choose(calls >? 2 value value) not=? 22 return 4
+if known(true 20)+known(false 22) not=? 42 return 5
+return offset(true 20)+offset(false 22)}''',
     'unit-range-guarded-limits': '''bounded_count=(start:int64 stop:int64):>int64=>{
 let count:int64=0
 loop i in start.. and i <? stop {count+=1 if count >? 10 panic("did not stop")}

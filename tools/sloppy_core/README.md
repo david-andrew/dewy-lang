@@ -749,3 +749,18 @@ These are pytest times excluding bootstrap, from one run per strategy on a
 shared host. All checks passed; the subsequent worker-selection changes pass
 19 serial driver checks and 59 two-worker JSON/driver checks. See
 `parallel-validation.json` and its full-run logs for scope and toolchain identity.
+
+Scalar integer selections now simplify when inlining makes their condition
+constant, an enclosing branch establishes the condition, or both alternatives
+are the same value. Argument evaluation and other effects remain intact; only
+the selection and subsequently unused pure arithmetic disappear.
+
+An isolated helper with a constant mode selecting between two integer mixing
+formulas now performs one multiplication per iteration instead of two. Seven
+alternating thread-CPU pairs pinned to CPU 2 measured 206.20/140.43 ms for 100
+million iterations, with a median paired candidate/baseline ratio of 0.679.
+Python independently checks the result by composing the recurrence. This is a
+helper-specialization result, not an application-wide speedup. Fresh-build paired
+CPU ratios are tour 0.968, Dunes 0.988 and compiler 1.025; no compilation gain is
+claimed. The independent C-bootstrap gate passes 2,910 checks in 56.38 seconds.
+See the `constant-select-*` source-core audits for sources, samples and toolchains.
