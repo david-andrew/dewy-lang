@@ -902,6 +902,18 @@ main=()=>value(42)+value("ignored")''',
     'optional-return': '''choose=(yes:bool):>int64?=>if yes 42 else none
 main=()=>{let a=choose(true) let b=choose(false)
 return if a is? int64 and b is? none a else 1}''',
+    'generic-optional-suffix': """choose=(yes:bool):>array<uint16>?=>if yes [20 22] else none
+sum=(values:array<uint16>?):>int64=>if values is? none 0 else values[0]+values[1]
+main=()=>{let empty:array<uint16>?=none let present:array<uint16>?=[20 22]
+return if sum(empty)=?0 and sum(choose(false))=?0 and sum(choose(true))=?42
+and 5>?3 and not (3>?5) sum(present) else 1}""",
+    'generic-optional-nested-suffix': """read=(values:array<array<uint16>?>?):>int64=>{
+if values is? none return 0
+let first=values[0] let second=values[1]
+return if first is? none and second isnt? none second[0]+second[1] else 1}
+main=()=>{let absent:array<array<uint16>?>?=none
+let present:array<array<uint16>?>?=[none [20 22]]
+return if read(absent)=?0 read(present) else 1}""",
     'optional-union': '''value=(x:(int64|string)?):>int64=>if x is? int64 x else if x is? string 2 else 0
 main=()=>value(40)+value("two")+value(none)''',
     'optional-dictionary': '''main=()=>{let d=["a"->42] let hit=d.get("a") let miss=d.get("b")

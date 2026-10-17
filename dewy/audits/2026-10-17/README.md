@@ -371,3 +371,16 @@ arrays **272.88/252.81 ms**, records **163.41/164.88 ms**, text **372.35/288.65 
 and graph **612.58/591.19 ms**. This correctness change shows no broad runtime
 regression in these workloads; the varying host load limits stronger claims.
 [Runtime samples](source-core/operand-values-runtime.json).
+
+## Optional generic suffixes
+
+The fast frontend now reads `array<uint16>?` and nested
+`array<array<uint16>?>?` types in declarations, parameters and returns. The
+closing generic angle is split from its adjacent optional suffix. A spaced
+` >? ` inside an angle-bracket refinement remains a comparison.
+
+The focused native/web gate passed **281 checks in 5.17 s**. The fresh C
+bootstrap passed **1,920 checks in 71.62 s**.
+[Focused gate](source-core/optional-generic-focused.log),
+[full gate](source-core/optional-generic-full.log),
+[build manifest](source-core/optional-generic-build.json).

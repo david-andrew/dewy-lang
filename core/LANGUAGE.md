@@ -397,6 +397,9 @@ value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 
 ## Loops, text and optional values
 
+Optional types use `T?`, including generic types such as `array<uint16>?`
+and nested `array<array<uint16>?>?`. `none` represents an absent value.
+
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 

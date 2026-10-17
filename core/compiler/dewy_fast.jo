@@ -336,9 +336,10 @@ dn_block = () -> int:
     exclusive = false
     loop true:
         if dn_tokens[dn_at].kind == "eof": dn_error(opening.start, "expected '{close}' before end of file")
-        # A nested type followed immediately by assignment ends in `>>=`.
-        # Consume one angle at a time, leaving the assignment for its parent.
-        if close == ">" and dn_peek() in [">>", ">>=", ">="]:
+        # Split adjacent generic closers, assignments and optional suffixes.
+        # Consume one angle at a time, leaving the rest for its parent.
+        # A spaced ` >? ` stays a comparison inside a refinement.
+        if close == ">" and (dn_peek() in [">>", ">>=", ">="] or (dn_peek() == ">?" and not dn_tokens[dn_at].space)):
             dn_tokens[dn_at].text = dn_tokens[dn_at].text[1..]
             dn_tokens[dn_at].start += 1
             break
@@ -403,7 +404,7 @@ dn_expr = (minimum: int) -> int:
         op = token.text
         if token.kind == "eof": break
         if token.newline and dn_power(op) == 0 and op != "not": break
-        if dn_angles > 0 and op in [">>", ">>=", ">="]: break
+        if dn_angles > 0 and (op in [">>", ">>=", ">="] or (op == ">?" and not token.space)): break
         # Literal coefficients are unambiguous: 2x and 2(x + 1). General
         # adjacent names remain separate arguments or block elements.
         if not token.space and minimum <= 135 and dewy_syntax[left].kind in ["Integer", "Real"] and (token.kind == "Identifier" or op == "("):
