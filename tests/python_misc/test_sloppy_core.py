@@ -1382,7 +1382,8 @@ def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
     numerators = [minimum, minimum + 1, -1000000007, -129, -7, -1, 0, 1, 7, 129, 1000000007, maximum - 1, maximum]
     denominators = [minimum, minimum + 1, -1000000007, -129, -3, -1, 1, 2, 3, 129, 1000000007, maximum]
     powers = [1 << shift for shift in range(63)]
-    constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in powers)
+    constants = powers + [-3, 3, -129, 129, -1000000007, 1000000007, minimum, maximum]
+    constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in constants)
     source = tmp_path / 'floor.dewy'
     source.write_text(f'''main=():>void=>{{
 loop a in [{' '.join(map(str, numerators))}] {{
@@ -1396,7 +1397,7 @@ loop a in [{' '.join(map(str, numerators))}] {{
 }}
 ''')
     expected = [f'{a % b} {minimum if a == minimum and b == -1 else a // b}'
-                for a in numerators for b in denominators + powers]
+                for a in numerators for b in denominators + constants]
     binary = tmp_path / 'floor'
     flags = ['--release'] if release else []
     if target == 'wasm':
