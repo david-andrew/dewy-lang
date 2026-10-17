@@ -264,8 +264,9 @@ lib_private = (name: int) -> bool:
 # own with that name, as overloads)
 from_imports: int[]
 
-bind_from_imports = ():
-    loop d in from_imports:
+bind_from_imports = (start: int = 0):
+    loop di in [start..from_imports.len()):
+        d = from_imports[di]
         m = int(nodes[d].mod)
         im = int(nodes[d].sym)
         loop i in [0..nkids(d)):
@@ -671,6 +672,31 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     p_lazy = false
     modules[mi].decls = decls
     mi
+
+late_module_imports = false
+
+# Some language operations need a bundled module only once their types are
+# known. Add an ordinary qualified import and initialize any newly discovered
+# modules, without rebinding imports that have already been processed.
+ensure_bundled_import = (file: str, alias: str, pos: int):
+    m = cur_mod()
+    name = intern(alias)
+    if modules[m].names.get(name) != none: return
+    first_module = modules.len()
+    first_import = from_imports.len()
+    d = mk(.import_, pos)
+    nodes[d].aux2 = 1
+    nodes[d].sval = i32(intern("@lib/{file}"))
+    nodes[d].name = i32(name)
+    register_decls(m, [d])
+    modules[m].decls.push(d)
+    mi = first_module
+    loop mi < modules.len():
+        register_module(mi)
+        mi += 1
+    bind_from_imports(first_import)
+    if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+    late_module_imports = true
 
 eval_when_toplevel = (m: int, w: int):
     saved = cx
@@ -1386,6 +1412,34 @@ check_shareable = (r: int, pos: int):
     fatal(pos, "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
 
 module_ctx: int[]
+module_frames: FnCtx[]
+
+# Module state outlives a check, but temporary function contexts are a stack.
+# Keep inactive module frames outside that stack so loading another module
+# during an expression cannot interfere with its caller's push/pop lifetime.
+enter_module_context = (m: int) -> bool:
+    if module_ctx[m] >= 0: return false
+    module_ctx[m] = ctxs.len()
+    ctxs.push(module_frames[m])
+    true
+
+leave_module_context = (m: int, entered: bool):
+    if not entered: return
+    module_frames[m] = ctxs.pop()
+    module_ctx[m] = -1
+
+setup_module_contexts = (prelude_init: int):
+    first = module_ctx.len()
+    loop mi in [first..modules.len()):
+        inst = prelude_init
+        if not modules[mi].is_prelude:
+            inst = new_inst(FK_INIT, mi, "init_{sanitize(name_of(int(modules[mi].name)))}")
+            b = mk(.block, mkpos(int(modules[mi].file), 0))
+            set_list(b, modules[mi].inits)
+            fns[inst].body = i32(b)
+        modules[mi].init_fn = i32(inst)
+        module_frames.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
+        module_ctx.push(-1)
 
 # global g is changed here: in a function, that is something a call may do
 note_global_write = (g: int):
@@ -1410,6 +1464,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     globals[g].state = 1
     saved = cx
     m = int(globals[g].mod)
+    entered = enter_module_context(m)
     flow = in_flow and cx == module_ctx[m]
     cx = module_ctx[m]
     saved_floor = ctxs[cx].floor
@@ -1473,6 +1528,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         add_flag(d, NF_CHECKED)
     globals[g].state = 2
     ctxs[cx].floor = saved_floor
+    leave_module_context(m, entered)
     cx = saved
 
 # xs.sorted(), s.trim() as a statement: a library function that gives a new value of its first
@@ -3160,6 +3216,31 @@ synth_str = (s: str, pos: int) -> int:
 
 program_named = false         # (the build block gave the name)
 
+check_pending_functions = (start: int) -> int:
+    k = start
+    loop k < fns.len():
+        if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
+            if fns[k].kind == FK_INIT:
+                m = int(fns[k].mod)
+                entered = enter_module_context(m)
+                cx = module_ctx[m]
+                fns[k].state = 1
+                mark = scope_mark()
+                ctxs[cx].floor = i32(sc_names.len())
+                body = int(fns[k].body)
+                loop j in [0..nkids(body)): check_stmt(kid(body, j))
+                scope_reset(mark)
+                zonk_tree(body)
+                loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+                copy_write_warnings(k)
+                fns[k].ret = i32(T_VOID)
+                fns[k].state = 2
+                leave_module_context(m, entered)
+                cx = -1
+            else: check_fn_body(k)
+        k += 1
+    k
+
 check_program = (main_path: str):
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
@@ -3344,16 +3425,8 @@ check_program = (main_path: str):
     fns[prelude_init].ret = i32(T_VOID)
     fns[prelude_init].state = 2
     module_ctx = []
-    loop mi in [0..modules.len()):
-        inst = prelude_init
-        if not modules[mi].is_prelude:
-            inst = new_inst(FK_INIT, mi, "init_{sanitize(name_of(int(modules[mi].name)))}")
-            b = mk(.block, mkpos(int(modules[mi].file), 0))
-            set_list(b, modules[mi].inits)
-            fns[inst].body = i32(b)
-        modules[mi].init_fn = i32(inst)
-        ctxs.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
-        module_ctx.push(ctxs.len() - 1)
+    module_frames = []
+    setup_module_contexts(prelude_init)
     dfs_state = fill(false, modules.len())
     order: int[]
     order_modules(mainm, order)
@@ -3415,30 +3488,12 @@ check_program = (main_path: str):
     k = 0
     exp_added: bool[] = fill(false, export_decls.len())
     loop true:
-        loop k < fns.len():
-            if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
-                if fns[k].kind == FK_INIT:
-                    m = int(fns[k].mod)
-                    cx = module_ctx[m]
-                    fns[k].state = 1
-                    mark = scope_mark()
-                    ctxs[cx].floor = i32(sc_names.len())
-                    body = int(fns[k].body)
-                    loop j in [0..nkids(body)): check_stmt(kid(body, j))
-                    scope_reset(mark)
-                    zonk_tree(body)
-                    loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
-                    copy_write_warnings(k)
-                    fns[k].ret = i32(T_VOID)
-                    fns[k].state = 2
-                    cx = -1
-                else: check_fn_body(k)
-            k += 1
-
+        k = check_pending_functions(k)
         used: {int: bool} = {}
         loop fi in [1..fns.len()):
             if fns[fi].state == 2 and fns[fi].decl != 0: used[int(nodes[int(fns[fi].decl)].mod)] = true
         more = false
+        exp_added.resize(export_decls.len())
         loop ei in 0.. and d in export_decls:
             if exp_added[ei] or not modules[int(nodes[d].mod)].is_prelude: continue
             if used.get(int(nodes[d].mod)) != none:
@@ -3465,6 +3520,18 @@ check_program = (main_path: str):
             if syms[cs].kind == .const_ and syms[cs].decl != 0:
                 cg = int(syms[cs].ref)
                 if globals[cg].decl != 0: ensure_global(cg, nodes[int(syms[cs].decl)].pos)
+    # An otherwise unused constant can discover another exact-arithmetic
+    # module. Finish its queued bodies before lowering any initialization.
+    if k < fns.len():
+        k = check_pending_functions(k)
+        if open_globals.len() > 0: settle_open_globals()
+    if late_module_imports:
+        dfs_state = fill(false, modules.len())
+        order.clear()
+        order_modules(mainm, order)
+        init_fns = [prelude_init]
+        loop m in order:
+            if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
     loop ci, at in draw_to_at:
         if not back_to_screen.has(ci): warn(at, "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")
     # (nothing runs at all: one word for the whole file, as a module or a program not finished)

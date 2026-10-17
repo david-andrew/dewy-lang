@@ -1,17 +1,15 @@
-from rational import rational
-
 main=():>void=>{
-    let harmonic=rational(0)
-    loop n in [1..11) {harmonic+=rational(1 n)}
+    let harmonic=0/1
+    loop n in [1..11) {harmonic+=1/n}
     printl"First ten harmonic terms: {harmonic}"
 
     # Exactly two sixes in ten independent rolls: C(10, 2) p^2 (1-p)^8.
-    let chance=45*rational(1 6)^2*rational(5 6)^8
+    let chance=45*(1/6)^2*(5/6)^8
     printl"Exactly two sixes in ten rolls: {chance}"
-    printl"Reciprocal cube of 2/3: {rational(2 3)^(-3)}"
+    printl"Reciprocal cube of 2/3: {(2/3)^(-3)}"
 
-    let step=rational(1 60)
+    let step=1/60
     printl"Sixty exact time steps: {60*step}"
-    let parts=rational(-7 3).divmod(rational(2 5))
+    let parts=((-7)/3).divmod(2/5)
     printl"Floor quotient: {parts.quotient}; remainder: {parts.remainder}"
 }

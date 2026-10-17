@@ -242,6 +242,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
     set_list(body, stmts)
     fns[ci].body = i32(body)
     fns[ci].ret = i32(T_VOID)
+    entered = enter_module_context(m)
     cx = module_ctx[m]
     fns[ci].state = 1
     ctxs[cx].inst = i32(ci)
@@ -252,6 +253,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
     zonk_tree(body)
     loop l in fns[ci].locals: locals[l].type = i32(zonk(int(locals[l].type)))
     fns[ci].state = 2
+    leave_module_context(m, entered)
     cx = -1
     loop d in decls:
         if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)

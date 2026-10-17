@@ -178,6 +178,8 @@ def test_vscode_core_client(tmp_path):
 
 @pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
     ('', 'let value:uint64=42 return value as int64', 'value', 'uint64'),
+    ('', 'let value=1/2 return if value =? 1/2 42 else 1', 'value', 'Rational'),
+    ('', 'let value=123456789012345678901234567890 return if value >? 1 42 else 1', 'value', 'BigInt'),
     ('', 'let value:array<string>=["answer"] return value.length', 'value', 'array<string>'),
     ('', 'let value:dict<string array<int16>>=[] return value.length', 'value', 'dict<string array<int16>>'),
     ('', 'let value=[y=22 x=20] return value.x+value.y', 'value', '[x: int64 y: int64]'),
@@ -226,6 +228,8 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
 @pytest.mark.parametrize(('text', 'wanted', 'absent'), [
     ('main=()=>{let answer:int64=42 return ans§}', {'answer': 'int64', 'printl': None}, ['struct', 'mut', 'while']),
     ('main=()=>{let point=[x=42 y=2] return point.§}', {'x': 'int64', 'y': 'int64'}, ['struct']),
+    ('main=()=>{let ratio=1/2 ratio.§}', {'numerator': 'BigInt', 'denominator': 'BigInt'}, []),
+    ('main=()=>{let ratio=1/2 rat§}', {'ratio': 'Rational'}, ['$dewy_rational']),
     ('main=()=>{let point=[x=42] point.§', {'x': 'int64'}, []),
     ('main=()=>{let value:in§=42 return value}', {'int64': 'type', 'string': 'type', 'array': 'array<Element>'}, ['int', 'i64', 'str', 'struct']),
     ('main=()=>{let values=[20 22] values.§}', {'length': 'int64', 'push': 'builtin'}, []),

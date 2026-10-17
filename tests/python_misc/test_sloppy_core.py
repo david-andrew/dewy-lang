@@ -18,6 +18,40 @@ from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
     'answer': 'main=():>int64=>42',
+    'rational-division-notation': '''main=()=>{
+let sum=1/2+1/3
+return if sum =? 5/6 and "{sum}" =? "5/6" and "{4/2}" =? "2"
+and (-7)/3 =? -(7/3) and (2/3)^(-3) =? 27/8 42 else 1
+}''',
+    'rational-division-widths': '''divide=(a b)=>a/b
+main=()=>{
+if divide(7 as int8 -3 as int16) not=? (-7)/3 return 1
+if divide(18446744073709551615 -1) not=? -18446744073709551615 return 2
+if divide(-9223372036854775808 18446744073709551615) not=? (-9223372036854775808)/18446744073709551615 return 3
+return if 123456789012345678901234567890/10 =? 12345678901234567890123456789
+and 1/123456789012345678901234567890*123456789012345678901234567890 =? 1 42 else 4
+}''',
+    'rational-division-order': '''let order:int64=0
+value=(n:int64)=>{order=order*10+n n}
+main=()=>{let fraction=value(1)/value(2) return if order =? 12 and fraction =? 1/2 42 else 1}''',
+    'rational-division-generic-mixed': '''divide=(a b)=>a/b
+main=()=>if divide(3.0 2.0) =? 1.5 and divide(1 3) =? 1/3 42 else 1''',
+    'rational-division-float': '''main=()=>{
+let a:float32=3.0 let b:float32=2.0
+return if a/b =? 1.5 and 3/2.0 =? 1.5 and 3.0/2 =? 1.5 42 else 1
+}''',
+    'rational-division-custom': '''BigInt:type=[value:int64]
+__truediv__=(a:BigInt b:BigInt):>int64=>a.value//b.value
+main=()=>BigInt[84]/BigInt[2]''',
+    'rational-division-unused-constant': 'const unused=1/2\nmain=()=>42',
+    'rational-division-lifetime': '''work=():>void=>{
+let fractions=[1/2 2/3 3/4] let copy=fractions
+fractions[0]=5/6
+if copy[0] not=? 1/2 panic("lost value copy")
+loop n in [1..15) {let ratio=n/(n+1) let text="{ratio}" if text.length =? 0 panic("missing fraction")}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+return if alloc_count() =? before 42 else 1}''',
     'floor-literal-inference': '''check=(a)=>{let q=a//2 let r=a%3 return q-100 =? -58 and r-100 =? -99}
 main=()=>if check(85) and check(85 as int8) and check(85 as int16) and check(85 as int32)
 and check(85 as uint8) and check(85 as uint16) and check(85 as uint32) 42 else 1''',
@@ -826,7 +860,7 @@ ERRORS = {
     'match-refinement': ('main=()=>match 42 {n:int64<n >? 0>=>n _=>0}', 'does not yet support'),
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
     'unbounded-int': ('main=():>int=>42', 'unbounded integer'),
-    'integer-division': ('main=():>int64=>85/2', 'integer /'),
+    'integer-division': ('main=():>int64=>85/2', 'type mismatch'),
     'literal-too-large': ('main=():>uint64=>18446744073709551616', 'type mismatch'),
     'hex-too-large': ('main=():>uint64=>0x10000000000000000', 'type mismatch'),
     'negative-too-large': ('main=():>int64=>-9223372036854775809', 'type mismatch'),
@@ -1107,7 +1141,8 @@ def test_core_bigint_errors(compiler, tmp_path, expression, diagnostic, target, 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_rational_arithmetic(compiler, tmp_path, target, release):
+@pytest.mark.parametrize('notation', ['constructor', 'division'])
+def test_core_rational_arithmetic(compiler, tmp_path, target, release, notation):
     values = [(0, 1), (0, -13), (1, 1), (-1, 1), (1, 2), (-1, 2), (2, -3),
               (-2, -3), (4, 6), (10**50, 10**25), (2**127-1, 2**96+1), (-2**63, 2**64-1)]
     pairs = [(a, b) for a in values for b in values if b[0]]
@@ -1118,7 +1153,7 @@ def test_core_rational_arithmetic(compiler, tmp_path, target, release):
         pairs.append((tuple(parts[:2]), tuple(parts[2:])))
     (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b} {c} {d}' for (a, b), (c, d) in pairs))
     source = tmp_path / 'fractions.dewy'
-    source.write_text('''from rational import rational
+    body = '''from rational import rational
 main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
@@ -1131,7 +1166,12 @@ loop line in input.split("\n") {
     printl"{a+b}|{a-b}|{a*b}|{a/b}|{parts.quotient}|{parts.remainder}|{a <? b}|{a =? b}|{a.floor()}|{a.ceil()}|{a.pow(3)}"
 }
 }
-''')
+'''
+    if notation == 'division':
+        body = body.replace('from rational import rational', 'from bigint import bigint')
+        body = body.replace('rational(fields[0] fields[1])', 'bigint(fields[0])/bigint(fields[1])')
+        body = body.replace('rational(fields[2] fields[3])', 'bigint(fields[2])/bigint(fields[3])')
+    source.write_text(body)
     expected = []
     for left, right in pairs:
         a, b = Fraction(*left), Fraction(*right)
@@ -1162,6 +1202,9 @@ loop line in input.split("\n") {
 
 @pytest.mark.parametrize('expression, diagnostic', [
     ('rational(1 0)', 'rational denominator must be nonzero'),
+    ('1/0', 'rational denominator must be nonzero'),
+    ('(-1)/0', 'rational denominator must be nonzero'),
+    ('123456789012345678901234567890/0', 'rational denominator must be nonzero'),
     ('rational(1)/rational(0)', 'rational division by zero'),
     ('rational(1)//0', 'rational division by zero'),
     ('rational(1)%0', 'rational division by zero'),
@@ -1290,12 +1333,16 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_bigint_literal_modules(compiler, tmp_path, target, release):
+    (tmp_path / 'rational.dewy').write_text('rational=()=>"wrong library"\n')
     (tmp_path / 'constants.dewy').write_text('''const amount=123456789012345678901234567890
+const fraction=amount/7
 read=(value=amount)=>value+1
+fractional=(value=fraction)=>value*7
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text('''from constants import amount, read
-main=()=>if amount+1 =? read() and read(18446744073709551616) =? 18446744073709551617 42 else 1
+    source.write_text('''from constants import amount, read, fractional
+main=()=>if amount+1 =? read() and read(18446744073709551616) =? 18446744073709551617
+and fractional() =? amount 42 else 1
 ''')
     binary = tmp_path / 'modules'
     flags = ['--release'] if release else []
@@ -2637,6 +2684,75 @@ def test_core_library_import(compiler, tmp_path, style):
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     assert subprocess.run([binary], timeout=10, check=False).returncode == 42
+
+
+@pytest.mark.parametrize('source_text', [
+    'divide=(a b)=>a/b\nmain=()=>if divide(3.0 2.0) =? 1.5 42 else 1',
+    'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=()=>BigInt[84]/BigInt[2]',
+], ids=['float', 'custom'])
+def test_core_division_without_exact_libraries(compiler, tmp_path, source_text):
+    library = tmp_path / 'lib'
+    library.mkdir()
+    for item in (compiler.parent.parent / 'lib').iterdir():
+        if item.name not in ('bigint.dewy', 'rational.dewy'):
+            (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    source = tmp_path / 'main.dewy'
+    source.write_text(source_text)
+    binary = tmp_path / 'program'
+    env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
+    built = subprocess.run([compiler, 'build', source, '-o', binary, '--release'], env=env,
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('entry', ['body', 'global', 'unused-constant'])
+def test_core_exact_division_module_initialization(compiler, tmp_path, target, release, entry):
+    library = tmp_path / 'lib'
+    library.mkdir()
+    for item in (compiler.parent.parent / 'lib').iterdir():
+        if item.name != 'rational.dewy':
+            (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    # An observable library initializer checks dependency order when a language
+    # operation first discovers a module during function/global checking.
+    (library / 'seed.dewy').write_text('let seed:int64=39\nprintl"seed"\n')
+    (library / 'rational.dewy').write_text('''from seed import seed
+let base=seed+1
+printl"rational"
+rational=(a b):>int64=>a+b+base
+''')
+    (tmp_path / 'helper.dewy').write_text('const offset=1\n')
+    bodies = {
+        'body': 'main=()=>1/2-offset',
+        'global': 'let ratio=1/2\nmain=()=>ratio-offset',
+        'unused-constant': 'const unused=1/2\nmain=()=>42',
+    }
+    source = tmp_path / 'main.dewy'
+    source.write_text('from helper import offset\nprintl"main"\n' + bodies[entry] + '\n')
+    binary = tmp_path / 'program'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], env=env,
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web module initialization checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'modules.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['seed', 'rational', 'main']
 
 
 @pytest.mark.parametrize(('expression', 'diagnostic'), [

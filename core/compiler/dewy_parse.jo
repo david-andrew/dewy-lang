@@ -558,10 +558,10 @@ dw_expr = (id: int) -> int:
             loop child in dewy_syntax[right].children: args.push(dw_type(child))
             set_list(n, args)
             return n
-        if op == "//" or op == "%" or op == "^":
+        if op == "//" or op == "%" or op == "^" or op == "/":
             a = dw_expr(left)
             b = dw_expr(right)
-            name = if op == "^": "__dewy_power" else if op == "//": "__floor_div" else: "__floor_mod"
+            name = if op == "/": "__dewy_divide" else if op == "^": "__dewy_power" else if op == "//": "__floor_div" else: "__floor_mod"
             callee = mk(.ident, pos)
             nodes[callee].name = i32(intern(name))
             n = mk(.call, pos)

@@ -96,7 +96,7 @@ when they fit. Use `as` for numeric value conversion. Integer `//` is floor
 division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support signed `int64` and unsigned `uint64`, preserving the full
 unsigned range; narrower operands retain the existing integer widening rules.
-Floating-point `/` is available; built-in integer `/` is not implemented yet.
+Integer `/` produces an exact fraction; `/` with a floating operand uses floating math.
 Literals beyond a machine word automatically use the bundled exact `BigInt` type.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
@@ -154,7 +154,7 @@ can be dictionary keys; construct them through numeric literals or `bigint`, kee
 
 Ordinary fixed-width arithmetic does not automatically widen on overflow.
 Convert a word variable with `bigint(word)` when exact arithmetic is needed.
-Automatic rational promotion and bigint bitwise operations are not yet implemented. The inherited
+Bigint bitwise operations are not yet implemented. The inherited
 `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
@@ -164,12 +164,20 @@ Automatic rational promotion and bigint bitwise operations are not yet implement
 ```dewy
 from rational import Rational, rational, parse_rational
 main=():>void=>{
-    let half=rational(1 2)
-    printl"{half+rational(1 3)}"  # 5/6
-    printl"{rational(2 3)^(-3)}"  # 27/8
+    let half=1/2
+    printl"{half+1/3}"  # 5/6
+    printl"{(2/3)^(-3)}"  # 27/8
     printl"{rational("-7/3").floor()}"  # -3
 }
 ```
+
+Dividing two machine integers or `BigInt` values with `/` constructs a `Rational`
+without an explicit import. This includes mixed signed/unsigned words, and the
+full-width values are preserved. `4/2` is still a fraction value, formatted as
+`2`. Use `//` for a whole-number quotient. Floating operands retain floating
+division, so `1.0/2` is `float64`; a floating annotation alone does not convert
+the exact result of `1/2`. Fraction support is loaded only when needed after
+operand types are known. Import `Rational` when naming its type.
 
 `rational(numerator denominator)` accepts machine integers, `BigInt` values, or
 decimal integer text for its parts; the denominator defaults to one. A single string accepts an integer or `numerator/denominator`.
@@ -177,7 +185,7 @@ decimal integer text for its parts; the denominator defaults to one. A single st
 denominator. Decimal points and whitespace inside the string are not accepted.
 
 Values keep a positive denominator and coprime `BigInt` parts. Zero is `0/1`.
-The constructor normalizes signs and common factors. Use it to construct values;
+Division and the constructor normalize signs and common factors. Use them to construct values;
 read `.numerator` and `.denominator` without assigning noncanonical parts directly.
 `Rational[]` defaults to zero. Interpolation prints an integer when the denominator
 is one, otherwise `numerator/denominator`.
@@ -189,8 +197,7 @@ sign. `.divmod(other)` returns both. `.floor()` and `.ceil()` return `BigInt`;
 `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return fractions. Division
 by zero, a zero denominator and negative powers of zero panic. Zero to the zeroth
 power is one. Copies are independent, and normalized values can be dictionary
-keys. Floating conversion and automatic promotion of built-in integer `/` are
-not yet supplied.
+keys. Conversion between fractions and floating values is not yet supplied.
 
 [The exact-fraction example](../examples/sloppy_core/exact_rationals.dewy) computes
 harmonic sums, dice probabilities and exact time steps.

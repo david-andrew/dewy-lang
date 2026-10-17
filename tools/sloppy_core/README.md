@@ -52,9 +52,10 @@ This is an opt-in compiler experiment, not a full language implementation or a
 release-certified replacement. The core supplies runtime bounds checks, not the
 old proof engine. Proof directives, effect contracts, unbounded integer types,
 and unsupported syntax produce diagnostics.
-Signed floor division/modulo currently use the core's int64 helpers. Floating
-point `/` is supported; integer `/` is rejected until its result semantics are
-implemented. Calls/indexing use adjacent brackets. Literal coefficients such as
+Floor division/modulo support signed and unsigned machine words and exact
+library numbers. Integer `/` constructs an exact Rational, loading its bundled
+implementation only when required by the checked operand types; floating `/`
+keeps floating arithmetic. Calls/indexing use adjacent brackets. Literal coefficients such as
 `2x`, `2f(x)` and `2(x + 1)` multiply; separated values remain arguments or block
 elements. Other multiplication uses `*`. Multiline infix expressions are supported;
 `[40\n-2\n4]` remains three elements. This deterministic syntax is an intentional
@@ -305,9 +306,8 @@ delays easier to distinguish on the shared desktop. It sums the compiler and
 its waited-for children, so multiple emission workers can exceed elapsed time.
 See `cse-probe-compile.json` in the source-core audit.
 
-The combined Dewy/editor/shared-core gate now contains 1,451 checks and took
-73 seconds in the latest development run, including separate compiler
-processes and program execution.
+The combined Dewy/editor/shared-core gate now contains 1,520 checks and takes
+about 80 seconds locally, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build

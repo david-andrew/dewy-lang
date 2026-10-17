@@ -842,3 +842,41 @@ seconds. This editor-only change does not alter normal compilation.
 An unrelated attempt to check unused bundled-library functions on demand was
 reverted: paired measurements did not show a useful compilation improvement.
 The existing eager diagnostic behavior for named library imports is retained.
+
+## Exact integer division syntax
+
+Integer `/` now constructs an exact Rational from signed/unsigned machine words
+and BigInt values, without requiring an explicit import. Floating division and
+custom record protocols retain their respective arithmetic. The exact-fraction
+example now uses ordinary expressions such as `1/n`, `(1/6)^2` and `1/60`.
+A floating annotation does not change `1/2` into a float; use a floating operand.
+
+The checker loads the bundled rational module only after operand types require
+it. Newly discovered modules register their imports and initialization contexts;
+previous selected imports are not rebound. Inactive module frames now live
+separately from the temporary checker stack, preventing late imports from
+interfering with function/default context push/pop. Queued checks are drained
+after unused constants too, and initialization order is recomputed after new
+import edges are added. The inherited REPL's context entry/exit uses the same
+frame lifetime, although the Dewy command still does not expose that REPL.
+
+`exact-division-build.json` records an independent C bootstrap. The full gate
+passed 1,517 checks in 82.59 seconds (`exact-division-full-tests.log`); three
+additional loading/watch checks passed in 2.36 seconds with that same compiler
+(`exact-division-loading-checks.log`). The gate now contains 1,520 checks.
+The rational oracle covers 216 signed fraction pairs through both explicit
+constructors and integer division on native/web in debug/release. Other checks
+cover full unsigned width, call order, division by zero, constants/defaults,
+allocation balance, imported globals, initialization dependency order, and editor
+types/completion. A running game's counter survives float-to-exact-to-float
+reloads. Floating/custom division also builds with both exact libraries absent.
+
+An initial eager-import prototype unnecessarily loaded exact arithmetic for
+floating division. It was replaced before committing. `exact-division-compile.json`
+contains seven alternating warmed builds and the complete tiny floating source:
+float division 82.15/76.34 ms wall and 71.01/69.82 ms CPU; physics
+469.96/436.97 ms wall and 454.62/424.02 ms CPU; compiler self-build
+1854.75/1736.84 ms wall and 1740.43/1638.46 ms CPU (before/after). These shared
+desktop measurements show no observed regression; the syntax feature is not
+credited with a speedup. The measured compiler was seeded and the independent
+C-built compiler subsequently passed the full behavior gate.
