@@ -4,7 +4,9 @@ This is the high-level roadmap for taking the language from "a native
 compiler pair exists" to a practical compiler and the language as it was
 intended. It records the order in which the remaining pieces should land,
 why that order, and the strategy for the pieces where the project has
-previously bogged down.
+previously bogged down. [Language goals](GOALS.md) record what Dewy should
+be able to do, including the ordinary path used by games and the stricter
+lane for systems work.
 
 The [September 29 audit](AUDIT_2026_09_29.md) records fresh direct-native
 measurements, capability/validation gaps and proposed sequencing adjustments.
