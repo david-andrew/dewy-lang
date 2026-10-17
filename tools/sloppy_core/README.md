@@ -268,6 +268,15 @@ for the compiler. The noisy initial Dunes ratio of 1.070 becomes 1.002 in a
 seven-pair follow-up. All measurements use CPU 2; see `reachability-*` in the
 source-core audits.
 
+Dictionary declarations and assignments can unpack entries too:
+`let [[key value] [_ other]] = mapping`. They reuse the retained dense snapshot
+and key/value pair helper, check the number of live entries, and preserve nested
+value copies. Flat targets can retain whole pairs; `_` discards a pair or one of
+its members. Focused checks cover deleted entries, swaps, nested containers,
+global initialization, source evaluation and length failures on native/web
+default/release builds. The independent C gate passes 3,118 checks in 77.02
+seconds; see `dictionary-unpack-validation.json` and its full test log.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

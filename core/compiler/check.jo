@@ -3437,7 +3437,7 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     nested = false
     loop b in bindings:
         if nodes[b].kind == .tuple: nested = true; break
-    if not nested and types[t].kind != .array and (types[t].kind != .struct_ or is_map_type(t)): return (t, bindings)
+    if not nested and types[t].kind != .array and types[t].kind != .struct_: return (t, bindings)
     statements: int[]
     values: int[]
     unpack_values(e, t, bindings, pos, statements, values)
@@ -3460,14 +3460,22 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
 unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[], values: mut int[]):
     is_array = types[t].kind == .array
     is_tuple = types[t].kind == .tuple
-    if not is_array and not is_tuple and (types[t].kind != .struct_ or is_map_type(t)):
-        fatal(pos, "unpacking needs an array, tuple or record, found {type_str(t)}")
+    is_map = is_map_type(t)
+    if not is_array and not is_tuple and types[t].kind != .struct_:
+        fatal(pos, "unpacking needs an array, tuple, dictionary or record, found {type_str(t)}")
     if is_tuple and int(types[t].nargs) != bindings.len():
         fatal(pos, "expected a tuple with {bindings.len()} elements, found {type_str(t)}")
-    source = capture_value(e, t, statements)
-    if is_array:
+    input = e
+    if is_map:
+        add_flag(input, NF_CHECKED)
+        check_expr(bc_call("__map_live", [input], pos), 0)
+        input = last_checked
+    source = capture_value(input, t, statements)
+    if is_array or is_map:
         length = mk(.call, pos)
-        check_intrinsic(length, .len, [source], 0)
+        length_source = source
+        if is_map: length_source = bc_field(source, "keys", pos)
+        check_intrinsic(length, .len, [length_source], 0)
         add_flag(length, NF_CHECKED)
         count = mk(.int_lit, pos)
         nodes[count].ival = bindings.len()
@@ -3485,7 +3493,11 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         value = mk(.field, nodes[binding].pos)
         if is_array: nodes[value].kind = .index
         nodes[value].a = i32(source)
-        if is_array:
+        if is_map:
+            index = mk(.int_lit, nodes[binding].pos)
+            nodes[index].ival = i
+            value = bc_call("__map_pair_at", [source, index], nodes[binding].pos)
+        else if is_array:
             index = mk(.int_lit, nodes[binding].pos)
             nodes[index].ival = i
             nodes[value].b = i32(index)

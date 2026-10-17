@@ -453,11 +453,15 @@ work in declarations and assignments:
 let [[left top] [right bottom]]=[[10 20] [90 80]]
 [[left] [right]]=[[right] [left]]
 let [[x] [y]]=[[x=20 y=1] [x=2 y=22]]
+let [[team score] [_ other]]=["red"->20 "blue"->22]
 ```
 
-Each level follows its source type: arrays and tuples use positions, records use
-field names. The source evaluates once, nested array lengths are checked before
-destinations are written, and extracted values keep ordinary value semantics.
+Each level follows its source type: arrays and tuples use positions, dictionaries
+yield key/value pairs in insertion order, and records use field names. Dictionary
+unpacking skips removed entries and requires exactly as many live entries as
+targets. `_` can discard an entry or either member of a pair. The source evaluates
+once, nested lengths are checked before destinations are written, and extracted
+values keep ordinary value semantics.
 Annotated targets and `const` unpacking are not implemented yet.
 
 ```dewy

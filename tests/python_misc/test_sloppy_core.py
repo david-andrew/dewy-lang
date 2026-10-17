@@ -22,6 +22,36 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'unpack-dictionary': '''main=()=>{
+let [[first x] [second y]]=["a"->20 "b"->22]
+return if first=?"a" and second=?"b" x+y else 1}''',
+    'unpack-dictionary-entries': '''main=()=>{
+let [first _ last]=[100->20 200->99 300->22]
+let [key x]=first let [other y]=last
+return if key=?100 and other=?300 x+y else 1}''',
+    'unpack-dictionary-removed': '''main=()=>{
+let values=["a"->20 "gone"->99 "b"->22]
+values.remove("gone")
+let [[first x] [second y]]=values
+values["a"]=0 values.remove("b")
+return if first=?"a" and second=?"b" x+y else 1}''',
+    'unpack-dictionary-assignment': '''main=()=>{
+let x:int64=20 let y:int64=22
+let first="a" let second="b"
+[[first x] [second y]]=[second->y first->x]
+return if first=?"b" and second=?"a" and x=?22 and y=?20 x+y else 1}''',
+    'unpack-dictionary-managed': '''main=()=>{
+let values=["a"->[20] "b"->[22]]
+let [[_ first] [_ second]]=values
+let snapshot=first first[0]=99 values["b"][0]=88
+return if values["a"][0]=?20 and second[0]=?22 snapshot[0]+second[0] else 1}''',
+    'unpack-dictionary-global': '''let calls:int64=0
+source=():>dict<uint64 array<int64>> =>{calls+=1 return [uint64.max->[20 22]]}
+let [[key [left right]]]=source()
+main=()=>{return if calls=?1 and key=?uint64.max left+right else 1}''',
+    'unpack-dictionary-nested': '''main=()=>{
+let [[[_ [first second]]]]=[["point"->[20 22]]]
+return first+second}''',
     'optimizer-nested-exits': '''reachability_probe=(first:bool second:bool):>int64=>{
 if first {if second return 20 else return 21} else {return 22}
 printl"unreachable tail"
@@ -2748,7 +2778,7 @@ ERRORS = {
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
     'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
-    'unpack-nested-scalar': ('main=()=>{let [[x]]=[42] return x}', 'unpacking needs an array, tuple or record'),
+    'unpack-nested-scalar': ('main=()=>{let [[x]]=[42] return x}', 'unpacking needs an array, tuple, dictionary or record'),
     'unpack-nested-duplicate': ('main=()=>{let [[x] [x]]=[[20] [22]] return x}', 'duplicate unpacking name'),
     'unpack-nested-record-position': ('main=()=>{let [[x]]=[value=[42]] return x}', 'record unpacking needs field names'),
     'unpack-nested-empty': ('main=()=>{let [[]]=[[42]] return 0}', 'empty unpacking target'),
@@ -4609,6 +4639,10 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
     'loop [x y] in [[1] [2 3]] {printl(x+y)}',
     'loop [key [x y]] in ["a"->[1]] {printl(x+y)}',
     'loop i in [0..1) and [[x y]] in [[1]] {printl(x+y)}',
+    'let values:dict<string int64>=[] let [[_ x] [_ y]]=values printl(x+y)',
+    'let [[_ x] [_ y]]=["one"->42] printl(x+y)',
+    'let [[_ x] [_ y]]=["one"->20 "two"->22 "three"->99] printl(x+y)',
+    'let [[_ [x y]]]=["one"->[42]] printl(x+y)',
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
