@@ -62,6 +62,28 @@ def cached_state(cache: Path) -> tuple[dict, Path | None]:
         return {}, None
 
 
+def test_runner_options(python: Path, arguments: list[str]) -> list[str]:
+    explicit = any(arg.startswith('-n') or arg.startswith('--numprocesses') for arg in arguments)
+    # Focused iteration should not pay worker startup/collection costs. Explicit
+    # pytest worker options still work despite disabling unrelated plugin autoload.
+    if arguments and not explicit:
+        return []
+    workers = min(4, getattr(os, 'process_cpu_count', os.cpu_count)() or 1)
+    if not explicit:
+        if workers == 1:
+            return []
+        available = subprocess.run(
+            [str(python), '-c', 'import importlib.util\nraise SystemExit(importlib.util.find_spec("xdist") is None)'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        if available.returncode:
+            return []
+    options = ['-p', 'xdist.plugin', '-p', 'tools.sloppy_core.pytest_parallel', '--dist=loadgroup']
+    if not explicit:
+        options += ['-n', str(workers)]
+    return options
+
+
 def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     # Serialize cache publication/builds. Running commands retain an immutable
@@ -116,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         # A shared compiler/library error otherwise repeats the same failed
         # build across the gate. A later --maxfail=0 requests every failure.
         command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
-                   *TESTS, *args.arguments]
+                   *test_runner_options(python, args.arguments), *TESTS, *args.arguments]
         return subprocess.call(command, cwd=ROOT, env=env)
     # The compiler owns the terminal/LSP streams and receives signals directly;
     # there is no wrapper process to leave a watcher or language server orphaned.

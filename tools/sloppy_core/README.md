@@ -734,3 +734,18 @@ other three workloads near neutral. Fresh-build paired CPU ratios are tour
 0.999, Dunes 0.989 and self-compilation 1.031; the latter's samples vary widely,
 so no compilation gain is claimed. See the `guarded-range-*` source-core audits.
 The independent C-bootstrap gate passes 2,899 checks in 169 seconds.
+
+The full `python3 -m tools.core test` gate now uses up to four pytest workers when
+pytest-xdist is installed. The compact-core plugin groups by test function and
+build mode, preserving reuse of compiled case batches while letting the large
+source-core test file use multiple workers. Other repository tests keep file
+isolation. Focused commands such as `test -k record` stay serial; `test -n 0`
+forces serial execution and `test -n 2` selects two workers. Without pytest-xdist,
+the default gate falls back to serial execution. CI explicitly uses two workers.
+
+On the same 2,899 checks, a local four-worker grouped run took 88.10 seconds,
+versus 168.61 seconds serially and 169.33 seconds with whole-file grouping.
+These are pytest times excluding bootstrap, from one run per strategy on a
+shared host. All checks passed; the subsequent worker-selection changes pass
+19 serial driver checks and 59 two-worker JSON/driver checks. See
+`parallel-validation.json` and its full-run logs for scope and toolchain identity.

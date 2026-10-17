@@ -79,7 +79,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install the test runner
-        run: python -m pip install pytest==9.0.2
+        run: python -m pip install pytest==9.0.2 pytest-xdist==3.8.0
       - name: Ensure offscreen GLES shader validation
         run: |
           if ! python -c 'from tests.python_misc.core_glsl_driver import ShaderDriver; ShaderDriver().close()'; then
@@ -94,6 +94,7 @@ jobs:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/dewy-core/bin/dewy-core
         run: |
           python -m pytest -q -o addopts='' --junitxml=core-results.xml \
+            -p xdist.plugin -p tools.sloppy_core.pytest_parallel -n 2 --dist=loadgroup \
             tests/python_misc/test_sloppy_core.py \
             tests/python_misc/test_sloppy_core_editor.py \
             tests/python_misc/test_sloppy_core_format.py \

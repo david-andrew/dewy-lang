@@ -1,5 +1,6 @@
 """The local driver must never silently validate a stale or failed compiler build."""
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,6 +124,51 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
     assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
     assert 'DEWY_CORE_FRONTEND' not in received['env']
     assert 'SLOPPY_LIB' not in received['env']
+
+
+@pytest.mark.parametrize('arguments, cpus, available, expected_workers', [
+    ([], 16, True, '4'),
+    ([], 2, True, '2'),
+    ([], 1, True, None),
+    ([], 16, False, None),
+    (['-k', 'json'], 16, True, None),
+    (['-n', '0'], 16, True, '0'),
+    (['-n', '2', '-k', 'json'], 16, True, '2'),
+])
+def test_core_driver_worker_selection(monkeypatch, tmp_path, arguments, cpus, available, expected_workers):
+    binary = tmp_path / 'dewy-core'
+    monkeypatch.setattr(core, 'toolchain', lambda **kwargs: binary)
+    monkeypatch.setattr(core.os, 'process_cpu_count', lambda: cpus, raising=False)
+    probes = []
+    received = {}
+
+    def probe(command, **options):
+        probes.append(command)
+        return SimpleNamespace(returncode=0 if available else 1)
+
+    def run(command, **options):
+        received.update(command=command, **options)
+        return 0
+
+    monkeypatch.setattr(core.subprocess, 'run', probe)
+    monkeypatch.setattr(core.subprocess, 'call', run)
+    assert core.main(['test', *arguments]) == 0
+    command = received['command']
+    if expected_workers is None:
+        assert 'xdist.plugin' not in command
+        assert '-n' not in command
+    else:
+        assert command[command.index('-n') + 1] == expected_workers
+        assert 'xdist.plugin' in command
+        assert 'tools.sloppy_core.pytest_parallel' in command
+        assert '--dist=loadgroup' in command
+    if arguments or cpus == 1:
+        assert not probes
+    else:
+        assert len(probes) == 1 and probes[0][0] == command[0]
+    assert all(path in command for path in core.TESTS)
+    assert received['env']['DEWY_CORE_COMPILER'] == str(binary)
+    assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
 
 
 def test_core_driver_rejects_cache_path_outside_owned_directory(tmp_path):

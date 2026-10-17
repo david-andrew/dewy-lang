@@ -15,6 +15,8 @@ Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 ```sh
 python3 -m tools.core test                       # current compiler + focused gate
 python3 -m tools.core test -k record             # select relevant checks
+python3 -m tools.core test -n 0                  # run the full gate serially
+python3 -m tools.core test -n 2                  # choose the worker count
 python3 -m tools.core test -k shader_driver      # compile/link shaders with GLES
 python3 -m tools.core watch examples/sloppy_core/paddle.dewy
 python3 -m tools.core check examples/sloppy_core/tour.dewy
@@ -32,8 +34,13 @@ The cache and build logs live in `__dewycache__/compact-core/`; removing that
 generated directory resets it. No installed compiler is changed.
 
 `test` uses the checkout's `.venv/bin/python` when available, otherwise the current
-Python. Install pytest in that environment and have Node available for the web
-checks. Tests stop at the first failure by default; use `test --maxfail=0` to
+Python. Install pytest and pytest-xdist in that environment and have Node available
+for the web checks. A full `test` uses up to four workers when pytest-xdist is
+available, grouping compilation batches by test function and build mode. Without
+pytest-xdist it runs serially. Commands with additional pytest arguments, such as
+`test -k record`, stay serial unless given `-n`; focused runs avoid worker startup.
+`-n 0` forces serial execution and `-n 2` selects two workers (both require xdist).
+Tests stop at the first failure by default; use `test --maxfail=0` to
 collect every failure. Extra arguments go to pytest; compiler commands forward
 their arguments.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
