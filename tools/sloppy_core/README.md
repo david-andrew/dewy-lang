@@ -344,6 +344,21 @@ integers and 0.627 for records containing arrays and strings. Each run checks a
 Python-computed expected result. Five paired fresh-build ratios remain neutral
 (tour 0.996, Dunes 0.991, compiler 1.005). See `minmax-*` for sources and samples.
 
+Ordinary read-only loops over contiguous array slices now retain the source and
+iterate the selected bounds without materializing a slice. Bounds are checked
+before the first iteration, including empty and early-exit loops. A body that
+can modify its source keeps the copied-slice path to avoid forcing a larger COW
+detach. The shared bounds lowering also captures the lower value before an
+upper-bound expression can assign its variable. The independent C gate passes
+3,322 checks in 39.20 seconds. Seven paired release runs scanning 20,000 values
+500 times give kernel CPU ratios of 0.330 for integers and 0.066 for records
+containing arrays and strings. Taking only the first selected element from a
+200,000-element array 500 times drops from 28.56 ms to about 0.005 ms; the latter
+is a very short kernel, so the useful result is removal of the up-front copying,
+not a precise speedup multiplier. These are focused slice-loop results. Five
+fresh-build ratios are neutral (tour 0.988, Dunes 0.991, compiler 0.992).
+See `slice-loop-*` for source programs, samples and validation.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

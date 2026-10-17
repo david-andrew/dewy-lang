@@ -22,6 +22,60 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sequence-slice-loop-bound-locals': '''main=()=>{
+let values=[99 20 22 100] let start:int64=1
+let chosen=values[start..({start=0; 3}))
+if chosen not=?[20 22] or start not=?0 return 1
+start=1 let sum:int64=0
+loop value in values[start..({start=0; 3})) sum+=value
+return if start=?0 sum else 2}''',
+    'sequence-slice-loop-replaced-by-bound': '''let values:array<int64>=[99 20 22 100]
+let trace:int64=0
+lower=():>int64=>{trace=trace*10+2 values=[99] return 1}
+upper=():>int64=>{trace=trace*10+3 return 3}
+main=()=>{
+let sum:int64=0
+loop value in values[lower()..upper()) {trace=trace*10+4 sum+=value}
+return if trace=?2344 and values=?[99] sum else 1}''',
+    'sequence-slice-loop-no-allocation': '''main=()=>{
+let values=[99 20 22 100]
+let before=alloc_count() let sum:int64=0
+loop value in values[1..3) {
+if alloc_count() not=?before return 1
+sum+=value
+}
+return if alloc_count()=?before sum else 2}''',
+    'sequence-slice-loop-bounds-order': '''let values:array<int64>=[99 20 22 100]
+let trace:int64=0
+source=():>array<int64>=>{trace=trace*10+1 return values}
+lower=():>int64=>{trace=trace*10+2 values=[99] return 1}
+upper=():>int64=>{trace=trace*10+3 return 3}
+main=()=>{
+let sum:int64=0
+loop value in source()[lower()..upper()) {trace=trace*10+4 sum+=value}
+return if trace=?12344 and values=?[99] sum else 1}''',
+    'sequence-slice-loop-snapshots': '''main=()=>{
+let values=[[99] [20] [22] [100]] let saved=values
+let sum:int64=0
+loop item in values[1..2] {
+values.clear() values.push([1])
+let copy=item copy[0]=99
+sum+=item[0]
+}
+return if saved[1]=?[20] and saved[2]=?[22] sum else 1}''',
+    'sequence-slice-loop-control': '''first=(values:array<int64>):>int64=>{
+loop value in values[1..] return value
+return 0
+}
+main=()=>{
+let values=[99 20 22 100] let before=alloc_count()
+let sum=first(values)
+loop value in values[2..] {sum+=value break}
+loop value in values[0..0) return 1
+let visited=[loop value in values[1..3) value]
+let empty=first([99])
+return if visited=?[20 22] and empty=?0
+and alloc_count()=?before+1 sum else 2}''',
     'sequence-minmax-by-order': '''let trace:int64=0
 key=(value:int64):>int64=>{trace=trace*10+value return value}
 main=()=>{
@@ -4917,6 +4971,11 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs=[10 20] let low:int64=-1 loop value in xs[low..] return', 'slice'),
+    ('let xs=[10 20] loop value in xs[0..3) return', 'slice'),
+    ('let xs=[10 20] loop value in xs[2..1) return', 'slice'),
+    ('let xs=[10 20] loop value in xs[3..3) return', 'slice'),
+    ('let xs=[10 20] let high=int64.max loop value in xs[0..high] return', 'slice'),
     ('let xs=[10 20] loop i in (-1).. and i <? xs.length {printl(xs[i])}', 'out of bounds'),
     ('let xs=[10 20] loop i in 0.. and i <? xs.length {printl(xs[i+1])}', 'out of bounds'),
     ('let xs=[10 20 30] let stop=xs.length loop i in 0.. and i <? stop {xs.pop() printl(xs[i])}', 'out of bounds'),

@@ -2879,24 +2879,31 @@ gen_expr = (e: int) -> Val:
     fatal(nodes[e].pos, "unsupported expression in codegen ({k})")
     V(-1, false)
 
-gen_slice = (e: int) -> Val:
-    a = int(nodes[e].a)
-    bt = prune(ntype(a))
+gen_slice_bounds = (e: int, p: int) -> (int, int):
     r = int(nodes[e].b)
-    # Bounds can call code that mutates or replaces the source. Keep the value
-    # read before those calls alive, independently of the original variable.
-    source = gen_owned(a)
-    borrow(source, bt)
-    p = vreg(VI)
-    e_mov(p, source.v)
     lo = 0
-    if nodes[r].a != 0: lo = gen_expr(int(nodes[r].a)).v
+    if nodes[r].a != 0:
+        value = gen_expr(int(nodes[r].a)).v
+        lo = vreg(VI)
+        e_mov(lo, value)  # the upper bound may assign the lower-bound variable
     else: lo = e_iconst(0)
     hi = 0
     if nodes[r].b != 0:
         hi = gen_expr(int(nodes[r].b)).v
         if has_flag(r, NF_INCLUSIVE): hi = e_addi(hi, 1)
     else: hi = arr_len(p)
+    (lo, hi)
+
+gen_slice = (e: int) -> Val:
+    a = int(nodes[e].a)
+    bt = prune(ntype(a))
+    # Bounds can call code that mutates or replaces the source. Keep the value
+    # read before those calls alive, independently of the original variable.
+    source = gen_owned(a)
+    borrow(source, bt)
+    p = vreg(VI)
+    e_mov(p, source.v)
+    lo, hi = gen_slice_bounds(e, p)
     if types[bt].kind == .str_: return V(e_call(rt("__str_slice"), [p, lo, hi], VI), true)
     et = int(types[bt].elem)
     q = e_call(rt("__arr_slice"), [p, lo, hi, e_iconst(tsize(et))], VI)
@@ -4172,16 +4179,37 @@ gen_for = (s: int):
     snap = int(nodes[s].d)
     el = int(nodes[s].sym)
     ct = prune(ntype(int(nodes[s].a)))
+    slice_lo = -1
+    slice_hi = -1
     if aux == 1 or aux == 3:
         # (iterating a variable the loop does not change needs no snapshot of it: the loop
         # borrows the array, with no reference counting)
         it = int(nodes[s].a)
-        borrowed = aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
+        sliced = aux == 1 and types[ct].kind == .array and nodes[it].kind == .index and nodes[it].aux == 1
+        # If the body writes the source, copying its selected range can be
+        # cheaper than retaining the full array and forcing a whole-array detach.
+        if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
+        borrowed = not sliced and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
-        val = if borrowed: gen_borrowed(it) else: gen_owned(it)
-        write_place(local_place(snap, true), ct, val.v)
+        if sliced:
+            # Iteration needs a retained source and bounds, not a copied slice.
+            # Own the source before evaluating bounds that can replace it.
+            val = gen_owned(int(nodes[it].a))
+            write_place(local_place(snap, true), ct, val.v)
+            scope_add_local(snap)
+            p = read_place(local_place(snap, false), ct)
+            slice_lo, slice_hi = gen_slice_bounds(it, p)
+            n = arr_len(p)
+            bad = e_bin(.or_, VI, e_bin(.lts, VI, slice_lo, e_iconst(0)), e_bin(.gts, VI, slice_hi, n))
+            bad = e_bin(.or_, VI, bad, e_bin(.gts, VI, slice_lo, slice_hi))
+            iff(bad)
+            e_call_nr(rt("__panic_slice"), [e_daddr(str_data("slice")), slice_lo, slice_hi, n], -1)
+            endc()
+        else:
+            val = if borrowed: gen_borrowed(it) else: gen_owned(it)
+            write_place(local_place(snap, true), ct, val.v)
         stmt_end()
-        if not borrowed: scope_add_local(snap)
+        if not borrowed and not sliced: scope_add_local(snap)
     ip = local_place(idx, true)
     write_place(ip, T_INT, e_iconst(0))
     # the snapshot of an array cannot change while iterating: hoist its length and data
@@ -4197,6 +4225,9 @@ gen_for = (s: int):
         else:
             n_snap = arr_len(sv)
             base_snap = e_addi(sv, 24)
+            if slice_lo >= 0:
+                n_snap = e_bin(.sub, VI, slice_hi, slice_lo)
+                base_snap = e_bin(.add, VI, base_snap, e_bin(.mul, VI, slice_lo, e_iconst(tsize(int(types[ct].elem)))))
     if aux == 2 and types[ct].kind == .array:
         key = lpath_key(int(nodes[s].a))
         if len(key) > 0:

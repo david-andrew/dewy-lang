@@ -1,0 +1,223 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "samples": 7,
+  "warmups": 1,
+  "clock": "Linux thread CPU",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792277561664195845/bin/dewy-core",
+      "sha256": "0a88cf2167f1b6105603662567e48278e9c846a12438993ac4f4545d36ca6b50"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792278038179348877/bin/dewy-core",
+      "sha256": "692910c16f8614e6d2b8941ea6420741c62d7f4bc9cabab8ad8b0227973bd9e5"
+    }
+  },
+  "workloads": {
+    "full": {
+      "source": "from p\"support.jo\" import clock\nscan=(values:array<int64>):>int64=>{let sum:int64=0 loop value in values[1..] sum+=value; return sum}\nmain=()=>{\n    let values=[loop i in [0..20000) i]\n    let total:int64=0\n    let started=clock()\n    loop repetition in [0..500) total+=scan(values)\n    let elapsed=clock()-started\n    printl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 99995000000,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 3778140,
+            "wall_seconds": 0.0058459138963371515
+          },
+          {
+            "kernel_ns": 3534811,
+            "wall_seconds": 0.005557087017223239
+          },
+          {
+            "kernel_ns": 3392966,
+            "wall_seconds": 0.005250811926089227
+          },
+          {
+            "kernel_ns": 3386438,
+            "wall_seconds": 0.005388768040575087
+          },
+          {
+            "kernel_ns": 3477828,
+            "wall_seconds": 0.005301437922753394
+          },
+          {
+            "kernel_ns": 3489036,
+            "wall_seconds": 0.00535269791726023
+          },
+          {
+            "kernel_ns": 4355956,
+            "wall_seconds": 0.006189594976603985
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 1228409,
+            "wall_seconds": 0.0032102869590744376
+          },
+          {
+            "kernel_ns": 1166479,
+            "wall_seconds": 0.00296935997903347
+          },
+          {
+            "kernel_ns": 1269690,
+            "wall_seconds": 0.0030251500429585576
+          },
+          {
+            "kernel_ns": 1208100,
+            "wall_seconds": 0.0030550489900633693
+          },
+          {
+            "kernel_ns": 1419134,
+            "wall_seconds": 0.0031925629591569304
+          },
+          {
+            "kernel_ns": 1121253,
+            "wall_seconds": 0.002945014974102378
+          },
+          {
+            "kernel_ns": 1307909,
+            "wall_seconds": 0.0031274829525500536
+          }
+        ]
+      },
+      "paired_ratio": 0.329997558568195
+    },
+    "early-exit": {
+      "source": "from p\"support.jo\" import clock\nscan=(values:array<int64>):>int64=>{loop value in values[1..] return value; return 0}\nmain=()=>{\n    let values=[loop i in [0..200000) i]\n    let total:int64=0\n    let started=clock()\n    loop repetition in [0..500) total+=scan(values)\n    let elapsed=clock()-started\n    printl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 500,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 28379848,
+            "wall_seconds": 0.03178264596499503
+          },
+          {
+            "kernel_ns": 28635860,
+            "wall_seconds": 0.03194256604183465
+          },
+          {
+            "kernel_ns": 29489139,
+            "wall_seconds": 0.03309272706974298
+          },
+          {
+            "kernel_ns": 28620956,
+            "wall_seconds": 0.032033800962381065
+          },
+          {
+            "kernel_ns": 28075821,
+            "wall_seconds": 0.03162418201100081
+          },
+          {
+            "kernel_ns": 28508252,
+            "wall_seconds": 0.03211671102326363
+          },
+          {
+            "kernel_ns": 28556306,
+            "wall_seconds": 0.03200598992407322
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 5059,
+            "wall_seconds": 0.0028000560123473406
+          },
+          {
+            "kernel_ns": 4977,
+            "wall_seconds": 0.0029318250017240644
+          },
+          {
+            "kernel_ns": 5393,
+            "wall_seconds": 0.003165349015034735
+          },
+          {
+            "kernel_ns": 5306,
+            "wall_seconds": 0.0031410070369020104
+          },
+          {
+            "kernel_ns": 5163,
+            "wall_seconds": 0.0028054589638486505
+          },
+          {
+            "kernel_ns": 5319,
+            "wall_seconds": 0.0030960709555074573
+          },
+          {
+            "kernel_ns": 5113,
+            "wall_seconds": 0.0028789399657398462
+          }
+        ]
+      },
+      "paired_ratio": 0.00018288089048649402
+    },
+    "entities": {
+      "source": "from p\"support.jo\" import clock\nEntity:type=[id:int64 items:array<int64> name:string]\nscan=(values:array<Entity>):>int64=>{let sum:int64=0 loop value in values[1..] sum+=value.id; return sum}\nmain=()=>{\n    let values=[loop i in [0..20000) Entity[i [i] \"entity\"]]\n    let total:int64=0\n    let started=clock()\n    loop repetition in [0..500) total+=scan(values)\n    let elapsed=clock()-started\n    printl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 99995000000,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 88793110,
+            "wall_seconds": 0.09258324094116688
+          },
+          {
+            "kernel_ns": 87831911,
+            "wall_seconds": 0.09146512998268008
+          },
+          {
+            "kernel_ns": 91480127,
+            "wall_seconds": 0.09524059400428087
+          },
+          {
+            "kernel_ns": 88986490,
+            "wall_seconds": 0.09313954098615795
+          },
+          {
+            "kernel_ns": 89632245,
+            "wall_seconds": 0.09382346190977842
+          },
+          {
+            "kernel_ns": 87595873,
+            "wall_seconds": 0.09143550996668637
+          },
+          {
+            "kernel_ns": 88556057,
+            "wall_seconds": 0.09254146204330027
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 5931782,
+            "wall_seconds": 0.009091078070923686
+          },
+          {
+            "kernel_ns": 5967349,
+            "wall_seconds": 0.008709584944881499
+          },
+          {
+            "kernel_ns": 5710382,
+            "wall_seconds": 0.00851002405397594
+          },
+          {
+            "kernel_ns": 5825486,
+            "wall_seconds": 0.008703544037416577
+          },
+          {
+            "kernel_ns": 6648303,
+            "wall_seconds": 0.009856151998974383
+          },
+          {
+            "kernel_ns": 5784380,
+            "wall_seconds": 0.008646885049529374
+          },
+          {
+            "kernel_ns": 5886122,
+            "wall_seconds": 0.008721971069462597
+          }
+        ]
+      },
+      "paired_ratio": 0.06646775160732371
+    }
+  },
+  "support_source": "clock = () -> int:\n    ts: (int, int)\n    if syscall(228, 3, &ts) != 0: panic(\"clock failed\")\n    ts.0 * 1000000000 + ts.1\n"
+}
