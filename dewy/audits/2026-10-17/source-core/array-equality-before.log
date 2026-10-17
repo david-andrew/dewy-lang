@@ -1,0 +1,42 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+__________ test_core_values[debug-array-comparison-record-snapshots] ___________
+
+value_batches = <function value_batches.<locals>.result at 0x7f802d4e50c0>
+name = 'array-comparison-record-snapshots', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: array-comparison-record-snapshots: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1626: AssertionError
+__________ test_core_values[debug-array-comparison-concat-snapshots] ___________
+
+value_batches = <function value_batches.<locals>.result at 0x7f802d4e50c0>
+name = 'array-comparison-concat-snapshots', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: array-comparison-concat-snapshots: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1626: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-array-comparison-record-snapshots]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-array-comparison-concat-snapshots]
+2 failed, 1783 deselected in 0.44s

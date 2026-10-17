@@ -1610,8 +1610,12 @@ gen_binary = (e: int) -> Val:
     op = nodes[e].op as Tok
     aux = int(nodes[e].aux)
     is_cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
-    # (the left operand read from a variable that a call on the right may change: kept as it was)
-    keep_left = is_managed(lt) and has_call(b) and borrow_may_change(a, [], 0, 0)
+    # Read the left value before evaluating the right. Explicit mutation of a
+    # local (including an intrinsic or assignment inside a block) matters too,
+    # and aggregate equality needs a copy even for records without references.
+    keep_left = false
+    if is_managed(lt) or (aux == 1 and vc(lt) == VC_AGG):
+        if place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1:
         ad = 0
         # (a slice, xs[a..b) == ys: a new array, not a place to take the address of)
@@ -1704,7 +1708,13 @@ sdiv_wrap = (op: Tok, va: int, vb: int, t: int) -> int:
 
 gen_left = (a: int, t: int, keep: bool) -> int:
     v = gen_expr(a)
-    if keep: v = own(v, t)
+    if keep:
+        v = own(v, t)
+        if vc(t) != VC_AGG:
+            # Retaining the object does not freeze a local's mutable register.
+            saved = vreg(vt_of(t))
+            e_mov(saved, v.v)
+            v.v = saved
     borrow(v, t)
     v.v
 

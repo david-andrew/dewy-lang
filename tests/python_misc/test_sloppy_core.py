@@ -207,6 +207,70 @@ Item:type=[values:array<uint64>]
 exact=(values:array<BigInt>)=>values[0]+values[1]
 items=(values:array<Item>)=>values[0].values[0]
 main=()=>{return if exact([20 22]) =? 42 and items([[values=[42]]]) =? 42 42 else 1}''',
+    'array-comparison-widths': '''main=()=>{
+let wide:array<uint64>=[0 1 18446744073709551615]
+let small:array<uint8>=[0 42 255] let signed:array<int8>=[-128 0 127]
+let real:array<float32>=[1.25 2.5]
+return if wide =? [0 1 18446744073709551615] and [0 1 18446744073709551615] =? wide
+and small =? [0 42 255] and [0 42 255] =? small and small not=? [0 42]
+and signed =? [-128 0 127] and [-128 0 127] =? signed
+and real =? [1.25 2.5] and [1.25 2.5] =? real 42 else 1
+}''',
+    'array-comparison-nested-optional': '''main=()=>{
+let matrix:array<array<uint8>>=[[1 2] [3]]
+let present:array<uint16>|none=[1 2] let absent:array<uint16>|none=none
+let empty:array<uint16>=[] let optional_empty:array<uint16>|none=[]
+return if matrix =? [[1 2] [3]] and [[1 2] [3]] =? matrix
+and present =? [1 2] and [1 2] =? present and absent not=? [1 2] and [1 2] not=? absent
+and empty =? [] and [] =? empty and optional_empty =? [] and [] =? optional_empty 42 else 1
+}''',
+    'array-comparison-exact-records': '''from bigint import BigInt
+Item:type=[amount:uint64]
+main=()=>{
+let exact:array<BigInt>=[0 123456789012345678901234567890]
+let items:array<Item>=[[amount=42]]
+return if exact =? [0 123456789012345678901234567890]
+and [0 123456789012345678901234567890] =? exact
+and items =? [[amount=42]] and [[amount=42]] =? items 42 else 1
+}''',
+    'array-comparison-order': '''let trace:int64=0
+value=(tag:int64):>uint64=>{trace=trace*10+tag return 42}
+make_array=(tag:int64):>array<uint64>=>{trace=trace*10+tag return [42]}
+main=()=>{
+if [value(1)] not=? make_array(2) or trace not=? 12 return 1
+trace=0
+if make_array(1) not=? [value(2)] or trace not=? 12 return 2
+return 42
+}''',
+    'array-comparison-record-snapshots': '''Item:type=[amount:int64]
+change=(@item:Item):>Item=>{item.amount=2 return [amount=1]}
+main=()=>{
+let item:Item=[amount=1]
+if item not=? change(@item) or item.amount not=? 2 return 1
+let nested=[values=[1 2]]
+if nested.values not=? {nested.values.clear() [1 2]} or nested.values.length not=? 0 return 2
+let values=[1 2]
+if values not=? {values=[3 4] [1 2]} or values[0] not=? 3 return 3
+return 42
+}''',
+    'array-comparison-concat-snapshots': '''main=()=>{
+let text="a"
+let joined=text+{text="b"; "c"}
+if joined not=? "ac" or text not=? "b" return 1
+text="a"
+if text not=? {text="b"; "a"} return 2
+let values=[1]
+let combined=values+{values=[2]; [3]}
+return if combined =? [1 3] and values =? [2] 42 else 3
+}''',
+    'array-comparison-snapshots': '''change=(@values:array<uint64>):>uint64=>{values[0]=2 return 1}
+main=()=>{
+let values:array<uint64>=[1]
+if values not=? [change(@values)] or values[0] not=? 2 return 1
+values[0]=1
+if [change(@values)] =? values or values[0] not=? 2 return 2
+return 42
+}''',
     'power-precedence': '''main=()=>{
 if 2^3^2 not=? 512 or (2^3)^2 not=? 64 return 1
 if -2^2 not=? -4 or (-2)^2 not=? 4 return 2
@@ -1224,6 +1288,10 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'array-comparison-negative': ('main=()=>{let values:array<uint8>=[1] return values =? [-1]}', 'does not fit in u8'),
+    'array-comparison-overflow': ('main=()=>{let values:array<uint8>=[1] return [256] =? values}', 'does not fit in u8'),
+    'array-comparison-narrow-variable': ('main=()=>{let values:array<uint8>=[1] let other:int64=1 return values =? [other]}', 'cannot implicitly convert'),
+    'array-comparison-different-arrays': ('main=()=>{let values:array<uint8>=[1] let other=[1] return values =? other}', 'cannot compare'),
     'combined-or-condition': ('main=()=>{loop i in [0..3) or true {printl(i)}}', 'only loop variables'),
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
     'stepped-range-membership': ('main=()=>2 in? [0,2..10]', 'stepped slices or membership'),
@@ -3134,7 +3202,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

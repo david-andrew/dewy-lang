@@ -317,3 +317,31 @@ variant wrote fields in place to avoid whole-record temporary copies; it measure
 Neither established a substantial, consistent benefit. Both were reverted;
 the simpler existing implementation remains. [Constructor variant](source-core/cse-entry-rejected.json),
 [field-write variant](source-core/cse-entry-fields-rejected.json).
+
+## Contextual array comparisons and operand snapshots
+
+Dewy equality/inequality now uses a typed array operand to provide element
+context for a literal on either side. This covers narrow/unsigned words,
+floats, nested arrays, optional arrays, BigInt and record elements. Literals
+outside the element range and incompatible constructed arrays still fail.
+Checking the typed operand first does not reorder runtime evaluation.
+
+The side-effect cases also exposed an existing lowering error: a right operand
+could mutate a local array or record before the left operand had been retained
+or copied. Binary operations now use the existing mutation analysis for managed
+values and aggregate equality, including explicit references, intrinsics and
+assignments. Keeping an object's reference also freezes its mutable register;
+string/array concatenation follows the same order. The old compiler fails the
+[record and concatenation regressions](source-core/array-equality-before.log).
+
+The **56-check focused gate passed in 1.55 s**, on native/web in both modes.
+[Focused gate](source-core/array-equality-focused.log).
+Seven paired builds measured tour **50.56/51.64 ms**, physics **295.55/298.75 ms**,
+and compiler self-build **1,143.13/1,140.06 ms** wall time. CPU medians were
+49.71/50.53, 293.13/296.22 and 1,133.30/1,131.07 ms. This is a language/correctness
+change, with small mixed timing differences rather than a claimed speedup.
+[Compile samples](source-core/array-equality-compile.json).
+
+The fresh C bootstrap passed **1,896 checks in 62.85 s**.
+[Full gate](source-core/array-equality-full.log),
+[build manifest](source-core/array-equality-build.json).

@@ -371,6 +371,14 @@ integer or floating literal type when it fits. A literal outside a parameter's
 element range is rejected. An already constructed array keeps its element type;
 passing an `array<int64>` variable does not convert it to `array<uint64>`.
 
+Equality and inequality also give an array literal the element type of the
+value being compared, on either side. For example, `let words:array<uint8>=[0 42]`
+can be followed by `words =? [0 42]` or `[0 42] =? words`. This includes nested
+arrays, optional arrays, exact integers and record elements. Out-of-range
+literals still fail, and separately constructed arrays keep their own types.
+Comparison operands evaluate left to right; changing a value while evaluating
+the right operand does not change the left value already read.
+
 `let [a b] = xs` unpacks arrays or tuple results by position, with an exact array
 length check. `_` discards an element. For records, targets select fields by
 name, in any order. `[a b] = [b a]` swaps existing variables. Nested patterns

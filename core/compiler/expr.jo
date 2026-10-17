@@ -3857,6 +3857,13 @@ charlike_to_int = (n: int):
     add_flag(n, NF_LITERAL)
     clear_flag(n, NF_CHARLIKE)
 
+# Equality gives an array literal the same element context as a typed value.
+# Unwrap an optional only for the literal; the normal equality path adds its tag.
+comparison_array_context = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind == .opt: t = prune(int(types[t].elem))
+    types[t].kind == .array or types[t].kind == .fixed
+
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
     if op == .dotop: return check_dotted(n, expected)
@@ -3920,6 +3927,13 @@ check_binary = (n: int, expected: int) -> int:
         tb0 = prune(check_expr(b, 0))
         add_flag(b, NF_CHECKED)
         if is_int(tb0): hint = tb0
+    array_compare = (op == .eq or op == .ne) and files[pos_file(nodes[n].pos)].is_dewy
+    if array_compare and nodes[a].kind == .array and nodes[b].kind != .array:
+        # Type-checking the typed operand first supplies context without moving
+        # either operand in the runtime expression or checking it twice.
+        bt = prune(check_expr(b, 0))
+        add_flag(b, NF_CHECKED)
+        if comparison_array_context(bt): hint = bt
     ta = prune(check_expr(a, hint))
     tb = 0
     bk = nodes[b].kind
@@ -3927,6 +3941,7 @@ check_binary = (n: int, expected: int) -> int:
     else:
         h = 0
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
+        if array_compare and nodes[a].kind != .array and bk == .array and comparison_array_context(ta): h = ta
         tb = prune(check_expr(b, h))
     # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)
     if op == .eq and is_float(ta) and (nodes[a].kind == .ident or nodes[a].kind == .field) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit) and cx >= 0 and not pos_in_lib(nodes[n].pos):
