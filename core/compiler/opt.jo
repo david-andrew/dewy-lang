@@ -338,13 +338,15 @@ o_holds = (d: int, s: int) -> bool:
 
 # ---------------- common subexpressions ----------------
 # A hash table of available values keyed by (op, type, operands, immediate). Entries belong to
-# the control construct that was open when they were made and die when it closes; loads also
-# die when memory may have changed (any store or call bumps the memory generation).
+# their control construct. An unconditional block can export its prefix before
+# the first branch; conditional arms and loops never export. Loads also die when
+# memory may have changed (any store or call bumps the memory generation).
 ht_k1: int[]
 ht_k2: int[]
 ht_k3: int[]
 ht_val: i32[]
 ht_scope: i32[]
+ht_nbr: int[]          # branch count when the entry was made
 ht_gen: int[]
 ht_epoch: int[]
 ht_va: i32[]            # versions of the entry's operands when it was made
@@ -356,6 +358,9 @@ o_genf = 0             # memory generation for float data (distinct unless raw p
 o_genh = 0             # memory generation for object headers (refcounts, lengths)
 o_open: bool[]          # by scope serial
 o_scopes: int[]         # open scopes, innermost last
+o_parent: int[]
+o_export: bool[]
+o_scope_nbr: int[]
 
 const FACT_FALSE = 255  # pseudo-op key: "this condition is known to be false"
 const FACT_TRUE = 254   # ... "known to be true" (inside an if on it)
@@ -369,6 +374,7 @@ ht_setup = (n: int):
         ht_k3.resize(size)
         ht_val.resize(size)
         ht_scope.resize(size)
+        ht_nbr.resize(size)
         ht_gen.resize(size)
         ht_epoch.resize(size)
         ht_va.resize(size)
@@ -380,9 +386,17 @@ ht_setup = (n: int):
     o_genh = 2 << 40
     o_open.clear()
     o_scopes.clear()
+    o_parent.clear()
+    o_export.clear()
+    o_scope_nbr.clear()
     o_scope_open()
 
-o_scope_open = ():
+o_scope_open = (export_prefix: bool = false):
+    parent = -1
+    if o_scopes.len() > 0: parent = o_scopes[o_scopes.len() - 1]
+    o_parent.push(parent)
+    o_export.push(export_prefix)
+    o_scope_nbr.push(o_nbr)
     o_open.push(true)
     o_scopes.push(o_open.len() - 1)
 
@@ -400,7 +414,14 @@ ht_slot = (k1: int, k2: int, k3: int) -> int:
 # gen: memory generation the entry depends on (-1: none); va, vb: operand versions
 ht_find = (k1: int, k2: int, k3: int, gen: int, va: int, vb: int) -> int:
     i = ht_slot(k1, k2, k3)
-    if ht_epoch[i] != o_epoch or not o_open[int(ht_scope[i])]: return -1
+    if ht_epoch[i] != o_epoch: return -1
+    scope = int(ht_scope[i])
+    loop not o_open[scope]:
+        # Every exit from this block passes its straight-line prefix. After
+        # any earlier branch the value might have been skipped, so discard it.
+        if not o_export[scope] or ht_nbr[i] != o_scope_nbr[scope]: return -1
+        scope = o_parent[scope]
+        if scope < 0: return -1
     if gen >= 0 and ht_gen[i] != gen: return -1
     if int(ht_va[i]) != va or int(ht_vb[i]) != vb: return -1
     int(ht_val[i])
@@ -441,6 +462,7 @@ ht_put = (k1: int, k2: int, k3: int, v: int):
     ht_k3[i] = k3
     ht_val[i] = i32(v)
     ht_scope[i] = i32(o_scopes[o_scopes.len() - 1])
+    ht_nbr[i] = o_nbr
     ht_gen[i] = o_gen
 
 # a value that is defined once and never read before its definition
@@ -1107,7 +1129,7 @@ optimize = ():
             ctl.push(0)
             ctl_c.push(-1)
             ctl_nbr.push(o_nbr)
-            o_scope_open()
+            o_scope_open(op == .block)
             o_out.push(ins)
             continue
         if op == .if_:

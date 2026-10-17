@@ -264,8 +264,35 @@ pairs gave tour 73.82/78.00 ms, physics 490.94/491.78 ms and compiler self-build
 1,961.99/1,879.92 ms (before/after). Shared-desktop variability and mixed results
 do not establish a compilation speed change; raw samples are in `power-compile.json`.
 
-The combined Dewy/editor/shared-core gate now contains 1,381 checks and took
-80 seconds in the latest development run, including separate compiler
+The optimizer now retains available values from the straight-line prefix of an
+unconditional block after that block ends. Values computed after an earlier
+branch stay local, and conditional arms and loops do not export their values.
+Operand versions and memory generations still invalidate computations after
+mutation. This lets repeated short-circuit array reads reuse an already successful
+bounds check and load. In the text application's optimized kernel, byte-load
+sites fall from seven to three. Native/web debug/release regressions cover
+scanning, skipped branches, changed indices, changed array contents/lengths,
+subsequent loop iterations and bounds failures. The independent C bootstrap and
+all 1,413 checks pass (83 seconds for the test phase).
+
+Seven alternating application runs gave text medians of 326.92 ms before and
+277.14 ms after (about 15% less kernel time); an earlier seven-run text comparison
+was 428.66/383.97 ms. The first broad run showed slower record/graph medians amid
+large load variation, so both were repeated with nine samples: records were
+174.93/173.46 ms and graph 614.46/615.67 ms. Those follow-ups do not show a
+consistent regression. Other first-run medians were helpers 1,140.86/1,123.09 ms
+and arrays 269.22/256.33 ms; small differences are not speed claims. All measured
+checksums match C, with the existing graph representation differences retained.
+Raw samples and workload/compiler hashes are in `block-cse-applications.json`,
+`block-cse-text-initial.json` and `block-cse-regression-check.json` in the source-core
+audit. These are shared-desktop native results, not web performance claims.
+Seven warmed compile pairs were tour 51.40/50.53 ms, physics 306.05/305.37 ms
+and compiler self-build 1,187.41/1,224.69 ms (before/after). The self-build was
+about 3% slower in this run; retain that tradeoff alongside the runtime result.
+See `block-cse-compile.json`.
+
+The combined Dewy/editor/shared-core gate now contains 1,413 checks and took
+83 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

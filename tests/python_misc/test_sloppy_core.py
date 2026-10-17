@@ -44,6 +44,55 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'optimizer-short-circuit-scan': '''scan=(text:array<uint8>):>int64=>{
+let i:int64=0 let total:int64=0
+loop i <? text.length {
+    if text[i] <? 48 or text[i] >? 57 {i+=1 continue}
+    let value:int64=0
+    loop i <? text.length and text[i] >=? 48 and text[i] <=? 57 {
+        value=10*value+(text[i] as int64)-48 i+=1
+    }
+    total+=value
+}
+return total
+}
+main=()=>{return if scan(bytes("123 x 45 0 7")) =? 175 and scan(bytes("")) =? 0
+and scan(bytes("1 20 300")) =? 321 and scan(bytes("no digits")) =? 0 42 else 1}''',
+    'optimizer-conditional-loads': '''read=(take:bool values:array<int64>):>int64=>{
+if take and values[0] >? 0 and values[0] <? 100 return values[0]
+return 42
+}
+main=()=>{let empty:array<int64>=[]
+if read(false empty) not=? 42 return 1
+loop take in [true false] {
+    let values=[7]
+    let first=if take {let value=values[0] value*2} else 10
+    if first not=? (if take 14 else 10) return 2
+    if read(take values) not=? (if take 7 else 42) return 3
+}
+return 42}''',
+    'optimizer-mutation-after-load': '''change=(@values:array<int64>):>bool=>{values[0]+=1 return true}
+main=()=>{
+let values=[7 11] let index:int64=0
+if values[index] =? 7 and values[index] >? 0 {index=1}
+if values[index] not=? 11 return 1
+if values[0] =? 7 and change(@values) and values[0] =? 8 {values[0]=40}
+if values[0] not=? 40 return 2
+loop take in [true false] {
+    if take and values[0] =? 40 {values[0]=41} else {values[0]=42}
+}
+return values[0]
+}''',
+    'optimizer-loop-loads': '''main=()=>{
+let values=[1 2 3] let total:int64=0 let i:int64=0
+loop i <? values.length {
+    if values[i] >? 0 and values[i] <? 10 {total+=values[i]}
+    values[i]+=10 i+=1
+}
+i=0
+loop i <? values.length {total+=values[i] i+=1}
+return total
+}''',
     'power-precedence': '''main=()=>{
 if 2^3^2 not=? 512 or (2^3)^2 not=? 64 return 1
 if -2^2 not=? -4 or (-2)^2 not=? 4 return 2
@@ -1195,6 +1244,48 @@ loop line in input.split("\n") {
     assert ran.stdout.splitlines() == expected
 
 
+@pytest.mark.parametrize('body', [
+    '''let values=[42] let index:int64=0
+if values[index] >? 0 and values[index] <? 100 {index=-1}
+printl"{values[index]}"''',
+    '''let values=[42]
+if values[0] >? 0 and values[0] <? 100 {values.clear()}
+printl"{values[0]}"''',
+    '''let values:array<int64>=[] let skip=args().length >? 0
+if not skip and values[0] >? 0 {printl"unreachable"}
+printl"{values[0]}"''',
+    '''let values=[42]
+loop i in [0..2) {
+    if values[0] >? 0 and values[0] <? 100 {values.clear()}
+}''',
+], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_optimizer_bounds(compiler, tmp_path, body, target, release):
+    source = tmp_path / 'bounds.dewy'
+    source.write_text(f'main=():>void=>{{{body}}}')
+    binary = tmp_path / 'bounds'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web bounds checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'bounds.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0, ran.stdout + ran.stderr
+    assert 'out of bounds' in ran.stdout + ran.stderr
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_word_power_arithmetic(compiler, tmp_path, target, release):
@@ -2103,7 +2194,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
