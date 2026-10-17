@@ -219,8 +219,18 @@ elements as targets, checked at runtime; `_` discards an array/tuple element.
 There is no two-to-four-element restriction. `[x y] = [y x]` reads the source
 once before writing either target. Bare targets also declare when all names are
 new; `let` explicitly declares/shadows. Managed values retain independent copies,
-and module-level unpacking is supported. Nested, annotated and `const` targets
-are not implemented yet; omit unwanted record fields instead of using `_`.
+and module-level unpacking is supported. Nested patterns in declarations and
+assignments recurse through arrays, tuples and records using those same rules.
+For example, `let [[x y] [z]] = [[20 1] [21]]` reads its source once and checks
+both inner array lengths before writing destinations. Nested managed values keep
+independent copies, and duplicate target names are diagnosed across the entire
+pattern. Annotated and `const` targets are not implemented yet; omit unwanted
+record fields instead of using `_`.
+The nested-unpacking change passes 2,957 checks from the independent C seed,
+including native/web default/release cases for globals, discards, mixed tuples,
+swaps, nested value copies and length failures. `nested-unpack-compile.json`
+records fresh-build timings; `nested-unpack-validation.json` records the tested
+toolchain and gate scope.
 
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core

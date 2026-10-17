@@ -710,6 +710,20 @@ eval_when_toplevel = (m: int, w: int):
     if blk == 0: return
     register_decls(m, kids(blk))
 
+# The names in a destructuring pattern, in source order. Keep the tree until
+# checking the source type; registration and declaration detection need leaves.
+binding_leaves = (bindings: int[]) -> int[]:
+    nested = false
+    loop b in bindings:
+        if nodes[b].kind == .tuple: nested = true; break
+    if not nested: return bindings
+    leaves: int[]
+    loop b in bindings:
+        if nodes[b].kind == .tuple:
+            loop leaf in binding_leaves(kids(b)): leaves.push(leaf)
+        else: leaves.push(b)
+    leaves
+
 # `x = value` where no variable x exists yet is a declaration
 # (m >= 0: at the top level of module m, where only that module's globals count)
 assign_declares = (s: int, m: int) -> bool:
@@ -719,8 +733,7 @@ assign_declares = (s: int, m: int) -> bool:
     if lk == .ident: return not name_assignable(int(nodes[lhs].name), m)
     if lk != .tuple: return false
     any = false
-    loop i in [0..nkids(lhs)):
-        c = kid(lhs, i)
+    loop c in binding_leaves(kids(lhs)):
         ck = nodes[c].kind
         if ck == .hole: continue
         if ck != .ident: return false
@@ -868,8 +881,7 @@ register_decls = (m: int, decls: int[]):
             if test_mode and modules[m].is_main: test_decls.push(d)
         else if k == .vardecl:
             if nodes[d].nlist > 0:
-                loop i in [0..nkids(d)):
-                    id = kid(d, i)
+                loop id in binding_leaves(kids(d)):
                     if nodes[id].kind == .hole: continue
                     g = new_global(int(nodes[id].name), d, m)
                     nodes[id].sym = i32(g)
@@ -1487,7 +1499,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if not has_flag(d, NF_CHECKED):
             t = prune(check_expr(int(nodes[d].b), 0))
             nodes[d].b = i32(last_checked)
-            t = unpack_binding(int(nodes[d].b), t, kids(d), nodes[d].pos)
+            unpacked = unpack_binding(int(nodes[d].b), t, kids(d), nodes[d].pos)
+            t = unpacked.0
+            set_list(d, unpacked.1)
             nodes[d].b = i32(last_checked)
             if types[t].kind != .tuple or int(types[t].nargs) != nkids(d): fatal(nodes[d].pos, "expected a tuple with {nkids(d)} elements (or an array), found {type_str(t)}")
             loop k in [0..nkids(d)):
@@ -2424,7 +2438,9 @@ check_assign = (s: int) -> int:
         if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
         t = prune(check_expr(int(nodes[s].b), 0))
         nodes[s].b = i32(last_checked)
-        t = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
+        unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
+        t = unpacked.0
+        set_list(lhs, unpacked.1)
         nodes[s].b = i32(last_checked)
         if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {type_str(t)}")
         loop i in [0..nkids(lhs)):
@@ -2668,14 +2684,16 @@ check_vardecl = (s: int):
         return
     if nodes[s].nlist > 0:
         if has_flag(s, NF_GLOBAL):
-            loop i in [0..nkids(s)):
-                if nodes[kid(s, i)].kind != .hole:
-                    ensure_global(int(nodes[kid(s, i)].sym), nodes[s].pos, true)
+            loop binding in binding_leaves(kids(s)):
+                if nodes[binding].kind != .hole:
+                    ensure_global(int(nodes[binding].sym), nodes[s].pos, true)
                     return
             # With only discards, no global initializer checks the source for us.
         t = prune(check_expr(int(nodes[s].b), 0))
         nodes[s].b = i32(last_checked)
-        t = unpack_binding(int(nodes[s].b), t, kids(s), nodes[s].pos)
+        unpacked = unpack_binding(int(nodes[s].b), t, kids(s), nodes[s].pos)
+        t = unpacked.0
+        set_list(s, unpacked.1)
         nodes[s].b = i32(last_checked)
         if types[t].kind != .tuple or int(types[t].nargs) != nkids(s): fatal(nodes[s].pos, "expected a tuple with {nkids(s)} elements (or an array), found {type_str(t)}")
         loop i in [0..nkids(s)):
@@ -3383,11 +3401,39 @@ order_modules = (m: int, out: mut int[]):
 
 # statement calling a prelude function with the given argument nodes
 # a, b = xs with an array: its elements, as a tuple (__unpack2(xs): the length checked)
-unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> int:
-    if not files[pos_file(pos)].is_dewy: return unpack_array(e, t, bindings.len(), pos)
-    is_array = types[t].kind == .array
-    if not is_array and (types[t].kind != .struct_ or is_map_type(t)): return t
+unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
+    if not files[pos_file(pos)].is_dewy: return (unpack_array(e, t, bindings.len(), pos), bindings)
+    leaves = binding_leaves(bindings)
+    nested = false
+    loop b in bindings:
+        if nodes[b].kind == .tuple: nested = true; break
+    if not nested and types[t].kind != .array and (types[t].kind != .struct_ or is_map_type(t)): return (t, bindings)
     statements: int[]
+    values: int[]
+    unpack_values(e, t, bindings, pos, statements, values)
+    tuple = mk(.tuple, pos)
+    set_list(tuple, values)
+    result_type = check_expr(tuple, 0)
+    result = mk(.exprstmt, pos)
+    nodes[result].a = i32(last_checked)
+    statements.push(result)
+    block = mk(.block, pos)
+    nodes[block].type = i32(result_type)
+    nodes[block].aux = 1
+    set_list(block, statements)
+    add_flag(block, NF_CHECKED)
+    last_checked = block
+    (result_type, leaves)
+
+# Read every leaf before any destination is written. Capturing each container
+# once preserves value snapshots and lets nested length checks precede writes.
+unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[], values: mut int[]):
+    is_array = types[t].kind == .array
+    is_tuple = types[t].kind == .tuple
+    if not is_array and not is_tuple and (types[t].kind != .struct_ or is_map_type(t)):
+        fatal(pos, "unpacking needs an array, tuple or record, found {type_str(t)}")
+    if is_tuple and int(types[t].nargs) != bindings.len():
+        fatal(pos, "expected a tuple with {bindings.len()} elements, found {type_str(t)}")
     source = capture_value(e, t, statements)
     if is_array:
         length = mk(.call, pos)
@@ -3405,7 +3451,6 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> int:
         statement = mk(.exprstmt, pos)
         nodes[statement].a = i32(guard)
         statements.push(statement)
-    values: int[]
     loop i in 0.. and binding in bindings:
         value = mk(.field, nodes[binding].pos)
         if is_array: nodes[value].kind = .index
@@ -3416,23 +3461,17 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> int:
             nodes[value].b = i32(index)
             # The length guard above dominates every element read.
             add_flag(value, NF_INBOUNDS)
+        else if is_tuple:
+            nodes[value].aux = -2
+            nodes[value].ival = i
         else:
             if nodes[binding].kind == .hole: fatal(nodes[binding].pos, "record unpacking names fields; leave unwanted fields out instead of using _")
+            if nodes[binding].kind == .tuple: fatal(nodes[binding].pos, "record unpacking needs field names at this level")
             nodes[value].name = nodes[binding].name
-        values.push(value)
-    tuple = mk(.tuple, pos)
-    set_list(tuple, values)
-    result_type = check_expr(tuple, 0)
-    result = mk(.exprstmt, pos)
-    nodes[result].a = i32(tuple)
-    statements.push(result)
-    block = mk(.block, pos)
-    nodes[block].type = i32(result_type)
-    nodes[block].aux = 1
-    set_list(block, statements)
-    add_flag(block, NF_CHECKED)
-    last_checked = block
-    result_type
+        if nodes[binding].kind == .tuple:
+            inner = prune(check_expr(value, 0))
+            unpack_values(last_checked, inner, kids(binding), nodes[binding].pos, statements, values)
+        else: values.push(value)
 
 unpack_array = (e: int, t: int, n: int, pos: int) -> int:
     if types[t].kind != .array or n < 2 or n > 4: return t

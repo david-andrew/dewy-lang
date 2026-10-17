@@ -2183,6 +2183,27 @@ main=()=>{let value:Value=[] return value.answer}''',
 get=(value:Value?)=>if value is? Value value.answer else 0
 main=()=>get([])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
+    'unpack-nested-array': 'main=()=>{let [[a b] [c d]]=[[20 1] [2 19]] return a+b+c+d}',
+    'unpack-nested-single': 'main=()=>{let [[answer]]=[[42]] return answer}',
+    'unpack-nested-implicit': 'main=()=>{[[x _] [y]]=[[20 99] [22]] return x+y}',
+    'unpack-nested-swap': '''main=()=>{let x:int64=20 let y:int64=22
+[[x] [y]]=[[y] [x]] return if x =? 22 and y =? 20 42 else 1}''',
+    'unpack-nested-once': '''let calls:int64=0
+make=()=>{calls+=1 return [[20] [22]]}
+main=()=>{let [[x] [y]]=make() return if calls =? 1 x+y else 1}''',
+    'unpack-nested-copy': '''main=()=>{let source=[[[20 22] [99]]]
+let [[first _]]=source let snapshot=first first[0]=0
+return if source[0][0][0] =? 20 and snapshot[0] =? 20 and first[1] =? 22 42 else 1}''',
+    'unpack-nested-record': '''main=()=>{let source=[[x=20 y=1] [x=2 y=22]]
+let [[x] [y]]=source return x+y}''',
+    'unpack-nested-global': '''let calls:int64=0
+make=()=>{calls+=1 return [[20] [22]]}
+let [[x] [y]]=make()
+main=()=>if calls =? 1 x+y else 1''',
+    'unpack-nested-global-discard': '''let calls:int64=0
+make=()=>{calls+=1 return [[20] [22]]}
+let [[_] [_]]=make()
+main=()=>calls+41''',
     'unpack-single': 'main=()=>{let [answer]=[42] return answer}',
     'unpack-many': 'main=()=>{let [a b c d e]=[2 4 6 10 20] return a+b+c+d+e}',
     'unpack-discard': '''main=()=>{let [first _ last]=["aa" "drop" "bbb"]
@@ -2583,7 +2604,10 @@ ERRORS = {
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
     'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
-    'unpack-nested': ('main=()=>{let [[x]]= [[42]] return x}', 'nested or annotated'),
+    'unpack-nested-scalar': ('main=()=>{let [[x]]=[42] return x}', 'unpacking needs an array, tuple or record'),
+    'unpack-nested-duplicate': ('main=()=>{let [[x] [x]]=[[20] [22]] return x}', 'duplicate unpacking name'),
+    'unpack-nested-record-position': ('main=()=>{let [[x]]=[value=[42]] return x}', 'record unpacking needs field names'),
+    'unpack-nested-empty': ('main=()=>{let [[]]=[[42]] return 0}', 'empty unpacking target'),
     'syntax-unicode-short': ('main=()=>"\\u123"', 'Unicode escape'),
     'syntax-unicode-bad-digit': ('main=()=>"\\u12G4"', 'hexadecimal'),
     'syntax-unicode-empty': ('main=()=>"\\u{}"', 'hex digits'),
@@ -5281,12 +5305,18 @@ def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('mismatch', [False, True])
-def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch):
-    (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
+@pytest.mark.parametrize('nested', [False, True])
+def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch, nested):
+    (tmp_path / 'helper.jo').write_text('''pair = () -> (int, str): (39, "abc")
+nested = () -> ((int, str), int[]): ((39, "abc"), [0])''')
     source = tmp_path / 'unpack.dewy'
-    source.write_text('''import p"helper.jo"
-main=()=>{let [count text]=helper.pair() return count+text.length}''' if not mismatch else
-                      'main=()=>{let [first second]=[42] return first+second}')
+    if mismatch:
+        program = ('main=()=>{let [[first second] [_]]=[[42] [0]] return first+second}' if nested else
+                   'main=()=>{let [first second]=[42] return first+second}')
+    else:
+        program = ('main=()=>{let [[count text] [extra]]=helper.nested() return count+text.length+extra}' if nested else
+                   'main=()=>{let [count text]=helper.pair() return count+text.length}')
+    source.write_text('import p"helper.jo"\n' + program)
     binary = tmp_path / 'unpack'
     node = shutil.which('node')
     if target == 'wasm' and node is None:

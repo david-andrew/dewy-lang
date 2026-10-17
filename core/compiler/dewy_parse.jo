@@ -708,11 +708,20 @@ dw_stmt = (id: int, top: bool = false) -> int:
     return n
 
 dw_bindings = (id: int) -> int[]:
-    bindings: int[]
     seen: {str: bool} = {}
+    dw_binding_items(id, seen)
+
+dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
+    bindings: int[]
     loop child in dewy_syntax[id].children:
+        let child = dw_unwrap(child)
+        if dewy_syntax[child].kind == "Block" and dewy_syntax[child].text == "[]:":
+            n = mk(.tuple, dewy_syntax[child].pos)
+            set_list(n, dw_binding_items(child, seen))
+            bindings.push(n)
+            continue
         name = dw_name(child)
-        if name == "": return [dw_fail(child, "nested or annotated unpacking targets; use simple names")]
+        if name == "": return [dw_fail(child, "annotated unpacking targets; use names or nested brackets")]
         if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
         seen[name] = true
         n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)

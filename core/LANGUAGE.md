@@ -447,7 +447,18 @@ the right operand does not change the left value already read.
 `let [a b] = xs` unpacks arrays or tuple results by position, with an exact array
 length check. `_` discards an element. For records, targets select fields by
 name, in any order. `[a b] = [b a]` swaps existing variables. Nested patterns
-and `const` unpacking are not implemented yet.
+work in declarations and assignments:
+
+```dewy
+let [[left top] [right bottom]]=[[10 20] [90 80]]
+[[left] [right]]=[[right] [left]]
+let [[x] [y]]=[[x=20 y=1] [x=2 y=22]]
+```
+
+Each level follows its source type: arrays and tuples use positions, records use
+field names. The source evaluates once, nested array lengths are checked before
+destinations are written, and extracted values keep ordinary value semantics.
+Annotated targets and `const` unpacking are not implemented yet.
 
 ```dewy
 let values=[loop i in [0..10) i*i]
