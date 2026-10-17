@@ -155,6 +155,11 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert errors[0]['range']['start'] == {'line': 0, 'character': expected_column}, errors
         diagnostics = client.set_text(uri, good, 6)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        labeled = 'main=()=>{$outer loop true {loop true {break $outer}} return 42}'
+        diagnostics = client.set_text(uri, labeled.replace('break $outer', 'break $missing'), 7)
+        assert any('unknown loop label' in d['message'] for d in diagnostics), diagnostics
+        diagnostics = client.set_text(uri, labeled, 8)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
         assert source.read_text() == 'main=()=>42'
     finally:
         client.close()

@@ -2106,6 +2106,7 @@ desugar_loopx = (lx: int) -> int:
             if nodes[terms[i]].op != 4: direct_range = false
         if direct_range:
             f = mk(.for_, pos)
+            nodes[f].sval = nodes[lx].sval
             nodes[f].a = nodes[first].a
             set_list(f, kids(first))
             stmts: int[]
@@ -2121,6 +2122,7 @@ desugar_loopx = (lx: int) -> int:
                 if nodes[t].op == 4: ok = false
         if ok and nseq == 1 and nodes[int(nodes[seq].a)].kind != .range:
             f = mk(.for_, pos)
+            nodes[f].sval = nodes[lx].sval
             ixname = intern("__ix" + tag)
             pre: int[]
             loop t in terms:
@@ -2149,6 +2151,7 @@ desugar_loopx = (lx: int) -> int:
     tr = mk(.bool_lit, pos)
     nodes[tr].ival = 1
     nodes[loop_].a = i32(tr)
+    nodes[loop_].sval = nodes[lx].sval
     stmts = head
     loop i in [0..nkids(body)): stmts.push(kid(body, i))
     nodes[loop_].b = i32(lx_block(stmts, pos))

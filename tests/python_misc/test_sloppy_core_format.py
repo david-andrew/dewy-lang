@@ -59,6 +59,19 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'labels': '''main=()=>{
+let total=0
+$outer
+loop i in [0..4) {
+loop c in "ab" {
+total+=1
+if i =? 0 {continue $outer}
+if i =? 2 {break $outer}
+}
+}
+printl(total)
+return 0
+}''',
     'adjacency': '''identity=<T>(x:T):>T=>x
 main=()=>{
 let x=5

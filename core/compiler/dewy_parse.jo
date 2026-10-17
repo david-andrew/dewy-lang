@@ -644,8 +644,13 @@ dw_stmt = (id: int, top: bool = false) -> int:
             if dewy_syntax[id].children.len() > 1: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
             return n
         if word == "let" or word == "const": return dw_declare(dw_child(id, 1), word == "const", top)
-        if word == "break": return mk(.break_, pos)
-        if word == "continue": return mk(.continue_, pos)
+        if word == "break" or word == "continue":
+            n = mk(if word == "break": NK.break_ else: NK.continue_, pos)
+            if dewy_syntax[id].children.len() > 1:
+                label = dw_child(id, 1)
+                if dewy_syntax[label].kind != "Metatag": return dw_fail(label, "a loop exit without a $label")
+                nodes[n].name = i32(intern(dewy_syntax[label].text))
+            return n
         return dw_fail(id, "statement '{word}'")
     if k == "Flow":
         n = dw_flow(id, 0)
@@ -984,9 +989,21 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     statements: int[]
     if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "{{}}:":
         children = dewy_syntax[id].children
+        label = 0
+        label_pos = 0
         loop i in 0.. and child in children:
-            if accumulator != 0 and i + 1 == children.len(): statements.push(dw_collect(child, accumulator, map))
-            else: statements.push(dw_stmt(child))
+            if dewy_syntax[child].kind == "Metatag":
+                if label != 0: fatal(label_pos, "a loop label must be followed by a loop")
+                label = intern(dewy_syntax[child].text)
+                label_pos = dewy_syntax[child].pos
+                continue
+            statement = if accumulator != 0 and i + 1 == children.len(): dw_collect(child, accumulator, map) else: dw_stmt(child)
+            if label != 0:
+                if nodes[statement].kind != .loopx and nodes[statement].kind != .for_ and nodes[statement].kind != .while_: fatal(label_pos, "a loop label must be followed by a loop")
+                nodes[statement].sval = i32(label)
+                label = 0
+            statements.push(statement)
+        if label != 0: fatal(label_pos, "a loop label must be followed by a loop")
     else if accumulator != 0: statements.push(dw_collect(id, accumulator, map))
     else: statements.push(dw_stmt(id))
     set_list(n, statements)

@@ -1621,15 +1621,16 @@ stmt_terminates = (s: int) -> bool:
     if k == .while_: return nodes[int(nodes[s].a)].kind == .bool_lit and nodes[int(nodes[s].a)].ival != 0 and not has_break(int(nodes[s].b))
     false
 
-has_break = (n: int) -> bool:
+has_break = (n: int, depth: int = 0) -> bool:
     if n == 0: return false
     k = nodes[n].kind
-    if k == .break_: return true
-    if k == .while_ or k == .for_ or k == .lambda: return false
-    if has_break(int(nodes[n].a)) or has_break(int(nodes[n].b)): return true
-    if k != .for_ and has_break(int(nodes[n].c)): return true
+    if k == .break_: return nodes[n].ival == depth
+    if k == .lambda: return false
+    if k == .while_ or k == .for_: return has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth + 1)
+    if has_break(int(nodes[n].a), depth) or has_break(int(nodes[n].b), depth): return true
+    if has_break(int(nodes[n].c), depth): return true
     loop i in [0..nkids(n)):
-        if has_break(kid(n, i)): return true
+        if has_break(kid(n, i), depth): return true
     false
 
 value_capable = (s: int) -> bool:
@@ -1849,6 +1850,7 @@ dewy_cursor_loop = (s: int) -> bool:
         nodes[range].b = i32(bc_bin(.minus, bc_ident(tag + "remaining", pos), bc_int(1, pos), pos))
         add_flag(range, NF_INCLUSIVE)
         loop_ = mk(.for_, pos)
+        nodes[loop_].sval = nodes[s].sval
         nodes[loop_].a = i32(range)
         nodes[loop_].b = i32(lx_block(head, pos))
         set_list(loop_, [bc_ident(tag + "counter", pos)])
@@ -1857,6 +1859,7 @@ dewy_cursor_loop = (s: int) -> bool:
         check_stmt(s)
         return true
     w = mk(.while_, pos)
+    nodes[w].sval = nodes[s].sval
     tr = mk(.bool_lit, pos)
     nodes[tr].ival = 1
     nodes[w].a = i32(tr)
@@ -1992,13 +1995,29 @@ check_for = (s: int):
             nodes[s].d = i32(snap)
             nodes[s].aux2 = i32(vl)
         else: fatal(nodes[it].pos, "cannot iterate over a value of type {type_str(t)}")
-    ctxs[cx].loop_depth += 1
+    check_loop_enter(s)
     check_block(int(nodes[s].b), 0, false)
     loop_serials.pop()
-    ctxs[cx].loop_depth -= 1
+    check_loop_leave(s)
     scope_reset(mark)
 
 const ASSIGN_OPS = 0
+
+# Labels belong to active loops in one function-checking context. They cannot
+# cross a function boundary, including a closure checked inside the loop.
+loop_labels: (int, int, int)[]
+
+check_loop_enter = (s: int):
+    ctxs[cx].loop_depth += 1
+    label = int(nodes[s].sval)
+    if label == 0: return
+    loop item in loop_labels:
+        if item.0 == cx and item.1 == label: fatal(nodes[s].pos, "duplicate active loop label '${name_of(label)}'")
+    loop_labels.push((cx, label, int(ctxs[cx].loop_depth)))
+
+check_loop_leave = (s: int):
+    if nodes[s].sval != 0: loop_labels.pop()
+    ctxs[cx].loop_depth -= 1
 
 compound_op = (op: int) -> int:
     k = op as Tok
@@ -2661,9 +2680,9 @@ check_stmt = (s: int):
             ct = check_expr(int(nodes[s].a), T_BOOL)
             if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)")
             nodes[s].a = i32(coerce(last_checked, T_BOOL))
-        ctxs[cx].loop_depth += 1
+        check_loop_enter(s)
         check_block(int(nodes[s].b), 0, false)
-        ctxs[cx].loop_depth -= 1
+        check_loop_leave(s)
         loop_serials.pop()
         scope_reset(mark)
     else if k == .for_: check_for(s)
@@ -2693,6 +2712,12 @@ check_stmt = (s: int):
             w = "continue"
             if k == .break_: w = "break"
             fatal(nodes[s].pos, "'{w}' outside of a loop")
+        if nodes[s].name != 0:
+            target = -1
+            loop item in loop_labels:
+                if item.0 == cx and item.1 == int(nodes[s].name): target = item.2
+            if target < 0: fatal(nodes[s].pos, "unknown loop label '${name_of(int(nodes[s].name))}'")
+            nodes[s].ival = int(ctxs[cx].loop_depth) - target
     else if k == .defer_:
         d = int(nodes[s].a)
         if nodes[d].kind == .block: check_block(d, 0, false)

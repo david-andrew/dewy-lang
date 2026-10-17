@@ -465,6 +465,8 @@ dn_stmt = () -> int:
         parts = [dn_node("Keyword", word, token.start)]
         if word != "break" and word != "continue":
             if word != "return" or (dn_can_start() and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
+        else if dn_tokens[dn_at].kind == "Metatag" and not dn_tokens[dn_at].newline:
+            parts.push(dn_atom())
         if word == "from":
             keyword = dn_tokens[dn_at]
             dn_expect("import")

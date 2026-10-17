@@ -4519,7 +4519,7 @@ gen_stmt = (s: int):
         uq_end(n)
     else if k == .return_: gen_return(s)
     else if k == .break_ or k == .continue_:
-        lp = loops[loops.len() - 1]
+        lp = loops[loops.len() - 1 - int(nodes[s].ival)]
         i = scope_locals.len() - 1
         loop i >= lp.scope:
             emit_scope_exit(i)

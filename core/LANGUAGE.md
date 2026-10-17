@@ -502,6 +502,24 @@ Inputs and range bounds are evaluated once, in source order. Conditions run
 from left to right and can refer to earlier bindings. An `or` group accepts
 iterator bindings; ordinary boolean `or` still works in a condition.
 
+Place `$name` before a loop to target it from nested loops:
+
+```dewy
+$rows
+loop row in [0..height) {
+    loop column in [0..width) {
+        if skip_row(row) {continue $rows}
+        if finished(row, column) {break $rows}
+    }
+}
+```
+
+`continue $rows` advances that loop; `break $rows` exits it. Both release values
+from the scopes they leave. Labels work with ordinary and combined headers,
+stored ranges and strings. Active labels must be unique within a function;
+a label can be reused after its loop ends. A closure cannot exit its caller's
+loop. Unlabeled exits still target the nearest loop.
+
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. String loops stream from an independent input snapshot;
 changing the source variable does not change the remaining input. They create

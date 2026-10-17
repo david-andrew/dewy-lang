@@ -722,3 +722,23 @@ bootstrap and full gate passed **2,121 checks in 110.59 s**.
 [extended oracle](source-core/range-bound-oracle.log),
 [full gate](source-core/range-bound-full.log),
 [build manifest](source-core/range-bound-build.json).
+
+## Labeled loop exits
+
+`$name` before a loop now supports `break $name` and `continue $name` from
+nested loops. The checker resolves each exit to a loop in its own function;
+lowering uses the existing branch and scope cleanup machinery. Labels survive
+combined-header and stored-range/string iterator lowering. Infinite-loop
+reachability recognizes an exit to an enclosing labeled loop. Duplicate active
+labels, unknown labels and attempts to exit a caller's loop are diagnosed.
+
+The existing `iterator_labeled_exits.dewy` and
+`range_stepped_labeled_exits.dewy` execute unchanged. Additional cases cover
+combined headers, stored ranges, graphemes, generic instantiation, label reuse,
+and allocation cleanup across outer exits, in native/web debug/release builds.
+Formatter execution and unsaved editor error recovery also cover labels.
+The focused selection passed **141 checks in 4.58 s**; the independent C
+bootstrap and expanded full gate passed **2,161 checks in 111.31 s**.
+[Focused gate](source-core/loop-label-focused.log),
+[full gate](source-core/loop-label-full.log),
+[build manifest](source-core/loop-label-build.json).

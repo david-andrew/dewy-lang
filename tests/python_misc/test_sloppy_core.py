@@ -20,6 +20,92 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    **{f'loop-label-original-{name}': (Path(__file__).resolve().parents[2] / 'dewy/tests' / f'{name}.dewy').read_text()
+       for name in ['iterator_labeled_exits', 'range_stepped_labeled_exits']},
+    'loop-label-while': '''main=()=>{
+let count:int64=0 let result:int64=0
+$outer
+loop true {
+    count+=1
+    loop true {
+        if count <? 3 {continue $outer}
+        result=42
+        break $outer
+    }
+}
+return result
+}''',
+    'loop-label-cursors': '''main=()=>{
+let r=(0,2..8] let total:int64=0
+$outer
+loop x in r {
+    loop c in "a🙂" {
+        if x =? 2 {total+=2 continue $outer}
+        if x =? 4 {total+=10 break}
+        total+=30 break $outer
+    }
+}
+return total
+}''',
+    'loop-label-string-outer': '''main=()=>{
+let total:int64=0
+$letters
+loop c in "ab🙂" {
+    loop i in [0..2] {
+        if c =? "a" {total+=2 continue $letters}
+        if c =? "b" {total+=10 break}
+        total+=30 break $letters
+    }
+}
+return total
+}''',
+    'loop-label-reuse': '''run=<T>(value:T):>int64=>{
+$again
+loop x in [1] {loop y in [1] {break $again}}
+$again
+loop true {break $again}
+return 21
+}
+main=()=>run(1)+run("hello")''',
+    'loop-label-combined': '''main=()=>{
+let total=0
+$range
+loop x in [0..4) and x <? 3 {
+    loop y in [0..2) {total+=1 continue $range}
+}
+$array
+loop x in [1 2 3] and x <? 3 {
+    loop y in [0..2) {total+=2 continue $array}
+}
+$zip
+loop x in [1 2 3] and y in [4 5 6] {
+    loop z in [0..2) {total+=3 continue $zip}
+}
+$longest
+loop x in [1] or y in [2 3 4] {
+    loop z in [0..2) {total+=4 continue $longest}
+}
+return if total =? 28 42 else 1
+}''',
+    'loop-label-cleanup': '''work=()=>{
+let result:int64=0
+$outer
+loop i in [0..3) {
+    let text="iteration {i}" let values=[text] values.push(text)
+    loop j in [0..3) {
+        let more=[values] more.push(values)
+        result+=values.length+more.length
+        if i =? 0 {continue $outer}
+        break $outer
+    }
+}
+return result
+}
+main=()=>{
+work() let before=alloc_count()
+loop i in [0..20) {if work() not=? 8 return 1}
+return if alloc_count() =? before 42 else 2
+}''',
     **{f'stored-range-original-{name}': (Path(__file__).resolve().parents[2] / 'dewy/tests' / f'{name}.dewy').read_text()
        for name in ['range_values', 'range_bound_forms', 'range_stepped']},
     'stored-range-exclusive-first': '''main=()=>{
@@ -1578,6 +1664,12 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'loop-label-missing': ('main=()=>{loop true {break $missing}}', 'unknown loop label'),
+    'loop-label-duplicate': ('main=()=>{$again loop true {$again loop true {break $again}}}', 'duplicate active loop label'),
+    'loop-label-dangling': ('main=()=>{$again}', 'label must be followed by a loop'),
+    'loop-label-non-loop': ('main=()=>{$again let x=42 return x}', 'label must be followed by a loop'),
+    'loop-label-out-of-scope': ('main=()=>{$again loop false {} loop true {break $again}}', 'unknown loop label'),
+    'loop-label-closure': ('main=()=>{$again loop true {let f=()=>{loop true {break $again}} f() break}}', 'unknown loop label'),
     'array-comparison-negative': ('main=()=>{let values:array<uint8>=[1] return values =? [-1]}', 'does not fit in u8'),
     'array-comparison-overflow': ('main=()=>{let values:array<uint8>=[1] return [256] =? values}', 'does not fit in u8'),
     'array-comparison-narrow-variable': ('main=()=>{let values:array<uint8>=[1] let other:int64=1 return values =? [other]}', 'cannot implicitly convert'),
@@ -3655,7 +3747,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
