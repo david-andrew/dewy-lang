@@ -98,6 +98,11 @@ literal indexing such as `world.ends(joint)[0]`.
 
 Record construction and collection `.length` are resolved from types, including
 imported/qualified record constructors and records with their own `length` field.
+
+Array spreading uses postfix `...` inside literals, as in `[head... item tail...]`.
+It reuses the core's append/extend lowering, evaluating operands once in source
+order and retaining independent nested values. Typed empty arrays and generic
+helpers work; record/set spreading and spread call arguments remain unsupported.
 Record literals such as `[x=20 y=22]` use the expected record type in variables,
 returns, arguments and nested fields, including defaults and optional payloads.
 Without an expected type, their field names and inferred types determine an

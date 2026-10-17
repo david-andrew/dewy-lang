@@ -405,6 +405,10 @@ dn_expr = (minimum: int) -> int:
         if token.kind == "eof": break
         if token.newline and dn_power(op) == 0 and op != "not": break
         if dn_angles > 0 and (op in [">>", ">>=", ">="] or (op == ">?" and not token.space)): break
+        if op == "..." and minimum <= 170:
+            dn_at += 1
+            left = dn_node("Postfix", "", pos_off(dewy_syntax[left].pos), [dn_node("Operator", "...", token.start), left])
+            continue
         # Literal coefficients are unambiguous: 2x and 2(x + 1). General
         # adjacent names remain separate arguments or block elements.
         if not token.space and minimum <= 135 and dewy_syntax[left].kind in ["Integer", "Real"] and (token.kind == "Identifier" or op == "("):

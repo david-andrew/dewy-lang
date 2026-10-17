@@ -5232,7 +5232,8 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .array and nodes[n].b == 0 and array_has_spread(n):
         # [a... b c...] builds the array: t = []; t.extend(a); t.push(b); t.extend(c); t
         spread_count += 1
-        acc = intern("__spread{spread_count}")
+        # Internal bindings must not shadow an operand's user-written name.
+        acc = intern("$spread{spread_count}")
         pos = nodes[n].pos
         stmts: int[]
         d = mk(.vardecl, pos)

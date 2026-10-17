@@ -21,6 +21,33 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'spread-arrays': '''main=()=>{let head=[1 2] let tail=[20 22]
+let all=[0 head... 3 tail...]
+return if all =? [0 1 2 3 20 22] all[end]+all[end-1] else 1}''',
+    'spread-empty-context': '''main=()=>{let empty:array<uint16>=[]
+let values:array<uint16>=[empty... []... 42]
+let strings:array<string>=[[]... []...]
+return if values.length =? 1 and strings.length =? 0 values[0] as int64 else 1}''',
+    'spread-call-context': '''total=(xs:array<uint64>)=>xs[0]+xs[1]
+main=()=>{let xs:array<uint64>=[20]
+return total([xs... 22]) as int64}''',
+    'spread-generic': '''append=<T>(xs:array<T> value:T):>array<T>=>[xs... value]
+main=()=>{let a=append([20] 22) let b=append(["a"] "b")
+return if b =? ["a" "b"] a[0]+a[1] else 1}''',
+    'spread-order-snapshot': '''let values=[20 21] let calls=0
+source=()=>{calls=calls*10+1 return values}
+change=()=>{calls=calls*10+2 values[0]=99 return 22}
+main=()=>{values.push(0) let result=[source()... change() values...]
+return if calls =? 12 and result =? [20 21 0 22 99 21 0] 42 else 1}''',
+    'spread-managed-values': '''Item:type=[words:array<string>]
+main=()=>{let xs=[Item[["a"]]] xs.push(Item[["b"]])
+let ys=[xs... Item[["c"]]] ys[0].words.push("changed")
+xs[1].words[0]="new"
+return if xs[0].words =? ["a"] and ys[1].words =? ["b"]
+and ys[2].words =? ["c"] 42 else 1}''',
+    'spread-grouping': '''main=()=>{let xs=[20 22] let ys=[(xs)...]
+let nested=[[xs...] [ys...]]
+return nested[0][0]+nested[1][1]}''',
     'end-index-local-offset': '''tail=(xs:array<int64> offset:int64)=>xs[end-offset]
 main=()=>{let xs=[1 20 22] let offset=1
 let a=tail(xs offset) offset=0
@@ -2183,6 +2210,8 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'spread-outside-literal': ('main=()=>{let xs=[42] return xs...}', 'spread is supported inside array literals'),
+    'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array literals'),
     'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
     'end-index-outside': ('main=()=>end', "unknown name 'end'"),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
@@ -4356,7 +4385,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

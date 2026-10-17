@@ -1158,3 +1158,23 @@ gain and was reverted. It is not part of this change.
 The final independent C-bootstrap gate: **2652 passed in 95.87s (0:01:35)**. Ruff and diff checks passed.
 [Full gate](source-core/default-opt-full.log),
 [toolchain and validation metadata](source-core/default-opt-validation.json).
+
+## Array spread syntax
+
+Dewy now accepts `[head... item tail...]`, connected directly to the inherited
+core's append/extend lowering. Operands evaluate once in source order; each
+spread copies its current elements into the new array before the next operand
+runs. Nested managed values remain independent. Contextual element types,
+typed empty arrays, generic helpers and formatter round trips are covered on
+native and web, with default and release compilation.
+
+The generated accumulator uses an identifier outside the user namespace, so
+it cannot shadow a name read by an operand. Spread outside an array literal
+gets an explicit diagnostic. Record/set and call-argument spreading remain
+unsupported in this slice.
+
+**450 focused checks passed in 11.76 s**; Ruff and diff checks passed. The
+preceding default-build change passed its complete independent C-bootstrap gate
+and CI; this frontend slice uses focused local validation and full CI on push.
+[Focused gate](source-core/array-spread-focused.log),
+[toolchain metadata](source-core/array-spread-validation.json).

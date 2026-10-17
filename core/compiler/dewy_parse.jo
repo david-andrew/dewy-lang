@@ -510,11 +510,19 @@ dw_expr = (id: int) -> int:
                     nodes[field].name = i32(intern(name))
                     nodes[field].a = i32(dw_expr(dw_child(child, 2)))
                     xs.push(field)
-                else: xs.push(dw_expr(child))
+                else:
+                    item = dw_unwrap(child)
+                    if dewy_syntax[item].kind == "Postfix" and dw_op(item) == "...":
+                        value = dw_expr(dw_child(item, 1))
+                        add_flag(value, NF_SPREAD)
+                        xs.push(value)
+                    else: xs.push(dw_expr(child))
             set_list(n, xs)
             return n
         if text == "{{}}:": return dw_block(id)
         return dw_fail(id, "this expression block")
+    if k == "Postfix" and op == "...":
+        fatal(pos, "spread is supported inside array literals: `[values... item]`")
     if k == "Prefix":
         e = dw_expr(dw_child(id, 1))
         if op == "@":
