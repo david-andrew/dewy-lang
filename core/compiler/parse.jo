@@ -2040,11 +2040,14 @@ lx_not = (c: int, pos: int) -> int:
     nodes[n].a = i32(c)
     n
 
-lx_len = (seq: int, pos: int) -> int:
+lx_call = (name: str, args: int[], pos: int) -> int:
     c = mk(.call, pos)
-    nodes[c].a = i32(lx_ident("len", pos))
-    set_list(c, [seq])
+    nodes[c].a = i32(lx_ident(name, pos))
+    set_list(c, args)
     c
+
+lx_len = (seq: int, pos: int) -> int:
+    lx_call("len", [seq], pos)
 
 lx_index = (seq: int, k: int, pos: int) -> int:
     ix = mk(.index, pos)
@@ -2210,9 +2213,14 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
     setup.push(lx_let(intern(k), lx_int(-1, pos), pos))
     head.push(lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos))
     done = lx_bin(.ge, lx_ident(k, pos), lx_len(lx_ident(seq, pos), pos), pos)
+    value = lx_index(lx_ident(seq, pos), lx_ident(k, pos), pos)
+    if ends_with(files[pos_file(pos)].path, ".dewy"):
+        # Arrays keep indexed lowering; text advances a streaming grapheme cursor.
+        done = lx_call("__dewy_iter_done", [lx_ident(seq, pos), lx_ident(k, pos)], pos)
+        value = lx_call("__dewy_iter_value", [lx_ident(seq, pos), lx_ident(k, pos)], pos)
     if not optional:
         head.push(lx_if(done, mk(.break_, pos), pos))
-        head.push(lx_let(v, lx_index(lx_ident(seq, pos), lx_ident(k, pos), pos), pos))
+        head.push(lx_let(v, value, pos))
         if many:
             tp = mk(.tuple, pos)
             set_list(tp, kids(t))
@@ -2223,7 +2231,7 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
             head.push(a)
         return 0
     head.push(lx_let(has, lx_not(done, pos), pos))
-    head.push(lx_let(v, lx_opt_value(has, lx_index(lx_ident(seq, pos), lx_ident(k, pos), pos), pos), pos))
+    head.push(lx_let(v, lx_opt_value(has, value, pos), pos))
     has
 
 # if has: value else: none

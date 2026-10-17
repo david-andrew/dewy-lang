@@ -1738,9 +1738,40 @@ map_tidy_first = (s: int) -> bool:
 # (loops made by map_tidy_first: the map is tidied already)
 map_tidied: {int: bool} = {}
 
+# A string loop is ordinary scoped control flow over a retained input and a
+# mutable boundary cursor. Advance before the body so continue needs no fixup.
+dewy_grapheme_loop = (s: int) -> bool:
+    it = int(nodes[s].a)
+    if not is_dewy_grapheme_iter(ntype(it)): return false
+    pos = nodes[s].pos
+    nv = nkids(s)
+    if has_flag(s, NF_MUT) or nv > 1 and nodes[s].ival != 1: fatal(pos, "a string loop binds one grapheme; use `i in 0.. and c in text` to count")
+    tag = "__grapheme{bc_count}"
+    bc_count += 1
+    seq = tag + "s"
+    index = tag + "i"
+    if nv == 2: index = name_of(int(nodes[kid(s, 0)].name))
+    name = int(nodes[kid(s, nv - 1)].name)
+    add_flag(it, NF_CHECKED)
+    setup = [bc_let(seq, it, pos), bc_let(index, bc_int(-1, pos), pos)]
+    done = bc_call("__dewy_iter_done", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
+    value = bc_call("__dewy_iter_value", [bc_ident(seq, pos), bc_ident(index, pos)], pos)
+    head = [lx_assign(bc_ident(index, pos), .pluseq, bc_int(1, pos), pos), lx_if(done, mk(.break_, pos), pos), lx_let(name, value, pos)]
+    loop item in kids(int(nodes[s].b)): head.push(item)
+    w = mk(.while_, pos)
+    tr = mk(.bool_lit, pos)
+    nodes[tr].ival = 1
+    nodes[w].a = i32(tr)
+    nodes[w].b = i32(lx_block(head, pos))
+    setup.push(w)
+    nodes[s] = nodes[lx_block(setup, pos)]
+    check_stmt(s)
+    true
+
 check_for = (s: int):
     soa_loop(s)
     unpack_loop(s)
+    if dewy_grapheme_loop(s): return
     if map_tidy_first(s): return
     mark = scope_mark()
     enter_loop()

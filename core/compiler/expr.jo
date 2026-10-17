@@ -13,7 +13,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter
+    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
@@ -25,6 +25,8 @@ struct Intrinsic:
 
 intrinsics = [
     Intrinsic("__dewy_iter", .dewy_iter, false),
+    Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
+    Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -2986,6 +2988,10 @@ fmt_part = (part: int, pos: int):
         nodes[part].sym = i32(resolve_by_types(intern("__fmt_spec"), [bt, t, T_STR], pos, true))
     else: nodes[part].sym = i32(resolve_by_types(intern("__fmt"), [bt, t], pos, true))
 
+is_dewy_grapheme_iter = (t: int) -> bool:
+    p = prune(t)
+    types[p].kind == .struct_ and structs[int(types[p].st)].name == "__DewyGraphemeIter"
+
 check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].kind = .intrinsic
     nodes[n].aux = i32(int(id))
@@ -2998,8 +3004,27 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         t = arg_type(args, 0, 0)
         add_flag(args[0], NF_CHECKED)
         if tkind(t) == .str_:
-            nodes[n] = nodes[bc_call("graphemes", args, nodes[n].pos)]
+            nodes[n] = nodes[bc_call("__dewy_grapheme_iter", args, nodes[n].pos)]
         else: nodes[n] = nodes[args[0]]
+        return check_expr(n, expected)
+    else if id == .dewy_iter_done or id == .dewy_iter_value:
+        nargs_check(n, nargs, 2, 2, "Dewy loop iterator")
+        t = arg_type(args, 0, 0)
+        add_flag(args[0], NF_CHECKED)
+        pos = nodes[n].pos
+        if is_dewy_grapheme_iter(t):
+            name = "__dewy_grapheme_done"
+            if id == .dewy_iter_value:
+                name = "__dewy_grapheme_value"
+                add_flag(args[0], NF_MUT)
+            nodes[n] = nodes[bc_call(name, [args[0]], pos)]
+        else if id == .dewy_iter_done:
+            nodes[n] = nodes[bc_bin(.ge, args[1], bc_call("len", [args[0]], pos), pos)]
+        else:
+            ix = mk(.index, pos)
+            nodes[ix].a = i32(args[0])
+            nodes[ix].b = i32(args[1])
+            nodes[n] = nodes[ix]
         return check_expr(n, expected)
     else if id == .len or id == .arrcap:
         nargs_check(n, nargs, 1, 1, "len")

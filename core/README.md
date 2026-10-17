@@ -96,7 +96,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 1,011-check gate normally takes about a minute locally. It tests expected Dewy
+the earlier compiler suite. The 1,015-check gate normally takes about a minute locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -155,6 +155,18 @@ generation; whole-process timing includes it. The C graph uses flat edges and a
 handwritten hash table, while Dewy uses per-node arrays and an insertion-ordered
 dictionary, so that comparison includes representation and library costs.
 The correctness gate also runs all five workloads on native and web targets.
+
+String iteration has a separate full-scan/early-exit measurement:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_graphemes "$(python3 -m tools.core path)" \
+  --baseline /tmp/old/bin/dewy-core --output /tmp/grapheme-times.json
+```
+
+It records alternating kernel/wall samples and live allocations at the first
+loop body. A 100,000-grapheme input now needs one live cluster allocation there,
+instead of an up-front array and 100,000 cluster strings. Input construction is
+outside the kernel measurement; total allocations and RSS are not measured.
 
 ## Editor
 

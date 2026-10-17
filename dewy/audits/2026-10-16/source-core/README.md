@@ -707,3 +707,37 @@ module check alone does not certify WebGL execution; the manual check above does
 `forest-compile.json` records seven warmed sequential builds per target, one
 emission worker: medians 323.08 ms native release and 160.24 ms web release. No
 compiler changes or additional bootstrap were needed for this example.
+
+## Streaming grapheme loops
+
+`stream-build.json` and `stream-full-tests.log` record a fresh independent C
+bootstrap and all 1,015 checks passing in 88.75 seconds. Ordinary string loops,
+combined headers and comprehensions retain an input snapshot and stream its
+graphemes. Each yielded string remains an independent value; `graphemes(s)`
+still explicitly collects an array. Early exit no longer scans the remaining
+input. Malformed foreign UTF-8 panics when examined (including boundary
+lookahead), so an untouched invalid tail no longer prevents an early return.
+
+The Unicode conformance gate now also calls a Dewy comprehension for every valid
+input. Focused native/web debug/release checks cover one evaluation of inputs,
+source replacement, sequential snapshots in combined headers, unequal/empty
+inputs, nested loops, continue/break/return, retained element copies and allocation
+cleanup. A long-input first-iteration check bounds live allocations independently
+of input length; this does not assert a particular allocator's exact count.
+
+`stream-performance.json`, reproducible with `benchmark_graphemes.py`, compares
+five alternating warmed native release samples against the membership compiler.
+At the first loop body, 100,000 ASCII graphemes dropped from 100,001 live loop
+allocations to one; 30,000 mixed Unicode graphemes dropped from 30,001 to one.
+Ten complete scans measured 94.49/88.49 ms ASCII and 289.38/257.13 ms Unicode
+(before/after). Twenty first-character lookups on the 100,000-character input
+measured 165.84 ms before and under 0.01 ms after. The small absolute streaming
+prefix times are too short for a meaningful precise speedup factor. Input
+construction is excluded from kernel timing; whole-process samples, source and
+compiler identities are retained. RSS and total allocation counts were not measured.
+
+`stream-compile.json` records seven alternating builds: tour 58.66/60.36 ms,
+physics 365.87/368.81 ms and compiler self-build 1406.52/1394.69 ms. These small
+mixed differences are not a compiler-speed claim. The runtime measurements used
+the seeded compiler; the compile comparison used the independently bootstrapped
+compiler after the complete gate passed.

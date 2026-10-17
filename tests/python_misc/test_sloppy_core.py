@@ -1172,8 +1172,11 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
                  b'\xf5\x80\x80\x80', b'\xe2\x82', b'\xc2A', b'\xff'])
     (tmp_path / 'cases.bin').write_bytes(b''.join(struct.pack('<I', len(data)) + data for data, _ in cases))
     expected = ['invalid' if boundaries is None else ','.join(map(str, boundaries)) for _, boundaries in cases]
+    (tmp_path / 'iteration.dewy').write_text('''stream_clusters=(text:string):>array<string>=>[loop c in text c]
+''')
     source = tmp_path / 'conformance.jo'
-    source.write_text('''main = ():
+    source.write_text('''use 'iteration.dewy'
+main = ():
     data_ = embed("cases.bin")
     offset = 0
     loop offset < data_.len():
@@ -1188,6 +1191,7 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
             clusters = graphemes(text)
             assert(clusters.len() == bounds.len() - 1)
             assert(join(clusters, "") == text)
+            assert(stream_clusters(text) == clusters)
             loop i in [0..clusters.len()):
                 assert(__dewy_string_index(text, i) == clusters[i])
                 assert(__dewy_string_slice(text, i, i + 1, false, true) == clusters[i])
@@ -1219,6 +1223,77 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
     assert ran.returncode == 0, ran.stdout[-2000:] + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_streaming_graphemes(compiler, tmp_path, target, release):
+    source = tmp_path / 'stream.dewy'
+    source.write_text('''let calls:int64=0
+let shared="abc"
+input=()=>{calls+=1 return shared}
+replace=()=>{shared="changed" return "12"}
+first=(text:string):>string=>{loop c in text return c return ""}
+main=()=>{
+    let before=alloc_count()
+    {
+        let large=repeat("a" 20000)
+        let ready=alloc_count()
+        loop c in large {
+            # A loop keeps one cluster, not an array of 20,000 cluster strings.
+            if alloc_count()-ready >? 12 return 1
+            if c not=? "a" return 2
+            break
+        }
+        let sum:int64=0
+        loop i in 0.. and c in large {if i =? 3 break if i =? 1 continue sum+=i+bytes(c).length}
+        if sum not=? 4 return 3
+        let saved:array<string>=[]
+        loop c in "é👩‍👩‍👧‍👦🇺🇸" {saved.push(c) c="changed"}
+        if saved not=? ["é" "👩‍👩‍👧‍👦" "🇺🇸"] return 4
+        let seen=""
+        loop c in input() {shared="replacement" seen+=c}
+        if calls not=? 1 or seen not=? "abc" return 5
+        shared="abc"
+        seen=""
+        loop a in input() and b in replace() {seen+=a+b}
+        if calls not=? 2 or seen not=? "a1b2" return 6
+        let zipped=[loop a in "abc" and b in [1 2] a]
+        if zipped not=? ["a" "b"] return 7
+        let count:int64=0
+        loop a in "" and b in "abc" {count+=1}
+        loop a in "ab" and b in "cd" {loop c in "12" {if c =? "1" continue count+=1}}
+        if count not=? 2 return 8
+        if first("") not=? "" or first("🙂x") not=? "🙂" return 9
+        # Foreign bytes are checked as visited; an untouched tail is not scanned.
+        let bad_tail=str_from_bytes([97 98 99 255] as array<uint8>)
+        if first(bad_tail) not=? "a" return 10
+        loop i in [0..100) {if first(large) not=? "a" return 11}
+        if alloc_count()-ready >? 25 return 12
+    }
+    if alloc_count() not=? before return 13
+    return 42
+}
+''')
+    binary = tmp_path / 'stream'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web streaming checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'stream.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
 @pytest.mark.parametrize('expression', ['s[2]', 's[-1]', 's[0..2]', 's[2..1)', 's[0..9223372036854775807]'])

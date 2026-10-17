@@ -89,7 +89,7 @@ grapheme_boundaries = (s: str) -> int[]?:
         out.push(next_byte)
     out
 
-# An explicit collection of grapheme strings, also used by Dewy loop snapshots.
+# An explicit, eagerly collected array of grapheme strings.
 graphemes = (s: str) -> str[]:
     c = __GraphemeCursor()
     out: str[]
@@ -147,3 +147,21 @@ __dewy_string_slice = (s: str, lo: int, hi: int, inclusive: bool, has_stop: bool
         at += 1
     if has_stop or start_byte < 0: panic("string slice out of bounds")
     s[start_byte..]
+
+# Dewy loops retain only the input snapshot and a boundary cursor. The current
+# cluster is an independent string value; breaking does not scan the tail.
+struct __DewyGraphemeIter:
+    text: str
+    cursor: __GraphemeCursor
+
+__dewy_grapheme_iter = (text: str) -> __DewyGraphemeIter:
+    __DewyGraphemeIter(text, __GraphemeCursor())
+
+__dewy_grapheme_done = (it: __DewyGraphemeIter) -> bool:
+    it.cursor.offset >= len(it.text)
+
+__dewy_grapheme_value = (it: mut __DewyGraphemeIter) -> str:
+    start = it.cursor.offset
+    next_byte = __grapheme_next(it.text, it.cursor)
+    if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+    it.text[start..next_byte)

@@ -133,7 +133,7 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,011 checks and takes
+The combined Dewy/editor/shared-core gate now contains 1,015 checks and takes
 about a minute on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
@@ -236,10 +236,12 @@ Dewy string `.length`, `len(s)`, indexing, slicing and loop iteration now use
 Unicode 16 extended grapheme clusters. Combining marks, emoji ZWJ sequences,
 regional indicators, Indic conjuncts and CR/LF follow the existing Unicode
 conformance corpus. The compact byte representation remains: length scans,
-index/slice scan up to the requested boundary, and string loops currently
-materialize one grapheme array per iterable. Explicit `bytes(s)` exposes bytes;
+index/slice scan up to the requested boundary, and string loops stream from a
+retained input snapshot. Each yielded grapheme is an independent string; early
+exit leaves the remaining text unscanned. `graphemes(s)` explicitly collects an
+array when one is wanted. Explicit `bytes(s)` exposes bytes;
 implementation `.jo` libraries retain byte-oriented operations. Text supplied by
-those libraries is validated as it is scanned; malformed UTF-8 panics in Dewy
+those libraries is validated as it is scanned, including boundary lookahead; malformed UTF-8 panics in Dewy
 operations, while `grapheme_boundaries(s)` returns `none`. No global boundary cache
 or old string descriptor is required.
 

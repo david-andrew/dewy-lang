@@ -151,7 +151,13 @@ loop i in 0.. and character in "café 🙂" {
 ```
 
 String length, indexing, slicing and iteration use extended grapheme clusters.
-`"é🙂".length` is 2. Interpolation uses `{expression}` inside a string.
+`"é🙂".length` is 2. String loops stream from an independent input snapshot;
+changing the source variable does not change the remaining input. They create
+one independent string per visited grapheme, so `break` and `return` avoid
+collecting or scanning the remaining text. `graphemes(text)` explicitly collects
+all graphemes into an array. Foreign malformed UTF-8 panics when examined,
+including the lookahead needed to find a boundary; an unvisited tail is not
+validated. Interpolation uses `{expression}` inside a string.
 Single or double quotes support escapes and interpolation. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces
 (`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
