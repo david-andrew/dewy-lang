@@ -6,6 +6,8 @@ bounded experiment using Sloppy's implementation core. It preserves the
 semantic requirements below while proposing a shorter route to a usable
 compiler and games/numerics applications. Experimental performance targets
 and historical certification evidence remain distinct.
+[Language goals](GOALS.md) record what Dewy should be able to do, including
+the ordinary path used by games and the stricter lane for systems work.
 
 This is the high-level roadmap for taking the language from "a native
 compiler pair exists" to a practical compiler and the language as it was
