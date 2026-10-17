@@ -5008,8 +5008,8 @@ helper_arruniq = (t: int):
 
 # Set member equality/hash can call user-defined key operations. Keep the
 # enclosing value alive and independent throughout those calls, including a
-# surrounding array whose owner a callback could replace. Ordinary helpers
-# with no sets keep their existing pure read path.
+# surrounding array whose owner a callback could replace. When all reachable
+# member operations leave global state alone, helpers keep the pure read path.
 set_member_cache: {int: int[]} = {}
 
 helper_set_members = (t: int) -> int[]:
@@ -5039,7 +5039,13 @@ helper_set_members = (t: int) -> int[]:
     set_member_cache[t] = result
     result
 
-helper_set_snapshot = (t: int) -> bool: helper_set_members(t).len() > 0
+helper_set_snapshot = (t: int, hashing: bool = false) -> bool:
+    loop member in helper_set_members(t):
+        f = dewy_set_equal_fns[member]
+        if hashing: f = dewy_set_hash_fns[member]
+        writes = fn_writes(f)
+        if writes.all or writes.globals.len() > 0: return true
+    false
 
 # Calls made by generated aggregate helpers still participate in ordinary
 # alias/effect analysis, just like calls written explicitly in the source.
@@ -5079,8 +5085,9 @@ helper_eq = (t: int):
         f = dewy_set_equal_fns.get(t) ?? 0
         if f == 0: ice("set equality was not checked")
         result = e_call(lf_of_inst(f), [a, b], VI)
-        drop_at(a, t)
-        drop_at(b, t)
+        if snapshot:
+            drop_at(a, t)
+            drop_at(b, t)
         e_ret(result)
         return
     r = vreg(VI)
@@ -5172,13 +5179,13 @@ helper_hash = (t: int):
     ps = helper_params(1)
     ir.ret = VI
     a = ps[0]
-    snapshot = helper_set_snapshot(t)
+    snapshot = helper_set_snapshot(t, true)
     if snapshot: a = helper_value_snapshot(t, a)
     if is_dewy_set_type(t):
         f = dewy_set_hash_fns.get(t) ?? 0
         if f == 0: ice("set hashing was not checked")
         result = e_call(lf_of_inst(f), [a], VI)
-        drop_at(a, t)
+        if snapshot: drop_at(a, t)
         e_ret(result)
         return
     h = vreg(VI)

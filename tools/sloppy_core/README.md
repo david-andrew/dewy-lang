@@ -302,6 +302,18 @@ application build speedup; the reproducible generator is
 `python3 -m tools.sloppy_core.benchmark_types`. See `struct-index-*` in the same
 audit directory.
 
+Aggregate helpers now consult the existing transitive effect analysis before
+retaining set-containing values. Integer-set equality/hashing use the pure read
+path; unknown calls and global-writing callbacks keep their snapshots. The
+independent C gate passes 3,226 checks in 44.48 seconds, including the callback
+and borrowed-argument regressions. In a focused native release benchmark of
+1.28 million dictionary lookups, records containing integer sets take 0.412
+times the baseline kernel CPU time across seven alternating pairs. Direct set
+keys are neutral at 1.007. Inputs use reversed insertion order and every run
+checks an independent expected sum. This is an isolated nested-key improvement,
+not a general application claim. Five fresh-build pairs remain neutral (tour
+1.008, Dunes 0.999, compiler 0.992). See `set-effects-*` for sources and samples.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
