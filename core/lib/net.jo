@@ -620,6 +620,10 @@ __net_parse = (i: int):
         __net_peers[i].inbuf = b[at + n..)
         fin = int(b[0]) & 128 != 0
         if op == 8:
+            # A browser waits for the close reply before ending its connection.
+            __ws_frame(__net_peers[i].outbuf, 8, payload, __net_peers[i].client)
+            __net_flush(i)
+            if __net_peers[i].state == 3: return
             __n_close(__net_peers[i].fd)
             __net_gone(i)
             return

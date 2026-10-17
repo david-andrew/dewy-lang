@@ -1,0 +1,347 @@
+# Adapted from Sloppy’s MIT-licensed examples/netpong/netpong.jo at the revision
+# in core/UPSTREAM.json. See core/LICENSE. Native and web share the game source.
+# Host a native build with HOST=1; join it with JOIN=localhost.
+# DEWY_NETPONG_PORT overrides the default 47200 for local sessions.
+
+or_default = <T>(value: T? fallback: T) :> T => match value { present: T => present <none> => fallback }
+
+import net
+import invite
+
+window("Dewy / Netpong" 1280 720)
+
+let PORT = or_default(to_int(or_default(env("DEWY_NETPONG_PORT") "47200")) 47200)
+const PADDLE_H = 120.0
+const PADDLE_SPEED = 620.0
+const BALL_SPEED = 520.0
+const WIN = 7
+# Set this to a hosted build's URL to share links from native games. With no URL,
+# native games share invite codes; browser games use their own page address.
+const WEB_PAGE = ""
+
+let Screen = [title = 0 help = 1 friend = 2 by_address = 3 joining = 4 waiting = 5 playing = 6 over = 7]
+
+let screen = Screen.title
+let hosting = false
+let other = -1 # the other player (a peer)
+let address = or_default(env("JOIN") "localhost") # (a web page: ?join=address)
+let left_y = 360.0 # the host's paddle (left), the other's (right)
+let right_y = 360.0
+let right_move = 0.0 # (the host: what the other player last asked for)
+let ball = vec2(640 360)
+let vel = vec2(0 0)
+let score_l = 0
+let score_r = 0
+let send_wait = 0.0
+let status = ""
+let why = "" # (why the other player could not be reached)
+let via_relay = false # relay-compatible host/guest messages
+let my_address = "" # (the host: this machine's address on its network)
+let invited = false # (connected by invite codes, not by address)
+
+serve = (dir: float64) => {
+    ball = vec2(640 360)
+    let a = random(-0.5 0.5)
+    vel = vec2(f32(cos(a) * dir) f32(sin(a))) * f32(BALL_SPEED)
+}
+
+host = () => {
+    # (a web page cannot listen: only the game built for a computer hosts by address)
+    if TARGET not=? "wasm" {
+        if not net.listen(PORT) {
+            status = "port {PORT} is taken (another game hosting here?)"
+            return
+        }
+        hosting = true
+        via_relay = false
+        screen = Screen.waiting
+        my_address = net.local_address()
+        if my_address.length >? 0 { my_address = "ws://{my_address}:{PORT}" }
+    }
+}
+
+join = () => {
+    invited = false
+    other = net.connect(address PORT)
+    hosting = false
+    via_relay = false
+    screen = Screen.waiting
+    status = "connecting to {address}..."
+}
+
+# straight to the other player, by invite codes (the invite screens): who invited hosts the game
+friend_screens = () => {
+    via_relay = false
+    invited = true
+    status = ""
+    why = ""
+    screen = Screen.friend
+}
+
+# connected by invite: the inviter starts the game, the other waits for it
+friend_joined = (c: invite.Invited) => {
+    other = c.peer
+    hosting = c.inviter
+    if hosting { start() }
+    else {
+        status = "connected: waiting for the host"
+        screen = Screen.waiting
+    }
+}
+
+start = () => {
+    score_l = 0
+    score_r = 0
+    left_y = 360.0
+    right_y = 360.0
+    right_move = 0.0
+    send_wait = 0.0
+    serve(1.0)
+    screen = Screen.playing
+}
+
+# the host's view of the game, as a message: "s ball.x ball.y left right score_l score_r screen"
+state = () :> string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score_r} {int(screen)}"
+
+read_state = (t: string) => {
+    let w = split(t " ")
+    if w.length <? 8 { return }
+    ball = vec2(f32(or_default(to_float(w[1]) 0.0)) f32(or_default(to_float(w[2]) 0.0)))
+    left_y = or_default(to_float(w[3]) left_y)
+    right_y = or_default(to_float(w[4]) right_y)
+    score_l = or_default(to_int(w[5]) score_l)
+    score_r = or_default(to_int(w[6]) score_r)
+    let k = or_default(to_int(w[7]) int(Screen.playing))
+    if k =? int(Screen.over) { screen = Screen.over }
+    else if k =? int(Screen.playing) { screen = Screen.playing }
+}
+
+network = () => {
+    loop e in net.receive() {
+        if e.kind =? net.NetKind.joined {
+            other = e.peer
+            if hosting { start() }
+            else { status = "connected: waiting for the host" }
+        }
+        else if e.kind =? net.NetKind.left {
+            if e.peer =? other {
+                let was = screen
+                status = "the other player left"
+                why = ""
+                if was =? Screen.waiting and not hosting and not invited {
+                    status = "could not reach {address}"
+                    if not starts_with(address "ws") { status = "could not reach {address}, port {PORT}" }
+                    why = net.why(e.peer)
+                }
+                screen = Screen.title
+                other = -1
+                # (the relay: who hosts, and the other player coming and going)
+            }
+        }
+        else if e.text =? "host" {
+            hosting = true
+            via_relay = true
+            status = "waiting for the other player: on their computer or phone, they open the same address"
+        }
+        else if e.text =? "guest" {
+            via_relay = true
+            status = "connected: waiting for the host"
+        }
+        else if e.text =? "j" and hosting { start() }
+        else if e.text =? "l" {
+            status = "the other player left"
+            screen = Screen.title
+            if other >=? 0 { net.close(other) }
+            other = -1
+        }
+        else if hosting {
+            if starts_with(e.text "m ") { right_move = or_default(to_float(e.text[2..]) 0.0) }
+        }
+        else if starts_with(e.text "s ") { read_state(e.text) }
+    }
+}
+
+# HOST/JOIN start a local connection; INVITE opens a received invite code.
+if env("HOST") not=? none { host() }
+else if env("JOIN") not=? none { join() }
+else if invite.from_link() { friend_screens() }
+
+# back to the title, leaving the other player (if any)
+go_title = () => {
+    if other >=? 0 { net.close(other) }
+    other = -1
+    if hosting and not via_relay { net.stop_listening() }
+    hosting = false
+    status = ""
+    screen = Screen.title
+}
+
+# a Back button at the top left: for a phone, with no Escape
+back_button = () :> bool => hud_button(Rect(30 24 120 44) "Back")
+
+update = (dt: float64) => {
+    network()
+    if key_pressed(Key.escape) and screen not=? Screen.title and screen not=? Screen.joining and screen not=? Screen.help and screen not=? Screen.friend {
+        go_title()
+        return
+    }
+    if screen =? Screen.help {
+        if key_pressed(Key.escape) or key_pressed(Key.enter) or mouse_pressed(Mouse.left) { screen = Screen.title }
+        return
+    }
+    if screen =? Screen.joining {
+        if key_pressed(Key.escape) { screen = Screen.by_address }
+        return
+    }
+    if screen not=? Screen.playing { return }
+    let move = f64(-input_axis().y)
+    # (a finger, or the mouse held down: the paddle goes to it)
+    if mouse_down(Mouse.left) {
+        let mine = if hosting left_y else right_y
+        move = clamp((mine - f64(mouse_pos().y)) / 30.0 -1.0 1.0)
+    }
+    if hosting {
+        left_y = clamp(left_y - move * PADDLE_SPEED * dt PADDLE_H / 2.0 720.0 - PADDLE_H / 2.0)
+        right_y = clamp(right_y - right_move * PADDLE_SPEED * dt PADDLE_H / 2.0 720.0 - PADDLE_H / 2.0)
+        ball += vel * f32(dt)
+        if ball.y <? 10 or ball.y >? 710 {
+            vel.y = -vel.y
+            ball.y = clamp(ball.y 10.0 710.0)
+        }
+        if ball.x <? 60 and ball.x >? 30 and abs(f64(ball.y) - left_y) <? PADDLE_H / 2.0 and vel.x <? 0 {
+            vel.x = -vel.x * 1.05
+            vel.y += f32((f64(ball.y) - left_y) * 4.0)
+        }
+        if ball.x >? 1220 and ball.x <? 1250 and abs(f64(ball.y) - right_y) <? PADDLE_H / 2.0 and vel.x >? 0 {
+            vel.x = -vel.x * 1.05
+            vel.y += f32((f64(ball.y) - right_y) * 4.0)
+        }
+        if ball.x <? -20 {
+            score_r += 1
+            serve(1.0)
+        }
+        if ball.x >? 1300 {
+            score_l += 1
+            serve(-1.0)
+        }
+        if score_l >=? WIN or score_r >=? WIN { screen = Screen.over }
+        send_wait -= dt
+        if (send_wait <=? 0.0 or screen =? Screen.over) and other >=? 0 {
+            net.send(other state())
+            send_wait = 1.0 / 30.0
+        }
+    }
+    else if other >=? 0 { net.send(other "m {move}") }
+}
+
+let GOLD = rgb(1.0 0.85 0.3)
+let DIM = rgba(1 1 1 0.55)
+let BLUE = rgb(0.4 0.8 1.0)
+
+draw = () => {
+    clear(rgb(0.05 0.06 0.09))
+    if screen =? Screen.playing or screen =? Screen.over {
+        loop y in [0..18) { rect(638 f64(y) * 40 + 10 4 20 rgba(1 1 1 0.15)) }
+        rect(36 left_y - PADDLE_H / 2.0 16 PADDLE_H BLUE)
+        rect(1228 right_y - PADDLE_H / 2.0 16 PADDLE_H rgb(1.0 0.6 0.3))
+        circle(ball 10 WHITE)
+        text_centered("{score_l}" vec2(560 60) 64)
+        text_centered("{score_r}" vec2(720 60) 64)
+        let you = "you are the right paddle"
+        if hosting { you = "you are the left paddle" }
+        text_centered(you vec2(640 690) 20 rgba(1 1 1 0.5))
+    }
+    if screen =? Screen.over {
+        let won = score_l >? score_r
+        if not hosting { won = not won }
+        text_centered(if won "you won" else "you lost" vec2(640 300) 72)
+        if hud_button(Rect(540 360 200 48) "Back to the title") { go_title() }
+    }
+    if screen =? Screen.title {
+        text_centered("NETPONG" vec2(640 170) 96 BLUE)
+        ui_begin("title" vec2(640 300))
+        if ui_button("Invite a friend") {
+            invite.start()
+            friend_screens()
+        }
+        if ui_button("Join a friend") {
+            invite.join()
+            friend_screens()
+        }
+        if ui_button("Same network, by address") { screen = Screen.by_address }
+        if ui_button("How to play together") { screen = Screen.help }
+        if TARGET not=? "wasm" {
+            if ui_button("Quit") { quit() }
+        }
+        ui_end()
+        if len(status) >? 0 { text_centered(status vec2(640 590) 22 GRAY) }
+        if len(why) >? 0 { text_wrapped(why vec2(240 620) 800 18 rgba(1 1 1 0.45) align = Align.center) }
+    }
+    if screen =? Screen.by_address {
+        text_centered("Same network, by address" vec2(640 170) 44 BLUE)
+        ui_begin("addr" vec2(640 300))
+        if TARGET not=? "wasm" {
+            if ui_button("Host on this network") { host() }
+        }
+        if ui_button("Join an address") { screen = Screen.joining }
+        if ui_button("Back") { screen = Screen.title }
+        ui_end()
+        if TARGET =? "wasm" {
+            text_wrapped("A web page cannot host by address: Invite a friend works from a web page too." vec2(240 480) 800 20 DIM align = Align.center)
+        }
+    }
+    if screen =? Screen.friend {
+        let connection = invite.screen("Netpong" WEB_PAGE)
+        if connection not=? none { friend_joined(connection) }
+        else if not invite.active() { screen = Screen.title }
+    }
+    if screen =? Screen.help { draw_help() }
+    if screen =? Screen.joining {
+        text_centered("Type the address the host's screen shows, then Enter" vec2(640 250) 30)
+        address = hud_text_field(Rect(390 310 500 56) address "address" 64)
+        if hud_button(Rect(560 385 160 44) "Join") or key_pressed(Key.enter) { join() }
+        text_wrapped("Paste the host's ws:// address, including its port. A plain address such as 192.168.1.20 uses port {PORT}. On this same computer: ws://127.0.0.1:{PORT}." vec2(240 460) 800 20 DIM align = Align.center)
+        if back_button() { screen = Screen.by_address }
+    }
+    if screen =? Screen.waiting { draw_waiting() }
+    if screen =? Screen.waiting {
+        if back_button() { go_title() }
+        # (playing: between the scores, away from the paddles' fingers)
+    }
+    if screen =? Screen.playing and hud_button(Rect(595 22 90 34) "Leave") { go_title() }
+}
+
+draw_waiting = () => {
+    if not hosting or via_relay {
+        text_wrapped(status vec2(190 330) 900 26 WHITE align = Align.center)
+        return
+    }
+    text_centered("Waiting for the other player" vec2(640 200) 36)
+    if len(my_address) >? 0 {
+        text_centered("On their computer: Netpong, Same network, Join an address, and this address:" vec2(640 280) 24 GRAY)
+        text_centered(my_address vec2(640 350) 48 GOLD)
+        if hud_button(Rect(520 400 240 44) "Copy address") { set_clipboard(my_address) }
+    }
+    else {
+        text_centered("This computer seems to be on no network: connect it to the Wi-Fi first" vec2(640 330) 24 GRAY)
+    }
+    text_wrapped("Both computers must be on the same network (the same Wi-Fi or router). Playing on this same computer: join ws://127.0.0.1:{PORT}." vec2(240 470) 800 20 DIM align = Align.center)
+}
+
+let HELP = [
+    "Invite a friend: share the generated code or link. The other player opens it or pastes it into Join a friend, then sends their reply code back. Paste that reply to connect directly."
+    "Same network: run a native game and choose Host on this network. The other player chooses Join an address and enters the shown address. On one computer, use localhost."
+    "Browser players can join a native host. Open the web build over local HTTP and enter ws://host:port. Secure (HTTPS) pages need a secure WebSocket server, or use Invite a friend."
+    "If direct invites cannot connect on your network, try Same network by address. Both players must keep the game open while exchanging invite codes."
+    "Move with up/down or W/S, a gamepad, or by holding the mouse or a finger where your paddle should go. First to 7 wins. Escape or Back leaves the match."
+]
+
+draw_help = () => {
+    text_centered("How to play together" vec2(640 80) 44 BLUE)
+    let y = 150.0
+    loop i in 0.. and h in HELP {
+        text_centered("{i + 1}" vec2(150 f32(y + 12.0)) 28 GOLD)
+        y += text_wrapped(h vec2(190 f32(y)) 900 22 WHITE) + 24.0
+    }
+    text_centered("A click or a tap: back" vec2(640 680) 20 GRAY)
+}

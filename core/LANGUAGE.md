@@ -642,6 +642,13 @@ animated meshes and custom sand/shadow and beacon shaders.
 Native `watch` refreshes shaders after edits, including imported shader functions,
 while preserving unrelated game state.
 
+[`netpong.dewy`](../examples/sloppy_core/netpong.dewy) adds native/browser
+multiplayer using `import net`. `net.listen(port)` hosts natively,
+`net.connect(address port)` joins, `net.receive()` supplies joined/message/left
+events, and `net.send(peer value)` sends strings or byte arrays. Browser builds
+can connect to a native host or use direct invite codes through `import invite`.
+See the [multiplayer run instructions](../examples/sloppy_core/README.md#multiplayer).
+
 This remains a developing subset of Dewy. The earlier proof/effect system,
 automatic numeric widening, general structural conversions and every historical
 juxtaposition form have not been recreated. See the

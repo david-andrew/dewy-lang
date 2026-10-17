@@ -29,6 +29,8 @@ WORKLOADS = {
     'forest-web': ('build', 'examples/sloppy_core/forest.dewy', '--release', '--target', 'wasm'),
     'dunes': ('build', 'examples/sloppy_core/dunes.dewy', '--release'),
     'dunes-web': ('build', 'examples/sloppy_core/dunes.dewy', '--release', '--target', 'wasm'),
+    'netpong': ('build', 'examples/sloppy_core/netpong.dewy', '--release'),
+    'netpong-web': ('build', 'examples/sloppy_core/netpong.dewy', '--release', '--target', 'wasm'),
     'compiler': ('build', 'core/compiler/main.jo'),
 }
 

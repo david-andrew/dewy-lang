@@ -810,3 +810,45 @@ iterators, generic returns, managed cleanup, formatter execution and editor
 error recovery. [Focused gate](source-core/loop-else-focused.log),
 [full gate](source-core/loop-else-full.log),
 [build manifest](source-core/loop-else-build.json).
+
+## Native/browser multiplayer
+
+The compact core now has a Dewy port of Sloppy's pinned Netpong example, using
+the bundled network and invite UI libraries. Native hosts simulate the match;
+clients send input and receive state at 30 Hz. Native/browser builds share the
+source. The port uses ordinary Dewy records for named screen states, optional
+matching for defaults, and normal numeric string formatting. The host exposes a
+copyable WebSocket address including its configured port.
+
+Application validation found two inherited functional bugs. Netpong could stop
+updating after a winning point before sending its final state; that transition
+now sends immediately and a new match resets its input/send timer. The native
+WebSocket implementation also dropped the transport when receiving a close frame
+without replying; it now sends the close reply first. A Node client successfully
+exchanged every message before reporting that disconnect as an error in the old
+implementation. [Winning-state reproducer](source-core/netpong-winning-before.log),
+[disconnect reproducer](source-core/netpong-close-before.log).
+
+The new gate exchanges Unicode text containing NUL and a 512-byte binary message
+between native peers and Node WebSocket clients, in development/release modes.
+It checks joining, echoes, leaving, and a clean close with the original status
+and reason. A real connection to the game verifies that a winning frame between
+send ticks still reaches the client. **Nine focused checks passed in 5.46 s**;
+the independently C-bootstrapped full gate passed **2,231 checks in 90.93 s**.
+[Focused gate](source-core/netpong-focused.log),
+[full gate](source-core/netpong-full.log),
+[build manifest](source-core/netpong-build.json).
+
+In Chromium, the actual web game joined a native host on loopback. Holding
+ArrowUp moved the client's paddle through the host and back to the page; the
+client subsequently displayed its final 5–7 win. The help screen fits the page,
+and the native host screen was checked with a custom port. No browser console
+errors were observed. Direct invite negotiation across networks was not tested.
+[Validation identity](source-core/netpong-validation.json),
+[browser match](source-core/netpong-browser.png),
+[help screen](source-core/netpong-help.png).
+
+Seven warmed release builds measured medians of **376.86 ms native** and
+**167.46 ms web** (CPU **371.72/165.33 ms**). These describe this application's
+build cost, not a comparison with another compiler or a runtime performance gain.
+[Compile samples](source-core/netpong-compile.json).

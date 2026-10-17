@@ -153,7 +153,7 @@ See the source-core audit for inputs and measurements.
 
 The forest model gate checks deterministic placement, height callbacks and
 independent instance-array copies on both targets in both modes. The actual game
-also runs through the native software renderer; all four games' web modules are
+also runs through the native software renderer; all five games' web modules are
 validated in debug/release. The forest was separately rendered in Chromium with
 drag, zoom and reset exercised, with no console errors. Seven warmed compiler
 runs gave median release builds of 323.08 ms native and 160.24 ms web on the
@@ -167,3 +167,45 @@ offscreen GLES driver. The full game was also rendered in Chromium with movement
 input. Shader validation needs EGL/GLES3 libraries; CI installs them when absent.
 
 ![The Dewy Dunes game running in the browser](../../dewy/audits/2026-10-17/source-core/dunes-web.png)
+
+## Multiplayer
+
+[`netpong.dewy`](netpong.dewy) adapts Sloppy's two-player game, including its input,
+invite screens and network library. The host simulates the ball and paddles;
+the joining player sends movement and receives game state 30 times a second.
+The winning state is sent immediately. Start two native instances in separate
+terminals:
+
+```sh
+python3 -m tools.core build examples/sloppy_core/netpong.dewy -o /tmp/dewy-netpong
+HOST=1 /tmp/dewy-netpong
+JOIN=localhost /tmp/dewy-netpong
+```
+
+The default port is 47200; `DEWY_NETPONG_PORT` changes it. The host shows a
+copyable `ws://` address including the port. A client can pass that complete
+address through `JOIN` or enter it in the game's Join an address screen.
+Arrows/WASD, a gamepad, and held mouse/touch input move the paddle.
+
+A browser can join the same native host. Build and serve the page locally:
+
+```sh
+mkdir -p /tmp/dewy-netpong-web
+python3 -m tools.core build examples/sloppy_core/netpong.dewy --target wasm -o /tmp/dewy-netpong-web/index
+python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/dewy-netpong-web
+```
+
+Open `http://localhost:8000/?join=ws://127.0.0.1:47200`. Browser pages connect to
+native hosts; they cannot listen for WebSocket clients. HTTPS-hosted pages need
+a secure WebSocket endpoint. The web build currently warns that native hosting
+is unavailable; its host button is hidden.
+
+Invite a friend and Join a friend retain the bundled direct-connection flow.
+Native games share codes unless `WEB_PAGE` names a hosted build; browser games
+use their own page address. Cross-network invite negotiation is not covered by
+the local validation gate. That gate tests native peers, Node WebSocket clients,
+Unicode/binary messages, clean disconnects and delivery of a winning game state.
+The actual browser game was also connected to a native host and driven with
+keyboard input.
+
+![Netpong connected to a native host](../../dewy/audits/2026-10-17/source-core/netpong-browser.png)

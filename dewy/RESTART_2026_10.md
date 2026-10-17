@@ -58,7 +58,8 @@ libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
 and remaining gaps; compatibility is defined by useful language behavior rather
 than the old representations or proof machinery.
 
-Native/web paddle, physics, forest and Dunes examples exercise the game libraries.
+Native/web paddle, physics, forest, Dunes and Netpong examples exercise the game
+libraries. Netpong adds tested native/browser multiplayer and a bundled invite UI.
 Dunes includes procedural cloth and custom terrain/shadow shaders written in
 Dewy; generated GLSL is compiled and linked by a real offscreen GLES driver in CI.
 The editor checks unsaved source, including opened named libraries. Templates,

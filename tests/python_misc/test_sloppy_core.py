@@ -3755,7 +3755,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -3778,7 +3778,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
