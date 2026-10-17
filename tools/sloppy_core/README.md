@@ -669,3 +669,23 @@ Raw samples and compiler identities are in `typed-json-runtime.json` and
 C-bootstrap gate passed 2,811 checks in 130 seconds. A final malformed-enum
 rejection additionally passed all 76 JSON/upstream checks; the settings example
 agrees in native/web default/release modes.
+
+`sort_by` / `sorted_by` cache each key as before, then sort integer positions with
+statically typed comparisons. The reorder builds its result once instead of
+copying the original array and replacing every copied field. Equal keys stay
+stable in ascending and descending order, and record/array snapshots remain
+independent. This also removes comparator closures from the compiler's internal
+keyed sorts.
+
+For ten sorts of 20,000 entity records, seven alternating thread-CPU pairs against
+the previous implementation reduce release integer-key sorting by about 57–58%
+across random, ordered, reversed and equal-key inputs. String keys improve by
+about 17%. Default builds improve by 50–53% for integer keys and 10% for string
+keys. Every result checksum matches Python's stable sort; setup and checksum
+work are outside the timed region. These workloads do not establish a general
+sorting/C performance ranking. Raw results are in `keyed-sort-runtime.json` and
+`keyed-sort-default-runtime.json` in the source-core audit.
+Fresh-build paired CPU ratios are tour 0.998, Dunes 0.965 and compiler 1.003;
+there is no broad compilation speedup claim. Independent C-bootstrap validation
+passes 2,831 checks in 129 seconds, including native/web tuple-key ordering
+against Python and managed-copy checks.

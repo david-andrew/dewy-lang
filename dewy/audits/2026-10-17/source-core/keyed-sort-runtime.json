@@ -1,0 +1,189 @@
+{
+  "clock": "Linux thread CPU, sorting only; source setup and checksum outside timing",
+  "samples": 7,
+  "elements": 20000,
+  "repetitions": 10,
+  "source": "from p\"benchmark_harness.jo\" import clock, mix\nItem:type=[score:int64 id:int64 name:string]\nscore_key=(item:Item):>int64=>item.score\nname_key=(item:Item):>string=>item.name\nmain=():>void=>{\n    loop mode in [0..5) {\n        let source=[loop i in [0..20000) {\n            let score=if mode =? 1 i//4 else if mode =? 2 (20000-i)//4 else if mode =? 3 42 else (i*7919)%1009\n            Item[score i \"group{i%128}\"]\n        }]\n        let elapsed:int64=0\n        let hash:int64=0\n        loop repeat in [0..10) {\n            let start=clock()\n            let ordered=if mode =? 4 source.sorted_by(name_key) else source.sorted_by(score_key)\n            elapsed+=clock()-start\n            loop item in ordered {hash=mix(hash item.id)}\n        }\n        printl\"{mode} {hash} {elapsed}\"\n    }\n}\n",
+  "harness_sha256": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+  "baseline": {
+    "source_identity": "0d19a0ccbb1ea26ca1a880ba55282611cd4ca9a1f7afab683919d1aecaf0273c",
+    "binary": "build-1792266909686700342/bin/dewy-core",
+    "binary_sha256": "24a9c6fa0f562ae7ac0b5d30eb490a85383f46e1b1bf1d8947f2c364e04e144d",
+    "validation": {
+      "independent_c_bootstrap": {
+        "command": "python3 -m tools.core --bootstrap test",
+        "passed": 2811,
+        "seconds": 129.9,
+        "scope": "Before the final rejection of malformed object-wrapped zero-field enum variants; performance reports identify this toolchain."
+      },
+      "final_focused": {
+        "command": "python3 -m tools.core test -k 'json or upstream'",
+        "passed": 76,
+        "seconds": 4.79
+      },
+      "settings_example": "Native/web, default/release; exact expected output in all four modes",
+      "ruff": "passed",
+      "git_diff_check": "passed"
+    },
+    "behavior": [
+      "Typed to_json writes directly, without to_text or an intermediate Json tree",
+      "Exact signed/unsigned 64-bit integers, finite f32/f64 round trips and negative zero",
+      "Records, nested/fixed arrays, tuples, vectors/mat4, maps, optionals, enums and unions",
+      "Typed enum payloads read back from the documented JSON object/array representation",
+      "json_value uses the same schema but intentionally retains Json.number f64 precision"
+    ]
+  },
+  "candidate": {
+    "source_identity": "f901a426cfb4d730651f0dfad3bec2049a884aa4447fdc1c10a2370badb0b367",
+    "binary": "build-1792267064185515494/bin/dewy-core",
+    "binary_sha256": "b7c3d2d8fdf8c381f9aceaabf839aa690700d42c1b9e38354ed53abfdcf4e98d"
+  },
+  "variants": {
+    "baseline": {
+      "compiler_sha256": "24a9c6fa0f562ae7ac0b5d30eb490a85383f46e1b1bf1d8947f2c364e04e144d",
+      "binary_sha256": "70071d70e9676626b07c24ef0752dc213680e7a9401107adcdb5cf2b81316f62",
+      "build_wall_s": 0.11261341802310199,
+      "build_cpu_s": 0.07088,
+      "workloads": {
+        "random-integer": [
+          51395449,
+          48078218,
+          41132965,
+          47537124,
+          44726964,
+          48718101,
+          49408090
+        ],
+        "ordered-integer": [
+          26525430,
+          24553802,
+          29097942,
+          24321224,
+          20487156,
+          25591350,
+          24997517
+        ],
+        "reversed-integer": [
+          46078862,
+          44970736,
+          38127749,
+          31833194,
+          29148384,
+          41348740,
+          43989152
+        ],
+        "equal-integer": [
+          25503031,
+          23944146,
+          25118450,
+          22328974,
+          18771757,
+          16875153,
+          26400944
+        ],
+        "string": [
+          80155756,
+          54142580,
+          61763350,
+          66985209,
+          65004259,
+          76975412,
+          65152500
+        ]
+      }
+    },
+    "candidate": {
+      "compiler_sha256": "b7c3d2d8fdf8c381f9aceaabf839aa690700d42c1b9e38354ed53abfdcf4e98d",
+      "binary_sha256": "66cfd5c66ed93b27f43155b9467c6e9d9bfc4dfe400ff69061afb3587e272bb5",
+      "build_wall_s": 0.13528231694363058,
+      "build_cpu_s": 0.075963,
+      "workloads": {
+        "random-integer": [
+          24641160,
+          25000763,
+          17493020,
+          16852847,
+          16697880,
+          25494116,
+          18806258
+        ],
+        "ordered-integer": [
+          11340937,
+          11652915,
+          7517352,
+          10282765,
+          7505304,
+          11451283,
+          7751448
+        ],
+        "reversed-integer": [
+          19009688,
+          19400143,
+          12887669,
+          14647527,
+          14572628,
+          18292645,
+          15944258
+        ],
+        "equal-integer": [
+          11543720,
+          11603493,
+          8431559,
+          7832918,
+          11112461,
+          7170538,
+          11170601
+        ],
+        "string": [
+          66399743,
+          60528015,
+          46129427,
+          51778832,
+          58673034,
+          54825798,
+          55906181
+        ]
+      }
+    }
+  },
+  "expected_checksums": {
+    "random-integer": 163863088,
+    "ordered-integer": 65047250,
+    "reversed-integer": 519777273,
+    "equal-integer": 65047250,
+    "string": 259001946
+  },
+  "summary": {
+    "random-integer": {
+      "baseline_median_ns": 48078218,
+      "candidate_median_ns": 18806258,
+      "paired_ratio": 0.4252798211847845
+    },
+    "ordered-integer": {
+      "baseline_median_ns": 24997517,
+      "candidate_median_ns": 10282765,
+      "paired_ratio": 0.42278978229056235
+    },
+    "reversed-integer": {
+      "baseline_median_ns": 41348740,
+      "candidate_median_ns": 15944258,
+      "paired_ratio": 0.43139482973994464
+    },
+    "equal-integer": {
+      "baseline_median_ns": 23944146,
+      "candidate_median_ns": 11112461,
+      "paired_ratio": 0.42491691779031576
+    },
+    "string": {
+      "baseline_median_ns": 65152500,
+      "candidate_median_ns": 55906181,
+      "paired_ratio": 0.8283839653386839
+    }
+  },
+  "load_end": [
+    7.1357421875,
+    8.494140625,
+    9.0380859375
+  ],
+  "mode": "release"
+}

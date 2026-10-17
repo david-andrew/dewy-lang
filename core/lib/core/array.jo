@@ -380,13 +380,81 @@ sort_by[T, K] = (xs: mut T[], key: (T) -> K, descending: bool = false):
     if n < 2: return
     # (each key worked out once, then the positions sorted by them: not twice a comparison)
     ks: K[]
+    ks.reserve(n)
     loop x in xs: ks.push(key(x))
     idx = fill(0, n)
     loop i in [0..n): idx[i] = i
-    if descending: __merge_sort(idx, (a: int, b: int) -> bool: ks[b] < ks[a])
-    else: __merge_sort(idx, (a: int, b: int) -> bool: ks[a] < ks[b])
-    old = xs
-    loop i in [0..n): xs[i] = old[idx[i]]
+    # Keep key comparison statically typed instead of calling a closure for
+    # every comparison. Reverse twice to retain stable descending order.
+    if descending: idx.reverse()
+    __merge_sort_keys(idx, ks)
+    if descending: idx.reverse()
+    # Build the reordered result once, instead of detaching a full copy of xs
+    # and then replacing every copied element (including managed fields).
+    out: T[]
+    out.reserve(n)
+    loop i in [0..n): out.push(xs[idx[i]])
+    xs = out
+
+# Stable sorting of positions by cached keys. Keys and managed values stay in
+# place throughout the sort; only integer positions move between the two runs.
+__merge_sort_keys[K] = (idx: mut int[], keys: K[]):
+    n = idx.len()
+    lo = 0
+    loop lo < n:
+        hi = min(lo + 16, n)
+        i = lo + 1
+        loop i < hi:
+            at = idx[i]
+            j = i
+            loop j > lo and keys[at] < keys[idx[j - 1]]:
+                idx[j] = idx[j - 1]
+                j -= 1
+            idx[j] = at
+            i += 1
+        lo += 16
+    if n <= 16: return
+    buf = idx
+    in_idx = true
+    width = 16
+    loop width < n:
+        if in_idx: __merge_keys(idx, buf, keys, width)
+        else: __merge_keys(buf, idx, keys, width)
+        in_idx = not in_idx
+        width *= 2
+    if not in_idx: idx = buf
+
+__merge_keys[K] = (src: int[], dst: mut int[], keys: K[], width: int):
+    n = src.len()
+    lo = 0
+    loop lo < n:
+        mid = min(lo + width, n)
+        hi = min(lo + 2 * width, n)
+        i = lo
+        j = mid
+        out = lo
+        if mid >= hi or not (keys[src[mid]] < keys[src[mid - 1]]):
+            loop out < hi:
+                dst[out] = src[out]
+                out += 1
+        else:
+            loop i < mid and j < hi:
+                if keys[src[j]] < keys[src[i]]:
+                    dst[out] = src[j]
+                    j += 1
+                else:
+                    dst[out] = src[i]
+                    i += 1
+                out += 1
+            loop i < mid:
+                dst[out] = src[i]
+                i += 1
+                out += 1
+            loop j < hi:
+                dst[out] = src[j]
+                j += 1
+                out += 1
+        lo += 2 * width
 
 # a sorted copy of xs
 sorted[T] = (xs: T[], descending: bool = false) -> T[]:

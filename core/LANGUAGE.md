@@ -498,6 +498,22 @@ argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
 
+`values.sorted()` returns an independent sorted array; `values.sort()` updates
+the receiver. Use `sorted_by(key)` or `sort_by(key)` for records:
+
+```dewy
+Player:type=[name:string score:int64]
+by_score=(p:Player)=>p.score
+let players=[Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
+let leaderboard=players.sorted_by(by_score true)
+```
+
+The optional `true` requests descending order. Equal keys retain their original
+order, so Bea stays ahead of Cal. The key is computed once per element when
+sorting is needed, then cached while integer positions are sorted. Records and
+their managed fields keep ordinary independent-value behavior; modifying a
+record in `leaderboard` leaves `players` unchanged.
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`

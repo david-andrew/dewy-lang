@@ -22,6 +22,50 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sort-key-stable': '''Item:type=[score:int64 id:int64]
+key=(item:Item):>int64=>item.score
+main=()=>{
+loop size in [0 1 2 15 16 17 31 32 33 129] {
+    let items=[loop i in [0..size) Item[(i*17)%13 i]]
+    loop descending in [false true] {
+        let result=items.sorted_by(key descending)
+        if result.length not=? size return 1
+        loop i in [1..size) {
+            let a=result[i-1] let b=result[i]
+            if a.score =? b.score and a.id >? b.id return 2
+            if descending and a.score <? b.score return 3
+            if not descending and a.score >? b.score return 4
+        }
+        loop i in [0..size) {if items[i].id not=? i return 5}
+    }
+}
+return 42}''',
+    'sort-key-once': '''Item:type=[score:int64 id:int64]
+main=()=>{
+let calls:array<int64>=[]
+let key=(item:Item):>int64=>{calls.push(item.id) return item.score}
+let items=[loop i in [0..65) Item[65-i i]]
+items.sort_by(key)
+if calls.length not=? 65 return 1
+loop i in [0..65) {
+    if calls[i] not=? i or items[i].id not=? 64-i return 2
+}
+return 42}''',
+    'sort-key-managed': '''Item:type=[name:string id:int64 values:array<int64>]
+key=(item:Item):>string=>item.name
+main=()=>{
+let items=[loop i in [0..65) Item[if i%2 =? 0 "beta" else "alpha" i [i]]]
+let snapshot=items
+items.sort_by(key true)
+items[0].values[0]=999
+if snapshot[0].values[0] not=? 0 return 1
+loop i in [1..33) {if items[i].id not=? i*2 return 2}
+loop i in [33..65) {if items[i].id not=? (i-33)*2+1 return 3}
+return 42}''',
+    'sort-key-float': '''Item:type=[score:float64 id:int64]
+main=()=>{let items=[Item[0.0 0] Item[-0.0 1] Item[-2.5 2] Item[1.5 3]]
+items.sort_by((item:Item):>float64=>item.score)
+return if items[0].id =? 2 and items[1].id =? 0 and items[2].id =? 1 and items[3].id =? 3 42 else 1}''',
     'json-typed-integers': '''Settings:type=[id:uint64 low:int64]
 main=()=>{let value=Settings[uint64.max int64.min] let text=to_json(value)
 let copy=from_json<Settings>(text)
@@ -2447,6 +2491,30 @@ ERRORS = {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_sort_key_order(compiler, tmp_path, target, release):
+    (tmp_path / 'keys.jo').write_text('key = (i: int) -> (int, int): (i % 7, -i)\n')
+    statements = ['from p"keys.jo" import key', 'main=()=>{']
+    expected = []
+    for size in [0, 1, 2, 15, 16, 17, 31, 32, 33, 129]:
+        values = [(i * 79) % 137 for i in range(size)]
+        literal = ' '.join(map(str, values))
+        statements += [f'let values_{size}:array<int64>=[{literal}]',
+                       f'printl(to_json(values_{size}.sorted_by(key)))',
+                       f'printl(to_json(values_{size}.sorted_by(key true)))',
+                       f'printl(to_json(values_{size}))']
+        expected += [sorted(values, key=lambda i: (i % 7, -i)),
+                     sorted(values, key=lambda i: (i % 7, -i), reverse=True), values]
+    statements += ['return 42', '}']
+    command, error = build_case_batch(compiler, tmp_path, {'order': '\n'.join(statements)},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    assert [json.loads(line) for line in ran.stdout.splitlines()] == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_json_aggregates(compiler, tmp_path, target, release):
     # Core providers expose aggregate types whose Dewy declaration syntax is
     # still developing. Serialization must use their actual storage and tags.
@@ -4583,7 +4651,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('json-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
