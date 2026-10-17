@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
+
 CASES = {
     'answer': 'main=():>int64=>42',
     'syntax-coefficients': '''twice=(x:int64)=>2x
@@ -510,6 +512,108 @@ def test_core_values(compiler, tmp_path, name, release):
     assert result.returncode == 42, (result.returncode, result.stdout, result.stderr)
     if name == 'unicode':
         assert result.stdout == 'é🙂 42\n'
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
+    minimum, maximum = -(1 << 63), (1 << 63) - 1
+    numerators = [minimum, minimum + 1, -1000000007, -129, -7, -1, 0, 1, 7, 129, 1000000007, maximum - 1, maximum]
+    denominators = [minimum, minimum + 1, -1000000007, -129, -3, -1, 1, 2, 3, 129, 1000000007, maximum]
+    powers = [1 << shift for shift in range(63)]
+    constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in powers)
+    source = tmp_path / 'floor.dewy'
+    source.write_text(f'''main=():>void=>{{
+loop a in [{' '.join(map(str, numerators))}] {{
+    loop b in [{' '.join(map(str, denominators))}] {{
+        let remainder=a%b
+        let quotient=a//b
+        printl"{{remainder}} {{quotient}}"
+    }}
+    {constant_cases}
+}}
+}}
+''')
+    expected = [f'{a % b} {minimum if a == minimum and b == -1 else a // b}'
+                for a in numerators for b in denominators + powers]
+    binary = tmp_path / 'floor'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web arithmetic checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'floor.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('operator', ['//', '%'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_floor_zero_divisor(compiler, tmp_path, operator, target, release):
+    source = tmp_path / 'zero.dewy'
+    # Runtime zero prevents a constant-folding diagnostic from substituting for
+    # the generated program's division-by-zero behavior.
+    source.write_text(f'main=()=>42 {operator} (args().length-1)')
+    binary = tmp_path / 'zero'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web arithmetic checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'zero.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0, 'zero divisor unexpectedly returned successfully'
+
+
+@pytest.mark.parametrize('name', CHECKSUMS_1000)
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_applications(compiler, tmp_path, name, target, release):
+    source = prepare_source(name, tmp_path)
+    binary = tmp_path / name
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary, '1000']
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web application checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / f'{name}.cjs'
+        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [node, runner, '1000']
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    checksum, elapsed = map(int, ran.stdout.split())
+    assert checksum == CHECKSUMS_1000[name]
+    assert elapsed >= 0
 
 
 @pytest.mark.parametrize('name', ERRORS)

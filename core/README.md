@@ -96,7 +96,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 826-check gate normally takes about a minute locally. It tests expected Dewy
+the earlier compiler suite. The 858-check gate normally takes about a minute locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -135,6 +135,26 @@ other CPU-heavy work. The report records all samples, binary/source identities,
 working-tree state and system load; small desktop differences are not a speedup
 claim. `build ... --time` reports checking, lowering/code generation and output
 times. `SLOPPY_PAR_TIME=1` adds optimizer and emission timing.
+
+## Measure generated programs
+
+Run the original helper, array, particle-record, text and graph workloads against
+C (`-O2`), optionally including a previous compact compiler:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_apps "$(python3 -m tools.core path)" \
+  --baseline /tmp/old/bin/dewy-core --output /tmp/app-times.json
+```
+
+This takes about a minute for five measured runs per workload on a development
+machine. `--workload helpers --samples 3` focuses a run; `--count 1000` is a quick
+smoke check. The runner compares checksums at small boundary inputs and every
+measured run. Reports retain raw alternating samples, kernel and whole-process
+times, build times and source/toolchain identities. Kernel timing excludes input
+generation; whole-process timing includes it. The C graph uses flat edges and a
+handwritten hash table, while Dewy uses per-node arrays and an insertion-ordered
+dictionary, so that comparison includes representation and library costs.
+The correctness gate also runs all five workloads on native and web targets.
 
 ## Editor
 

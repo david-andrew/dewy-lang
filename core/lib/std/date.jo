@@ -197,9 +197,18 @@ __date_of = (local: int, off: int) -> Date:
 
 __floor_div = (a: int, b: int) -> int:
     q = a / b
-    if (a % b != 0) and ((a < 0) != (b < 0)): q -= 1
+    # Recover the truncating remainder from the quotient already computed.
+    if (a - q * b != 0) and ((a < 0) != (b < 0)): q -= 1
     q
-__floor_mod = (a: int, b: int) -> int: a - __floor_div(a, b) * b
+__floor_mod = (a: int, b: int) -> int:
+    r = a % b
+    if r != 0 and ((r < 0) != (b < 0)): r += b
+    r
+
+# The Dewy frontend selects these for positive power-of-two literal divisors.
+# Keep the same signed argument conversion as the general floor operations.
+__floor_div_pow2 = (a: int, shift: int) -> int: a >> shift
+__floor_mod_pow2 = (a: int, mask: int) -> int: a & mask
 
 __le32 = (b: u8[], at: int) -> int:
     v = int(b[at]) | (int(b[at + 1]) << 8) | (int(b[at + 2]) << 16) | (int(b[at + 3]) << 24)

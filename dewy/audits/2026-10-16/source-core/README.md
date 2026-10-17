@@ -576,3 +576,41 @@ subprocess.
 
 A fresh C bootstrap takes 17.53 seconds, and all 826 checks pass in 57.84
 seconds (`completion-build.json`, `completion-full-tests.log`).
+
+## Floor arithmetic and application performance
+
+`floor-build.json` records a fresh independent C bootstrap. The compiler passes
+838 checks (`floor-full-tests.log`), then all 20 additional application checks
+(`application-tests.log`): each of the five original application workloads runs
+on native/WebAssembly in debug/release, checked against the C checksum at 1,000
+inputs. The combined gate is 858 checks. Arithmetic coverage includes signed
+extremes, every positive int64 power-of-two literal divisor, variable divisors,
+and runtime zero-divisor failure on both targets in both modes.
+
+Floor modulo now uses one remainder operation plus sign correction; floor
+division recovers its remainder from the quotient instead of dividing again.
+Positive power-of-two literal divisors select tiny typed mask/shift helpers,
+which inline without the general sign-adjustment branches. This also handles
+negative numerators. The backend already supplies defined wrapping division and
+zero remainder for the signed minimum divided by -1; no extra guard is needed.
+
+`floor-application-performance.json` comes from the new reproducible
+`tools.sloppy_core.benchmark_apps` command: one warmup and five measured runs,
+sequentially alternating baseline/candidate/C, all checksums equal. Median
+kernel times in milliseconds:
+
+| Workload | Count | Before | After | C -O2 |
+|---|---:|---:|---:|---:|
+| Helpers | 2,000,000 | 1861.60 | 1230.30 | 820.89 |
+| Arrays | 10,000,000 | 280.35 | 284.97 | 279.56 |
+| Records, 50 steps | 1,000,000 | 239.74 | 229.53 | 190.06 |
+| Text tokens | 10,000,000 | 361.21 | 356.84 | 198.17 |
+| Graph nodes | 1,000,000 | 720.35 | 723.96 | 428.96 |
+
+Helpers improved about 34%; small changes elsewhere are not claimed as gains.
+This is a shared desktop measurement, with unrelated work running. Reports
+retain raw samples and load averages, complete-process times (including input
+generation), one build timing per binary, and source/compiler/build identities.
+Only the platform harness import and old `addr` index annotation are adapted.
+C graph storage is flat and uses a handwritten table; Dewy's per-node arrays and
+insertion-ordered dictionary have different representation/library costs.

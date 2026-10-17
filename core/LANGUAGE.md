@@ -77,7 +77,8 @@ main=()=>{let value:int64=41 bump(@value) return value}
 Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
 types are `float32` and `float64`. Ordinary integer literals default to `int64`
 when they fit. Use `as` for numeric value conversion. Integer `//` is floor
-division; floating-point `/` is available. Integer `/` and unbounded integers
+division and `%` gives a remainder with the divisor’s sign (or zero). These
+operators currently use signed `int64` arithmetic. Floating-point `/` is available. Integer `/` and unbounded integers
 are not implemented in this core yet.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
