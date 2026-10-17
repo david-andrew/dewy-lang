@@ -39,36 +39,52 @@ contracts rather than pretending that runtime checks discharge them. Additional
 proof sophistication should earn its place by enabling ordinary programs within
 measured compile-time budgets.
 
-### Source-level restart checkpoint
+### Current source-level restart
 
-`restart/sloppy-frontend` now carries an opt-in source-level core, documented in
-[`tools/sloppy_core/README.md`](../tools/sloppy_core/README.md). It retains Dewy's
-syntax parser and maps its output directly into pinned Sloppy AST/checking,
-runtime, code generation, and libraries. It bypasses the old semantic IR, proof
-pipeline, and backend bridge. The tested slice includes inferred/generic functions, closures, value
-copies, explicit place arguments, dense nested records, floats, dictionaries,
-unions, optionals, array/string slices, grapheme-aware strings, imports and combined iterator loops. A native/web paddle game uses the
-inherited graphics/input/font runtime. The editor checks unsaved Dewy source and
-serves diagnostics, hover and definitions through the opt-in VS Code client.
-Project templates and native live reload support application work. The complete
-parser/compiler now bootstraps from C in about 24 seconds, without a prebuilt
-Dewy or Sloppy compiler. Parser seed regeneration remains a maintainer operation
-using the earlier compiler pair.
+`restart/sloppy-frontend` carries the implementation under active development in
+[`core/`](../core/README.md), with its own in-process Dewy lexer/parser feeding the
+Sloppy-derived checker, runtime, native/web backends and bundled libraries. It
+bypasses the old semantic IR, proof pipeline and backend bridge. There is no
+patch generator, dependency on the Sloppy checkout, or Python process in normal
+program compilation. The complete compiler bootstraps independently from C in
+about 20 seconds. No installed compiler has been replaced.
 
-The compiler sources and libraries now live directly under `core/`, without a
-patch generator or separate Sloppy checkout. The latest combined
-language/editor/watch/shared-core gate has 282 checks and takes about 23 seconds.
-A separate compact-core CI workflow builds from C and runs this gate. The original nested-particle algorithm, changing only its platform
-harness import, builds in about 73 ms by default and 82 ms in release, versus
-1.66 seconds for the earlier Dewy compiler. The latest million-particle kernel
-medians are 396 ms by default and 203 ms in release, versus C at 174 ms in the
-same comparison; all 300 comparative executions agreed. Earlier Dewy results
-were 706 ms boxed and 218 ms with opt-in dense records.
+The working language includes inferred/generic functions, overloads, defaults,
+closures, dense records, independent value copies, custom operators/indexing,
+arrays, dictionaries, unions, optionals, grapheme-aware strings, imports and
+combined loops. Large integer literals, exact fractions through integer `/`,
+powers and explicit exact-to-float conversions now use ordinary compact-core
+libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
+and remaining gaps; compatibility is defined by useful language behavior rather
+than the old representations or proof machinery.
 
-This supports moving application development onto the new core while improving
-code generation and filling useful language gaps. It does not establish full
-compatibility or release certification. Detailed measurements and limitations
-are recorded in the source-core README and audit directory.
+Native/web paddle, physics and forest examples exercise the game libraries.
+The editor checks unsaved source, including opened named libraries. Templates,
+asset embedding, error recovery and native live reload support application work.
+Dewy's 57-body physics scene runs at 178.32 ms versus 178.64 ms for the matching
+Sloppy source in the recorded headless comparison; this is one workload, not a
+general runtime parity claim. The earlier nested-particle comparison brought the
+release kernel within about 14% of C. Detailed results and limits are in the
+[implementation notes](../tools/sloppy_core/README.md) and
+[example guide](../examples/sloppy_core/README.md).
+
+The development gate now has over 1,500 checks and completes in roughly one to
+one-and-a-half minutes locally. Focused selections typically take seconds. Value
+checks are batched into small programs: a controlled 674-case comparison reduced
+compiler launches from 674 to 44 and test time from 73.49 to 7.93 seconds, while
+retaining individual results and test selection. The local driver caches an
+immutable current toolchain and stops at the first failure by default. Hosted CI
+always starts from C and exercises language behavior, native/web programs,
+editor integration, live reload and shared-core regressions.
+
+Recent warmed measurements put the tour build near 60 ms, the physics release
+build near 340 ms and compiler self-build near 1.6 seconds. Sharing flat loop
+metadata reduced the latter by about 7% in two paired comparisons. Compilation
+and runtime changes are measured separately; inconclusive experiments are
+removed. Continue application development on this core while filling useful
+language gaps and improving measured bottlenecks. It is still experimental,
+with explicit unsupported-feature diagnostics rather than full old-compiler
+compatibility or release certification.
 
 ## What the comparison establishes
 
