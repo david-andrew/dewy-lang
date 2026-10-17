@@ -86,7 +86,10 @@ conditional expressions now use conditional moves: the helper application
 improved from 1.196 to 0.995 seconds in seven paired samples, at a measured 2.4%
 compiler self-build cost. Removing redundant register copies then improved it
 from 0.993 to 0.924 seconds in another seven-pair comparison, without a measured
-compilation regression. Compilation and runtime changes are measured separately;
+compilation regression. Small 64-bit records now also stay in registers when their addresses do not escape;
+focused integer/float record-update workloads improve about 11.8×/3.1×, with a
+measured 1.8% compiler self-build cost and no broad application speedup claim.
+Compilation and runtime changes are measured separately;
 inconclusive experiments are removed. Continue application development on this
 core while filling useful language gaps and improving measured bottlenecks. It
 is still experimental, with explicit unsupported-feature diagnostics rather than

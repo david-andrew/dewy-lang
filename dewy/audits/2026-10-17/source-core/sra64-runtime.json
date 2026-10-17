@@ -1,0 +1,172 @@
+{
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792253497834773204/bin/dewy-core",
+      "sha256": "09fde68a5ad01596829cf5e41c36266687dfe9aee5186cb4940d802645c0e558"
+    },
+    "candidate": {
+      "path": "/tmp/dewy-source-core/sra64/bin/dewy-core",
+      "sha256": "db842e2c3efd40d6a8b001f32c794238cdcdd3f2f9c5d03b96c413dc8e3b6068"
+    }
+  },
+  "clock": "thread-cpu",
+  "count": 10000000,
+  "samples": 7,
+  "preflight_checksums": {
+    "0": 1,
+    "1": 3,
+    "2": 6,
+    "1000": 501501,
+    "10000000": 50000015000001
+  },
+  "sources": {
+    "int64": "from p\"benchmark_harness.jo\" import clock, size_argument\nPair:type=[x:int64 y:int64]\nadvance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y+p.x)\nkernel=(count:int64):>int64=>{\nlet p=Pair(x=1 y=0)\nloop i in [0..count) {p=advance(p)}\nreturn int(p.x+p.y)\n}\nmain=(args:array<string>)=>{\nlet count=size_argument(args 10000000)\nlet start=clock() let result=kernel(count) let finish=clock()\nprintl\"{result} {finish-start}\"\nreturn 0\n}\n",
+    "float64": "from p\"benchmark_harness.jo\" import clock, size_argument\nPair:type=[x:float64 y:float64]\nadvance=(p:Pair):>Pair=>Pair(x=p.x+1.0 y=p.y+p.x)\nkernel=(count:int64):>int64=>{\nlet p=Pair(x=1.0 y=0.0)\nloop i in [0..count) {p=advance(p)}\nreturn int(p.x+p.y)\n}\nmain=(args:array<string>)=>{\nlet count=size_argument(args 10000000)\nlet start=clock() let result=kernel(count) let finish=clock()\nprintl\"{result} {finish-start}\"\nreturn 0\n}\n"
+  },
+  "harness_hashes": {
+    "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+    "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+  },
+  "timings": {
+    "int64": {
+      "baseline": [
+        {
+          "kernel_ns": 83447407,
+          "wall_seconds": 0.08826576091814786
+        },
+        {
+          "kernel_ns": 83344446,
+          "wall_seconds": 0.08911494805943221
+        },
+        {
+          "kernel_ns": 85358558,
+          "wall_seconds": 0.08863465499598533
+        },
+        {
+          "kernel_ns": 82627073,
+          "wall_seconds": 0.08563641889486462
+        },
+        {
+          "kernel_ns": 82833502,
+          "wall_seconds": 0.11590765696018934
+        },
+        {
+          "kernel_ns": 85318751,
+          "wall_seconds": 0.09096045198384672
+        },
+        {
+          "kernel_ns": 85158975,
+          "wall_seconds": 0.10154927102848887
+        }
+      ],
+      "candidate": [
+        {
+          "kernel_ns": 7281688,
+          "wall_seconds": 0.010987667017616332
+        },
+        {
+          "kernel_ns": 6939101,
+          "wall_seconds": 0.010615147999487817
+        },
+        {
+          "kernel_ns": 4951829,
+          "wall_seconds": 0.0073136689607053995
+        },
+        {
+          "kernel_ns": 6480931,
+          "wall_seconds": 0.010378298000432551
+        },
+        {
+          "kernel_ns": 7250492,
+          "wall_seconds": 0.019809994962997735
+        },
+        {
+          "kernel_ns": 4402323,
+          "wall_seconds": 0.00537113391328603
+        },
+        {
+          "kernel_ns": 7212072,
+          "wall_seconds": 0.008150334004312754
+        }
+      ]
+    },
+    "float64": {
+      "baseline": [
+        {
+          "kernel_ns": 93017455,
+          "wall_seconds": 0.12030882807448506
+        },
+        {
+          "kernel_ns": 92990533,
+          "wall_seconds": 0.11034050607122481
+        },
+        {
+          "kernel_ns": 84472718,
+          "wall_seconds": 0.08665292395744473
+        },
+        {
+          "kernel_ns": 92906096,
+          "wall_seconds": 0.1010616539278999
+        },
+        {
+          "kernel_ns": 89902878,
+          "wall_seconds": 0.09622246702201664
+        },
+        {
+          "kernel_ns": 90280614,
+          "wall_seconds": 0.0932721559656784
+        },
+        {
+          "kernel_ns": 93229000,
+          "wall_seconds": 0.10004568402655423
+        }
+      ],
+      "candidate": [
+        {
+          "kernel_ns": 30505666,
+          "wall_seconds": 0.03620959597174078
+        },
+        {
+          "kernel_ns": 29994677,
+          "wall_seconds": 0.038600588915869594
+        },
+        {
+          "kernel_ns": 27608659,
+          "wall_seconds": 0.029728938010521233
+        },
+        {
+          "kernel_ns": 29965290,
+          "wall_seconds": 0.050000897026620805
+        },
+        {
+          "kernel_ns": 31296222,
+          "wall_seconds": 0.0420197460334748
+        },
+        {
+          "kernel_ns": 29947599,
+          "wall_seconds": 0.03320554702077061
+        },
+        {
+          "kernel_ns": 29712966,
+          "wall_seconds": 0.041693403967656195
+        }
+      ]
+    }
+  },
+  "median_ms": {
+    "int64": {
+      "baseline": 83.447407,
+      "candidate": 6.939101
+    },
+    "float64": {
+      "baseline": 92.906096,
+      "candidate": 29.96529
+    }
+  },
+  "script": "from pathlib import Path\nimport json,shutil,os,statistics\nfrom tools.sloppy_core.benchmark_apps import execute,prepare_clock,run,digest\nroot=Path.cwd();w=Path('/tmp/dewy-source-core/sra64-runtime');w.mkdir(exist_ok=True)\nstate=json.loads((root/'__dewycache__/compact-core/current.json').read_text())\ncompilers={'baseline':root/'__dewycache__/compact-core'/state['binary'], 'candidate':Path('/tmp/dewy-source-core/sra64/bin/dewy-core')}\nshutil.copy2(root/'tools/sloppy_core/benchmark_harness.jo',w)\nharness=prepare_clock(w,'thread-cpu')\ncommon='''from p\"benchmark_harness.jo\" import clock, size_argument\nPair:type=[x:TYPE y:TYPE]\nadvance=(p:Pair):>Pair=>Pair(x=p.x+ONE y=p.y+p.x)\nkernel=(count:int64):>int64=>{\nlet p=Pair(x=ONE y=ZERO)\nloop i in [0..count) {p=advance(p)}\nreturn int(p.x+p.y)\n}\nmain=(args:array<string>)=>{\nlet count=size_argument(args 10000000)\nlet start=clock() let result=kernel(count) let finish=clock()\nprintl\"{result} {finish-start}\"\nreturn 0\n}\n'''\nvariants={'int64':common.replace('TYPE','int64').replace('ONE','1').replace('ZERO','0'),\n          'float64':common.replace('TYPE','float64').replace('ONE','1.0').replace('ZERO','0.0')}\nenv={k:v for k,v in os.environ.items() if not k.startswith(('DEWY_','SLOPPY_'))};env['SLOPPY_EMIT_WORKERS']='1'\ntimings={k:{v:[] for v in compilers} for k in variants};checks={}\nfor name,source in variants.items():\n p=w/(name+'.dewy');p.write_text(source)\n for label,compiler in compilers.items():run([compiler,'build',p,'--release','-o',w/(name+'-'+label)],env)\nfor count in [0,1,2,1000,10000000]:\n expected=count+1+count*(count+1)//2;checks[str(count)]=expected\n for name in variants:\n  for label in compilers:\n   value,_=execute(w/(name+'-'+label),count,env);assert value==expected,(name,label,count,value,expected)\nfor sample in range(8):\n for name in variants:\n  for label in list(compilers)[::1 if sample%2==0 else -1]:\n   value,t=execute(w/(name+'-'+label),10000000,env);assert value==checks['10000000']\n   if sample:timings[name][label].append(t)\nreport={'compilers':{k:{'path':str(v),'sha256':digest(v)} for k,v in compilers.items()},'clock':'thread-cpu','count':10000000,'samples':7,'preflight_checksums':checks,'sources':variants,'harness_hashes':harness,'timings':timings,'median_ms':{k:{label:statistics.median(x['kernel_ns'] for x in ts)/1e6 for label,ts in v.items()} for k,v in timings.items()},'script':Path(__file__).read_text(),'load':os.getloadavg()}\nPath('/tmp/dewy-source-core/sra64-runtime.json').write_text(json.dumps(report,indent=2)+'\\n'); print(report['median_ms'])\n",
+  "load": [
+    12.77392578125,
+    9.56103515625,
+    8.85986328125
+  ]
+}

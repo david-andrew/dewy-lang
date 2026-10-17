@@ -742,3 +742,47 @@ bootstrap and expanded full gate passed **2,161 checks in 111.31 s**.
 [Focused gate](source-core/loop-label-focused.log),
 [full gate](source-core/loop-label-full.log),
 [build manifest](source-core/loop-label-build.json).
+
+## Small 64-bit records in registers
+
+The inherited scalar replacement handled only four-byte lanes. It now also
+handles eight-byte integer and floating lanes in non-escaping slots up to
+16 bytes. Width discovery shares the existing address scan. Copies preserve
+full-width bits, and mixed-width accesses or escaped addresses keep memory
+storage. This changes no source-level representation or copy semantics.
+
+A first experiment ran two complete passes and admitted 32-byte records. It
+regressed Dunes compilation and the particle-record workload, so it was not
+adopted. The narrower implementation keeps one pass and the original size limit.
+[Prototype generation](source-core/sra64-prototypes.json),
+[initial compile samples](source-core/sra64-compile.json),
+[initial applications](source-core/sra64-apps.json),
+[unified compile samples](source-core/sra64-unified-compile.json),
+[unified applications](source-core/sra64-unified-apps.json).
+
+The final independent C bootstrap passed **2,177 checks in 124.35 s**. New
+native/web debug/release cases cover full-width signed values, float64 precision,
+integer/float fields, zero initialization, branch results, array copies, and
+mixed-width nested records. Earlier prototype selections passed 434 checks.
+[Full gate](source-core/sra64-final-full.log),
+[build manifest](source-core/sra64-final-build.json).
+
+Seven alternating thread-CPU samples of ten million small-record updates
+measured **82.40/6.99 ms** baseline/candidate for int64 and **91.87/29.91 ms**
+for float64 (about **11.8× and 3.1×**). These are deliberately focused workloads,
+with arithmetic expectations checked at five input sizes, not whole-game speedups.
+[Sources, checksums and samples](source-core/sra64-final-runtime.json).
+
+Seven final compile pairs measured tour **51.21/50.39 ms**, Dunes
+**281.59/277.61 ms**, and compiler self-build **1128.93/1149.39 ms** wall time;
+CPU medians were **50.14/49.33**, **277.34/273.89**, and **1120.42/1140.80 ms**.
+The self-build cost is about 1.8% in this comparison; the other small changes
+do not establish a broad compilation gain.
+[Final compilation samples](source-core/sra64-final-compile.json).
+
+The wider application comparison was mixed. An apparent text regression in
+the unified prototype had highly variable samples despite identical kernel IR;
+seven final pairs measured text **263.58/264.04 ms** and records
+**163.14/165.34 ms**. There is no demonstrated broad application improvement,
+and the initial particle regression is absent with the 16-byte limit.
+[Final application samples](source-core/sra64-final-apps.json).

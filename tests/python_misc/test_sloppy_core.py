@@ -20,6 +20,46 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'optimizer-record-wide-integers': '''Pair:type=[x:int64 y:int64]
+advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y-2)
+main=()=>{
+let p=Pair(x=4294967296 y=-4294967296) let saved=p
+loop i in [0..20) {p=advance(p)}
+let values=[saved p] values.push(p)
+p.x=99
+return if saved.x =? 4294967296 and saved.y =? (-4294967296)
+and values[1].x =? 4294967316 and values[2].y =? (-4294967336) 42 else 1
+}''',
+    'optimizer-record-wide-floats': '''Pair:type=[x:float64 y:float64]
+advance=(p:Pair):>Pair=>Pair(x=p.x+0.5 y=p.y+p.x)
+main=()=>{
+let p=Pair(x=2.5 y=1.25) let saved=p
+loop i in [0..20) {p=advance(p)}
+let values=[saved p] values.push(p)
+p.y=0.0
+let precise=advance(Pair(x=1.0000000000000002 y=0.0))
+return if saved.x =? 2.5 and saved.y =? 1.25 and precise.y >? 1.0
+and values[1].x =? 12.5 and values[2].y =? 146.25 42 else 1
+}''',
+    'optimizer-record-wide-mixed': '''Pair:type=[x:int64 y:float64]
+advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y+0.25)
+choose=(take:bool):>Pair=>{let p:Pair=[] if take {p=Pair(x=4294967296 y=2.5)} return p}
+main=()=>{
+let zero=choose(false) let p=choose(true)
+loop i in [0..20) {p=advance(p)}
+return if zero.x =? 0 and zero.y =? 0.0 and p.x =? 4294967316 and p.y =? 7.5 42 else 1
+}''',
+    'optimizer-record-mixed-widths': '''Pair:type=[x:int32 y:int64]
+Outer:type=[left:Pair right:Pair]
+advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y-2)
+main=()=>{
+let p=Pair(x=-2147483648 y=4294967296)
+let outer=Outer(left=p right=p)
+loop i in [0..20) {p=advance(p)}
+outer.right=p
+return if outer.left.x =? (-2147483648) and outer.left.y =? 4294967296
+and outer.right.x =? (-2147483628) and outer.right.y =? 4294967256 42 else 1
+}''',
     **{f'loop-label-original-{name}': (Path(__file__).resolve().parents[2] / 'dewy/tests' / f'{name}.dewy').read_text()
        for name in ['iterator_labeled_exits', 'range_stepped_labeled_exits']},
     'loop-label-while': '''main=()=>{
