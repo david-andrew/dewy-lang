@@ -2081,6 +2081,7 @@ desugar_loopx = (lx: int) -> int:
         ok = true
         loop t in terms:
             if int(nodes[t].op) == 1:
+                if terms.len() > 1 and has_flag(int(nodes[t].a), NF_STEP): fatal(nodes[t].pos, "stepped ranges are only supported in single loops for now")
                 if nkids(t) != 1 or has_flag(t, NF_MUT): ok = false
                 else if not is_open_range(t):
                     seq = t

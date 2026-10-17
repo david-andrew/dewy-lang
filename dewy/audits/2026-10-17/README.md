@@ -131,3 +131,43 @@ All **1,655 checks pass in 90.64 s** with the existing independently bootstrappe
 compiler. The machine remains shared with other CPU-heavy work, so compare the
 focused setup changes rather than attributing the entire whole-suite wall-time
 difference to this patch. [Full gate](source-core/exact-errors-full.log).
+
+## Counted stepped integer loops
+
+Single loops and comprehensions accept `[first,second..end]` and
+`[first,second..end)`, including descending and open-ended progressions.
+Starting values and endpoints evaluate once in source order. Zero steps panic;
+an open-ended progression reports exhaustion of its machine-integer type.
+Combined stepped headers, stepped slices and stepped membership have explicit
+unsupported diagnostics.
+
+Bounded iteration computes an unsigned distance and trip count once, instead of
+checking for wraparound on each step. This handles signed/unsigned endpoints
+and step magnitudes across the full word without constructing an array. It also
+reuses the existing array-path optimization. Ordinary unit-step loops retain
+their existing lowering.
+
+A Python oracle compares **1,216** bounded cases on native/web in debug/release.
+Additional checks cover endpoint side effects, counter reassignment, `continue`,
+comprehensions, snapshots, narrow words, zero steps and open-range exhaustion.
+The independent C bootstrap passed **1,703 checks in 83.11 s**.
+The final **48-case focused gate passed in 3.46 s**, including added early-break
+prefix checks for progressions whose full mathematical length is 2^64.
+[Build manifest](source-core/stepped-range-build.json),
+[full gate](source-core/stepped-range-full.log),
+[final focused gate](source-core/stepped-range-final-check.log).
+
+Seven alternating native release measurements of a 30-million-iteration strided
+integer accumulation gave **105.78 / 25.99 ms**, about **4.1×**, for the initial
+per-step-check prototype versus the counted lowering. This is an implementation
+comparison within the new feature, not a speedup over a released compiler or a
+claim about every loop. Python checks the result independently, including
+zero/small-count preflights. The report includes the complete program, runner,
+compiler manifests and samples. The shared host's load average was about 7.67.
+[Runtime evidence](source-core/stepped-range-runtime.json).
+
+Seven compile pairs against the preceding compiler gave tour 64.36/57.39 ms,
+physics 328.07/339.41 ms and compiler self-build 1,299.18/1,300.80 ms wall time.
+CPU medians were 63.01/55.54, 323.81/333.66 and 1,279.58/1,286.11 ms. The mixed
+differences do not establish an overall compile-time improvement.
+[Complete compile samples](source-core/stepped-range-compile.json).

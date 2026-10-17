@@ -42,7 +42,7 @@ scientific literals, floating-point records,
 arrays and dictionaries with value copies, array slices, grapheme string operations, optional values, type aliases, callable types, union
 narrowing, typed/literal/catch-all `match` arms, nested record mutation, conditionals, while loops,
 interpolated strings, entry-point arguments, file imports (Dewy and Sloppy), named library imports,
-array/range iteration, import aliases, forward local record declarations, and
+array/range iteration (including single stepped integer loops), import aliases, forward local record declarations, and
 combined `and` loop headers, and `in?`/`not in?` membership for arrays,
 dictionaries, strings and integer range literals. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
@@ -410,6 +410,14 @@ directly. That variant measured 140.82/37.01 ms before/after, about 3.8×, while
 other projects were using substantial CPU. Those absolute times are not
 comparable to the quieter initial run. Its fresh-bootstrap gate passed 1,621
 checks in 103.18 seconds; the same audit directory records inputs and results.
+
+Stepped integer loops use `[first,second..end]` or an exclusive `)` endpoint.
+Their bounded form computes its trip count once, retaining full signed/unsigned
+word behavior without a per-iteration overflow check. The Python range oracle
+checks 1,216 cases on native/web in both modes. Open-ended steps report integer
+exhaustion; zero steps panic. Combined stepped loops, slicing and membership
+remain unsupported. See the language guide and the October 17 audit for the
+fresh 1,703-check bootstrap gate and measured lowering/compilation comparisons.
 
 The combined Dewy/editor/shared-core gate now contains 1,608 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.

@@ -813,7 +813,14 @@ dw_iterable = (id: int, slice: bool = false) -> int:
     n = mk(.range, dewy_syntax[id].pos)
     at = 1
     if dw_name(dw_child(id, at)) != "..":
-        nodes[n].a = i32(dw_expr(dw_child(id, at)))
+        first = dw_unwrap(dw_child(id, at))
+        if dw_op(first) == ",":
+            if slice: return dw_fail(id, "stepped slices or membership")
+            if dewy_syntax[first].children.len() != 3: return dw_fail(first, "a stepped range without exactly two starting values")
+            nodes[n].a = i32(dw_expr(dw_child(first, 1)))
+            nodes[n].c = i32(dw_expr(dw_child(first, 2)))
+            add_flag(n, NF_STEP)
+        else: nodes[n].a = i32(dw_expr(first))
         at += 1
     else if not slice: return dw_fail(id, "a loop range without a start")
     if at >= size or dw_name(dw_child(id, at)) != ".." or size > at + 2: return dw_fail(id, "this range")

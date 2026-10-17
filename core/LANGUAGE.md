@@ -390,7 +390,24 @@ value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 ## Loops, text and optional values
 
 `loop condition { ... }` repeats while the condition holds. Ranges such as
-`[0..10)` exclude the upper bound. Combined headers walk iterables together:
+`[0..10)` exclude the upper bound. Give the first two values for a stepped range:
+
+```dewy
+loop x in [0,16..width) {printl(x)}
+loop y in [10,8..0] {printl(y)}
+let odd_squares=[loop i in [1,3..10] i*i]
+```
+
+The step is the second value minus the first; it can ascend or descend but must
+be nonzero. `]` includes the endpoint and `)` excludes it. Starting values and
+the endpoint evaluate once in source order. Iteration uses counters without
+building an intermediate array. Bounded stepped loops terminate safely at the
+integer type's limits. An open-ended stepped loop such as `[1,3..]` panics if it
+exhausts its fixed-width integer type; `break` and `continue` work normally.
+Stepped ranges currently require a single loop header; combining them with other
+iterators/conditions, stepped slicing and stepped membership are not implemented.
+
+Combined headers walk supported iterables together:
 
 ```dewy
 loop i in 0.. and character in "café 🙂" {

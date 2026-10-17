@@ -3713,18 +3713,104 @@ gen_loop_body = (b: int):
     gen_block_stmts(b)
     scope_pop()
 
-# is a counting loop done (ctr past its end)
-for_done = (step_k: int, cmpop: Op, ltop: Op, ctr: int, endv: int, endn: int, stepv: int) -> int:
-    if step_k > 0: return e_bin(cmpop, VI, ctr, endv)
-    if step_k < 0: return e_bin(ltop, VI, ctr, endn)
-    up = e_bin(.gts, VI, stepv, e_iconst(0))
-    done_up = e_bin(.and_, VI, up, e_bin(cmpop, VI, ctr, endv))
-    done_dn = e_bin(.and_, VI, e_bin(.xor, VI, up, e_iconst(1)), e_bin(ltop, VI, ctr, endn))
-    e_bin(.or_, VI, done_up, done_dn)
+# Stepped ranges compare the original endpoint, without end+1 arithmetic.
+# Direction comes from the first two values, not their possibly wrapping
+# difference. The difference's bit pattern still gives the correct next value.
+stepped_done = (up: int, ctr: int, endv: int, inclusive: bool, signed: bool) -> int:
+    above = if signed: Op.ges else: Op.geu
+    below = if signed: Op.les else: Op.leu
+    if inclusive:
+        above = if signed: Op.gts else: Op.gtu
+        below = if signed: Op.lts else: Op.ltu
+    e_bin(.or_, VI,
+        e_bin(.and_, VI, up, e_bin(above, VI, ctr, endv)),
+        e_bin(.and_, VI, e_bin(.xor, VI, up, e_iconst(1)), e_bin(below, VI, ctr, endv)))
+
+gen_stepped_for = (s: int):
+    it = int(nodes[s].a)
+    l = int(nodes[s].sym)
+    lt = prune(int(locals[l].type))
+    signed = types[lt].sign
+    less = if signed: Op.lts else: Op.ltu
+    greater = if signed: Op.gts else: Op.gtu
+    lf = int(locals[l].flags)
+    direct = lf & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF) == 0 and not is_shared(l) and locals[l].offset < 0 and tsize(lt) == 8
+    ctr = vreg(VI)
+    if direct: ctr = int(locals[l].vreg)
+    endv = vreg(VI)
+    open_end = nodes[it].b == 0
+    inclusive = has_flag(it, NF_INCLUSIVE)
+    stmt_begin()
+    e_mov(ctr, gen_expr(int(nodes[it].a)).v)
+    second = gen_expr(int(nodes[it].c)).v
+    up = e_bin(greater, VI, second, ctr)
+    step = e_bin(.sub, VI, second, ctr)
+    if not open_end: e_mov(endv, gen_expr(int(nodes[it].b)).v)
+    iff(e_bin(.eq, VI, step, e_iconst(0)))
+    e_call_nr(rt("__panic"), [e_daddr(str_data("range step must be nonzero"))], -1)
+    endc()
+    stmt_end()
+    blk()
+    brk = ctl
+    if not open_end: brif_to(stepped_done(up, ctr, endv, inclusive, signed), brk)
+    remaining = vreg(VI)
+    if not open_end:
+        # Count iterations with unsigned distances, once. This covers the full
+        # signed/unsigned span without overflow checks on every iteration.
+        # A count of zero represents 2^64 iterations (the range is nonempty).
+        distance = vreg(VI)
+        magnitude = vreg(VI)
+        iff(up)
+        e_mov(distance, e_bin(.sub, VI, endv, ctr))
+        e_mov(magnitude, step)
+        els()
+        e_mov(distance, e_bin(.sub, VI, ctr, endv))
+        e_mov(magnitude, e_bin(.sub, VI, e_iconst(0), step))
+        endc()
+        if not inclusive: e_mov(distance, e_addi(distance, -1))
+        e_mov(remaining, e_addi(e_bin(.divu, VI, distance, magnitude), 1))
+    nfp = fp_begin(s, l, 0, 0)
+    lop()
+    top = ctl
+    if not direct: write_place(local_place(l, true), lt, ctr)
+    blk()
+    cont = ctl
+    loops.push(LoopInfo(brk, cont, scope_locals.len()))
+    gen_loop_body(int(nodes[s].b))
+    loops.pop()
+    fp_end(nfp)
+    endc()
+    next = e_bin(.add, VI, ctr, step)
+    if open_end:
+        wrapped = e_bin(.or_, VI,
+            e_bin(.and_, VI, up, e_bin(less, VI, next, ctr)),
+            e_bin(.and_, VI, e_bin(.xor, VI, up, e_iconst(1)), e_bin(greater, VI, next, ctr)))
+        bits = int(types[lt].bits)
+        if bits < 64:
+            lo = 0
+            hi = (1 << bits) - 1
+            if signed:
+                lo = -(1 << (bits - 1))
+                hi = (1 << (bits - 1)) - 1
+            wrapped = e_bin(.or_, VI, wrapped, e_bin(.or_, VI, e_bin(.lts, VI, next, e_iconst(lo)), e_bin(.gts, VI, next, e_iconst(hi))))
+        iff(wrapped)
+        e_call_nr(rt("__panic"), [e_daddr(str_data("range exhausted its integer type"))], -1)
+        endc()
+    e_mov(ctr, next)
+    if open_end: br_to(top)
+    else:
+        e_mov(remaining, e_addi(remaining, -1))
+        brif_to(e_bin(.ne, VI, remaining, e_iconst(0)), top)
+    endc()
+    endc()
 
 gen_for = (s: int):
     scope_push()
     aux = int(nodes[s].aux)
+    if aux == 0 and has_flag(int(nodes[s].a), NF_STEP):
+        gen_stepped_for(s)
+        scope_pop()
+        return
     if aux == 0 or aux == 4:
         l = int(nodes[s].sym)
         lt = int(locals[l].type)
@@ -3734,31 +3820,17 @@ gen_for = (s: int):
         lf = int(locals[l].flags)
         direct = lf & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF) == 0 and not is_shared(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
         if direct: ctr = int(locals[l].vreg)
-        stepv = 0              # vreg of the step (0: step 1)
-        step_k = 1             # the step when it is a constant (0: known only at run time)
-        endn = vreg(VI)        # with a run-time step: the end for counting down
         open_end = false
         stmt_begin()
         if aux == 0:
             it = int(nodes[s].a)
             e_mov(ctr, gen_expr(int(nodes[it].a)).v)
             incl = has_flag(it, NF_INCLUSIVE)
-            if has_flag(it, NF_STEP):
-                second = int(nodes[it].c)
-                stepv = vreg(VI)
-                e_mov(stepv, e_bin(.sub, VI, gen_expr(second).v, ctr))
-                step_k = 0
-                if has_flag(int(nodes[it].a), NF_LITERAL) and has_flag(second, NF_LITERAL): step_k = int(nodes[second].ival - nodes[int(nodes[it].a)].ival)
             if nodes[it].b == 0: open_end = true
             else:
                 hi = gen_expr(int(nodes[it].b)).v
-                if step_k >= 0:
-                    if incl: e_mov(endv, e_addi(hi, 1))
-                    else: e_mov(endv, hi)
-                if step_k <= 0:
-                    # counting down: stop below hi (or at it, when it is excluded)
-                    if incl: e_mov(endn, hi)
-                    else: e_mov(endn, e_addi(hi, 1))
+                if incl: e_mov(endv, e_addi(hi, 1))
+                else: e_mov(endv, hi)
         else:
             r = gen_expr(int(nodes[s].a)).v
             e_mov(ctr, e_load(VI, r, 0, 8))
@@ -3767,13 +3839,13 @@ gen_for = (s: int):
         sg = types[prune(lt)].sign
         safe_arrs: int[]
         nonneg = false
-        if aux == 0 and stepv == 0 and not open_end:
+        if aux == 0 and not open_end:
             safe_arrs = range_bounds_arrays(int(nodes[s].a))
             nonneg = is_nonneg(int(nodes[int(nodes[s].a)].a))
         if nonneg: nonneg_locals.push(l)
         # (the loop runs up to a path's length: its indexes by l are in bounds)
         bound = 0
-        if aux == 0 and stepv == 0 and not open_end and nonneg and not has_flag(int(nodes[s].a), NF_INCLUSIVE):
+        if aux == 0 and not open_end and nonneg and not has_flag(int(nodes[s].a), NF_INCLUSIVE):
             hi = int(nodes[int(nodes[s].a)].b)
             if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
         nfp = 0
@@ -3790,10 +3862,10 @@ gen_for = (s: int):
         ltop = Op.lts
         if not sg: ltop = .ltu
         # the loop is tested once before it and then at the bottom (one branch per iteration):
-        #   block { brif done; loop { l = ctr; block { body }; ctr += step; brif not done, loop } }
+        #   block { brif done; loop { l = ctr; block { body }; ctr += 1; brif not done, loop } }
         blk()
         brk = ctl
-        if not open_end: brif_to(for_done(step_k, cmpop, ltop, ctr, endv, endn, stepv), brk)
+        if not open_end: brif_to(e_bin(cmpop, VI, ctr, endv), brk)
         lop()
         top = ctl
         if not direct: write_place(local_place(l, true), lt, ctr)
@@ -3806,12 +3878,9 @@ gen_for = (s: int):
         fp_end(nfp)
         if nonneg: nonneg_locals.pop()
         endc()
-        if stepv != 0: e_mov(ctr, e_bin(.add, VI, ctr, stepv))
-        else: e_mov(ctr, e_addi(ctr, 1))
+        e_mov(ctr, e_addi(ctr, 1))
         if open_end: br_to(top)
-        else if step_k > 0: brif_to(e_bin(ltop, VI, ctr, endv), top)
-        else if step_k < 0: brif_to(e_bin(cmpop, VI, ctr, endn), top)
-        else: brif_to(e_bin(.xor, VI, for_done(step_k, cmpop, ltop, ctr, endv, endn, stepv), e_iconst(1)), top)
+        else: brif_to(e_bin(ltop, VI, ctr, endv), top)
         endc()
         endc()
         scope_pop()

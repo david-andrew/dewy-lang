@@ -1049,6 +1049,54 @@ return if decoded is? string and decoded =? original and again[0] =? 104 and byt
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
+    'stepped-range-values': '''main=()=>{
+let up:array<int64>=[] let down:array<int64>=[] let open:array<int64>=[]
+loop i in [0,2..8] {up.push(i)}
+loop i in [8,5..0) {down.push(i)}
+loop i in [1,4..] {if i >? 10 break if i =? 4 continue open.push(i)}
+let empty:int64=0
+loop i in [10,12..0] {empty+=1}
+loop i in [0,-2..10] {empty+=1}
+let collected=[loop i in [1,3..8] i*2]
+return if up =? [0 2 4 6 8] and down =? [8 5 2] and open =? [1 7 10]
+and empty =? 0 and collected =? [2 6 10 14] 42 else 1
+}''',
+    'stepped-range-managed': '''main=()=>{
+let values=[loop i in [0..8) [amount=i]] let saved=values
+loop i in [0,2..6] {values[i].amount+=10}
+let sum:int64=0
+loop i in [7,5..0] {sum+=values[i].amount}
+return if sum =? 16 and values[0].amount =? 10 and values[6].amount =? 16
+and saved[0].amount =? 0 and saved[6].amount =? 6 42 else 1
+}''',
+    'stepped-range-order': '''let order:int64=0
+bound=(tag:int64 value:int64):>int64=>{order=order*10+tag return value}
+main=()=>{let values:array<int64>=[]
+loop i in [bound(1 1),bound(2 4)..bound(3 10)] {values.push(i) i=99}
+return if order =? 123 and values =? [1 4 7 10] 42 else 1}''',
+    'stepped-range-widths': '''main=()=>{
+let low:int8=-128 let second:int8=0 let high:int8=127
+let signed:array<int64>=[]
+loop i in [low,second..high] {signed.push(i as int64)}
+let a:uint8=255 let b:uint8=253 let end:uint8=249
+let unsigned:array<int64>=[]
+loop i in [a,b..end] {unsigned.push(i as int64)}
+return if signed =? [-128 0] and unsigned =? [255 253 251 249] 42 else 1
+}''',
+    'stepped-range-limits': '''main=()=>{
+let low:int64=-9223372036854775808 let high:int64=9223372036854775807
+let top:uint64=18446744073709551615 let zero:uint64=0
+let a:array<int64>=[] let b:array<int64>=[] let c:array<uint64>=[] let d:array<uint64>=[]
+loop i in [low,high..high] {a.push(i) if a.length >? 3 break}
+loop i in [high,low..low] {b.push(i) if b.length >? 3 break}
+loop i in [zero,top..top] {c.push(i) if c.length >? 3 break}
+loop i in [top,zero..zero] {d.push(i) if d.length >? 3 break}
+let signed_prefix:array<int64>=[] let unsigned_prefix:array<uint64>=[]
+loop i in [low,low+1..high] {signed_prefix.push(i) if signed_prefix.length =? 3 break}
+loop i in [zero,zero+1..top] {unsigned_prefix.push(i) if unsigned_prefix.length =? 3 break}
+return if a =? [low high] and b =? [high low] and c =? [zero top] and d =? [top zero]
+and signed_prefix =? [low low+1 low+2] and unsigned_prefix =? [zero zero+1 zero+2] 42 else 1
+}''',
     'range-ends': '''main=():>int64=>{let sum:int64=0 loop i in 0..3 {sum+=i}
 loop i in [0..3) {sum+=i} loop i in [0..3] {sum+=i} return sum+27}''',
     'combined-continue': '''main=():>int64=>{let sum:int64=0
@@ -1059,6 +1107,10 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
+    'stepped-range-membership': ('main=()=>2 in? [0,2..10]', 'stepped slices or membership'),
+    'stepped-range-slice': ('main=()=>{let xs=[0 1 2 3] return xs[0,2..3].length}', 'stepped slices or membership'),
+    'stepped-range-combined': ('main=()=>{loop i in [0,2..10] and j in [0..3] {printl(i+j)}}', 'stepped ranges are only supported in single loops'),
     'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
     'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
     'array-context-variable-container': ('accept=(xs:array<uint64>)=>0\nmain=()=>{let xs=[42] return accept(xs)}', 'expects u64[]'),
@@ -1261,19 +1313,23 @@ def test_core_exit_batch_results(compiler, tmp_path, target):
 
 
 @pytest.fixture(scope='module')
-def exact_error_batches(compiler, tmp_path_factory, request):
+def error_batches(compiler, tmp_path_factory, request):
     selected, sources = {}, {}
     for item in request.session.items:
         if item.module is not request.module:
             continue
         family = {'test_core_bigint_errors': 'bigint',
-                  'test_core_rational_errors': 'rational'}.get(item.originalname)
+                  'test_core_rational_errors': 'rational',
+                  'test_core_stepped_range_errors': 'range'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['expression']
+        expression = params['body'] if family == 'range' else params['expression']
         case = family, expression
-        sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
+        if family == 'range':
+            sources[case] = f'main=():>void=>{{{expression}}}'
+        else:
+            sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
         selected.setdefault((params['target'], params['release']), []).append(case)
     groups = {}
     for (target, release), cases in selected.items():
@@ -1435,8 +1491,8 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_bigint_errors(exact_error_batches, expression, diagnostic, target, release):
-    ran = exact_error_batches('bigint', expression, release, target)
+def test_core_bigint_errors(error_batches, expression, diagnostic, target, release):
+    ran = error_batches('bigint', expression, release, target)
     assert ran.returncode != 0
     assert diagnostic in ran.stdout + ran.stderr
 
@@ -1602,8 +1658,8 @@ loop line in input.split("\n") {
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_rational_errors(exact_error_batches, expression, diagnostic, target, release):
-    ran = exact_error_batches('rational', expression, release, target)
+def test_core_rational_errors(error_batches, expression, diagnostic, target, release):
+    ran = error_batches('rational', expression, release, target)
     assert ran.returncode != 0
     assert diagnostic in ran.stdout + ran.stderr
 
@@ -1792,6 +1848,103 @@ loop line in input.split("\n") {
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_stepped_ranges(compiler, tmp_path, target, release):
+    cases, expected = [], []
+
+    def add(kind, start, second, end, inclusive):
+        step = second - start
+        if not step:
+            return
+        stop = end + (1 if step > 0 else -1) if inclusive else end
+        values = range(start, stop, step)
+        try:
+            if len(values) > 32:
+                return
+        except OverflowError:
+            return
+        cases.append(f'{kind}|{start}|{second}|{end}|{int(inclusive)}')
+        expected.extend([*[str(value) for value in values], 'end'])
+
+    for kind, edges in [('s', [-2**63, -2**63+1, -4, 0, 4, 2**63-2, 2**63-1]),
+                        ('u', [0, 1, 2, 2**63-1, 2**63, 2**64-2, 2**64-1])]:
+        for start in edges:
+            for second in edges:
+                for end in edges:
+                    for inclusive in [False, True]:
+                        add(kind, start, second, end, inclusive)
+    rng = random.Random(42028)
+    for _ in range(128):
+        start = rng.randrange(-100, 101)
+        step = rng.choice([n for n in range(-17, 18) if n])
+        add('s', start, start + step, start + rng.randrange(-50, 51), rng.choice([False, True]))
+    (tmp_path / 'cases.txt').write_text('\n'.join(cases))
+    source = tmp_path / 'ranges.dewy'
+    source.write_text('''from bigint import bigint
+emit=<T>(a:T b:T end:T inclusive:bool):>void=>{
+let count:int64=0
+if inclusive {
+    loop i in [a,b..end] {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
+} else {
+    loop i in [a,b..end) {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
+}
+printl"end"
+}
+main=():>void=>{
+let input=$include_bytes(p"cases.txt") as string|none
+if input is? none panic("invalid test data")
+loop line in input.split("\\n") {
+    let fields=line.split("|") let inclusive=fields[4] =? "1"
+    if fields[0] =? "s" {
+        let a=bigint(fields[1]).to_int64() let b=bigint(fields[2]).to_int64() let end=bigint(fields[3]).to_int64()
+        if a is? none or b is? none or end is? none panic("invalid signed bounds")
+        emit<int64>(a b end inclusive)
+    } else {
+        let a=bigint(fields[1]).to_uint64() let b=bigint(fields[2]).to_uint64() let end=bigint(fields[3]).to_uint64()
+        if a is? none or b is? none or end is? none panic("invalid unsigned bounds")
+        emit<uint64>(a b end inclusive)
+    }
+}
+}
+''')
+    binary = tmp_path / 'ranges'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web range checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'ranges.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('body, diagnostic', [
+    ('loop i in [2,2..10] {printl(i)}', 'range step must be nonzero'),
+    ('let start:int64=9223372036854775806 let second:int64=9223372036854775807\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
+    ('let start:uint64=18446744073709551614 let second:uint64=18446744073709551615\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
+    ('let start:uint8=254 let second:uint8=255\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
+    ('let start:int8=-127 let second:int8=-128\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_stepped_range_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('range', body, release, target)
+    assert ran.returncode != 0
+    assert diagnostic in ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -2829,7 +2982,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
