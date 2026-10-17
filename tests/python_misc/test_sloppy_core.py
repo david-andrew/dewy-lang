@@ -147,6 +147,32 @@ i=0
 loop i <? values.length {total+=values[i] i+=1}
 return total
 }''',
+    'optimizer-nested-loop-effects': '''main=()=>{
+let integers=[0] let floats=[0.0] let history:array<int64>=[]
+let counter:int64=0 let outer:int64=0
+loop outer <? 4 {
+    let before=integers[0] let before_float=floats[0] let before_length=history.length
+    let before_counter=counter
+    if false {loop unused in [0..3) {integers[0]=999 counter=999}}
+    let inner:int64=0
+    loop inner <? 3 {
+        if inner =? 1 {inner+=1 continue}
+        loop deepest in [0..2) {
+            integers[0]+=outer+inner+deepest
+            floats[0]+=0.5
+            history.push(counter)
+            counter+=1
+        }
+        inner+=1
+    }
+    if integers[0] not=? before+4*outer+6 return 1
+    if floats[0] not=? before_float+2.0 return 2
+    if history.length not=? before_length+4 or counter not=? before_counter+4 return 3
+    loop sibling in [0..2) {integers[0]+=1 counter+=1}
+    outer+=1
+}
+return if integers[0] =? 56 and floats[0] =? 8.0 and history.length =? 16 and counter =? 24 42 else 4
+}''',
     'power-precedence': '''main=()=>{
 if 2^3^2 not=? 512 or (2^3)^2 not=? 64 return 1
 if -2^2 not=? -4 or (-2)^2 not=? 4 return 2

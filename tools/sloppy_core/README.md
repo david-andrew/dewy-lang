@@ -325,7 +325,25 @@ delays easier to distinguish on the shared desktop. It sums the compiler and
 its waited-for children, so multiple emission workers can exceed elapsed time.
 See `cse-probe-compile.json` in the source-core audit.
 
-The combined Dewy/editor/shared-core gate now contains 1,532 checks and takes
+Loop-effect metadata now stores definitions once in a flat list, with nested
+loops sharing subranges. Memory-write categories propagate to the parent when
+a loop closes. The prepass no longer walks every enclosing construct for every
+instruction or allocates a definition array for each loop. A fresh C bootstrap
+and all 1,536 checks pass in 79.66 seconds, including nested integer/float/header
+mutations, dead loops, sibling loops and `continue`.
+
+Seven alternating warmed builds with the C-bootstrapped compiler measured tour
+at 58.60/58.00 ms, physics at 342.98/336.50 ms and compiler self-build at
+1,721.33/1,598.65 ms before/after. CPU medians were 56.29/57.05, 338.01/332.81
+and 1,642.45/1,516.93 ms respectively. An earlier seven-pair run gave physics
+344.83/328.92 ms and self-build 1,389.36/1,292.01 ms. These shared-desktop
+measurements show about 7% less self-build time; the smaller physics improvement
+varied between runs, and tiny builds were effectively unchanged. See
+`flat-loop-compile-final.json`, `flat-loop-compile.json`, `flat-loop-build.json`
+and `flat-loop-full-tests.log` in the source-core audit. A preceding experiment
+replacing operand-list scans with masks gave conflicting results and was discarded.
+
+The combined Dewy/editor/shared-core gate now contains 1,536 checks and takes
 about 80 seconds locally, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
