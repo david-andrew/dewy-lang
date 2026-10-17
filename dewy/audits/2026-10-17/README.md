@@ -995,3 +995,16 @@ debug/release checks in 1.36 s**.
 [full bootstrap gate](source-core/sequence-full.log),
 [closure checks](source-core/sequence-closures.log),
 [toolchain metadata](source-core/sequence-validation.json).
+
+## Numeric type values and integer bounds
+
+Dewy's full numeric type names now work as conversions, and `string(value)`
+formats a value. Integer types expose typed `.min` and `.max` values through
+ordinary names, aliases and generic parameters. Bounds retain their width when
+constants/defaults are cloned; normal local shadowing remains intact.
+
+All **26 focused checks passed in 1.66 s**, including native/web debug/release.
+The independent C-bootstrap gate passed **2,529 checks in 132.52 s**. The existing
+`dewy/tests/integer_bounds.dewy` program also compiled and returned 42 unchanged.
+[Full bootstrap gate](source-core/numeric-full.log),
+[toolchain metadata](source-core/numeric-validation.json).

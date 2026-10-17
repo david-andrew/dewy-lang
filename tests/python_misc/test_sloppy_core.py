@@ -20,6 +20,34 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'numeric-names': '''main=()=>{let x=42
+return if int8(x) =? 42 and int16(x) =? 42 and int32(x) =? 42 and int64(x) =? 42
+and uint8(x) =? 42 and uint16(x) =? 42 and uint32(x) =? 42 and uint64(x) =? 42
+and float32(x) =? 42.0 and float64(x) =? 42.0 and string(x) =? "42" 42 else 1}''',
+    'numeric-bounds': '''main=()=>{
+if int8.min not=? -128 or int8.max not=? 127 return 1
+if int16.min not=? -32768 or int16.max not=? 32767 return 2
+if int32.min not=? -2147483648 or int32.max not=? 2147483647 return 3
+if int64.min not=? -9223372036854775808 or int64.max not=? 9223372036854775807 return 4
+if uint8.min not=? 0 or uint8.max not=? 255 return 5
+if uint16.min not=? 0 or uint16.max not=? 65535 return 6
+if uint32.min not=? 0 or uint32.max not=? 4294967295 return 7
+if uint64.min not=? 0 or uint64.max not=? 18446744073709551615 return 8
+return 42}''',
+    'numeric-bounds-generic': '''upper=<T>():>T=>T.max
+lower=<T>():>T=>T.min
+Byte:type=uint8
+main=()=>{let a:Byte=upper<Byte>() let b:int16=lower<int16>()
+return if a =? 255 and b =? -32768 and upper<uint64>() =? 18446744073709551615 42 else 1}''',
+    'numeric-bounds-constant': '''const BYTE_TOP=uint8.max
+const WORD_TOP=uint64.max
+width=((x:uint8)=>8)&((x:uint64)=>64)&((x:int64)=>0)
+default_byte=(x:uint8=BYTE_TOP)=>x
+main=()=>{let x=BYTE_TOP let y=WORD_TOP
+return if width(x) =? 8 and width(y) =? 64 and default_byte() =? 255 42 else 1}''',
+    'numeric-names-shadow': '''main=()=>{let uint8=(x:int64)=>x+2
+let int64=[min=20 max=22]
+return if uint8(40) =? int64.min+int64.max 42 else 1}''',
     'sequence-unpack': '''Series:type=[values:array<array<int64>>]
 len=(s:Series)=>s.values.length
 __index__=(s:Series index:int64)=>s.values[index]
@@ -2053,6 +2081,8 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
+    'numeric-bound-unknown': ('main=()=>uint8.maximum', "type has no member 'maximum'"),
     'range-index-stepped-string': ('main=()=>"abc"[0,2..2].length', 'stepped slicing requires an array'),
     'coalesce-nonoptional': ('main=()=>42??0', 'needs an optional on the left'),
     'compound-integer-exact-division': ('main=()=>{let x=42 x/=2 return x}', 'expected int, found Rational'),
@@ -4192,7 +4222,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

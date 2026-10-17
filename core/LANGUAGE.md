@@ -109,7 +109,11 @@ other copies of the record or array retain their independent values.
 
 Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
 types are `float32` and `float64`. Ordinary integer literals default to `int64`
-when they fit. Use `as` for numeric value conversion. Integer `//` is floor
+when they fit. Use `as` or a type call such as `uint8(value)` for numeric value
+conversion. Integer types expose typed `.min` and `.max` constants, including
+the full `uint64` range; these also work through type aliases and generic type
+parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.
+`string(value)` formats a value as text. Integer `//` is floor
 division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support signed `int64` and unsigned `uint64`, preserving the full
 unsigned range; narrower operands retain the existing integer widening rules.
