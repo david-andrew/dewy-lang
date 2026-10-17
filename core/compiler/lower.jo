@@ -1168,6 +1168,11 @@ race_scan = (n: int, f: int, who: str, captures: bool):
     loop i in [0..nkids(n)): race_scan(kid(n, i), f, who, captures)
     loop i in [0..nkids2(n)): race_scan(kid2(n, i), f, who, captures)
 
+gen_map_presence = (call: int, f: int) -> int:
+    order: int[]
+    if nodes[call].c != 0: order = call_eval_order(call)
+    gen_direct_call(f, kids(call), order).v
+
 gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     ret = int(fns[f].ret)
     rslot = -1
@@ -1649,6 +1654,10 @@ gen_binary = (e: int) -> Val:
         if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
         return V(r, false)
     if aux == 6:
+        if nodes[e].aux2 != 0:
+            has = gen_map_presence(a, int(nodes[e].aux2))
+            if op == .eq: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
+            return V(has, false)
         pa = gen_place(a, false)
         has = e_load(VI, place_addr(pa, lt), tsize(int(types[lt].elem)), 1)
         if op == .eq: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
@@ -2684,6 +2693,10 @@ gen_expr = (e: int) -> Val:
         at = prune(ntype(a))
         vi = int(nodes[e].aux)
         if vi == -3: return V(e_iconst(1), false)
+        if nodes[e].aux2 != 0:
+            has = gen_map_presence(a, int(nodes[e].aux2))
+            if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
+            return V(has, false)
         p = gen_place(a, false)
         addr = place_addr(p, at)
         if vi < 0:

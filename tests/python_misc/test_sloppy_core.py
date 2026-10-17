@@ -22,6 +22,64 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'dictionary-presence-forms': '''main=()=>{
+let values=[1->0 2->42]
+if values.get(1) is? none or values.get(3) isnt? none return 1
+if values.get(1) =? none or values.get(3) not=? none return 2
+if none =? values.get(2) or none not=? values.get(3) return 3
+if not (values.get(2) is? int64) return 4
+let flags=[1->false]
+if flags.get(1) is? none return 5
+let managed=[1->[20 22]]
+if managed.get(1) is? none or managed.get(2) isnt? none return 6
+return values.get(2)??0}''',
+    'dictionary-presence-default-values': '''main=()=>{
+let values:dict<int64 int64?>=[1->none 2->42]
+if values.get(1 none) isnt? none or values.get(3 none) isnt? none return 3
+if values.get(3 42) is? none return 4
+return 42}''',
+    'dictionary-presence-argument-order': '''let trace:int64=0
+let values:dict<int64 array<int64>>=[1->[42]]
+source=():>dict<int64 array<int64>>=>{trace=trace*10+1 return values}
+key=():>int64=>{trace=trace*10+2 values.clear() return 1}
+main=()=>{
+if source().get(key()) is? none or trace not=?12 return 1
+values=[1->[42]] trace=0
+if get(k=key() m=source()) isnt? none or trace not=?21 return 2
+values=[1->[42]] trace=0
+if none =? source().get(key()) or trace not=?12 return 3
+return 42}''',
+    'dictionary-presence-custom-methods': '''Box:type=[value:int64?]
+get=(box:Box key:int64):>int64?=>box.value
+has=(box:Box key:int64):>bool=>false
+has=(values:dict<int64 int64> key:int64):>bool=>false
+main=()=>{
+let box=Box[42] let empty=Box[none]
+if box.get(1) is? none or box.get(1) =? none return 1
+if empty.get(1) isnt? none or empty.get(1) not=? none return 2
+let values=[1->42]
+if values.get(1) is? none or values.get(1) =? none return 3
+return 42}''',
+    'dictionary-presence-callback-snapshot': '''Key:type=[value:int64]
+let values:dict<Key array<int64>>=[]
+let hash_calls:int64=0 let equal_calls:int64=0 let armed=false
+hash=(key:Key):>uint64=>{
+hash_calls+=1
+if armed values.clear()
+return 0
+}
+__eq__=(a:Key b:Key):>bool=>{
+equal_calls+=1
+if armed values.clear()
+return a.value =? b.value
+}
+main=()=>{
+values=[Key[1]->[42]] hash_calls=0 equal_calls=0 armed=true
+if values.get(Key[1]) is? none return 1
+if values.length not=?0 or hash_calls not=?1 or equal_calls not=?1 return 2
+armed=false values=[Key[1]->[42]] hash_calls=0 equal_calls=0 armed=true
+if values.get(Key[2]) not=? none return 3
+return if values.length=?0 and hash_calls=?1 and equal_calls=?1 42 else 4}''',
     'sequence-slice-loop-bound-locals': '''main=()=>{
 let values=[99 20 22 100] let start:int64=1
 let chosen=values[start..({start=0; 3}))
@@ -4309,6 +4367,22 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_dictionary_presence_ir(compiler, tmp_path, target):
+    source = tmp_path / 'presence.dewy'
+    source.write_text('''probe=(values:dict<int64 array<int64>> key:int64):>bool=>values.get(key) is? none
+main=()=>if probe([1->[42]] 1) 1 else 42
+''')
+    flags = ['--ir', *(['--target', 'wasm'] if target == 'wasm' else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'presence', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'presence probe was not emitted'
+    assert ' = load ' not in probe[0], 'presence query still loads an optional tag'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

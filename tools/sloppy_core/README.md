@@ -359,6 +359,19 @@ not a precise speedup multiplier. These are focused slice-loop results. Five
 fresh-build ratios are neutral (tour 0.988, Dunes 0.991, compiler 0.992).
 See `slice-loop-*` for source programs, samples and validation.
 
+Dictionary `get(key)` calls whose only use is testing the outer optional tag now
+lower to `has(key)`. This skips the value read and optional result while keeping
+written argument order and custom key hash/equality callbacks. Custom methods
+and the default-valued `get` overload keep their normal behavior. The independent
+C gate passes 3,344 checks in 68.46 seconds. Seven alternating release pairs on
+CPU 2 give a median candidate/baseline thread-CPU ratio of 0.934 for the unchanged
+million-node graph traversal, with matching boundary and full-size checksums.
+The candidate is still 1.498 times the C reference in this run; its insertion-ordered
+dictionaries and per-node neighbor arrays differ from C's flat representation.
+Five paired fresh-build CPU ratios are neutral: tour 0.992, Dunes 0.995 and
+self-compilation 1.006; no compilation-speed improvement is claimed.
+See `map-presence-*` for samples, compiler identities and validation.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

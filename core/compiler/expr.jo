@@ -4292,6 +4292,7 @@ check_binary = (n: int, expected: int) -> int:
                     nodes[n].b = i32(a)
                 if tkind(ntype(int(nodes[n].a))) != .opt: fatal(nodes[n].pos, "only optionals can be compared with none")
                 nodes[n].aux = 6
+                nodes[n].aux2 = i32(map_presence_fn(int(nodes[n].a)))
                 nodes[n].type = i32(T_BOOL)
                 return T_BOOL
             join_types(a, b, nodes[n].pos)
@@ -6639,6 +6640,23 @@ check_dotted = (n: int, expected: int) -> int:
 
 # ---------------- unions: `is` and narrowing ----------------
 # x is T: aux = the member's index for a union; -1 (is none) or -2 (has a value) for an optional
+# When only Map.get's outer optional tag is observed, use its presence query.
+# Keep the checked expression intact for types and conservative effect analysis;
+# lowering uses the original arguments and their written evaluation order.
+map_presence_fn = (call: int) -> int:
+    if nodes[call].kind != .call or nodes[call].aux != 0 or nkids(call) != 2: return 0
+    f = int(nodes[call].sym)
+    d = int(fns[f].decl)
+    if d == 0 or nodes[d].name != intern("get"): return 0
+    path = lib_dir + "/core/map.jo"
+    if files[pos_file(nodes[d].pos)].path != path: return 0
+    decls: int[]
+    collect_module(int(nodes[d].mod), intern("has"), decls)
+    loop candidate in decls:
+        if files[pos_file(nodes[candidate].pos)].path == path:
+            return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)
+    0
+
 check_istype = (n: int) -> int:
     # (a variable or field path, copied before it is checked: the rewrites below test it again)
     orig = 0
@@ -6671,6 +6689,7 @@ check_istype = (n: int) -> int:
         if types[tt].kind == .none_lit: nodes[n].aux = -1
         else if type_eq(tt, int(types[at].elem)): nodes[n].aux = -2
         else: fatal(nodes[int(nodes[n].b)].pos, "a {type_str(at)} is either a {type_str(int(types[at].elem))} or none, never a {type_str(tt)}")
+        nodes[n].aux2 = i32(map_presence_fn(int(nodes[n].a)))
     else if type_eq(at, tt): nodes[n].aux = -3      # (already narrowed to it, say): always true
     else: fatal(nodes[n].pos, "`is` tests which type a union (A | B) or optional value holds; this is always a {type_str(at)}")
     T_BOOL
