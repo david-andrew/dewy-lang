@@ -98,6 +98,32 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'optimizer-select-arithmetic': """choose=(x:int64):>int64=>if x%2 =? 0 x//2 else 3*x+1
+main=()=>{let total:int64=0
+loop x in [0..100) total+=choose(x)
+return if total=?8775 and choose(-3)=?(-8) and choose(-4)=?(-2) 42 else 1}""",
+    'optimizer-select-widths': """signed=(take:bool a:int8 b:int8):>int8=>if take a+1 else b-1
+unsigned=(take:bool a:uint64 b:uint64):>uint64=>if take a xor b else a+b
+main=()=>{let high:uint64=18446744073709551615
+return if signed(true 127 0)=?(-128) and signed(false 0 (-128))=?127
+and unsigned(true high 1)=?18446744073709551614 and unsigned(false high 1)=?0 42 else 1}""",
+    'optimizer-select-lazy': """let calls:int64=0
+bump=(n:int64):>int64=>{calls+=1 return n}
+choose=(take:bool value:int64 divisor:int64 values:array<int64>):>int64=>
+if take value+1 else value//divisor+values[10]
+main=()=>{let a:int64=0 let b:int64=0
+loop i in [0..10) {
+a=if i%2 =? 0 {b+=1; a+1} else {b+=10; a+2}
+let result=if i%2 =? 0 bump(20) else bump(22)
+if result not=? (if i%2 =? 0 20 else 22) return 1
+}
+return if a=?15 and b=?55 and calls=?10 and choose(true 41 0 [])=?42 42 else 2}""",
+    'optimizer-select-condition-order': """main=()=>{let x:int64=0 let total:int64=0
+loop i in [0..10) {
+let value=if {x+=1; x%2 =? 0} x*3 else x+1
+total+=value
+}
+return if x=?10 and total=?120 42 else 1}""",
     'optimizer-scalar-operand-values': '''main=()=>{
 let x:int64=10
 if x+{x=20; 3} not=? 13 return 1
@@ -2373,6 +2399,54 @@ loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
         runner = tmp_path / 'powers.cjs'
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm', 'linux-arm64'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_integer_select(compiler, tmp_path, target, release):
+    runner = shutil.which('qemu-aarch64' if target == 'linux-arm64' else 'node')
+    if target != 'native' and not runner:
+        pytest.skip(f'Runner unavailable for {target}')
+    values = [-(1 << 63), -(1 << 63)+1, -129, -1, 0, 1, 127, (1 << 63)-1]
+    rng = random.Random(42031)
+    values += [rng.randrange(-(1 << 63), 1 << 63) for _ in range(128)]
+    source = tmp_path / 'select.dewy'
+    source.write_text(f"""pick=(x:int64 y:int64 flag:bool):>int64=>
+if flag (x xor y)+1 else (x-y)*3
+main=():>void=>{{
+let values:array<int64>=[{' '.join(map(str, values))}]
+loop i in [0..values.length) {{
+let x=values[i] let y=values[values.length-1-i]
+printl(pick(x y true)) printl(pick(x y false))
+}}
+}}
+""")
+    expected = []
+    for x, y in zip(values, reversed(values), strict=True):
+        for result in [(x ^ y)+1, (x-y)*3]:
+            expected.append(str((result+(1 << 63)) % (1 << 64)-(1 << 63)))
+    binary = tmp_path / 'select'
+    flags = ['--ir', *(['--release'] if release else [])]
+    if target != 'native':
+        flags += ['--target', target]
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    pick_ir = re.search(r'^fn f_pick_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    if release:
+        assert pick_ir and ' = select ' in pick_ir[0], 'conditional selection was not emitted'
+    command = [binary]
+    if target == 'linux-arm64':
+        command = [runner, binary]
+    elif target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'select.cjs'
+        script.write_text('\n'.join(scripts.parts))
+        command = [runner, script]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected

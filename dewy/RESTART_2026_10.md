@@ -68,7 +68,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 1,500 checks and completes in roughly one to
+The development gate now has over 1,900 checks and completes in roughly one to
 one-and-a-half minutes locally. Focused selections typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced
 compiler launches from 674 to 44 and test time from 73.49 to 7.93 seconds, while
@@ -79,9 +79,10 @@ editor integration, live reload and shared-core regressions.
 
 Recent warmed measurements put the tour build near 60 ms, the physics release
 build near 340 ms and compiler self-build near 1.6 seconds. Sharing flat loop
-metadata reduced the latter by about 7% in two paired comparisons. Compilation
-and runtime changes are measured separately; inconclusive experiments are
-removed. Continue application development on this core while filling useful
+metadata reduced the latter by about 7% in two paired comparisons. Small integer conditional expressions now use conditional moves: the helper
+application improved from 1.196 to 0.995 seconds in seven paired samples, at a
+measured 2.4% compiler self-build cost. Compilation and runtime changes are
+measured separately; inconclusive experiments are removed. Continue application development on this core while filling useful
 language gaps and improving measured bottlenecks. It is still experimental,
 with explicit unsupported-feature diagnostics rather than full old-compiler
 compatibility or release certification.

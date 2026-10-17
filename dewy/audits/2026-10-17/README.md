@@ -384,3 +384,38 @@ bootstrap passed **1,920 checks in 71.62 s**.
 [Focused gate](source-core/optional-generic-focused.log),
 [full gate](source-core/optional-generic-full.log),
 [build manifest](source-core/optional-generic-build.json).
+
+## Conditional moves for small integer expressions
+
+The optimized IR already inlines the helper workload's hot functions. Increasing
+inlining limits would not address its remaining branches. A bounded cleanup now
+recognizes small integer value conditionals after inlining and emits an integer
+selection operation. x86 uses `cmovne`, ARM64 uses `csel`, and web uses Wasm
+`select`. Only cheap, nontrapping arithmetic is speculated; memory reads, calls,
+division, managed values and observable writes retain their conditional paths.
+The join writes are renamed before selection, preserving overlapping operands.
+
+The **196-check focused gate passed in 6.09 s**, including side effects, lazy
+unselected paths, narrowing and a Python oracle for 272 boundary/random results
+per mode/target. The oracle executes on native, web and ARM64 under QEMU and
+checks that the release helper actually contains selection IR.
+[Focused gate](source-core/integer-select-focused.log).
+The independent C bootstrap passed **1,942 checks in 59.28 s**.
+[Full gate](source-core/integer-select-full.log),
+[build manifest](source-core/integer-select-build.json).
+
+Seven paired full application measurements show the helper kernel improving
+from **1,195.65 to 994.79 ms (16.8% less time)**, versus C at 802.60 ms. The
+earlier three-pair trial measured 1,196.26/994.06 ms. Every checksum matches the
+independent C implementation. Other baseline/candidate medians are arrays
+**246.53/245.40 ms**, records **167.99/164.80 ms**, text **263.10/261.44 ms** and
+graph **595.42/588.91 ms**; these small differences are not claimed as speedups.
+[Full runtime samples](source-core/integer-select-runtime.json),
+[initial trial](source-core/integer-select-runtime-initial.json).
+
+The tradeoff is a small compilation cost. Seven pairs measured tour
+**49.90/50.20 ms**, physics **293.51/295.44 ms**, and compiler self-build
+**1,124.38/1,151.57 ms** (about 2.4% slower) wall time. CPU medians were
+48.81/49.22, 290.51/291.35 and 1,111.18/1,137.78 ms. The transformation has a
+fixed 32-instruction search limit and an eight-operation speculation budget.
+[Compile samples](source-core/integer-select-compile-initial.json).

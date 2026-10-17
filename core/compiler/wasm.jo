@@ -634,7 +634,14 @@ emit_wins = (ins: Ins):
             restore_sp()
             op(0x0F)
         trap: op(0x00)
-        select: op(0x00)
+        select:
+            lget(bb)
+            lget(int(ins.c))
+            lget(a)
+            op(0x50)                    # i64.eqz
+            op(0x45)                    # i32.eqz: nonzero condition
+            op(0x1B)
+            lset(d)
 
 vtype_of = (v: int) -> int:
     t = int(cur_wf.vtypes[v])

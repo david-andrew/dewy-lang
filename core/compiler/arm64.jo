@@ -1212,6 +1212,13 @@ arm64_ins = (pos: int, ins: Ins):
                 if ty == VI: a_ld(0, a)
                 else: a_lds(0, a, ty)
             a_epilogue()
+        select:
+            a_ld(9, a)
+            a_ld(10, bb)
+            a_ld(11, int(ins.c))
+            a_cmp_imm(9, 0)
+            w32(0x9A800000 | (11 << 16) | (AC_NE << 12) | (10 << 5) | 9)
+            a_st(d, 9)
         trap: w32(0)                                                   # udf #0
         _: ice("arm64: {op} is not supported")
 

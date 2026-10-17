@@ -126,6 +126,7 @@ o_rewrite = (ins: mut Ins):
 
 o_pure = (op: Op) -> bool:
     match op:
+        select: true
         iconst, fconst, mov, slot, gaddr, daddr, faddr, load: true
         add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, mulhs, mulhu: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
@@ -1360,6 +1361,86 @@ o_def_within = (dpos: int[], lo: int, hi: int, s: int, e: int) -> bool:
 
 # Final tidying: drop unreachable code after unconditional jumps, branches to the very next
 # instruction, and copies of a value that was computed just for the copy (t = a + 1; x = t).
+# Only cheap integer operations may run on the unselected path. In particular,
+# no loads, calls, division, managed values, or observable writes are speculated.
+o_select_op = (ins: Ins) -> bool:
+    if ins.ty != VI: return false
+    match ins.op:
+        iconst, mov, add, sub, mul, and_, or_, xor, shl, shrs, shru, neg, not_: true
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        sext8, sext16, sext32, zext8, zext16, zext32: true
+        _: false
+
+# Lowered value-if: block { block { condition; brif else; yes; br end }; no }.
+# Recognize a small diamond after inlining, so tiny arithmetic helpers count too.
+o_if_select = (out: mut Ins[], start: int) -> bool:
+    n = out.len()
+    if n - start < 6 or n - start > 32 or out[start + 1].op != .block: return false
+    depth = 0
+    branch = -1
+    jump = -1
+    split = -1
+    yes = -1
+    no = -1
+    cost = 0
+    loop j in [start + 2..n):
+        ins = out[j]
+        op = ins.op
+        if op == .block:
+            depth += 1
+            continue
+        if op == .end:
+            if depth > 0: depth -= 1
+            else:
+                if jump != j - 1 or split >= 0: return false
+                split = j
+            continue
+        if op == .brif and branch < 0 and depth == 0 and ins.imm == 0:
+            branch = j
+            continue
+        if op == .br and branch >= 0 and jump < 0 and depth == 0 and ins.imm == 1:
+            jump = j
+            continue
+        if op == .br or op == .brif or op == .brtable or op == .loop or op == .if_ or op == .else_ or op == .ret or op == .trap: return false
+        if branch < 0: continue
+        if not o_select_op(ins): return false
+        cost += 1
+        if cost > 8: return false
+        if split < 0:
+            if jump >= 0: return false
+            yes = j
+        else: no = j
+    if depth != 0 or yes < 0 or no < 0 or split < 0: return false
+    dst = int(out[yes].dst)
+    cond = int(out[branch].a)
+    if dst < 0 or out[no].dst != dst or vtype(dst) != VI: return false
+    loop j in [branch + 1..n):
+        ins = out[j]
+        if not o_select_op(ins): continue
+        d = int(ins.dst)
+        # Only the two result writes may redefine a register. Everything else
+        # must be a temporary, and neither arm may read the result being joined.
+        if d == cond: return false
+        if j != yes and j != no:
+            if d == dst or d < 0 or o_ndef[d] != 1: return false
+        o_operands(ins)
+        if o_buf.contains(dst): return false
+    y = o_tmp()
+    z = o_tmp()
+    replacement: Ins[]
+    loop j in [start + 2..n):
+        ins = out[j]
+        if ins.op == .block or ins.op == .end or j == branch or j == jump: continue
+        if j == yes: ins.dst = i32(y)
+        if j == no: ins.dst = i32(z)
+        replacement.push(ins)
+    selected = Ins(.select, VI, i32(dst), i32(cond), i32(z), i32(y), 0)
+    selected.pos = out[branch].pos
+    replacement.push(selected)
+    out.resize(start)
+    loop ins in replacement: out.push(ins)
+    true
+
 o_cleanup = (code: Ins[]) -> Ins[]:
     out: Ins[]
     out.reserve(code.len())
@@ -1389,6 +1470,10 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                 dead = false
             else: continue
         if op == .end and out.len() > 0:
+            if kinds[kinds.len() - 1] == .block and o_if_select(out, starts[starts.len() - 1]):
+                kinds.pop()
+                starts.pop()
+                continue
             last = out[out.len() - 1]
             if last.op == .br and last.imm == 0 and kinds[kinds.len() - 1] != .loop: out.pop()
             # `if c { br d }` is `brif c, d - 1` (one branch instead of two)

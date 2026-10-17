@@ -404,6 +404,11 @@ operands = (ins: Ins) -> int:
             use_buf.push(bb)
             use_buf.push(int(ins.c))
             return -1
+        select:
+            use_buf.push(a)
+            use_buf.push(bb)
+            use_buf.push(int(ins.c))
+            return d
         zeroslots:
             # defines vreg items (handled by caller via args)
             return -1
@@ -2265,7 +2270,16 @@ emit_ins = (pos: int, ins: Ins):
                 else: lds(0, a, ty)
             emit_epilogue()
         trap: b(0x0F); b(0x0B)
-        select: ice("select not supported")
+        select:
+            # Integer select: a is the condition, b/c the true/false values.
+            # Load all inputs before writing a potentially overlapping result.
+            ld(RAX, int(ins.c))
+            ld(RCX, bb)
+            ld(RDX, a)
+            op_rr(0x85, true, RDX, RDX)
+            rex(true, RAX, 0, RCX, false)
+            b(0x0F); b(0x45); modrr(RAX, RCX)       # cmovne rax, rcx
+            st(d, RAX)
 
 # jumps taken when condition `cc` is false (fixup positions appended to fx)
 jfalse = (cc: int, fx: mut int[]):
