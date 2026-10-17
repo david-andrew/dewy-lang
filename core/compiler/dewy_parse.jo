@@ -654,6 +654,8 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
+    if not top and initial != 0 and dw_op(dw_grouped(initial)) == "&":
+        return dw_fail(initial, "a local overload group; declare it at module level")
     if initial != 0 and dw_op(initial) == "=>":
         if top: return dw_function(initial, name)
         n = mk(.vardecl, dewy_syntax[id].pos)
@@ -989,6 +991,40 @@ dw_comprehension = (id: int) -> int:
     set_list(call, [block])
     call
 
+# Strip grouping parentheses when recognizing a function declaration or group.
+dw_grouped = (id: int) -> int:
+    let id = dw_unwrap(id)
+    loop dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+        id = dw_unwrap(dw_child(id, 0))
+    id
+
+dw_overload_members = (id: int, name: str, declarations: mut int[]):
+    let id = dw_grouped(id)
+    if dw_op(id) == "&":
+        loop i in [1..dewy_syntax[id].children.len()):
+            dw_overload_members(dw_child(id, i), name, declarations)
+    else if dw_op(id) == "=>": declarations.push(dw_function(id, name))
+    else: dw_fail(id, "an overload group member other than a function literal")
+
+# Expand a static overload group directly into ordinary declarations. This keeps
+# overload selection, generic specialization and callable context in one checker.
+dw_top_declarations = (id: int) -> int[]:
+    declaration = dw_unwrap(id)
+    if dw_op(declaration) == "SemicolonJuxtapose": declaration = dw_unwrap(dw_child(declaration, 1))
+    if dewy_syntax[declaration].kind == "KeywordExpr":
+        word = dewy_syntax[dw_child(declaration, 0)].text
+        if word == "let" or word == "const": declaration = dw_unwrap(dw_child(declaration, 1))
+    if dw_op(declaration) == "=":
+        name = dw_name(dw_child(declaration, 1))
+        initial = dw_grouped(dw_child(declaration, 2))
+        if name != "" and dw_op(initial) == "&":
+            if name == "main": return [dw_fail(id, "an overloaded entry point")]
+            declarations: int[]
+            dw_overload_members(initial, name, declarations)
+            return declarations
+        if name != "" and dw_op(initial) == "=>": return [dw_function(initial, name)]
+    [dw_stmt(id, true)]
+
 dewy_parse_file = (file: int) -> int[]:
     parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
     if not file_exists(parser): fatal(mkpos(file, 0), "legacy syntax parser is not installed; rebuild with --legacy-parser or use the default frontend")
@@ -1038,6 +1074,7 @@ dewy_parse_file = (file: int) -> int[]:
         stack.push(id)
     if root == 0: fatal(mkpos(file, 0), "missing syntax root")
     decls: int[]
-    loop child in dewy_syntax[root].children: decls.push(dw_stmt(child, true))
+    loop child in dewy_syntax[root].children:
+        loop declaration in dw_top_declarations(child): decls.push(declaration)
     dewy_syntax = []
     return decls

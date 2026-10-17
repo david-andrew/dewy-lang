@@ -65,6 +65,22 @@ are supported. Explicit arguments evaluate in written order, then omitted
 defaults in parameter order. An earlier parameter used in a default refers to
 its captured value, so `combine(next())` calls `next()` once.
 
+Module-level overload groups join function literals with `&`:
+
+```dewy
+measure = ((value:int64):>int64=>value)
+        & ((text:string):>int64=>text.length)
+main=()=>measure(40)+measure("ab")
+```
+
+Groups can be nested, and members may have different arities, defaults or generic
+type parameters. They expand into ordinary function declarations, sharing the
+same overload selection as repeated declarations of a function name. Selected
+imports retain the whole group. When passing an overloaded function as a value,
+its expected callable type selects a member. Grouping existing function values
+or local closures is not yet supported; group members must be function literals
+at module level. `main` must have one entry-point definition.
+
 Use `let` to declare a local or deliberately shadow a name. Assignment updates a
 visible variable; otherwise it can introduce a new variable. Parameters have
 value semantics. Use `@` in both a parameter and its call to change the caller:

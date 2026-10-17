@@ -130,6 +130,14 @@ both modes cover independent copies, side effects and shared `.jo` behavior.
 This retains the collection-copy cost of explicit read/edit/writeback; it does
 not introduce a mutable borrow through a getter.
 
+Module-level `f = (signature => body) & (signature => body)` overload groups
+expand directly into compact function declarations. Parentheses, nested groups,
+`let`/`const`, generic members, defaults, recursion and imports use the existing
+checker. Expected callable types select a member for first-class use, and editor
+hover reports the selected signature. No runtime overload object is introduced.
+Local groups, groups containing existing values, and grouped entry points are
+diagnosed rather than given a second dispatch mechanism.
+
 Dewy-defined dunder functions now participate in custom-record operator lookup:
 arithmetic, comparisons, unary minus, shifts/xor, and `__index__` / `__setindex__`.
 Their names remain ordinary function names for explicit calls and imports.
@@ -188,8 +196,8 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,156 checks and took
-74 seconds in the latest development run, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,205 checks and took
+59 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -197,9 +205,9 @@ display-independent render of the actual game. The playable example and build
 instructions are in `examples/sloppy_core/`.
 Evidence is in `dewy/audits/2026-10-16/source-core/`.
 
-The ordinary value gate retains 674 individual debug/release/native/web pytest
-checks but groups up to 16 independent modules into each build and execution.
-It uses 44 compiler launches instead of 674. Selection happens before grouping,
+At the first batching checkpoint, the ordinary value gate retained 674 individual
+debug/release/native/web pytest checks while grouping up to 16 independent
+modules into each build and execution, using 44 compiler launches instead of 674. Selection happens before grouping,
 so `-k` still gives a small reproducer, and each case's full result and captured
 output are checked separately. Harness checks exercise module isolation, output
 attribution, incorrect results, compile failures and panics. Process-specific

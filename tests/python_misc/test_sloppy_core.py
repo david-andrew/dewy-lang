@@ -38,6 +38,27 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'overload-group-arity': '''let choose = (():>int64=>40) & ((value:int64):>int64=>value+2)
+main=()=>choose()+choose(0)''',
+    'overload-group-types': '''const measure = (((value:int64)=>value) & ((text:string)=>text.length))
+main=()=>measure(40)+measure("ab")''',
+    'overload-group-generic': '''first = (<T>(items:array<T>):>T=>items[0]) & ((value:int64)=>value)
+main=()=>{let word=first<string>(["hello" "world"])
+return if word =? "hello" first([40 1])+first(2) else 1}''',
+    'overload-group-defaults': '''choose = ((x:int64 y:int64=x+2)=>x+y) & ((text:string)=>text.length)
+main=()=>if choose(text="ab") =? 2 choose(x=20) else 1''',
+    'overload-group-callable': '''step = ((value:int64):>int64=>value+2) & ((value:string):>string=>value+"!")
+apply=(f:((value:int64):>int64) value:int64):>int64=>f(value)
+main=()=>apply(step 40)''',
+    'overload-group-operators': '''Point:type=[x:int64 y:int64]
+__mul__ = ((v:Point amount:int64)=>Point[v.x*amount v.y*amount])
+        & ((amount:int64 v:Point)=>Point[amount*v.x amount*v.y])
+main=()=>{let point=Point[10 11] let a=point*2 let b=2point
+return if a =? b a.x+a.y else 1}''',
+    'overload-group-recursion': '''sum = (():>int64=>0)
+    & ((n:int64):>int64=>if n =? 0 sum() else n+sum(n-1))
+main=()=>sum(8)+sum(3)''',
+    'overload-group-parenthesized': 'main=(():>int64=>42)',
     'generic-records': '''Box:type=<T>[value:T history:array<T>=[]]
 Pair:type=<A B>[left:A right:B]
 Words:type=Box<array<string>>
@@ -546,6 +567,9 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'overload-group-value': ('choose=(()=>42)&42\nmain=()=>choose()', 'overload group member other than a function literal'),
+    'overload-group-local': ('main=()=>{let choose=(()=>40)&((n:int64)=>n) return choose()+choose(2)}', 'local overload group'),
+    'overload-group-main': ('main=(()=>42)&((n:int64)=>n)', 'overloaded entry point'),
     'main-record-result': ('main=()=>[value=42]', 'main must return void or an integer exit code'),
     'main-float-result': ('main=()=>42.5', 'main must return void or an integer exit code'),
     'operator-comparison-result': ('Box:type=[value:int64]\n__lt__=(a:Box b:Box)=>a.value-b.value\nmain=()=>Box[1] <? Box[2]', 'must return bool'),
@@ -1088,6 +1112,9 @@ events=():>string=>trace
     ('generic-operator-arithmetic', 'Vec, __add__'),
     ('generic-operator-comparison', 'Score'),
     ('generic-operator-specialization', 'Box'),
+    ('overload-group-callable', 'step, apply'),
+    ('overload-group-defaults', 'choose'),
+    ('overload-group-operators', 'Point'),
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
@@ -1574,7 +1601,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

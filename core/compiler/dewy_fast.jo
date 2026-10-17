@@ -483,7 +483,7 @@ dewy_fast_file = (file: int) -> int[]:
     loop dn_tokens[dn_at].kind != "eof":
         before = dn_at
         syntax = dn_stmt()
-        declarations.push(dw_stmt(syntax, true))
+        loop declaration in dw_top_declarations(syntax): declarations.push(declaration)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     dn_tokens = []
     dewy_syntax = []
