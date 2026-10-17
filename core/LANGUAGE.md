@@ -148,7 +148,9 @@ Dewy's unary minus binds below multiplication and division.
 `^` (also `.pow(nonnegative_exponent)`), `.abs()` and `.gcd(other)` operate exactly;
 `gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
 panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
-truncate. Interpolation formats decimal text. Values are independent copies and
+truncate. `.to_float32()` and `.to_float64()` round to the nearest floating
+value, with ties to even; overflow produces signed infinity. Interpolation
+formats decimal text. Values are independent copies and
 can be dictionary keys; construct them through numeric literals or `bigint`, keeping `_sign` and
 `_limbs` as internal representation details.
 
@@ -197,7 +199,20 @@ sign. `.divmod(other)` returns both. `.floor()` and `.ceil()` return `BigInt`;
 `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return fractions. Division
 by zero, a zero denominator and negative powers of zero panic. Zero to the zeroth
 power is one. Copies are independent, and normalized values can be dictionary
-keys. Conversion between fractions and floating values is not yet supplied.
+keys.
+
+`.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with
+ties to even. They handle very large parts without first rounding the numerator
+and denominator separately. Overflow produces signed infinity; underflow can
+produce signed zero. Conversion is explicit, for example when passing an exact
+time step to a vector or rendering API:
+
+```dewy
+let step=(1/60).to_float32()
+let movement=vec2(step 2.0*step)
+```
+
+Floating values cannot yet be converted back to `Rational` directly.
 
 [The exact-fraction example](../examples/sloppy_core/exact_rationals.dewy) computes
 harmonic sums, dice probabilities and exact time steps.

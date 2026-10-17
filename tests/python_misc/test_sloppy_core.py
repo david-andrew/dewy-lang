@@ -1,5 +1,6 @@
 """Expected user behavior for the experimental source-level core."""
 import base64
+import ctypes
 import math
 import os
 import random
@@ -8,6 +9,7 @@ import shutil
 import struct
 import subprocess
 import zlib
+from decimal import Decimal, localcontext
 from fractions import Fraction
 from html.parser import HTMLParser
 from pathlib import Path
@@ -44,6 +46,24 @@ return if a/b =? 1.5 and 3/2.0 =? 1.5 and 3.0/2 =? 1.5 42 else 1
 __truediv__=(a:BigInt b:BigInt):>int64=>a.value//b.value
 main=()=>BigInt[84]/BigInt[2]''',
     'rational-division-unused-constant': 'const unused=1/2\nmain=()=>42',
+    'rational-float-usage': '''from bigint import bigint
+main=()=>{
+let step=(1/60).to_float32()
+let position=vec2(step 2.0*step)
+let huge:int64=1000
+return if position.x >? 0.016 and position.x <? 0.017 and (1/2).to_float64() =? 0.5
+and bigint(huge).to_float32() =? 1000.0 42 else 1
+}''',
+    'rational-float-lifetime': '''work=():>void=>{
+let huge=123456789012345678901234567890
+loop n in [1..20) {
+let value=huge/(huge+n)
+if value.to_float64() <? 0.99 or value.to_float32() <? 0.99 panic("lost ratio")
+if huge.to_float64() <? 1e20 or huge.to_float32() <? 1e20 panic("lost integer")
+}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+return if alloc_count() =? before 42 else 1}''',
     'rational-division-lifetime': '''work=():>void=>{
 let fractions=[1/2 2/3 3/4] let copy=fractions
 fractions[0]=5/6
@@ -1196,6 +1216,92 @@ loop line in input.split("\n") {
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_exact_float_conversions(compiler, tmp_path, target, release):
+    values = {Fraction(0), Fraction(1, 3), Fraction(2, 3), Fraction(2**4096+1, 2**4096-1)}
+    for fraction_bits, bias in [(23, 127), (52, 1023)]:
+        minimum = 1-bias-fraction_bits
+        exponents = [minimum-1, minimum, minimum+1, -bias, 1-bias, 2-bias,
+                     -fraction_bits-1, -1, 0, 1, fraction_bits, fraction_bits+1, bias-1, bias, bias+1]
+        for exponent in exponents:
+            base = Fraction(2)**exponent
+            unit = Fraction(2)**max(exponent-fraction_bits, minimum)
+            half = base+unit/2
+            values.update([base, base+unit, half, half-unit/2**200,
+                           half+unit/2**200, base+3*unit/2])
+        largest = (2-Fraction(2)**(-fraction_bits))*Fraction(2)**bias
+        half = largest+Fraction(2)**(bias-fraction_bits-1)
+        values.update([largest, half, half-Fraction(2)**(bias-fraction_bits-200),
+                       half+Fraction(2)**(bias-fraction_bits-200)])
+        # These perturbations disappear if the conversion rounds to float64
+        # before float32, or rounds either part before dividing.
+        half = 1+Fraction(2)**(-fraction_bits-1)
+        values.update([half-Fraction(2)**-2000, half+Fraction(2)**-2000])
+    rng = random.Random(42029)
+    for _ in range(96):
+        numerator = rng.getrandbits(rng.choice([32, 64, 256, 1024, 2048, 4096])) or 1
+        denominator = rng.getrandbits(rng.choice([32, 64, 256, 1024, 2048, 4096])) or 1
+        values.add(Fraction(numerator, denominator))
+    values |= {-value for value in values}
+    values = sorted(values)
+    (tmp_path / 'cases.txt').write_text('\n'.join(f'{v.numerator} {v.denominator}' for v in values))
+    # CPython converts Fraction directly to a correctly rounded double. libc's
+    # decimal-to-float parser supplies an independent single-precision oracle;
+    # 5,000 digits resolve these <=4,096-bit inputs around every rounding tie.
+    libc = ctypes.CDLL(None)
+    libc.strtof.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p)]
+    libc.strtof.restype = ctypes.c_float
+
+    def bits(value):
+        try:
+            double = float(value)
+        except OverflowError:
+            double = -math.inf if value < 0 else math.inf
+        with localcontext() as context:
+            context.prec = 5000
+            text = str(Decimal(value.numerator)/Decimal(value.denominator))
+        single = libc.strtof(text.encode(), None)
+        return [struct.unpack('>Q', struct.pack('>d', double))[0],
+                struct.unpack('>I', struct.pack('>f', single))[0]]
+
+    expected = ['|'.join(map(str, bits(Fraction(v.numerator))+bits(v))) for v in values]
+    source = tmp_path / 'conversions.dewy'
+    source.write_text('''from bigint import bigint
+from rational import rational
+main=():>void=>{
+let input=$include_bytes(p"cases.txt") as string|none
+if input is? none panic("invalid test data")
+loop line in input.split("\n") {
+    let fields=line.split(" ")
+    let numerator=bigint(fields[0])
+    let value=rational(numerator bigint(fields[1]))
+    printl"{f64_bits(numerator.to_float64())}|{f32_bits(numerator.to_float32())}|{f64_bits(value.to_float64())}|{f32_bits(value.to_float32())}"
+}
+}
+''')
+    binary = tmp_path / 'conversions'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web floating conversion checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'conversions.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
 

@@ -1,6 +1,6 @@
 # Exact fractions over BigInt. Reduction strategies are adapted from the old
 # library/rational.dewy; representation and error handling use the compact core.
-from bigint import BigInt, bigint, parse_bigint
+from bigint import BigInt, bigint, parse_bigint, _ratio_float_bits
 
 Rational:type=[numerator:BigInt denominator:BigInt=bigint(1)]
 
@@ -64,6 +64,11 @@ _lt=(a:Rational b:Rational):>bool=>a.numerator*b.denominator <? b.numerator*a.de
 floor=(value:Rational):>BigInt=>value.numerator//value.denominator
 ceil=(value:Rational):>BigInt=>-((-value.numerator)//value.denominator)
 abs=(value:Rational):>Rational=>if value.numerator <? 0 _neg(value) else value
+
+to_float64=(value:Rational):>float64=>f64_from_bits(_ratio_float_bits(
+    value.numerator._sign <? 0 value.numerator._limbs value.denominator._limbs 52 11))
+to_float32=(value:Rational):>float32=>f32_from_bits(_ratio_float_bits(
+    value.numerator._sign <? 0 value.numerator._limbs value.denominator._limbs 23 8) as uint32)
 
 pow=(value:Rational exponent:int64):>Rational=>{
     let remaining=exponent as uint64

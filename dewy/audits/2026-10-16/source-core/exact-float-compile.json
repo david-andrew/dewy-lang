@@ -1,0 +1,144 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "aa1fe305c39ab16752cf0c7bd3ddca60bb898903",
+  "working_tree": " M core/LANGUAGE.md\n M core/lib/bigint.dewy\n M core/lib/rational.dewy\n M tests/python_misc/test_sloppy_core.py\n M tools/sloppy_core/README.md\n?? dewy/audits/2026-10-16/source-core/exact-float-build.json\n?? dewy/audits/2026-10-16/source-core/exact-float-full-tests.log\n",
+  "diff_sha256": "635582c01c41c3034c34e97d42a165aafab25281e7a0d7a6dde2d9dfbdb5483d",
+  "load_average_start": [
+    6.76123046875,
+    6.10693359375,
+    6.18359375
+  ],
+  "workers": 1,
+  "samples": 7,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792207148585400448/bin/dewy-core",
+      "sha256": "e26fc3e354e6310def5491a5425e2ea9970c0ba4de3811fb87b6a282b47af3e1"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792207673101439525/bin/dewy-core",
+      "sha256": "4dab069ffd8b9132ac329509ea72171b2056427eca49f74301dc514649f6813b"
+    }
+  },
+  "workloads": {
+    "exact-rationals": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/exact_rationals.dewy",
+        "--release"
+      ],
+      "source_sha256": "5c38902284cd36b0d65d9d4e2bb4c02d16bd1cb95e8309ba251c2b0be22d62cd",
+      "seconds": {
+        "baseline": [
+          0.07099887100048363,
+          0.06763421290088445,
+          0.0659603140084073,
+          0.06680419796612114,
+          0.08655703905969858,
+          0.10267241497058421,
+          0.080553891020827
+        ],
+        "candidate": [
+          0.07227306196000427,
+          0.06753235496580601,
+          0.07191983691882342,
+          0.07928362092934549,
+          0.07498835294973105,
+          0.10357402102090418,
+          0.10238515702076256
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.07099887100048363,
+        "candidate": 0.07498835294973105
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.06976599999999997,
+          0.06628399999999998,
+          0.06464099999999996,
+          0.06550099999999995,
+          0.08450399999999994,
+          0.09523000000000004,
+          0.07708299999999987
+        ],
+        "candidate": [
+          0.070988,
+          0.06379499999999999,
+          0.07043400000000005,
+          0.07412500000000007,
+          0.073439,
+          0.0981070000000001,
+          0.09975400000000015
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.06976599999999997,
+        "candidate": 0.073439
+      }
+    },
+    "exact-integers": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/exact_integers.dewy",
+        "--release"
+      ],
+      "source_sha256": "f20e7401bffa9641c21f55d0a29c14c66e7deca2ac8675a50658e8598061a818",
+      "seconds": {
+        "baseline": [
+          0.06913677998818457,
+          0.06648054299876094,
+          0.06495283194817603,
+          0.0646148941013962,
+          0.06492568401154131,
+          0.07163676503114402,
+          0.0703450640430674
+        ],
+        "candidate": [
+          0.06801014603115618,
+          0.10244584491010755,
+          0.06653758091852069,
+          0.06865060899872333,
+          0.06759883905760944,
+          0.05882456596009433,
+          0.09369941998738796
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.06648054299876094,
+        "candidate": 0.06801014603115618
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.06805200000000017,
+          0.06527,
+          0.06392200000000026,
+          0.06344299999999975,
+          0.06188400000000022,
+          0.06793399999999977,
+          0.06812400000000057
+        ],
+        "candidate": [
+          0.0647649999999999,
+          0.07730100000000015,
+          0.06547399999999992,
+          0.06630299999999992,
+          0.06448700000000013,
+          0.05765499999999993,
+          0.09139899999999998
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.06527,
+        "candidate": 0.06547399999999992
+      }
+    }
+  },
+  "load_average_end": [
+    6.76123046875,
+    6.10693359375,
+    6.18359375
+  ]
+}

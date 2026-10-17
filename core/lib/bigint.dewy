@@ -431,6 +431,54 @@ to_int64=(value:BigInt):>int64|none=>{
     return magnitude as int64
 }
 
+# Round the exact ratio once to an IEEE binary format. Keeping a quotient and
+# remainder avoids overflowing either part or losing a tie-breaking low bit.
+_ratio_float_bits=(negative:bool numerator:array<uint64> denominator:array<uint64>
+                   fraction_bits:int64 exponent_bits:int64):>uint64=>{
+    if denominator.length =? 0 panic("floating conversion denominator must be nonzero")
+    let sign:uint64=0
+    if negative sign=(1 as uint64) << (fraction_bits+exponent_bits)
+    if numerator.length =? 0 return sign
+    let bias:int64=(1 << (exponent_bits-1))-1
+    let minimum:int64=1-bias-fraction_bits
+    let infinity:uint64=(((1 as uint64) << exponent_bits)-1) << fraction_bits
+    let nb=numerator.length*32-_limb_leading_zeros(numerator[numerator.length-1])
+    let db=denominator.length*32-_limb_leading_zeros(denominator[denominator.length-1])
+    let exponent=nb-db
+    if exponent >? bias+1 return sign or infinity
+    if exponent <? minimum-1 return sign
+    if exponent >=? 0 {
+        if _mag_compare(numerator _mag_shift_left(denominator exponent)) <? 0 exponent-=1
+    } else {
+        if _mag_compare(_mag_shift_left(numerator -exponent) denominator) <? 0 exponent-=1
+    }
+    if exponent >? bias return sign or infinity
+    if exponent <? minimum-1 return sign
+    let unit=exponent-fraction_bits
+    if unit <? minimum unit=minimum
+    let scaled_n=numerator let scaled_d=denominator
+    if unit <? 0 scaled_n=_mag_shift_left(numerator -unit)
+    else if unit >? 0 scaled_d=_mag_shift_left(denominator unit)
+    let parts=_mag_divmod(scaled_n scaled_d)
+    let word:uint64=0
+    if parts.quotient.length >? 0 word=parts.quotient[0]
+    if parts.quotient.length >? 1 word=word or (parts.quotient[1] << 32)
+    let rounding=_mag_compare(_mag_shift_left(parts.remainder 1) scaled_d)
+    if rounding >? 0 or (rounding =? 0 and (word and 1) not=? 0) word+=1
+    # At the minimum unit, these bits cover subnormals and the first normal
+    # binade, including a carry from rounding the largest subnormal.
+    if unit =? minimum return sign or word
+    let hidden:uint64=(1 as uint64) << fraction_bits
+    if word =? hidden << 1 {word=word >> 1 exponent+=1}
+    if exponent >? bias return sign or infinity
+    return sign or (((exponent+bias) as uint64) << fraction_bits) or (word-hidden)
+}
+
+to_float64=(value:BigInt):>float64=>
+    f64_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1 as uint64] 52 11))
+to_float32=(value:BigInt):>float32=>
+    f32_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1 as uint64] 23 8) as uint32)
+
 str=(value:BigInt):>string=>{
     if value._sign =? 0 return "0"
     let parts:array<string>=[]

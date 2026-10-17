@@ -237,8 +237,11 @@ rational library's denominator-GCD addition and cross-cancellation multiplicatio
 and avoids repeated GCDs when raising a reduced fraction to a power. Signed
 powers include the full `int64` exponent range; division by zero is a runtime
 error. Parsing, formatting, checked construction, floor/remainder operations,
-independent copies and dictionary keys are supported. Integer `/` still needs an
-explicit rational operand; no automatic fixed-width promotion is implied.
+independent copies and dictionary keys are supported. Integer `/` constructs an
+exact fraction directly, including mixed signed/unsigned words and `BigInt`.
+The type checker loads the bundled fraction library only after finding exact
+operands; floating and custom record division keep their existing dispatch.
+Ordinary fixed-width arithmetic still does not widen automatically on overflow.
 
 Native/web debug/release differential checks compare 216 fraction pairs with
 Python's `Fraction`, including random parts up to 256 bits. The executable
@@ -251,6 +254,22 @@ runtime measurement, not a speed comparison with another rational library.
 Seven warmed release builds of the fraction example took a median 63.96 ms
 (`rational-compile.json`). The full 1,340-check gate passes with this library;
 the unchanged compiler was independently C-bootstrapped at the bigint checkpoint.
+
+`BigInt` and `Rational` now provide explicit `.to_float32()` and `.to_float64()`
+conversions for floating APIs. Both round once to nearest, ties to even, including
+subnormal results, signed zero and overflow to signed infinity. Fraction parts
+are divided at sufficient integer precision instead of individually rounded;
+even ratios of two enormous integers can produce a finite, accurate result.
+Native/web debug/release checks compare boundary and seeded random inputs through
+4,096 bits with CPython's fraction-to-double conversion and libc's decimal-to-float
+parser. The latter receives 5,000 decimal digits and avoids double rounding
+through Python's float. Allocation-lifetime and vector-use cases are included.
+See `exact-float-full-tests.log` and `exact-float-build.json` in the source-core audit.
+The full gate passes 1,532 checks in 70.42 seconds. Seven alternating warmed
+builds measured the fraction example at 71.00/74.99 ms before/after (CPU
+69.77/73.44 ms), and the integer example at 66.48/68.01 ms (CPU 65.27/65.47 ms).
+The added library functions have a small checking cost; this is a capability
+change, not a compile-time improvement. See `exact-float-compile.json`.
 
 Dewy `^` now parses as right-associative power above multiplication, literal
 coefficients and unary minus. Records use `__pow__`; `xor` remains `__xor__`.
@@ -306,7 +325,7 @@ delays easier to distinguish on the shared desktop. It sums the compiler and
 its waited-for children, so multiple emission workers can exceed elapsed time.
 See `cse-probe-compile.json` in the source-core audit.
 
-The combined Dewy/editor/shared-core gate now contains 1,520 checks and takes
+The combined Dewy/editor/shared-core gate now contains 1,532 checks and takes
 about 80 seconds locally, including separate compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
