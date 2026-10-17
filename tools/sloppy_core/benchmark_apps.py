@@ -153,6 +153,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'adapted_source_sha256': digest(source), 'c_source_sha256': digest(c_source),
                 'build_seconds': builds,
                 'binary_sha256': {label: digest(binary) for label, binary in binaries.items()},
+                'binary_bytes': {label: binary.stat().st_size for label, binary in binaries.items()},
                 'samples': measured, 'median_kernel_ms': medians,
                 'median_wall_seconds': {label: statistics.median(row['wall_seconds'] for row in rows)
                                         for label, rows in measured.items()},

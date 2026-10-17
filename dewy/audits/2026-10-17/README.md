@@ -1048,3 +1048,35 @@ Five final alternating compile pairs gave median paired CPU ratios of
 **0.991 tour / 0.990 Dunes / 1.009 compiler self-build**,
 which show no meaningful compile regression on this busy host.
 [Compile samples](source-core/end-index-compile.json).
+
+## Targeted x86 comparison/branch alignment
+
+The x86 backend now pads a fused integer comparison and its conditional jump
+when the pair would cross or end on a 32-byte boundary. Any preparatory operand loads happen
+before the padding; only the comparison and branch must fit. Register, small
+immediate, large immediate and stack-spill encodings determine the exact span.
+This follows [Intel's conditional-branch layout guidance](https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/mitigation-strategies-jcc-microcode.html).
+It does not change the general loop alignment policy.
+
+On this Intel i7-6700 host, seven alternating thread-CPU samples gave paired
+median candidate/baseline ratios of **0.807 helpers, 0.918 arrays,
+0.860 records, 0.853 text and 1.004 graph**. The first four
+improved about 8–19%; graph was effectively unchanged. Executable files grew
+by 4,120–4,128 bytes. These are comparisons of the same programs across Dewy
+compiler versions on this processor, not a universal architecture or C ranking.
+The benchmark runner now records executable byte counts alongside hashes.
+[Application sources, checksums, timings and sizes](source-core/branch-padding-apps.json).
+
+Seven alternating compile pairs gave paired CPU ratios of **0.998 tour / 1.000
+Dunes / 1.000 compiler self-build**: no measured compile regression.
+[Compile samples](source-core/branch-padding-compile.json).
+
+The focused gate passed **300 checks in 12.87 s**. A further native release test
+checks program output and disassembles comparisons with register and immediate
+operands, verifying that the emitted fused pairs do not cross or end on a
+32-byte boundary; it passed in 1.87 s.
+[Focused gate](source-core/branch-padding-focused.log).
+
+The independent C-bootstrap gate passed **2,623 checks in 185.30 s**.
+[Full gate](source-core/branch-padding-full.log),
+[toolchain metadata](source-core/branch-padding-validation.json).

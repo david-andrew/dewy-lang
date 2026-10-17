@@ -3,6 +3,7 @@ import base64
 import ctypes
 import math
 import os
+import platform
 import random
 import re
 import shutil
@@ -4309,6 +4310,38 @@ def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
     assert code == '42', f'{name}: {code}\n{output}'
 
+
+
+def test_core_x64_compare_branch_layout(compiler, tmp_path):
+    objdump = shutil.which('objdump')
+    if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64') or not objdump:
+        pytest.skip('requires an x86-64 Linux host and objdump')
+    cutoffs = [-129, -128, 0, 1, 127, 128, 65536, *[i * 13 + 3 for i in range(24)]]
+    body = '\n'.join(f'if x <? {cutoff} printl({i})' for i, cutoff in enumerate(cutoffs))
+    source = tmp_path / 'branches.dewy'
+    source.write_text('branch_probe=(x:int64 y:int64):>void=>{\n'
+                      'if x <? y printl(777)\n' + body +
+                      '\n}\nmain=()=>{branch_probe(100 200) return 42}\n')
+    binary = tmp_path / 'branches'
+    built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['777', *[str(i) for i, cutoff in enumerate(cutoffs) if 100 < cutoff]]
+    dumped = subprocess.run([objdump, '-d', '--disassemble=branch_probe', binary],
+                            capture_output=True, text=True, timeout=10, check=True)
+    instructions = []
+    for line in dumped.stdout.splitlines():
+        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
+        if match:
+            instructions.append((int(match[1], 16), len(match[2].split()), match[3]))
+    pairs = [(left, right) for left, right in zip(instructions, instructions[1:])
+             if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
+    assert len(pairs) >= 8, dumped.stdout
+    for compare, branch in pairs:
+        # The fused pair must neither cross nor end on the 32-byte boundary.
+        assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
 
 
 def test_core_slice_bounds_panic(compiler, tmp_path):

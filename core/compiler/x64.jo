@@ -1459,8 +1459,28 @@ int_bin = (opc_rr: int, ext: int, ins: Ins):
     alu_v(opc_rr, ext, r, bb)
     st(d, r)
 
-cmp_ops = (a: int, bb: int):
+cmp_branch_pad = (span: int):
+    # Keep a fused integer comparison and its near conditional jump within a
+    # 32-byte region, including the last byte. Some x86 CPUs are sensitive to
+    # crossing or ending on this boundary; pad only an affected pair.
+    offset = code.len() % 32
+    if offset + span >= 32: nop_pad(32 - offset)
+
+cmp_ops = (a: int, bb: int, branch: bool = false):
     ra = reg_of(a, RAX)
+    if branch and ra_on:
+        l = vloc[bb]
+        size = 3  # REX.W, opcode, register ModRM
+        if l == LOC_CONST:
+            size = if vcval[bb] >= -128 and vcval[bb] <= 127: 4 else: 7
+        else if l == LOC_SPILL:
+            size = if vspill[bb] >= -128 and vspill[bb] <= 127: 4 else: 7
+        else if l < 0 or l >= XMM:
+            ld(RCX, bb)
+            cmp_branch_pad(9)
+            op_rr(0x39, true, RCX, ra)
+            return
+        cmp_branch_pad(size + 6)
     alu_v(0x39, 7, ra, bb)
 
 icc = (op: Op) -> int:
@@ -1579,7 +1599,7 @@ emit_ins = (pos: int, ins: Ins):
             nx = ir.code[pos + 1]
             if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
                 if is_icmp(op):
-                    cmp_ops(a, bb)
+                    cmp_ops(a, bb, true)
                     fused_cc = icc(op)
                 else: fused_cc = fcmp_flags(ins)
                 return
