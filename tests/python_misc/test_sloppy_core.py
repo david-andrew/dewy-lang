@@ -22,6 +22,36 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'dictionary-custom-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key\n'+'''main=()=>{
+let values:dict<Key int64>=[]
+values[Key[7 "first"]]=20
+values[Key[7 "second"]]+=22
+if values.length not=?1 or not values.has(Key[7 "third"]) return 1
+if values.get(Key[7 "fourth"]) not=?42 return 2
+if values.insert_if_absent(Key[7 "fifth"] 99) return 3
+let saved=values
+if not values.remove(Key[7 "sixth"]) or values.length not=?0 return 4
+return saved[Key[7 "last"]]}'''),
+    'set-custom-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key, Tagged\n'+'''main=()=>{
+let first=set[Key[20 "a"] Key[22 "b"] Key[20 "c"]]
+let second=set[Key[22 "other"] Key[20 "labels"]]
+if first.length not=?2 or first not=?second return 1
+let outer=set[first second]
+if outer.length not=?1 or second not in? outer return 2
+let records=[[members=first]->42]
+if records[[members=second]] not=?42 return 3
+let generic=set[Tagged<string>["same" "a"] Tagged<string>["same" "b"]]
+return if generic.length=?1 42 else 4}'''),
+    'set-hash-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'"\n'+'''through=(values:array<set<hash_keys.Key>>):>int64=>{
+let code=hash(values)
+let noise=[set[hash_keys.Key[99 "other"]]]
+return if noise.length=?1 and code=?hash(values) values[0].length*21 else 1
+}
+main=()=>{
+hash_keys.current=[set[hash_keys.Key[20 "a"] hash_keys.Key[22 "b"]]]
+hash_keys.armed=true
+let result=through(hash_keys.current)
+return if hash_keys.current.length=?0 and not hash_keys.armed result else 2}'''),
     'set-membership': '''main=()=>{
 let seen=set["read" "write" "read"]
 seen.push("execute") seen.push("write")

@@ -1,0 +1,16 @@
+# Equality deliberately ignores a label; hashing must use the same identity.
+Key:type=[value:int64 label:string]
+__eq__=(a:Key b:Key):>bool=>a.value =? b.value
+
+let hash_calls:int64=0
+let armed=false
+let current:array<set<Key>>=[]
+hash=(key:Key):>uint64=>{
+    hash_calls+=1
+    if armed {armed=false current.clear()}
+    return (key.value as uint64).hash()
+}
+
+Tagged:type=<T>[value:T label:string]
+__eq__=<T>(a:Tagged<T> b:Tagged<T>):>bool=>a.value =? b.value
+hash=<T>(key:Tagged<T>):>uint64=>key.value.hash()

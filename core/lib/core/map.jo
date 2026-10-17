@@ -78,8 +78,10 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
         loop m.slots[i] != 0: i = (i + 1) & mask
         m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(e + 1)
 
+# Method lookup also finds hash in the key's defining module, just as equality
+# finds its operator there. A lexical hash(k) can miss that overload in a caller.
 ([]=)[K, V] = (m: mut Map[K, V], k: K, v: V):
-    h = hash(k)
+    h = k.hash()
     e = __map_probe(m, k, h)
     if e >= 0:
         m.vals[e] = v
@@ -89,7 +91,7 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
 # Insert only a new key, preserving an existing value and its position. Returns
 # whether an entry was added; avoids a second hash/probe after checking absence.
 insert_if_absent[K, V] = (m: mut Map[K, V], k: K, v: V) -> bool:
-    h = hash(k)
+    h = k.hash()
     e = __map_probe(m, k, h)
     if e >= 0: return false
     __map_add(m, k, v, h, -2 - e)
@@ -99,7 +101,7 @@ insert_if_absent[K, V] = (m: mut Map[K, V], k: K, v: V) -> bool:
 # key is added, its value starting as V's zero value (or the default d, for a struct with
 # default field values)
 __map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
-    h = hash(k)
+    h = k.hash()
     e = __map_probe(m, k, h)
     if e >= 0: return e
     z: V
@@ -107,7 +109,7 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
     m.keys.len() - 1
 
 __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
-    h = hash(k)
+    h = k.hash()
     e = __map_probe(m, k, h)
     if e >= 0: return e
     __map_add(m, k, d, h, -2 - e)
@@ -150,7 +152,7 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
     m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(n + 1)
 
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
-    e = __map_find(m, k, hash(k))
+    e = __map_find(m, k, k.hash())
     if e < 0: panic("the map has no key {k}{__near_key(m, k)}: m.get(k) gives none for a missing key, and m.has(k) asks whether it is there")
     __at(m.vals, e)
 
@@ -196,17 +198,17 @@ __text_distance = (a: str, b: str, limit: int) -> int:
     min(prev[len(b)], limit)
 
 get[K, V] = (m: Map[K, V], k: K) -> V?:
-    e = __map_find(m, k, hash(k))
+    e = __map_find(m, k, k.hash())
     if e < 0: return none
     __at(m.vals, e)
 
 get[K, V] = (m: Map[K, V], k: K, default: V) -> V:
-    e = __map_find(m, k, hash(k))
+    e = __map_find(m, k, k.hash())
     if e < 0: return default
     __at(m.vals, e)
 
-contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
-has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
+contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
+has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
 len[K, V] = (m: Map[K, V]) -> int: m.keys.len() - m.ngone
 
 # Positional access for a compacted iteration snapshot, not a key lookup.
@@ -232,7 +234,7 @@ clear[K, V] = (m: mut Map[K, V]):
 remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
     ns = m.slots.len()
     if ns == 0: return false
-    h = hash(k)
+    h = k.hash()
     mask = ns - 1
     i = int(h) & mask
     hi = h & 0xFFFFFFFF00000000

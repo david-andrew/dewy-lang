@@ -42,7 +42,7 @@ pop[T] = (s: mut Set[T], default: T?) -> T?:
 # members commutatively so a set can itself be a dictionary key or set member.
 hash[T] = (s: Set[T]) -> u64:
     total: u64 = 0
-    loop value in __dewy_set_values(s): total += hash(value)
+    loop value in __dewy_set_values(s): total += value.hash()
     hash(total xor u64(s.len()))
 
 (|)[T] = (a: Set[T], b: Set[T]) -> Set[T]:

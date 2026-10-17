@@ -365,6 +365,19 @@ in written order. Built-in boolean `and`/`or` retain short-circuit evaluation;
 machine integers use bit operations. Power uses `__pow__` and keeps bitwise
 `xor`/`__xor__` separate.
 
+Dictionary and set keys can define `hash` alongside their record type:
+
+```dewy
+Key:type=[id:int64 label:string]
+__eq__=(a:Key b:Key):>bool=>a.id =? b.id
+hash=(key:Key):>uint64=>(key.id as uint64).hash()
+```
+
+Equal keys must return the same hash; here both operations use `id` and ignore
+`label`. Importing the type is enough for collection operations to find its hash
+function, including generic keys. Ordinary keys without a custom hash use the
+library's default hashing.
+
 [The bounded history example](../examples/sloppy_core/history.dewy) uses a
 [generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),
 including operator discovery through an imported type, nested edits and independent

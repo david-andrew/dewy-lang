@@ -314,6 +314,15 @@ checks an independent expected sum. This is an isolated nested-key improvement,
 not a general application claim. Five fresh-build pairs remain neutral (tour
 1.008, Dunes 0.999, compiler 0.992). See `set-effects-*` for sources and samples.
 
+Dictionary and set hashing now uses method lookup, finding a key's custom
+`hash` function in its defining module just as equality finds its operator.
+Previously, imported keys whose equality ignored a label could be stored as
+distinct entries despite a matching custom hash. Checks cover selected imports,
+generic keys, updates, removals, nested sets and a hash callback that clears the
+source while a borrowed argument remains in use. The independent C gate passes
+3,238 checks in 53.98 seconds. Five paired fresh-build CPU ratios are neutral:
+tour 0.999, Dunes 1.000, compiler 0.991. See `hash-discovery-*`.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
