@@ -441,6 +441,22 @@ without adding entries or changing their order; arrays have `reserve` too.
 Optional types use `T?`, including generic types such as `array<uint16>?`
 and nested `array<array<uint16>?>?`. `none` represents an absent value.
 
+Use `value ?? fallback` to unwrap an optional or provide a default. The left side
+runs once; the fallback runs only when it is `none`. Zero, `false` and empty
+collections are present values. Chains associate right, so
+`first ?? second ?? default` picks the first present value. A final optional
+fallback keeps the result optional. Arithmetic binds more tightly than `??`,
+while comparisons and boolean operators bind less tightly:
+`to_int(text) ?? 0 >? 10` compares the selected number with 10.
+
+```dewy
+let address = env("JOIN") ?? "localhost"
+let port = to_int(env("PORT") ?? "47200") ?? 47200
+```
+
+The left operand must be optional; use `mapping.get(key) ?? fallback` for an
+optional dictionary lookup. Direct indexing returns the stored element itself.
+
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 

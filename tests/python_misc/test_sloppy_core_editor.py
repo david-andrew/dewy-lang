@@ -165,6 +165,10 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert any("unknown name 'x'" in d['message'] for d in diagnostics), diagnostics
         diagnostics = client.set_text(uri, fallback, 10)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        diagnostics = client.set_text(uri, 'main=()=>42??0', 11)
+        assert any('needs an optional on the left' in d['message'] for d in diagnostics), diagnostics
+        diagnostics = client.set_text(uri, 'main=()=>none??42', 12)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
         assert source.read_text() == 'main=()=>42'
     finally:
         client.close()

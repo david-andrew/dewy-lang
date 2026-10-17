@@ -3,14 +3,12 @@
 # Host a native build with HOST=1; join it with JOIN=localhost.
 # DEWY_NETPONG_PORT overrides the default 47200 for local sessions.
 
-or_default = <T>(value: T? fallback: T) :> T => match value { present: T => present <none> => fallback }
-
 import net
 import invite
 
 window("Dewy / Netpong" 1280 720)
 
-let PORT = or_default(to_int(or_default(env("DEWY_NETPONG_PORT") "47200")) 47200)
+let PORT = to_int(env("DEWY_NETPONG_PORT") ?? "47200") ?? 47200
 const PADDLE_H = 120.0
 const PADDLE_SPEED = 620.0
 const BALL_SPEED = 520.0
@@ -24,7 +22,7 @@ let Screen = [title = 0 help = 1 friend = 2 by_address = 3 joining = 4 waiting =
 let screen = Screen.title
 let hosting = false
 let other = -1 # the other player (a peer)
-let address = or_default(env("JOIN") "localhost") # (a web page: ?join=address)
+let address = env("JOIN") ?? "localhost" # (a web page: ?join=address)
 let left_y = 360.0 # the host's paddle (left), the other's (right)
 let right_y = 360.0
 let right_move = 0.0 # (the host: what the other player last asked for)
@@ -106,12 +104,12 @@ state = () :> string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score
 read_state = (t: string) => {
     let w = split(t " ")
     if w.length <? 8 { return }
-    ball = vec2(f32(or_default(to_float(w[1]) 0.0)) f32(or_default(to_float(w[2]) 0.0)))
-    left_y = or_default(to_float(w[3]) left_y)
-    right_y = or_default(to_float(w[4]) right_y)
-    score_l = or_default(to_int(w[5]) score_l)
-    score_r = or_default(to_int(w[6]) score_r)
-    let k = or_default(to_int(w[7]) int(Screen.playing))
+    ball = vec2(f32(to_float(w[1]) ?? 0.0) f32(to_float(w[2]) ?? 0.0))
+    left_y = to_float(w[3]) ?? left_y
+    right_y = to_float(w[4]) ?? right_y
+    score_l = to_int(w[5]) ?? score_l
+    score_r = to_int(w[6]) ?? score_r
+    let k = to_int(w[7]) ?? int(Screen.playing)
     if k =? int(Screen.over) { screen = Screen.over }
     else if k =? int(Screen.playing) { screen = Screen.playing }
 }
@@ -155,7 +153,7 @@ network = () => {
             other = -1
         }
         else if hosting {
-            if starts_with(e.text "m ") { right_move = or_default(to_float(e.text[2..]) 0.0) }
+            if starts_with(e.text "m ") { right_move = to_float(e.text[2..]) ?? 0.0 }
         }
         else if starts_with(e.text "s ") { read_state(e.text) }
     }

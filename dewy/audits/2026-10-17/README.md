@@ -884,7 +884,7 @@ and cleanup transformations. No new optimization pass is added.
 
 An initial seven-pair trial removed the intermediate buffer. The final version
 also combined the slot scans and was measured in eleven alternating pairs. Its
-median paired CPU ratios (candidate/baseline) were **0.999 tour, 0.992 Dunes,
+median paired CPU ratios (candidate/baseline) were **1.004 tour, 0.992 Dunes,
 0.990 self-build**: a modest roughly 1% gain on the larger builds, no meaningful
 change for the tour. Raw self-build medians differed more, **1774.15/1668.23 ms
 CPU**, but paired samples show that changing host load influenced that apparent
@@ -899,3 +899,22 @@ passed the independent C bootstrap and **2,310 checks in 121.53 s**.
 [Focused gate](source-core/dead-nop-focused.log),
 [full gate](source-core/dead-nop-full.log),
 [build manifest](source-core/dead-nop-build.json).
+
+## Lazy optional defaults
+
+Dewy's previously reserved `??` spelling now reaches the inherited coalescing
+checker and backend. It evaluates the left operand once, returns a present value
+(including zero, false and empty collections), and evaluates the right operand
+only for `none`. Right association supports chains and optional fallbacks. Its
+precedence is above comparisons and below arithmetic, consistent with the
+underlying Sloppy operation. No checker or backend fork was needed.
+
+Netpong now uses `??` for environment and numeric parsing defaults, removing
+its eager generic `or_default` wrapper. **47 focused checks passed in 10.60 s**,
+covering native/web debug/release behavior, generic inference, contextual arrays,
+managed snapshots and cleanup, precedence, lazy side effects, invalid operands,
+formatting, unsaved editor error recovery, and Netpong's native/web builds and
+winning-state exchange. This frontend addition uses the focused gate locally;
+the pushed CI workflow performs the full independent-bootstrap gate.
+[Focused gate](source-core/coalesce-focused.log),
+[build manifest](source-core/coalesce-build.json).

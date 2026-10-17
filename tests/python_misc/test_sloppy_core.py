@@ -20,6 +20,41 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'coalesce-inferred-none': 'main=()=>none??42',
+    'coalesce-basic': '''read=(present:bool):>int64?=>if present 42 else none
+main=()=>if (read(true)??0) =? 42 and (read(false)??42) =? 42 42 else 1''',
+    'coalesce-lazy-order': '''let trace:int64=0
+read=(present:bool):>int64?=>{trace=trace*10+1 if present 42 else none}
+fallback=()=>{trace=trace*10+2 42}
+main=()=>{let a=read(true)??fallback() let b=read(false)??fallback()
+return if a =? 42 and b =? 42 and trace =? 112 42 else 1}''',
+    'coalesce-chain': '''read=(value:int64):>int64?=>if value >? 0 value else none
+main=()=>{let a=read(0)??read(0)??42 let b:int64?=read(0)??read(42)
+let c:int64?=read(0)??read(0)
+return if a =? 42 and b =? 42 and c is? none 42 else 1}''',
+    'coalesce-precedence': '''read=():>int64?=>none
+main=()=>if read()??20+22 =? 42 and read()??2^3 =? 8 42 else 1''',
+    'coalesce-false': '''let called:bool=false
+read=():>bool?=>false
+fallback=()=>{called=true true}
+main=()=>if not (read()??fallback()) and not called 42 else 1''',
+    'coalesce-context': '''choose=(value:int64?):>int64=>value??42
+main=()=>{let bytes:array<uint8>=none??[20 22]
+return if choose(none) =? 42 and bytes[0]+bytes[1] =? 42 42 else 1}''',
+    'coalesce-generic': '''or_else=<T>(value:T? fallback:(():>T)):>T=>value??fallback()
+main=()=>if or_else(none ()=>42) =? 42 and or_else("yes" ()=>"no") =? "yes" 42 else 1''',
+    'coalesce-managed': '''make=(present:bool):>array<string>?=>{
+let values=["a"] values.push("b") return if present values else none
+}
+work=(present:bool):>void=>{
+let source=make(present) let values=source??["fallback"] let saved=values
+values.push("new")
+if present {if saved not=? ["a" "b"] panic("snapshot changed")}
+else {if saved not=? ["fallback"] panic("fallback changed")}
+}
+main=()=>{work(true) work(false) let before=alloc_count()
+loop i in [0..20) {work(true) work(false)}
+return if alloc_count() =? before 42 else 1}''',
     'compound-value-parameter': 'halve=(x:int64)=>{x//=2 x}\nmain=()=>{let x=84 return if halve(x) =? 42 and x =? 84 42 else 1}',
     'compound-custom-width': '''Box:type=[value:int8]
 __index__=(box:Box i:int64):>int8=>box.value
@@ -1862,6 +1897,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'coalesce-nonoptional': ('main=()=>42??0', 'needs an optional on the left'),
     'compound-integer-exact-division': ('main=()=>{let x=42 x/=2 return x}', 'expected int, found Rational'),
     'loop-else-value': ('main=()=>{let x=loop false {1} else 42 return x}', 'loop used as a value'),
     'loop-else-binder-scope': ('main=()=>{loop x in [0..0) {} else {return x} return 42}', "unknown name 'x'"),
@@ -3967,7 +4003,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

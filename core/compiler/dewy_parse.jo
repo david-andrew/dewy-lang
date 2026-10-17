@@ -611,6 +611,11 @@ dw_expr = (id: int) -> int:
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
+        if op == "??":
+            n = mk(.coalesce, pos)
+            nodes[n].a = i32(dw_expr(left))
+            nodes[n].b = i32(dw_expr(right))
+            return n
         n = mk(if op == "and": NK.and_ else if op == "or": NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
         nodes[n].a = i32(dw_expr(left))

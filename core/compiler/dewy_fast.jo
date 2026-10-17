@@ -164,7 +164,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             value = source[start..i)
         else:
             # Longest spelling wins. Dewy's comparison ? belongs to the operator.
-            loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "//", "<<", ">>", "..", "|>", "<|"]:
+            loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "??", "//", "<<", ">>", "..", "|>", "<|"]:
                 if dn_matches(source, start, stop, op):
                     value = op
                     i += len(op)
@@ -217,6 +217,7 @@ dn_power = (op: str) -> int:
         "xor": 65
         "and": 70
         "=?", "not=?", "<?", "not<?", ">?", "not>?", "<=?", "not<=?", ">=?", "not>=?", "is?", "isnt?", "in?", "notin?": 80
+        "??": 82
         "|": 85
         "&": 90
         "in": 95
@@ -445,7 +446,7 @@ dn_expr = (minimum: int) -> int:
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_node("Flat", "", pos_off(dewy_syntax[left].pos), parts)
             continue
-        right = dn_expr(if op == "=>" or op == "^": power else: power + 1)
+        right = dn_expr(if op == "=>" or op == "^" or op == "??": power else: power + 1)
         if op == ",":
             parts: int[]
             if dw_op(left) == ",": parts = dewy_syntax[left].children

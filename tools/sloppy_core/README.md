@@ -148,7 +148,11 @@ Dewy and `.jo` clients share specialization and dispatch. Comparisons require
 `bool`, and comparisons derived from `<` preserve written operand evaluation
 order. Record `and`/`or`/`not` use `__and__`/`__or__`/`__not__`; binary record
 operators evaluate both arguments once in source order. Built-in boolean
-`and`/`or` keep short-circuit evaluation. Floor division/modulo and power use
+`and`/`or` keep short-circuit evaluation. Optional `value ?? fallback` reuses
+the inherited checked coalescing operation, evaluates its left operand once,
+and only evaluates the fallback for `none`. It associates right, above
+comparisons and below arithmetic. Netpong uses it for configuration and parsed
+message fields. Floor division/modulo and power use
 their corresponding protocols too. Compound `//=`, `%=`, `/=` and `^=` use
 those same numeric and record operations, with index capture and custom-index
 writeback. Fixed-width results wrap to the destination width; exact `/=` needs
