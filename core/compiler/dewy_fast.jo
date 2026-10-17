@@ -333,7 +333,6 @@ dn_block = () -> int:
     if opening.text == "<": dn_angles += 1
     close = if opening.text == "(": ")" else if opening.text == "[": "]" else if opening.text == "<": ">" else: "}"
     children: int[]
-    exclusive = false
     loop true:
         if dn_tokens[dn_at].kind == "eof": dn_error(opening.start, "expected '{close}' before end of file")
         # Split adjacent generic closers, assignments and optional suffixes.
@@ -344,16 +343,15 @@ dn_block = () -> int:
             dn_tokens[dn_at].start += 1
             break
         if dn_accept(close): break
-        if opening.text == "[" and dn_peek() == ")" and children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose":
+        if ((opening.text == "[" and dn_peek() == ")") or (opening.text == "(" and dn_peek() == "]")) and children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose":
+            close = dn_peek()
             dn_at += 1
-            exclusive = true
             break
         before = dn_at
         children.push(dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
     if opening.text == "<": dn_angles -= 1
     label = opening.text + close + ":"
-    if exclusive: label = "[):"
     dn_node("Block", label, opening.start, children)
 
 dn_flow = () -> int:

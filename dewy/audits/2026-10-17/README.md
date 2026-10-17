@@ -700,3 +700,25 @@ Seven compile pairs measured baseline/candidate tour **83.20/81.92 ms**, Dunes
 were **77.68/77.78**, **429.74/428.22** and **1785.10/1781.12 ms**. These show no
 material compilation change on the loaded shared host.
 [Compile samples](source-core/stored-range-compile.json).
+
+## Exclusive first bounds
+
+Bounded signed-word ranges now accept `(first..last]` and `(first..last)`,
+including stepped forms. They exclude the first specified element and retain
+the existing stride. A constant-size range transformation drops that element;
+loops reuse the counted lowering above. Empty/singleton intervals and full-width
+counts remain correct without overflowing a signed endpoint. This applies to
+stored ranges, ordinary/combined loops and membership. Left-exclusive slices
+and open-ended left-exclusive ranges remain unsupported.
+
+The existing `range_values.dewy`, `range_bound_forms.dewy` and `range_stepped.dewy`
+programs now run unchanged through the compact core in both modes and targets.
+Python-generated iteration and membership expectations additionally cover both
+left-exclusive forms and signed boundaries; formatter execution checks include
+mixed `(]` delimiters. **120 focused checks passed in 6.03 s**, followed by the
+extended **96-check oracle/format selection in 6.32 s**. The independent C
+bootstrap and full gate passed **2,121 checks in 110.59 s**.
+[Focused gate](source-core/range-bound-focused.log),
+[extended oracle](source-core/range-bound-oracle.log),
+[full gate](source-core/range-bound-full.log),
+[build manifest](source-core/range-bound-build.json).

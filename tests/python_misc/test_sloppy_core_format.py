@@ -65,8 +65,10 @@ let x=5
 let values=[1 -2 3]
 let optional:array<array<int64>?>=[]
 let points=[0,2..8)
+let exclusive=(0,2..8]
 printl(identity<int64>(2x+2(x+1)))
 printl(values) printl([loop point in points point]) printl(optional.length)
+printl([loop point in exclusive point])
 return 0
 }''',
     'strings': '''main=()=>{

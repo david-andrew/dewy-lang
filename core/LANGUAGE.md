@@ -473,6 +473,13 @@ storage; use `break` to consume a prefix. Use a comprehension to materialize an
 array when needed. Stored ranges currently require both endpoints; open ranges
 remain available directly in loops and unit-range membership.
 
+For bounded signed-word ranges, `(` excludes the first specified value:
+`(0..3]` yields `1, 2, 3`, `(0..3)` yields `1, 2`, and `(0,3..10]` yields
+`3, 6, 9`. This works in ordinary/combined loops, stored values and membership.
+Excluding a single-element interval makes it empty, even at an integer limit.
+Slices with an exclusive first bound and open-ended left-exclusive ranges are
+not implemented.
+
 Combined headers walk supported iterables together:
 
 ```dewy

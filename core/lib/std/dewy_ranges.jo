@@ -19,6 +19,12 @@ __dewy_range = (first: int, second: int, last: int, stepped: bool, inclusive: bo
     if not inclusive: distance -= 1
     IntRange(first, stride, distance / stride + 1, up, false)
 
+__dewy_range_tail = (r: IntRange) -> IntRange:
+    if r._empty or r._stride == 0: return r
+    first = int(if r._up: u64(r._first) + r._stride else: u64(r._first) - r._stride)
+    count = r._count - 1
+    IntRange(first, r._stride, count, r._up, count == 0)
+
 contains = (r: IntRange, value: int) -> bool:
     if r._empty or r._stride == 0: return false
     if r._up and value < r._first or not r._up and value > r._first: return false

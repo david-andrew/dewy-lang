@@ -20,6 +20,24 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    **{f'stored-range-original-{name}': (Path(__file__).resolve().parents[2] / 'dewy/tests' / f'{name}.dewy').read_text()
+       for name in ['range_values', 'range_bound_forms', 'range_stepped']},
+    'stored-range-exclusive-first': '''main=()=>{
+let up=(0,3..10] let down=(10,7..0) let singleton=(5..5] let adjacent=(5..6)
+let a=[loop x in up x] let b=[loop x in down x]
+let c=[loop x in singleton x] let d=[loop x in adjacent x]
+let combined:int64=0 loop x in (0..3] and y in (10,8..4] {combined+=x+y}
+return if a =? [3 6 9] and b =? [7 4 1] and c.length =? 0 and d.length =? 0
+and 0 notin? up and 3 in? up and 10 notin? down and 7 in? down and combined =? 24 42 else 1
+}''',
+    'stored-range-exclusive-limits': '''main=()=>{
+let low:int64=-9223372036854775808 let high:int64=9223372036854775807
+let all=(low..high] let empty=(high..high] let reverse=(high,low..low]
+let a=[loop x in empty x] let b=[loop x in reverse x]
+let first:int64=0 loop x in all {first=x break}
+return if low notin? all and high in? all and first =? low+1 and a.length =? 0
+and b =? [low] and low in? reverse and high notin? reverse 42 else 1
+}''',
     'overload-group-empty-receiver': '''Value:type=[answer:int64=1]
 consume=(values:array<int64>)=>42
 consume=(value:Value)=>value.answer
@@ -2314,7 +2332,8 @@ loop line in input.split("\n") {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.parametrize('form', ['unit', 'stepped', 'stored-unit', 'stored-stepped'])
+@pytest.mark.parametrize('form', ['unit', 'stepped', 'stored-unit', 'stored-stepped',
+                                  'stored-open-unit', 'stored-open-stepped'])
 def test_core_integer_ranges(compiler, tmp_path, target, release, form):
     cases, expected = [], []
 
@@ -2326,6 +2345,8 @@ def test_core_integer_ranges(compiler, tmp_path, target, release, form):
             return
         stop = end + (1 if step > 0 else -1) if inclusive else end
         values = range(start, stop, step)
+        if form.startswith('stored-open-'):
+            values = values[1:]
         try:
             if len(values) > 32:
                 return
@@ -2386,6 +2407,8 @@ loop line in input.split("\\n") {
                           .replace('emit<uint64>(a b end inclusive)', 'panic("stored inputs must be signed")'))
     if form.endswith('unit'):
         source.write_text(source.read_text().replace('a,b..', 'a..'))
+    if form.startswith('stored-open-'):
+        source.write_text(source.read_text().replace('let r=[', 'let r=('))
     binary = tmp_path / 'ranges'
     flags = ['--release'] if release else []
     if target == 'wasm':

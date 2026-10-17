@@ -802,20 +802,25 @@ dw_range_value = (range: int) -> int:
     nodes[stepped].ival = if step: 1 else: 0
     inclusive = mk(.bool_lit, pos)
     nodes[inclusive].ival = if has_flag(range, NF_INCLUSIVE): 1 else: 0
-    bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
+    result = bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
+    if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
+    result
 
 dw_membership = (id: int) -> int:
     r = dw_iterable(id, true, true)
-    if nodes[r].kind == .range and has_flag(r, NF_STEP): return dw_range_value(r)
+    if nodes[r].kind == .range and (has_flag(r, NF_STEP) or has_flag(r, NF_EXCL_FIRST)): return dw_range_value(r)
     r
 
 dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
+    exclude_first = false
     if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
         wrapper = dewy_syntax[id].text
-        if wrapper != "[]:" and wrapper != "[):": return dw_fail(id, "this range boundary")
-        inclusive = wrapper == "[]:"
+        if wrapper not in ["[]:", "[):", "():", "(]:"]: return dw_fail(id, "this range boundary")
+        inclusive = wrapper == "[]:" or wrapper == "(]:"
+        exclude_first = wrapper == "():" or wrapper == "(]:"
+        if exclude_first and slice and not membership: return dw_fail(id, "a slice with an exclusive first bound")
         id = dw_unwrap(dw_child(id, 0))
     if slice and dw_name(id) == "..": return mk(.range, dewy_syntax[id].pos)
     if dw_op(id) != "RangeJuxtapose":
@@ -846,6 +851,9 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     if at >= size or dw_name(dw_child(id, at)) != ".." or size > at + 2: return dw_fail(id, "this range")
     if size == at + 2: nodes[n].b = i32(dw_expr(dw_child(id, at + 1)))
     if inclusive: add_flag(n, NF_INCLUSIVE)
+    if exclude_first:
+        add_flag(n, NF_EXCL_FIRST)
+        if not slice: return bc_call("__dewy_iter", [dw_range_value(n)], dewy_syntax[id].pos)
     return n
 
 dw_loop_head = (id: int, combined: bool = false) -> int:
