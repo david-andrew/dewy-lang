@@ -184,6 +184,11 @@ rel_finish = ():
 
 emit_now = (finish: bool):
     if finish: rel_finish()
+    else if not opt_release and not dbg_on:
+        # One local pass keeps ordinary builds useful without whole-program
+        # inlining. Variable-debug builds retain the original local locations.
+        kc_fn += 1
+        optimize()
     if dump: dump_ir()
     if target_wasm: wasm_collect()
     else if target_arm64: arm64_function()

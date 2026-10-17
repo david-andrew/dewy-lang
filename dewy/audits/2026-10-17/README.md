@@ -1121,3 +1121,40 @@ inside an index call. Ruff and diff checks passed. The preceding commit's full
 CI gate was green; this small checker extension uses the focused local gate and
 the normal full CI gate on push.
 [Toolchain and validation](source-core/end-offset-validation.json).
+
+## Useful code from default builds
+
+Default builds now apply the existing per-function optimizer once, before
+machine-code emission. This removes redundant operations and loads, propagates
+constants and promotes eligible small records. They still avoid release-mode
+cross-function inlining, loop versioning, and the release register allocator.
+Native `-g` builds preserve their local variable locations by skipping this new
+pass. A GDB test inspects a scalar and a changed record field at a source line.
+
+Five alternating thread-CPU pairs on the five application workloads produced
+candidate/baseline median paired ratios of **0.942 helpers, 0.921 arrays,
+0.514 records, 0.895 text and 0.914 graph**. Default-build records improved about
+49%; the others improved about 6–11%. Executables shrank by 13–17 KB.
+These compare the same workload and count across default compiler versions;
+they are not comparisons with C or with earlier measurements on a busier host.
+[Sources, checksums, hashes and samples](source-core/default-opt-runtime.json).
+
+The compile tradeoff is explicit. Seven alternating CPU pairs gave ratios of
+**1.109 tour, 1.302 Dunes, 1.002 compiler self-build**. Raw medians were
+53.76 → 59.58 ms for the tour and 159.19 → 218.95 ms for Dunes. The compiler's
+source already requests release mode; its approximately 1.66-second CPU
+self-build was effectively unchanged. Default small programs remain within the
+100 ms target; a roughly 60 ms Dunes cost buys better ordinary generated code.
+[Paired compilation samples](source-core/default-opt-compile.json).
+
+The initial default/release survey showed 1.4–2.7× runtime differences with
+47–54 / 64–79 ms single-build CPU times on the then-busier host. An intervening
+trial enabled extra uniqueness hoisting in default builds, but the existing
+fixed-array path already handled common loops; the trial gave no useful broad
+gain and was reverted. It is not part of this change.
+[Initial mode survey](source-core/build-modes-runtime.json),
+[discarded uniqueness trial](source-core/default-unique-runtime.json).
+
+The final independent C-bootstrap gate: **2652 passed in 95.87s (0:01:35)**. Ruff and diff checks passed.
+[Full gate](source-core/default-opt-full.log),
+[toolchain and validation metadata](source-core/default-opt-validation.json).

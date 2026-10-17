@@ -2317,6 +2317,34 @@ def test_core_frontend_selection(compiler, tmp_path, mode):
         assert checked.returncode == 1 and 'DEWY_CORE_FRONTEND' in checked.stderr, checked.stderr
 
 
+def test_core_debug_local_values(compiler, tmp_path):
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gdb'):
+        pytest.skip('native Linux x86-64 with GDB required')
+    source = tmp_path / 'main.dewy'
+    source.write_text('''Pair:type=[left:int64 right:int64]
+probe=():>int64=>{
+let result=Pair[20 21]
+result.right+=1
+let total=result.left+result.right
+printl"{total}"
+return total
+}
+main=()=>probe()
+''')
+    binary = tmp_path / 'program'
+    built = subprocess.run([compiler, 'build', source, '-g', '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    debugged = subprocess.run([
+        'gdb', '--batch', '-nx', '-ex', f'break {source}:6', '-ex', 'run',
+        '-ex', 'printf "scalar=%ld\\n", total',
+        '-ex', 'printf "field=%ld\\n", result.right', str(binary),
+    ], capture_output=True, text=True, timeout=30, check=False)
+    assert debugged.returncode == 0, debugged.stdout + debugged.stderr
+    assert 'scalar=42' in debugged.stdout, debugged.stdout
+    assert 'field=22' in debugged.stdout, debugged.stdout
+
+
 def build_case_batch(compiler, directory, cases, body, release, target, *, arguments=False):
     """Build independent source modules with a caller-supplied test entry point."""
     imports = []

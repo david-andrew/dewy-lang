@@ -41,8 +41,11 @@ standalone build.
 
 `watch` reruns a terminal program after edits and retries failed builds when a
 missing imported file or embedded asset appears. `check` reports errors without
-emitting an executable. `build --time` reports compiler phase timings. Use
-`--release` for optimized programs; development builds are the default.
+emitting an executable. `build --time` reports compiler phase timings.
+Development builds are the default and apply one local optimization pass per
+function. `--release` adds cross-function inlining and further loop optimization.
+Use `-g` without `--release` for native variable debugging; it preserves local
+variable locations instead of running the default local optimization pass.
 
 Native game reload keeps unrelated live state. Changed assets refresh globals
 initialized from them, including through direct helper calls across modules.
