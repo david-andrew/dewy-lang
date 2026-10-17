@@ -686,6 +686,10 @@ ctx_dependent = (a: int) -> bool:
     if k == .block and has_flag(a, NF_COMPREHENSION): return true
     if k == .array:
         if nkids(a) == 0: return nodes[a].b == 0
+        # Dewy array literals take their element type from the selected call.
+        # Check their children first, but do not freeze the array at int[] just
+        # because its numeric literals have not received a parameter type yet.
+        if nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"): return true
         # ([.key(.space), .button(.a)]: its elements take their type from the parameter's)
         loop e in kids(a):
             if ctx_dependent(e): return true
@@ -938,6 +942,25 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .opt: return 0
             if pk == .param: return 3
             return -1
+        if k == .array and nkids(a) > 0 and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"):
+            target = p
+            if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+            cost = 0
+            if types[target].kind == .opt:
+                target = prune(int(types[target].elem))
+                cost = 2
+            tk = types[target].kind
+            if tk == .array or (tk == .fixed and fixed_literal_ok(a, target)):
+                et = int(types[target].elem)
+                loop element in kids(a):
+                    ep = et
+                    if has_flag(element, NF_SPREAD): ep = mk_array(et)
+                    r = arg_cost(element, ep, binds)
+                    if r < 0: return -1
+                    cost += r
+                return cost
+            if pk == .param: return 3
+            return -1
         if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
             if pk == .array: return 0
             if nkids(a) == 0 and dewy_record_target(p) != 0 and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"): return 0
@@ -1019,6 +1042,9 @@ check_args_untyped = (args: int[]):
     loop a0 in args:
         a = unnamed(a0)
         if nodes[a].kind == .record_lit:
+            check_args_untyped(kids(a))
+            continue
+        if nodes[a].kind == .array and ctx_dependent(a) and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"):
             check_args_untyped(kids(a))
             continue
         if nodes[a].kind == .ident and not has_flag(a, NF_CHECKED):
@@ -4537,6 +4563,9 @@ check_expr = (n: int, expected: int) -> int:
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
     k = nodes[n].kind
+    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
+        ex = prune(int(types[ex].elem))
+        exk = types[ex].kind
     if k == .int_lit:
         add_flag(n, NF_LITERAL)
         nodes[n].type = i32(T_INT)

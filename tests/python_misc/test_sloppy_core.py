@@ -173,6 +173,40 @@ loop outer <? 4 {
 }
 return if integers[0] =? 56 and floats[0] =? 8.0 and history.length =? 16 and counter =? 24 42 else 4
 }''',
+    'argument-array-numeric-context': '''unsigned=(values:array<uint64>)=>values[0]+values[1]
+single=(values:array<float32>)=>values[0]+values[1]
+octets=(values:array<uint8>)=>values[0]+values[1]
+main=()=>{
+let indirect:((values:array<uint64>):>uint64)=unsigned
+return if unsigned([20 22]) =? 42 and single([20 22]) =? 42.0
+and octets([20 22]) =? 42 and indirect([20 22]) =? 42 42 else 1
+}''',
+    'argument-array-nested-context': '''nested=(values:array<array<uint64>>)=>values[0][0]+values[1][0]
+optional=(values:array<uint64>|none):>uint64=>if values is? none 0 else values[0]
+main=()=>{
+let nested_optional:array<array<uint64>>|none=[[42]]
+return if nested([[20] [22]]) =? 42 and optional([42]) =? 42
+and nested_optional is? array<array<uint64>> and nested_optional[0][0] =? 42 42 else 1
+}''',
+    'argument-array-overloads': '''pick = ((xs:array<int64>)=>1) & ((xs:array<uint64>)=>2) & ((xs:array<float64>)=>3)
+main=()=>{return if pick([1 2]) =? 1 and pick([18446744073709551615]) =? 2
+and pick([1.5 2.5]) =? 3 42 else 1}''',
+    'argument-array-generic-context': '''first=<T>(values:array<T> seed:T):>T=>values[0]
+plain=<T>(values:array<T>):>T=>values[0]
+main=()=>{let seed:uint64=0
+return if first([42] seed) =? 42 and first<float32>([42] 0) =? 42.0
+and plain([42]) =? 42 and plain([[42]])[0] =? 42 42 else 1}''',
+    'argument-array-order': '''let trace:int64=0
+next=():>uint64=>{trace=trace*10+1 return 20}
+last=():>uint64=>{trace=trace*10+2 return 22}
+accept=(values:array<uint64> tail:uint64):>uint64=>values[0]+values[1]+tail
+main=()=>{let result=accept([next() 0] last())
+return if result =? 42 and trace =? 12 42 else 1}''',
+    'argument-array-exact-records': '''from bigint import BigInt
+Item:type=[values:array<uint64>]
+exact=(values:array<BigInt>)=>values[0]+values[1]
+items=(values:array<Item>)=>values[0].values[0]
+main=()=>{return if exact([20 22]) =? 42 and items([[values=[42]]]) =? 42 42 else 1}''',
     'power-precedence': '''main=()=>{
 if 2^3^2 not=? 512 or (2^3)^2 not=? 64 return 1
 if -2^2 not=? -4 or (-2)^2 not=? 4 return 2
@@ -890,6 +924,10 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
+    'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
+    'array-context-variable-container': ('accept=(xs:array<uint64>)=>0\nmain=()=>{let xs=[42] return accept(xs)}', 'expects u64[]'),
+    'array-context-variable-element': ('accept=(xs:array<uint8>)=>0\nmain=()=>{let x:int64=42 return accept([x])}', 'expects u8[]'),
     'bigint-literal-user-record': ('BigInt:type=[value:int64]\nmain=()=>{let value:BigInt=42 0}', 'type mismatch'),
     'bigint-literal-word-variable': ('from bigint import BigInt\nmain=()=>{let word:int64=42 let value:BigInt=word 0}', 'type mismatch'),
     'overload-group-value': ('choose=(()=>42)&42\nmain=()=>choose()', 'overload group member other than a function literal'),

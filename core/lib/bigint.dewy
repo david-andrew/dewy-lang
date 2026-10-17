@@ -475,9 +475,9 @@ _ratio_float_bits=(negative:bool numerator:array<uint64> denominator:array<uint6
 }
 
 to_float64=(value:BigInt):>float64=>
-    f64_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1 as uint64] 52 11))
+    f64_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1] 52 11))
 to_float32=(value:BigInt):>float32=>
-    f32_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1 as uint64] 23 8) as uint32)
+    f32_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1] 23 8) as uint32)
 
 str=(value:BigInt):>string=>{
     if value._sign =? 0 return "0"

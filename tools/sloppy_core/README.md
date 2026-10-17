@@ -343,8 +343,24 @@ varied between runs, and tiny builds were effectively unchanged. See
 and `flat-loop-full-tests.log` in the source-core audit. A preceding experiment
 replacing operand-list scans with masks gave conflicting results and was discarded.
 
-The combined Dewy/editor/shared-core gate now contains 1,536 checks and takes
-about 80 seconds locally, including separate compiler processes and program execution.
+Dewy call arguments now keep array literals open to the selected parameter's
+element type. `[1]` can directly supply `array<uint64>`, `array<float32>` or
+`array<BigInt>` without a cast on each element. Overload selection checks the
+elements and their conversion costs before choosing a candidate; the children
+are checked once without prematurely fixing the container's type. This also
+supports nested arrays, optional array parameters, generic calls and arrays of
+contextual records. Existing array variables retain their concrete element type.
+Out-of-range literals and incompatible typed elements remain errors. The focused
+32-check selection takes 3.20 seconds; evidence for the independent C bootstrap
+and full gate is in `context-array-build.json` and `context-array-full-tests.log`.
+All 1,564 checks passed in 93.54 seconds. Seven alternating warmed builds were
+tour 61.19/59.06 ms, physics 351.79/346.08 ms and self-build 1,303.71/1,329.33 ms
+before/after. CPU medians were 58.30/56.53, 346.99/342.46 and 1,261.12/1,309.96 ms.
+The self-build cost was slightly higher in this run; this change improves typing
+ergonomics, with no compile-speed claim. See `context-array-compile.json`.
+
+The combined Dewy/editor/shared-core gate now contains 1,564 checks and takes
+roughly one to one-and-a-half minutes locally, including compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
 display-independent render of the actual game. The playable example and build

@@ -347,6 +347,14 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
+Array literals take their element type from a function parameter, including
+nested arrays and optional array parameters. For example,
+`sum_words=(xs:array<uint64>)=>xs[0]+xs[1]` accepts `sum_words([20 22])` without
+element casts. Overloads compare element conversions and prefer the usual
+integer or floating literal type when it fits. A literal outside a parameter's
+element range is rejected. An already constructed array keeps its element type;
+passing an `array<int64>` variable does not convert it to `array<uint64>`.
+
 `let [a b] = xs` unpacks arrays or tuple results by position, with an exact array
 length check. `_` discards an element. For records, targets select fields by
 name, in any order. `[a b] = [b a]` swaps existing variables. Nested patterns
