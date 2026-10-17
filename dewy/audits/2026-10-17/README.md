@@ -660,3 +660,43 @@ stronger runtime/compile benefit needed to keep them was absent.
 [Focused gate](source-core/operand-mask-focused.log),
 [first prototype](source-core/operand-mask-compile-rejected.json),
 [limited prototype](source-core/operand-mask-hot-compile-rejected.json).
+
+## Lazy stored ranges and bounded stepped combinations
+
+Bounded range expressions now produce an `IntRange`: a small signed-word value
+that captures its endpoints once. It can be copied, returned, passed to functions,
+kept in records/arrays and reused in independent loops. Membership checks bounds
+and stride without materializing elements. Default values are empty. Full-width
+distances/counts use unsigned arithmetic, including an interval with 2^64 elements.
+Stored ranges require both endpoints; direct open loops retain their existing
+behavior. Bounded signed-word stepped literals also work in combined headers.
+
+The first iterator-record implementation took **31.82 ms** for ten million
+values versus **8.58 ms** for the literal loop. Keeping hot state in scalar locals
+and reusing the existing counted-loop backend eliminated the repeated record
+loads/stores and termination flag. Seven alternating runs with the final C-built
+compiler measured literal/stored **8.68/8.12 ms** thread CPU time. This supports
+roughly comparable loop throughput for this simple workload, not a general
+speedup claim. Checksums use an independent arithmetic-series formula, with
+boundary preflights. [Initial source and measurements](source-core/stored-range-runtime-initial.json),
+[final source and measurements](source-core/stored-range-runtime.json).
+
+The new `contains` overload exposed an overload-resolution issue: a checked empty
+array receiver could be reconsidered as a default record. Candidate filtering
+now retains its array shape while still inferring its element type. Explicit
+record arguments keep their contextual initialization.
+[Existing membership failure](source-core/stored-range-overload-before.log),
+[321 focused checks in 9.69 s](source-core/stored-range-focused.log).
+
+The full independently C-bootstrapped gate passed **2,093 checks in 121.58 s**.
+Coverage includes Python-generated iteration/membership expectations, native/web
+in both modes, endpoint evaluation order, copied values, early exits, nested and
+combined loops, exact signed-word boundaries, empty defaults and no per-range
+allocation. [Full gate](source-core/stored-range-full.log),
+[build manifest](source-core/stored-range-build.json).
+
+Seven compile pairs measured baseline/candidate tour **83.20/81.92 ms**, Dunes
+**441.71/439.76 ms**, and self-build **1863.06/1863.41 ms** wall time. CPU medians
+were **77.68/77.78**, **429.74/428.22** and **1785.10/1781.12 ms**. These show no
+material compilation change on the loaded shared host.
+[Compile samples](source-core/stored-range-compile.json).

@@ -415,8 +415,9 @@ Stepped integer loops use `[first,second..end]` or an exclusive `)` endpoint.
 Their bounded form computes its trip count once, retaining full signed/unsigned
 word behavior without a per-iteration overflow check. The Python range oracle
 checks 1,216 cases on native/web in both modes. Open-ended steps report integer
-exhaustion; zero steps panic. Combined stepped loops, slicing and membership
-remain unsupported. See the language guide and the October 17 audit for the
+exhaustion; zero steps panic. Bounded signed-word steps now also support combined
+loops, stored `IntRange` values and membership. Stepped slicing remains unsupported.
+See the language guide and the October 17 audit for the
 bootstrap gates and measured lowering/compilation comparisons. Proved ascending
 strides over a stable array extent also omit redundant bounds checks: a repeated
 every-third-slot update with a live snapshot measured 44.81/24.55 ms before/after
@@ -539,8 +540,11 @@ Array slices support inclusive `xs[a..b]`, exclusive `xs[a..b)`, omitted bounds
 and `xs[..]`. Slices are independent values, including nested managed elements.
 The source value is held across bound evaluation, so calls in bounds can mutate
 or replace the original array without changing the value being sliced. Invalid
-bounds panic at runtime. String slices use grapheme boundaries too; stored range values remain a separate,
-unfinished feature.
+bounds panic at runtime. String slices use grapheme boundaries too. Bounded
+signed-word ranges can be stored as lazy `IntRange` values, reused in loops,
+returned or passed between functions, and tested with membership. They retain
+constant storage even across the full signed-word domain. Ordinary stored-range
+loops use scalar state and the existing counted-loop backend.
 
 Optional types accept `T?` and `T | none`, with `none` values and `is?`/`isnt?`
 narrowing. This includes dictionary `.get`, arrays of optional values, optional

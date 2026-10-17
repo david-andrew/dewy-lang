@@ -448,8 +448,30 @@ the endpoint evaluate once in source order. Iteration uses counters without
 building an intermediate array. Bounded integer loops terminate safely at the integer type's limits, including
 an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
 integer type; `break` and `continue` work normally.
-Stepped ranges currently require a single loop header; combining them with other
-iterators/conditions, stepped slicing and stepped membership are not implemented.
+Bounded signed-word stepped ranges also work in combined headers. Open-ended
+stepped ranges currently require a single header; stepped slicing is not implemented.
+
+Store a bounded range to reuse it, pass it to functions or return it:
+
+```dewy
+evens = [0,2..100)
+sum = (r:IntRange):>int64 => {
+    let total:int64=0
+    loop value in r {total+=value}
+    return total
+}
+printl(sum(evens))
+printl(42 in? evens)
+```
+
+`IntRange` is a small lazy value with signed `int64` endpoints. It captures its
+bounds once, retains no array, and each loop gets an independent cursor. Copies,
+arrays, record fields, `and`/`or` loops and membership work normally. Ordinary
+loops keep their counters in scalar locals. A default-initialized `IntRange` is
+empty. Even an interval covering the full signed-word domain takes constant
+storage; use `break` to consume a prefix. Use a comprehension to materialize an
+array when needed. Stored ranges currently require both endpoints; open ranges
+remain available directly in loops and unit-range membership.
 
 Combined headers walk supported iterables together:
 
@@ -535,7 +557,8 @@ Integer range literals use bound comparisons without building an array; `[a..b]`
 includes the end, `[a..b)` excludes it, and either endpoint can be omitted. The
 needle and then the container evaluate once in source order. For a range, both
 specified endpoints evaluate once after the needle, even if the lower-bound
-comparison is false. Stepped and stored range membership are not implemented.
+comparison is false. Bounded signed-word stepped literals and stored `IntRange`
+values check the stride as well as the bounds, without constructing an array.
 Custom containers can provide a `contains(container, needle):>bool` overload;
 a callable field named `contains` is not used by membership.
 

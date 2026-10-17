@@ -20,6 +20,94 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'overload-group-empty-receiver': '''Value:type=[answer:int64=1]
+consume=(values:array<int64>)=>42
+consume=(value:Value)=>value.answer
+main=()=>[].consume()''',
+    'stored-range-reuse': '''window=[0..10)
+evens=0,2..100
+sum=(r:IntRange):>int64=>{let total:int64=0 loop x in r {total+=x} return total}
+main=()=>{
+let local=[3..6]
+let count:int64=0 loop x in evens {count+=1}
+return if sum(window) =? 45 and sum(local) =? 18 and sum(local) =? 18
+and count =? 51 and 16 in? evens and 15 notin? evens 42 else 1
+}''',
+    'stored-range-direction': '''main=()=>{
+let up=[1,4..11] let down=[8,5..0) let empty=[4..2] let wrong=[1,-1..8]
+let a=[loop x in up x] let b=[loop x in down x]
+let c=[loop x in empty x] let d=[loop x in wrong x]
+return if a =? [1 4 7 10] and b =? [8 5 2] and c.length =? 0 and d.length =? 0
+and 10 in? up and 11 notin? up and 5 in? down and 0 notin? down and 4 notin? empty
+and 7 in? [1,4..11] and 8 notin? [1,4..11] 42 else 1
+}''',
+    'stored-range-boundaries': '''main=()=>{
+let low:int64=-9223372036854775808 let high:int64=9223372036854775807
+let all=[low..high] let wide=[low,high..high] let reverse=[high,low..low]
+let a=[loop x in wide x] let b=[loop x in reverse x]
+let count:int64=0 loop x in all {count+=1 if count =? 3 break}
+let last=[high..high] let empty=[high..high)
+let c=[loop x in last x] let d=[loop x in empty x]
+return if count =? 3 and a =? [low high] and b =? [high low] and c =? [high] and d.length =? 0
+and low in? all and high in? all and 0 in? all and 0 notin? wide 42 else 1
+}''',
+    'stored-range-capture': '''let order:int64=0
+bound=(tag:int64 value:int64)=>{order=order*10+tag return value}
+main=()=>{
+let end:int64=8
+let r=[bound(1 0),bound(2 2)..bound(3 end))
+end=100
+let saved=r let values:array<int64>=[]
+loop x in r {r=[100..101] if x =? 2 continue values.push(x)}
+return if order =? 123 and values =? [0 4 6] and 4 in? saved and 4 notin? r 42 else 1
+}''',
+    'stored-range-membership-order': '''let r=[0..2]
+needle=()=>{r=[20..22] return 21}
+main=()=>{
+let found=needle() in? r
+return if found 42 else 1
+}''',
+    'stored-range-membership-endpoints': '''let order:int64=0
+bound=(tag:int64 value:int64)=>{order=order*10+tag return value}
+main=()=>{
+let found=bound(1 4) in? [bound(2 0),bound(3 2)..bound(4 8))
+return if found and order =? 1234 42 else 1
+}''',
+    'stored-range-no-allocation': '''sum=(end:int64)=>{
+let r=[1,3..end) let total:int64=0 loop x in r {total+=x}
+return total
+}
+main=()=>{
+sum(1000) let before=alloc_count()
+let result=sum(1000)
+return if result =? 250000 and alloc_count() =? before 42 else 1
+}''',
+    'stored-range-combined': '''main=()=>{
+let r=[1,3..7] let sum:int64=0 let count:int64=0
+loop x in r and y in [10 20] {sum+=x+y}
+loop x in r or y in [10] {count+=1}
+let nested:int64=0 loop x in r {loop y in r {nested+=1}}
+return if sum =? 34 and count =? 4 and nested =? 16 42 else 1
+}''',
+    'stored-range-combined-literals': '''main=()=>{
+let sum:int64=0 let count:int64=0
+loop x in [1,3..7] and y in [10,20..30) {sum+=x+y}
+loop x in [1,3..7] or y in [10,20..30) {count+=1}
+return if sum =? 34 and count =? 4 42 else 1
+}''',
+    'stored-range-return': '''span=(first:int64 last:int64):>IntRange=>[first..last)
+take=(r:IntRange)=>[loop x in r x]
+main=()=>{
+let record=[bounds=span(20 23)]
+let ranges=[span(0 2) record.bounds]
+return if take(ranges[0]) =? [0 1] and take(ranges[1]) =? [20 21 22] 42 else 1
+}''',
+    'stored-range-default': '''main=()=>{
+let r:IntRange let values:array<IntRange>=[] values.resize(3)
+let count:int64=0 loop x in r {count+=1}
+loop item in values {loop x in item {count+=1} if 0 in? item return 1}
+return if count =? 0 and 0 notin? r 42 else 2
+}''',
     'answer': 'main=():>int64=>42',
     'rational-division-notation': '''main=()=>{
 let sum=1/2+1/3
@@ -1478,9 +1566,10 @@ ERRORS = {
     'array-comparison-different-arrays': ('main=()=>{let values:array<uint8>=[1] let other=[1] return values =? other}', 'cannot compare'),
     'combined-or-condition': ('main=()=>{loop i in [0..3) or true {printl(i)}}', 'only loop variables'),
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
-    'stepped-range-membership': ('main=()=>2 in? [0,2..10]', 'stepped slices or membership'),
-    'stepped-range-slice': ('main=()=>{let xs=[0 1 2 3] return xs[0,2..3].length}', 'stepped slices or membership'),
-    'stepped-range-combined': ('main=()=>{loop i in [0,2..10] and j in [0..3] {printl(i+j)}}', 'stepped ranges are only supported in single loops'),
+    'stored-range-open': ('main=()=>{let r=[0..] return 0}', 'stored range needs both endpoints'),
+    'stored-range-no-start': ('main=()=>{let r=[..4] return 0}', 'stored range needs both endpoints'),
+    'stepped-range-slice': ('main=()=>{let xs=[0 1 2 3] return xs[0,2..3].length}', 'stepped slices'),
+    'stepped-range-combined': ('main=()=>{loop i in [0,2..] and j in [0..3] {printl(i+j)}}', 'stepped ranges are only supported in single loops'),
     'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
     'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
     'array-context-variable-container': ('accept=(xs:array<uint64>)=>0\nmain=()=>{let xs=[42] return accept(xs)}', 'expects u64[]'),
@@ -2225,12 +2314,14 @@ loop line in input.split("\n") {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.parametrize('form', ['unit', 'stepped'])
+@pytest.mark.parametrize('form', ['unit', 'stepped', 'stored-unit', 'stored-stepped'])
 def test_core_integer_ranges(compiler, tmp_path, target, release, form):
     cases, expected = [], []
 
     def add(kind, start, second, end, inclusive):
-        step = second - start if form == 'stepped' else 1
+        if form.startswith('stored-') and kind != 's':
+            return
+        step = second - start if form.endswith('stepped') else 1
         if not step:
             return
         stop = end + (1 if step > 0 else -1) if inclusive else end
@@ -2241,12 +2332,15 @@ def test_core_integer_ranges(compiler, tmp_path, target, release, form):
         except OverflowError:
             return
         cases.append(f'{kind}|{start}|{second}|{end}|{int(inclusive)}')
-        expected.extend([*[str(value) for value in values], 'end'])
+        expected.extend(str(value) for value in values)
+        if form.startswith('stored-'):
+            expected.extend(str(needle in values).lower() for needle in [start, second, end, 0])
+        expected.append('end')
 
     for kind, edges in [('s', [-2**63, -2**63+1, -4, 0, 4, 2**63-2, 2**63-1]),
                         ('u', [0, 1, 2, 2**63-1, 2**63, 2**64-2, 2**64-1])]:
         for start in edges:
-            for second in (edges if form == 'stepped' else [start]):
+            for second in (edges if form.endswith('stepped') else [start]):
                 for end in edges:
                     for inclusive in [False, True]:
                         add(kind, start, second, end, inclusive)
@@ -2284,7 +2378,13 @@ loop line in input.split("\\n") {
 }
 }
 ''')
-    if form == 'unit':
+    if form.startswith('stored-'):
+        source.write_text(source.read_text()
+                          .replace('loop i in [a,b..end] {', 'let r=[a,b..end] loop i in r {')
+                          .replace('loop i in [a,b..end) {', 'let r=[a,b..end) loop i in r {')
+                          .replace('count+=1}', 'count+=1} printl(a in? r) printl(b in? r) printl(end in? r) printl(0 in? r)')
+                          .replace('emit<uint64>(a b end inclusive)', 'panic("stored inputs must be signed")'))
+    if form.endswith('unit'):
         source.write_text(source.read_text().replace('a,b..', 'a..'))
     binary = tmp_path / 'ranges'
     flags = ['--release'] if release else []
@@ -2339,6 +2439,8 @@ def test_core_combined_range_errors(error_batches, body, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let r=[2,2..10] printl(3 in? r)', 'range step must be nonzero'),
+    ('printl(3 in? [2,2..10])', 'range step must be nonzero'),
     ('loop i in [2,2..10] {printl(i)}', 'range step must be nonzero'),
     ('let start:int64=9223372036854775806 let second:int64=9223372036854775807\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
     ('let start:uint64=18446744073709551614 let second:uint64=18446744073709551615\nloop i in [start,second..] {printl(i)}', 'range exhausted its integer type'),
@@ -3530,7 +3632,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

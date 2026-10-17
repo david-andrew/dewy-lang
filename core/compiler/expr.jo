@@ -964,7 +964,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             return -1
         if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
             if pk == .array: return 0
-            if nkids(a) == 0 and dewy_record_target(p) != 0 and files[pos_file(nodes[a].pos)].is_dewy: return 0
+            # A checked method receiver is already an array, though its empty
+            # element type can still be inferred from the other arguments.
+            if nkids(a) == 0 and not has_flag(a, NF_CHECKED) and dewy_record_target(p) != 0 and files[pos_file(nodes[a].pos)].is_dewy: return 0
             if pk == .param: return 3
             return -1
         if k == .record_lit:
@@ -3185,6 +3187,17 @@ is_dewy_grapheme_iter = (t: int) -> bool:
     p = prune(t)
     types[p].kind == .struct_ and structs[int(types[p].st)].name == "__DewyGraphemeIter"
 
+is_dewy_range_type = (t: int, name: str) -> bool:
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != name: return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_ranges.jo"
+
+is_dewy_cursor_iter = (t: int) -> bool:
+    is_dewy_grapheme_iter(t) or is_dewy_range_type(t, "__DewyRangeIter")
+
 check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].kind = .intrinsic
     nodes[n].aux = i32(int(id))
@@ -3198,6 +3211,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         add_flag(args[0], NF_CHECKED)
         if tkind(t) == .str_:
             nodes[n] = nodes[bc_call("__dewy_grapheme_iter", args, nodes[n].pos)]
+        else if is_dewy_range_type(t, "IntRange"):
+            nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
         else: nodes[n] = nodes[args[0]]
         return check_expr(n, expected)
     else if id == .dewy_iter_done or id == .dewy_iter_value:
@@ -3205,10 +3220,11 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         t = arg_type(args, 0, 0)
         add_flag(args[0], NF_CHECKED)
         pos = nodes[n].pos
-        if is_dewy_grapheme_iter(t):
-            name = "__dewy_grapheme_done"
+        if is_dewy_cursor_iter(t):
+            prefix = if is_dewy_grapheme_iter(t): "__dewy_grapheme" else: "__dewy_range"
+            name = prefix + "_done"
             if id == .dewy_iter_value:
-                name = "__dewy_grapheme_value"
+                name = prefix + "_value"
                 add_flag(args[0], NF_MUT)
             nodes[n] = nodes[bc_call(name, [args[0]], pos)]
         else if id == .dewy_iter_done:

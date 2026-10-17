@@ -51,8 +51,8 @@ about 20 seconds. No installed compiler has been replaced.
 
 The working language includes inferred/generic functions, overloads, defaults,
 closures, dense records, independent value copies, custom operators/indexing,
-arrays, dictionaries, unions, optionals, grapheme-aware strings, imports and
-combined loops. Large integer literals, exact fractions through integer `/`,
+arrays, dictionaries, unions, optionals, grapheme-aware strings, imports,
+lazy stored ranges and combined loops. Large integer literals, exact fractions through integer `/`,
 powers and explicit exact-to-float conversions now use ordinary compact-core
 libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
 and remaining gaps; compatibility is defined by useful language behavior rather
@@ -70,7 +70,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 1,900 checks and completes in roughly one to
+The development gate now has over 2,000 checks and completes in roughly one to
 one-and-a-half minutes locally. Focused selections typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced
 compiler launches from 674 to 44 and test time from 73.49 to 7.93 seconds, while

@@ -5,6 +5,7 @@ use 'util.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'parse.jo'
+use 'expr.jo'
 
 struct DewySyntax:
     kind: str
@@ -416,6 +417,7 @@ dw_expr = (id: int) -> int:
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     op = dw_op(id)
+    if op == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
     if dw_is_include(id): return dw_include(id)
     if k == "BasedString": return dw_binary(id)
     if k == "Identifier":
@@ -477,6 +479,7 @@ dw_expr = (id: int) -> int:
         return n
     if k == "Block":
         children = dewy_syntax[id].children
+        if children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
             if children.len() == 1 and dewy_syntax[children[0]].kind == "Flow":
@@ -546,7 +549,7 @@ dw_expr = (id: int) -> int:
             comparison = mk(.binary, pos)
             nodes[comparison].op = i32(int(dw_binary_token(op, id)))
             nodes[comparison].a = i32(dw_expr(left))
-            nodes[comparison].b = i32(if op == "in?": dw_iterable(right, true) else: dw_expr(right))
+            nodes[comparison].b = i32(if op == "in?": dw_membership(right) else: dw_expr(right))
             n = mk(.not_, pos)
             nodes[n].a = i32(comparison)
             return n
@@ -607,7 +610,7 @@ dw_expr = (id: int) -> int:
         n = mk(if op == "and": NK.and_ else if op == "or": NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
         nodes[n].a = i32(dw_expr(left))
-        nodes[n].b = i32(if op == "in?": dw_iterable(right, true) else: dw_expr(right))
+        nodes[n].b = i32(if op == "in?": dw_membership(right) else: dw_expr(right))
         return n
     return dw_fail(id, "syntax '{k}'")
 
@@ -790,7 +793,23 @@ dw_import_name = (id: int) -> int:
     if alias != "": nodes[n].aux = i32(intern(alias))
     return n
 
-dw_iterable = (id: int, slice: bool = false) -> int:
+dw_range_value = (range: int) -> int:
+    pos = nodes[range].pos
+    if nodes[range].a == 0 or nodes[range].b == 0: fatal(pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
+    step = has_flag(range, NF_STEP)
+    second = if step: int(nodes[range].c) else: bc_int(0, pos)
+    stepped = mk(.bool_lit, pos)
+    nodes[stepped].ival = if step: 1 else: 0
+    inclusive = mk(.bool_lit, pos)
+    nodes[inclusive].ival = if has_flag(range, NF_INCLUSIVE): 1 else: 0
+    bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
+
+dw_membership = (id: int) -> int:
+    r = dw_iterable(id, true, true)
+    if nodes[r].kind == .range and has_flag(r, NF_STEP): return dw_range_value(r)
+    r
+
+dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
     if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
@@ -816,7 +835,7 @@ dw_iterable = (id: int, slice: bool = false) -> int:
     if dw_name(dw_child(id, at)) != "..":
         first = dw_unwrap(dw_child(id, at))
         if dw_op(first) == ",":
-            if slice: return dw_fail(id, "stepped slices or membership")
+            if slice and not membership: return dw_fail(id, "stepped slices")
             if dewy_syntax[first].children.len() != 3: return dw_fail(first, "a stepped range without exactly two starting values")
             nodes[n].a = i32(dw_expr(dw_child(first, 1)))
             nodes[n].c = i32(dw_expr(dw_child(first, 2)))
@@ -829,7 +848,7 @@ dw_iterable = (id: int, slice: bool = false) -> int:
     if inclusive: add_flag(n, NF_INCLUSIVE)
     return n
 
-dw_loop_head = (id: int) -> int:
+dw_loop_head = (id: int, combined: bool = false) -> int:
     let id = dw_unwrap(id)
     op = dw_op(id)
     n = mk(.lhead, dewy_syntax[id].pos)
@@ -845,11 +864,14 @@ dw_loop_head = (id: int) -> int:
             if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
             binders.push(dw_expr(binder))
         set_list(n, binders)
-        nodes[n].a = i32(dw_iterable(dw_child(id, 2)))
+        it = dw_iterable(dw_child(id, 2))
+        if combined and nodes[it].kind == .range and has_flag(it, NF_STEP) and nodes[it].b != 0:
+            it = bc_call("__dewy_iter", [dw_range_value(it)], nodes[it].pos)
+        nodes[n].a = i32(it)
     else if op == "and" or op == "or":
         nodes[n].op = if op == "and": 2 else: 3
-        nodes[n].a = i32(dw_loop_head(dw_child(id, 1)))
-        nodes[n].b = i32(dw_loop_head(dw_child(id, 2)))
+        nodes[n].a = i32(dw_loop_head(dw_child(id, 1), true))
+        nodes[n].b = i32(dw_loop_head(dw_child(id, 2), true))
         return head_collapse(n)
     else:
         nodes[n].op = 4

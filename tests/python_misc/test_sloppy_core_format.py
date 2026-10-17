@@ -64,10 +64,9 @@ main=()=>{
 let x=5
 let values=[1 -2 3]
 let optional:array<array<int64>?>=[]
-let points:array<int64>=[]
-loop point in [0,2..8) { points.push(point) }
+let points=[0,2..8)
 printl(identity<int64>(2x+2(x+1)))
-printl(values) printl(points) printl(optional.length)
+printl(values) printl([loop point in points point]) printl(optional.length)
 return 0
 }''',
     'strings': '''main=()=>{
