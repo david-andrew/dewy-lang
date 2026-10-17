@@ -976,7 +976,11 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 si = int(types[target].st)
                 check_struct_fields(si)
                 cost = 0
-                loop field in kids(a):
+                members = kids(a)
+                if array_has_spread(a):
+                    unused: int[]
+                    members = dewy_record_spread_entries(a, 0, unused, false)
+                loop field in members:
                     fi = -1
                     loop i in [0..int(structs[si].nfields)):
                         at = int(structs[si].fields) + i
@@ -1044,6 +1048,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
 check_args_untyped = (args: int[]):
     loop a0 in args:
         a = unnamed(a0)
+        if nodes[a].kind == .array: dewy_classify_spread(a)
         if nodes[a].kind == .record_lit:
             check_args_untyped(kids(a))
             continue
@@ -1673,6 +1678,88 @@ dewy_record_target = (expected: int) -> int:
     if types[target].kind == .opt: target = prune(int(types[target].elem))
     if types[target].kind == .struct_ and not is_map_type(target): return target
     0
+
+# With no written field names, the first spread distinguishes `[xs...]` from
+# `[record...]`. Inspect a clone so contextual checking retains the source AST.
+dewy_spread_source_type = (n: int) -> int:
+    # Call arguments may already have become checked constructor calls. Their
+    # original type syntax is gone; retain the checked type instead of cloning
+    # them as unchecked syntax and trying to resolve them again.
+    if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return prune(ntype(n))
+    prune(check_expr(clone(n), 0))
+
+dewy_classify_spread = (n: int):
+    if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
+    first = kid(n, 0)
+    if not has_flag(first, NF_SPREAD) or not files[pos_file(nodes[n].pos)].is_dewy: return
+    t = dewy_spread_source_type(first)
+    if types[t].kind == .struct_ and not is_map_type(t): nodes[n].kind = .record_lit
+
+# Expand record fields for overload scoring, or capture operands in source
+# order for construction. Later entries replace earlier fields; even overwritten
+# operands are evaluated. Captured records retain their independent values.
+dewy_record_spread_entries = (n: int, expected: int, stmts: mut int[], capture: bool) -> int[]:
+    out: int[]
+    positions: {int: int} = {}
+    field_decls: {int: int} = {}
+    target = dewy_record_target(expected)
+    target_si = -1
+    if target != 0:
+        target_si = int(types[target].st)
+        check_struct_fields(target_si)
+    loop entry in kids(n):
+        pos = nodes[entry].pos
+        members: int[]
+        if has_flag(entry, NF_SPREAD):
+            source = entry
+            st = dewy_spread_source_type(entry)
+            if types[st].kind != .struct_ or is_map_type(st): fatal(pos, "only records can be spread into a record (found {type_str(st)})")
+            si = int(types[st].st)
+            check_struct_fields(si)
+            if capture:
+                name = "$record_spread{bc_count}"
+                bc_count += 1
+                clear_flag(entry, NF_SPREAD)
+                stmts.push(bc_let(name, entry, pos))
+                source = bc_ident(name, pos)
+            loop i in [0..int(structs[si].nfields)):
+                fi = int(structs[si].fields) + i
+                field = mk(.namedarg, pos)
+                nodes[field].name = fields[fi].name
+                value = bc_field(source, name_of(int(fields[fi].name)), pos)
+                if not capture:
+                    nodes[value].type = fields[fi].type
+                    add_flag(value, NF_CHECKED)
+                nodes[field].a = i32(value)
+                members.push(field)
+        else:
+            if nodes[entry].kind != .namedarg: fatal(pos, "a record literal needs named fields or record spreads")
+            field = entry
+            if capture:
+                name = "$record_field{bc_count}"
+                bc_count += 1
+                decl = bc_let(name, int(nodes[entry].a), pos)
+                stmts.push(decl)
+                field = mk(.namedarg, pos)
+                nodes[field].name = nodes[entry].name
+                nodes[field].a = i32(bc_ident(name, pos))
+                field_decls[field] = decl
+            members.push(field)
+        loop field in members:
+            name = int(nodes[field].name)
+            if let at = positions.get(name): out[at] = field
+            else:
+                positions[name] = out.len()
+                out.push(field)
+    # Context belongs to the surviving fields. An overwritten value still runs,
+    # but need not have the type of the field that eventually replaces it.
+    if capture and target_si >= 0:
+        loop field in out:
+            if let decl = field_decls.get(field):
+                loop i in [0..int(structs[target_si].nfields)):
+                    fi = int(structs[target_si].fields) + i
+                    if fields[fi].name == nodes[field].name: nodes[decl].a = i32(type_node_of(int(fields[fi].type), nodes[field].pos)); break
+    out
 
 # Canonical field order gives structurally equal anonymous records one type.
 # Values are still checked/evaluated in source order by the ordinary constructor.
@@ -4616,6 +4703,7 @@ check_expr = (n: int, expected: int) -> int:
     if expected == 0: ex = 0
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
+    if nodes[n].kind == .array: dewy_classify_spread(n)
     k = nodes[n].kind
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
         ex = prune(int(types[ex].elem))
@@ -5297,6 +5385,14 @@ check_expr = (n: int, expected: int) -> int:
         nodes[n] = nodes[b]
         return check_expr(n, expected)
     else if k == .record_lit:
+        if array_has_spread(n):
+            stmts: int[]
+            members = dewy_record_spread_entries(n, expected, stmts, true)
+            result = mk(.record_lit, nodes[n].pos)
+            set_list(result, members)
+            stmts.push(bc_stmt(result, nodes[n].pos))
+            nodes[n] = nodes[bc_block(stmts, nodes[n].pos)]
+            return check_expr(n, expected)
         target = ex
         if exk == .opt: target = prune(int(types[ex].elem))
         if target == 0 or types[target].kind == .var or types[target].kind == .param:

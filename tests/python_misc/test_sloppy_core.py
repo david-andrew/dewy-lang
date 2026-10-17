@@ -21,6 +21,60 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'record-spread-basic': '''main=()=>{let base=[left=20 right=1]
+let result=[base... right=22]
+return if base.right =? 1 result.left+result.right else 1}''',
+    'record-spread-only': '''main=()=>{let a=[left=1 right=2] let b=[left=20 right=22]
+let merged=[a... b...] let copied=[merged...]
+return copied.left+copied.right}''',
+    'record-spread-context': '''Pair:type=[left:uint8 right:uint8]
+total=(pair:Pair)=>(pair.left as int64)+(pair.right as int64)
+main=()=>{let base=Pair[20 1] let typed:Pair=[base... right=22]
+return if total([base... right=22]) =? 42 total(typed) else 1}''',
+    'record-spread-constructor-argument': '''Pair:type=[left:int64 right:int64]
+total=(pair:Pair)=>pair.left+pair.right
+main=()=>{let direct=total([Pair[20 22]...])
+let anonymous=total([[left=20 right=0]... right=22])
+return if direct =? 42 and anonymous =? 42 42 else 1}''',
+    'record-spread-overridden-context': '''Answer:type=[value:uint8]
+let calls=0
+discarded=()=>{calls+=1 return "discarded"}
+read=(answer:Answer)=>answer.value as int64
+main=()=>{let base=Answer[42] let first:Answer=[value=discarded() base...]
+let second=read([value=discarded() base... value=42])
+return if calls =? 2 and first.value =? 42 second else 1}''',
+    'record-spread-order': '''let trace=0
+part=(tag:int64 value:int64)=>{trace=trace*10+tag return [x=value]}
+number=(tag:int64 value:int64)=>{trace=trace*10+tag return value}
+main=()=>{let result=[x=number(1 0) part(2 1)... x=number(3 2) part(4 42)...]
+return if trace =? 1234 result.x else 1}''',
+    'record-spread-managed': '''main=()=>{let source=[words=["a"] number=20]
+source.words.push("b") let copy=[source... number=22]
+copy.words[0]="changed" source.words.push("c")
+return if source.words =? ["a" "b" "c"] and copy.words =? ["changed" "b"]
+source.number+copy.number else 1}''',
+    'record-spread-later-mutation': '''Item:type=[words:array<int64> number:int64]
+let source=Item[[20] 1]
+change=()=>{source.words[0]=99 return 22}
+main=()=>{source.words.push(0) let result=[source... number=change()]
+return if result.words =? [20 0] and source.words =? [99 0]
+result.words[0]+result.number else 1}''',
+    'record-spread-empty': '''Empty:type=[]
+main=()=>{let empty=Empty[] let copied=[empty...] let value=[copied... answer=42]
+return value.answer}''',
+    'record-spread-callback': '''Options:type=[run:((n:int64):>int64) offset:int64]
+main=()=>{let base=Options[run=(n:int64)=>n offset=2]
+let changed:Options=[base... run=(n)=>n+2]
+return changed.run(40)}''',
+    'record-spread-generic': '''Box:type=<T>[value:T]
+change=<T>(box:Box<T> value:T):>Box<T>=>[box... value=value]
+main=()=>{let a=change(Box<int64>[1] 42) let b=change(Box<string>["a"] "b")
+return if b.value =? "b" a.value else 1}''',
+    'record-spread-overload': '''Small:type=[value:uint8]
+Large:type=[value:uint64]
+read=(item:Small)=>42
+read=(item:Large)=>1
+main=()=>{let base=Small[7] return read([base...])}''',
     'generic-value-explicit': '''identity=<T>(x:T):>T=>x
 main=()=>{let integer=identity<int64> let text=identity<string>
 return if text("yes") =? "yes" integer(42) else 1}''',
@@ -2231,11 +2285,13 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'record-spread-array': ('main=()=>{let xs=[1] let record=[xs... answer=42] return 42}', 'only records can be spread into a record'),
+    'record-spread-unnamed': ('main=()=>{let base=[answer=42] let record=[base... 1] return 42}', 'a record literal needs named fields or record spreads'),
     'generic-value-ambiguous': ('choose=<T>(x:T):>T=>x\nchoose=<T>(x:T y:T):>T=>y\nmain=()=>{let f=choose<int64> return 42}', 'multiple versions of'),
     'generic-value-wrong-type-count': ('identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64 string> return 42}', 'no version of'),
     'generic-value-conflicting-type': ('identity=<T>(x:T):>T=>x\nmain=()=>{let f:((x:string):>string)=identity<int64> return 42}', 'no version of'),
-    'spread-outside-literal': ('main=()=>{let xs=[42] return xs...}', 'spread is supported inside array literals'),
-    'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array literals'),
+    'spread-outside-literal': ('main=()=>{let xs=[42] return xs...}', 'spread is supported inside array or record literals'),
+    'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array or record literals'),
     'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
     'end-index-outside': ('main=()=>end', "unknown name 'end'"),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),

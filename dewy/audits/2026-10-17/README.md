@@ -1200,3 +1200,42 @@ and diff checks passed. The preceding array-spread commit passed full CI.
 [Focused gate](source-core/generic-values-focused.log),
 [additional checks](source-core/generic-values-extra.log),
 [toolchain metadata](source-core/generic-values-validation.json).
+
+## Record composition
+
+`[base... field=value]` and `[left... right...]` now compose records. Later
+entries replace earlier fields, while all operands evaluate once in source
+order, including overwritten expressions. Source records are captured as
+independent values, so a later operand can mutate the original without changing
+the already captured fields. Nested arrays retain ordinary copy-on-write value
+semantics. No new runtime reflection or dictionary representation is introduced.
+
+Expected record types provide field context, including integer widths and
+callback parameter inference. Only surviving explicit fields receive that
+context: an overwritten string expression can run even when the resulting
+field is an integer. Inferred literals create normal anonymous record shapes;
+annotations, parameters and return types can supply a named destination type.
+Overload scoring sees the surviving expanded fields.
+
+The independent C-bootstrap gate passed **2,763 checks in 153.08 s**. Review
+then found a direct-constructor argument case: rechecking a clone of an already
+lowered constructor lost its original type syntax. Checked source types are now
+reused. A further fix limits field context to surviving overrides. The final
+focused gate passed **651 checks in 38.34 s**, including native/web regressions
+for both fixes, empty records, generic records, nested managed values, operand
+order, mutation, overloads, hover and formatting. Full CI runs on push.
+[Earlier full gate](source-core/record-spread-full.log),
+[final focused gate](source-core/record-spread-final-focused.log),
+[validation/toolchain metadata](source-core/record-spread-validation.json).
+
+Five alternating compile pairs on the initial implementation gave median paired
+CPU ratios of **0.991 tour, 1.009 Dunes and 1.025 compiler self-build**. These
+samples precede the two final edge-case fixes and the tour additions, so they
+are a bounded cost check rather than an exact final-toolchain performance claim.
+The original workload hashes are recorded with the samples.
+[Compile samples](source-core/record-spread-compile.json).
+
+The executable tour now demonstrates array spread with `end`, typed record
+overrides, and explicitly specialized callbacks. Four native/web default/release
+runs produced the same expected output.
+[Tour checks](source-core/composition-tour.json).

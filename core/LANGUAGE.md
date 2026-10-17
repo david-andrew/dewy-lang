@@ -407,8 +407,16 @@ Array literals can spread other arrays: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before
 the next operand runs. The result has independent value semantics, including
 nested arrays and record fields. Expected array types flow into the literal,
-so `let values:array<uint16>=[[]... 42]` works. This form currently spreads
-arrays; record/set spreading and spread call arguments are not supported.
+so `let values:array<uint16>=[[]... 42]` works. Set spreading and spread call
+arguments are not supported.
+
+Records compose similarly: `let tuned:Settings=[defaults... speed=12]`.
+Later fields or record spreads replace earlier fields with the same name.
+Every operand still runs once in source order, including overwritten values;
+changes made by a later operand do not change an earlier captured record.
+`[left... right...]` can combine records without any individually written fields.
+The literal can infer an anonymous record shape, or take a named record type
+from an annotation, function parameter, or return type, as other record literals do.
 
 Inside an index or slice, `end` is the receiver's last index: `xs[end]`,
 `xs[end-2..end]` and `xs[end,end-2..0]`. Nested brackets use their own receiver.
