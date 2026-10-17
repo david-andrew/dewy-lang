@@ -362,7 +362,7 @@ fmt_failed = false      # a file did not lex, or could not be formatted
 
 # the tokens, or none when the text does not lex (the lexer has said why)
 fmt_lexes = (path: str, src: str) -> str[]?:
-    files.push(SrcFile(path, ".", src))
+    files.push(SrcFile(path, ".", src, ends_with(path, ".dewy")))
     f = files.len() - 1
     when not BOOTSTRAP:
         if fmt_jbuf == null: fmt_jbuf = __alloc(192)

@@ -63,7 +63,7 @@ is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
     k = nodes[n].kind
     if k == .float_lit: return T_FLOAT
-    if has_flag(n, NF_U64) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return T_U64
+    if has_flag(n, NF_U64) and files[pos_file(nodes[n].pos)].is_dewy: return T_U64
     if k == .unary or k == .conv: return lit_default(int(nodes[n].a))
     if k == .binary:
         if lit_default(int(nodes[n].a)) == T_FLOAT or lit_default(int(nodes[n].b)) == T_FLOAT: return T_FLOAT
@@ -89,7 +89,7 @@ int_widens = (f: int, t: int) -> bool:
 # decimal conversion. Ordinary integer variables keep their fixed-width type.
 dewy_bigint_literal_target = (n: int, t0: int) -> bool:
     if n == 0 or nodes[n].kind != .int_lit or not is_lit(n): return false
-    if not ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return false
+    if not files[pos_file(nodes[n].pos)].is_dewy: return false
     bundled_bigint_type(t0)
 
 bundled_bigint_type = (t0: int) -> bool:
@@ -195,7 +195,7 @@ int_fits = (v: int, t: int) -> bool:
 # types as its bits, e.g. hash constants)
 lit_fits = (n: int, t: int) -> bool:
     if has_flag(n, NF_U64):
-        if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if files[pos_file(nodes[n].pos)].is_dewy:
             return int(types[t].bits) >= 64 and not types[t].sign
         return int(types[t].bits) >= 64
     int_fits(nodes[n].ival, t)
@@ -689,7 +689,7 @@ ctx_dependent = (a: int) -> bool:
         # Dewy array literals take their element type from the selected call.
         # Check their children first, but do not freeze the array at int[] just
         # because its numeric literals have not received a parameter type yet.
-        if nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"): return true
+        if nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy: return true
         # ([.key(.space), .button(.a)]: its elements take their type from the parameter's)
         loop e in kids(a):
             if ctx_dependent(e): return true
@@ -740,7 +740,7 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[]) -> 
 # Dewy arguments in source order, then omitted defaults in parameter order.
 # c holds a list of integer-literal slot numbers only when reordering is needed.
 save_call_order = (n: int, given: int[], final: int[]):
-    if not ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return
+    if not files[pos_file(nodes[n].pos)].is_dewy: return
     order: int[]
     loop a in given:
         value = unnamed(a)
@@ -942,7 +942,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .opt: return 0
             if pk == .param: return 3
             return -1
-        if k == .array and nkids(a) > 0 and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"):
+        if k == .array and nkids(a) > 0 and files[pos_file(nodes[a].pos)].is_dewy:
             target = p
             if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
             cost = 0
@@ -963,7 +963,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             return -1
         if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
             if pk == .array: return 0
-            if nkids(a) == 0 and dewy_record_target(p) != 0 and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"): return 0
+            if nkids(a) == 0 and dewy_record_target(p) != 0 and files[pos_file(nodes[a].pos)].is_dewy: return 0
             if pk == .param: return 3
             return -1
         if k == .record_lit:
@@ -1044,7 +1044,7 @@ check_args_untyped = (args: int[]):
         if nodes[a].kind == .record_lit:
             check_args_untyped(kids(a))
             continue
-        if nodes[a].kind == .array and ctx_dependent(a) and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"):
+        if nodes[a].kind == .array and files[pos_file(nodes[a].pos)].is_dewy and ctx_dependent(a):
             check_args_untyped(kids(a))
             continue
         if nodes[a].kind == .ident and not has_flag(a, NF_CHECKED):
@@ -1061,7 +1061,7 @@ check_args_untyped = (args: int[]):
         add_flag(a, NF_CHECKED)
 
 finish_arg = (a: int, pt: int, is_mut: bool):
-    if is_mut and not has_flag(a, NF_MUT) and ends_with(files[pos_file(nodes[a].pos)].path, ".dewy"):
+    if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
         fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
     if nodes[a].kind == .hole:
         nodes[a].type = i32(pt)
@@ -1520,7 +1520,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         if is_lit(dv): cd.binds[int(types[p].id)] = lit_default(dv)
         else if dk == .bool_lit: cd.binds[int(types[p].id)] = T_BOOL
         else if dk == .str_lit: cd.binds[int(types[p].id)] = T_STR
-        else if dk == .ident and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        else if dk == .ident and files[pos_file(nodes[n].pos)].is_dewy:
             loop j in [0..i):
                 if nodes[dv].name != nodes[kid(decl, j)].name: continue
                 earlier = subst_partial(cd.sig.params[j], cd.binds)
@@ -1528,7 +1528,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         # Nonliteral defaults (including large integer literals lowered to
         # constructors) have their ordinary expression type. Resolve names in
         # the declaration's module, just as when emitting the actual default.
-        if cd.binds[int(types[p].id)] == 0 and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy") and not default_uses_params(dv, decl, i):
+        if cd.binds[int(types[p].id)] == 0 and files[pos_file(nodes[n].pos)].is_dewy and not default_uses_params(dv, decl, i):
             ready = true
             loop j in [0..nkids2(decl)):
                 if cd.binds[j] == 0 or has_var(cd.binds[j]): ready = false
@@ -1552,7 +1552,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         if nodes[n].a != 0: ide_fn_ref(nodes[int(nodes[n].a)].pos, name, f)
         ide_named_args(args, decl, IK_PARAM, fns[f].ptypes)
     capture_defaults = false
-    dewy_call = ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+    dewy_call = files[pos_file(nodes[n].pos)].is_dewy
     if not partial and dewy_call:
         loop i in [0..np):
             if cd.args[i] == 0 and default_uses_params(int(nodes[kid(decl, i)].b), decl, i): capture_defaults = true
@@ -2029,7 +2029,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(args[0], 0)
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
-    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
     ii = intrinsic_of(name)
@@ -3222,7 +3222,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 1, 1, "len")
         t = arg_type(args, 0, 0)
         if is_soa(t): return check_soa_method(n, args[0], intern("len"), [], expected)
-        if id == .len and types[t].kind == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if id == .len and types[t].kind == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
             add_flag(args[0], NF_CHECKED)
             nodes[n] = nodes[bc_call("__dewy_string_length", args, nodes[n].pos)]
             return check_expr(n, expected)
@@ -3875,7 +3875,7 @@ check_binary = (n: int, expected: int) -> int:
     if op == .kw_in:
         needle = int(nodes[n].a)
         container = int(nodes[n].b)
-        dewy = ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+        dewy = files[pos_file(nodes[n].pos)].is_dewy
         call = mk(.call, nodes[n].pos)
         callee = mk(.field, nodes[n].pos)
         nodes[callee].a = nodes[n].b
@@ -4120,11 +4120,11 @@ check_binary = (n: int, expected: int) -> int:
                     why = " ('{fnm}' gives nothing back (printing is not giving back): end it with the value it should give, and write `-> int` after its parameters)"
                     break
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {type_str(ta)} and {type_str(tb)}{why}")
-    if op == .slash and is_int(ta) and is_int(tb) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+    if op == .slash and is_int(ta) and is_int(tb) and files[pos_file(nodes[n].pos)].is_dewy:
         fatal(nodes[n].pos, "Dewy core experiment does not yet support integer /; use // or convert to float64")
     # High unsigned Dewy literals go through typed lowering. The untyped fold
     # below uses signed division/shifts and would lose their unsigned meaning.
-    wide_unsigned = (has_flag(a, NF_U64) or has_flag(b, NF_U64)) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+    wide_unsigned = (has_flag(a, NF_U64) or has_flag(b, NF_U64)) and files[pos_file(nodes[n].pos)].is_dewy
     if is_lit(a) and is_lit(b) and not is_cmp and not wide_unsigned:
         # fold literal arithmetic, keeping the result an untyped literal
         if nodes[a].kind == .int_lit and nodes[b].kind == .int_lit:
@@ -4252,7 +4252,7 @@ check_match = (m: int, expected: int) -> int:
     first_val = 0
     has_wild = false
     finite_seen = 0
-    dewy = ends_with(files[pos_file(nodes[m].pos)].path, ".dewy")
+    dewy = files[pos_file(nodes[m].pos)].is_dewy
     seen: bool[]
     if types[st].kind == .enum_:
         check_struct_fields(int(types[st].st))
@@ -4580,7 +4580,7 @@ check_expr = (n: int, expected: int) -> int:
             t = ntype(n)
         else:
             t = T_INT
-            if has_flag(n, NF_U64) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): t = T_U64
+            if has_flag(n, NF_U64) and files[pos_file(nodes[n].pos)].is_dewy: t = T_U64
     else if k == .float_lit:
         if ex != 0 and exk == .float_:
             clear_flag(n, NF_LITERAL)
@@ -4601,7 +4601,7 @@ check_expr = (n: int, expected: int) -> int:
                 if nodes[part].kind != .pair: continue
                 e = int(nodes[part].a)
                 # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
-                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not ends_with(files[pos_file(nodes[e].pos)].path, ".dewy") and brace_before(nodes[e].pos):
+                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
                     warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
                 check_expr(e, 0)
                 finalize_literal(e)
@@ -4739,7 +4739,7 @@ check_expr = (n: int, expected: int) -> int:
         fname = int(nodes[n].name)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
         bk = types[bt].kind
-        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt)) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
             method = mk(.field, nodes[n].pos)
             nodes[method].a = nodes[n].a
             nodes[method].name = i32(intern("len"))
@@ -4897,7 +4897,7 @@ check_expr = (n: int, expected: int) -> int:
         bt = prune(check_expr(int(nodes[n].a), 0))
         bk = types[bt].kind
         b = int(nodes[n].b)
-        if bk == .str_ and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
             base = last_checked
             add_flag(base, NF_CHECKED)
             pos = nodes[n].pos
@@ -4918,7 +4918,7 @@ check_expr = (n: int, expected: int) -> int:
                 call = bc_call("__dewy_string_index", [base, b], pos)
             nodes[n] = nodes[call]
             return check_expr(n, expected)
-        if bk == .typeval and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if bk == .typeval and files[pos_file(nodes[n].pos)].is_dewy:
             # Checking a qualified type replaces its field node with a resolved
             # identifier. Use that resolved type rather than looking up its bare
             # name again in the caller's module.
@@ -4932,7 +4932,7 @@ check_expr = (n: int, expected: int) -> int:
                 last_checked = n
                 return t
             return check_expr(n, expected)
-        if bk == .tuple and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy:
             if b == 0 or nodes[b].kind != .int_lit: fatal(nodes[n].pos, "a tuple index must be an integer literal")
             nodes[n].kind = .field
             nodes[n].aux = -2
@@ -5171,7 +5171,7 @@ check_expr = (n: int, expected: int) -> int:
             target = dewy_record_type(n)
         if types[target].kind != .struct_ or is_map_type(target): fatal(nodes[n].pos, "record literal needs a record type, found {type_str(target)}")
         t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
-    else if k == .array and nkids(n) == 0 and nodes[n].b == 0 and dewy_record_target(ex) != 0 and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+    else if k == .array and nkids(n) == 0 and nodes[n].b == 0 and dewy_record_target(ex) != 0 and files[pos_file(nodes[n].pos)].is_dewy:
         target = dewy_record_target(ex)
         t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), [], expected)
     else if k == .array and ex != 0 and exk == .fixed and fixed_literal_ok(n, ex):
@@ -5186,7 +5186,7 @@ check_expr = (n: int, expected: int) -> int:
         fixed_literal(n, ex)
         t = ex
     else if k == .array:
-        if nkids(n) == 0 and ex != 0 and is_map_type(ex) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if nkids(n) == 0 and ex != 0 and is_map_type(ex) and files[pos_file(nodes[n].pos)].is_dewy:
             nodes[n].kind = .map_lit
             return check_expr(n, expected)
         et = 0
@@ -5318,7 +5318,7 @@ check_expr = (n: int, expected: int) -> int:
             return tt
         fk = types[ft].kind
         tk = types[tt].kind
-        if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+        if files[pos_file(nodes[n].pos)].is_dewy:
             if is_numeric(ft) and is_numeric(tt):
                 add_flag(a, NF_CHECKED)
                 t = conversion(n, tt, [a])
@@ -5521,7 +5521,7 @@ check_dewy_in_range = (n: int) -> int:
 
 # x in a..b: a <= x and x <= b (no array)
 check_in_range = (n: int, expected: int) -> int:
-    if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return check_dewy_in_range(n)
+    if files[pos_file(nodes[n].pos)].is_dewy: return check_dewy_in_range(n)
     pos = nodes[n].pos
     r = int(nodes[n].b)
     x = int(nodes[n].a)

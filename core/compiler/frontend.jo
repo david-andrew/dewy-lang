@@ -6,7 +6,7 @@ use 'dewy_parse.jo'
 use 'dewy_fast.jo'
 
 source_declarations = (file: int) -> int[]:
-    if ends_with(files[file].path, ".dewy"):
+    if files[file].is_dewy:
         first = nodes.len()
         mode = env("DEWY_CORE_FRONTEND") ?? "fast"
         if mode != "fast" and mode != "legacy": fatal(mkpos(file, 0), "DEWY_CORE_FRONTEND must be 'fast' or 'legacy'")

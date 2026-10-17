@@ -359,6 +359,16 @@ before/after. CPU medians were 58.30/56.53, 346.99/342.46 and 1,261.12/1,309.96 
 The self-build cost was slightly higher in this run; this change improves typing
 ergonomics, with no compile-speed claim. See `context-array-compile.json`.
 
+Source files now retain their language classification when loaded, so checking
+and lowering read a flag instead of repeatedly examining filename suffixes.
+Implementation-language array arguments also skip an extra context-dependent
+walk needed only by Dewy literals. Seven warmed pairs were tour 57.41/59.54 ms,
+physics 333.14/334.66 ms and self-build 1,305.37/1,283.98 ms before/after; CPU
+medians were 56.30/56.25, 325.88/330.06 and 1,283.78/1,267.16 ms. These small,
+mixed differences do not establish an overall speedup. The retained change
+removes repeated classification work. See `source-language-compile.json`,
+`source-language-build.json` and `source-language-full-tests.log`.
+
 The combined Dewy/editor/shared-core gate now contains 1,564 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model

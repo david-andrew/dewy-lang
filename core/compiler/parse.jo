@@ -2214,7 +2214,7 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
     head.push(lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos))
     done = lx_bin(.ge, lx_ident(k, pos), lx_len(lx_ident(seq, pos), pos), pos)
     value = lx_index(lx_ident(seq, pos), lx_ident(k, pos), pos)
-    if ends_with(files[pos_file(pos)].path, ".dewy"):
+    if files[pos_file(pos)].is_dewy:
         # Arrays keep indexed lowering; text advances a streaming grapheme cursor.
         done = lx_call("__dewy_iter_done", [lx_ident(seq, pos), lx_ident(k, pos)], pos)
         value = lx_call("__dewy_iter_value", [lx_ident(seq, pos), lx_ident(k, pos)], pos)

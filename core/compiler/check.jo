@@ -659,7 +659,7 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     d = "."
     slash = rfind(path, "/")
     if slash >= 0: d = path[..slash)
-    files.push(SrcFile(path, d, src!))
+    files.push(SrcFile(path, d, src!, ends_with(path, ".dewy")))
     fi = files.len() - 1
     base = path
     if slash >= 0: base = path[slash + 1..]
@@ -3141,7 +3141,7 @@ order_modules = (m: int, out: mut int[]):
 # statement calling a prelude function with the given argument nodes
 # a, b = xs with an array: its elements, as a tuple (__unpack2(xs): the length checked)
 unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> int:
-    if not ends_with(files[pos_file(pos)].path, ".dewy"): return unpack_array(e, t, bindings.len(), pos)
+    if not files[pos_file(pos)].is_dewy: return unpack_array(e, t, bindings.len(), pos)
     is_array = types[t].kind == .array
     if not is_array and (types[t].kind != .struct_ or is_map_type(t)): return t
     statements: int[]
