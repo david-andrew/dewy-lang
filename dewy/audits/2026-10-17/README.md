@@ -1080,3 +1080,23 @@ operands, verifying that the emitted fused pairs do not cross or end on a
 The independent C-bootstrap gate passed **2,623 checks in 185.30 s**.
 [Full gate](source-core/branch-padding-full.log),
 [toolchain metadata](source-core/branch-padding-validation.json).
+
+## Type aliases as values and editor support
+
+Non-generic type aliases now resolve as type values in expressions, enabling
+`Byte.max` and `Alias[42]` record construction. Explicit generic aliases also
+work in these positions. Editor tests caught the missing direct alias case;
+the earlier bound tests covered aliases through generic type parameters.
+
+Integer type members complete as `.min` and `.max`, including aliases, and
+bounds hover with their integer type. Contextual `end` now hovers as `int64`;
+calling it produces a source-level explanation rather than a generated name.
+The LSP recovery test checks correction of that error in unsaved text.
+
+**357 focused checks passed in 27.25 s**, covering editor behavior, numeric
+names/bounds, end-relative indices and generic functions. A further **4
+native/web debug/release checks passed in 2.37 s** for record construction
+through ordinary and generic aliases.
+[Focused gate](source-core/numeric-end-editor.log),
+[record alias checks](source-core/type-value-alias.log),
+[toolchain metadata](source-core/numeric-end-editor-validation.json).

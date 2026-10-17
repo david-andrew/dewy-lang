@@ -2162,6 +2162,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         # a variable of the same name hides the function or type
         hs = lookup(name)
         if hs != 0 and syms[hs].kind == .local:
+            if starts_with(name_of(name), "$index_end"): fatal(nodes[n].pos, "end is the last index inside brackets; it cannot be called")
             fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {type_str(int(locals[int(syms[hs].ref)].type))} here (it hides the function or type of that name); rename the variable")
         if hs != 0 and syms[hs].kind == .global:
             g = int(syms[hs].ref)
@@ -4742,6 +4743,10 @@ check_expr = (n: int, expected: int) -> int:
             d = int(syms[s].ref)
             if nkids2(d) > 0: t = mk_typeval(0)
             else: t = mk_typeval(get_struct_inst(d, []))
+        else if sk == .alias_:
+            d = int(syms[s].ref)
+            if nkids2(d) > 0: t = mk_typeval(0)
+            else: t = mk_typeval(resolve_alias(d, [], nodes[n].pos))
         else if sk == .type_: t = mk_typeval(int(syms[s].ref))
         else if sk == .module: t = mk_modval(int(syms[s].ref))
         else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
@@ -4794,6 +4799,7 @@ check_expr = (n: int, expected: int) -> int:
         if bk == .typeval:
             tt = prune(int(types[bt].elem))
             if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
+                if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
                 bits = int(types[tt].bits)
                 value = 0
                 if name_of(fname) == "min":

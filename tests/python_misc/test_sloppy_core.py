@@ -118,6 +118,16 @@ lower=<T>():>T=>T.min
 Byte:type=uint8
 main=()=>{let a:Byte=upper<Byte>() let b:int16=lower<int16>()
 return if a =? 255 and b =? -32768 and upper<uint64>() =? 18446744073709551615 42 else 1}''',
+    'numeric-bounds-alias': '''Byte:type=uint8
+Word:type=uint64
+Number:type=<T>(T)
+const TOP=Word.max
+main=()=>{let a:Byte=Byte.max let b:int16=Number<int16>.min
+return if a =? 255 and b =? -32768 and TOP =? 18446744073709551615 42 else 1}''',
+    'generic-type-value-alias': '''Record:type=[value:int64]
+Alias:type=Record
+Identity:type=<T>(T)
+main=()=>Alias[20].value+Identity<Record>[22].value''',
     'numeric-bounds-constant': '''const BYTE_TOP=uint8.max
 const WORD_TOP=uint64.max
 width=((x:uint8)=>8)&((x:uint64)=>64)&((x:int64)=>0)
@@ -2160,6 +2170,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
     'end-index-outside': ('main=()=>end', "unknown name 'end'"),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
     'numeric-bound-unknown': ('main=()=>uint8.maximum', "type has no member 'maximum'"),

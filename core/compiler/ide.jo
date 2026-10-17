@@ -169,6 +169,9 @@ ide_sym_ref = (n: int, s: int):
     p = nodes[n].pos
     if sk == .local:
         l = int(syms[s].ref)
+        if starts_with(name_of(nm), "$index_end"):
+            ide_ref(p, intern("end"), IK_LOCAL, 0, int(locals[l].type), 0)
+            return
         r = ide_local_root(l)
         ide_ref(p, nm, ide_local_kind(r), locals[r].pos, int(locals[l].type), 0)
     else if sk == .global:
@@ -938,6 +941,8 @@ ide_complete_members = (t0: int):
     if k == .typeval:
         tt = prune(int(types[t].elem))
         if tt != 0 and types[tt].kind == .enum_: ide_complete_variants(tt)
+        if tt != 0 and is_int(tt):
+            loop name in ["min", "max"]: ide_emit("C\t{name}\t{IK_CONST}\t{ide_type_str(tt)}")
         ide_flush()
         stop(0)
     st = t

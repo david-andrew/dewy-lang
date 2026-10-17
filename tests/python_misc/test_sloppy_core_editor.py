@@ -169,6 +169,11 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert any('needs an optional on the left' in d['message'] for d in diagnostics), diagnostics
         diagnostics = client.set_text(uri, 'main=()=>none??42', 12)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        diagnostics = client.set_text(uri, 'main=()=>{let xs=[42] return xs[end()]}', 13)
+        assert any('end is the last index' in d['message'] for d in diagnostics), diagnostics
+        assert '$index_end' not in str(diagnostics), diagnostics
+        diagnostics = client.set_text(uri, 'main=()=>{let xs=[42] return xs[end]}', 14)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
         assert source.read_text() == 'main=()=>42'
     finally:
         client.close()
@@ -191,6 +196,9 @@ def test_vscode_core_client(tmp_path):
 
 
 @pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
+    ('', 'let xs=[42] return xs[end]', 'end', 'int64'),
+    ('', 'let value=uint8.max return if value >? 0 42 else 1', 'max', 'uint8'),
+    ('Byte:type=uint8\n', 'let value=Byte.min return if value =? 0 42 else 1', 'min', 'uint8'),
     ('', 'let value:uint64=42 return value as int64', 'value', 'uint64'),
     ('', 'let value=1/2 return if value =? 1/2 42 else 1', 'value', 'Rational'),
     ('', 'let value=123456789012345678901234567890 return if value >? 1 42 else 1', 'value', 'BigInt'),
@@ -240,6 +248,10 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
 
 
 @pytest.mark.parametrize(('text', 'wanted', 'absent'), [
+    ('main=()=>{let value=uint8.§ return 42}', {'min': 'uint8', 'max': 'uint8'}, ['length']),
+    ('Byte:type=uint8\nmain=()=>{let value=Byte.§ return 42}', {'min': 'uint8', 'max': 'uint8'}, ['length']),
+    ('Number:type=<T>(T)\nmain=()=>{let value=Number<int16>.§ return 42}', {'min': 'int16', 'max': 'int16'}, []),
+    ('main=()=>{let value=float64.§ return 42}', {}, ['min', 'max']),
     ('main=()=>{let answer:int64=42 return ans§}', {'answer': 'int64', 'printl': None}, ['struct', 'mut', 'while']),
     ('main=()=>{let point=[x=42 y=2] return point.§}', {'x': 'int64', 'y': 'int64'}, ['struct']),
     ('main=()=>{let ratio=1/2 ratio.§}', {'numerator': 'BigInt', 'denominator': 'BigInt'}, []),

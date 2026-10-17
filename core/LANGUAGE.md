@@ -305,6 +305,10 @@ names such as `models.Box<string>`. Generic type aliases wrap their definition i
 parentheses. Each concrete function/type is specialized by the compact compiler;
 this adds no universal boxed-value representation. Defaults can use the bound
 type parameters, and generic functions can return closures or structural records.
+Aliases also work as type values: a record alias can construct `Alias[42]`,
+and an integer alias exposes `.min` and `.max`. The editor completes these
+bounds and shows their integer type on hover; `end` inside brackets hovers as
+`int64`.
 
 This slice accepts plain type parameter names. Constraints such as `T of Bound`
 and explicitly generic local closures remain unsupported. To pass a generic
