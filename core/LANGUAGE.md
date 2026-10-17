@@ -585,6 +585,11 @@ orderings that depend on both values. It is stable too: values for which neither
 argument compares less than the other retain their order. A comparator should
 define a consistent ordering; use `sort_by` when a cached key expresses it.
 
+`values.min_by(key)` and `values.max_by(key)` select one value without sorting.
+They evaluate the key once per element and choose the first of equal keys.
+The scan does not allocate a copy of the array tail, and the returned value
+remains independent of the source. An empty input raises an error.
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`

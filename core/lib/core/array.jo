@@ -112,7 +112,8 @@ min_by[T, K] = (xs: T[], key: (T) -> K) -> T:
     if xs.len() == 0: panic("min_by of an empty array")
     m = xs[0]
     mk = key(m)
-    loop x in xs[1..]:
+    loop i in [1..xs.len()):
+        x = xs[i]
         k = key(x)
         if k < mk:
             m = x
@@ -122,7 +123,8 @@ max_by[T, K] = (xs: T[], key: (T) -> K) -> T:
     if xs.len() == 0: panic("max_by of an empty array")
     m = xs[0]
     mk = key(m)
-    loop x in xs[1..]:
+    loop i in [1..xs.len()):
+        x = xs[i]
         k = key(x)
         if mk < k:
             m = x

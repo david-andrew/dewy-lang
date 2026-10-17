@@ -22,6 +22,45 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sequence-minmax-by-order': '''let trace:int64=0
+key=(value:int64):>int64=>{trace=trace*10+value return value}
+main=()=>{
+let values=[4 2 8 1]
+if values.min_by(key) not=?1 or trace not=?4281 return 1
+trace=0
+if values.max_by(key) not=?8 or trace not=?4281 return 2
+trace=0
+return if [42].min_by(key)=?42 and trace=?42 42 else 3}''',
+    'sequence-minmax-by-ties-and-copies': '''Item:type=[rank:int64 values:array<int64>]
+key=(item:Item):>int64=>item.rank
+main=()=>{
+let items=[Item[1 [20]] Item[1 [99]] Item[2 [22]] Item[2 [100]]]
+let low=items.min_by(key) let high=items.max_by(key)
+let saved=low low.values[0]=0 high.values[0]=0
+return if items[0].values[0]=?20 and items[2].values[0]=?22
+and saved.values[0]=?20 saved.values[0]+items[2].values[0] else 1}''',
+    'sequence-minmax-by-custom-order': '''Rank:type=[value:int64]
+__lt__=(a:Rank b:Rank):>bool=>a.value <? b.value
+key=(value:int64):>Rank=>Rank[-value]
+main=()=>[20 22].min_by(key)+[20 22].max_by(key)''',
+    'sequence-minmax-by-source-mutation': '''let source:array<int64>=[20 22]
+let calls:int64=0
+key=(value:int64):>int64=>{calls+=1 source=[99] return value}
+main=()=>{
+let low=source.min_by(key)
+if low not=?20 or calls not=?2 or source not=?[99] return 1
+source=[20 22] calls=0
+let high=source.max_by(key)
+return if high=?22 and calls=?2 and source=?[99] low+high else 2}''',
+    'sequence-minmax-by-no-tail-allocation': '''let before:int64=0
+let extra=false
+key=(value:int64):>int64=>{if alloc_count() not=?before extra=true return value}
+main=()=>{
+let values=[20 99 22 1]
+values.min_by(key) values.max_by(key)
+before=alloc_count() extra=false
+let low=values.min_by(key) let high=values.max_by(key)
+return if not extra and low=?1 and high=?99 42 else 1}''',
     'dictionary-equality-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''through=(values:array<dict<int64 set_effects.Key>>):>int64=>{
 let other=[[2->set_effects.Key[22] 1->set_effects.Key[20]]]
 if values not=?other return 1

@@ -334,6 +334,16 @@ fresh-build CPU ratios are 1.000 for the tour, 1.018 for Dunes and 1.011 for the
 compiler; this is a behavior improvement, not a compilation speedup.
 See `map-values-*` for the full gate and samples.
 
+`min_by` and `max_by` now scan by index instead of copying the array tail.
+Checks verify first-match ties, one key evaluation per element, custom ordering,
+managed result independence, source mutation from a callback and no extra live
+tail-array allocation during the scan. The independent C gate passes 3,278 checks
+in 42.43 seconds. Seven alternating release benchmark pairs on CPU 2 select both
+extremes from 20,000 values 50 times: median kernel CPU ratios are 0.905 for
+integers and 0.627 for records containing arrays and strings. Each run checks a
+Python-computed expected result. Five paired fresh-build ratios remain neutral
+(tour 0.996, Dunes 0.991, compiler 1.005). See `minmax-*` for sources and samples.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
