@@ -84,3 +84,28 @@ were 96.46/113.91, 101.19/100.10 and 82.48/80.55 ms respectively; load averages
 were around eight. The wall/CPU difference is a reason not to infer a compile
 regression from this busy-host run. This is a feature addition, with no claimed
 compile-time speedup. [Complete samples](source-core/bigint-bits-compile.json).
+
+## Share membership and string test builds
+
+Membership and string-result cases now use the existing isolated-module batching
+fixture. Selected tests are grouped only after pytest selection, with at most 16
+modules per program. Individual IDs and results remain separate. The constant
+interpolation warning check retains a dedicated build. Runtime output is decoded
+without newline normalization, and four new carriage-return checks exercise that
+requirement across native/web and debug/release.
+
+With the same compiler, the selected families improved from **112 checks in
+11.71 s** to **116 checks in 2.68 s**, about **4.4×** for that selection.
+Compiler launches fall from 112 to 12, despite the four added cases.
+[Before](source-core/literal-membership-before.log),
+[after](source-core/literal-membership-after.log).
+Selecting one native debug case from each family passes just those two cases in
+1.09 s: [selection check](source-core/batched-extra-selection.log).
+
+All **1,653 checks pass** with the same independently bootstrapped compiler.
+The whole run took 108.75 s while other projects were busy; this is correctness
+evidence, not a controlled whole-suite speed comparison.
+[Full log](source-core/batched-extra-full.log).
+The aggregated [timing profile](source-core/validation-profile.json) identifies
+further setup costs: the 76 exact-number panic checks still spend about nine
+seconds compiling and launching separate programs.

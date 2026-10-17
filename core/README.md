@@ -104,12 +104,14 @@ behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
 
-Ordinary value checks compile groups of up to 16 source modules and execute one
+Ordinary value, membership and string-result checks compile groups of up to 16 source modules and execute one
 program per group. They retain separate pytest IDs and expected results: `-k`
 selects only the requested cases before grouping. A failure reports the generated
 source directory; rerun with `-k <case-name>` for a single-case reproducer. Each
 case has its own module globals, and returned values/output are checked per case.
-Process failures and build failures fail the batch. Diagnostic, panic, editor,
+String output retains carriage returns and other control characters. The string
+compiler-warning check keeps its own build. Process failures and build failures
+fail the batch. Diagnostic, panic, editor,
 watch and game integration checks keep their dedicated processes.
 
 `check file.dewy` and `lsp` use the same compiler as `build`. `new <directory> [game|program]` creates a Dewy starting point with build/run

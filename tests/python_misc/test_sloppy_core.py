@@ -1195,13 +1195,17 @@ def run_value_batch(compiler, directory, cases, release, target):
         runner = directory / 'batch.cjs'
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
-    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    ran = subprocess.run(command, capture_output=True, timeout=10, check=False)
+    # Decode without text-mode newline translation: string tests also verify
+    # carriage returns and other control characters in the program's output.
+    stdout = ran.stdout.decode('utf-8', errors='replace')
+    stderr = ran.stderr.decode('utf-8', errors='replace')
     if ran.returncode:
-        message = f'Batch exited {ran.returncode}; sources in {directory}\n{ran.stdout}{ran.stderr}'
+        message = f'Batch exited {ran.returncode}; sources in {directory}\n{stdout}{stderr}'
         return {name: (None, message) for name in names}
     outcomes = {}
     active, output = None, []
-    for line in ran.stdout.splitlines(keepends=True):
+    for line in stdout.splitlines(keepends=True):
         if line.startswith('__DEWY_CASE_BEGIN__:'):
             active = line.strip().removeprefix('__DEWY_CASE_BEGIN__:')
             output = []
@@ -1214,7 +1218,7 @@ def run_value_batch(compiler, directory, cases, release, target):
             output.append(line)
     for name in names:
         if name not in outcomes:
-            outcomes[name] = (None, f'Missing result for {name}; sources in {directory}\n{ran.stdout}{ran.stderr}')
+            outcomes[name] = (None, f'Missing result for {name}; sources in {directory}\n{stdout}{stderr}')
     return outcomes
 
 
@@ -1248,13 +1252,30 @@ def value_batches(compiler, tmp_path_factory, request):
     # Collection has already applied -k / node selection. Compile only selected
     # cases, in groups of at most 16, and cache each group for its individual IDs.
     selected = {}
+    sources = {}
     for item in request.session.items:
         if item.module is not request.module:
             continue
         target = {'test_core_values': 'native', 'test_core_value_web': 'wasm'}.get(item.originalname)
+        family = 'values'
+        if item.originalname in ('test_core_membership', 'test_core_string_literals'):
+            params = item.callspec.params
+            if item.originalname == 'test_core_membership':
+                family = 'membership'
+                source = params['program'] + '\nmain=()=>probe()'
+            else:
+                # This case additionally checks compiler warnings, which are
+                # deliberately verified in its own compilation.
+                if params['name'] == 'constant-interpolation':
+                    continue
+                family = 'strings'
+                source = f'main=()=>{{printl({params["expression"]}) return 42}}'
+            target = params['target']
         if target is not None:
             params = item.callspec.params
-            selected.setdefault((target, params['release']), []).append(params['name'])
+            name = f'{family}-{params["name"]}'
+            sources[name] = CASES[params['name']] if family == 'values' else source
+            selected.setdefault((target, params['release']), []).append(name)
     groups = {}
     for (target, release), names in selected.items():
         for start in range(0, len(names), 16):
@@ -1263,12 +1284,13 @@ def value_batches(compiler, tmp_path_factory, request):
                 groups[target, release, name] = group
     cached = {}
 
-    def result(name, release, target):
+    def result(name, release, target, family='values'):
+        name = f'{family}-{name}'
         group = groups[target, release, name]
         key = target, release, group
         if key not in cached:
             directory = tmp_path_factory.mktemp(f'values-{target}-{"release" if release else "debug"}')
-            cached[key] = run_value_batch(compiler, directory, {n: CASES[n] for n in group}, release, target)
+            cached[key] = run_value_batch(compiler, directory, {n: sources[n] for n in group}, release, target)
         return cached[key][name]
 
     return result
@@ -2021,11 +2043,17 @@ main=():>void=>{
     ('nested-triple', '"answer {"""hello "there"!""".length}"', 'answer 14'),
     ('interpolation-comment', '"answer { # " } ignored\n 42}"', 'answer 42'),
     ('continued-line', '"first\\\nsecond"', 'firstsecond'),
+    ('carriage-return', '"first\\r\\nsecond\\rthird"', 'first\r\nsecond\rthird'),
     ('controls', '"\\a\\b\\v\\f\\0".length', '5'),
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_string_literals(compiler, tmp_path, name, expression, expected, target, release):
+def test_core_string_literals(compiler, tmp_path, value_batches, name, expression, expected, target, release):
+    if name != 'constant-interpolation':
+        code, output = value_batches(name, release, target, 'strings')
+        assert code == '42', f'{name}: {code}\n{output}'
+        assert output.encode('utf-8') == (expected + '\n').encode('utf-8')
+        return
     source = tmp_path / f'{name}.dewy'
     source.write_text(f'main=():>void=>{{printl({expression})}}')
     binary = tmp_path / name
@@ -2072,29 +2100,9 @@ def test_core_string_literals(compiler, tmp_path, name, expression, expected, ta
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_membership(compiler, tmp_path, name, program, target, release):
-    source = tmp_path / f'{name}.dewy'
-    source.write_text(program + '\nmain=():>void=>printl(probe())')
-    binary = tmp_path / name
-    flags = ['--release'] if release else []
-    if target == 'wasm':
-        flags += ['--target', 'wasm']
-    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
-                           capture_output=True, text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    command = [binary]
-    if target == 'wasm':
-        node = shutil.which('node')
-        if not node:
-            pytest.skip('Node is needed for web membership checks')
-        scripts = Scripts()
-        scripts.feed(binary.with_suffix('.html').read_text())
-        runner = tmp_path / f'{name}.cjs'
-        runner.write_text('\n'.join(scripts.parts))
-        command = [node, runner]
-    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
-    assert ran.returncode == 0, ran.stdout + ran.stderr
-    assert ran.stdout == '42\n'
+def test_core_membership(value_batches, name, program, target, release):
+    code, output = value_batches(name, release, target, 'membership')
+    assert code == '42', f'{name}: {code}\n{output}'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
