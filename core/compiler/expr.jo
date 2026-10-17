@@ -13,7 +13,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair
+    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
@@ -29,6 +29,7 @@ intrinsics = [
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
+    Intrinsic("__dewy_set", .dewy_set, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -679,8 +680,12 @@ variant_enum = (t0: int, name: int) -> int:
     if found == 0: return t
     found
 
+dewy_set_literal = (a: int) -> bool:
+    nodes[a].kind == .call and nodes[a].type == 0 and nkids(a) == 1 and nodes[int(nodes[a].a)].kind == .ident and name_of(int(nodes[int(nodes[a].a)].name)) == "__dewy_set"
+
 ctx_dependent = (a: int) -> bool:
     k = nodes[a].kind
+    if dewy_set_literal(a): return true
     if k == .ident or k == .field or k == .typeapply: return has_flag(a, NF_FNREF_ARG)
     if k == .dotname: return nodes[a].type == 0        # (E.v is a dotname already typed)
     if k == .call and nodes[a].type == 0 and nodes[int(nodes[a].a)].kind == .dotname: return true     # .v(args)
@@ -910,6 +915,19 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     pk = types[p].kind
     if ctx_dependent(a):
         k = nodes[a].kind
+        if dewy_set_literal(a):
+            target = p
+            if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+            cost = 0
+            if types[target].kind == .opt:
+                target = prune(int(types[target].elem))
+                cost = 2
+            if is_dewy_set_type(target):
+                r = arg_cost(kid(a, 0), mk_array(struct_targ(int(types[target].st), 0)), binds)
+                if r < 0: return -1
+                return cost + r
+            if pk == .param: return 3
+            return -1
         if k == .hole: return 0
         if k == .ident or k == .field or k == .typeapply:
             if pk == .fn_: return 0
@@ -1050,6 +1068,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
 check_args_untyped = (args: int[]):
     loop a0 in args:
         a = unnamed(a0)
+        if dewy_set_literal(a):
+            check_args_untyped(kids(a))
+            continue
         if nodes[a].kind == .array: dewy_classify_spread(a)
         if nodes[a].kind == .record_lit:
             check_args_untyped(kids(a))
@@ -3295,6 +3316,14 @@ is_dewy_range_type = (t: int, name: str) -> bool:
 is_dewy_cursor_iter = (t: int) -> bool:
     is_dewy_grapheme_iter(t) or is_dewy_range_type(t, "__DewyRangeIter")
 
+is_dewy_set_type = (t: int) -> bool:
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != "Set": return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_sets.jo"
+
 check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].kind = .intrinsic
     nodes[n].aux = i32(int(id))
@@ -3302,7 +3331,18 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].a = 0
     nargs = args.len()
     r = T_VOID
-    if id == .dewy_iter:
+    if id == .dewy_set:
+        nargs_check(n, nargs, 1, 1, "set literal")
+        ex = prune(expected)
+        if types[ex].kind == .opt: ex = prune(int(types[ex].elem))
+        if is_dewy_set_type(ex):
+            check_to(args[0], mk_array(struct_targ(int(types[ex].st), 0)))
+            add_flag(args[0], NF_CHECKED)
+        else if nodes[args[0]].kind == .array and nkids(args[0]) == 0:
+            fatal(nodes[n].pos, "cannot infer the type of an empty set; add a type annotation: `let values:set<int64>=set[]`")
+        nodes[n] = nodes[bc_call("__dewy_make_set", args, nodes[n].pos)]
+        return check_expr(n, expected)
+    else if id == .dewy_iter:
         nargs_check(n, nargs, 1, 1, "__dewy_iter")
         t = arg_type(args, 0, 0)
         add_flag(args[0], NF_CHECKED)
@@ -3310,6 +3350,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call("__dewy_grapheme_iter", args, nodes[n].pos)]
         else if is_dewy_range_type(t, "IntRange"):
             nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
+        else if is_dewy_set_type(t):
+            nodes[n] = nodes[bc_call("__dewy_set_values", args, nodes[n].pos)]
         else if is_map_type(t):
             # Combined loops index a retained dense entry list. Compact deleted
             # entries once, just as ordinary dictionary iteration does.
@@ -3632,7 +3674,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         set_list2(n, refs)
     else if id == .hash:
         nargs_check(n, nargs, 1, 1, "__hash_value")
-        arg_type(args, 0, 0)
+        note_value_helpers(arg_type(args, 0, 0))
         r = T_U64
     else if id == .shader:
         nargs_check(n, nargs, 2, 2, "shader")
@@ -4016,12 +4058,13 @@ charlike_to_int = (n: int):
     add_flag(n, NF_LITERAL)
     clear_flag(n, NF_CHARLIKE)
 
-# Equality gives an array literal the same element context as a typed value.
+# Collection literals take their element context from a typed operand.
 # Unwrap an optional only for the literal; the normal equality path adds its tag.
-comparison_array_context = (t0: int) -> bool:
+binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
     t = prune(t0)
     if types[t].kind == .opt: t = prune(int(types[t].elem))
-    types[t].kind == .array or types[t].kind == .fixed
+    if dewy_set_literal(n): return is_dewy_set_type(t)
+    (op == .eq or op == .ne) and nodes[n].kind == .array and (types[t].kind == .array or types[t].kind == .fixed)
 
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
@@ -4086,13 +4129,15 @@ check_binary = (n: int, expected: int) -> int:
         tb0 = prune(check_expr(b, 0))
         add_flag(b, NF_CHECKED)
         if is_int(tb0): hint = tb0
-    array_compare = (op == .eq or op == .ne) and files[pos_file(nodes[n].pos)].is_dewy
-    if array_compare and nodes[a].kind == .array and nodes[b].kind != .array:
+    literal_op = (op == .eq or op == .ne or op == .amp or op == .pipe or op == .caret or op == .minus) and files[pos_file(nodes[n].pos)].is_dewy
+    a_literal = literal_op and (nodes[a].kind == .array or dewy_set_literal(a))
+    b_literal = literal_op and (nodes[b].kind == .array or dewy_set_literal(b))
+    if a_literal and not b_literal:
         # Type-checking the typed operand first supplies context without moving
         # either operand in the runtime expression or checking it twice.
         bt = prune(check_expr(b, 0))
         add_flag(b, NF_CHECKED)
-        if comparison_array_context(bt): hint = bt
+        if binary_literal_context(a, bt, op): hint = bt
     ta = prune(check_expr(a, hint))
     tb = 0
     bk = nodes[b].kind
@@ -4100,7 +4145,7 @@ check_binary = (n: int, expected: int) -> int:
     else:
         h = 0
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
-        if array_compare and nodes[a].kind != .array and bk == .array and comparison_array_context(ta): h = ta
+        if not a_literal and b_literal and binary_literal_context(b, ta, op): h = ta
         tb = prune(check_expr(b, h))
     # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)
     if op == .eq and is_float(ta) and (nodes[a].kind == .ident or nodes[a].kind == .field) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit) and cx >= 0 and not pos_in_lib(nodes[n].pos):
@@ -4127,6 +4172,8 @@ check_binary = (n: int, expected: int) -> int:
     if types[ta].kind == .typeval or types[tb].kind == .typeval: fatal(nodes[n].pos, "a type name cannot be used as a value here")
     # vectors
     if is_cmp and (op == .eq or op == .ne):
+        note_value_helpers(ta)
+        note_value_helpers(tb)
         # (x == v with x: T? and v: T: v as a T?, so none is never equal to it)
         if tkind(ta) == .opt and tkind(tb) != .opt and tkind(tb) != .none_lit and type_eq(prune(int(types[ta].elem)), tb):
             nodes[n].b = i32(coerce(b, ta))
@@ -4937,7 +4984,7 @@ check_expr = (n: int, expected: int) -> int:
         fname = int(nodes[n].name)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
         bk = types[bt].kind
-        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
+        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
             method = mk(.field, nodes[n].pos)
             nodes[method].a = nodes[n].a
             nodes[method].name = i32(intern("len"))

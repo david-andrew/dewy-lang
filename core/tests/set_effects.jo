@@ -1,0 +1,12 @@
+# A key operation can replace the owner of a collection being compared.
+struct Key:
+    value: int
+
+armed = false
+current: Set[Key][]
+
+(==) = (a: Key, b: Key) -> bool:
+    if armed:
+        armed = false
+        current.clear()
+    a.value == b.value

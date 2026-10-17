@@ -3458,6 +3458,11 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
 # Read every leaf before any destination is written. Capturing each container
 # once preserves value snapshots and lets nested length checks precede writes.
 unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[], values: mut int[]):
+    if is_dewy_set_type(t):
+        add_flag(e, NF_CHECKED)
+        at = prune(check_expr(bc_call("__dewy_set_values", [e], pos), 0))
+        unpack_values(last_checked, at, bindings, pos, statements, values)
+        return
     is_array = types[t].kind == .array
     is_tuple = types[t].kind == .tuple
     is_map = is_map_type(t)
@@ -3540,9 +3545,50 @@ synth_str = (s: str, pos: int) -> int:
 
 program_named = false         # (the build block gave the name)
 
+# Generated aggregate comparisons/hashes must preserve the semantic equality
+# of a set even inside arrays, optionals, records or enum payloads. Resolve the
+# ordinary library functions during checking, before lowering needs them.
+value_helper_types: {int: bool} = {}
+dewy_set_equal_fns: {int: int} = {}
+dewy_set_hash_fns: {int: int} = {}
+
+note_value_helpers = (t: int):
+    k = tkind(t)
+    if k == .array or k == .fixed or k == .opt or k == .struct_ or k == .tuple or k == .enum_: value_helper_types[t] = true
+
+check_set_value_members = (t0: int, seen: mut {int: bool}):
+    t = prune(t0)
+    if seen.has(t) or has_var(t): return
+    seen[t] = true
+    if is_dewy_set_type(t) and not dewy_set_equal_fns.has(t):
+        dewy_set_equal_fns[t] = resolve_by_types(intern("=="), [t, t], 0, true)
+        dewy_set_hash_fns[t] = resolve_by_types(intern("hash"), [t], 0, true)
+    k = types[t].kind
+    if k == .array or k == .fixed or k == .opt:
+        check_set_value_members(int(types[t].elem), seen)
+    else if k == .tuple:
+        loop i in [0..int(types[t].nargs)): check_set_value_members(targ(t, i), seen)
+    else if k == .struct_ or k == .enum_:
+        layout(t)
+        si = int(types[t].st)
+        if k == .struct_:
+            loop i in [0..int(structs[si].nfields)):
+                check_set_value_members(int(fields[int(structs[si].fields) + i].type), seen)
+        else:
+            loop i in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + i
+                loop j in [0..int(variants[vi].nfields)):
+                    check_set_value_members(int(fields[int(variants[vi].fields) + j].type), seen)
+
+prepare_set_value_helpers = () -> bool:
+    before = fns.len()
+    seen: {int: bool} = {}
+    loop t in value_helper_types: check_set_value_members(t, seen)
+    fns.len() > before
+
 check_pending_functions = (start: int) -> int:
     k = start
-    loop k < fns.len():
+    loop k < fns.len() or prepare_set_value_helpers():
         if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
             if fns[k].kind == FK_INIT:
                 m = int(fns[k].mod)

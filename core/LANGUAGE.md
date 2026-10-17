@@ -513,6 +513,39 @@ argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
 
+Sets retain distinct members in insertion order:
+
+```dewy
+let tags=set["visible" "moving" "visible"]
+tags.push("selected")
+if "moving" in? tags {printl"moving entity"}
+let active=tags & set["visible" "selected"]
+let names=[loop tag in active tag]
+let [first second]=active
+let visited:set<int64>=set[]
+if visited.add(7) {printl"first visit"}
+```
+
+`set<T>` supplies the element type for an empty literal or narrower numeric
+members. Function parameters provide the same context. `set[loop ...]` and
+`set[values...]` also work. `push` adds a member; `add` returns whether it was
+new. Adding an existing member leaves its position unchanged. `remove(value)`
+returns whether it removed a member, while `clear()` and `reserve(count)` work
+like their dictionary counterparts. `.length`, `has`, `contains` and `is_empty`
+inspect the set.
+
+`a | b`, `a & b`, `a-b` and `a xor b` compute union, intersection, difference and
+symmetric difference. Results keep surviving members from the left in order,
+then any new members from the right. Equality and hashing ignore insertion
+order, so sets can themselves be dictionary keys or set members. Copies remain
+independent, including managed members and iteration snapshots. Counted/zipped
+loops, comprehensions and unpacking use the same members and skip removed ones.
+
+`pop(value)` removes and returns that member; `pop()` removes and returns a
+member from a nonempty set. A missing member or empty set causes a checked
+runtime failure. Use `pop(value default=none)` or `pop(default=none)` to receive
+an optional value instead.
+
 `values.sorted()` returns an independent sorted array; `values.sort()` updates
 the receiver. Use `sorted_by(key)` or `sort_by(key)` for records:
 

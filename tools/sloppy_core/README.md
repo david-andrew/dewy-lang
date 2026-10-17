@@ -277,6 +277,20 @@ global initialization, source evaluation and length failures on native/web
 default/release builds. The independent C gate passes 3,118 checks in 77.02
 seconds; see `dictionary-unpack-validation.json` and its full test log.
 
+Insertion-ordered sets now use the existing dictionary hashing and COW storage:
+`set[1 2 2]`, `set<T>`, membership, mutation, set algebra, comprehensions,
+spreads, counted/zipped iteration and unpacking. Equality and hashing ignore
+insertion order, including sets nested inside arrays, optionals, records and
+unions. Copies and iteration preserve independent values. Generated aggregate
+comparisons participate in effect analysis when a set key's equality calls user
+code; checks include a callback that clears the original collection while a
+borrowed argument is still in use. Native/web default/release checks include an
+independent oracle for all pairs of four-member subsets. The independent C gate
+passes 3,226 checks in 46.26 seconds. Five alternating fresh-build pairs on CPU 2
+show no material compilation change: median paired CPU ratios are 0.984 for the
+tour, 1.012 for Dunes and 1.004 for the compiler. See `sets-*` in the October 17
+source-core audit directory.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

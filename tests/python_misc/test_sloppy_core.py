@@ -22,6 +22,134 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'set-membership': '''main=()=>{
+let seen=set["read" "write" "read"]
+seen.push("execute") seen.push("write")
+if seen.length not=? 3 or "read" not in? seen or "absent" in? seen return 1
+if seen.add("read") or not seen.add("new") return 2
+return if seen.has("new") and seen.contains("write") and not seen.is_empty() 42 else 3}''',
+    'set-typed-literals': '''sum=(values:set<int8>):>int64=>{
+let result:int64=0 loop value in values {result+=value as int64} return result}
+empty=():>set<uint64>=>set[]
+wrap=<T>(value:T):>set<T>=>set[value]
+main=()=>{
+let values:set<uint8>=set[20 22 20]
+let absent:set<string>?=set[]
+let high:uint64=uint64.max
+if empty().length not=? 0 or absent is? none or absent.length not=? 0 return 1
+if high not in? wrap(high) or values.length not=? 2 return 2
+return sum(set[20 22])}''',
+    'set-algebra': '''main=()=>{
+let evens=set[0 2 4 6 8] let small=set[0 1 2 3]
+if [loop x in (evens & small) x] not=? [0 2] return 1
+if [loop x in (evens | small) x] not=? [0 2 4 6 8 1 3] return 2
+if [loop x in (evens-small) x] not=? [4 6 8] return 3
+if [loop x in (evens xor small) x] not=? [4 6 8 1 3] return 4
+if evens not=? set[8 6 4 2 0] or small =? evens return 5
+return if (evens & evens)=?evens and (evens-evens).length=?0 42 else 6}''',
+    'set-copy-and-removal': '''main=()=>{
+let values=set[20 99 22] let before=values
+if not values.remove(99) or values.remove(99) return 1
+values.push(20) values.reserve(100)
+if [loop v in values v] not=? [20 22] or before.length not=? 3 return 2
+let saved=values values.clear()
+return if values.is_empty() and saved.length=?2 and 99 in? before 42 else 3}''',
+    'set-pop': '''main=()=>{
+let values=set[20 22]
+let first=values.pop(20)
+if values.pop(99 default=none) not=? none return 1
+let second=values.pop(22 default=none)
+if second is? none return 2
+return if values.length=?0 first+second else 3}''',
+    'set-iteration-snapshot': '''main=()=>{
+let values=set[20 22] let trace:int64=0 let total:int64=0
+loop i in 0.. and value in {trace+=1; values} {
+total+=value values.remove(value) values.push(i)
+}
+if trace not=? 1 or [loop v in values v] not=? [0 1] return 1
+let zipped=[loop a in set[20 22] and b in [1 2] a+b]
+if zipped not=? [21 24] return 2
+return total}''',
+    'set-unpack': '''main=()=>{
+let values=set[20 99 22] values.remove(99)
+let [first second]=values
+[second first]=set[first second]
+return if first=?22 and second=?20 first+second else 1}''',
+    'set-managed-keys': '''main=()=>{
+let item=[20] let values=set[item [22] item] item[0]=99
+let [first second]=values let saved=first first[0]=100
+return if values.length=?2 and [20] in? values and [99] not in? values
+and saved[0]=?20 saved[0]+second[0] else 1}''',
+    'set-format': '''main=()=>{
+let values=set[20 22 20]
+return if "{values}"=?"set{[20 22]}" 42 else 1}''',
+    'set-nested-hash': '''main=()=>{
+let left=set[20 22] let right=set[22 99 20]
+right.remove(99) right.reserve(100)
+let values=set[left right]
+let mapping=[left->42]
+if values.length not=? 1 or right not in? values return 1
+right.push(99)
+return if right not in? values mapping[set[22 20]] else 2}''',
+    'set-comprehension-and-generic': '''identity=(value)=>value
+main=()=>{
+let calls:int64=0
+let values=identity(set[loop value in [20 22 20] {calls+=1; value}])
+let output=[loop a in values or b in [1 2 3] a??0]
+return if calls=?3 and output=?[20 22 0] 42 else 1}''',
+    'set-literal-overload': '''pick=(values:set<int8>)=>1
+pick=(values:set<int64>)=>42
+main=()=>pick(set[20 22])''',
+    'set-pop-any': '''main=()=>{
+let values=set[20 99 22] values.remove(99)
+let before=values let first=values.pop()
+let second=values.pop(default=none)
+if second is? none return 1
+if values.pop(default=none) not=? none or before.length not=?2 return 2
+return first+second}''',
+    'set-context-comparison': '''main=()=>{
+let values:set<uint8>=set[20 22]
+if values not=? set[20 22] or set[22 20] not=? values return 1
+if (values | set[20 22 24]).length not=?3 return 2
+if (set[20 22 24]-values) not=? set[24 as uint8] return 3
+let optional:set<uint8>?=values
+return if optional=?set[22 20] and set[20 22]=?optional 42 else 4}''',
+    'set-spread-and-records': '''main=()=>{
+let source:array<uint8>=[20 22]
+let values:set<uint8>=set[source... 20]
+source[0]=99
+let records=set[[value=42] [value=0] [value=42]]
+let [[value] _]=records
+return if values=?set[20 22] and records.length=?2 value else 1}''',
+    'set-nested-value-equality': '''main=()=>{
+let first=[tags=set[20 22] count=7]
+let second=[tags=set[22 20] count=7]
+if first not=? second or [first] not=? [second] return 1
+let values=[first->42]
+return values[second]}''',
+    'set-union-value-equality': '''main=()=>{
+let first:set<int64>|string=set[20 22]
+let second:set<int64>|string=set[22 20]
+if first not=? second return 1
+let values=[first->42]
+return values[second]}''',
+    'set-equality-callback-snapshot': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''main=()=>{
+set_effects.current=[set[set_effects.Key[20] set_effects.Key[22]]]
+let other=[set[set_effects.Key[22] set_effects.Key[20]]]
+set_effects.armed=true
+if set_effects.current not=? other return 1
+return if set_effects.current.length=?0 and not set_effects.armed 42 else 2}'''),
+    'set-callback-borrowed-argument': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''through=(value:array<set<set_effects.Key>>):>int64=>{
+let other=[set[set_effects.Key[22] set_effects.Key[20]]]
+if value not=? other return 1
+let noise=[set[set_effects.Key[99]]]
+return if noise.length=?1 value[0].length*21 else 2
+}
+main=()=>{
+set_effects.current=[set[set_effects.Key[20] set_effects.Key[22]]]
+set_effects.armed=true
+let result=through(set_effects.current)
+return if set_effects.current.length=?0 and not set_effects.armed result else 3}'''),
     'generic-nested-return-adjacency': '''pair=():>array<array<int64>>=>[[20 22]]
 deep=():>array<array<array<array<int64>>>>=>[[[[20 22]]]]
 main=()=>{
@@ -2792,6 +2920,8 @@ ERRORS = {
     'unpack-nested-record-position': ('main=()=>{let [[x]]=[value=[42]] return x}', 'record unpacking needs field names'),
     'unpack-nested-empty': ('main=()=>{let [[]]=[[42]] return 0}', 'empty unpacking target'),
     'unpack-loop-duplicate': ('main=()=>{loop [x [x]] in [[1 2]] {} return 0}', 'duplicate unpacking name'),
+    'set-empty-untyped': ('main=()=>{let values=set[] return 0}', 'cannot infer the type of an empty set'),
+    'set-literal-range': ('main=()=>{let values:set<uint8>=set[256] return 0}', 'does not fit in u8'),
     'syntax-unicode-short': ('main=()=>"\\u123"', 'Unicode escape'),
     'syntax-unicode-bad-digit': ('main=()=>"\\u12G4"', 'hexadecimal'),
     'syntax-unicode-empty': ('main=()=>"\\u{}"', 'hex digits'),
@@ -3144,15 +3274,16 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unit_range_errors': 'range',
                   'test_core_range_index_errors': 'range',
                   'test_core_unpack_errors': 'unpack',
+                  'test_core_set_errors': 'set',
                   'test_core_combined_range_errors': 'range',
                   'test_core_compound_errors': 'compound',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['body'] if family in ('range', 'bounds', 'compound', 'unpack') else params['expression']
+        expression = params['body'] if family in ('range', 'bounds', 'compound', 'unpack', 'set') else params['expression']
         case = family, expression
-        if family in ('range', 'bounds', 'compound', 'unpack'):
+        if family in ('range', 'bounds', 'compound', 'unpack', 'set'):
             sources[case] = f'main=():>void=>{{{expression}}}'
         else:
             sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
@@ -3963,6 +4094,57 @@ loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_set_algebra(compiler, tmp_path, target, release):
+    keys = [-2, 0, 3, 5]
+    members = [[key for i, key in enumerate(keys) if mask & (1 << i)] for mask in range(16)]
+    literals = ' '.join('set['+' '.join(map(str, values))+']' for values in members)
+    source = tmp_path / 'sets.dewy'
+    source.write_text('''digest=(values:set<int64>):>int64=>{
+let result:int64=7 loop value in values {result=result*11+value+5} return result}
+main=():>void=>{
+let values:array<set<int64>>=['''+literals+''']
+loop a in values {loop b in values {
+printl(digest(a & b)) printl(digest(a | b))
+printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
+}}
+}''')
+    expected = []
+    for left in members:
+        for right in members:
+            a, b = set(left), set(right)
+            results = ([v for v in left if v in b], list(dict.fromkeys(left+right)),
+                       [v for v in left if v not in b],
+                       [v for v in left if v not in b]+[v for v in right if v not in a])
+            for values in results:
+                checksum = 7
+                for value in values:
+                    checksum = checksum*11+value+5
+                expected.append(str(checksum))
+            expected.append(str(a == b).lower())
+    binary = tmp_path / 'sets'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web set checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'sets.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_nested_exit_cleanup(compiler, tmp_path, target, release):
     source = tmp_path / 'nested_exit.dewy'
     source.write_text(CASES['optimizer-nested-exits'])
@@ -4652,12 +4834,25 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
     'let [[_ x] [_ y]]=["one"->42] printl(x+y)',
     'let [[_ x] [_ y]]=["one"->20 "two"->22 "three"->99] printl(x+y)',
     'let [[_ [x y]]]=["one"->[42]] printl(x+y)',
+    'let [x y]=set[42] printl(x+y)',
+    'let [x y]=set[1 2 3] printl(x+y)',
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_unpack_errors(error_batches, body, target, release):
     ran = error_batches('unpack', body, release, target)
     assert ran.returncode != 0 and 'unpacking requires exactly 2 elements' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body, diagnostic', [
+    ('let values=set[20] printl(values.pop(22))', 'the set has no member 22'),
+    ('let values:set<int64>=set[] printl(values.pop())', 'cannot pop an empty set'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_set_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('set', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('body, diagnostic', [
@@ -5089,7 +5284,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
