@@ -302,6 +302,17 @@ application build speedup; the reproducible generator is
 `python3 -m tools.sloppy_core.benchmark_types`. See `struct-index-*` in the same
 audit directory.
 
+Generic functions now look up concrete specializations by declaration and
+interned type arguments. Arguments still carrying inference variables retain
+the existing structural comparison path. Seven alternating fresh type-check
+pairs on CPU 2 give candidate/baseline CPU ratios of 0.972, 0.757 and 0.470 for
+500, 2,000 and 5,000 distinct records passed to one generic function. Five paired
+ordinary builds remain neutral (tour 0.992, Dunes 1.004, compiler 0.999).
+The scaling workload is reproducible with
+`python3 -m tools.sloppy_core.benchmark_types --kind functions`; no code generation
+or program runtime is included in that measurement. All 3,364 checks pass on the
+independently C-built compiler in 68.19 seconds. See `function-index-*`.
+
 Aggregate helpers now consult the existing transitive effect analysis before
 retaining set-containing values. Integer-set equality/hashing use the pure read
 path; unknown calls and global-writing callbacks keep their snapshots. The

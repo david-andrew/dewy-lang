@@ -137,6 +137,14 @@ struct DeclInfo:
     insts: int[]
     sig: FnSig
 
+struct FnInstanceKey:
+    decl: int
+    args: int[]
+
+# Concrete types are interned: their IDs are their equality keys. Keep the
+# declaration's instance list for inference-bearing arguments and IDE ordering.
+fn_instances: {FnInstanceKey: int} = {}
+
 struct FnCtx:
     inst: i32
     parent: i32
@@ -1260,16 +1268,24 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
     di = decl_info(decl)
     sig = fn_sig(decl)
-    loop f in decl_infos[di].insts:
-        same = fns[f].targs.len() == targs.len()
-        loop k in [0..targs.len()):
-            if not same: break
-            if not type_eq(fns[f].targs[k], targs[k]):
-                same = false
-                break
-        if same:
+    concrete = targs.len() > 0
+    loop t in targs:
+        if has_var(t): concrete = false
+    if concrete:
+        if let f = fn_instances.get(FnInstanceKey(decl, targs)):
             ensure_ret(f, use_pos)
             return f
+    else:
+        loop f in decl_infos[di].insts:
+            same = fns[f].targs.len() == targs.len()
+            loop k in [0..targs.len()):
+                if not same: break
+                if not type_eq(fns[f].targs[k], targs[k]):
+                    same = false
+                    break
+            if same:
+                ensure_ret(f, use_pos)
+                return f
     f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
     fns[f].decl = i32(decl)
     fns[f].use_pos = use_pos
@@ -1345,6 +1361,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                 if an == "inline" or an == "always_inline" or an == "forceinline": why = " (release builds put small functions inline by themselves; @noinline keeps one out)"
                 fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @plain, @cabi, @export, @no_web(\"why\"), and for externs @lib, @symbol, @variadic")
     decl_infos[di].insts.push(f)
+    if zt.len() > 0: fn_instances[FnInstanceKey(decl, zt)] = f
     ensure_ret(f, use_pos)
     f
 

@@ -22,6 +22,27 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'generic-instance-identity': '''A:type=[value:int64]
+B:type=[value:int64]
+identity=<T>(value:T):>T=>value
+first=<T U>(a:T b:U):>T=>a
+second=<T U>(a:T b:U):>U=>b
+score=(value:A):>int64=>value.value
+score=(value:B):>int64=>value.value+1
+main=()=>{
+let a=identity(A[20]) let b=identity(B[21])
+let copied=identity([a.value b.value]) copied[0]=99
+if first<int64 string>(20 "ignored") not=?20 return 1
+if second<int64 string>(20 "kept") not=?"kept" return 2
+if first<string int64>("kept" 22) not=?"kept" return 3
+return score(identity(a))+score(identity(b))}''',
+    'generic-instance-recursion': '''recur_value=<T>(value:T depth:int64):>T=>
+if depth=?0 value else recur_value(value depth-1)
+main=()=>{
+let values=[20 22]
+let copied=recur_value(values 5) copied[0]=99
+return if recur_value("kept" 2)=?"kept" and recur_value(true 3)
+values[0]+recur_value(values[1] 4) else 1}''',
     'dictionary-optional-payload': '''main=()=>{
 let values:dict<int64 int64?>=[1->none 2->42]
 if values.get(1) is? none or values.get(3) isnt? none return 1
