@@ -201,8 +201,10 @@ base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-co
 records and no refinement-proof representation. Constructors accept signed and
 unsigned machine words or decimal text; checked word conversions, interpolation,
 comparisons, arithmetic, floor division/modulo, nonnegative powers and GCD work
-on native and web. This explicit `BigInt` type does not yet replace fixed-width
-integer defaults or add automatic widening. See the language guide and
+on native and web. Literals beyond the machine-word range automatically construct
+`BigInt` values from limbs computed at compilation. Small literals adopt an
+expected `BigInt` type; machine-word arithmetic retains its fixed width and does
+not automatically widen on overflow. See the language guide and
 `examples/sloppy_core/exact_integers.dewy`.
 
 The differential gate compares 622 signed operand pairs against Python integers,
@@ -291,8 +293,8 @@ and compiler self-build 1,187.41/1,224.69 ms (before/after). The self-build was
 about 3% slower in this run; retain that tradeoff alongside the runtime result.
 See `block-cse-compile.json`.
 
-The combined Dewy/editor/shared-core gate now contains 1,413 checks and took
-83 seconds in the latest development run, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,451 checks and took
+58 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

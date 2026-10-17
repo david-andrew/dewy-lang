@@ -85,6 +85,42 @@ int_widens = (f: int, t: int) -> bool:
     if not types[f].sign and types[t].sign: return tb > fb
     false
 
+# A literal can take the bundled BigInt's expected type without a runtime
+# decimal conversion. Ordinary integer variables keep their fixed-width type.
+dewy_bigint_literal_target = (n: int, t0: int) -> bool:
+    if n == 0 or nodes[n].kind != .int_lit or not is_lit(n): return false
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    decl = int(structs[int(types[t].st)].decl)
+    if name_of(int(nodes[decl].name)) != "BigInt": return false
+    if files[pos_file(nodes[decl].pos)].path != "{lib_dir}/bigint.dewy": return false
+    ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
+
+dewy_coerce_bigint_literal = (n: int, t: int):
+    pos = nodes[n].pos
+    negative = nodes[n].ival < 0 and not has_flag(n, NF_U64)
+    magnitude = u64(nodes[n].ival)
+    if negative: magnitude = 0 - magnitude
+    sign = mk(.int_lit, pos)
+    nodes[sign].type = i32(T_INT)
+    nodes[sign].ival = if magnitude == 0: 0 else if negative: -1 else: 1
+    add_flag(sign, NF_CHECKED)
+    items: int[]
+    loop magnitude != 0:
+        item = mk(.int_lit, pos)
+        nodes[item].type = i32(T_U64)
+        nodes[item].ival = int(magnitude & 0xFFFFFFFF)
+        add_flag(item, NF_CHECKED)
+        items.push(item)
+        magnitude = magnitude >> 32
+    limbs = mk(.array, pos)
+    nodes[limbs].type = i32(mk_array(T_U64))
+    add_flag(limbs, NF_CHECKED)
+    set_list(limbs, items)
+    layout(t)
+    nodes[n] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
+    set_list(n, [sign, limbs])
+
 can_coerce = (n: int, from0: int, to0: int) -> bool:
     from = prune(from0)
     to = prune(to0)
@@ -100,6 +136,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
             return types[fe].kind == .var or types[te].kind == .var or type_eq(fe, te)
         if fk == .opt and tk == .opt: return true
     if n != 0 and is_lit(n):
+        if dewy_bigint_literal_target(n, to): return true
         if nodes[n].kind == .int_lit and (tk == .int_ or tk == .float_): return true
         if nodes[n].kind == .float_lit and tk == .float_: return true
     if fk == .int_ and tk == .int_: return int_widens(from, to)
@@ -176,6 +213,9 @@ coerce = (n: int, target: int) -> int:
         if to != T_NEVER and types[to].kind != .void_ and types[to].kind != .var and types[to].kind != .param: wrap_conv(n, CV.none_, to)
         return n
     tk = types[to].kind
+    if dewy_bigint_literal_target(n, to):
+        dewy_coerce_bigint_literal(n, to)
+        return n
     if is_lit(n):
         k = nodes[n].kind
         if k == .int_lit and tk == .int_:
@@ -943,6 +983,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 if p == lit_default(a): return 0
                 return 1
             return -1
+        if dewy_bigint_literal_target(a, p): return 2
         if pk == .float_:
             if p == T_FLOAT:
                 if nodes[a].kind == .int_lit: return 2
@@ -1021,7 +1062,8 @@ default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = f
             name = int(nodes[kid(decl, j)].name)
             push_scope_sym(name, new_sym(name, .local, int(nodes[value].sym), kid(decl, j)))
     check_expr(d, pt)
-    coerce(d, pt)
+    if pt != 0: coerce(d, pt)
+    else: finalize_literal(d)
     scope_reset(mark)
     ctxs.pop()
     cx = saved
@@ -1454,6 +1496,16 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
                 if nodes[dv].name != nodes[kid(decl, j)].name: continue
                 earlier = subst_partial(cd.sig.params[j], cd.binds)
                 if not has_var(earlier): cd.binds[int(types[p].id)] = earlier
+        # Nonliteral defaults (including large integer literals lowered to
+        # constructors) have their ordinary expression type. Resolve names in
+        # the declaration's module, just as when emitting the actual default.
+        if cd.binds[int(types[p].id)] == 0 and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy") and not default_uses_params(dv, decl, i):
+            ready = true
+            loop j in [0..nkids2(decl)):
+                if cd.binds[j] == 0 or has_var(cd.binds[j]): ready = false
+            if ready:
+                inferred = default_arg(decl, i, 0, targs = cd.binds)
+                cd.binds[int(types[p].id)] = ntype(inferred)
     loop i in [0..int(cd.sig.ntp)):
         b = cd.binds[i]
         if b == 0:

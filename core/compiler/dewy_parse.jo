@@ -58,7 +58,7 @@ dw_digits = (text: str) -> str:
     if starts_with(lower(digits), text[..2)): digits = digits[2..]
     digits
 
-dw_unsigned = (text: str, id: int) -> u64:
+dw_alphabet = (text: str, id: int) -> str:
     alphabet = ""
     match text[..3):
         "0b:": alphabet = "01"
@@ -70,6 +70,10 @@ dw_unsigned = (text: str, id: int) -> u64:
         "0z:": alphabet = "0123456789xe"
         "0x:": alphabet = "0123456789abcdef"
         _: dw_fail(id, "this numeric base")
+    alphabet
+
+dw_unsigned = (text: str, id: int) -> u64?:
+    alphabet = dw_alphabet(text, id)
     base = u64(len(alphabet))
     value: u64 = 0
     loop c in lower(dw_digits(text)):
@@ -77,9 +81,67 @@ dw_unsigned = (text: str, id: int) -> u64:
         digit = find_byte(alphabet, c)
         if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
         if value > (0xFFFFFFFFFFFFFFFF - u64(digit)) / base:
-            fatal(dewy_syntax[id].pos, "integer literal exceeds uint64")
+            return none
         value = value * base + u64(digit)
     value
+
+# Only modules that use a large literal import the exact-integer library. The
+# alias contains a character that cannot occur in a user identifier.
+dw_bigint_import = 0
+const DW_BIGINT_ALIAS = "__dewy$bigint"
+
+dw_finish_declarations = (declarations: int[]) -> int[]:
+    if dw_bigint_import == 0: return declarations
+    [dw_bigint_import] + declarations
+
+dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
+    if dw_bigint_import == 0:
+        dw_bigint_import = mk(.import_, pos)
+        nodes[dw_bigint_import].aux2 = 1
+        nodes[dw_bigint_import].sval = i32(intern("@lib/bigint.dewy"))
+        nodes[dw_bigint_import].name = i32(intern(DW_BIGINT_ALIAS))
+    owner = mk(.ident, pos)
+    nodes[owner].name = i32(intern(DW_BIGINT_ALIAS))
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(owner)
+    nodes[callee].name = i32(intern("BigInt"))
+    sign = mk(.int_lit, pos)
+    nodes[sign].ival = if negative: -1 else: 1
+    add_flag(sign, NF_LITERAL)
+    sign_arg = mk(.namedarg, pos)
+    nodes[sign_arg].name = i32(intern("_sign"))
+    nodes[sign_arg].a = i32(sign)
+    items: int[]
+    loop limb in limbs:
+        item = mk(.int_lit, pos)
+        nodes[item].ival = int(limb)
+        add_flag(item, NF_LITERAL)
+        items.push(item)
+    magnitude = mk(.array, pos)
+    set_list(magnitude, items)
+    magnitude_arg = mk(.namedarg, pos)
+    nodes[magnitude_arg].name = i32(intern("_limbs"))
+    nodes[magnitude_arg].a = i32(magnitude)
+    result = mk(.call, pos)
+    nodes[result].a = i32(callee)
+    set_list(result, [sign_arg, magnitude_arg])
+    result
+
+dw_big_integer = (text: str, id: int) -> int:
+    alphabet = dw_alphabet(text, id)
+    base = u64(len(alphabet))
+    limbs: u64[]
+    loop c in lower(dw_digits(text)):
+        if c == '_': continue
+        digit = find_byte(alphabet, c)
+        if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
+        carry = u64(digit)
+        loop i in [0..limbs.len()):
+            word = limbs[i] * base + carry
+            limbs[i] = word & 0xFFFFFFFF
+            carry = word >> 32
+        if carry != 0: limbs.push(carry)
+    dw_bigint_value(limbs, dewy_syntax[id].pos)
 
 # Power-of-two based strings pack digits most-significant-bit first. The final
 # partial byte is zero padded, as in the existing Dewy literal design.
@@ -361,11 +423,13 @@ dw_expr = (id: int) -> int:
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
     if k == "Integer":
-        n = mk(.int_lit, pos)
-        nodes[n].ival = int(dw_unsigned(text, id))
-        add_flag(n, NF_LITERAL)
-        if nodes[n].ival < 0: add_flag(n, NF_U64)
-        return n
+        if let value = dw_unsigned(text, id):
+            n = mk(.int_lit, pos)
+            nodes[n].ival = int(value)
+            add_flag(n, NF_LITERAL)
+            if nodes[n].ival < 0: add_flag(n, NF_U64)
+            return n
+        return dw_big_integer(text, id)
     if k == "Real":
         parts = split(text, "|")
         if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
@@ -448,7 +512,8 @@ dw_expr = (id: int) -> int:
             return e
         if op == "-" and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
             if has_flag(e, NF_U64) and nodes[e].ival != -9223372036854775807 - 1:
-                fatal(pos, "negative integer literal exceeds int64")
+                value = u64(nodes[e].ival)
+                return dw_bigint_value([value & 0xFFFFFFFF, value >> 32], pos, true)
             nodes[e].ival = -nodes[e].ival
             nodes[e].pos = pos
             nodes[e].aux2 = 1
@@ -1011,6 +1076,7 @@ dw_top_declarations = (id: int) -> int[]:
     [dw_stmt(id, true)]
 
 dewy_parse_file = (file: int) -> int[]:
+    dw_bigint_import = 0
     parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
     if not file_exists(parser): fatal(mkpos(file, 0), "legacy syntax parser is not installed; rebuild with --legacy-parser or use the default frontend")
     # Parse the compiler's source snapshot, including unsaved editor text.
@@ -1062,4 +1128,4 @@ dewy_parse_file = (file: int) -> int[]:
     loop child in dewy_syntax[root].children:
         loop declaration in dw_top_declarations(child): decls.push(declaration)
     dewy_syntax = []
-    return decls
+    return dw_finish_declarations(decls)

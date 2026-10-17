@@ -474,6 +474,7 @@ dn_stmt = () -> int:
     result
 
 dewy_fast_file = (file: int) -> int[]:
+    dw_bigint_import = 0
     dn_file = file
     dn_tokens = dn_lex(file, 0, len(files[file].src))
     dn_at = 0
@@ -488,4 +489,4 @@ dewy_fast_file = (file: int) -> int[]:
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     dn_tokens = []
     dewy_syntax = []
-    declarations
+    dw_finish_declarations(declarations)

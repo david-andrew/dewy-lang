@@ -773,3 +773,31 @@ compiler: tour 58.61/58.97 ms, physics 353.15/366.92 ms and compiler self-build
 1419.83/1360.25 ms. These mixed desktop measurements are not a speedup claim.
 `entities-compile.json` measures the new entity-event example alone: a seven-run
 median of 66.06 ms for a native release build.
+
+## Ordinary exact integer literals
+
+`big-literal-build.json` records an independent C bootstrap;
+`big-literal-full-tests.log` records all 1,451 checks passing in 57.97 seconds.
+Literals beyond the signed/unsigned machine-word range now construct the bundled
+BigInt automatically. The frontend converts digits to base-2^32 limbs, avoiding
+runtime decimal parsing. Only source modules containing an oversized literal
+receive the hidden bundled-library import. Small literals adopt an expected
+BigInt type in arguments, fields, optionals and collections; ordinary word
+variables still require an explicit conversion and word arithmetic does not
+automatically widen on overflow. The constructor also accepts an existing BigInt.
+
+A Python oracle covers 240 signed literals across all eight supported bases,
+including 64-bit boundaries and values through 1,024 bits, on native/web in
+debug/release. Additional checks exercise imported constants, module-name
+collisions, inferred arrays, defaults, overload preference, map keys, value
+copies and allocation balance. Nonliteral omitted defaults now infer their
+expression type in the declaring module when they do not depend on earlier
+parameters and their explicit type arguments are known. Side effects remain
+once per actual default evaluation. The exact-integer example uses ordinary
+numeric notation, including an explicitly BigInt-typed word-sized literal.
+
+`big-literal-compile.json` records seven alternating warmed builds against the
+block-prefix CSE compiler: tour 58.28/57.24 ms, physics 383.18/335.89 ms, and
+compiler self-build 1280.32/1251.35 ms (before/after). These shared-desktop
+measurements show no observed regression; this feature is not credited with a
+compilation speedup.

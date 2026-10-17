@@ -97,7 +97,7 @@ division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support signed `int64` and unsigned `uint64`, preserving the full
 unsigned range; narrower operands retain the existing integer widening rules.
 Floating-point `/` is available; built-in integer `/` is not implemented yet.
-Use the bundled `BigInt` library for exact integers beyond a machine word.
+Literals beyond a machine word automatically use the bundled exact `BigInt` type.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
@@ -118,7 +118,7 @@ power as one. `^=` is not implemented yet.
 ```dewy
 from bigint import BigInt, bigint, parse_bigint
 main=():>void=>{
-    let value=bigint("123456789012345678901234567890")
+    let value=123456789012345678901234567890
     printl"{value*value}"
     printl"{bigint(2)^256}"
     let parts=(-value).divmod(bigint(7))
@@ -126,7 +126,15 @@ main=():>void=>{
 }
 ```
 
-`bigint` constructs from `int64`, `uint64` or signed decimal text. `parse_bigint`
+Integer literals outside `int64`/`uint64` become `BigInt` values without an
+explicit import. Decimal and all supported based literals work, including digit
+separators. Their digits are converted at compilation, not parsed at runtime.
+Small literals also adopt an expected `BigInt` type, for example
+`let value:BigInt=42`, typed arguments, record fields and arrays. Import `BigInt`
+when naming its type. Mixed arrays such as `[1 123456789012345678901234567890]`
+infer `array<BigInt>`; ordinary word-only arrays keep their word element type.
+
+`bigint` constructs from `int64`, `uint64`, `BigInt` or signed decimal text. `parse_bigint`
 returns `BigInt|none` for text that may be invalid; the constructor panics on
 invalid text. Parsing is strict: an optional leading `+`/`-` and ASCII decimal
 digits, with no whitespace or separators. Leading zeros are accepted.
@@ -141,12 +149,12 @@ Dewy's unary minus binds below multiplication and division.
 `gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
 panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
 truncate. Interpolation formats decimal text. Values are independent copies and
-can be dictionary keys; construct them through `bigint`, keeping `_sign` and
+can be dictionary keys; construct them through numeric literals or `bigint`, keeping `_sign` and
 `_limbs` as internal representation details.
 
-This is an explicit library type. Ordinary fixed-width arithmetic does not
-automatically widen. Oversized numeric literals, automatic rational promotion and
-bigint bitwise operations are not yet implemented. The inherited
+Ordinary fixed-width arithmetic does not automatically widen on overflow.
+Convert a word variable with `bigint(word)` when exact arithmetic is needed.
+Automatic rational promotion and bigint bitwise operations are not yet implemented. The inherited
 `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.

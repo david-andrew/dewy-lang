@@ -172,6 +172,56 @@ let text="{parts.remainder}" if text.length =? 0 panic("missing fraction")}
 }
 main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
 return if alloc_count() =? before 42 else 1}''',
+    'bigint-literal-auto-import': '''main=()=>{
+let value=123456789012345678901234567890
+return if "{value+42}" =? "123456789012345678901234567932"
+and value//10 =? 12345678901234567890123456789 and value%10 =? 0 42 else 1
+}''',
+    'bigint-literal-negative': '''main=()=>{
+let values=[-9223372036854775809 -18446744073709551615 -18446744073709551616 -123456789012345678901234567890]
+if values[0]+9223372036854775807 not=? -2 return 1
+if values[1]+18446744073709551615 not=? 0 return 2
+if values[2]+18446744073709551615 not=? -1 return 3
+return if -values[3] =? 123456789012345678901234567890 42 else 4
+}''',
+    'bigint-literal-context': '''from bigint import BigInt, bigint
+read=(value:BigInt=42):>BigInt=>value
+main=()=>{
+let values:array<BigInt>=[0 42 -9223372036854775808 18446744073709551615]
+let inferred=[1 -2 123456789012345678901234567890]
+let optional:BigInt|none=42
+if optional is? none return 1
+if values[0] not=? 0 or values[1] not=? 42 or values[2].to_int64() not=? -9223372036854775808 return 2
+if values[3].to_uint64() not=? 18446744073709551615 or inferred[1] not=? -2 return 3
+return if optional =? 42 and read() =? 42 and read(7) =? 7 and bigint(inferred[2]) =? inferred[2] 42 else 4
+}''',
+    'bigint-literal-record-and-map': '''from bigint import BigInt
+Record:type=[value:BigInt=42]
+main=()=>{
+let row=Record[] let data:dict<BigInt string>=[0->"zero" 42->"answer" 123456789012345678901234567890->"large"]
+let copy=data data[42]="changed"
+return if row.value =? 42 and data[0] =? "zero" and copy[42] =? "answer"
+and data[123456789012345678901234567890] =? "large" 42 else 1
+}''',
+    'bigint-literal-lifetime': '''work=():>void=>{
+let values=[1 2 123456789012345678901234567890]
+loop i in [0..10) {let text="{values[2]+i}" if text.length <? 30 panic("lost digits")}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..30) {work()}
+return if alloc_count() =? before 42 else 1}''',
+    'bigint-literal-defaults': '''let calls:int64=0
+make=()=>{calls=calls+1 123456789012345678901234567890}
+read=(value=123456789012345678901234567890)=>value
+called=(value=make())=>value
+main=()=>{
+if read() not=? called() or calls not=? 1 return 1
+if called(42) not=? 42 or calls not=? 1 return 2
+return if called() =? read() and calls =? 2 42 else 3
+}''',
+    'bigint-literal-overload': '''from bigint import BigInt
+choose=((value:int64)=>1)&((value:uint64)=>2)&((value:BigInt)=>3)
+main=()=>if choose(42) =? 1 and choose(18446744073709551615) =? 2
+and choose(18446744073709551616) =? 3 and choose(-9223372036854775809) =? 3 42 else 1''',
     'bigint-parse': '''from bigint import bigint, parse_bigint
 main=()=>{
 loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if parse_bigint(text) isnt? none return 1}
@@ -760,6 +810,8 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'bigint-literal-user-record': ('BigInt:type=[value:int64]\nmain=()=>{let value:BigInt=42 0}', 'type mismatch'),
+    'bigint-literal-word-variable': ('from bigint import BigInt\nmain=()=>{let word:int64=42 let value:BigInt=word 0}', 'type mismatch'),
     'overload-group-value': ('choose=(()=>42)&42\nmain=()=>choose()', 'overload group member other than a function literal'),
     'overload-group-local': ('main=()=>{let choose=(()=>40)&((n:int64)=>n) return choose()+choose(2)}', 'local overload group'),
     'power-missing-protocol': ('Box:type=[value:int64]\nmain=()=>Box[2]^3', 'operator ^ is not defined'),
@@ -775,9 +827,9 @@ ERRORS = {
     'missing-place': ('bump=(@x:int64):>void=>{x+=2}\nmain=():>int64=>{let x:int64=40 bump(x) return x}', 'needs `@`'),
     'unbounded-int': ('main=():>int=>42', 'unbounded integer'),
     'integer-division': ('main=():>int64=>85/2', 'integer /'),
-    'literal-too-large': ('main=()=>18446744073709551616', 'exceeds uint64'),
-    'hex-too-large': ('main=()=>0x10000000000000000', 'exceeds uint64'),
-    'negative-too-large': ('main=()=>-9223372036854775809', 'exceeds int64'),
+    'literal-too-large': ('main=():>uint64=>18446744073709551616', 'type mismatch'),
+    'hex-too-large': ('main=():>uint64=>0x10000000000000000', 'type mismatch'),
+    'negative-too-large': ('main=():>int64=>-9223372036854775809', 'type mismatch'),
     'signed-literal-overflow': ('main=():>int64=>0xffffffffffffffff', 'does not fit'),
     'narrow-literal-overflow': ('main=()=>{let x:uint8=256 return x}', 'does not fit'),
     'float-literal-overflow': ('main=()=>1e309', 'exceeds float64'),
@@ -1182,6 +1234,88 @@ def test_core_exact_example(compiler, tmp_path, target, release, example):
                                       f'Ways to choose 50 of 100: {math.comb(100, 50)}',
                                       f'Floor quotient: {quotient}; remainder: {remainder}',
                                       'Reconstruction: true', f'2^256 = {2**256}']
+
+
+def integer_literal(value, prefix, alphabet):
+    digits = ''
+    while value:
+        value, digit = divmod(value, len(alphabet))
+        digits = alphabet[digit] + digits
+    digits = digits or '0'
+    return prefix + '_'.join(digits[i:i+4] for i in range(0, len(digits), 4))
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
+    alphabets = [('0b', '01'), ('0t', '012'), ('0q', '0123'), ('0s', '012345'),
+                 ('0o', '01234567'), ('0d', '0123456789'), ('0z', '0123456789xe'),
+                 ('0x', '0123456789ABCDEF')]
+    values = [2**63+1, 2**64, 2**64+1, 2**127-1, 2**128+17, 2**255+43, 2**1023+7]
+    rng = random.Random(42028)
+    values += [rng.getrandbits(257) for _ in range(8)]
+    statements, expected = [], []
+    for prefix, alphabet in alphabets:
+        for value in values:
+            literal = integer_literal(value, prefix, alphabet)
+            for sign in ['', '-']:
+                statements.append(f'printl"{{{sign}{literal}}}"')
+                expected.append(str(-value if sign else value))
+    # A local module cannot replace the implementation of a numeric literal.
+    (tmp_path / 'bigint.dewy').write_text('BigInt:type=[wrong:bool]\n')
+    source = tmp_path / 'literals.dewy'
+    source.write_text('main=():>void=>{\n' + '\n'.join(statements) + '\n}\n')
+    binary = tmp_path / 'literals'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web literal checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'literals.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_literal_modules(compiler, tmp_path, target, release):
+    (tmp_path / 'constants.dewy').write_text('''const amount=123456789012345678901234567890
+read=(value=amount)=>value+1
+''')
+    source = tmp_path / 'main.dewy'
+    source.write_text('''from constants import amount, read
+main=()=>if amount+1 =? read() and read(18446744073709551616) =? 18446744073709551617 42 else 1
+''')
+    binary = tmp_path / 'modules'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web literal checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'modules.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
