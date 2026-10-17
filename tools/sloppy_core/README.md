@@ -50,8 +50,9 @@ Diagnostics retain UTF-8 source locations. A semicolon explicitly discards a res
 
 This is an opt-in compiler experiment, not a full language implementation or a
 release-certified replacement. The core supplies runtime bounds checks, not the
-old proof engine. Proof directives, effect contracts, unbounded integer types,
-and unsupported syntax produce diagnostics.
+old proof engine. Proof directives, effect contracts, the old numeric refinement
+types, and other unsupported syntax produce diagnostics. Exact `BigInt` and
+`Rational` values are bundled; fixed-width machine arithmetic retains its width.
 Floor division/modulo support signed and unsigned machine words and exact
 library numbers. Integer `/` constructs an exact Rational, loading its bundled
 implementation only when required by the checked operand types; floating `/`
@@ -700,3 +701,18 @@ on ordered/equal inputs; the string result is near neutral (paired ratio 0.975).
 Independent Python checksums agree, and 64 focused native/web default/release
 checks pass. See `comparator-sort-{release,default}-runtime.json` and
 `comparator-sort-validation.json` for the measured toolchains and scope.
+
+Constant interval tests on an ordinary signed 64-bit local now lower to one
+unsigned comparison. For example, `x <? 0 or x >=? BOX` checks the same interval
+without separate negative/upper-bound branches. Bounds may cross zero or span
+the entire signed range; calls, aliases, floats and overloaded comparisons keep
+their existing evaluation. Native/web default/release checks compare 2,800
+interval results per mode with Python, including open/closed endpoints, empty
+intervals and both integer extremes. Separate cases retain short-circuit effects.
+
+Five alternating thread-CPU application pairs show a median candidate/baseline
+ratio of 0.865 for the particle-record kernel; helpers, arrays, text and graph are
+0.991, 1.013, 1.025 and 1.013 respectively. The other workloads do not establish
+an improvement. Fresh-build paired CPU ratios are 1.004 for the tour, 1.018 for
+Dunes and 0.992 for the compiler: no compilation improvement is claimed.
+Raw samples are in `interval-applications.json` and `interval-compile.json`.

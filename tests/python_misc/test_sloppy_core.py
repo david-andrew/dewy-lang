@@ -22,6 +22,22 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'optimizer-interval-effects': '''let calls:int64=0
+next=():>int64=>{calls+=1 return calls-1}
+probe=(@x:int64):>bool=>x >=? 0 and x <? 4
+main=()=>{
+let a=next() <? 0 or next() >=? 4
+if calls not=? 2 or a return 1
+calls=0
+let b=next() >=? 0 and next() <? 4
+if calls not=? 2 or not b return 2
+calls=0
+let c=next() <? 1 or next() >=? 4
+if calls not=? 1 or not c return 3
+let x:int64=2
+if not probe(@x) return 4
+let narrow:int8=-1
+return if narrow <? 0 or narrow >=? 42 42 else 1}''',
     'sort-with-managed': '''Item:type=[score:int64 id:int64 payload:array<int64>]
 main=()=>{
 let values=[loop i in [0..65) Item[(i*17)%13 i [i]]]
@@ -2511,6 +2527,60 @@ ERRORS = {
     'syntax-deep-expression': ('main=()=>'+ '(' * 300 + '42' + ')' * 300, 'nested too deeply'),
     'syntax-deep-interpolation': ('main=()=>'+ '"{' * 300 + '42' + '}"' * 300, 'nested too deeply'),
 }
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_integer_interval_comparisons(compiler, tmp_path, target, release):
+    minimum, maximum = -(2**63), 2**63 - 1
+    bounds = [(minimum, maximum), (minimum, minimum), (maximum, maximum),
+              (-10, 10), (0, 256), (48, 57), (-5, -1), (5, 5), (5, -5),
+              (-1, 0), (minimum, 0), (0, maximum), (minimum + 1, maximum - 1),
+              (maximum, minimum)]
+    rng = random.Random(731)
+    values = [minimum, minimum + 1, maximum - 1, maximum, *range(-12, 13),
+              47, 48, 49, 56, 57, 58, 255, 256, 257,
+              *(rng.randint(minimum, maximum) for _ in range(12))]
+    functions, body, expected = [], [], []
+    for low, high in bounds:
+        for lower_closed, upper_closed in [(True, True), (False, False),
+                                           (True, False), (False, True)]:
+            number = len(functions)
+            lower = f'x {">=?" if lower_closed else ">?"} ({low})'
+            upper = f'x {"<=?" if upper_closed else "<?"} ({high})'
+            below = f'x {"<?" if lower_closed else "<=?"} ({low})'
+            above = f'x {">?" if upper_closed else ">=?"} ({high})'
+            # Reverse operands and conjunction order to cover equivalent source forms.
+            if number % 2:
+                lower = f'({low}) {"<=?" if lower_closed else "<?"} x'
+                upper = f'({high}) {">=?" if upper_closed else ">?"} x'
+                below = f'({low}) {">?" if lower_closed else ">=?"} x'
+                above = f'({high}) {"<?" if upper_closed else "<=?"} x'
+            inside = f'{lower} and {upper}' if number % 3 else f'{upper} and {lower}'
+            outside = f'{below} or {above}' if number % 3 else f'{above} or {below}'
+            functions.append(f'''probe_{number}=(x:int64):>int64=>{{
+let a={inside} let b={outside} let result:int64=0
+if a result+=1
+if b result+=2
+if {inside} result+=4
+if {outside} result+=8
+if not ({inside}) result+=16
+if not ({outside}) result+=32
+return result
+}}''')
+            body.append(f'printl(to_json([loop x in values probe_{number}(x)]))')
+            expected.append([37 if (x >= low if lower_closed else x > low)
+                             and (x <= high if upper_closed else x < high) else 26
+                             for x in values])
+    literal = ' '.join(f'({x})' for x in values)
+    program = '\n'.join(functions) + f'\nmain=()=>{{let values=[{literal}]\n'
+    program += '\n'.join(body) + '\nreturn 42\n}'
+    command, error = build_case_batch(compiler, tmp_path, {'intervals': program},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    assert [json.loads(line) for line in ran.stdout.splitlines()] == expected
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

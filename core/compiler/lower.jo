@@ -2771,6 +2771,8 @@ gen_expr = (e: int) -> Val:
         return V(norm(e_un(.not_, VI, v), t), false)
     if k == .not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
     if k == .and_ or k == .or_:
+        range = gen_range_cond(e)
+        if range >= 0: return V(range, false)
         r = vreg(VI)
         e_mov(r, gen_expr(int(nodes[e].a)).v)
         if k == .and_: iff(r)
@@ -3045,6 +3047,58 @@ const_array = (e: int, et: int) -> int:
     o
 
 # ---------------- conditions as branches ----------------
+# A constant interval test on the same ordinary integer local needs one
+# unsigned comparison: low <= x <= high is (u64(x) - u64(low)) <= u64(high-low).
+# The subtraction wraps, so negative values and intervals crossing zero work
+# without sign tests. Restrict the match to local reads: no calls, aliases,
+# overloaded comparisons or changes to short-circuit side effects.
+range_cmp = (e: int) -> (int, Tok, int):
+    if nodes[e].kind != .binary or nodes[e].aux != 0: return (0, .eq, 0)
+    op = nodes[e].op as Tok
+    if op != .lt and op != .le and op != .gt and op != .ge: return (0, .eq, 0)
+    a = int(nodes[e].a)
+    b = int(nodes[e].b)
+    if nodes[a].kind == .int_lit:
+        tmp = a
+        a = b
+        b = tmp
+        op = if op == .lt: .gt else if op == .le: .ge else if op == .gt: .lt else: .le
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[b].kind != .int_lit: return (0, .eq, 0)
+    if prune(ntype(a)) != T_INT or prune(ntype(b)) != T_INT: return (0, .eq, 0)
+    if int(locals[int(nodes[a].sym)].flags) & (LF_ALIAS | LF_MUTPARAM) != 0: return (0, .eq, 0)
+    (a, op, nodes[b].ival)
+
+gen_range_cond = (e: int, invert: bool = false) -> int:
+    k = nodes[e].kind
+    if k != .and_ and k != .or_: return -1
+    a = range_cmp(int(nodes[e].a))
+    if a.0 == 0: return -1
+    b = range_cmp(int(nodes[e].b))
+    if b.0 == 0 or not same_var(a.0, b.0): return -1
+    if k == .or_:
+        a.1 = if a.1 == .lt: .ge else if a.1 == .le: .gt else if a.1 == .gt: .le else: .lt
+        b.1 = if b.1 == .lt: .ge else if b.1 == .le: .gt else if b.1 == .gt: .le else: .lt
+    if a.1 == .lt or a.1 == .le:
+        tmp = a
+        a = b
+        b = tmp
+    if (a.1 != .gt and a.1 != .ge) or (b.1 != .lt and b.1 != .le): return -1
+    low = a.2
+    high = b.2
+    empty = false
+    if a.1 == .gt:
+        if low == 9223372036854775807: empty = true
+        else: low += 1
+    if b.1 == .lt:
+        if high == -9223372036854775807 - 1: empty = true
+        else: high -= 1
+    outside = (k == .or_) != invert
+    if empty or low > high: return e_iconst((if outside: 1 else: 0))
+    value = gen_expr(a.0).v
+    if low != 0: value = e_bin(.sub, VI, value, e_iconst(low))
+    op = if outside: Op.gtu else: Op.leu
+    e_bin(op, VI, value, e_iconst(high - low))
+
 # `and` / `or` / `not` in if/while conditions become jumps instead of boolean values.
 # Each leaf is its own small statement, so its temporaries are dropped before branching.
 cond_leaf = (e: int) -> int:
@@ -3075,6 +3129,10 @@ negate_cmp = (op: Op) -> Op:
 # continue when e is true, branch to `level` when it is false
 jump_if_false = (e: int, level: int):
     k = nodes[e].kind
+    range = gen_range_cond(e, true)
+    if range >= 0:
+        brif_to(range, level)
+        return
     if k == .and_:
         jump_if_false(int(nodes[e].a), level)
         jump_if_false(int(nodes[e].b), level)
@@ -3102,6 +3160,10 @@ jump_if_false = (e: int, level: int):
 # continue when e is false, branch to `level` when it is true
 jump_if_true = (e: int, level: int):
     k = nodes[e].kind
+    range = gen_range_cond(e)
+    if range >= 0:
+        brif_to(range, level)
+        return
     if k == .or_:
         jump_if_true(int(nodes[e].a), level)
         jump_if_true(int(nodes[e].b), level)

@@ -810,7 +810,7 @@ can connect to a native host or use direct invite codes through `import invite`.
 See the [multiplayer run instructions](../examples/sloppy_core/README.md#multiplayer).
 
 This remains a developing subset of Dewy. The earlier proof/effect system,
-automatic numeric widening, general structural conversions and every historical
+automatic growth of machine integers on overflow, general structural conversions and every historical
 juxtaposition form have not been recreated. See the
 [implementation notes](../tools/sloppy_core/README.md) for current boundaries,
 validation and measured performance.
