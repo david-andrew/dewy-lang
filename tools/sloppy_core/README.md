@@ -764,3 +764,11 @@ helper-specialization result, not an application-wide speedup. Fresh-build paire
 CPU ratios are tour 0.968, Dunes 0.988 and compiler 1.025; no compilation gain is
 claimed. The independent C-bootstrap gate passes 2,910 checks in 56.38 seconds.
 See the `constant-select-*` source-core audits for sources, samples and toolchains.
+
+Plain scalar conditionals with two value-producing arms now omit the initial
+zero write that both arms overwrite. This also leaves a single definition when
+the optimizer turns the branches into a selection. Existing checks cover narrow
+integers, floats, booleans, full-width unsigned values, nested conditionals and
+early exits. All 2,910 checks pass from the independent C seed. Five fresh-build
+CPU pairs give ratios of tour 1.011, Dunes 1.012 and compiler 1.008, so this is a
+lowering simplification with no compile-speed claim. See `conditional-init-*`.

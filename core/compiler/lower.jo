@@ -3182,6 +3182,7 @@ jump_if_true = (e: int, level: int):
 
 gen_if = (e: int, t: int) -> Val:
     val = vc(t) != VC_VOID and t != T_NEVER and not has_flag(e, NF_STMT)
+    has_else = nodes[e].c != 0
     rs = -1
     rv = -1
     if val:
@@ -3189,11 +3190,13 @@ gen_if = (e: int, t: int) -> Val:
         # each loop iteration does not spill an expression to a stack slot.
         if vc(t) != VC_AGG and not is_managed(t):
             rv = vreg(vt_of(t))
-            e_mov(rv, zero_val(t))
+            # Two value arms overwrite the result on every returning path.
+            # Leaving out the dead initial write also lets a later scalar
+            # selection become a single definition after branch folding.
+            if not has_else or nodes[int(nodes[e].b)].aux == 0 or nodes[int(nodes[e].c)].aux == 0: e_mov(rv, zero_val(t))
         else:
             rs = new_temp(t)
             e_zero(e_slot(rs), tsize(t))
-    has_else = nodes[e].c != 0
     blk()
     end_level = ctl
     if has_else: blk()
