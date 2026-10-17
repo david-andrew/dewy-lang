@@ -196,8 +196,8 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,205 checks and took
-59 seconds in the latest development run, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,221 checks and took
+63 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
@@ -343,3 +343,9 @@ release old managed values; unrelated live state remains. The watch gate checks
 asset deletion/recovery, stable live allocation counts and a counter continuing
 across repeated asset edits. Dependency discovery does not yet follow arbitrary
 global reads hidden inside initializer helper functions.
+
+Unsigned `uint64` floor division and modulo now use the core’s unsigned divide
+and remainder operations, including literal power-of-two fast paths. Native/web
+debug/release checks compare 876 quotient/remainder pairs per mode with Python
+integers, spanning zero through `2^64−1` and every power-of-two divisor. Zero
+divisors fail in both modes, and signed literal/narrow-input inference is retained.

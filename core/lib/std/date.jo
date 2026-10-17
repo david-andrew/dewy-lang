@@ -205,10 +205,16 @@ __floor_mod = (a: int, b: int) -> int:
     if r != 0 and ((r < 0) != (b < 0)): r += b
     r
 
+# Unsigned division already rounds down; preserve the full 64-bit range.
+__floor_div = (a: u64, b: u64) -> u64: a / b
+__floor_mod = (a: u64, b: u64) -> u64: a % b
+
 # The Dewy frontend selects these for positive power-of-two literal divisors.
-# Keep the same signed argument conversion as the general floor operations.
+# Keep the same argument conversion as the general floor operations.
 __floor_div_pow2 = (a: int, shift: int) -> int: a >> shift
 __floor_mod_pow2 = (a: int, mask: int) -> int: a & mask
+__floor_div_pow2 = (a: u64, shift: int) -> u64: a >> shift
+__floor_mod_pow2 = (a: u64, mask: u64) -> u64: a & mask
 
 __le32 = (b: u8[], at: int) -> int:
     v = int(b[at]) | (int(b[at + 1]) << 8) | (int(b[at + 2]) << 16) | (int(b[at + 3]) << 24)

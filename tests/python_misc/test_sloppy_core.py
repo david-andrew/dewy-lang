@@ -15,6 +15,9 @@ from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
     'answer': 'main=():>int64=>42',
+    'floor-literal-inference': '''check=(a)=>{let q=a//2 let r=a%3 return q-100 =? -58 and r-100 =? -99}
+main=()=>if check(85) and check(85 as int8) and check(85 as int16) and check(85 as int32)
+and check(85 as uint8) and check(85 as uint16) and check(85 as uint32) 42 else 1''',
     'syntax-coefficients': '''twice=(x:int64)=>2x
 main=()=>{let x:int64=19 return twice(x)+2(x-17)}''',
     'syntax-coefficient-call': '''value=()=>21
@@ -786,6 +789,52 @@ def test_core_values(value_batches, name, release):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_unsigned_floor_arithmetic(compiler, tmp_path, target, release):
+    maximum = (1 << 64) - 1
+    numerators = [0, 1, 2, 127, 255, 65535, (1 << 32) - 1, 1 << 32,
+                  (1 << 63) - 1, 1 << 63, maximum - 1, maximum]
+    denominators = [1, 2, 3, 255, 1000000007, (1 << 32) - 1, 1 << 32, 1 << 63, maximum]
+    powers = [1 << shift for shift in range(64)]
+    constants = '\n'.join(f'printl"{{a//{b}}} {{a%{b}}}"' for b in powers)
+    source = tmp_path / 'unsigned.dewy'
+    source.write_text(f'''main=():>void=>{{
+let values:array<uint64>=[{' '.join(map(str, numerators))}]
+let divisors:array<uint64>=[{' '.join(map(str, denominators))}]
+loop a in values {{
+    loop b in divisors {{
+        let quotient:uint64=a//b
+        let remainder:uint64=a%b
+        printl"{{quotient}} {{remainder}}"
+    }}
+    {constants}
+}}
+}}
+''')
+    expected = [f'{a // b} {a % b}' for a in numerators for b in denominators + powers]
+    binary = tmp_path / 'unsigned'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web unsigned arithmetic checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'unsigned.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
     minimum, maximum = -(1 << 63), (1 << 63) - 1
     numerators = [minimum, minimum + 1, -1000000007, -129, -7, -1, 0, 1, 7, 129, 1000000007, maximum - 1, maximum]
@@ -1225,11 +1274,13 @@ main = ():
 @pytest.mark.parametrize('operator', ['//', '%'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_floor_zero_divisor(compiler, tmp_path, operator, target, release):
+@pytest.mark.parametrize('type_name', ['int64', 'uint64'])
+def test_core_floor_zero_divisor(compiler, tmp_path, operator, target, release, type_name):
     source = tmp_path / 'zero.dewy'
     # Runtime zero prevents a constant-folding diagnostic from substituting for
     # the generated program's division-by-zero behavior.
-    source.write_text(f'main=()=>42 {operator} (args().length-1)')
+    source.write_text(f'main=()=>{{let zero:{type_name}=(args().length-1) as {type_name} '
+                      f'return (42 as {type_name}) {operator} zero}}')
     binary = tmp_path / 'zero'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1601,7 +1652,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
