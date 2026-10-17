@@ -21,6 +21,19 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'end-index-local-offset': '''tail=(xs:array<int64> offset:int64)=>xs[end-offset]
+main=()=>{let xs=[1 20 22] let offset=1
+let a=tail(xs offset) offset=0
+return a+xs[end-offset]}''',
+    'end-index-local-slice': '''main=()=>{let xs=[1 2 3 4 5] let offset=2 let step=2
+let text="a👩‍🚀é" let one=1
+return if xs[end-offset..end] =? [3 4 5]
+and xs[end,end-step..0] =? [5 3 1]
+and text[end-one..end] =? "👩‍🚀é" 42 else 1}''',
+    'end-index-offset-call-mutation': '''let xs=[20 21]
+change=()=>{xs[2]=99 return 0}
+main=()=>{xs.push(22) let offset=0 let value=xs[end-offset+change()]
+return if value =? 22 and xs[2] =? 99 42 else 1}''',
     'end-index-basic': '''main=()=>{let xs=[10 20 22]
 return xs[end]+xs[end-1]}''',
     'end-index-once': '''let calls=0

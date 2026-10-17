@@ -5931,13 +5931,21 @@ neg_index_check = (b: int):
     if k > 1: e = "end - {k - 1}"
     fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
 
-# Literal arithmetic around `end` cannot change the receiver. Other index
+# Integer arithmetic around `end` cannot change the receiver. Other index
 # expressions retain a value snapshot before invoking user code.
 dewy_end_arithmetic = (n: int, name: int) -> bool:
     if n == 0: return true
     k = nodes[n].kind
     if k == .int_lit: return true
-    if k == .ident: return nodes[n].name == i32(name)
+    if k == .ident:
+        if nodes[n].name == i32(name): return true
+        s = lookup(int(nodes[n].name))
+        if s == 0 or syms[s].kind != .local: return false
+        l = int(syms[s].ref)
+        # An alias can stand for a getter or a deferred element read. Keep its
+        # snapshot; an ordinary local (including a parameter) is just a value.
+        if int(locals[l].flags) & (LF_ALIAS | LF_UNNARROWED) != 0: return false
+        return is_int(int(locals[l].type))
     if k == .binary or k == .unary or k == .range:
         return dewy_end_arithmetic(int(nodes[n].a), name) and dewy_end_arithmetic(int(nodes[n].b), name) and dewy_end_arithmetic(int(nodes[n].c), name)
     false

@@ -1100,3 +1100,24 @@ through ordinary and generic aliases.
 [Focused gate](source-core/numeric-end-editor.log),
 [record alias checks](source-core/type-value-alias.log),
 [toolchain metadata](source-core/numeric-end-editor-validation.json).
+
+## Local offsets in end-relative indices
+
+`xs[end - offset]` now avoids retaining a temporary array when `offset` is an
+ordinary integer local or parameter. The same rule covers slices and arithmetic
+combinations of integer locals. Calls, globals, and aliases still take the
+snapshot path; a custom getter or index expression can change the receiver.
+
+Seven alternating thread-CPU samples of two million reads measured **12.059 ms
+before / 2.266 ms after** for `end - offset`. Explicit `length - 1 - offset`
+controls measured 3.015 / 2.594 ms respectively. These tiny kernels are sensitive
+to instruction layout; the meaningful change is removal of per-read retention
+and release, confirmed in the generated loop. Bounds checks remain.
+[Sources, hashes and raw samples](source-core/end-offset-runtime.json).
+
+**163 focused native/web checks passed in 7.78 s**, including changed local
+values, parameter offsets, Unicode slices, stepped slices, and receiver mutation
+inside an index call. Ruff and diff checks passed. The preceding commit's full
+CI gate was green; this small checker extension uses the focused local gate and
+the normal full CI gate on push.
+[Toolchain and validation](source-core/end-offset-validation.json).
