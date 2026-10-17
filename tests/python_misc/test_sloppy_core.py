@@ -22,6 +22,77 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'unit-range-guarded-limits': '''bounded_count=(start:int64 stop:int64):>int64=>{
+let count:int64=0
+loop i in start.. and i <? stop {count+=1 if count >? 10 panic("did not stop")}
+return count
+}
+main=()=>{
+let high=int64.max let low=int64.min
+let count=bounded_count(high-2 high)+bounded_count(low low+2)+bounded_count(-3 4)
+count+=bounded_count(high low)+bounded_count(0 0)
+return if count =? 11 42 else 1}''',
+    'unit-range-guarded-array': '''bump=(@values:array<int64>):>void=>{
+loop i in 0.. and i <? values.length {if i%2 =? 0 continue values[i]+=1}
+}
+main=()=>{let values=[10 20 11] let snapshot=values bump(@values)
+let empty:array<int64>=[] bump(@empty)
+return if snapshot =? [10 20 11] and empty.length =? 0 values[0]+values[1]+values[2] else 1}''',
+    'unit-range-guarded-changing-stop': '''main=()=>{
+let stop:int64=7 let total:int64=0
+loop i in 0.. and i <? stop {total+=i if i =? 2 stop=4}
+if total not=? 6 return 1
+stop=2 total=0
+loop i in 0.. and i <? stop {total+=1 if i =? 1 stop=4}
+return if total =? 4 42 else 2}''',
+    'unit-range-guarded-resize': '''main=()=>{
+let values=[0] let count:int64=0
+loop i in 0.. and i <? values.length {count+=1 if values.length <? 4 values.push(i)}
+if count not=? 4 return 1
+values=[0 1 2 3 4 5 6 7] count=0
+loop i in 0.. and i <? values.length {count+=1 values.pop()}
+return if count =? 4 and values.length =? 4 42 else 2}''',
+    'unit-range-guarded-header-effects': '''main=()=>{
+let calls:int64=0 let count:int64=0
+let limit=():>int64=>{calls+=1 return 3}
+loop i in 0.. and i <? limit() {count+=1}
+if count not=? 3 or calls not=? 4 return 1
+calls=0 count=0
+let allowed=():>bool=>{calls+=1 return calls <? 3}
+loop i in 0.. and i <? 3 and allowed() {count+=1}
+return if count =? 2 and calls =? 3 42 else 2}''',
+    'unit-range-guarded-index-write': '''main=()=>{
+let count:int64=0
+loop i in 0.. and i <? 3 {i=99 count+=1 if count >? 4 panic("index changed control")}
+return if count =? 3 42 else 1}''',
+    'unit-range-guarded-captured-stop': '''main=()=>{
+let stop:int64=4 let count:int64=0
+let shrink=()=>{stop=1}
+loop i in 0.. and i <? stop {count+=1 shrink()}
+return if count =? 1 42 else 1}''',
+    'unit-range-guarded-global-alias': '''let shared=[0 1 2]
+shrink=():>void=>{shared.pop()}
+visit=(@values:array<int64>):>int64=>{
+let count:int64=0
+loop i in 0.. and i <? values.length {count+=1 shrink()}
+return count
+}
+main=()=>if visit(@shared) =? 2 and shared.length =? 1 42 else 1''',
+    'unit-range-guarded-bound-reference': '''visit=(@stop:int64):>int64=>{
+let count:int64=0
+loop i in 0.. and i <? stop {count+=1 stop=1}
+return count
+}
+main=()=>{let stop:int64=4 return if visit(@stop) =? 1 and stop =? 1 42 else 1}''',
+    'unit-range-guarded-else-nested': '''fallback=(stop:int64):>int64=>{
+let count:int64=0
+loop i in 0.. and i <? stop {count+=1} else {count=42}
+return count
+}
+main=()=>{
+let sum:int64=0
+loop i in 0.. and i <? 4 {loop j in 0.. and j <? i {sum+=j}}
+return if sum =? 4 and fallback(0) =? 42 and fallback(2) =? 2 42 else 1}''',
     'optimizer-interval-effects': '''let calls:int64=0
 next=():>int64=>{calls+=1 return calls-1}
 probe=(@x:int64):>bool=>x >=? 0 and x <? 4
@@ -4308,6 +4379,9 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs=[10 20] loop i in (-1).. and i <? xs.length {printl(xs[i])}', 'out of bounds'),
+    ('let xs=[10 20] loop i in 0.. and i <? xs.length {printl(xs[i+1])}', 'out of bounds'),
+    ('let xs=[10 20 30] let stop=xs.length loop i in 0.. and i <? stop {xs.pop() printl(xs[i])}', 'out of bounds'),
     ('let xs:array<int64>=[] printl(xs[end])', 'out of bounds (length 0)'),
     ('let text="" printl(text[end])', 'string index out of bounds'),
     ('let xs=[10 20] xs[0..2]=42', 'range indexes are out of bounds'),

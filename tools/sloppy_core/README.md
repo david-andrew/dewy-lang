@@ -716,3 +716,21 @@ ratio of 0.865 for the particle-record kernel; helpers, arrays, text and graph a
 an improvement. Fresh-build paired CPU ratios are 1.004 for the tour, 1.018 for
 Dunes and 0.992 for the compiler: no compilation improvement is claimed.
 Raw samples are in `interval-applications.json` and `interval-compile.json`.
+
+A guarded open unit range such as `loop i in 0.. and i <? values.length` now uses
+bounded-range lowering when the stopping value is an unchanged local/constant
+or a provably fixed array length. This removes the redundant integer-exhaustion
+counter and lets the existing bounds analysis apply. Resizing, changing limits,
+captured/assigned indices and effectful conditions retain live evaluation.
+Additional header conditions keep their order; empty loop/else, `continue`, signed
+integer extremes and still-invalid indices are covered on native and web.
+
+Five alternating release/thread-CPU pairs against the previous compiler give
+candidate/baseline ratios of helpers 0.993, arrays 0.980, records 0.809, text 0.989
+and graph 0.997. The record kernel is 0.857 times the C reference in this run;
+that is a workload result, not a general compiler ranking. Default-build pairs
+at the smaller development counts give arrays 0.951 and records 0.923, with the
+other three workloads near neutral. Fresh-build paired CPU ratios are tour
+0.999, Dunes 0.989 and self-compilation 1.031; the latter's samples vary widely,
+so no compilation gain is claimed. See the `guarded-range-*` source-core audits.
+The independent C-bootstrap gate passes 2,899 checks in 169 seconds.

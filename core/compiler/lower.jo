@@ -4026,7 +4026,57 @@ gen_stepped_for = (s: int):
     endc()
     endc()
 
+# A leading `if not (i < stop): break` on an open unit range is a bounded
+# range when stop cannot change. Combined Dewy loop headers produce exactly
+# this guard. Reuse bounded lowering (including its index facts) without an
+# extra exhaustion counter, and leave dynamic/effectful headers alone.
+bounded_open_for = (s: int) -> int:
+    if nodes[s].aux != 0: return 0
+    it = int(nodes[s].a)
+    if nodes[it].kind != .range or nodes[it].b != 0 or has_flag(it, NF_STEP): return 0
+    l = int(nodes[s].sym)
+    if not stable_loop_index(l) or prune(int(locals[l].type)) != T_INT: return 0
+    body = int(nodes[s].b)
+    if nkids(body) == 0: return 0
+    guard = kid(body, 0)
+    if nodes[guard].kind != .if_ or nodes[guard].c != 0: return 0
+    condition = int(nodes[guard].a)
+    if nodes[condition].kind != .not_: return 0
+    condition = int(nodes[condition].a)
+    if nodes[condition].kind != .binary or nodes[condition].aux != 0 or nodes[condition].op != i32(int(Tok.lt)): return 0
+    index = int(nodes[condition].a)
+    if nodes[index].kind != .ident or nodes[index].aux != i32(int(SK.local)) or int(nodes[index].sym) != l: return 0
+    stop = int(nodes[condition].b)
+    if prune(ntype(stop)) != T_INT: return 0
+    stable = nodes[stop].kind == .int_lit or fixed_array_len(stop) >= 0
+    if nodes[stop].kind == .ident and nodes[stop].aux == i32(int(SK.local)):
+        end_local = int(nodes[stop].sym)
+        stable = stable_loop_index(end_local) and int(locals[end_local].flags) & LF_MUTPARAM == 0
+    if not stable: return 0
+    exit = int(nodes[guard].b)
+    if nodes[exit].kind == .block and nkids(exit) == 1: exit = kid(exit, 0)
+    if nodes[exit].kind != .break_ or nodes[exit].ival != 0 or nodes[exit].name != 0: return 0
+    # Make a lowering-only view; retain the checked source tree for tooling.
+    range = mk(.range, nodes[it].pos)
+    nodes[range] = nodes[it]
+    nodes[range].b = i32(stop)
+    clear_flag(range, NF_INCLUSIVE)
+    statements: int[]
+    loop i in [1..nkids(body)): statements.push(kid(body, i))
+    block = mk(.block, nodes[body].pos)
+    nodes[block] = nodes[body]
+    set_list(block, statements)
+    result = mk(.for_, nodes[s].pos)
+    nodes[result] = nodes[s]
+    nodes[result].a = i32(range)
+    nodes[result].b = i32(block)
+    result
+
 gen_for = (s: int):
+    bounded = bounded_open_for(s)
+    if bounded != 0:
+        gen_for(bounded)
+        return
     scope_push()
     aux = int(nodes[s].aux)
     if aux == 0 and has_flag(int(nodes[s].a), NF_STEP):

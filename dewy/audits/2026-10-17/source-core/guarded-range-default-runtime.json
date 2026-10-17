@@ -1,0 +1,207 @@
+{
+  "toolchain": {
+    "source_identity": "c4c5c31c8e57274f746da4f6ca4ee2905749435a084189ad22de0ef58637edc9",
+    "binary": "build-1792268770953598711/bin/dewy-core",
+    "binary_sha256": "1ab34c8d7146b13ed15e898cb566959f7ef3824d0f3065caf6c2144b1464a586"
+  },
+  "baseline_sha256": "714c70cb6e68a77000b9a7cb392857be45d6649b21da1e09483bba194948f604",
+  "samples": 5,
+  "clock": "Linux thread CPU",
+  "workloads": {
+    "helpers": {
+      "count": 500000,
+      "source": "# Helper-heavy scalar loops: small functions called from a hot loop.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\ngcd = (a:int64 b:int64):>int64 => {\n    let x=a\n    let y=b\n    loop y not=? 0 {\n        let rest=x%y\n        x=y\n        y=rest\n    }\n    return x\n}\ncollatz = (start:int64):>int64 => {\n    let steps:int64=0\n    let value=start\n    loop value >? 1 and steps <? 200 {\n        value=if value%2 =? 0 value//2 else 3*value+1\n        steps+=1\n    }\n    return steps\n}\nclamp = (value:int64 low:int64 high:int64):>int64 => if value <? low low else if value >? high high else value\n\nkernel = (count:int64):>int64 => {\n    let hash:int64=7\n    let i:int64=1\n    loop i <=? count {\n        hash=mix(hash gcd(i 360360))\n        hash=mix(hash collatz(i))\n        hash=mix(hash clamp(i%1000-500 (-100) 100)+100)\n        i+=1\n    }\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 200000)\n    let started=clock()\n    let result=kernel(count)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "harness_sha256": {
+        "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+        "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+      },
+      "modes": {
+        "baseline": {
+          "build_wall_s": 0.09178466408047825,
+          "build_cpu_s": 0.059447,
+          "binary_sha256": "7ea608888cfcac19704093e12f5c296766f04d8e5b5aa6c670a986df3580c5ea",
+          "binary_bytes": 113368,
+          "kernel_ns": [
+            523488894,
+            522932867,
+            526321934,
+            525378115,
+            523214826
+          ],
+          "median_ns": 523488894
+        },
+        "candidate": {
+          "build_wall_s": 0.05837961100041866,
+          "build_cpu_s": 0.056987,
+          "binary_sha256": "cb3e73299247941c2faf5f56aa0d4689292038e3d3be734beb2180df50d04ca4",
+          "binary_bytes": 113368,
+          "kernel_ns": [
+            544345893,
+            523600166,
+            528884769,
+            525337361,
+            519932051
+          ],
+          "median_ns": 525337361
+        }
+      },
+      "checksum": 167564799
+    },
+    "arrays": {
+      "count": 2000000,
+      "source": "# Flat integer-array loops: fill, prefix sums, a sieve, an in-place reverse.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nfill = (count:int64):>array<int64> => {\n    let values:array<int64>=[]\n    let seed:int64=12345\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        values.push(seed%1000)\n        i+=1\n    }\n    return values\n}\n\nprefix_sums = (@values:array<int64>):>void => {\n    let total:int64=0\n    loop i in 0.. and i <? values.length {\n        total=(total+values[i])%1000000007\n        values[i]=total\n    }\n}\n\n# Primes below the length of `flags`, which starts as all ones.\nsieve = (@flags:array<int64>):>int64 => {\n    let found:int64=0\n    loop i in 2.. and i <? flags.length {\n        if flags[i] =? 1 {\n            found+=1\n            let j=i+i\n            loop j <? flags.length {\n                flags[j]=0\n                j+=i\n            }\n        }\n    }\n    return found\n}\n\nreverse = (@values:array<int64>):>void => {\n    let low:int64=0\n    let high=values.length\n    loop low+1 <? high {\n        high-=1\n        let kept=values[low]\n        values[low]=values[high]\n        values[high]=kept\n        low+=1\n    }\n}\n\nkernel = (@values:array<int64> @flags:array<int64>):>int64 => {\n    prefix_sums(@values)\n    reverse(@values)\n    let hash=sieve(@flags)\n    loop i in 0.. and i <? values.length {hash=mix(hash values[i])}\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let values=fill(count)\n    let flags:array<int64>=[]\n    let i:int64=0\n    loop i <? count {\n        flags.push(1)\n        i+=1\n    }\n    let started=clock()\n    let result=kernel(@values @flags)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "harness_sha256": {
+        "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+        "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+      },
+      "modes": {
+        "baseline": {
+          "build_wall_s": 0.07994866103399545,
+          "build_cpu_s": 0.05973800000000029,
+          "binary_sha256": "545d118ef8b8073191db5ec7bc92e108cfcf70d83e4c358c11c10f851bc9e1d9",
+          "binary_bytes": 113880,
+          "kernel_ns": [
+            107340392,
+            105802886,
+            103187128,
+            99064219,
+            100038211
+          ],
+          "median_ns": 103187128
+        },
+        "candidate": {
+          "build_wall_s": 0.06590489996597171,
+          "build_cpu_s": 0.057662000000000345,
+          "binary_sha256": "b82871e18c0dfb8ec377dd5b4ea1374952d01b89721f4ced586958bfcca72f83",
+          "binary_bytes": 113832,
+          "kernel_ns": [
+            100166177,
+            100575109,
+            97902264,
+            99432093,
+            98230392
+          ],
+          "median_ns": 99432093
+        }
+      },
+      "checksum": 186658392
+    },
+    "records": {
+      "count": 500000,
+      "source": "# Loops over an array of small records: integer particles stepped in a box.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nParticle:type = [x:int64 y:int64 dx:int64 dy:int64]\n\nconst BOX:int64=4096\n\npopulate = (count:int64):>array<Particle> => {\n    let particles:array<Particle>=[]\n    let seed:int64=2024\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        let x=seed%BOX\n        seed=(seed*1103515245+12345)%2147483648\n        let y=seed%BOX\n        seed=(seed*1103515245+12345)%2147483648\n        particles.push(Particle(x=x y=y dx=seed%17-8 dy=(seed//32)%17-8))\n        i+=1\n    }\n    return particles\n}\n\nstep = (@particles:array<Particle>):>void => {\n    loop i in 0.. and i <? particles.length {\n        let x=particles[i].x+particles[i].dx\n        let y=particles[i].y+particles[i].dy\n        if x <? 0 or x >=? BOX {\n            particles[i].dx=0-particles[i].dx\n            x=particles[i].x\n        }\n        if y <? 0 or y >=? BOX {\n            particles[i].dy=0-particles[i].dy\n            y=particles[i].y\n        }\n        particles[i].x=x\n        particles[i].y=y\n    }\n}\n\nkernel = (@particles:array<Particle> rounds:int64):>int64 => {\n    let round:int64=0\n    loop round <? rounds {\n        step(@particles)\n        round+=1\n    }\n    let hash:int64=3\n    loop particle in particles {hash=mix(mix(hash particle.x) particle.y)}\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 100000)\n    let particles=populate(count)\n    let started=clock()\n    let result=kernel(@particles 50)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "harness_sha256": {
+        "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+        "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+      },
+      "modes": {
+        "baseline": {
+          "build_wall_s": 0.061915347003377974,
+          "build_cpu_s": 0.05787400000000041,
+          "binary_sha256": "11b9192ab46696df5b8dd7baad76c15b432c26693ac7cf7d1d90c0592ab9a734",
+          "binary_bytes": 113840,
+          "kernel_ns": [
+            107437135,
+            111538970,
+            107602637,
+            116083337,
+            117622516
+          ],
+          "median_ns": 111538970
+        },
+        "candidate": {
+          "build_wall_s": 0.06258116906974465,
+          "build_cpu_s": 0.05684899999999994,
+          "binary_sha256": "3633f14b70a1b0ea79aea67eff7aad72513d9bae8f474f9eb79a894d30ea4242",
+          "binary_bytes": 113448,
+          "kernel_ns": [
+            99127144,
+            105414091,
+            106574491,
+            100116585,
+            99319807
+          ],
+          "median_ns": 100116585
+        }
+      },
+      "checksum": 120368354
+    },
+    "text": {
+      "count": 2000000,
+      "source": "# Text scanning and parsing: split generated text into words and numbers.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\n# `count` tokens: words of lowercase letters and decimal numbers, separated\n# by spaces and newlines.\ngenerate = (count:int64):>array<uint8> => {\n    let text:array<uint8>=[]\n    let seed:int64=99\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        let size=seed%7+1\n        let digits=(seed//8)%3 =? 0\n        let j:int64=0\n        loop j <? size {\n            seed=(seed*1103515245+12345)%2147483648\n            if digits {text.push((48+seed%10) as uint8)} else {text.push((97+seed%26) as uint8)}\n            j+=1\n        }\n        text.push(if i%12 =? 11 10 as uint8 else 32 as uint8)\n        i+=1\n    }\n    return text\n}\n\nkernel = (text:array<uint8>):>int64 => {\n    let words:int64=0\n    let lines:int64=0\n    let total:int64=0\n    let hash:int64=5\n    let i:int64=0\n    loop i <? text.length {\n        let byte=text[i] as int64\n        if byte =? 10 {\n            lines+=1\n            i+=1\n        } else if byte =? 32 {i+=1} else if byte >=? 48 and byte <=? 57 {\n            let value:int64=0\n            loop i <? text.length and text[i] >=? 48 and text[i] <=? 57 {\n                value=value*10+(text[i] as int64)-48\n                i+=1\n            }\n            total=(total+value)%1000000007\n        } else {\n            let word:int64=0\n            loop i <? text.length and text[i] >=? 97 and text[i] <=? 122 {\n                word=(word*131+(text[i] as int64))%1000000007\n                i+=1\n            }\n            words+=1\n            hash=mix(hash word)\n        }\n    }\n    return mix(mix(mix(hash words) lines) total)\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let text=generate(count)\n    let started=clock()\n    let result=kernel(text)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "harness_sha256": {
+        "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+        "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+      },
+      "modes": {
+        "baseline": {
+          "build_wall_s": 0.13686453097034246,
+          "build_cpu_s": 0.060649999999999316,
+          "binary_sha256": "fee899c6aaec6b0e9dff8574074a565242633a1a69cdd9fbfc12e1a0f9453cee",
+          "binary_bytes": 113600,
+          "kernel_ns": [
+            166770349,
+            165182676,
+            166790160,
+            170294011,
+            166342140
+          ],
+          "median_ns": 166770349
+        },
+        "candidate": {
+          "build_wall_s": 0.09629066206980497,
+          "build_cpu_s": 0.06022099999999858,
+          "binary_sha256": "b2243cb6fad9a495771341e7564f90b07a1a24e4054770d4d32d2cc79ac7d2a7",
+          "binary_bytes": 113600,
+          "kernel_ns": [
+            169489960,
+            166136808,
+            167263156,
+            167507305,
+            165992008
+          ],
+          "median_ns": 167263156
+        }
+      },
+      "checksum": 601424141
+    },
+    "graph": {
+      "count": 200000,
+      "source": "# Dictionary and graph traversal: breadth-first search over a generated\n# graph whose nodes are sparse integer labels held in dictionaries.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nconst DEGREE:int64=4\n\nlabel = (index:int64):>int64 => index*7919+13\n\n# Every node's neighbours, `DEGREE` each.\ngenerate = (count:int64):>dict<int64 array<int64>> => {\n    let edges:dict<int64 array<int64>>=[]\n    let seed:int64=4242\n    let i:int64=0\n    loop i <? count {\n        let targets:array<int64>=[label((i+1)%count)]\n        let j:int64=1\n        loop j <? DEGREE {\n            seed=(seed*1103515245+12345)%2147483648\n            targets.push(label(seed%count))\n            j+=1\n        }\n        edges[label(i)]=targets\n        i+=1\n    }\n    return edges\n}\n\nkernel = (edges:dict<int64 array<int64>>):>int64 => {\n    let distance:dict<int64 int64>=[]\n    let queue:array<int64>=[label(0)]\n    distance[label(0)]=0\n    let hash:int64=11\n    let head:int64=0\n    loop head <? queue.length {\n        let node=queue[head]\n        head+=1\n        let reached=distance.get(node)\n        let targets=edges.get(node)\n        if reached is? none or targets is? none {continue}\n        hash=mix(hash node%1000+reached)\n        loop target in targets {\n            if distance.get(target) is? none {\n                distance[target]=reached+1\n                queue.push(target)\n            }\n        }\n    }\n    return mix(hash queue.length as int64)\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 200000)\n    let edges=generate(count)\n    let started=clock()\n    let result=kernel(edges)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "harness_sha256": {
+        "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+        "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+      },
+      "modes": {
+        "baseline": {
+          "build_wall_s": 0.06974476401228458,
+          "build_cpu_s": 0.062392999999999865,
+          "binary_sha256": "c275638850d02c5ae262a52b1759c8909681a3ed3859ec892f52055bb27e70de",
+          "binary_bytes": 128704,
+          "kernel_ns": [
+            218003233,
+            214892918,
+            207578603,
+            215842640,
+            210638571
+          ],
+          "median_ns": 214892918
+        },
+        "candidate": {
+          "build_wall_s": 0.07213779294397682,
+          "build_cpu_s": 0.06192700000000065,
+          "binary_sha256": "723797e6cabfa40711997203fee2de30bc2f911a3fe2ba8c7a39b2ba1902e118",
+          "binary_bytes": 128704,
+          "kernel_ns": [
+            218124244,
+            219591423,
+            209494058,
+            213990333,
+            215726057
+          ],
+          "median_ns": 215726057
+        }
+      },
+      "checksum": 790817328
+    }
+  }
+}
