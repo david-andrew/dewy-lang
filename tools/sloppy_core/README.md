@@ -570,12 +570,14 @@ encodes bytes, and `bytes as string|none` (or `string?`) checks UTF-8 and return
 `none` for malformed data. Both conversions preserve independent values.
 
 Native watch tracks embedded files inside functions as well as declarations.
-Changing a global initializer also refreshes initializers that directly read it,
-in dependency order, including across imports. Repeated same-layout replacements
+Changing a global initializer also refreshes initializers that read it directly
+or through statically resolved helper calls, in dependency order across imports.
+Assets embedded inside those helpers also refresh their derived globals.
+Recursive helper calls are scanned once; creating a closure does not read its
+body's dependencies or reset captured state when those assets change. Repeated same-layout replacements
 release old managed values; unrelated live state remains. The watch gate checks
 asset deletion/recovery, stable live allocation counts and a counter continuing
-across repeated asset edits. Dependency discovery does not yet follow arbitrary
-global reads hidden inside initializer helper functions.
+across repeated asset edits. Dependency discovery does not yet follow calls through arbitrary function values.
 
 Unsigned `uint64` floor division and modulo now use the core’s unsigned divide
 and remainder operations, including literal power-of-two fast paths. Native/web

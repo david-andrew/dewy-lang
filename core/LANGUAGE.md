@@ -44,6 +44,11 @@ missing imported file or embedded asset appears. `check` reports errors without
 emitting an executable. `build --time` reports compiler phase timings. Use
 `--release` for optimized programs; development builds are the default.
 
+Native game reload keeps unrelated live state. Changed assets refresh globals
+initialized from them, including through direct helper calls across modules.
+Closures keep their captured state when assets used by their bodies change.
+Dependency discovery cannot follow arbitrary calls through function values yet.
+
 The [VS Code extension](../dewy/vscode-dewy/README.md) supports unsaved diagnostics,
 completions, hover and definitions. Set `dewy.core.path` to the compiler executable.
 

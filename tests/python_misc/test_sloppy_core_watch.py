@@ -249,17 +249,26 @@ draw=():>void=>clear(BLACK)
 
 
 @pytest.mark.parametrize('imported', [False, True], ids=['local', 'imported'])
-def test_core_watch_derived_asset(compiler, tmp_path, imported):
+@pytest.mark.parametrize('indirect', ['direct', 'helper', 'embedded-helper'])
+def test_core_watch_derived_asset(compiler, tmp_path, imported, indirect):
     source = tmp_path / 'game.dewy'
     asset_dir = tmp_path / 'assets' if imported else tmp_path
     asset_dir.mkdir(exist_ok=True)
     asset = asset_dir / 'label.txt'
     save(asset, 'one')
     declaration = '$include_bytes(p"label.txt") as content\n'
+    if indirect != 'direct':
+        value = 'content'
+        if indirect == 'embedded-helper':
+            declaration = ''
+            value = '$include_bytes(p"label.txt")'
+        declaration += (f'read=(depth:int64):>string=>if depth >? 0 again(depth-1) else str_from_bytes({value})\n'
+                        'again=(depth:int64):>string=>read(depth)\n')
     if imported:
         save(asset_dir / 'content.dewy', declaration)
-        declaration = 'from p"assets/content.dewy" import content\n'
-    save(source, declaration + '''let decoded=str_from_bytes(content)
+        declaration = 'from p"assets/content.dewy" import ' + ('read' if indirect != 'direct' else 'content') + '\n'
+    decoded = 'read(1)' if indirect != 'direct' else 'str_from_bytes(content)'
+    save(source, declaration + f'let decoded={decoded}\n' + '''
 let label="asset="+decoded
 let count:int64=0
 update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label} allocations={alloc_count()}" sleep(0.005)}
@@ -287,5 +296,26 @@ draw=():>void=>clear(BLACK)
         save(asset, 'restored')
         watcher.expect(r'reloaded in \d+ ms:')
         assert int(watcher.expect(r'tick (\d+) asset=restored').group(1)) > after
+    finally:
+        watcher.close()
+
+
+def test_core_watch_closure_asset_keeps_capture(compiler, tmp_path):
+    source = tmp_path / 'game.dewy'
+    asset = tmp_path / 'label.txt'
+    save(asset, 'one')
+    save(source, '''make=()=>{let count:int64=0
+return ()=>{count+=1 return "{count}:{str_from_bytes($include_bytes(p\"label.txt\"))}"}}
+let next=make()
+update=(dt:float64):>void=>{if frame_number()%10 =? 0 printl(next()) sleep(0.005)}
+draw=():>void=>clear(BLACK)
+''')
+    watcher = Watch(compiler, source, game=True)
+    try:
+        before = int(watcher.expect(r'(\d+):one').group(1))
+        save(asset, 'two')
+        watcher.expect(r'reloaded in \d+ ms:')
+        after = int(watcher.expect(r'(\d+):two').group(1))
+        assert after > before, watcher.output
     finally:
         watcher.close()

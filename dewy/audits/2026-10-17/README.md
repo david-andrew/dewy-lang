@@ -448,3 +448,24 @@ Seven compile pairs measured baseline/candidate tour **49.24/49.38 ms**, physics
 were 48.54/48.67, 296.27/290.92 and 1150.80/1109.24 ms. These show no compilation
 regression in this run; host load and the different workload sizes limit broader
 claims. [Compile samples](source-core/select-registers-compile.json).
+
+## Live-reload dependencies through initializer helpers
+
+A global initialized by `decode()` previously stayed stale when `decode` read
+an embedded global asset that changed. The watcher rebuilt and patched code,
+but did not know to rerun the derived initializer.
+[Reproduction on the preceding compiler](source-core/watch-helper-before.log).
+
+Initializer discovery now follows statically resolved calls, collecting global
+reads and asset inputs together. It scans each function specialization once per
+initializer, so recursive helpers terminate; paths inside imported helpers use
+the helper's module. Changed dependencies initialize before their consumers.
+Creating a closure does not execute its body, and changing assets used by a
+closure preserves its captured state. Arbitrary indirect calls remain opaque.
+
+The watch gate passed **18 checks in 20.75 s**. It covers local/imported recursive
+helpers, assets embedded in helper bodies, repeated replacements with stable
+allocation counts, asset deletion/recovery, and counters/closures retaining state.
+[Focused gate](source-core/watch-helper-focused.log). The fresh C bootstrap
+passed **1,947 checks in 89.79 s**. [Full gate](source-core/watch-helper-full.log),
+[build manifest](source-core/watch-helper-build.json).

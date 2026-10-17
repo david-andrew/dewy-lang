@@ -256,21 +256,6 @@ w_decl_hashes: {int: int} = {}
 w_decl_stack: int[]
 w_decl_deps: {int: int[]} = {}
 
-wk_init_refs = (n: int, refs: mut int[]):
-    if n <= 0 or n >= nodes.len(): return
-    k = nodes[n].kind
-    # Making a closure does not execute its body; its code is patched separately.
-    if k == .lambda or k == .fnref: return
-    if k == .ident and nodes[n].aux == i32(int(SK.global)):
-        g = int(nodes[n].sym)
-        if not refs.contains(g): refs.push(g)
-    wk_init_refs(int(nodes[n].a), refs)
-    wk_init_refs(int(nodes[n].b), refs)
-    wk_init_refs(int(nodes[n].c), refs)
-    wk_init_refs(int(nodes[n].d), refs)
-    loop i in [0..nkids(n)): wk_init_refs(kid(n, i), refs)
-    loop i in [0..nkids2(n)): wk_init_refs(kid2(n, i), refs)
-
 # a global's declaration, as text without comments (a change re-runs it)
 wk_decl_hash = (g: int) -> int:
     if let h = w_decl_hashes.get(g): return h
@@ -281,9 +266,9 @@ wk_decl_hash = (g: int) -> int:
     h = wk_text_hash(nodes[d].pos, WH0)
     # and what it is made from that is not its text: the GPU programs made from shader functions,
     # and files named in it (an image loaded with embed or read_bytes...)
-    h = wk_extra(int(nodes[d].b), int(globals[g].mod), h)
     refs: int[]
-    wk_init_refs(int(nodes[d].b), refs)
+    seen: int[]
+    h = wk_init_scan(int(nodes[d].b), int(globals[g].mod), h, refs, seen)
     w_decl_deps[g] = refs
     loop other in refs:
         h = wh_str(h, wk_glob(other))
@@ -335,10 +320,22 @@ wk_loop = () -> int:
 
 w_assets: str[]             # files named in declarations (watched, as the sources are)
 
-wk_extra = (n: int, m: int, h0: int) -> int:
+# Follow statically resolved calls made by an initializer. Merely creating a
+# closure does not execute its body. Each specialization is scanned once per
+# initializer, including mutually recursive helpers; indirect calls stay opaque.
+wk_init_scan = (n: int, m: int, h0: int, refs: mut int[], seen: mut int[]) -> int:
     if n <= 0 or n >= nodes.len(): return h0
     h = h0
     k = nodes[n].kind
+    if k == .lambda or k == .fnref: return h
+    if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        if not refs.contains(g): refs.push(g)
+    if k == .call and nodes[n].aux == 0:
+        f = int(nodes[n].sym)
+        if f > 0 and f < fns.len() and not seen.contains(f):
+            seen.push(f)
+            h = wk_init_scan(int(fns[f].body), int(fns[f].mod), h, refs, seen)
     if k == .intrinsic and nodes[n].aux == i32(int(IN.shader)):
         if let src = glsl_of.get(n): h = wh_str(h, src)
     if k == .str_lit:
@@ -350,12 +347,12 @@ wk_extra = (n: int, m: int, h0: int) -> int:
                 if let b = read_file(p):
                     h = wh_str(h, b)
                     if not w_assets.contains(p): w_assets.push(p)
-    h = wk_extra(int(nodes[n].a), m, h)
-    h = wk_extra(int(nodes[n].b), m, h)
-    h = wk_extra(int(nodes[n].c), m, h)
-    h = wk_extra(int(nodes[n].d), m, h)
-    loop i in [0..nkids(n)): h = wk_extra(kid(n, i), m, h)
-    loop i in [0..nkids2(n)): h = wk_extra(kid2(n, i), m, h)
+    h = wk_init_scan(int(nodes[n].a), m, h, refs, seen)
+    h = wk_init_scan(int(nodes[n].b), m, h, refs, seen)
+    h = wk_init_scan(int(nodes[n].c), m, h, refs, seen)
+    h = wk_init_scan(int(nodes[n].d), m, h, refs, seen)
+    loop i in [0..nkids(n)): h = wk_init_scan(kid(n, i), m, h, refs, seen)
+    loop i in [0..nkids2(n)): h = wk_init_scan(kid2(n, i), m, h, refs, seen)
     h
 
 # ---- the link map of a first build ----
