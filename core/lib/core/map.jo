@@ -208,6 +208,10 @@ get[K, V] = (m: Map[K, V], k: K, default: V) -> V:
 contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
 has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, hash(k)) >= 0
 len[K, V] = (m: Map[K, V]) -> int: m.keys.len() - m.ngone
+
+# Positional access for a compacted iteration snapshot, not a key lookup.
+# Ordinary parameters evaluate each source/index once and retain value copies.
+__map_pair_at[K, V] = (m: Map[K, V], i: int) -> (K, V): (m.keys[i], m.vals[i])
 is_empty[K, V] = (m: Map[K, V]) -> bool: m.keys.len() == m.ngone
 keys[K, V] = (m: Map[K, V]) -> K[]:
     if m.ngone == 0: return m.keys

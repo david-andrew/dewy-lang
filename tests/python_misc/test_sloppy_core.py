@@ -2073,6 +2073,64 @@ let b=a b["a"]=0 return a["a"]+a["b"]}''',
 main=()=>{let a:Values=[] a["answer"]=42 return a["answer"]}''',
     'dictionary-iteration': '''main=()=>{let a:dict<int64 int64>=[1->19 2->20]
 let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
+    'dictionary-counted-keys': '''main=()=>{let values=["a"->10 "b"->20]
+let count:int64=0
+loop i in 0.. and key in values {
+if i =? 0 and key not=? "a" return 1
+if i =? 1 and key not=? "b" return 2
+count+=1
+}
+return if count =? 2 42 else 3}''',
+    'dictionary-counted-sparse': '''main=()=>{let values=[100->1 200->2]
+let count:int64=0
+loop i in 0.. and key in values {if key not=? (i+1)*100 return 1 count+=1}
+return if count =? 2 42 else 2}''',
+    'dictionary-zip-keys': '''main=()=>{let values=["a"->1 "b"->2]
+let total:int64=0
+loop key in values and score in [20 22] {if key =? "a" or key =? "b" total+=score}
+return total}''',
+    'dictionary-zip-pairs': '''main=()=>{let values=["a"->[10 11] "b"->[10 11]]
+let total:int64=0
+loop [key [x y]] in values and weight in [1 1] {total+=(x+y)*weight}
+return total}''',
+    'dictionary-zip-wide-record': '''main=()=>{let values=[uint64.max->[x=20 y=22]]
+let total:int64=0
+loop [key [x y]] in values and marker in [1] {
+if key not=? uint64.max return 1 total+=(x+y)*marker
+}
+return total}''',
+    'dictionary-zip-removed': '''main=()=>{let values=["gone"->99 "a"->20 "b"->22]
+values.remove("gone") let total:int64=0
+loop [key value] in values and expected in [20 22] {
+if key =? "gone" or value not=? expected return 1 total+=value
+}
+let count:int64=0
+loop i in 0.. and key in values {if key =? "gone" or i >? 1 return 2 count+=1}
+return if count =? 2 total else 3}''',
+    'dictionary-zip-copy': '''main=()=>{let values=["a"->[20] "b"->[22]]
+let total:int64=0
+loop [key value] in values and index in [0 1] {
+total+=value[0] value[0]=0 values["b"]=[99] values["c"]=[100]
+}
+return total}''',
+    'dictionary-zip-source-order': '''let trace:int64=0
+entries=()=>{trace=trace*10+1 return ["a"->20 "b"->22]}
+weights=()=>{trace=trace*10+2 return [1 1]}
+main=()=>{let total:int64=0
+loop [key value] in entries() and weight in weights() {total+=value*weight}
+return if trace =? 12 total else 1}''',
+    'dictionary-zip-or': '''main=()=>{let values=["a"->99]
+let total:int64=0 let keys:int64=0
+loop key in values or value in [20 22] {
+if key isnt? none {if key not=? "a" return 1 keys+=1}
+total+=value??0
+}
+return if keys =? 1 total else 2}''',
+    'dictionary-zip-empty': '''main=()=>{let values:dict<string int64>=[]
+let total:int64=0
+loop key in values and value in [99] {return 1} else {total=20}
+loop key in values or value in [22] {if key isnt? none return 2 total+=value??0}
+return total}''',
     'dictionary-length': 'main=()=>{let a=["a"->1 "b"->2] return a.length+40}',
     'dictionary-insert-absent': '''main=()=>{let values:dict<string int64>=[]
 if not values.insert_if_absent("first" 20) return 1
@@ -2290,6 +2348,9 @@ let copied=[loop item in original item] copied[0].values[0]=99
 return original[0].values[0]+original[0].values[1]}''',
     'comprehension-dictionary': '''main=()=>{let values=[loop key in ["a" "b"] key->21]
 return values["a"]+values["b"]}''',
+    'comprehension-dictionary-zip': '''main=()=>{let values=["a"->20 "b"->22]
+let scaled=[loop [key value] in values and factor in [2 3] key->value*factor]
+return if scaled["a"] =? 40 and scaled["b"] =? 66 42 else 1}''',
     'comprehension-dictionary-update': '''main=()=>{let values=[loop x in [1 2] "same"->x]
 return values["same"]+40}''',
     'comprehension-context': '''main=()=>{let values:array<uint8>=[loop i in [0..3) 14]

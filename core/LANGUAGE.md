@@ -600,6 +600,21 @@ A dictionary binder may be followed by `and` conditions, and `else` runs if its
 body never enters. Nested groups also work in indexed-sequence `and` headers;
 `or` headers yield optional values and do not support unpacking groups.
 
+Dictionaries also work in counted and zipped headers:
+
+```dewy
+loop i in 0.. and team in scores {printl"{i}: {team}"}
+loop [team [home away]] in scores and factor in [2 3] {
+    printl"{team}: {(home+away)*factor}"
+}
+```
+
+The counter is a position starting at zero, independent of dictionary keys.
+Dictionary iteration follows insertion order, skips removed entries and retains
+a snapshot of its input. Combined sources evaluate once in source order. An
+`and` header stops at the shortest input; an `or` header keeps going until all
+inputs finish, yielding `none` for exhausted inputs.
+
 Records with `len(container)` and `__index__(container index)` work as finite
 indexed sequences in loops and comprehensions. Length describes integer positions
 from zero through `len(container)-1`. For example:

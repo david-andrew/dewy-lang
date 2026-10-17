@@ -1998,6 +1998,13 @@ check_for = (s: int):
             check_expr(lv, 0)
             it = last_checked
             nodes[s].a = i32(it)
+        if is_map_type(t) and nodes[s].ival == 1:
+            # `i in 0.. and key in map` counts keys. The native two-binding
+            # map loop otherwise means key/value, so iterate its key snapshot.
+            add_flag(it, NF_CHECKED)
+            t = prune(check_expr(bc_field(it, "keys", pos), 0))
+            it = last_checked
+            nodes[s].a = i32(it)
         k = types[t].kind
         if k == .range:
             l = new_local(n1, T_INT, pos)

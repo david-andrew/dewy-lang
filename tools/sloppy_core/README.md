@@ -245,6 +245,16 @@ The pinned follow-up for the preceding nested-assignment change is also neutral
 (self-build ratio 0.996). See `nested-loop-*` and
 `nested-unpack-compile-affinity.json` in the source-core audits.
 
+Counted dictionary headers now bind the zero-based position and key, rather than
+mistaking those bindings for a key/value pair. General combined headers iterate
+keys or unpack key/value pairs from a retained, compacted snapshot, including
+deleted entries, nested values and comprehensions. `or` headers yield optional
+keys. Tests cover source evaluation order, mutation during iteration, empty maps
+and full-width unsigned keys. All 3,054 checks pass from the independent C seed
+in 61.98 seconds. Five paired fresh-build CPU measurements pinned to CPU 2 are
+neutral: tour 0.999, Dunes 1.000 and compiler 1.001. See `dictionary-zip-*` in
+the source-core audits.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

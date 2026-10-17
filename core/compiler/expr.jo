@@ -13,7 +13,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields
+    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
@@ -28,6 +28,7 @@ intrinsics = [
     Intrinsic("__dewy_iter", .dewy_iter, false),
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
+    Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -3309,9 +3310,13 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call("__dewy_grapheme_iter", args, nodes[n].pos)]
         else if is_dewy_range_type(t, "IntRange"):
             nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
+        else if is_map_type(t):
+            # Combined loops index a retained dense entry list. Compact deleted
+            # entries once, just as ordinary dictionary iteration does.
+            nodes[n] = nodes[bc_call("__map_live", args, nodes[n].pos)]
         else: nodes[n] = nodes[args[0]]
         return check_expr(n, expected)
-    else if id == .dewy_iter_done or id == .dewy_iter_value:
+    else if id == .dewy_iter_done or id == .dewy_iter_value or id == .dewy_iter_pair:
         nargs_check(n, nargs, 2, 2, "Dewy loop iterator")
         t = arg_type(args, 0, 0)
         add_flag(args[0], NF_CHECKED)
@@ -3319,16 +3324,18 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if is_dewy_cursor_iter(t):
             prefix = if is_dewy_grapheme_iter(t): "__dewy_grapheme" else: "__dewy_range"
             name = prefix + "_done"
-            if id == .dewy_iter_value:
+            if id != .dewy_iter_done:
                 name = prefix + "_value"
                 add_flag(args[0], NF_MUT)
             nodes[n] = nodes[bc_call(name, [args[0]], pos)]
         else if id == .dewy_iter_done:
             length = if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
             nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
+        else if is_map_type(t) and id == .dewy_iter_pair:
+            nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
         else:
             ix = mk(.index, pos)
-            nodes[ix].a = i32(args[0])
+            nodes[ix].a = i32(if is_map_type(t): bc_field(args[0], "keys", pos) else: args[0])
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]
         return check_expr(n, expected)

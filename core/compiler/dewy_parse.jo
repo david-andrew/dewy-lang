@@ -867,8 +867,8 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     if dw_op(id) != "RangeJuxtapose":
         value = dw_expr(id)
         if slice: return value
-        # Resolve iterable strings once, before combined-loop desugaring. Other
-        # iterable types keep their existing representation without a wrapper.
+        # Resolve streaming text/ranges and dense dictionary snapshots once,
+        # before combined-loop desugaring.
         call = mk(.call, dewy_syntax[id].pos)
         callee = mk(.ident, dewy_syntax[id].pos)
         nodes[callee].name = i32(intern("__dewy_iter"))
