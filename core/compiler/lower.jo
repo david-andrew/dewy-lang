@@ -3659,10 +3659,20 @@ same_value = (x: int, y: int) -> bool:
         return a >= 0 and a == fixed_array_len(y)
     false
 
+# A bounded ascending range with a nonnegative start never yields a negative
+# index. For steps, require ordered literal starts; dynamic/descending steps
+# keep their ordinary checks until there is a stronger proof.
+nonnegative_range = (it: int) -> bool:
+    if nodes[it].b == 0 or not is_nonneg(int(nodes[it].a)): return false
+    if not has_flag(it, NF_STEP): return true
+    a = int(nodes[it].a)
+    b = int(nodes[it].c)
+    nodes[a].kind == .int_lit and nodes[b].kind == .int_lit and nodes[b].ival > nodes[a].ival
+
 # the array locals whose length bounds the range `it`
 range_bounds_arrays = (it: int) -> int[]:
     out: int[]
-    if not is_nonneg(int(nodes[it].a)) or has_flag(it, NF_INCLUSIVE) or has_flag(it, NF_STEP): return out
+    if not nonnegative_range(it) or has_flag(it, NF_INCLUSIVE): return out
     hi = int(nodes[it].b)
     if hi == 0: return out
     a = fixed_array_len(hi)
@@ -3713,6 +3723,35 @@ other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
     loop i in [0..nkids2(n)):
         if other_index_of(kid2(n, i), a, ok, seen): return true
     false
+
+# Share range facts between unit and stepped loops. Array paths can still be
+# hoisted when the counter is mutable, but only stable indices prove bounds.
+range_facts_begin = (s: int, l: int) -> (int, int, bool):
+    safe_arrs: int[]
+    nonneg = false
+    bound = 0
+    if nodes[s].aux == 0 and stable_loop_index(l):
+        it = int(nodes[s].a)
+        nonneg = nonnegative_range(it)
+        if nonneg:
+            safe_arrs = range_bounds_arrays(it)
+            if not has_flag(it, NF_INCLUSIVE):
+                hi = int(nodes[it].b)
+                if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
+    if nonneg: nonneg_locals.push(l)
+    nfp = fp_begin(s, l, bound, 0)
+    loop sa in safe_arrs:
+        seen = fill(false, nodes.len())
+        ok = [l]
+        loop p in safe_index:
+            if p.0 == sa: ok.push(p.1)
+        safe_index.push((sa, l, other_index_of(int(nodes[s].b), sa, ok, seen)))
+    (nfp, safe_arrs.len(), nonneg)
+
+range_facts_end = (facts: (int, int, bool)):
+    loop _ in [0..facts.1): safe_index.pop()
+    fp_end(facts.0)
+    if facts.2: nonneg_locals.pop()
 
 gen_loop_body = (b: int):
     scope_push()
@@ -3774,7 +3813,7 @@ gen_stepped_for = (s: int):
         endc()
         if not inclusive: e_mov(distance, e_addi(distance, -1))
         e_mov(remaining, e_addi(e_bin(.divu, VI, distance, magnitude), 1))
-    nfp = fp_begin(s, l, 0, 0)
+    facts = range_facts_begin(s, l)
     lop()
     top = ctl
     if not direct: write_place(local_place(l, true), lt, ctr)
@@ -3783,7 +3822,7 @@ gen_stepped_for = (s: int):
     loops.push(LoopInfo(brk, cont, scope_locals.len()))
     gen_loop_body(int(nodes[s].b))
     loops.pop()
-    fp_end(nfp)
+    range_facts_end(facts)
     endc()
     next = e_bin(.add, VI, ctr, step)
     if open_end:
@@ -3841,26 +3880,7 @@ gen_for = (s: int):
             e_mov(endv, e_load(VI, r, 8, 8))
         stmt_end()
         sg = types[prune(lt)].sign
-        safe_arrs: int[]
-        nonneg = false
-        if aux == 0 and not open_end and stable_loop_index(l):
-            safe_arrs = range_bounds_arrays(int(nodes[s].a))
-            nonneg = is_nonneg(int(nodes[int(nodes[s].a)].a))
-        if nonneg: nonneg_locals.push(l)
-        # (the loop runs up to a path's length: its indexes by l are in bounds)
-        bound = 0
-        if aux == 0 and not open_end and nonneg and not has_flag(int(nodes[s].a), NF_INCLUSIVE):
-            hi = int(nodes[int(nodes[s].a)].b)
-            if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
-        nfp = 0
-        nfp = fp_begin(s, l, bound, 0)
-        loop sa in safe_arrs:
-            seen = fill(false, nodes.len())
-            # indexes by enclosing loops' variables that are in bounds for sa are fine too
-            ok = [l]
-            loop p in safe_index:
-                if p.0 == sa: ok.push(p.1)
-            safe_index.push((sa, l, other_index_of(int(nodes[s].b), sa, ok, seen)))
+        facts = range_facts_begin(s, l)
         cmpop = Op.ges
         if not sg: cmpop = .geu
         ltop = Op.lts
@@ -3878,9 +3898,7 @@ gen_for = (s: int):
         loops.push(LoopInfo(brk, cont, scope_locals.len()))
         gen_loop_body(int(nodes[s].b))
         loops.pop()
-        loop sa in safe_arrs: safe_index.pop()
-        fp_end(nfp)
-        if nonneg: nonneg_locals.pop()
+        range_facts_end(facts)
         endc()
         e_mov(ctr, e_addi(ctr, 1))
         if open_end: br_to(top)

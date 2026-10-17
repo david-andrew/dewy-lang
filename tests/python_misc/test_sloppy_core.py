@@ -1069,6 +1069,30 @@ loop i in [7,5..0] {sum+=values[i].amount}
 return if sum =? 16 and values[0].amount =? 10 and values[6].amount =? 16
 and saved[0].amount =? 0 and saved[6].amount =? 6 42 else 1
 }''',
+    'stepped-range-array-paths': '''change=(@values:array<int64>):>void=>{
+loop pass in [0..3) {loop i in [0,3..values.length) {values[i]+=2}}
+}
+main=()=>{
+let values=[loop i in [0..10) i] let saved=values
+change(@values)
+let record=[values=[10 20 30 40]] let record_saved=record
+loop i in [1,3..record.values.length) {record.values[i]+=2}
+let length=values.length let sum:int64=0
+loop i in [0,3..length) {sum+=values[i]}
+let empty:array<int64>=[]
+loop i in [0,3..empty.length) {return empty[i]}
+return if sum =? 42 and saved =? [0 1 2 3 4 5 6 7 8 9]
+and record.values =? [10 22 30 42] and record_saved.values =? [10 20 30 40] 42 else 1
+}''',
+    'stepped-range-nested-indices': '''main=()=>{
+let values=[10 20 30 40] let sum:int64=0
+loop i in [0,2..values.length) {
+    loop j in [1,3..values.length) {sum+=values[i]+values[j]}
+}
+let replacement:int64=0
+loop i in [0,2..values.length) {i=1 replacement+=values[i]}
+return if sum =? 200 and replacement =? 40 42 else 1
+}''',
     'stepped-range-order': '''let order:int64=0
 bound=(tag:int64 value:int64):>int64=>{order=order*10+tag return value}
 main=()=>{let values:array<int64>=[]
@@ -2025,10 +2049,15 @@ loop i in [0..2) {
     'let values=[42] loop i in [0..1) {i=-1 loop j in [i..values.length) {printl(values[j])}}',
     'let values=[42] loop i in [0..1) {loop j in [i+9223372036854775807+1..values.length) {printl(values[j])}}',
     'let values=[42] loop i in [0..values.length) {loop j in [0,-1..-2] {printl(values[j])} printl(values[i])}',
+    'let values=[42] loop i in [0,2..values.length) {i=1 printl(values[i])}',
+    'let values=[42] loop i in [0,2..values.length) {values.clear() printl(values[i])}',
+    'let values=[20 22] loop i in [0,2..values.length] {printl(values[i])}',
+    'let record=[values=[42]] loop i in [0,2..record.values.length) {i=-1 printl(record.values[i])}',
 ], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration',
         'counter-end', 'counter-negative', 'counter-reference',
         'counter-record-field', 'counter-after-read', 'counter-nested',
-        'counter-nested-start', 'counter-overflowed-start', 'counter-descending'])
+        'counter-nested-start', 'counter-overflowed-start', 'counter-descending',
+        'step-counter-end', 'step-resized', 'step-inclusive', 'step-counter-field'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_optimizer_bounds(error_batches, body, target, release):

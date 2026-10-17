@@ -417,7 +417,10 @@ word behavior without a per-iteration overflow check. The Python range oracle
 checks 1,216 cases on native/web in both modes. Open-ended steps report integer
 exhaustion; zero steps panic. Combined stepped loops, slicing and membership
 remain unsupported. See the language guide and the October 17 audit for the
-fresh 1,703-check bootstrap gate and measured lowering/compilation comparisons.
+bootstrap gates and measured lowering/compilation comparisons. Proved ascending
+strides over a stable array extent also omit redundant bounds checks: a repeated
+every-third-slot update with a live snapshot measured 44.81/24.55 ms before/after
+(about 1.8×), with 1,763 checks passing from a fresh C bootstrap.
 
 The combined Dewy/editor/shared-core gate now contains over 1,700 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.

@@ -194,3 +194,32 @@ this is a correctness change, not a claimed overall performance improvement.
 [Focused gate](source-core/loop-bounds-focused.log),
 [full gate](source-core/loop-bounds-full.log),
 [build manifest](source-core/loop-bounds-build.json).
+
+## Eliminate proved bounds checks in strided array loops
+
+Ascending literal steps such as `[0,3..values.length)` now reuse the range
+facts for ordinary loops. Both use the same implementation for array paths,
+nonnegative indices and nested-loop checks. The facts require an unchanged
+index and array extent; dynamic or descending steps retain runtime checks.
+Native/web checks cover nested indices, record fields, saved lengths, empty
+arrays, reassigned indices, resized arrays and retained snapshots.
+
+Seven alternating native release runs update every third slot of a 12,288-item
+array for 12,000 passes. The median fell from **44.81 to 24.55 ms**, about
+**1.8×**. Python independently checks the complete final array checksum and the
+unchanged snapshot, with zero/small-count preflights. The report contains the
+full source, runner, compiler identities and individual samples. This is one
+kernel, not an overall runtime claim. [Runtime](source-core/stride-array-runtime.json).
+
+Seven compile pairs measured tour **54.55/54.45 ms**, physics **318.57/327.94 ms**,
+and compiler self-build **1,203.62/1,203.31 ms** wall time. CPU medians were
+53.37/53.39, 315.53/324.61 and 1,189.00/1,191.90 ms respectively. Physics was about
+3% slower while the others were essentially unchanged; no compilation speedup
+is claimed. [Compile samples](source-core/stride-array-compile.json).
+
+The focused gate passed **124 checks in 4.66 s**.
+[Focused gate](source-core/stride-array-focused.log).
+
+The independent C bootstrap passed **1,763 checks in 57.90 s**.
+[Full gate](source-core/stride-array-full.log),
+[build manifest](source-core/stride-array-build.json).
