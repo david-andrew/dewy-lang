@@ -21,6 +21,7 @@ gl_done_fns: {int: bool} = {}
 gl_done_structs: {int: bool} = {}
 gl_done: {str: bool} = {}   # helper declarations already made (by name)
 gl_decls: str[]          # struct and function definitions, in dependency order
+gl_param_copies: {int: int} = {}  # read-only local copies of immutable parameters
 
 gl_stage = ""            # "vertex" or "fragment": the stage being translated
 
@@ -94,7 +95,24 @@ gl_name = (s: str) -> str:
     if b.len() == 0: return "a"
     str_from_bytes(b)
 
-gl_local = (l: int) -> str: "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+gl_local = (l: int) -> str:
+    if let source = gl_param_copies.get(l): return gl_local(source)
+    "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+
+# Dewy introduces a local value copy for each ordinary parameter. A read-only
+# copy can use the parameter directly. This is required for uniform records
+# containing samplers, which GLSL cannot assign into a local variable.
+gl_param_copy = (s: int) -> bool:
+    l = int(nodes[s].sym)
+    value = int(nodes[s].b)
+    if value == 0 or nodes[value].kind != .ident or nodes[value].aux != i32(int(SK.local)): return false
+    forbidden = LF_ASSIGNED | LF_ADDR | LF_BYREF | LF_CAPTURED | LF_MUTPARAM | LF_ALIAS
+    if int(locals[l].flags) & forbidden != 0: return false
+    source = int(nodes[value].sym)
+    if int(locals[source].flags) & (LF_PARAM | LF_MUTPARAM) != LF_PARAM: return false
+    if prune(int(locals[l].type)) != prune(int(locals[source].type)): return false
+    gl_param_copies[l] = source
+    true
 
 gl_float = (x: f64) -> str:
     s = "{x}"
@@ -195,6 +213,7 @@ gl_stmt = (s: int, depth: int):
     pre = ind(depth)
     if k == .vardecl:
         if nodes[s].nlist > 0: gl_err(nodes[s].pos, "tuple destructuring is not supported in shaders")
+        if gl_param_copy(s): return
         l = int(nodes[s].sym)
         if is_gpu_buffer(int(locals[l].type)): gl_err(nodes[s].pos, "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")
         t = gl_type(int(locals[l].type), nodes[s].pos)
@@ -695,6 +714,7 @@ gl_udesc = (t: int, prefix: str, base: int, pos: int) -> str:
 # returns (vertex source, fragment source, layout description)
 glsl_build = (vsf: int, fsf: int) -> (str, str, str):
     gl_decls = []
+    gl_param_copies = {}
     gl_done_fns = {}
     gl_done_structs = {}
     gl_done = {}
@@ -709,6 +729,7 @@ glsl_build = (vsf: int, fsf: int) -> (str, str, str):
     gl_function(vsf)
     vdecls = gl_decls
     gl_decls = []
+    gl_param_copies = {}
     gl_done_fns = {}
     gl_done_structs = {}
     gl_done = {}

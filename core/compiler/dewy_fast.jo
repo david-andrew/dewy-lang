@@ -383,7 +383,8 @@ dn_atom = () -> int:
     if token.kind == "quoted" or token.kind == "rawquoted": return dn_string(token)
     if text == "+" or text == "-" or text == "@" or text == "not":
         power = 125
-        if text == "@": power = 180
+        # A reference covers the full postfix place: @point.x, @items[i].x.
+        if text == "@": power = 160
         if text == "not": power = 75
         operator = dn_node("Operator", text, token.start)
         return dn_node("Prefix", "", token.start, [operator, dn_expr(power)])

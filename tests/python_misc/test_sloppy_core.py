@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
@@ -124,6 +125,19 @@ let value=if {x+=1; x%2 =? 0} x*3 else x+1
 total+=value
 }
 return if x=?10 and total=?120 42 else 1}""",
+    'argument-mutable-field': """Item:type=[value:int64]
+bump=(@value:int64):>void=>{value+=22}
+main=()=>{let item=Item[20] let copy=item bump(@item.value)
+return if copy.value=?20 item.value else 1}""",
+    'argument-mutable-index': """bump=(@value:int64):>void=>{value+=22}
+main=()=>{let values=[20 30] let copy=values let index:int64=0
+bump(@values[index])
+return if copy[0]=?20 and values[1]=?30 values[0] else 1}""",
+    'argument-mutable-nested': """Item:type=[values:array<int64>]
+bump=(@value:int64):>void=>{value+=22}
+main=()=>{let items=[Item[[20 30]]] let copy=items let calls:int64=0
+bump(@items[{calls+=1; 0}].values[0])
+return if calls=?1 and copy[0].values[0]=?20 items[0].values[0] else 1}""",
     'optimizer-scalar-operand-values': '''main=()=>{
 let x:int64=10
 if x+{x=20; 3} not=? 13 return 1
@@ -3232,7 +3246,102 @@ main=()=>{
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest'])
+@pytest.fixture(scope='module')
+def shader_driver():
+    try:
+        driver = ShaderDriver()
+    except DriverUnavailable as error:
+        pytest.skip(str(error))
+    try:
+        yield driver
+    finally:
+        driver.close()
+
+
+@pytest.mark.parametrize('case', ['dunes', 'parameter-copies'])
+def test_core_shader_driver(compiler, shader_driver, tmp_path, case):
+    if case == 'dunes':
+        model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/dunes_model.dewy'
+        shutil.copy2(model, tmp_path / model.name)
+        body = 'from p"dunes_model.dewy" import sand_vs, sand_fs\n'
+        pair = 'sand_vs sand_fs'
+    else:
+        body = """Vertex:type=[pos:vec4 uv:vec2]
+Surface:type=[tex:Texture tint:vec4]
+Uniform:type=[surface:Surface]
+Output:type=[pos:vec4 uv:vec2]
+shift=(@p:vec2):>void=>{p.x+=1.0}
+vertex=(v:Vertex u:Uniform):>Output=>{
+let before=v.uv.x shift(@v.uv)
+return Output(v.pos vec2(before v.uv.x))
+}
+fetch=(tex:Texture uv:vec2):>vec4=>sample(tex uv)
+fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
+"""
+        pair = 'vertex fragment'
+    body += f"""main=()=>{{let source=shader({pair})
+write_file("shader.vert" source.vs); write_file("shader.frag" source.fs); return 0}}
+"""
+    source = tmp_path / 'shaders.dewy'
+    source.write_text(body)
+    binary = tmp_path / 'shaders'
+    built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                           text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], cwd=tmp_path, capture_output=True, text=True,
+                         timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    shader_driver.validate((tmp_path / 'shader.vert').read_text(),
+                           (tmp_path / 'shader.frag').read_text())
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_dunes_model(compiler, tmp_path, target, release):
+    model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/dunes_model.dewy'
+    shutil.copy2(model, tmp_path / model.name)
+    source = tmp_path / 'dunes-model.dewy'
+    source.write_text("""from p"dunes_model.dewy" import dune_height, robe_vertices, robe_indices, ribbon_vertices, ribbon_indices
+main=()=>{
+let cloth=robe_vertices(0.0 0.0) let indices=robe_indices()
+if cloth.length not=? 175 or indices.length not=? 864 return 1
+loop index in indices {if (index as int64) >=? cloth.length return 2}
+loop v in cloth {if not is_finite(v.pos.x as float64) or abs(length(v.normal)-1.0) >? 0.0001 return 3}
+let original=cloth cloth[0].pos.x+=10.0
+if abs(cloth[0].pos.x-original[0].pos.x-10.0) >? 0.0001 return 4
+let moving=robe_vertices(1.0 4.0)
+if moving.length not=? cloth.length or moving[174].pos =? original[174].pos return 5
+let points=[vec3(0 0 0) vec3(1 0 0) vec3(2 1 0) vec3(3 1 1)]
+let ribbon=ribbon_vertices(points 0.2 0.0) let ribbon_ids=ribbon_indices(points.length)
+if ribbon.length not=? 8 or ribbon_ids.length not=? 36 return 6
+loop index in ribbon_ids {if (index as int64) >=? ribbon.length return 7}
+if ribbon_vertices([] 0.2 0.0).length not=? 0 or ribbon_indices(0).length not=? 0 return 8
+if dune_height(0.0 (-150.0)) <? 60.0 or dune_height(150.0 150.0) >? 60.0 return 9
+return 42
+}
+""")
+    binary = tmp_path / 'dunes-model'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web geometry checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'dunes.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -3255,7 +3364,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game

@@ -95,6 +95,10 @@ bump=(@value:int64):>void=>{value+=1}
 main=()=>{let value:int64=41 bump(@value) return value}
 ```
 
+References can name a field or array element: `bump(@point.x)`,
+`bump(@values[i])` or `bump(@points[i].x)`. An index expression evaluates once;
+other copies of the record or array retain their independent values.
+
 Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
 types are `float32` and `float64`. Ordinary integer literals default to `int64`
 when they fit. Use `as` for numeric value conversion. Integer `//` is floor
@@ -538,9 +542,15 @@ Start a game with the built-in template, then edit it while it runs:
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,
 `update(dt:float64)` each frame, and `draw()` for rendering. The
-[paddle game, physics playground and 3D forest](../examples/sloppy_core/README.md) show
+[paddle game, physics playground, forest and Dunes](../examples/sloppy_core/README.md) show
 input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.
+
+Dunes also defines vertex and fragment shaders as ordinary Dewy functions, with
+typed input/output records and texture uniforms. The compiler generates GPU
+shader code and the software renderer can execute the same shader functions.
+See [its model module](../examples/sloppy_core/dunes_model.dewy) for terrain,
+animated meshes and custom sand/shadow and beacon shaders.
 
 This remains a developing subset of Dewy. The earlier proof/effect system,
 automatic numeric widening, general structural conversions and every historical

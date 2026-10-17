@@ -1,0 +1,287 @@
+# A playable desert journey with procedural cloth and custom shaders.
+# Adapted from Sloppy's MIT-licensed examples/dunes/dunes.jo; see core/LICENSE.
+from p"dunes_model.dewy" import WORLD, dune_height, sand_color, robe_vertices, robe_indices,
+    ribbon_vertices, ribbon_indices, SandParams, sand_vs, sand_fs, BeamParams, beam_vs, beam_fs
+
+# ---------------- game state ----------------
+Glyph:type=[
+    pos: vec3
+    taken = false
+]
+let pos = vec3(40 f32(dune_height(40.0 150.0)) 150)
+let vel = vec3(0 0 0)
+let yaw = 0.0 # camera orbit angle around the traveler (0: looking north, at the beacon)
+let heading = PI
+let grounded = true
+let energy = 1.0
+let scarf: array<vec3>
+let scarf_len = 6
+let glyphs: array<Glyph>
+let collected = 0
+let won = false
+let won_t = 0.0
+let t = 0.0
+let cam_pos = pos + vec3(0 2.4 8)
+let intro = 8.0
+
+let sand_sh = make_shader(shader(sand_vs sand_fs))
+seed_random(11)
+let terrain = terrain_mesh(WORLD 220 dune_height sand_color)
+let robe = mesh(robe_vertices(0.0 0.0) robe_indices())
+let head = sphere_mesh(0.2 16 10)
+let hood = cone_mesh(0.24 0.42 16)
+let eye = sphere_mesh(0.035 8 4)
+let MAX_SCARF = 64
+let scarf_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) MAX_SCARF) 0.1 0.0) ribbon_indices(MAX_SCARF))
+let banner_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) 12) 0.25 0.0) ribbon_indices(12))
+let light_pillar = cylinder_mesh(3.0 420.0 32)
+let beam_sh = make_shader(shader(beam_vs beam_fs))
+let footprint = cylinder_mesh(0.09 0.03 10)
+let steps: array<vec3>
+let step_side = 1.0
+let last_step = vec3(0 0 0)
+let moved = 0.0
+let pillar = cylinder_mesh(0.7 7.0 10)
+let block = cube_mesh(1.0)
+let ring = sphere_mesh(0.45 20 10)
+let beacon = sphere_mesh(3.0 24 12)
+let ruins: array<Instance3D>
+let stones: array<Instance3D>
+loop c in [0..9) {
+    let cx = random(-120.0 120.0)
+    let cz = random(-100.0 130.0)
+    let ang = random(0.0 TAU)
+    loop k in [0..5) {
+        # a broken colonnade: pillars along a line, some still carrying a lintel
+        let d = f64(k) * 4.2 - 8.0
+        let x = cx + cos(ang) * d
+        let z = cz + sin(ang) * d
+        let y = dune_height(x z) - random(0.5 2.5)
+        let h = random(0.5 1.0)
+        let tilt = rotation(normalize(vec3(f32(random(-1.0 1.0)) 0 f32(random(-1.0 1.0)))) random(0.0 0.12))
+        ruins.push(instance(translation(vec3(f32(x) f32(y) f32(z))) * tilt * scaling(vec3(1 f32(h) 1)) rgb(0.66 0.45 0.36)))
+        if k % 2 =? 1 and h >? 0.75 {
+            let mx = x - cos(ang) * 2.1
+            let mz = z - sin(ang) * 2.1
+            stones.push(instance(translation(vec3(f32(mx) f32(y + 7.0 * h + 0.4) f32(mz))) * rotation_y(-ang) * scaling(vec3(5.6 0.8 1.4)) rgb(0.6 0.41 0.33)))
+        }
+    }
+    loop k in [0..4) {
+        let s_ = random(0.8 2.2)
+        let x = cx + random(-10.0 10.0)
+        let z = cz + random(-10.0 10.0)
+        stones.push(instance(translation(vec3(f32(x) f32(dune_height(x z) - 0.3) f32(z))) * rotation_y(random(0.0 3.0)) * scaling(vec3(f32(s_) f32(s_ * 0.5) f32(s_ * 0.8))) rgb(0.55 0.37 0.3)))
+    }
+}
+loop k in [0..12) {
+    let a = f64(k) / 12.0 * TAU
+    let r = 40.0 + f64(k % 3) * 35.0
+    let x = cos(a) * r
+    let z = sin(a) * r * 0.8 + 10.0
+    glyphs.push(Glyph(vec3(f32(x) f32(dune_height(x z) + 2.2) f32(z))))
+}
+let posts: array<vec3>
+loop k in [0..14) {
+    let x = random(-110.0 110.0)
+    let z = random(-90.0 140.0)
+    posts.push(vec3(f32(x) f32(dune_height(x z) - 0.5) f32(z)))
+}
+let post_mesh = cylinder_mesh(0.08 3.4 8)
+let dust: array<vec3>
+loop k in [0..400) {dust.push(vec3(f32(random(-30.0 30.0)) f32(random(0.0 10.0)) f32(random(-30.0 30.0))))}
+
+let wind_snd = tone(220.0 4.0 Wave.noise 0.05 1.5 1.5)
+let chime = sfx_chime()
+let step_snd = tone(140.0 0.05 Wave.noise 0.08 0.001 0.04)
+let theme = mix([melody("A3 - C4 E4 - D4 C4 - B3 - - - A3 - - - . . E4 - G4 A4 - G4 E4 - D4 - - - C4 - - -" 70.0 Wave.sine 0.18)
+              melody("A2 - - - - - - - F2 - - - - - - - C3 - - - - - - - E2 - - - - - - -" 70.0 Wave.triangle 0.15)])
+let wind_id = 0
+
+ground=(x: float64 z: float64):>float64=>dune_height(x z)
+
+update=(dt: float64)=>{
+    t += dt
+    intro -= dt
+    if wind_id =? 0 {wind_id = play(wind_snd 0.6 looping = true)}
+    if key_pressed(Key.escape) {quit()}
+    # camera orbit
+    if key_down(Key.q) {yaw -= 1.8 * dt}
+    if key_down(Key.e) {yaw += 1.8 * dt}
+    if mouse_down(Mouse.right) {yaw += f64(mouse_delta().x) * 0.006}
+    yaw += f64(right_stick().x) * 2.2 * dt
+    # movement relative to the camera
+    let inp = input_axis()
+    let fwd = vec3(f32(-sin(yaw)) 0 f32(-cos(yaw)))
+    let right = vec3(f32(cos(yaw)) 0 f32(-sin(yaw)))
+    let wish = right * inp.x - fwd * inp.y
+    let speed = 7.5
+    if length(wish) >? 0.01 {
+        wish = normalize(wish)
+        heading = atan2(f64(wish.x) f64(wish.z))
+    }
+    let target = wish * f32(speed)
+    vel.x = f32(approach(f64(vel.x) f64(target.x) 6.0 dt))
+    vel.z = f32(approach(f64(vel.z) f64(target.z) 6.0 dt))
+    let gy = ground(f64(pos.x) f64(pos.z))
+    let jump_pressed = key_pressed(Key.space) or gamepad_pressed(PadButton.a)
+    let jump_held = key_down(Key.space) or gamepad_down(PadButton.a)
+    if jump_pressed and grounded {
+        vel.y = 7.0
+        grounded = false
+        play(sfx_whoosh() 0.3)
+    }
+    let gliding = jump_held and not grounded and vel.y <? 0.0 and energy >? 0.0
+    let g = 18.0
+    if gliding {
+        g = 3.0
+        energy -= dt / (1.0 + f64(scarf_len) * 0.25)
+        vel.y = max(vel.y -1.5)
+    }
+    vel.y -= f32(g * dt)
+    pos += vel * f32(dt)
+    gy = ground(f64(pos.x) f64(pos.z))
+    if pos.y <=? f32(gy) {
+        if not grounded and vel.y <? -4.0 {play(step_snd 0.5)}
+        pos.y = f32(gy)
+        vel.y = 0.0
+        grounded = true
+        energy = min(energy + dt * 0.8 1.0)
+    }
+    if grounded {
+        moved += f64(length(vec3(vel.x 0 vel.z))) * dt
+        if length(pos - last_step) >? 0.75 {
+            let side = vec3(f32(cos(heading)) 0 f32(-sin(heading))) * f32(0.12 * step_side)
+            steps.push(pos + side)
+            step_side = -step_side
+            last_step = pos
+            if steps.length >? 160 {steps.remove(0)}
+        }
+    }
+    if moved >? 3.0 {intro = min(intro 2.0)}
+    let lim = f32(WORLD / 2.0 - 5.0)
+    pos.x = clamp(pos.x -lim lim)
+    pos.z = clamp(pos.z -lim lim)
+    # scarf follows the traveler
+    let anchor = pos + vec3(0 1.35 0)
+    if scarf.length =? 0 {
+        loop k in [0..scarf_len) {scarf.push(anchor)}
+    }
+    loop scarf.length <? min(scarf_len MAX_SCARF) {scarf.push(scarf[scarf.length - 1])}
+    scarf[0] = anchor
+    loop k in [1..scarf.length) {
+        let d = scarf[k] - scarf[k - 1]
+        let l = length(d)
+        let dir = d / max(l 0.001)
+        let flutter = vec3(f32(sin(t * 7.0 + f64(k)) * 0.04) 0.02 f32(cos(t * 5.0 + f64(k)) * 0.04))
+        scarf[k] = scarf[k - 1] + normalize(dir + vec3(0.25 0.05 0.1) * f32(dt) * 10.0 + flutter) * 0.32
+    # glyphs
+    }
+    loop glyph_index in [0..glyphs.length) {
+        if glyphs[glyph_index].taken {continue}
+        if length(glyphs[glyph_index].pos - (pos + vec3(0 1 0))) <? 1.6 {
+            glyphs[glyph_index].taken = true
+            collected += 1
+            scarf_len += 3
+            energy = 1.0
+            play(chime 0.6 pitch = 0.8 + 0.06 * f64(collected))
+        }
+    }
+    if collected =? glyphs.length and not won {
+        won = true
+        play(theme 0.8)
+    }
+    if won {won_t += dt}
+    # smooth third-person camera
+    let desired = pos + vec3(f32(sin(yaw) * 8.0) 2.4 f32(cos(yaw) * 8.0))
+    let dg = ground(f64(desired.x) f64(desired.z)) + 1.5
+    if desired.y <? f32(dg) {desired.y = f32(dg)}
+    cam_pos = approach(cam_pos desired 5.0 dt)
+}
+draw=()=>{
+    clear(BLACK)
+    sun(vec3(-0.5 0.35 -0.4) vec3(1.25 0.95 0.7))
+    sky(vec3(0.2 0.38 0.68) vec3(0.98 0.78 0.58) vec3(0.8 0.55 0.4))
+    fog(vec3(0.97 0.78 0.6) 0.005 0.03)
+    shadows(true 0.65 40)
+    post_effects(0.55 0.78 0.3 1.05 vec3(1.03 1.0 0.96))
+    camera3d(cam_pos pos + vec3(0 2.9 0) 50.0 0.1 700.0)
+    draw_custom(()=>{
+        let p = SandParams(scene_view_proj() scene_shadow_vp() scene_camera() scene_sun() scene_sun_color() scene_sky_color()
+            scene_fog_color() scene_fog() f32(elapsed()) scene_shadow_strength() scene_shadow_map())
+        draw(sand_sh terrain p)
+    }
+    )
+    # the traveler: flowing robe, hood with glowing eyes, and a luminous scarf
+    let speed = f64(length(vec3(vel.x 0 vel.z)))
+    update_mesh(@robe robe_vertices(t speed))
+    let body = translation(pos) * rotation_y(heading)
+    draw_mesh(robe body rgb(1 1 1) specular = 0.15)
+    draw_mesh(head body * translation(vec3(0 1.45 0.02)) rgb(0.42 0.07 0.06))
+    draw_mesh(hood body * translation(vec3(0 1.48 -0.1)) * rotation_x(-0.75) * scaling(vec3(1 1.3 1)) rgb(0.5 0.09 0.07))
+    loop sx in [-0.06 0.06] {
+        draw_mesh(eye body * translation(vec3(f32(sx) 1.47 0.18)) rgb(1 0.95 0.8) emissive = 3.0 cast_shadow = false)
+    }
+    if scarf.length >? 1 {
+        let pts = scarf
+        loop pts.length <? MAX_SCARF {pts.push(pts[pts.length - 1])}
+        update_mesh(@scarf_mesh ribbon_vertices(pts 0.15 t))
+        let glow = f32(0.4 + 0.6 * energy)
+        draw_mesh(scarf_mesh mat4() rgb(0.98 * glow 0.72 * glow 0.28 * glow) emissive = 0.9 * f64(glow) cast_shadow = false)
+    # cloth banners fluttering on old posts
+    }
+    loop i in 0.. and bp in posts {
+        draw_mesh(post_mesh translation(bp) rgb(0.35 0.22 0.18))
+        let pts: array<vec3>
+        loop k in [0..12) {
+            let f = f64(k) * 0.28
+            let w = sin(t * 3.0 + f64(i) + f64(k) * 0.6) * 0.18 * f64(k) / 12.0
+            pts.push(bp + vec3(f32(f * 0.8) f32(3.2 - f * 0.25 + w) f32(f * 0.55 + w)))
+        }
+        update_mesh(@banner_mesh ribbon_vertices(pts 0.22 t + f64(i)))
+        draw_mesh(banner_mesh mat4() rgb(0.66 0.12 0.09) emissive = 0.15 cast_shadow = false)
+    # footprints
+    }
+    let prints: array<Instance3D>
+    loop sp_ in steps {
+        prints.push(instance(translation(sp_ + vec3(0 f32(ground(f64(sp_.x) f64(sp_.z)) - f64(sp_.y) - 0.025) 0)) * scaling(vec3(1 1 1.5)) rgb(0.86 0.62 0.44)))
+    }
+    draw_mesh_instanced(footprint prints cast_shadow = false)
+    draw_mesh_instanced(pillar ruins)
+    draw_mesh_instanced(block stones)
+    # glyphs: glowing orbs that bob in the wind
+    loop gl_ in glyphs {
+        if gl_.taken {continue}
+        let bob = vec3(0 f32(sin(t * 2.0 + f64(gl_.pos.x)) * 0.3) 0)
+        draw_mesh(ring translation(gl_.pos + bob) * rotation_y(t) rgb(1 0.85 0.45) emissive = 2.5 cast_shadow = false)
+    # the beacon on the mountain
+    }
+    let bpos = vec3(0 f32(dune_height(0.0 -150.0) + 6.0) -150)
+    let k = 1.5
+    if won {k = 4.0 + 2.0 * sin(t * 2.0)}
+    draw_mesh(beacon translation(bpos) rgb(1 0.9 0.7) emissive = k cast_shadow = false)
+    # a pillar of light rises from the mountain: the goal is visible from everywhere
+    let bs = f32(0.32 + 0.3 * k / 4.0)
+    draw_custom(()=>{draw(beam_sh light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs f32(elapsed())))} additive=true)
+    # drifting sand
+    let motes: array<Instance3D>
+    loop i in 0.. and d in dust {
+        let p = vec3(d.x + f32(mod(t * 3.0 + f64(i) 60.0)) - 30.0 d.y d.z) + vec3(pos.x f32(ground(f64(pos.x) f64(pos.z))) pos.z)
+        motes.push(instance(translation(p) * scaling(vec3(0.05 0.05 0.05)) rgb(1 0.9 0.75)))
+    }
+    draw_mesh_instanced(block motes emissive = 0.6 cast_shadow = false)
+    # HUD
+    text("glyphs {collected} / {glyphs.len()}" vec2(30 24) 28 rgba(1 0.95 0.85 0.9))
+    rect(30 64 160 6 rgba(0 0 0 0.3))
+    rect(30 64 160.0 * energy 6 rgba(1 0.85 0.5 0.9))
+    if intro >? 0.0 {
+        let a = f32(clamp(intro / 2.0 0.0 1.0))
+        text_centered("D U N E S" vec2(640 250) 80 rgba(1 0.97 0.9 a))
+        text_centered("gather the glyphs   -   wasd to walk, space to jump (hold to glide), q/e to look" vec2(640 320) 22 rgba(1 1 1 a * 0.8))
+    }
+    if won {
+        let a = f32(clamp(won_t / 3.0 0.0 1.0))
+        text_centered("the beacon answers" vec2(640 200) 56 rgba(1 0.95 0.85 a))
+
+    }
+}
+window("Dewy / Dunes" 1280 720)

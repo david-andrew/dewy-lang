@@ -495,3 +495,36 @@ tradeoff and compiler cost do not justify another arithmetic specialization.
 The implementation was reverted. The expanded independent arithmetic oracle
 remains; its eight native/web checks pass on the restored compiler in 2.80 s.
 [Restored implementation gate](source-core/floor-positive-restored.log).
+
+## Dunes: procedural game and real shader validation
+
+The pinned Sloppy Dunes game now runs as Dewy on native and web. Its terrain,
+robe/scarf/banner meshes, sand/shadow and beacon shaders, movement, gliding,
+collectibles and audio are in `examples/sloppy_core/dunes.dewy` and
+`dunes_model.dewy`. The initial player/camera heights follow the terrain, fixing
+an initially underground view. The source retains MIT attribution.
+
+Running the game in WebGL exposed an invalid shader parameter copy: Dewy's
+ordinary value parameters introduced local copies of uniform records containing
+samplers, which GLSL cannot assign. The GLSL emitter now aliases read-only copies
+of immutable parameters; changed or addressed values retain their copies.
+An offscreen EGL/GLES3 test compiles and links generated shaders with the actual
+driver, including nested texture records, texture helper parameters and mutable
+numeric fields. CI ensures that the driver is installed; local runs skip these
+two tests if unavailable. Browser rendering also verifies the complete game.
+
+The shader work exposed a reference parser bug: `@point.x`, `@items[i]` and
+`@items[i].x` marked only the base name. References now include the full postfix
+place. Tests verify caller mutation, independent snapshots and one evaluation of
+an index expression on native/web in development/release builds.
+
+All 14 shader/reference regressions fail on the preceding compiler.
+[Before](source-core/dunes-before.log). The **21 focused checks passed in 5.08 s**,
+including geometry bounds/normals, animated meshes, the native software renderer
+and web module validation. [Focused gate](source-core/dunes-focused.log).
+The fresh C-bootstrap gate passed **1,968 checks in 127.04 s**.
+[Full gate](source-core/dunes-full.log), [build manifest](source-core/dunes-build.json).
+This is correctness and rendering evidence, not a frame-rate comparison.
+
+![Dunes in WebGL](source-core/dunes-web.png)
+![Dunes in the native software renderer](source-core/dunes-native.png)

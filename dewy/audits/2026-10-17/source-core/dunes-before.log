@@ -1,0 +1,555 @@
+FFFFFFFFFFFFFF                                                           [100%]
+=================================== FAILURES ===================================
+________________ test_core_values[debug-argument-mutable-field] ________________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-field', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-field: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-debug0
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+________________ test_core_values[debug-argument-mutable-index] ________________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-index', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-index: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-debug0
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+_______________ test_core_values[debug-argument-mutable-nested] ________________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-nested', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-nested: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-debug0
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+_______________ test_core_values[release-argument-mutable-field] _______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-field', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-field: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-release0
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+_______________ test_core_values[release-argument-mutable-index] _______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-index', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-index: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-release0
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+______________ test_core_values[release-argument-mutable-nested] _______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-nested', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-nested: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-native-release0
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-native-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:1738: AssertionError
+________________________ test_core_shader_driver[dunes] ________________________
+
+compiler = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792246215892398083/bin/dewy-core')
+shader_driver = <tests.python_misc.core_glsl_driver.ShaderDriver object at 0x7f7432054d70>
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-517/test_core_shader_driver_dunes_0')
+case = 'dunes'
+
+    @pytest.mark.parametrize('case', ['dunes', 'parameter-copies'])
+    def test_core_shader_driver(compiler, shader_driver, tmp_path, case):
+        if case == 'dunes':
+            model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/dunes_model.dewy'
+            shutil.copy2(model, tmp_path / model.name)
+            body = 'from p"dunes_model.dewy" import sand_vs, sand_fs\n'
+            pair = 'sand_vs sand_fs'
+        else:
+            body = """Vertex:type=[pos:vec4 uv:vec2]
+    Surface:type=[tex:Texture tint:vec4]
+    Uniform:type=[surface:Surface]
+    Output:type=[pos:vec4 uv:vec2]
+    shift=(@p:vec2):>void=>{p.x+=1.0}
+    vertex=(v:Vertex u:Uniform):>Output=>{
+    let before=v.uv.x shift(@v.uv)
+    return Output(v.pos vec2(before v.uv.x))
+    }
+    fetch=(tex:Texture uv:vec2):>vec4=>sample(tex uv)
+    fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
+    """
+            pair = 'vertex fragment'
+        body += f"""main=()=>{{let source=shader({pair})
+    write_file("shader.vert" source.vs); write_file("shader.frag" source.fs); return 0}}
+    """
+        source = tmp_path / 'shaders.dewy'
+        source.write_text(body)
+        binary = tmp_path / 'shaders'
+        built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                               text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary], cwd=tmp_path, capture_output=True, text=True,
+                             timeout=10, check=False)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+>       shader_driver.validate((tmp_path / 'shader.vert').read_text(),
+                               (tmp_path / 'shader.frag').read_text())
+
+tests/python_misc/test_sloppy_core.py:3294: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <tests.python_misc.core_glsl_driver.ShaderDriver object at 0x7f7432054d70>
+vertex = '#version 300 es\nprecision highp float;\nprecision highp int;\nstruct S_SandOut_2 {\n    vec4 pos_;\n    vec3 world_;...n    gl_Position = o.pos_;\n    v_world = o.world_;\n    v_normal = o.normal_;\n    v_shadow_pos = o.shadow_pos_;\n}\n'
+fragment = '#version 300 es\nprecision highp float;\nprecision highp int;\nstruct S_SandOut_2 {\n    vec4 pos_;\n    vec3 world_;...S_SandOut_2 i = S_SandOut_2(gl_FragCoord, v_world, v_normal, v_shadow_pos);\n    frag_color = f_sand_fs_10(i, u);\n}\n'
+
+    def validate(self, vertex, fragment):
+        shaders = []
+        program = self.create_program()
+        try:
+            for kind, text in [(0x8B31, vertex), (0x8B30, fragment)]:
+                shader = self.create_shader(kind)
+                shaders.append(shader)
+                encoded = c.c_char_p(text.encode())
+                self.source(shader, 1, c.byref(encoded), None)
+                self.compile_shader(shader)
+                status = c.c_int()
+                self.shader_status(shader, 0x8B81, c.byref(status))
+                log = c.create_string_buffer(16384)
+                self.shader_log(shader, len(log), None, log)
+>               assert status.value, log.value.decode(errors='replace') + '\n' + text
+                       ^^^^^^^^^^^^
+E               AssertionError: 0(27) : error C7554: OpenGL requires sampler variables to be explicitly declared as uniform
+E               
+E               #version 300 es
+E               precision highp float;
+E               precision highp int;
+E               struct S_SandOut_2 {
+E                   vec4 pos_;
+E                   vec3 world_;
+E                   vec3 normal_;
+E                   vec4 shadow_pos_;
+E               };
+E               struct S_Vertex3D_5 {
+E                   vec3 pos_;
+E                   vec3 normal_;
+E                   vec2 uv_;
+E                   vec4 color_;
+E               };
+E               struct S_SandParams_0 {
+E                   mat4 view_proj_;
+E                   mat4 shadow_vp_;
+E                   vec3 cam_;
+E                   vec3 sun_;
+E                   vec3 sun_color_;
+E                   vec3 sky_;
+E                   vec3 fog_color_;
+E                   vec2 fog_;
+E                   float time_;
+E                   float shadow_strength_;
+E                   sampler2D shadow_map_;
+E               };
+E               layout(location=0) in vec3 a_pos;
+E               layout(location=1) in vec3 a_normal;
+E               layout(location=2) in vec2 a_uv;
+E               layout(location=3) in vec4 a_color;
+E               uniform S_SandParams_0 u;
+E               uniform int sl_ibase;
+E               out vec3 v_world;
+E               out vec3 v_normal;
+E               out vec4 v_shadow_pos;
+E               S_SandOut_2 f_sand_vs_11(S_Vertex3D_5 l_v_58, S_SandParams_0 l_u_59) {
+E                   S_Vertex3D_5 l_v_60 = l_v_58;
+E                   S_SandParams_0 l_u_61 = l_u_59;
+E                   return S_SandOut_2((l_u_61.view_proj_ * vec4(l_v_60.pos_, 1.0)), l_v_60.pos_, l_v_60.normal_, (l_u_61.shadow_vp_ * vec4(l_v_60.pos_, 1.0)));
+E               }
+E               void main() {
+E                   S_Vertex3D_5 vin = S_Vertex3D_5(a_pos, a_normal, a_uv, a_color);
+E                   S_SandOut_2 o = f_sand_vs_11(vin, u);
+E                   gl_Position = o.pos_;
+E                   v_world = o.world_;
+E                   v_normal = o.normal_;
+E                   v_shadow_pos = o.shadow_pos_;
+E               }
+
+tests/python_misc/core_glsl_driver.py:82: AssertionError
+__________________ test_core_shader_driver[parameter-copies] ___________________
+
+compiler = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792246215892398083/bin/dewy-core')
+shader_driver = <tests.python_misc.core_glsl_driver.ShaderDriver object at 0x7f7432054d70>
+tmp_path = PosixPath('/tmp/pytest-of-david/pytest-517/test_core_shader_driver_parame0')
+case = 'parameter-copies'
+
+    @pytest.mark.parametrize('case', ['dunes', 'parameter-copies'])
+    def test_core_shader_driver(compiler, shader_driver, tmp_path, case):
+        if case == 'dunes':
+            model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/dunes_model.dewy'
+            shutil.copy2(model, tmp_path / model.name)
+            body = 'from p"dunes_model.dewy" import sand_vs, sand_fs\n'
+            pair = 'sand_vs sand_fs'
+        else:
+            body = """Vertex:type=[pos:vec4 uv:vec2]
+    Surface:type=[tex:Texture tint:vec4]
+    Uniform:type=[surface:Surface]
+    Output:type=[pos:vec4 uv:vec2]
+    shift=(@p:vec2):>void=>{p.x+=1.0}
+    vertex=(v:Vertex u:Uniform):>Output=>{
+    let before=v.uv.x shift(@v.uv)
+    return Output(v.pos vec2(before v.uv.x))
+    }
+    fetch=(tex:Texture uv:vec2):>vec4=>sample(tex uv)
+    fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
+    """
+            pair = 'vertex fragment'
+        body += f"""main=()=>{{let source=shader({pair})
+    write_file("shader.vert" source.vs); write_file("shader.frag" source.fs); return 0}}
+    """
+        source = tmp_path / 'shaders.dewy'
+        source.write_text(body)
+        binary = tmp_path / 'shaders'
+        built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
+                               text=True, timeout=30, check=False)
+>       assert built.returncode == 0, built.stdout + built.stderr
+E       AssertionError: /tmp/pytest-of-david/pytest-517/test_core_shader_driver_parame0/shaders.dewy:7:25: error: a mutable argument needs `@` at the call site
+E             let before=v.uv.x shift(@v.uv)
+E                                     ^
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=[PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792246215892398083/b...r: a mutable argument needs `@` at the call site\n    let before=v.uv.x shift(@v.uv)\n                            ^\n').returncode
+
+tests/python_misc/test_sloppy_core.py:3290: AssertionError
+______________ test_core_value_web[debug-argument-mutable-field] _______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-field', release = False
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-field: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-debug0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+______________ test_core_value_web[debug-argument-mutable-index] _______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-index', release = False
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-index: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-debug0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+______________ test_core_value_web[debug-argument-mutable-nested] ______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-nested', release = False
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-nested: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-debug0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-debug0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+_____________ test_core_value_web[release-argument-mutable-field] ______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-field', release = True
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-field: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-release0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+_____________ test_core_value_web[release-argument-mutable-index] ______________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-index', release = True
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-index: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-release0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+_____________ test_core_value_web[release-argument-mutable-nested] _____________
+
+value_batches = <function value_batches.<locals>.result at 0x7f7431f71900>
+name = 'argument-mutable-nested', release = True
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-mutable-nested: None
+E         Batch build failed; sources in /tmp/pytest-of-david/pytest-517/values-wasm-release0
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-field.dewy:3:48: error: a mutable argument needs `@` at the call site
+E             main=()=>{let item=Item[20] let copy=item bump(@item.value)
+E                                                            ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-index.dewy:3:6: error: a mutable argument needs `@` at the call site
+E             bump(@values[index])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/values-argument-mutable-nested.dewy:4:6: error: a mutable argument needs `@` at the call site
+E             bump(@items[{calls+=1; 0}].values[0])
+E                  ^
+E         
+E         /tmp/pytest-of-david/pytest-517/values-wasm-release0/batch.dewy:6:5: error: cannot assign a value with no type (void) to 'result_0'
+E             let result_0=case_0()
+E                 ^
+E         
+E       assert None == '42'
+
+tests/python_misc/test_sloppy_core.py:3465: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-argument-mutable-field]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-argument-mutable-index]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-argument-mutable-nested]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-argument-mutable-field]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-argument-mutable-index]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-argument-mutable-nested]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_shader_driver[dunes]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_shader_driver[parameter-copies]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[debug-argument-mutable-field]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[debug-argument-mutable-index]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[debug-argument-mutable-nested]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[release-argument-mutable-field]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[release-argument-mutable-index]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[release-argument-mutable-nested]
+14 failed, 1838 deselected in 3.67s

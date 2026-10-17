@@ -83,6 +83,14 @@ zoom, Space to pause automatic orbit, R to reset and Escape to quit. Terrain
 callbacks, placement, camera control and drawing are Dewy; `forest_model.dewy`
 keeps deterministic scene construction separate from the window.
 
+[`dunes.dewy`](dunes.dewy) is a playable desert journey adapted from Sloppy's
+MIT-licensed Dunes example. Walk with WASD/arrows or the left stick, jump with
+Space/gamepad A, and hold it while falling to glide. Q/E, right-drag or the right
+stick turn the camera. Collect glyphs to lengthen your scarf and head toward the
+beacon. Terrain, animated cloth, custom sand/shadow and beam shaders, input,
+sound and game logic are Dewy. [`dunes_model.dewy`](dunes_model.dewy) contains
+the geometry and shader functions without starting a window.
+
 After building the compiler as described in `tools/sloppy_core/README.md`:
 
 ```sh
@@ -91,6 +99,7 @@ CORE=/tmp/dewy-core/bin/dewy-core
 $CORE watch examples/sloppy_core/paddle.dewy
 $CORE watch examples/sloppy_core/physics.dewy
 $CORE watch examples/sloppy_core/forest.dewy
+$CORE watch examples/sloppy_core/dunes.dewy
 
 $CORE build examples/sloppy_core/paddle.dewy -o /tmp/paddle
 /tmp/paddle
@@ -102,6 +111,8 @@ $CORE build examples/sloppy_core/physics.dewy --release -o /tmp/physics
 $CORE build examples/sloppy_core/physics.dewy --target wasm --release -o /tmp/physics
 $CORE build examples/sloppy_core/forest.dewy --release -o /tmp/forest
 $CORE build examples/sloppy_core/forest.dewy --target wasm --release -o /tmp/forest
+$CORE build examples/sloppy_core/dunes.dewy --release -o /tmp/dunes
+$CORE build examples/sloppy_core/dunes.dewy --target wasm --release -o /tmp/dunes
 ```
 
 Use `--release` for the optimizing compiler. The default development build
@@ -142,10 +153,17 @@ See the source-core audit for inputs and measurements.
 
 The forest model gate checks deterministic placement, height callbacks and
 independent instance-array copies on both targets in both modes. The actual game
-also runs through the native software renderer; all three games' web modules are
+also runs through the native software renderer; all four games' web modules are
 validated in debug/release. The forest was separately rendered in Chromium with
 drag, zoom and reset exercised, with no console errors. Seven warmed compiler
 runs gave median release builds of 323.08 ms native and 160.24 ms web on the
 development machine. These are build measurements, not frame-rate claims.
 
 ![The Dewy forest running in the browser](../../dewy/audits/2026-10-16/source-core/forest-browser.png)
+
+Dunes adds geometry checks on native/web in development/release modes, a native
+software-rendered frame, and compilation/linking of generated shaders with a real
+offscreen GLES driver. The full game was also rendered in Chromium with movement
+input. Shader validation needs EGL/GLES3 libraries; CI installs them when absent.
+
+![The Dewy Dunes game running in the browser](../../dewy/audits/2026-10-17/source-core/dunes-web.png)
