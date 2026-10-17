@@ -2072,12 +2072,60 @@ is_open_range = (h: int) -> bool:
     it = int(nodes[h].a)
     nodes[it].kind == .range and nodes[it].b == 0 and not has_flag(it, NF_STEP)
 
+# Conservative source control flow: 1 falls through, 2 returns, 4 exits a loop.
+# This preserves a loop/else's all-returning arms after introducing its entered
+# flag. Nested loop exits may reject a proof, but must never prove a return.
+lx_flow_effects = (n: int) -> int:
+    if n == 0: return 1
+    k = nodes[n].kind
+    if k == .lambda: return 1
+    if k == .break_ or k == .continue_: return 4
+    if has_flag(n, NF_FLOW_RETURNS): return 2
+    if k == .return_:
+        e = lx_flow_effects(int(nodes[n].a))
+        return (e & 6) | (if e & 1 != 0: 2 else: 0)
+    if k == .block:
+        e = 1
+        loop item in kids(n):
+            if e & 1 == 0: break
+            e = (e & 6) | lx_flow_effects(item)
+        return e
+    if k == .if_:
+        e = lx_flow_effects(int(nodes[n].a))
+        if e & 1 == 0: return e
+        return (e & 6) | lx_flow_effects(int(nodes[n].b)) | lx_flow_effects(int(nodes[n].c))
+    if k == .exprstmt: return lx_flow_effects(int(nodes[n].a))
+    # Other expressions can contain blocks, including loop exits in arguments
+    # or conditions. Keep fallthrough possible rather than proving termination.
+    e = 1
+    e |= lx_flow_effects(int(nodes[n].a)) | lx_flow_effects(int(nodes[n].b))
+    e |= lx_flow_effects(int(nodes[n].c)) | lx_flow_effects(int(nodes[n].d))
+    loop item in kids(n): e |= lx_flow_effects(item)
+    e
+
 desugar_loopx = (lx: int) -> int:
     pos = nodes[lx].pos
     h = int(nodes[lx].a)
     body = int(nodes[lx].b)
     lx_count += 1
     tag = "{lx_count}"
+    if nodes[lx].c != 0:
+        # A Dewy loop is a flow arm: the next arm runs only if its body never
+        # enters. Mark entry after the lowered header's tests, before user code.
+        fallback = int(nodes[lx].c)
+        nodes[lx].c = 0
+        returns = lx_flow_effects(body) == 2 and lx_flow_effects(fallback) == 2
+        entered = "$entered" + tag
+        stmts = [lx_assign(lx_ident(entered, pos), .assign, lx_bool(true, pos), pos)]
+        loop item in kids(body): stmts.push(item)
+        nodes[lx].b = i32(lx_block(stmts, pos))
+        lowered = desugar_loopx(lx)
+        block = lx_block([lx_let(intern(entered), lx_bool(false, pos), pos), lowered,
+                          lx_if(lx_not(lx_ident(entered, pos), pos), fallback, pos)], pos)
+        if returns: add_flag(block, NF_FLOW_RETURNS)
+        st = mk(.exprstmt, pos)
+        nodes[st].a = i32(block)
+        return st
     terms: int[]
     if head_terms(h, terms):
         # one sequence + counters + conditions: an indexed loop over the sequence

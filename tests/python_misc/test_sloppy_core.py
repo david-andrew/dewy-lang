@@ -20,6 +20,84 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'loop-else-conditions': '''main=()=>{
+let total=0 let calls=0
+loop {calls+=1; false} {total=999} else {total+=10}
+loop {calls+=1; calls <? 4} {total+=1 continue} else {total=999}
+loop true {total+=30 break} else {total=999}
+return if calls =? 4 total else 1
+}''',
+    'loop-else-chains': '''main=()=>{
+let total=0 let empty:array<int64>=[]
+if false {total=999}
+else loop value in empty {total=999}
+else if false {total=999}
+else loop value in [20 22] {total+=value}
+else {total=999}
+return total
+}''',
+    'loop-else-iterators': '''main=()=>{
+let total=0 let empty=[3..3) let full=(0,2..4] let missing:array<int64>=[]
+loop value in empty {total=999} else {total+=10}
+loop value in full and value <? 2 {total=999} else {total+=10}
+loop c in "" {total=999} else {total+=10}
+loop c in "é🙂" {total+=1} else {total=999}
+loop x in [1] and y in missing {total=999} else {total+=10}
+return total
+}''',
+    'loop-else-labels': '''main=()=>{
+let total=0
+$outer
+loop i in [0..3) {
+    $inner
+    loop j in [0..2) {
+        total+=1
+        if i =? 0 {continue $outer}
+        if i =? 1 {break $inner}
+        break $outer
+    } else {total=999}
+    total+=10
+} else {total=999}
+return if total =? 13 42 else 1
+}''',
+    'loop-else-comprehensions': '''main=()=>{
+let a=[loop x in [0..0) x else 42]
+let b=[loop x in [1..3] x else 999]
+let c=[loop x in [0..0) x else loop y in [0..0) y else 42]
+return if a =? [42] and b =? [1 2 3] and c =? [42] 42 else 1
+}''',
+    'loop-else-generic': '''head_or=<T>(values:array<T> fallback:T):>T=>{
+loop value in values {return value} else {return fallback}
+}
+main=()=>if head_or([42] 0) =? 42 and head_or([] "empty") =? "empty" 42 else 1''',
+    'loop-else-or': '''main=()=>{
+let empty:array<int64>=[] let total=0
+loop x in empty or y in empty {total=999} else {total+=40}
+loop x in empty or y in [10 20] {total+=1} else {total=999}
+return total
+}''',
+    'loop-else-return-chains': '''choose=(take:bool):>int64=>{
+if take {return 42}
+else loop x in [0..0) {return x}
+else loop c in "a" {if c =? "a" {return 42} else {return 1}}
+else {return 2}
+}
+main=()=>if choose(true) =? 42 and choose(false) =? 42 42 else 1''',
+    'loop-else-cleanup': '''work=(empty:bool):>int64=>{
+let source:array<string>=if empty [] else ["x"]
+loop text in source {
+    let values=["body {text}"] values.push(text)
+    return values.length
+} else {
+    let values=["fallback {empty}"] values.push("y")
+    return values.length
+}
+}
+main=()=>{
+work(true) work(false) let before=alloc_count()
+loop i in [0..20) {if work(i%2 =? 0) not=? 2 return 1}
+return if alloc_count() =? before 42 else 2
+}''',
     'optimizer-record-wide-integers': '''Pair:type=[x:int64 y:int64]
 advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y-2)
 main=()=>{
@@ -1704,6 +1782,13 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'loop-else-value': ('main=()=>{let x=loop false {1} else 42 return x}', 'loop used as a value'),
+    'loop-else-binder-scope': ('main=()=>{loop x in [0..0) {} else {return x} return 42}', "unknown name 'x'"),
+    'loop-else-label-scope': ('main=()=>{$outer loop false {} else {break $outer} return 42}', 'outside of a loop'),
+    'loop-else-break-fallthrough': ('main=()=>{loop true {if true {break} return 42} else {return 42}}', 'must return a value'),
+    'loop-else-continue-fallthrough': ('main=()=>{loop i in [0..1) {continue} else {return 42}}', 'must return a value'),
+    'loop-else-argument-exit': ('main=()=>{loop true {return {break; 42}} else {return 42}}', 'must return a value'),
+    'loop-else-closure-return': ('main=()=>{loop i in [0..1) {let f=()=>42 f()} else {return 42}}', 'must return a value'),
     'loop-label-missing': ('main=()=>{loop true {break $missing}}', 'unknown loop label'),
     'loop-label-duplicate': ('main=()=>{$again loop true {$again loop true {break $again}}}', 'duplicate active loop label'),
     'loop-label-dangling': ('main=()=>{$again}', 'label must be followed by a loop'),
@@ -3787,7 +3872,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

@@ -532,7 +532,11 @@ dw_expr = (id: int) -> int:
         nodes[n].op = i32(int(if op == "-": Tok.minus else: Tok.plus))
         nodes[n].a = i32(e)
         return n
-    if k == "Flow": return dw_flow(id, 0)
+    if k == "Flow":
+        loop arm in dewy_syntax[id].children:
+            if dewy_syntax[arm].kind == "KeywordExpr" and dewy_syntax[dw_child(arm, 0)].text == "loop":
+                return dw_fail(arm, "a loop used as a value; use return or a comprehension")
+        return dw_flow(id, 0)
     if k == "BinOp":
         left = dw_child(id, 1)
         right = dw_child(id, 2)
@@ -964,7 +968,10 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
     if word == "loop":
         head = dw_loop_head(dw_child(arm, 1))
-        if nodes[head].op == 1:
+        if at + 1 < items.len():
+            nodes[n].kind = .loopx
+            nodes[n].a = i32(head)
+        else if nodes[head].op == 1:
             nodes[n].kind = .for_
             nodes[n].a = nodes[head].a
             set_list(n, kids(head))
@@ -975,7 +982,6 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     else: nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
     nodes[n].b = i32(dw_block(dw_child(arm, 2), accumulator, map))
     if at + 1 < items.len():
-        if word == "loop": return dw_fail(arm, "loop/else")
         rest = dw_flow(id, at + 1, accumulator, map)
         if nodes[rest].kind != .block:
             block = mk(.block, dewy_syntax[arm].pos)

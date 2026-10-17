@@ -786,3 +786,27 @@ seven final pairs measured text **263.58/264.04 ms** and records
 **163.14/165.34 ms**. There is no demonstrated broad application improvement,
 and the initial particle regression is absent with the 16-byte limit.
 [Final application samples](source-core/sra64-final-apps.json).
+
+## Loop fallback arms
+
+`loop ... else ...` now follows Dewy's existing flow-arm design: the next arm
+runs only when the loop body never enters. It composes with `if`, `else if`,
+`else loop`, combined iterators and comprehension collection. Entry is marked
+after header tests, before user statements, so ordinary exhaustion, `break` and
+`continue` after an iteration do not run the fallback. Labeled exits retain
+their target and cleanup; iteration bindings and labels end before the fallback.
+
+A conservative source control-flow summary preserves all-returning arms through
+the entered-flag rewrite. This supports the ordinary generic pattern
+`loop value in values {return value} else {return fallback}`. Loop exits, including
+ones inside expression blocks, cannot be mistaken for function returns. Returns
+inside closures do not count. Loops themselves remain statements, with an explicit
+diagnostic when used as a value.
+
+The focused loop selection passed **80 checks in 3.39 s**. The final independent
+C bootstrap and expanded gate passed **2,222 checks in 121.81 s**, including
+native/web debug/release cases, mixed flow chains, empty/nonempty `and`/`or`
+iterators, generic returns, managed cleanup, formatter execution and editor
+error recovery. [Focused gate](source-core/loop-else-focused.log),
+[full gate](source-core/loop-else-full.log),
+[build manifest](source-core/loop-else-build.json).

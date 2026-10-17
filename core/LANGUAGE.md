@@ -502,6 +502,22 @@ Inputs and range bounds are evaluated once, in source order. Conditions run
 from left to right and can refer to earlier bindings. An `or` group accepts
 iterator bindings; ordinary boolean `or` still works in a condition.
 
+An `else` after a loop runs only if its body never enters:
+
+```dewy
+head_or=<T>(values:array<T> fallback:T):>T=>{
+    loop value in values {return value}
+    else {return fallback}
+}
+```
+
+After any body iteration, including one that ends with `break` or `continue`,
+the fallback is skipped. Conditions and iterator exhaustion both determine
+whether the body enters. Chains can mix `if`, `loop`, `else if`, and `else loop`.
+Each loop's bindings and label belong to that arm; they are unavailable in its
+fallback. A comprehension can collect fallback elements for an empty loop.
+Loops themselves remain statements; use `return` or a comprehension for values.
+
 Place `$name` before a loop to target it from nested loops:
 
 ```dewy

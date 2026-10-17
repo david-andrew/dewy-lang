@@ -59,6 +59,12 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'loop-else': '''main=()=>{
+loop x in [0..0) {printl(x)}
+else loop c in "" {printl(c)}
+else {printl("empty")}
+return 0
+}''',
     'labels': '''main=()=>{
 let total=0
 $outer

@@ -52,7 +52,7 @@ about 20 seconds. No installed compiler has been replaced.
 The working language includes inferred/generic functions, overloads, defaults,
 closures, dense records, independent value copies, custom operators/indexing,
 arrays, dictionaries, unions, optionals, grapheme-aware strings, imports,
-lazy stored ranges, combined loops and labeled exits. Large integer literals, exact fractions through integer `/`,
+lazy stored ranges, combined loops, labeled exits and loop fallback arms. Large integer literals, exact fractions through integer `/`,
 powers and explicit exact-to-float conversions now use ordinary compact-core
 libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
 and remaining gaps; compatibility is defined by useful language behavior rather

@@ -1598,7 +1598,7 @@ stmt_terminates = (s: int) -> bool:
     if s == 0: return false
     k = nodes[s].kind
     if k == .return_ or k == .break_ or k == .continue_: return true
-    if k == .block: return nkids(s) > 0 and stmt_terminates(kid(s, nkids(s) - 1))
+    if k == .block: return has_flag(s, NF_FLOW_RETURNS) or (nkids(s) > 0 and stmt_terminates(kid(s, nkids(s) - 1)))
     if k == .if_: return nodes[s].c != 0 and stmt_terminates(int(nodes[s].b)) and stmt_terminates(int(nodes[s].c))
     if k == .exprstmt:
         e = int(nodes[s].a)
@@ -1679,6 +1679,7 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
             continue
         check_stmt(s)
     if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
+    if want_value and has_flag(b, NF_FLOW_RETURNS): result = T_NEVER
     # (an array built by pushing has a solved inference variable inside its type: the plain type
     # matches overloads exactly)
     if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
