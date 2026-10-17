@@ -223,3 +223,36 @@ The focused gate passed **124 checks in 4.66 s**.
 The independent C bootstrap passed **1,763 checks in 57.90 s**.
 [Full gate](source-core/stride-array-full.log),
 [build manifest](source-core/stride-array-build.json).
+
+## Unit ranges at integer limits
+
+Single-header inclusive ranges no longer compute `end+1`, which overflowed at
+the largest integer value. They count remaining iterations using unsigned word
+arithmetic, including the full 2^64-value span. Open-ended single ranges use the
+same count and report exhaustion of their integer type; a `break` exits normally.
+The common exclusive loop keeps its existing comparison-based lowering.
+Combined headers still have their separate parser lowering and are not included
+in this boundary fix.
+
+The earlier compiler fails the new [maximum-endpoint case](source-core/unit-range-before.log).
+The focused gate passed **168 checks in 6.03 s**, including **238** Python-generated
+unit ranges and the existing 1,216 stepped ranges on native/web in both modes.
+Additional checks exercise all eight integer widths, endpoint evaluation order,
+mutable indices, `continue`, open exhaustion and early exits from full spans.
+[Focused gate](source-core/unit-range-focused.log).
+
+Seven paired release runs of a 30-million-iteration inclusive accumulation
+measured **17.25/15.45 ms** before/after; the strided array kernel remained close
+at **24.10/24.34 ms**. Complete inputs and independent checksum checks are in the
+[inclusive kernel report](source-core/unit-range-runtime.json) and
+[array kernel report](source-core/unit-range-array-runtime.json).
+
+Seven compile pairs gave tour **54.93/55.79 ms**, physics **321.20/322.27 ms**, and
+self-build **1,230.01/1,218.33 ms** wall time. The corresponding CPU medians were
+53.97/53.08, 316.95/317.49 and 1,218.74/1,198.40 ms. These small mixed differences
+are not an overall compilation improvement claim.
+[Compile samples](source-core/unit-range-compile.json).
+
+The independent C bootstrap passed **1,807 checks in 59.46 s**.
+[Full gate](source-core/unit-range-full.log),
+[build manifest](source-core/unit-range-build.json).

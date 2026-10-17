@@ -401,9 +401,10 @@ let odd_squares=[loop i in [1,3..10] i*i]
 The step is the second value minus the first; it can ascend or descend but must
 be nonzero. `]` includes the endpoint and `)` excludes it. Starting values and
 the endpoint evaluate once in source order. Iteration uses counters without
-building an intermediate array. Bounded stepped loops terminate safely at the
-integer type's limits. An open-ended stepped loop such as `[1,3..]` panics if it
-exhausts its fixed-width integer type; `break` and `continue` work normally.
+building an intermediate array. Single-header bounded integer loops terminate safely at the integer type's
+limits, including an inclusive maximum endpoint. Open-ended single-header
+ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
+integer type; `break` and `continue` work normally.
 Stepped ranges currently require a single loop header; combining them with other
 iterators/conditions, stepped slicing and stepped membership are not implemented.
 

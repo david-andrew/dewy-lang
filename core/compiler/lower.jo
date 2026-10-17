@@ -3864,16 +3864,20 @@ gen_for = (s: int):
         direct = stable_loop_index(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
         if direct: ctr = int(locals[l].vreg)
         open_end = false
+        inclusive = false
         stmt_begin()
         if aux == 0:
             it = int(nodes[s].a)
             e_mov(ctr, gen_expr(int(nodes[it].a)).v)
-            incl = has_flag(it, NF_INCLUSIVE)
-            if nodes[it].b == 0: open_end = true
-            else:
-                hi = gen_expr(int(nodes[it].b)).v
-                if incl: e_mov(endv, e_addi(hi, 1))
-                else: e_mov(endv, hi)
+            inclusive = has_flag(it, NF_INCLUSIVE)
+            if nodes[it].b == 0:
+                open_end = true
+                bits = int(types[prune(lt)].bits)
+                if types[prune(lt)].sign: bits -= 1
+                maxv = -1
+                if bits < 64: maxv = (1 << bits) - 1
+                e_mov(endv, e_iconst(maxv))
+            else: e_mov(endv, gen_expr(int(nodes[it].b)).v)
         else:
             r = gen_expr(int(nodes[s].a)).v
             e_mov(ctr, e_load(VI, r, 0, 8))
@@ -3883,13 +3887,20 @@ gen_for = (s: int):
         facts = range_facts_begin(s, l)
         cmpop = Op.ges
         if not sg: cmpop = .geu
+        counted = inclusive or open_end
+        if counted: cmpop = if sg: Op.gts else: Op.gtu
         ltop = Op.lts
         if not sg: ltop = .ltu
-        # the loop is tested once before it and then at the bottom (one branch per iteration):
-        #   block { brif done; loop { l = ctr; block { body }; ctr += 1; brif not done, loop } }
+        # Exclusive bounds keep their direct comparison. Inclusive/open ranges
+        # count remaining representable values, avoiding end+1 overflow. As in
+        # stepped loops, a nonempty full-word span has count zero (2^64).
         blk()
         brk = ctl
         if not open_end: brif_to(e_bin(cmpop, VI, ctr, endv), brk)
+        remaining = 0
+        if counted:
+            remaining = vreg(VI)
+            e_mov(remaining, e_addi(e_bin(.sub, VI, endv, ctr), 1))
         lop()
         top = ctl
         if not direct: write_place(local_place(l, true), lt, ctr)
@@ -3901,9 +3912,12 @@ gen_for = (s: int):
         range_facts_end(facts)
         endc()
         e_mov(ctr, e_addi(ctr, 1))
-        if open_end: br_to(top)
+        if counted:
+            e_mov(remaining, e_addi(remaining, -1))
+            brif_to(e_bin(.ne, VI, remaining, e_iconst(0)), top)
         else: brif_to(e_bin(ltop, VI, ctr, endv), top)
         endc()
+        if open_end: e_call_nr(rt("__panic"), [e_daddr(str_data("range exhausted its integer type"))], -1)
         endc()
         scope_pop()
         return

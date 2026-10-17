@@ -1049,6 +1049,40 @@ return if decoded is? string and decoded =? original and again[0] =? 104 and byt
     'unicode': 'main=():>int64=>{let α:int64=42 printl"é🙂 {α}" return α}',
     'argv': 'main=(args:array<string>):>int64=>if args.length =? 2 42 else 1',
     'array-iteration': 'main=():>int64=>{let sum:int64=0 loop x in [20 22] {sum+=x} return sum}',
+    'unit-range-limits': '''count=<T>(start:T end:T):>int64=>{
+let result:int64=0
+loop i in [start..end] {result+=1 if result >? 4 panic("range did not stop")}
+return result
+}
+main=()=>{
+let total:int64=0
+ total+=count(125 as int8 127 as int8)
+ total+=count(253 as uint8 255 as uint8)
+ total+=count(32765 as int16 32767 as int16)
+ total+=count(65533 as uint16 65535 as uint16)
+ total+=count(2147483645 as int32 2147483647 as int32)
+ total+=count(4294967293 as uint32 4294967295 as uint32)
+ total+=count(9223372036854775805 9223372036854775807)
+ total+=count(18446744073709551613 18446744073709551615)
+let signed:array<int64>=[] let unsigned:array<uint64>=[]
+let low:int64=-9223372036854775808
+loop i in [low..9223372036854775807] {signed.push(i) if signed.length =? 3 break}
+let zero:uint64=0
+loop i in [zero..18446744073709551615] {unsigned.push(i) if unsigned.length =? 3 break}
+return if total =? 24 and signed =? [low low+1 low+2]
+and unsigned =? [zero zero+1 zero+2] 42 else 1
+}''',
+    'unit-range-order': '''let order:int64=0
+bound=(tag:int64 value:int64)=>{order=order*10+tag return value}
+main=()=>{
+let count:int64=0
+loop i in [bound(1 9223372036854775805)..bound(2 9223372036854775807)] {
+    i=0 count+=1 continue
+}
+let start:uint8=255
+loop i in [start..] {if i not=? 255 return 1 break}
+return if count =? 3 and order =? 12 42 else 2
+}''',
     'stepped-range-values': '''main=()=>{
 let up:array<int64>=[] let down:array<int64>=[] let open:array<int64>=[]
 loop i in [0,2..8] {up.push(i)}
@@ -1345,6 +1379,7 @@ def error_batches(compiler, tmp_path_factory, request):
         family = {'test_core_bigint_errors': 'bigint',
                   'test_core_rational_errors': 'rational',
                   'test_core_stepped_range_errors': 'range',
+                  'test_core_unit_range_errors': 'range',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
@@ -1877,11 +1912,12 @@ loop line in input.split("\n") {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_stepped_ranges(compiler, tmp_path, target, release):
+@pytest.mark.parametrize('form', ['unit', 'stepped'])
+def test_core_integer_ranges(compiler, tmp_path, target, release, form):
     cases, expected = [], []
 
     def add(kind, start, second, end, inclusive):
-        step = second - start
+        step = second - start if form == 'stepped' else 1
         if not step:
             return
         stop = end + (1 if step > 0 else -1) if inclusive else end
@@ -1897,7 +1933,7 @@ def test_core_stepped_ranges(compiler, tmp_path, target, release):
     for kind, edges in [('s', [-2**63, -2**63+1, -4, 0, 4, 2**63-2, 2**63-1]),
                         ('u', [0, 1, 2, 2**63-1, 2**63, 2**64-2, 2**64-1])]:
         for start in edges:
-            for second in edges:
+            for second in (edges if form == 'stepped' else [start]):
                 for end in edges:
                     for inclusive in [False, True]:
                         add(kind, start, second, end, inclusive)
@@ -1935,6 +1971,8 @@ loop line in input.split("\\n") {
 }
 }
 ''')
+    if form == 'unit':
+        source.write_text(source.read_text().replace('a,b..', 'a..'))
     binary = tmp_path / 'ranges'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1955,6 +1993,21 @@ loop line in input.split("\\n") {
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('body', [
+    f'let start:{kind}={start} let count:int64=0 loop i in [start..] {{printl(i) count+=1 if count >? 3 {{return}} continue}}'
+    for kind, start in [('int8', 126), ('uint8', 254), ('int16', 32766), ('uint16', 65534),
+    ('int32', 2147483646), ('uint32', 4294967294),
+    ('int64', 9223372036854775806), ('uint64', 18446744073709551614)]
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_unit_range_errors(error_batches, body, target, release):
+    ran = error_batches('range', body, release, target)
+    assert ran.returncode != 0, ran.stdout + ran.stderr
+    assert 'range exhausted its integer type' in ran.stdout + ran.stderr
+    assert len(ran.stdout.splitlines()) == 2
 
 
 @pytest.mark.parametrize('body, diagnostic', [
@@ -3005,7 +3058,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
