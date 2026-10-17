@@ -231,8 +231,8 @@ Start a game with the built-in template, then edit it while it runs:
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,
 `update(dt:float64)` each frame, and `draw()` for rendering. The
-[paddle game and physics playground](../examples/sloppy_core/README.md) show
-input, drawing, simulation, module boundaries and live reload. Graphics, fonts,
+[paddle game, physics playground and 3D forest](../examples/sloppy_core/README.md) show
+input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.
 
 This remains a developing subset of Dewy. The earlier proof/effect system,

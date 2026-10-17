@@ -13,7 +13,13 @@ physics example: a 57-body scene with a box pyramid, pinned bridge, rope and
 wrecking ball. Left-drag a body, right-click to add a box, press B or middle-click
 to add a ball, and R to reset. `physics_scene.dewy` contains scene construction
 and simulation; the repository-owned `physics` library supplies collision and
-joint solving. Both programs run natively and in the browser.
+joint solving. These programs run natively and in the browser.
+
+`forest.dewy` brings the same workflow to 3D: rolling terrain, 600 instanced tree
+meshes, a moving beacon, shadows, fog and bloom. Drag to orbit, use the wheel to
+zoom, Space to pause automatic orbit, R to reset and Escape to quit. Terrain
+callbacks, placement, camera control and drawing are Dewy; `forest_model.dewy`
+keeps deterministic scene construction separate from the window.
 
 After building the compiler as described in `tools/sloppy_core/README.md`:
 
@@ -22,6 +28,7 @@ CORE=/tmp/dewy-core/bin/dewy-core
 # Live editing: save changes and the running game takes the new code.
 $CORE watch examples/sloppy_core/paddle.dewy
 $CORE watch examples/sloppy_core/physics.dewy
+$CORE watch examples/sloppy_core/forest.dewy
 
 $CORE build examples/sloppy_core/paddle.dewy -o /tmp/paddle
 /tmp/paddle
@@ -31,6 +38,8 @@ $CORE build examples/sloppy_core/paddle.dewy --target wasm -o /tmp/paddle
 # Open /tmp/paddle.html in a browser.
 $CORE build examples/sloppy_core/physics.dewy --release -o /tmp/physics
 $CORE build examples/sloppy_core/physics.dewy --target wasm --release -o /tmp/physics
+$CORE build examples/sloppy_core/forest.dewy --release -o /tmp/forest
+$CORE build examples/sloppy_core/forest.dewy --target wasm --release -o /tmp/forest
 ```
 
 Use `--release` for the optimizing compiler. The default development build
@@ -68,3 +77,13 @@ libraries. Seven alternating measured runs agreed on the position checksum;
 setup and drawing were excluded. This demonstrates that the Dewy frontend adds
 no measurable simulation cost for this workload, not a general physics benchmark.
 See the source-core audit for inputs and measurements.
+
+The forest model gate checks deterministic placement, height callbacks and
+independent instance-array copies on both targets in both modes. The actual game
+also runs through the native software renderer; all three games' web modules are
+validated in debug/release. The forest was separately rendered in Chromium with
+drag, zoom and reset exercised, with no console errors. Seven warmed compiler
+runs gave median release builds of 323.08 ms native and 160.24 ms web on the
+development machine. These are build measurements, not frame-rate claims.
+
+![The Dewy forest running in the browser](../../dewy/audits/2026-10-16/source-core/forest-browser.png)

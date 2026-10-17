@@ -1,0 +1,28 @@
+# Adapted from Sloppy's MIT-licensed examples/scene3d.jo at the revision in
+# core/UPSTREAM.json. See core/LICENSE. Placement and terrain callbacks are Dewy.
+
+Forest:type=[trunks:array<Instance3D> crowns:array<Instance3D>]
+
+hill=(x:float64 z:float64):>float64=>2.5*sin(x*0.15)*cos(z*0.12)+0.8*sin(x*0.5+z*0.3)
+
+ground_color=(_x:float64 y:float64 _z:float64):>vec4=>{
+    return lerp(rgb(0.35 0.55 0.25) rgb(0.75 0.7 0.5) (clamp((y+2.0)/5.0 0.0 1.0) as float32))
+}
+
+fresh_forest=(count:int64=300):>Forest=>{
+    seed_random(7)
+    let forest=Forest[[] []]
+    loop i in [0..count) {
+        let x=random(-55.0 55.0)
+        let z=random(-55.0 55.0)
+        let y=hill(x z)
+        let scale=random(0.7 1.4)
+        forest.trunks.push(instance(
+            transform(vec3(x as float32 y as float32 z as float32) 0.0 scale)
+            rgb(0.45 0.3 0.2)))
+        forest.crowns.push(instance(
+            transform(vec3(x as float32 ((y+scale) as float32) z as float32) random(0.0 6.0) scale)
+            rgb(0.2 (random(0.45 0.6) as float32) 0.25)))
+    }
+    return forest
+}

@@ -687,3 +687,23 @@ Dewy programs, completed in 8.45 seconds before membership was added. 50 passed
 checking; this is not a runtime compatibility certification or a gate. Most
 failures involved unsupported type/proof constructs; ordinary membership was
 one actionable gap that did not require recreating those old internals.
+
+## Native and web 3D scene
+
+The Dewy forest adapts pinned Sloppy `examples/scene3d.jo`: terrain callbacks,
+deterministic placement of 600 tree instances, a moving beacon, orbit controls,
+shadows, fog and bloom. Native software rendering and browser WebGL rendering
+were visually checked; browser drag/zoom/reset worked without console errors.
+`forest-render.json` records the manual observations and HTML identity;
+`forest-native.png` and `forest-browser.png` retain frames. The screenshot HUD's
+FPS value is not a performance benchmark.
+
+`forest-full-tests.log` records 1,011 checks passing in 78.02 seconds, using the
+unchanged membership compiler. New coverage includes scene construction and
+copy independence on native/web in both modes, native software rendering, and
+WebAssembly module validation for all three actual games in both modes. The
+module check alone does not certify WebGL execution; the manual check above does.
+
+`forest-compile.json` records seven warmed sequential builds per target, one
+emission worker: medians 323.08 ms native release and 160.24 ms web release. No
+compiler changes or additional bootstrap were needed for this example.

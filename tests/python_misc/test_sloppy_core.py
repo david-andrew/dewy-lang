@@ -1,5 +1,7 @@
 """Expected user behavior for the experimental source-level core."""
+import base64
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -919,7 +921,79 @@ main=():>int64=>{
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_forest_model(compiler, tmp_path, target, release):
+    model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/forest_model.dewy'
+    shutil.copy2(model, tmp_path)
+    source = tmp_path / 'forest_test.dewy'
+    source.write_text('''from p"forest_model.dewy" import fresh_forest, hill, ground_color
+main=()=>{
+    let forest=fresh_forest()
+    if forest.trunks.length not=? 300 or forest.crowns.length not=? 300 return 1
+    let original=forest
+    forest.crowns[0].color.x=0.9
+    if abs(original.crowns[0].color.x-0.2) >? 0.0001 return 2
+    let repeated=fresh_forest()
+    if abs(repeated.trunks[0].model[3].x-original.trunks[0].model[3].x) >? 0.0001 return 3
+    loop tree in original.trunks {
+        let position=tree.model[3]
+        if abs(position.x) >? 55.0 or abs(position.z) >? 55.0 return 4
+        if abs((position.y as float64)-hill(position.x as float64 position.z as float64)) >? 0.001 return 5
+    }
+    let empty=fresh_forest(0)
+    if empty.trunks.length not=? 0 or hill(0.0 0.0) not=? 0.0 return 6
+    let low=ground_color(0.0 (-10.0) 0.0)
+    let high=ground_color(0.0 10.0 0.0)
+    if abs(low.x-0.35) >? 0.0001 or abs(high.x-0.75) >? 0.0001 return 7
+    return 42
+}
+''')
+    binary = tmp_path / 'forest-model'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web forest checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'forest-model.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_game_web_build(compiler, tmp_path, game, release):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is needed to validate the web module')
+    source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
+    output = tmp_path / game
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', output, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    html = output.with_suffix('.html').read_text()
+    embedded = re.search(r'SLOPPY_WASM = "([A-Za-z0-9+/=]+)"', html)
+    assert embedded, 'web host must include its compiled program'
+    module = tmp_path / f'{game}.wasm'
+    module.write_bytes(base64.b64decode(embedded[1], validate=True))
+    validation = subprocess.run([node, '-e',
+        "new WebAssembly.Module(require('fs').readFileSync(process.argv[1]));", module],
+        capture_output=True, text=True, timeout=10, check=False)
+    assert validation.returncode == 0, validation.stdout + validation.stderr
+
+
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game

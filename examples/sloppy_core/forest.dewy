@@ -1,0 +1,47 @@
+# Terrain, 600 instanced meshes, an orbit camera and post effects, in Dewy.
+# Adapted from Sloppy's MIT-licensed examples/scene3d.jo; see core/LICENSE.
+from p"forest_model.dewy" import hill, ground_color, fresh_forest
+
+let forest=fresh_forest()
+let terrain:Mesh
+let trunk:Mesh
+let crown:Mesh
+let beacon:Mesh
+let camera=orbit_camera(vec3(0 1 0) 24.0 0.0 0.38)
+let time:float64=0.0
+let orbit:bool=true
+
+main=():>void=>{
+    window("Dewy / Forest" 1280 720)
+    terrain=terrain_mesh(120 120 hill ground_color)
+    trunk=cylinder_mesh(0.15 1.2 8)
+    crown=cone_mesh(0.9 2.2 10)
+    beacon=sphere_mesh(0.6)
+}
+
+update=(dt:float64):>void=>{
+    if key_pressed(Key.escape) quit()
+    if key_pressed(Key.space) orbit=not orbit
+    if key_pressed(Key.r) {camera=orbit_camera(vec3(0 1 0) 24.0 0.0 0.38) orbit=true}
+    time+=dt
+    if orbit and not mouse_down(Mouse.left) and not mouse_down(Mouse.right) {camera.yaw+=0.15*dt}
+    update(@camera dt)
+}
+
+draw=():>void=>{
+    clear(BLACK)
+    sun(vec3(0.6 0.5 0.3) vec3(1.0 0.9 0.75))
+    sky(vec3(0.2 0.4 0.8) vec3(0.85 0.75 0.65))
+    fog(vec3(0.85 0.78 0.7) 0.012)
+    shadows(true)
+    post_effects(0.5 0.75 0.3)
+    camera3d(camera)
+    draw_mesh(terrain)
+    draw_mesh_instanced(trunk forest.trunks)
+    draw_mesh_instanced(crown forest.crowns wind=0.05)
+    let height=(hill(0.0 0.0)+1.5+sin(time*2.0)*0.5) as float32
+    draw_mesh(beacon translation(vec3(0 height 0)) rgb(1 0.5 0.2) emissive=1.5)
+    text("DEWY / FOREST" vec2(20 18) 30 WHITE)
+    text("600 instanced meshes | terrain, shadows, fog, bloom | {fps() as int64} fps" vec2(20 58) 20 WHITE)
+    text("Drag: orbit   Wheel: zoom   Space: auto-orbit   R: reset" vec2(20 686) 20 WHITE)
+}
