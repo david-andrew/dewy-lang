@@ -648,3 +648,24 @@ thread was descheduled. The default remains elapsed wall time. Both modes retain
 process wall time and record the measured harness hashes. CPU timing still
 depends on clock frequency and shared caches; it does not make a busy host an
 isolated benchmark machine.
+
+Typed `to_json(value)` now writes directly from typed fields into the output
+buffer. It no longer formats text, reparses it into a `Json` tree, and formats
+that tree again. Full-width signed/unsigned IDs survive a typed round trip;
+finite floats preserve their width-specific representation and negative zero.
+Record, tuple, fixed-array, vector, enum and union writers are selected at
+compile time. Payload enum variants now read back from their JSON representation,
+and custom variants named `number`, `text` or `list` keep their tags.
+`json_value` uses the same schema, but its explicit `Json.number` remains f64.
+See [the settings example](../../examples/sloppy_core/settings.dewy).
+
+Ten serializations of 10,000 records take 17.4 ms versus 167.7 ms with the previous
+writer in a seven-pair release/thread-CPU comparison (median paired ratio 0.103).
+The input is prepared before timing and both programs produce the same length
+checksum. Fresh-build paired CPU ratios are 0.992 for the tour, 1.005 for Dunes,
+and 0.985 for the compiler itself; these do not establish a compilation change.
+Raw samples and compiler identities are in `typed-json-runtime.json` and
+`typed-json-compile.json` in the 2026-10-17 source-core audit. The independent
+C-bootstrap gate passed 2,811 checks in 130 seconds. A final malformed-enum
+rejection additionally passed all 76 JSON/upstream checks; the settings example
+agrees in native/web default/release modes.

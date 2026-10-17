@@ -1,0 +1,20 @@
+# Decode an older settings file, keep defaults, and update an independent copy.
+Settings:type=[player:uint64 volume:float64=0.5 fullscreen:bool=false]
+
+main=()=>{
+    let loaded=from_json<Settings>(r'{"player":18446744073709551615,"old_option":true}')
+    if loaded is? TextError {printl(loaded.message) return 1}
+
+    let updated:Settings=[loaded... fullscreen=true]
+    let saved=to_json(updated)
+    printl(saved)
+
+    let restored=from_json<Settings>(saved)
+    if restored is? TextError {printl(restored.message) return 2}
+    if restored.player not=? uint64.max return 3
+    if restored.volume not=? 0.5 or not restored.fullscreen return 4
+    if loaded.fullscreen return 5
+    printl"Restored player: {restored.player}"
+    printl"Original fullscreen: {loaded.fullscreen}"
+    return 0
+}

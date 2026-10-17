@@ -253,97 +253,81 @@ to_json = (j: Json, indent: int = 0) -> str:
 # any value as JSON: a struct as an object (by field name), an array, tuple or vector as a list,
 # a map as an object (its keys as text), none as null, an enum's variant as its name (one with
 # fields as {"name": [fields]}), and a Json inside it as itself; from_json[T] reads it back
-to_json[T] = (x: T, indent: int = 0) -> str: to_json(json_value(x), indent)
+to_json[T] = (x: T, indent: int = 0) -> str:
+    buf: u8[]
+    __json_write_value(buf, x, indent, 0)
+    __buf_finish_val(buf)
 
-# any value as a Json (what to_json writes for it)
+# Typed writing preserves integer widths and selects field writers at compile
+# time. Json values themselves retain their explicitly floating-point numbers.
+__json_write_value = (b: mut u8[], x: str, indent: int, level: int): __json_write_str(b, x)
+__json_write_value = (b: mut u8[], x: bool, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: i8, indent: int, level: int): __fmt(b, int(x))
+__json_write_value = (b: mut u8[], x: i16, indent: int, level: int): __fmt(b, int(x))
+__json_write_value = (b: mut u8[], x: i32, indent: int, level: int): __fmt(b, int(x))
+__json_write_value = (b: mut u8[], x: int, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: u8, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: u16, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: u32, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: u64, indent: int, level: int): __fmt(b, x)
+__json_write_value = (b: mut u8[], x: f32, indent: int, level: int): __json_float(b, f64(x), true)
+__json_write_value = (b: mut u8[], x: f64, indent: int, level: int): __json_float(b, x, false)
+__json_write_value = (b: mut u8[], x: Json, indent: int, level: int): __json_write(b, x, indent, level)
+
+__json_float = (b: mut u8[], x: f64, single: bool):
+    # Keep the library's existing non-finite spellings, and preserve -0.0 and
+    # the shortest round-tripping spelling for each finite float width.
+    if x != x: __json_put(b, "NaN")
+    else if x - x != 0.0 and x > 0.0: __json_put(b, "Infinity")
+    else if x - x != 0.0: __json_put(b, "-Infinity")
+    else: __fmt_float(b, x, single)
+
+__json_sep = (b: mut u8[], indent: int, level: int, index: int):
+    if index > 0: b.push(',')
+    __json_newline(b, indent, level + 1)
+
+__json_key = (b: mut u8[], key: str, indent: int, level: int, index: int):
+    __json_sep(b, indent, level, index)
+    __json_write_str(b, key)
+    b.push(':')
+    if indent > 0: b.push(' ')
+
+__json_write_value[T] = (b: mut u8[], xs: T[], indent: int, level: int):
+    b.push('[')
+    loop i in 0.. and x in xs:
+        __json_sep(b, indent, level, i)
+        __json_write_value(b, x, indent, level + 1)
+    if xs.len() > 0: __json_newline(b, indent, level)
+    b.push(']')
+
+__json_write_value[T] = (b: mut u8[], x: T?, indent: int, level: int):
+    if let value = x: __json_write_value(b, value, indent, level)
+    else: __json_put(b, "null")
+
+__json_key_text = (key: str) -> str: key
+__json_key_text[K] = (key: K) -> str: to_json(key)
+
+__json_write_value[K, V] = (b: mut u8[], m: Map[K, V], indent: int, level: int):
+    b.push('{{')
+    count = 0
+    ng = m.gone.len()
+    loop i in 0.. and key in m.keys:
+        if i < ng and m.gone[i]: continue
+        __json_key(b, __json_key_text(key), indent, level, count)
+        __json_write_value(b, m.vals[i], indent, level + 1)
+        count += 1
+    if count > 0: __json_newline(b, indent, level)
+    b.push('}}')
+
+__json_write_value = (b: mut u8[], x, indent: int, level: int): __json_fields(b, x, indent, level)
+__json_write_fixed[T] = (b: mut u8[], x: T, indent: int, level: int): __json_fields(b, x, indent, level)
+
+# Explicit conversion to the dynamic JSON tree uses the same typed schema.
+# Json.number is f64, so this API can round integers beyond its exact range.
+json_value = (x: Json) -> Json: x
 json_value[T] = (x: T) -> Json:
-    r = __TextIn(to_text(x))
-    __json_of_text(r)
-
-# (to_text's text of a value, as a Json)
-__json_of_text = (r: mut __TextIn) -> Json:
-    k = __tx_kind(r)
-    if k == 1:
-        s = ""
-        __read(r, s)
-        return Json.text(s)
-    if k == 2 or k == 3:
-        v = 0.0
-        __read(r, v)
-        return Json.number(v)
-    if k == 4:
-        __tx_word(r, false)
-        return Json.null_
-    if k == 5:
-        b = false
-        __read(r, b)
-        return Json.boolean(b)
-    if k == 8 or k == 10:
-        close: u8 = ']'
-        if k == 10: close = ')'
-        r.i += 1
-        items: Json[]
-        loop len(r.err) == 0:
-            __tx_eat(r, ',')
-            if __tx_eat(r, close): break
-            items.push(__json_of_text(r))
-        return Json.list(items)
-    if k == 9:
-        r.i += 1
-        keys: str[]
-        vals: Json[]
-        loop len(r.err) == 0:
-            __tx_eat(r, ',')
-            if __tx_eat(r, '}}'): break
-            kv = __json_of_text(r)
-            match kv:
-                .text(t): keys.push(t)
-                _: keys.push(to_json(kv))
-            __tx_want(r, ':')
-            vals.push(__json_of_text(r))
-        return Json.object(keys, vals)
-    if k == 6:
-        name = r.name
-        __tx_word(r, false)
-        __tx_want(r, '(')
-        # (a struct names its fields: Name(a=1); a vector or an enum's variant does not)
-        at = r.i
-        w = __tx_word(r, false)
-        named = len(w) > 0 and __tx_eat(r, '=')
-        r.i = at
-        keys: str[]
-        vals: Json[]
-        loop len(r.err) == 0:
-            __tx_eat(r, ',')
-            if __tx_eat(r, ')'): break
-            if named:
-                keys.push(__tx_word(r, false))
-                __tx_want(r, '=')
-            vals.push(__json_of_text(r))
-        if named: return Json.object(keys, vals)
-        if starts_with(name, "vec") or starts_with(name, "ivec") or name == "mat4": return Json.list(vals)
-        # (a Json inside the value: what it stands for)
-        if vals.len() == 1 and (name == "boolean" or name == "number" or name == "text" or name == "list"): return vals[0]
-        if vals.len() == 2 and name == "object":
-            match vals[0]:
-                .list(ks):
-                    match vals[1]:
-                        .list(vs):
-                            names: str[]
-                            loop kj in ks:
-                                match kj:
-                                    .text(t): names.push(t)
-                                    _: names.push(to_json(kj))
-                            return Json.object(names, vs)
-                        _: pass
-                _: pass
-        return Json.object([name], [Json.list(vals)])
-    if k == 7:
-        w = __tx_word(r, false)
-        if w == "null_": return Json.null_
-        return Json.text(w)
-    __tx_fail(r, "a value that is not JSON")
-    Json.null_
+    r = __JsonReader(to_json(x))
+    __json_value(r, 0)
 
 __json_put = (b: mut u8[], s: str):
     loop k in [0..len(s)): b.push(s[k])

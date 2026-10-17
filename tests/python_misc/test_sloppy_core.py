@@ -1,6 +1,7 @@
 """Expected user behavior for the experimental source-level core."""
 import base64
 import ctypes
+import json
 import math
 import os
 import platform
@@ -21,6 +22,49 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'json-typed-integers': '''Settings:type=[id:uint64 low:int64]
+main=()=>{let value=Settings[uint64.max int64.min] let text=to_json(value)
+let copy=from_json<Settings>(text)
+if copy is? TextError return 1
+return if copy.id =? value.id and copy.low =? value.low 42 else 1}''',
+    'json-typed-widths': '''Numbers:type=[a:int8 b:int16 c:int32 d:int64 e:uint8 f:uint16 g:uint32 h:uint64]
+main=()=>{let value=Numbers[int8.min int16.min int32.min int64.min uint8.max uint16.max uint32.max uint64.max]
+let copy=from_json<Numbers>(to_json(value))
+if copy is? TextError return 1
+return if copy.a =? value.a and copy.b =? value.b and copy.c =? value.c and copy.d =? value.d
+and copy.e =? value.e and copy.f =? value.f and copy.g =? value.g and copy.h =? value.h 42 else 1}''',
+    'json-typed-floats': '''Numbers:type=[small:float32 tiny:float64 zero:float64]
+main=()=>{let value=Numbers[0.1 5e-324 -0.0]
+let copy=from_json<Numbers>(to_json(value))
+if copy is? TextError return 1
+return if copy.small =? value.small and copy.tiny =? value.tiny and 1.0/copy.zero <? 0.0 42 else 1}''',
+    'json-typed-nested': '''Item:type=[name:string ids:array<uint64> optional:int64?]
+main=()=>{let values=[Item["a\\n🙂" [uint64.max 42] none] Item["b" [] int64.min]]
+let copy=from_json<array<Item>>(to_json(values 2))
+if copy is? TextError return 1
+return if copy.length =? 2 and copy[0].name =? values[0].name and copy[0].ids =? values[0].ids
+and copy[0].optional is? none and copy[1].optional =? int64.min 42 else 1}''',
+    'json-typed-map': '''main=()=>{let values:dict<string uint64>=["gone"->0 "answer"->uint64.max]
+values.remove("gone") values["next"]=42
+let copy=from_json<dict<string uint64>>(to_json(values 2))
+if copy is? TextError return 1
+return if copy.length =? 2 and copy["answer"] =? uint64.max and copy["next"] =? 42 42 else 1}''',
+    'json-typed-integer-keys': '''main=()=>{let values:dict<uint64 string>=[uint64.max->"yes"]
+let copy=from_json<dict<uint64 string>>(to_json(values))
+if copy is? TextError return 1
+return if copy[uint64.max] =? "yes" 42 else 1}''',
+    'json-typed-empty-record': '''Empty:type=[]
+main=()=>{let text=to_json(Empty[])
+return if text =? r'{}' 42 else 1}''',
+    'json-typed-dynamic-value': '''Holder:type=[value:Json]
+main=()=>{let parsed=parse_json(r'{"answer":42}')
+if parsed is? JsonError return 1
+let text=to_json(Holder[parsed])
+return if text =? r'{"value":{"answer":42}}' 42 else 1}''',
+    'json-typed-defaults': '''Settings:type=[count:int64=42 label:string="default"]
+main=()=>{let loaded=from_json<Settings>(r'{"old":[1,2,3],"label":"kept"}')
+if loaded is? TextError return 1
+return if loaded.count =? 42 and loaded.label =? "kept" 42 else 1}''',
     'record-spread-basic': '''main=()=>{let base=[left=20 right=1]
 let result=[base... right=22]
 return if base.right =? 1 result.left+result.right else 1}''',
@@ -2401,6 +2445,75 @@ ERRORS = {
 }
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_json_aggregates(compiler, tmp_path, target, release):
+    # Core providers expose aggregate types whose Dewy declaration syntax is
+    # still developing. Serialization must use their actual storage and tags.
+    (tmp_path / 'types.jo').write_text('''enum Choice: idle, number(value: u64), text(value: str), list(values: int[])
+struct Aggregate:
+    pair: (u64, str)
+    fixed: u64[3]
+    nested: str[2][2]
+    point: vec3
+    mode: Choice
+    choice: int | str
+make = () -> Aggregate:
+    fixed: u64[3] = [1, 2, u64(18446744073709551615)]
+    nested: str[2][2] = [["a", "b"], ["c", "d"]]
+    Aggregate((u64(18446744073709551615), "tuple"), fixed, nested, vec3(1.0, 2.0, 3.0), Choice.number(u64(18446744073709551615)), "union")
+matrix = () -> mat4: mat4()
+''')
+    program = '''from p"types.jo" import make, Choice, Aggregate, matrix
+main=()=>{
+    let original=make()
+    let text=to_json(original 2)
+    printl(text)
+    let copy=from_json<Aggregate>(text)
+    if copy is? TextError {printl(copy.message) return 1}
+    if to_json(copy) not=? to_json(original) return 2
+    let variants=[Choice.idle Choice.number(uint64.max) Choice.text("hello") Choice.list([1 2 3])]
+    loop variant in variants {
+        printl(to_json(variant))
+        let loaded=from_json<Choice>(to_json(variant))
+        if loaded is? TextError {printl(loaded.message) return 3}
+        if loaded not=? variant return 4
+        let text_loaded=from_text<Choice>(to_text(variant))
+        if text_loaded is? TextError return 5
+        if text_loaded not=? variant return 6
+    }
+    printl(to_json(matrix()))
+    printl(to_json(json_value(Choice.text("hello"))))
+    let bad=[r'{"missing":[1]}' r'{"number":[]}' r'{"number":[1],"text":["extra"]}' r'{"idle":}']
+    loop input in bad {
+        let result=from_json<Choice>(input)
+        if not (result is? TextError) return 7
+    }
+    return 42
+}
+'''
+    command, error = build_case_batch(compiler, tmp_path, {'aggregates': program},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    decoder = json.JSONDecoder()
+    output = ran.stdout.strip()
+    values = []
+    while output:
+        value, end = decoder.raw_decode(output)
+        values.append(value)
+        output = output[end:].lstrip()
+    maximum = 2**64 - 1
+    assert values == [
+        {'pair': [maximum, 'tuple'], 'fixed': [1, 2, maximum],
+         'nested': [['a', 'b'], ['c', 'd']], 'point': [1, 2, 3],
+         'mode': {'number': [maximum]}, 'choice': 'union'},
+        'idle', {'number': [maximum]}, {'text': ['hello']}, {'list': [[1, 2, 3]]},
+        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], {'text': ['hello']},
+    ]
+
+
 @pytest.fixture(scope='module')
 def compiler():
     value = os.environ.get('DEWY_CORE_COMPILER')
@@ -4470,7 +4583,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('json-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

@@ -1,0 +1,55 @@
+{
+  "source": "from p\"benchmark_harness.jo\" import clock, byte_length\nItem:type=[id:int64 score:int64 label:string]\nkernel=(items:array<Item> repeats:int64):>int64=>{\nlet checksum:int64=0\nloop round in [0..repeats) checksum+=byte_length(to_json(items))\nreturn checksum\n}\nmain=():>void=>{\nlet items=[loop i in [0..10000) Item[i i*17 \"item\"]]\nlet expected=kernel(items 1)*10\nlet started=clock() let checksum=kernel(items 10) let elapsed=clock()-started\nif checksum not=? expected panic(\"checksum\")\nprintl\"{checksum} {elapsed}\"\n}\n",
+  "clock": "Linux thread CPU",
+  "samples": 7,
+  "records": 10000,
+  "serializations": 10,
+  "candidate": {
+    "source_identity": "f2b46a6cc2f655ad42cdfa95a407d1b50cf2d19a8d10405babe749322d8a40db",
+    "binary": "build-1792266689550317505/bin/dewy-core",
+    "binary_sha256": "9fac4a67fbaa96ceb21bd622eb15c51c713fa6516fd28f2e88079d6ab627531e"
+  },
+  "baseline": "6303d89036a1457f57a1bb490678e0089f13795dcd91f2ff332a5448157f07e5",
+  "harness_sha256": "75ecd3b1da8acbd724a755affda4b693d09bf3eebd932b9f82b4374dd7d0a1fa",
+  "variants": {
+    "baseline": {
+      "compiler_sha256": "6303d89036a1457f57a1bb490678e0089f13795dcd91f2ff332a5448157f07e5",
+      "binary_sha256": "b3ed1b9bfc079113ac3b1cec2ef4b6d82a8be6450c936cbbdc57cdc9c2b60555",
+      "build_wall_s": 0.07502413901966065,
+      "build_cpu_s": 0.054771,
+      "kernel_ns": [
+        176162393,
+        165826134,
+        188069436,
+        167719136,
+        173731596,
+        164815181,
+        167270001
+      ],
+      "median_ns": 167719136
+    },
+    "candidate": {
+      "compiler_sha256": "9fac4a67fbaa96ceb21bd622eb15c51c713fa6516fd28f2e88079d6ab627531e",
+      "binary_sha256": "c057c726cc6a0987c40bb470ec123065face658e98f9ddfb714ddd04b6ea11c8",
+      "build_wall_s": 0.0679367579286918,
+      "build_cpu_s": 0.047816999999999985,
+      "kernel_ns": [
+        18630239,
+        17020855,
+        17787844,
+        19399562,
+        16809187,
+        17405971,
+        16848524
+      ],
+      "median_ns": 17405971
+    }
+  },
+  "checksum": 4123530,
+  "paired_ratio": 0.10264277764565144,
+  "load_end": [
+    10.2255859375,
+    10.05712890625,
+    9.56298828125
+  ]
+}

@@ -147,6 +147,10 @@ __tx_eat = (r: mut __TextIn, c: u8) -> bool:
 __tx_want = (r: mut __TextIn, c: u8):
     if not __tx_eat(r, c): __tx_fail(r, "expected '{chr(c)}'")
 
+# JSON wraps a payload variant as {"variant": [fields]}; text keeps variant(fields).
+__tx_enum_open = (r: mut __TextIn) -> bool:
+    r.json and __tx_eat(r, '{{')
+
 # a ',' before every item but the first
 __tx_sep = (r: mut __TextIn, i: int):
     if i > 0: __tx_want(r, ',')

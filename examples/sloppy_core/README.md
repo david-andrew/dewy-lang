@@ -1,5 +1,9 @@
 # Dewy on the compact core
 
+[`settings.dewy`](settings.dewy) loads typed JSON with defaults, updates a record
+copy, and saves/loads a full-width player ID without rounding. Run it with
+`python3 -m tools.core run examples/sloppy_core/settings.dewy`.
+
 Start with [`tour.dewy`](tour.dewy) and the [language guide](../../core/LANGUAGE.md)
 for a terminal example of functions, records, copies, comprehensions, Unicode
 text, optional values and destructuring. [`entities.dewy`](entities.dewy) adds

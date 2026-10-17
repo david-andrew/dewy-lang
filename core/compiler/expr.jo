@@ -13,7 +13,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value
+    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
@@ -44,6 +44,7 @@ intrinsics = [
     Intrinsic("__atomic_cas", .atomic_cas, false), Intrinsic("__stack_ptr", .stack_ptr, false),
     Intrinsic("__cpu_features", .cpu_features, false), Intrinsic("__code_sync", .code_sync, false), Intrinsic("compute", .compute, false), Intrinsic("__compute_spirv", .compute_spirv, false), Intrinsic("__compute_textures", .compute_textures, false),
     Intrinsic("__read_fields", .read_fields, false), Intrinsic("__default_init", .default_init, false),
+    Intrinsic("__json_fields", .json_fields, false),
 ]
 
 last_checked = 0
@@ -2830,7 +2831,9 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
         # a variant by name: hard, or rect(1.0, 2.0)
         si = int(types[t].st)
         check_struct_fields(si)
+        st.push(bc_let("__wrapped", bc_call("__tx_enum_open", [bc_ident(rn, pos)], pos), pos))
         st.push(bc_let("__w", bc_call("__tx_word", [bc_ident(rn, pos), mk(.bool_lit, pos)], pos), pos))
+        st.push(bc_if(bc_ident("__wrapped", pos), [rcall("__tx_want", rn, [bc_int(':', pos)], pos)], [], pos))
         vs = ""
         loop vi in [0..int(structs[si].nvariants)):
             if vi > 0: vs += ", "
@@ -2845,7 +2848,9 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
             nodes[dn].name = variants[vi].name
             nf = int(variants[vi].nfields)
             body: int[]
-            if nf == 0: body.push(bc_assign(bc_ident(xn, pos), dn, pos))
+            if nf == 0:
+                body.push(bc_if(bc_ident("__wrapped", pos), [rcall("__tx_bad", rn, [bc_str("expected a variant name as a JSON string", pos)], pos)], [], pos))
+                body.push(bc_assign(bc_ident(xn, pos), dn, pos))
             else:
                 body.push(rcall("__tx_want", rn, [bc_int('(', pos)], pos))
                 vargs: int[]
@@ -2864,6 +2869,7 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
                 body.push(bc_assign(bc_ident(xn, pos), c, pos))
             chain = bc_if(bc_bin(.eq, bc_ident("__w", pos), bc_str(vn, pos), pos), body, [chain], pos)
         st.push(chain)
+        st.push(bc_if(bc_ident("__wrapped", pos), [rcall("__tx_want", rn, [bc_int('}}', pos)], pos)], [], pos))
     else: fatal(pos, "a value of type {type_str(t)} cannot be read from text")
     st
 
@@ -3521,6 +3527,45 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             t = T_FLOAT
         if types[t].kind != .float_: fatal(nodes[n].pos, "sqrt() needs a float")
         r = t
+    else if id == .json_fields:
+        nargs_check(n, nargs, 4, 4, "__json_fields")
+        # These calls are emitted by lowering, so check and finalize their
+        # bodies now rather than instantiating new functions during emission.
+        loop name in ["__json_key", "__json_sep", "__json_newline", "__json_write_str"]: runtime_fn(name)
+        bt = mk_array(T_U8)
+        arg_type(args, 0, bt)
+        t = prune(arg_type(args, 1, 0))
+        arg_type(args, 2, T_INT)
+        arg_type(args, 3, T_INT)
+        k = types[t].kind
+        fts: int[]
+        if k == .fixed: fts.push(int(types[t].elem))
+        else if k == .struct_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop i in [0..int(structs[si].nfields)): fts.push(int(fields[int(structs[si].fields) + i].type))
+        else if k == .tuple:
+            loop i in [0..int(types[t].nargs)): fts.push(targ(t, i))
+        else if k == .enum_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): fts.push(int(fields[int(variants[vi].fields) + i].type))
+        else if k == .vec:
+            ct = if types[t].sign: T_I32 else: T_F32
+            count = if t == T_MAT4: 16 else: int(types[t].bits)
+            loop i in [0..count): fts.push(ct)
+        else: fatal(nodes[n].pos, "a value of type {type_str(t)} cannot be written as JSON")
+        refs: int[]
+        loop ft in fts:
+            ref = mk(.fnref, nodes[n].pos)
+            # Lowering passes the field's exact storage. Do not select an
+            # array overload that expects an implicit fixed-to-dynamic copy.
+            writer = if tkind(ft) == .fixed: "__json_write_fixed" else: "__json_write_value"
+            nodes[ref].sym = i32(resolve_by_types(intern(writer), [bt, ft, T_INT, T_INT], nodes[n].pos, true))
+            refs.push(ref)
+        set_list2(n, refs)
     else if id == .fmt_struct:
         nargs_check(n, nargs, 2, 2, "__fmt_fields")
         arg_type(args, 0, 0)

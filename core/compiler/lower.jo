@@ -2270,6 +2270,7 @@ gen_intrinsic = (e: int) -> Val:
         pa = place_addr(gen_place(args[0], false), t)
         return V(e_call(lf_helper(.hash, t, 0), [pa], VI), false)
     if id == .fmt_struct: return gen_fmt_struct(e)
+    if id == .json_fields: return gen_json_fields(e)
     if id == .gpu_kernel:
         # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
         kf = int(nodes[args[0]].sym)
@@ -2416,6 +2417,86 @@ gen_fmt_struct = (e: int) -> Val:
 
 lit = (ba: int, s: str): e_call(rt("__buf_append_str"), [ba, e_daddr(str_data(s))], -1)
 fmt_field = (ba: int, f: int, t: int, addr: int): e_call(lf_of_inst(f), [ba, load_val(t, addr, 0)], -1)
+
+# Typed JSON writing uses the field writers selected by the checker. It emits
+# directly into the caller's buffer, without a text round trip or a Json tree.
+gen_json_fields = (e: int) -> Val:
+    args = kids(e)
+    t = prune(ntype(args[1]))
+    ba = place_addr(gen_place(args[0], true), ntype(args[0]))
+    va = place_addr(gen_place(args[1], false), t)
+    indent = gen_expr(args[2]).v
+    level = gen_expr(args[3]).v
+    child = e_addi(level, 1)
+    fi = 0
+    k = types[t].kind
+    if k == .struct_:
+        si = int(types[t].st)
+        layout(t)
+        lit(ba, "{{")
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            json_key(ba, name_of(int(fields[f].name)), indent, level, i)
+            json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, child)
+            fi += 1
+        if structs[si].nfields > 0: e_call(rt("__json_newline"), [ba, indent, level], -1)
+        lit(ba, "}}")
+    else if k == .fixed:
+        lit(ba, "[")
+        et = int(types[t].elem)
+        i = fixed_loop_begin(t)
+        e_call(rt("__json_sep"), [ba, indent, level, i], -1)
+        json_field(ba, int(nodes[kid2(e, 0)].sym), et, fixed_elem_addr(va, i, et), indent, child)
+        fixed_loop_end(i)
+        if fixed_len(t) > 0: e_call(rt("__json_newline"), [ba, indent, level], -1)
+        lit(ba, "]")
+    else if k == .tuple or k == .vec:
+        count = if k == .tuple: int(types[t].nargs) else: vec_comps(t)
+        lit(ba, "[")
+        loop i in [0..count):
+            e_call(rt("__json_sep"), [ba, indent, level, e_iconst(i)], -1)
+            ft = if k == .tuple: targ(t, i) else if types[t].sign: T_I32 else: T_F32
+            off = if k == .tuple: tuple_off(t, i) else: i * 4
+            json_field(ba, int(nodes[kid2(e, i)].sym), ft, e_addi(va, off), indent, child)
+        if count > 0: e_call(rt("__json_newline"), [ba, indent, level], -1)
+        lit(ba, "]")
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        tag = e_load(VI, va, 0, 4)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            want = if structs[si].simple_enum: variants[vi].value else: v
+            iff(e_bin(.eq, VI, tag, e_iconst(want)))
+            nf = int(variants[vi].nfields)
+            name = name_of(int(variants[vi].name))
+            if structs[si].union_:
+                f = int(variants[vi].fields)
+                json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, level)
+                fi += 1
+            else if nf == 0:
+                e_call(rt("__json_write_str"), [ba, e_daddr(str_data(name))], -1)
+            else:
+                lit(ba, "{{")
+                json_key(ba, name, indent, level, 0)
+                lit(ba, "[")
+                loop j in [0..nf):
+                    e_call(rt("__json_sep"), [ba, indent, child, e_iconst(j)], -1)
+                    f = int(variants[vi].fields) + j
+                    json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, e_addi(child, 1))
+                    fi += 1
+                e_call(rt("__json_newline"), [ba, indent, child], -1)
+                lit(ba, "]")
+                e_call(rt("__json_newline"), [ba, indent, level], -1)
+                lit(ba, "}}")
+            endc()
+    V(-1, false)
+
+json_key = (ba: int, name: str, indent: int, level: int, index: int):
+    e_call(rt("__json_key"), [ba, e_daddr(str_data(name)), indent, level, e_iconst(index)], -1)
+
+json_field = (ba: int, f: int, t: int, addr: int, indent: int, level: int):
+    e_call(lf_of_inst(f), [ba, load_val(t, addr, 0), indent, level], -1)
 
 # ---------------- conversions ----------------
 gen_conv = (e: int) -> Val:
@@ -3358,7 +3439,7 @@ may_write_root = (n: int, rn: int) -> bool:
         if w != 0 and same_var(w, rn): return true
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
-        if id == .fmt_struct and (glob or mutparam): return true
+        if (id == .fmt_struct or id == .json_fields) and (glob or mutparam): return true
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
             w = write_root(kid(n, 0))
             if w != 0 and same_var(w, rn): return true
@@ -3398,7 +3479,7 @@ calls_leave = (n: int, rn: int, written: bool) -> bool:
     if n <= 0: return true
     k = nodes[n].kind
     if k == .lambda: return true
-    if k == .intrinsic and nodes[n].aux == i32(int(IN.fmt_struct)): return false
+    if k == .intrinsic and (nodes[n].aux == i32(int(IN.fmt_struct)) or nodes[n].aux == i32(int(IN.json_fields))): return false
     if k == .call or (k == .pair and nodes[n].sym > 0):
         aux = if k == .pair: 0 else: int(nodes[n].aux)
         if aux == 1 or aux == 4: return false
@@ -3493,7 +3574,7 @@ fw_scan = (n: int, w: mut FnWrites):
         id = nodes[n].aux as IN
         # Field formatting invokes type-specific formatters selected by the
         # checker. Treat it conservatively, including nested user formatters.
-        if id == .fmt_struct: w.all = true
+        if id == .fmt_struct or id == .json_fields: w.all = true
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend: fw_global(kid(n, 0), w)
     if k == .for_ and has_flag(n, NF_MUT): fw_global(int(nodes[n].a), w)
     if k == .call or (k == .pair and nodes[n].sym > 0):

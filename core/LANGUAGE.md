@@ -16,8 +16,11 @@ The [executable tour](../examples/sloppy_core/tour.dewy) prints:
 
 ```text
 Independent array: 42
+Spread last: 44
 Record fields: 42
+Record override: 42
 Dependent default: 42
+Specialized callback: 42
 Filtered comprehension: 44
 Graphemes: 4 1
 Optional match: 4
@@ -494,6 +497,40 @@ Both arguments evaluate once, in order, even if the key already exists; the valu
 argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
+
+## Settings and JSON
+
+`to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`
+reads it into a type and returns either that value or a `TextError` with a message,
+line and column. Record fields may arrive in any order; missing fields keep their
+declared defaults and unknown fields are skipped:
+
+```dewy
+Settings:type=[player:uint64 volume:float64=0.5 fullscreen:bool=false]
+main=()=>{
+    let loaded=from_json<Settings>(r'{"player":18446744073709551615}')
+    if loaded is? TextError {printl(loaded.message) return 1}
+    let updated:Settings=[loaded... fullscreen=true]
+    printl(to_json(updated 2))
+    return 0
+}
+```
+
+The optional second argument indents by that many spaces. Records become JSON
+objects, arrays and tuples become arrays, dictionaries become objects with string
+keys, and `none` becomes `null`. Typed writing preserves all signed and unsigned
+integer values through 64 bits, plus round-tripping finite float representations
+including negative zero. Readers in other languages must also support the number
+range if they need to preserve large IDs exactly.
+
+`parse_json(text)` and `json_value(value)` instead produce the dynamic `Json`
+tree, whose numbers are `float64`; conversion to that tree can round large integers.
+Use `from_json<T>` directly for typed settings or save data. Embedded `Json` values
+write their JSON contents. The inherited non-finite float spellings (`NaN` and
+`Infinity`) are also supported, though they are outside standard JSON.
+
+See [the settings example](../examples/sloppy_core/settings.dewy) for defaults,
+record updates and an exact large-ID round trip.
 
 ## Loops, text and optional values
 
