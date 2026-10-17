@@ -826,3 +826,19 @@ Compile benchmarks now record process CPU time alongside elapsed time, including
 waited-for children. This helps identify scheduling delays; it does not remove
 frequency, thermal, cache or memory-contention variation. CPU time may exceed
 wall time when multiple workers are selected.
+
+## Diagnostics in opened bundled libraries
+
+The editor used an empty main when checking a library document. This loaded the
+prelude but omitted named modules outside it, silently hiding their diagnostics
+and hover information. The checker now explicitly loads the opened library
+document when it is absent. Tests open both Dewy and Jo modules, introduce an
+unsaved error in an unused function, clear it, and request a hover without
+changing the file on disk. The failure was reproduced with the prior compiler.
+`library-editor-build.json` records an independent C bootstrap;
+`library-editor-validation.log` records all 45 editor checks passing in 9.16
+seconds. This editor-only change does not alter normal compilation.
+
+An unrelated attempt to check unused bundled-library functions on demand was
+reverted: paired measurements did not show a useful compilation improvement.
+The existing eager diagnostic behavior for named library imports is retained.

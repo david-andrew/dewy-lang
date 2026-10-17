@@ -76,6 +76,44 @@ class Client:
         self.process.communicate(timeout=5)
 
 
+@pytest.mark.parametrize('extension', ['dewy', 'jo'])
+def test_bundled_library_unsaved_diagnostics(tmp_path, monkeypatch, extension):
+    value = os.environ.get('DEWY_CORE_COMPILER')
+    if not value:
+        pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
+    compiler = Path(value).resolve(strict=True)
+    library = tmp_path / 'lib'
+    library.mkdir()
+    for item in (compiler.parent.parent / 'lib').iterdir():
+        (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    module = library / f'probe.{extension}'
+    good = ('good=()=>42\nbad=():>int64=>0\n' if extension == 'dewy'
+            else 'good = () -> int: 42\nbad = () -> int: 0\n')
+    module.write_text(good)
+    project = tmp_path / 'project'
+    project.mkdir()
+    source = project / 'main.dewy'
+    main = 'from probe import good\nmain=()=>good()\n'
+    source.write_text(main)
+    monkeypatch.setenv('DEWY_CORE_LIB', str(library))
+    client = Client(compiler, project)
+    try:
+        diagnostics = client.set_text(source.as_uri(), main, 1)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        bad = good.replace('=>0', '=>missing').replace(': 0', ': missing')
+        diagnostics = client.set_text(module.as_uri(), bad, 1)
+        errors = [d for d in diagnostics if d['severity'] == 1]
+        assert errors and any('missing' in d['message'] for d in errors), diagnostics
+        diagnostics = client.set_text(module.as_uri(), good, 2)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        hover = client.request('textDocument/hover', {
+            'textDocument': {'uri': module.as_uri()}, 'position': {'line': 0, 'character': 1}})
+        assert hover and 'int' in str(hover), hover
+        assert module.read_text() == good
+    finally:
+        client.close()
+
+
 def test_unsaved_diagnostics_hover_and_definition(tmp_path):
     value = os.environ.get('DEWY_CORE_COMPILER')
     if not value:

@@ -3170,6 +3170,10 @@ check_program = (main_path: str):
     add_universe()
     load_prelude()
     mainm = load_module(main_path, false, -1)
+    # The editor checks library documents with an empty main. Named libraries
+    # are outside the prelude, so load the opened document explicitly as well.
+    if ide_on and starts_with(ide_doc, ide_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
+        load_module(ide_doc, false, -1)
     if stop_after == "lex" or stop_after == "parse": exit(0)
     modules[mainm].is_main = true
     i = 0
