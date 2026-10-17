@@ -3722,6 +3722,7 @@ decl_in_prelude = (d: int) -> bool: d != 0 and modules[int(nodes[d].mod)].is_pre
 dewy_operator_name = (op: str, unary: bool) -> str:
     if unary:
         if op == "-": return "__unary_sub__"
+        if op == "~": return "__not__"
         return ""
     match op:
         "+": "__add__"
@@ -3739,6 +3740,8 @@ dewy_operator_name = (op: str, unary: bool) -> str:
         ">=": "__ge__"
         "<<": "__lshift__"
         ">>": "__rshift__"
+        "&": "__and__"
+        "|": "__or__"
         "^": "__xor__"
         _: ""
 
@@ -5052,6 +5055,13 @@ check_expr = (n: int, expected: int) -> int:
         if ex != 0 and is_int(ex): h = ex
         ta = prune(check_expr(int(nodes[n].a), h))
         nodes[n].a = i32(last_checked)
+        if is_struct_like(ta):
+            check_expr(int(nodes[n].b), 0)
+            nodes[n].b = i32(last_checked)
+            r = op_overload(n, if k == .and_: "&" else: "|")
+            if r != 0:
+                last_checked = n
+                return r
         if is_int(ta):
             add_flag(int(nodes[n].a), NF_CHECKED)
             nodes[n].kind = .binary
@@ -5071,6 +5081,11 @@ check_expr = (n: int, expected: int) -> int:
         if ex != 0 and is_int(ex): h = ex
         ta = prune(check_expr(int(nodes[n].a), h))
         nodes[n].a = i32(last_checked)
+        if is_struct_like(ta):
+            r = op_overload(n, "~")
+            if r != 0:
+                last_checked = n
+                return r
         if is_int(ta):
             add_flag(int(nodes[n].a), NF_CHECKED)
             nodes[n].kind = .unary

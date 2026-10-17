@@ -140,13 +140,16 @@ Local groups, groups containing existing values, and grouped entry points are
 diagnosed rather than given a second dispatch mechanism.
 
 Dewy-defined dunder functions now participate in custom-record operator lookup:
-arithmetic, comparisons, unary minus, shifts/xor, and `__index__` / `__setindex__`.
+arithmetic, comparisons, unary minus, shifts and bit operations, and
+`__index__` / `__setindex__`.
 Their names remain ordinary function names for explicit calls and imports.
 Receiver/operand modules supply protocols even after a selected type import;
 Dewy and `.jo` clients share specialization and dispatch. Comparisons require
 `bool`, and comparisons derived from `<` preserve written operand evaluation
-order. Built-in scalar arithmetic is unchanged; custom logical operators,
-floor division/modulo and power are still outside this slice.
+order. Record `and`/`or`/`not` use `__and__`/`__or__`/`__not__`; binary record
+operators evaluate both arguments once in source order. Built-in boolean
+`and`/`or` keep short-circuit evaluation. Floor division/modulo and power use
+their corresponding protocols too.
 
 `examples/sloppy_core/ring.dewy` is a generic bounded container implemented in
 Dewy. Its history example covers wraparound, nested indexed edits and independent
@@ -207,6 +210,14 @@ on native and web. Literals beyond the machine-word range automatically construc
 expected `BigInt` type; machine-word arithmetic retains its fixed width and does
 not automatically widen on overflow. See the language guide and
 `examples/sloppy_core/exact_integers.dewy`.
+
+Exact integers also support sign-extending `and`/`or`/`xor`/`not` and shifts.
+Right shift rounds negative values down without allocating a power-of-two
+divisor. Shift counts are nonnegative `int64`; `<<=` and `>>=` capture indexed
+places once and preserve snapshots. The bit-operation oracle compares 470
+boundary/random cases through 4,096 bits with Python, in all four native/web
+debug/release combinations. Mixed signed/unsigned words, huge right shifts,
+negative-count errors and allocation lifetime are checked separately.
 
 The differential gate compares 622 signed operand pairs against Python integers,
 including limb boundaries, random values up to 512 bits and Algorithm D quotient
@@ -371,7 +382,8 @@ removes repeated classification work. See `source-language-compile.json`,
 
 The bundled `Pool` now updates scalar fields/elements directly when its getter
 and setter are the library implementations and every index/right operand is an
-ordinary read. It uses a qualified library helper to validate the handle, then
+ordinary read or checked scalar arithmetic/boolean expression. It uses a
+qualified library helper to validate the handle, then
 the existing array place lowering, including bounds checks and copy-on-write.
 Custom indexers, side-effecting calls and other complex updates retain
 read/edit/writeback. The fast path removes an avoidable nested-array copy on
@@ -392,6 +404,12 @@ A fresh C bootstrap and all 1,608 checks pass in 74.10 seconds. The focused
 custom accessors, side effects, stale handles and bounds failures on native/web
 in debug/release. Evidence and complete benchmark inputs are in
 [`dewy/audits/2026-10-17/`](../../dewy/audits/2026-10-17/README.md).
+
+The scalar-expression extension also handles updates such as `+= delta+1`
+directly. That variant measured 140.82/37.01 ms before/after, about 3.8×, while
+other projects were using substantial CPU. Those absolute times are not
+comparable to the quieter initial run. Its fresh-bootstrap gate passed 1,621
+checks in 103.18 seconds; the same audit directory records inputs and results.
 
 The combined Dewy/editor/shared-core gate now contains 1,608 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.

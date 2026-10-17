@@ -145,6 +145,13 @@ down and the remainder has the divisor's sign. `.divmod(other)` computes both
 results together. Parenthesize a negative numerator as `(-value)//other`:
 Dewy's unary minus binds below multiplication and division.
 
+`and`, `or`, `xor` and `not` operate on bits with infinite two's-complement sign
+extension, including mixed signed/unsigned machine words. Thus `not bigint(0)`
+is `-1`. `<<` and `>>` take a nonnegative `int64` count; right shift rounds down
+for negative values, so `bigint(-3) >> 1` is `-2`. Shifting beyond all magnitude
+bits yields `0` for nonnegative values or `-1` for negative ones. Negative shift
+counts panic. Shift compound assignments (`<<=`, `>>=`) work too.
+
 `^` (also `.pow(nonnegative_exponent)`), `.abs()` and `.gcd(other)` operate exactly;
 `gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
 panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
@@ -156,8 +163,7 @@ can be dictionary keys; construct them through numeric literals or `bigint`, kee
 
 Ordinary fixed-width arithmetic does not automatically widen on overflow.
 Convert a word variable with `bigint(word)` when exact arithmetic is needed.
-Bigint bitwise operations are not yet implemented. The inherited
-`big` module is a separate approximate-number library for idle games.
+The inherited `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
 
@@ -304,14 +310,17 @@ record type is sufficient. Built-in scalar operations keep their built-in behavi
 | `=?`, `not=?` | `__eq__`, `__ne__` |
 | `<?`, `<=?`, `>?`, `>=?` | `__lt__`, `__le__`, `__gt__`, `__ge__` |
 | `<<`, `>>`, `xor` | `__lshift__`, `__rshift__`, `__xor__` |
+| `and`, `or`, `not` | `__and__`, `__or__`, `__not__` |
 
 Comparisons must return `bool`. When absent, `not=?` derives from `__eq__`,
 and `<=?`, `>?`, `>=?` derive from `__lt__`. Derived comparisons preserve written
 operand evaluation order. Arithmetic compound assignments reuse the corresponding
 operator. Floor protocols receive the written divisor, including literal powers
 of two; the built-in shift/mask optimizations do not change custom operands.
-Logical `and`/`or`/`not` do not yet have custom record protocols. Power uses
-`__pow__` and keeps bitwise `xor`/`__xor__` separate.
+Record `and`/`or` operators are ordinary eager calls: both operands evaluate once
+in written order. Built-in boolean `and`/`or` retain short-circuit evaluation;
+machine integers use bit operations. Power uses `__pow__` and keeps bitwise
+`xor`/`__xor__` separate.
 
 [The bounded history example](../examples/sloppy_core/history.dewy) uses a
 [generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),

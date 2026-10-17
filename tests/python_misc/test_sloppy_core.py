@@ -336,6 +336,57 @@ return if called() =? read() and calls =? 2 42 else 3
 choose=((value:int64)=>1)&((value:uint64)=>2)&((value:BigInt)=>3)
 main=()=>if choose(42) =? 1 and choose(18446744073709551615) =? 2
 and choose(18446744073709551616) =? 3 and choose(-9223372036854775809) =? 3 42 else 1''',
+    'bigint-bitwise-mixed': '''from bigint import bigint
+main=()=>{
+let a=18446744073709551616 let signed:int64=-1 let word:uint64=18446744073709551615
+let saved=a
+if (a and signed) not=? a or (signed and a) not=? a return 1
+if (a or word) not=? 36893488147419103231 or (word or a) not=? 36893488147419103231 return 2
+if (a xor signed) not=? -18446744073709551617 or (signed xor a) not=? -18446744073709551617 return 3
+if (a and word) not=? 0 or (word and a) not=? 0 return 4
+if (a or signed) not=? -1 or (signed or a) not=? -1 return 5
+if (a xor word) not=? 36893488147419103231 or (word xor a) not=? 36893488147419103231 return 6
+a<<=17 a>>=17
+if a not=? saved or (not a) not=? -18446744073709551617 return 7
+let huge:int64=9223372036854775807
+return if (a >> huge) =? 0 and ((-a) >> huge) =? -1 and (bigint(0) << huge) =? 0 42 else 8
+}''',
+    'bigint-shift-places': '''from bigint import BigInt, bigint
+let calls:int64=0
+next=():>int64=>{calls+=1 return 0}
+main=()=>{
+let pool:Pool<array<BigInt>>=[] let h=pool.add([bigint(2)]) let saved=pool
+pool[h][next()]<<=3 pool[h][0]>>=2
+let words=[21] words[next()]<<=2 words[0]>>=1
+return if calls =? 2 and pool[h][0] =? 4 and saved[h][0] =? 2 and words[0] =? 42 42 else 1
+}''',
+    'bigint-bitwise-lifetime': '''from bigint import bigint
+exercise=():>void=>{
+let a=123456789012345678901234567890 let b=-98765432109876543210987654321
+let saved=a
+loop i in [0..20) {
+    let shifted=a << i
+    let mixed=(a and b) or (a xor b)
+    if (shifted >> i) not=? saved or mixed not=? (a or b) panic("bit operation mismatch")
+    a=not (not a)
+}
+}
+main=()=>{exercise() let before=alloc_count() exercise()
+return if before =? alloc_count() 42 else 1}''',
+    'generic-operator-bits': '''Flags:type=[bits:uint64]
+let order:int64=0
+make=(tag:int64 bits:uint64):>Flags=>{order=order*10+tag return Flags[bits]}
+__and__=(a:Flags b:Flags):>Flags=>Flags[a.bits and b.bits]
+__or__=(a:Flags b:Flags):>Flags=>Flags[a.bits or b.bits]
+__xor__=(a:Flags b:Flags):>Flags=>Flags[a.bits xor b.bits]
+__not__=(a:Flags):>Flags=>Flags[not a.bits]
+main=()=>{
+let joined=make(1 3) or make(2 4)
+let common=make(3 7) and make(4 2)
+let flipped=joined xor common
+return if order =? 1234 and joined.bits =? 7 and common.bits =? 2
+and flipped.bits =? 5 and (not flipped).bits =? 18446744073709551610 42 else 1
+}''',
     'bigint-parse': '''from bigint import bigint, parse_bigint
 main=()=>{
 loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if parse_bigint(text) isnt? none return 1}
@@ -1276,6 +1327,8 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
     ('bigint(42)%0', 'big integer division by zero'),
     ('bigint(2).pow(-1)', 'big integer exponent must be nonnegative'),
     ('bigint(2)^(-1)', 'big integer exponent must be nonnegative'),
+    ('bigint(2)<<(-1)', 'big integer shift count must be nonnegative'),
+    ('bigint(-2)>>(-1)', 'big integer shift count must be nonnegative'),
     ('2^(-1)', 'negative integer exponent: use a rational or floating base'),
     ('(2 as uint64)^(-1)', 'negative integer exponent: use a rational or floating base'),
     ('bigint("12x")', 'invalid decimal integer'),
@@ -1672,6 +1725,60 @@ loop line in input.split("\n") {
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / 'bigint.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bigint_bits(compiler, tmp_path, target, release):
+    rng = random.Random(42027)
+    values = [0, 1, -1]
+    for bits in [31, 32, 33, 63, 64, 65, 127, 128, 256]:
+        for delta in [-1, 0, 1]:
+            value = 2**bits + delta
+            values.extend([value, -value])
+    counts = [0, 1, 31, 32, 33, 63, 64, 65, 127, 256, 4096]
+    cases = [(a, b, counts[i % len(counts)]) for i, a in enumerate(values)
+             for b in [0, 1, -1, 2**32-1, -(2**32+1), 2**128]]
+    for _ in range(128):
+        a = rng.getrandbits(rng.choice([32, 64, 256, 512, 1024, 4096])) * rng.choice([-1, 1])
+        b = rng.getrandbits(rng.choice([32, 64, 256, 512, 1024, 4096])) * rng.choice([-1, 1])
+        cases.append((a, b, rng.choice(counts)))
+    (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b} {count}' for a, b, count in cases))
+    source = tmp_path / 'bits.dewy'
+    source.write_text('''from bigint import bigint
+main=():>void=>{
+let input=$include_bytes(p"cases.txt") as string|none
+if input is? none panic("invalid test data")
+loop line in input.split("\\n") {
+    let fields=line.split(" ")
+    let a=bigint(fields[0]) let b=bigint(fields[1]) let count=to_int(fields[2])
+    if count is? none panic("invalid shift count")
+    printl"{a and b}|{a or b}|{a xor b}|{not a}|{a << count}|{a >> count}"
+}
+}
+''')
+    expected = ['|'.join(map(str, [a & b, a | b, a ^ b, ~a, a << count, a >> count]))
+                for a, b, count in cases]
+    binary = tmp_path / 'bits'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web bigint checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'bits.cjs'
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)

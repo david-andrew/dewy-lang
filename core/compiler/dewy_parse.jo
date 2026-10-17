@@ -647,11 +647,11 @@ dw_stmt = (id: int, top: bool = false) -> int:
         n = dw_flow(id, 0)
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
-    if dw_op(id) in ["+=", "-=", "*=", "//=", "%="]:
+    if dw_op(id) in ["+=", "-=", "*=", "//=", "%=", "<<=", ">>="]:
         n = mk(.assign, pos)
         op = dw_op(id)
         if op == "//=" or op == "%=": return dw_fail(id, "compound floor division or modulo")
-        nodes[n].op = i32(int(if op == "+=": Tok.pluseq else if op == "-=": Tok.minuseq else: Tok.stareq))
+        nodes[n].op = i32(int(if op == "+=": Tok.pluseq else if op == "-=": Tok.minuseq else if op == "<<=": Tok.shleq else if op == ">>=": Tok.shreq else: Tok.stareq))
         nodes[n].a = i32(dw_expr(dw_child(id, 1)))
         nodes[n].b = i32(dw_expr(dw_child(id, 2)))
         return n
@@ -977,7 +977,7 @@ dw_collection_kind = (id: int) -> int:
         if children.len() == 0: return 0
         candidates.push(children[children.len() - 1])
     else:
-        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%="]: return 0
+        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%=", "<<=", ">>="]: return 0
         return if dw_op(id) == "->": 2 else: 1
     result = 0
     loop candidate in candidates:
@@ -995,7 +995,7 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
     if kind == "Block" and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
-    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%="]: return dw_stmt(id)
+    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "//=", "%=", "<<=", ">>="]: return dw_stmt(id)
     pos = dewy_syntax[id].pos
     value = 0
     if map:

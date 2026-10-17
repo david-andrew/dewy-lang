@@ -544,3 +544,78 @@ __mod__ = ((a:BigInt b:BigInt):>BigInt=>divmod(a b).remainder)
     & ((a:uint64 b:BigInt):>BigInt=>divmod(bigint(a) b).remainder)
 
 __pow__=(base:BigInt exponent:int64):>BigInt=>pow(base exponent)
+
+# Bit operations use infinite two's-complement sign extension. Convert limbs
+# as they are consumed; only the result needs storage. The extra high word
+# distinguishes a positive high bit from a negative sign extension.
+_bitwise=(a:BigInt b:BigInt operation:int64):>BigInt=>{
+    let count=a._limbs.length
+    if b._limbs.length >? count count=b._limbs.length
+    let carry_a:uint64=if a._sign <? 0 1 else 0
+    let carry_b:uint64=if b._sign <? 0 1 else 0
+    let result:array<uint64>=[]
+    loop i in [0..count] {
+        let left:uint64=if i <? a._limbs.length a._limbs[i] else 0
+        let right:uint64=if i <? b._limbs.length b._limbs[i] else 0
+        if a._sign <? 0 {
+            left=(left xor _LIMB_MASK)+carry_a
+            carry_a=left >> 32
+            left=left and _LIMB_MASK
+        }
+        if b._sign <? 0 {
+            right=(right xor _LIMB_MASK)+carry_b
+            carry_b=right >> 32
+            right=right and _LIMB_MASK
+        }
+        let word:uint64=left xor right
+        if operation =? 0 word=left and right
+        else if operation =? 1 word=left or right
+        result.push(word)
+    }
+    let negative=(result[count] and 2147483648) not=? 0
+    if negative {
+        let carry:uint64=1
+        loop i in [0..result.length) {
+            let word=(result[i] xor _LIMB_MASK)+carry
+            result[i]=word and _LIMB_MASK
+            carry=word >> 32
+        }
+    }
+    return _pack(negative result)
+}
+
+__not__=(value:BigInt):>BigInt=>_neg(_add(value bigint(1)))
+__lshift__=(value:BigInt bits:int64):>BigInt=>{
+    if bits <? 0 panic("big integer shift count must be nonnegative")
+    if bits =? 0 return value
+    return _pack(value._sign <? 0 _mag_shift_left(value._limbs bits))
+}
+__rshift__=(value:BigInt bits:int64):>BigInt=>{
+    if bits <? 0 panic("big integer shift count must be nonnegative")
+    if bits =? 0 return value
+    let result=_mag_shift_right(value._limbs bits)
+    # Arithmetic right shift rounds negative values down, including when all
+    # magnitude bits have shifted away. No power-of-two divisor is allocated.
+    if value._sign <? 0 and _mag_trailing_zeros(value._limbs) <? bits {
+        result=_mag_add(result [1])
+    }
+    return _pack(value._sign <? 0 result)
+}
+
+__and__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 0))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 0))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 0))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 0))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 0))
+
+__or__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 1))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 1))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 1))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 1))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 1))
+
+__xor__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 2))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 2))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 2))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 2))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 2))

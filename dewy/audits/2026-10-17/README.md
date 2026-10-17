@@ -53,3 +53,34 @@ effects and short-circuit behavior, on native/web in debug/release.
 [Build manifest](source-core/pool-expression-build.json),
 [full gate](source-core/pool-expression-full.log),
 [focused gate](source-core/pool-expression-focused.log).
+
+## Exact-integer bit operations
+
+`BigInt` now supports `and`, `or`, `xor`, `not`, `<<` and `>>`, with infinite
+two's-complement sign extension and arithmetic right shift. The library converts
+limbs while consuming them; input values remain independent and only the bitwise
+result needs storage. Right shift detects discarded magnitude bits to round
+negative values down, without constructing a power-of-two divisor.
+
+Record `and`/`or`/`not` dispatch through ordinary named operator functions.
+Boolean short-circuiting is unchanged. Shift compound assignments also work,
+including nested indexed places. The lexer/parser splits `>>=` in a nested type
+context so existing compact declarations such as `Pool<array<BigInt>>=[]` remain
+valid.
+
+An independent Python oracle checks 470 boundary/random inputs through 4,096
+bits on native/web in debug/release. Additional cases cover mixed signed/unsigned
+words, enormous right shifts, negative-count errors, index evaluation order,
+snapshots, eager record-operand evaluation and allocation lifetime.
+The focused gate passed **163 checks in 9.03 s**. A fresh C bootstrap passed
+**1,649 checks in 97.20 s**, with other CPU-heavy projects still running.
+[Focused gate](source-core/bigint-bits-validation.log),
+[full gate with slowest-test timings](source-core/bigint-bits-full.log),
+[build manifest](source-core/bigint-bits-build.json).
+
+Seven warmed compile pairs gave CPU medians of 88.87/89.30 ms for exact integers,
+94.86/95.83 ms for exact rationals, and 77.81/77.44 ms for the tour. Wall medians
+were 96.46/113.91, 101.19/100.10 and 82.48/80.55 ms respectively; load averages
+were around eight. The wall/CPU difference is a reason not to infer a compile
+regression from this busy-host run. This is a feature addition, with no claimed
+compile-time speedup. [Complete samples](source-core/bigint-bits-compile.json).
