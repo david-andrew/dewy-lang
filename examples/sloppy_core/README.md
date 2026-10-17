@@ -2,7 +2,22 @@
 
 Start with [`tour.dewy`](tour.dewy) and the [language guide](../../core/LANGUAGE.md)
 for a terminal example of functions, records, copies, comprehensions, Unicode
-text, optional values and destructuring.
+text, optional values and destructuring. [`entities.dewy`](entities.dewy) adds
+user generics, the bundled `Pool<T>` and `Heap<T>`, stable entity handles and a
+priority queue of damage events. It shows that removing/replacing an entity does
+not redirect old events to the replacement, and that a copied world remains
+independent:
+
+```sh
+python3 -m tools.core run examples/sloppy_core/entities.dewy
+```
+
+```text
+Guard health: 75
+Snapshot health: 100
+Replacement health: 100
+Old handle valid: false
+```
 
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
 code are Dewy. The pinned Sloppy platform library supplies the window, input,

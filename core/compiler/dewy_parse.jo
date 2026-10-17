@@ -224,7 +224,30 @@ dw_type = (id: int) -> int:
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         nodes[n].b = i32(dw_type(dw_child(args, 1)))
         return n
+    if dw_op(id) == "TypeParamJuxtapose":
+        n = dw_type(dw_child(id, 1))
+        if nodes[n].kind != .tname or nkids(n) != 0: return dw_fail(id, "type arguments on this type expression")
+        args: int[]
+        loop child in dewy_syntax[dw_child(id, 2)].children: args.push(dw_type(child))
+        set_list(n, args)
+        return n
     return dw_fail(id, "this type expression")
+
+# Type parameters use the existing compact specialization machinery. Constraints
+# are not silently ignored: this slice accepts only distinct parameter names.
+dw_type_params = (id: int) -> int[]:
+    out: int[]
+    seen: str[]
+    loop child in dewy_syntax[id].children:
+        name = dw_name(child)
+        if name == "" or name == "of": return [dw_fail(child, "constrained type parameters; use plain type parameter names")]
+        if seen.contains(name): fatal(dewy_syntax[child].pos, "duplicate type parameter '{name}'")
+        seen.push(name)
+        n = mk(.ident, dewy_syntax[child].pos)
+        nodes[n].name = i32(intern(name))
+        out.push(n)
+    if out.len() == 0: return [dw_fail(id, "an empty type parameter declaration")]
+    out
 
 dw_param = (id: int, kind: NK) -> int:
     let id = id
@@ -257,9 +280,18 @@ dw_function = (id: int, name: str) -> int:
     if dw_op(signature) == ":>":
         params = dw_child(signature, 1)
         result = dw_child(signature, 2)
+    type_params: int[]
+    if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "<>:":
+        if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
+        type_params = dw_type_params(dw_child(params, 1))
+        params = dw_child(params, 2)
     if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
+    if type_params.len() > 0:
+        if name == "main": return dw_fail(id, "a generic entry point")
+        set_list2(n, type_params)
+        add_flag(n, NF_GENERIC)
     if result != 0:
         if dw_name(result) == "void": add_flag(n, NF_VOID)
         else: nodes[n].a = i32(dw_type(result))
@@ -453,6 +485,14 @@ dw_expr = (id: int) -> int:
             nodes[n].a = i32(comparison)
             return n
         if op == "=>": return dw_function(id, "")
+        if op == "TypeParamJuxtapose":
+            n = mk(.typeapply, pos)
+            nodes[n].a = i32(dw_expr(left))
+            nodes[n].c = i32(dw_type(id))
+            args: int[]
+            loop child in dewy_syntax[right].children: args.push(dw_type(child))
+            set_list(n, args)
+            return n
         if op == "//" or op == "%":
             a = dw_expr(left)
             b = dw_expr(right)
@@ -623,13 +663,23 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         return n
     if annotation != 0 and dw_name(annotation) == "type":
         if initial == 0: return dw_fail(id, "a type declaration without a definition")
+        type_params: int[]
+        if dw_op(initial) in ["IndexJuxtapose", "CallJuxtapose"] and dewy_syntax[dw_child(initial, 1)].text == "<>:":
+            type_params = dw_type_params(dw_child(initial, 1))
+            initial = dw_child(initial, 2)
         if dewy_syntax[initial].text != "[]:":
             n = mk(.typealias, dewy_syntax[id].pos)
             nodes[n].name = i32(intern(name))
             nodes[n].a = i32(dw_type(initial))
+            if type_params.len() > 0:
+                set_list2(n, type_params)
+                add_flag(n, NF_GENERIC)
             return n
         n = mk(.struct_, dewy_syntax[id].pos)
         nodes[n].name = i32(intern(name))
+        if type_params.len() > 0:
+            set_list2(n, type_params)
+            add_flag(n, NF_GENERIC)
         fields: int[]
         loop field in dewy_syntax[initial].children: fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
@@ -675,6 +725,8 @@ dw_import = (id: int) -> int:
 
 dw_import_name = (id: int) -> int:
     let id = dw_unwrap(id)
+    loop dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+        id = dw_unwrap(dw_child(id, 0))
     alias = ""
     if dw_op(id) == "as":
         alias = dw_name(dw_child(id, 2))

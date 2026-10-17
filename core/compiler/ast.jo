@@ -26,7 +26,8 @@ enum NK:
     ptype,          # Dewy type pattern: a is the type, name is an optional value binding
     record_lit,     # Dewy [field=value ...], contextual or inferred structural record
     matrix,         # [1 2; 3 4]: the elements row by row; ival = elements per row
-    trecord         # Dewy inline structural type [field: Type ...]
+    trecord,        # Dewy inline structural type [field: Type ...]
+    typeapply       # Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
 
 # node flags
 const NF_MUT = 1
@@ -57,6 +58,7 @@ const NF_ALIASDECL = 8388608  # a vardecl whose name stands for the place b (`mu
 const NF_LAZY = 16777216      # a library function's body not parsed yet: tokens from ival in lazy_toks[aux] (parse.jo)
 const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused
 const NF_COMPREHENSION = 67108864 # block: first declaration is the collection accumulator
+const NF_RECORD = 134217728 # anonymous structural record declaration
 
 struct Node:
     kind: NK

@@ -482,7 +482,11 @@ ide_dewy_fn_header = (d: int) -> str:
         if nodes[param].a != 0: text += ": " + ide_dewy_type_node(int(nodes[param].a))
         if nodes[param].b != 0: text += " = …"
         params.push(text)
-    text = name_of(int(nodes[d].name)) + " = (" + params.join(" ") + ")"
+    generics: str[]
+    loop param in kids2(d): generics.push(name_of(int(nodes[param].name)))
+    prefix = ""
+    if generics.len() > 0: prefix = "<" + generics.join(" ") + ">"
+    text = name_of(int(nodes[d].name)) + " = " + prefix + "(" + params.join(" ") + ")"
     if nodes[d].a != 0: text += ":>" + ide_dewy_type_node(int(nodes[d].a))
     else if has_flag(d, NF_VOID): text += ":>void"
     text

@@ -741,3 +741,35 @@ physics 365.87/368.81 ms and compiler self-build 1406.52/1394.69 ms. These small
 mixed differences are not a compiler-speed claim. The runtime measurements used
 the seeded compiler; the compile comparison used the independently bootstrapped
 compiler after the complete gate passed.
+
+## Generic declarations and bundled containers
+
+`generics-build.json` and `generics-full-tests.log` record an independent C
+bootstrap and 1,057 checks passing in 82.54 seconds. Dewy now projects general
+`Name<T U>` applications, generic records, top-level generic functions and
+parenthesized generic aliases into the existing core. Explicit calls and record
+construction work with selected or qualified imports. Type parameters are bound
+inside function and record defaults, including calls that explicitly use `T`.
+Constrained parameters and explicitly generic local closures remain diagnosed.
+
+Anonymous records now intern a field-name shape whose field types are ordinary
+type arguments. Generic inference/substitution can therefore handle structural
+parameter/result annotations without a second type mechanism. Named records
+remain nominal. Editor types use angle brackets; completions show generic
+parameter declarations. Grouped selected-import aliases were fixed as part of
+exercising imported generic declarations.
+
+Coverage includes nested applications, multiple instantiations, aliases,
+recursion, expected callable types, returned closures, dependent/type-dependent
+defaults, structural results and malformed type parameters. `Pool<T>` checks
+handle invalidation/reuse and independent copies; `Heap<T>` checks ordering and
+copies. `generics-example.json` records the actual `entities.dewy` example
+running on native/web in debug/release, with the expected four output lines.
+Nested collection mutation through a custom indexed getter still needs explicit
+read/edit/writeback; direct record-field mutation is supported.
+
+`generics-compile.json` records seven alternating samples against the streaming
+compiler: tour 58.61/58.97 ms, physics 353.15/366.92 ms and compiler self-build
+1419.83/1360.25 ms. These mixed desktop measurements are not a speedup claim.
+`entities-compile.json` measures the new entity-event example alone: a seven-run
+median of 66.06 ms for a native release build.

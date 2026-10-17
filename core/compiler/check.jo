@@ -917,8 +917,8 @@ resolve_type = (tn: int) -> int:
             if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
             seen[name] = true
             t = resolve_type(int(nodes[field].a))
-            if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
-                fatal(nodes[field].pos, "inline record fields need concrete value types")
+            if tkind(t) == .void_ or tkind(t) == .typeval:
+                fatal(nodes[field].pos, "inline record fields need value types")
             nodes[field].type = i32(t)
         return dewy_record_schema(tn, fields)
     if k == .tarray:

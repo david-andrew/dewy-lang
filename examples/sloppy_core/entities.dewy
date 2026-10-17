@@ -1,0 +1,31 @@
+# Stable entity handles and a priority queue, using bundled generic containers.
+Enemy:type=[name:string health:int64=100]
+Event:type=<T>[target:T damage:int64]
+
+# The core specializes this function for the queue's element type.
+schedule=<T>(@queue:Heap<T> value:T time:float64):>void=>{
+    queue.push(value time)
+}
+
+main=():>void=>{
+    let enemies:Pool<Enemy>=[]
+    let events:Heap<Event<Handle>>=[]
+    let scout=enemies.add(Enemy[name="scout"])
+    let guard=enemies.add(Enemy[name="guard"])
+    schedule(@events Event<Handle>[scout 10] 1.0)
+    schedule(@events Event<Handle>[guard 25] 2.0)
+    schedule(@events Event<Handle>[scout 50] 3.0)
+
+    enemies.remove(scout)
+    let replacement=enemies.add(Enemy[name="replacement"])
+    let before=enemies
+    loop events.len() >? 0 {
+        let event=events.pop()
+        if not enemies.has(event.target) continue
+        enemies[event.target].health-=event.damage
+    }
+    printl"Guard health: {enemies[guard].health}"
+    printl"Snapshot health: {before[guard].health}"
+    printl"Replacement health: {enemies[replacement].health}"
+    printl"Old handle valid: {enemies.has(scout)}"
+}

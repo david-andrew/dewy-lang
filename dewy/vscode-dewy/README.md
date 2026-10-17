@@ -43,8 +43,8 @@ Completions include locals, functions, record fields, collection methods, `.leng
 and types in annotations. They work on unsaved text and unfinished expressions;
 comments and literal string text suppress them, while interpolation expressions
 can complete normally. Signatures are described without checking every library
-function's body. Generic library signatures can describe types beyond the current
-Dewy annotation subset.
+function's body. Generic signatures and instantiated types use Dewy `<T>` notation, including
+user declarations and imported containers such as `Pool<Enemy>`.
 
 Rename, signature help, semantic highlighting and formatting are not enabled by
 this client yet. The existing native-debugger configuration below still targets

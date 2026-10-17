@@ -107,6 +107,22 @@ types; annotate the record when a field is an otherwise untyped empty collection
 Named record types remain distinct, and structural conversions between already
 constructed named and anonymous values are not implemented.
 
+Generic records and top-level functions use Dewy's `<T U>` prefix:
+`Box:type=<T>[value:T]` and `first=<T>(xs:array<T>):>T|none=>...`.
+General type applications (including qualified imported types) now use the core's
+ordinary generic instances. Explicit calls use `first<string>(words)`; generic
+aliases use `Values:type=<T>(array<T>)`. Type-dependent defaults resolve the
+instantiated parameters in the declaring module. Constrained parameters and
+explicitly generic local closures are diagnosed. A generic function can still be
+passed with an expected concrete callable type or return a closure.
+
+Anonymous records are interned by their sorted field-name shape, with field
+types as ordinary type arguments. This shares matching/substitution with named
+generics, including structural parameter and return annotations containing `T`.
+It does not implement structural conversion between nominal record types.
+The bundled `Pool<T>` and `Heap<T>` are exercised on native and web; see
+`examples/sloppy_core/entities.dewy` for stable handles and queued game events.
+
 Comprehensions build arrays or dictionaries eagerly:
 
 ```dewy
@@ -133,7 +149,7 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,015 checks and takes
+The combined Dewy/editor/shared-core gate now contains 1,057 checks and takes
 about a minute on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model

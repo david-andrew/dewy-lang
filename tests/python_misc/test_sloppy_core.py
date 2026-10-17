@@ -38,6 +38,68 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'generic-records': '''Box:type=<T>[value:T history:array<T>=[]]
+Pair:type=<A B>[left:A right:B]
+Words:type=Box<array<string>>
+Values:type=<T>(array<T>)
+Container:type=<T>(Box<Values<T>>)
+let global:Box<int64>=[value=42]
+main=()=>{
+    let a=Box<string>["hello"] let b:Box<int64>=[value=20]
+    let pair=Pair<Box<string> Box<int64>>[a b]
+    let words:Words=[value=["one" "two"]]
+    let copy=words words.value[0]="changed"
+    let inferred=Box(22)
+    let aliased=Container<string>[value=["aliased"]]
+    let values:Values<int64>=[42]
+    if aliased.value[0] not=? "aliased" or values[0] not=? 42 return 2
+    return if pair.left.value =? "hello" and copy.value[0] =? "one" and words.history.length =? 0
+        and pair.right.value+inferred.value =? 42 and global.value =? 42 42 else 1
+}''',
+    'generic-typed-functions': '''first=<T>(xs:array<T>):>T|none=>if xs.length >? 0 xs[0] else none
+identity=<T>(x:T):>T=>x
+empty=<T>():>array<T>=>[]
+combine=<T>(a:T b:T=a):>T=>a+b
+count_down=<T>(n:T acc:T):>T=>if n <=? 0 acc else count_down(n-1 acc+n)
+main=()=>{
+    let a=first([42 10]) let b=first(["yes"])
+    let items=identity<array<dict<string int64>>>([["answer"->42]])
+    let no_values=empty<string>()
+    let typed:((x:int64):>int64)=identity
+    return if a =? 42 and b =? "yes" and items[0]["answer"] =? 42 and no_values.length =? 0
+        and typed(42) =? 42 and combine(21) =? 42 and combine<string>(b="b" a="a") =? "ab"
+        and count_down(4 0) =? 10 42 else 1
+}''',
+    'generic-library-containers': '''Enemy:type=[name:string health:int64]
+main=()=>{
+    let enemies:Pool<Enemy>=[]
+    let first=enemies.add(Enemy["one" 42]) let second=enemies.add(Enemy["two" 20])
+    let copy=enemies
+    enemies[first].health-=10
+    if copy[first].health not=? 42 or enemies[first].health not=? 32 return 1
+    if not enemies.remove(first) or enemies.has(first) or not enemies.has(second) return 2
+    let third=enemies.add(Enemy["three" 30])
+    if enemies.has(first) or enemies[second].name not=? "two" or enemies[third].health not=? 30 return 3
+    let removed=enemies.get(first)
+    if removed isnt? none return 4
+    let pending:Heap<string>=[]
+    pending.push("later" 2.0) pending.push("first" 1.0)
+    let saved=pending
+    if pending.pop() not=? "first" or pending.pop() not=? "later" or saved.peek() not=? "first" return 5
+    let arrays:Pool<array<string>>=[] let handle=arrays.add(["hello"])
+    let original=arrays let updated=arrays[handle] updated[0]="changed" arrays[handle]=updated
+    return if original[handle][0] =? "hello" and arrays[handle][0] =? "changed" 42 else 6
+}''',
+    'generic-type-defaults': '''empty=<T>():>array<T>=>[]
+fallback=<T>(values:array<T>=empty<T>()):>array<T>=>values
+Bucket:type=<T>[values:array<T>=empty<T>()]
+main=()=>{let one=fallback<int64>() let two=Bucket<string>[] let three:Bucket<int64>
+return if one.length =? 0 and two.values.length =? 0 and three.values.length =? 0 42 else 1}''',
+    'generic-return-closure': '''keep=<T>(value:T):>(():>T)=>()=>value
+main=()=>{let original=[42] let retained=keep(original) original[0]=1
+let value=retained() value[0]=3 return if retained()[0] =? 42 and original[0] =? 1 42 else 1}''',
+    'generic-structural-result': '''swap=<T U>(a:T b:U):>[x:U y:T]=>[x=b y=a]
+main=()=>{let result=swap(42 "hello") return if result.x =? "hello" and result.y =? 42 42 else 1}''',
     'generic-function': '''twice=(x)=>x+x
 main=()=>if twice(21) =? 42 and twice(1.25) =? 2.5 42 else 1''',
     'default-argument': 'add=(x y=2)=>x+y\nmain=()=>add(40)',
@@ -457,7 +519,7 @@ ERRORS = {
     'record-untyped-empty-array': ('main=()=>{let v=[items=[]] return 0}', 'type annotation'),
     'record-inline-duplicate': ('main=()=>{let v:[x:int64 x:int64]=[] return 0}', 'duplicate record field'),
     'record-inline-default': ('main=()=>{let v:[x:int64=42]=[] return 0}', 'named record for defaults'),
-    'record-inline-void': ('main=()=>{let v:[x:void]=[] return 0}', 'concrete value types'),
+    'record-inline-void': ('main=()=>{let v:[x:void]=[] return 0}', 'value types'),
     'record-inline-mutable-field': ('main=()=>{let v:[@x:int64]=[] return 0}', 'mutability belongs on the parameter'),
     'comprehension-mixed': ('main=()=>[loop i in [1 2] if i =? 1 "a"->2 else 3]', 'cannot mix'),
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
@@ -482,6 +544,14 @@ ERRORS = {
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
     'syntax-empty-interpolation': ('main=()=>"{}"', 'expected an expression'),
     'syntax-missing-member': ('main=()=>value.', 'expected a member name'),
+    'generic-duplicate': ('f=<T T>(x:T)=>x\nmain=()=>f(42)', 'duplicate type parameter'),
+    'generic-constraint': ('f=<T of int64>(x:T)=>x\nmain=()=>f(42)', 'constrained type parameters'),
+    'generic-empty': ('f=<>(x)=>x\nmain=()=>f(42)', 'empty type parameter'),
+    'generic-main': ('main=<T>()=>42', 'generic entry point'),
+    'generic-local': ('main=()=>{let f=<T>(x:T)=>x return f(42)}', 'generic closure'),
+    'generic-type-arity': ('main=()=>{let pool:Pool<int64 string>=[] return 42}', 'expects 1 type argument'),
+    'generic-value-type-argument': ('main=()=>{let pool:Pool<42>=[] return 42}', 'type expression'),
+    'generic-type-mismatch': ('identity=<T>(x:T):>T=>x\nmain=()=>identity<int64>("bad")', "argument 'x' expects"),
     'syntax-missing-exponent': ('main=()=>1e+', 'expected exponent digits'),
     'syntax-deep-expression': ('main=()=>'+ '(' * 300 + '42' + ')' * 300, 'nested too deeply'),
     'syntax-deep-interpolation': ('main=()=>'+ '"{' * 300 + '42' + '}"' * 300, 'nested too deeply'),
@@ -706,6 +776,55 @@ def test_core_membership(compiler, tmp_path, name, program, target, release):
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout == '42\n'
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_imported_generics(compiler, tmp_path, target, release):
+    (tmp_path / 'support.dewy').write_text('''Box:type=<T>[value:T]
+wrap=<T>(value:T):>Box<T>=>[value=value]
+identity=<T>(value:T):>T=>value
+''')
+    (tmp_path / 'other.jo').write_text('''struct Box[T]:
+    value: T
+    extra = 2
+type Nested[T] = Box[T[]]
+identity[T] = (value: T) -> T: value
+''')
+    source = tmp_path / 'main.dewy'
+    source.write_text('''import p"support.dewy" as a
+import p"other.jo" as b
+from p"support.dewy" import (Box as Package), wrap
+main=()=>{
+    let one:a.Box<int64>=a.Box<int64>[20]
+    let two=b.Box<int64>(22)
+    let nested:b.Nested<string>=[value=["one"]]
+    let words=Package<array<string>>[["yes"]]
+    let item=wrap<string>("wrapped")
+    return if one.value+b.identity<int64>(two.value) =? 42 and two.extra =? 2
+        and nested.value[0] =? "one" and item.value =? "wrapped"
+        and a.identity<array<string>>(words.value)[0] =? "yes" 42 else 1
+}
+''')
+    binary = tmp_path / 'imports'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web generic checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'imports.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
 @pytest.mark.parametrize('operator', ['//', '%'])
@@ -1087,7 +1206,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(compiler, tmp_path, name, release):
     node = shutil.which('node')

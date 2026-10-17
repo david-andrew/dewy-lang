@@ -116,7 +116,50 @@ main=()=>{
 Inline shapes work in parameters, returns, nested fields, collections, optional
 values and function types. They share type identity with inferred anonymous
 records. Named records remain distinct types; use a named declaration when fields
-need defaults. Inline fields specify concrete value types.
+need defaults. Inline fields may also refer to a generic function's type parameters.
+
+Declare type parameters before a function's parameters or a record's fields:
+
+```dewy
+first=<T>(items:array<T>):>T|none=>if items.length >? 0 items[0] else none
+Box:type=<T>[value:T]
+Values:type=<T>(array<T>)
+main=()=>{
+    let words:Values<string>=["hello" "world"]
+    let box=Box<string>["Dewy"]
+    printl(first(words))
+    printl(box.value)
+}
+```
+
+Calls normally infer the type arguments; `first<string>(words)` supplies them
+explicitly. Type applications nest, as in `Pool<Box<int64>>`, and work on imported
+names such as `models.Box<string>`. Generic type aliases wrap their definition in
+parentheses. Each concrete function/type is specialized by the compact compiler;
+this adds no universal boxed-value representation. Defaults can use the bound
+type parameters, and generic functions can return closures or structural records.
+
+This slice accepts plain type parameter names. Constraints such as `T of Bound`
+and explicitly generic local closures remain unsupported. To pass a generic
+function as a value, provide its expected callable type; explicit type arguments
+currently apply to calls and type construction.
+
+The bundled `Pool<T>` and `Heap<T>` are now available with ordinary Dewy type
+annotations. A pool stores values under stable `Handle`s; removing an entry
+invalidates its handle even when a later entry reuses the slot. A heap pops the
+value with the lowest numeric priority. Both retain independent copies, like
+arrays and dictionaries. [The entity-event example](../examples/sloppy_core/entities.dewy)
+uses them together:
+
+```sh
+python3 -m tools.core run examples/sloppy_core/entities.dewy
+```
+
+Use `pool.has(handle)` or `pool.get(handle)` when an entity may have been removed.
+`pool[handle].health -= damage` updates a record field. A custom indexed getter
+returns a value: for nested collection edits, read the value, edit it and assign
+it back to `pool[handle]`. Direct nested indexing through such a getter is not yet
+a mutable place.
 
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as

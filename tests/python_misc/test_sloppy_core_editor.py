@@ -151,6 +151,9 @@ def test_vscode_core_client(tmp_path):
     ('', 'let value:(int64|string)?=none return if value is? none 42 else 1', 'value', '(int64 | string)?'),
     ('Fn:type=(@x:int64):>void\n', 'let value:Fn=(@x:int64):>void=>{x+=1} let n:int64=41 value(@n) return n', 'value', '(@arg0: int64):>void'),
     ('bump=(@x:int64 n:int64=2):>void=>{x+=n}\n', 'let n:int64=40 bump(@n) return n', 'bump', 'bump = (@x: int64 n: int64 = …):>void'),
+    ('Box:type=<T>[text:T]\n', 'let value=Box<string>["hello"] return value.text.length', 'value', 'Box<string>'),
+    ('identity=<T>(x:T):>T=>x\n', 'return identity<int64>(42)', 'identity', 'identity = (x: int64):>int64'),
+    ('', 'let value:Pool<array<int64>>=[] return value.items.length', 'value', 'Pool<array<int64>>'),
     ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: float64):>float64'),
     ('from p"support.jo" import answer\n', 'return answer(40)', 'answer', 'answer = (x: int64 n: int64 = …):>int64'),
 ])
@@ -185,6 +188,8 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
     ('main=()=>{let values=[20 22] values.§}', {'length': 'int64', 'push': 'builtin'}, []),
     ('main=()=>{let text="hello" text.§}', {'length': 'int64'}, ['push', 'pop', 'resize']),
     ('main=()=>{let values=["a"->42] values.§}', {'length': 'int64', 'get': None}, ['slots', 'hashes', 'gone', 'ngone']),
+    ('identity=<T>(x:T):>T=>x\nmain=()=>{iden§}',
+     {'identity': 'identity = <T>(x: T):>T'}, []),
     ('helper=(@value:int64 amount:int64=2):>void=>{value+=amount}\nmain=()=>{hel§}',
      {'helper': 'helper = (@value: int64 amount: int64 = …):>void'}, []),
     ('from p"support.jo" import answer\nmain=()=>{ans§}',

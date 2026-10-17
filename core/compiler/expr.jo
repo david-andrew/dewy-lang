@@ -1006,7 +1006,7 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         return
     coerce(a, pt)
 
-default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false) -> int:
+default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false, targs: int[] = []) -> int:
     d = clone(int(nodes[kid(decl, i)].b))
     # (h: f64 = w: a default naming an earlier parameter takes that argument)
     if given.len() > 0 and not captured: subst_params(d, decl, given)
@@ -1014,6 +1014,7 @@ default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = f
     ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
+    push_type_params(decl, targs)
     if captured:
         loop j in 0.. and value in given:
             name = int(nodes[kid(decl, j)].name)
@@ -1494,7 +1495,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         is_mut = has_flag(kid(decl, i), NF_MUT)
         if a == 0:
             earlier = if dewy_call and not capture_defaults: [] else: fin
-            a = default_arg(decl, i, fns[f].ptypes[i], earlier, capture_defaults)
+            a = default_arg(decl, i, fns[f].ptypes[i], earlier, capture_defaults, fns[f].targs)
             if capture_defaults: a = capture_value(a, fns[f].ptypes[i], statements)
             fin.push(a)
             continue
@@ -1577,7 +1578,7 @@ struct_has_defaults = (si: int, depth: int) -> bool:
     struct_defaults_known[si] = has
     has
 
-dewy_record_types: {str: int} = {}
+dewy_record_shapes: {str: int} = {}
 
 dewy_record_target = (expected: int) -> int:
     target = prune(expected)
@@ -1616,23 +1617,37 @@ dewy_record_schema = (n: int, args: int[]) -> int:
             ordered[i] = ordered[i - 1]
             i -= 1
         ordered[i] = field
+    # Intern the shape once. Its field types are ordinary type arguments, so
+    # generic matching, substitution and specialization need no separate path.
     key = ""
-    loop field in ordered: key += "{int(nodes[field].name)}:{prune(ntype(field))};"
-    if let t = dewy_record_types.get(key): return t
-    decl = mk(.struct_, nodes[n].pos)
-    nodes[decl].name = i32(intern("<record>"))
-    nodes[decl].mod = ctxs[cx].mod
-    members: int[]
+    targs: int[]
     loop field in ordered:
-        member = mk(.vardecl, nodes[field].pos)
-        nodes[member].name = nodes[field].name
-        nodes[member].a = i32(type_node_of(ntype(field), nodes[field].pos))
-        members.push(member)
-    set_list(decl, members)
-    t = get_struct_inst(decl, [])
-    structs[int(types[t].st)].record_ = true
+        key += "{int(nodes[field].name)};"
+        targs.push(prune(ntype(field)))
+    decl = dewy_record_shapes.get(key) ?? 0
+    if decl == 0:
+        decl = mk(.struct_, nodes[n].pos)
+        nodes[decl].name = i32(intern("<record>"))
+        nodes[decl].mod = ctxs[cx].mod
+        add_flag(decl, NF_RECORD)
+        add_flag(decl, NF_GENERIC)
+        members: int[]
+        params: int[]
+        loop i in 0.. and field in ordered:
+            param = mk(.ident, nodes[field].pos)
+            nodes[param].name = i32(intern("__Field{i}"))
+            params.push(param)
+            member = mk(.vardecl, nodes[field].pos)
+            nodes[member].name = nodes[field].name
+            tn = mk(.tname, nodes[field].pos)
+            nodes[tn].name = nodes[param].name
+            nodes[member].a = i32(tn)
+            members.push(member)
+        set_list(decl, members)
+        set_list2(decl, params)
+        dewy_record_shapes[key] = decl
+    t = get_struct_inst(decl, targs)
     check_struct_fields(int(types[t].st))
-    dewy_record_types[key] = t
     t
 
 struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> int:
@@ -1699,8 +1714,13 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 saved = cx
                 ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
                 cx = ctxs.len() - 1
+                mark = scope_mark()
+                targs: int[]
+                loop j in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, j))
+                push_type_params(decl, targs)
                 check_expr(d, int(fields[fi].type))
                 coerce(d, int(fields[fi].type))
+                scope_reset(mark)
                 ctxs.pop()
                 cx = saved
                 fin.push(d)
@@ -2832,6 +2852,29 @@ check_call = (n: int, expected: int) -> int:
     callee = int(nodes[n].a)
     args = kids(n)
     ck = nodes[callee].kind
+    if ck == .typeapply:
+        base = int(nodes[callee].a)
+        name = int(nodes[base].name)
+        s = 0
+        mod = -1
+        if nodes[base].kind == .ident: s = lookup(name)
+        else if nodes[base].kind == .field:
+            mt = prune(check_expr(int(nodes[base].a), 0))
+            if types[mt].kind != .module: fatal(nodes[base].pos, "explicit type arguments on a method are not supported; call its function directly")
+            mod = int(types[mt].mod)
+            s = module_lookup(mod, name)
+        if s != 0 and syms[s].kind == .fns:
+            targs: int[]
+            loop arg in kids(callee): targs.push(resolve_type(arg))
+            saved = call_targs
+            call_targs = targs
+            nodes[n].a = i32(base)
+            r = call_by_name(n, name, mod, args, expected, false)
+            call_targs = saved
+            return r
+        t = prune(resolve_type(int(nodes[callee].c)))
+        if types[t].kind != .struct_: fatal(nodes[callee].pos, "this type does not have a record constructor")
+        return struct_ctor(n, t, int(structs[int(types[t].st)].decl), args, expected)
     if ck == .ident:
         if id_len == 0: id_len = intern("len")
         if args.len() == 1 and int(nodes[callee].name) == id_len:
@@ -4657,6 +4700,7 @@ check_expr = (n: int, expected: int) -> int:
             add_flag(n, NF_INBOUNDS)
             return check_expr(n, expected)
         t = check_call(n, expected)
+    else if k == .typeapply: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .index:
         bt = prune(check_expr(int(nodes[n].a), 0))
         bk = types[bt].kind
