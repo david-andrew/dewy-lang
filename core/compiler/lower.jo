@@ -901,7 +901,18 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
             if not calls_leave(args[j], n, false): return true
         return false
     if nodes[n].aux != i32(int(SK.local)): return false
-    int(locals[int(nodes[n].sym)].flags) & (LF_SHARED | LF_CAPTURE | LF_MUTPARAM | LF_BYREF | LF_ALIAS) != 0
+    flags = int(locals[int(nodes[n].sym)].flags)
+    if flags & (LF_SHARED | LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return true
+    if flags & LF_MUTPARAM == 0: return false
+    # A mutable parameter may alias a caller's global. A read-only direct call
+    # cannot replace it when it writes no globals and invokes no unknown code.
+    # Keep the snapshot if a later argument can write the parameter itself.
+    if not opt_release or callee <= 0: return true
+    w = fn_writes(callee)
+    if w.all or w.globals.len() > 0: return true
+    loop j in [i + 1..args.len()):
+        if may_write_root(args[j], n): return true
+    false
 
 # A `mut` argument that is an element of an array or map (xs[i], xs[i].f) is written through
 # its address in the array's memory, which must not move or be shared while the call runs: the
@@ -3347,6 +3358,7 @@ may_write_root = (n: int, rn: int) -> bool:
         if w != 0 and same_var(w, rn): return true
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
+        if id == .fmt_struct and (glob or mutparam): return true
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
             w = write_root(kid(n, 0))
             if w != 0 and same_var(w, rn): return true
@@ -3356,12 +3368,12 @@ may_write_root = (n: int, rn: int) -> bool:
     if k == .for_ and has_flag(n, NF_MUT):
         w = write_root(int(nodes[n].a))
         if w != 0 and same_var(w, rn): return true
-    if k == .call:
+    if k == .call or (k == .pair and nodes[n].sym > 0):
         loop i in [0..nkids(n)):
             if has_flag(kid(n, i), NF_MUT):
                 w = write_root(kid(n, i))
                 if w != 0 and same_var(w, rn): return true
-        aux = int(nodes[n].aux)
+        aux = if k == .pair: 0 else: int(nodes[n].aux)
         if mwr_direct: pass
         else if aux == 1 or aux == 4:
             if glob or mutparam: return true
@@ -3386,8 +3398,9 @@ calls_leave = (n: int, rn: int, written: bool) -> bool:
     if n <= 0: return true
     k = nodes[n].kind
     if k == .lambda: return true
-    if k == .call:
-        aux = int(nodes[n].aux)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.fmt_struct)): return false
+    if k == .call or (k == .pair and nodes[n].sym > 0):
+        aux = if k == .pair: 0 else: int(nodes[n].aux)
         if aux == 1 or aux == 4: return false
         if aux == 0:
             w = fn_writes(int(nodes[n].sym))
@@ -3461,6 +3474,8 @@ fn_writes_direct = (f: int) -> FnWrites:
     if let w = fw_direct.get(f): return w
     w = FnWrites(false, [], [], [])
     if f > 0 and f < fns.len() and fns[f].body != 0: fw_scan(int(fns[f].body), w)
+    # A foreign function may call back into the program; its body is opaque.
+    if f > 0 and f < fns.len() and fns[f].decl != 0 and has_flag(int(fns[f].decl), NF_EXTERN): w.all = true
     fw_direct[f] = w
     w
 
@@ -3476,12 +3491,15 @@ fw_scan = (n: int, w: mut FnWrites):
     if k == .assign: fw_global(int(nodes[n].a), w)
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
+        # Field formatting invokes type-specific formatters selected by the
+        # checker. Treat it conservatively, including nested user formatters.
+        if id == .fmt_struct: w.all = true
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend: fw_global(kid(n, 0), w)
     if k == .for_ and has_flag(n, NF_MUT): fw_global(int(nodes[n].a), w)
-    if k == .call:
+    if k == .call or (k == .pair and nodes[n].sym > 0):
         loop i in [0..nkids(n)):
             if has_flag(kid(n, i), NF_MUT): fw_global(kid(n, i), w)
-        aux = int(nodes[n].aux)
+        aux = if k == .pair: 0 else: int(nodes[n].aux)
         if aux == 1 or aux == 4: w.all = true
         else if aux == 0 and not w.calls.contains(int(nodes[n].sym)): w.calls.push(int(nodes[n].sym))
     fw_scan(int(nodes[n].a), w)

@@ -1,0 +1,42 @@
+.........F.........F                                                     [100%]
+=================================== FAILURES ===================================
+__________ test_core_values[release-argument-borrow-later-formatter] ___________
+
+value_batches = <function value_batches.<locals>.result at 0x7f62692c1c70>
+name = 'argument-borrow-later-formatter', release = True
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-borrow-later-formatter: 121
+E         
+E       assert '121' == '42'
+E         
+E         - 42
+E         + 121
+
+tests/python_misc/test_sloppy_core.py:1803: AssertionError
+_________ test_core_value_web[release-argument-borrow-later-formatter] _________
+
+value_batches = <function value_batches.<locals>.result at 0x7f62692c1c70>
+name = 'argument-borrow-later-formatter', release = True
+
+    @pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_value_web(value_batches, name, release):
+        code, output = value_batches(name, release, 'wasm')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: argument-borrow-later-formatter: 121
+E         
+E       assert '121' == '42'
+E         
+E         - 42
+E         + 121
+
+tests/python_misc/test_sloppy_core.py:3530: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[release-argument-borrow-later-formatter]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_value_web[release-argument-borrow-later-formatter]
+2 failed, 18 passed, 1989 deselected in 2.17s

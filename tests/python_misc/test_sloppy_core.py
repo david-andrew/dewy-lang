@@ -125,6 +125,42 @@ let value=if {x+=1; x%2 =? 0} x*3 else x+1
 total+=value
 }
 return if x=?10 and total=?120 42 else 1}""",
+    'argument-borrow-global-write': '''let source:array<int64>=[20]
+replace=():>void=>{source=[99]}
+read=(value:array<int64>)=>{replace() return value[0]}
+through=(@value:array<int64>)=>read(value)
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
+    'argument-borrow-later-write': '''read=(value:array<int64> ignored:int64)=>value[0]
+through=(@value:array<int64>)=>read(value {value=[99]; 0})
+main=()=>{let source=[20] source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
+    'argument-borrow-callback-write': '''let source:array<int64>=[20]
+read=(value:array<int64> callback:(():>void))=>{callback() return value[0]}
+through=(@value:array<int64>)=>read(value ()=>{source=[99]})
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
+    'argument-borrow-formatter-write': '''let source:array<int64>=[20]
+Marker:type=[id:int64]
+__fmt=(@buf:array<uint8> value:Marker):>void=>{source[0]=99 buf.push(120 as uint8)}
+read=(value:array<int64>)=>{let text="{Marker[0]}" return value[0]}
+through=(@value:array<int64>)=>read(value)
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
+    'argument-borrow-later-formatter': '''let source:array<int64>=[20]
+Marker:type=[id:int64]
+__fmt=(@buf:array<uint8> value:Marker):>void=>{source[0]=99 buf.push(120 as uint8)}
+read=(value:array<int64> ignored:string)=>value[0]
+through=(@value:array<int64>)=>read(value "{Marker[0]}")
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
+    'argument-borrow-nested-formatter': '''let source:array<int64>=[20]
+Marker:type=[id:int64]
+str=(value:Marker):>string=>{source[0]=99 return "x"}
+read=(value:array<int64> ignored:string)=>value[0]
+through=(@value:array<int64>)=>read(value "{[item=Marker[0]]}")
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}''',
     'argument-mutable-field': """Item:type=[value:int64]
 bump=(@value:int64):>void=>{value+=22}
 main=()=>{let item=Item[20] let copy=item bump(@item.value)
@@ -1010,6 +1046,42 @@ main=()=>{let a:Values=[] a["answer"]=42 return a["answer"]}''',
     'dictionary-iteration': '''main=()=>{let a:dict<int64 int64>=[1->19 2->20]
 let sum:int64=0 loop [k v] in a {sum+=k+v} return sum}''',
     'dictionary-length': 'main=()=>{let a=["a"->1 "b"->2] return a.length+40}',
+    'dictionary-insert-absent': '''main=()=>{let values:dict<string int64>=[]
+if not values.insert_if_absent("first" 20) return 1
+if values.insert_if_absent("first" 99) return 2
+if not values.insert_if_absent("second" 22) return 3
+if values.keys() not=? ["first" "second"] return 4
+return values["first"]+values["second"]}''',
+    'dictionary-insert-copy': '''main=()=>{let values=["one"->[20]] let snapshot=values
+let incoming=[22]
+if not values.insert_if_absent("two" incoming) return 1
+incoming[0]=99
+values["one"].push(7)
+if values.insert_if_absent("one" [99]) return 2
+if snapshot.length not=? 1 or snapshot["one"] not=? [20] return 3
+if values["one"] not=? [20 7] return 4
+return snapshot["one"][0]+values["two"][0]}''',
+    'dictionary-insert-arguments': '''let calls:int64=0
+key=()=>{calls=calls*10+1 return "key"}
+value=()=>{calls=calls*10+2 return 42}
+main=()=>{let values:dict<string int64>=[]
+if not values.insert_if_absent(key() value()) or calls not=? 12 return 1
+calls=0
+if values.insert_if_absent(key() value()) or calls not=? 12 return 2
+return values["key"]}''',
+    'dictionary-insert-growth': '''main=()=>{let values:dict<int64 int64>=[]
+loop i in [0..300) {if not values.insert_if_absent(i i+1) return 1}
+let snapshot=values
+loop i in [0,2..300) {if not values.remove(i) return 2}
+loop i in [0..300) {
+let added=values.insert_if_absent(i i+42)
+if added not=? (i%2 =? 0) return 3
+if values[i] not=? (if added i+42 else i+1) return 4
+if snapshot[i] not=? i+1 return 5
+}
+let keys=values.keys()
+if keys[0] not=? 1 or keys[149] not=? 299 or keys[150] not=? 0 or keys[299] not=? 298 return 6
+return if values.length=?300 42 else 7}''',
     'records': '''Vector:type=[x:int64 y:int64]
 main=():>int64=>{let a=Vector[20 22] let b=a b.x=0 return a.x+a.y}''',
     'record-context': '''Vector:type=[x:int64 y:int64=2]
@@ -3458,7 +3530,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

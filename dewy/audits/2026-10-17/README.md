@@ -551,3 +551,66 @@ regression (**1404.40/1661.60 ms**). The shared host was busy; the results do no
 justify keeping the change. The original helper was restored exactly.
 [Focused gate](source-core/remainder-sign-focused.log),
 [runtime samples](source-core/remainder-sign-rejected.json).
+
+## Read-only calls through mutable parameters and dictionary discovery
+
+Release builds now borrow a value reached through a mutable parameter when a
+direct callee writes no globals, invokes no unknown code, and later arguments
+cannot change that parameter. Shared/captured/aliased places remain conservative,
+as do calls with mutable arguments. This reuses the existing write analysis;
+it introduces no language annotations or proof obligations.
+
+The motivating case was a dictionary passed to its read-only lookup helper.
+It previously copied the six-field map and retained/released its managed arrays
+on every call. The new lowering removes that snapshot. A focused two-million-
+lookup workload over 64 entries, half hits, improved from **63.64 to 21.25 ms**
+median thread CPU time in seven alternating pairs, about **3× faster**. The
+expected hit count is independently calculated, including boundary preflights.
+[Input source, compiler identities and samples](source-core/borrow-mut-probe.json).
+
+Checking this optimization exposed a missing implicit call in write analysis:
+custom string formatting can change a previously evaluated argument. The
+prototype's native/web release runs returned the changed array value instead of
+its snapshot. [Reproduction](source-core/borrow-mut-formatter-before.log).
+Formatting pairs now contribute their resolved calls; nested field formatting
+and foreign calls are conservatively opaque. Tests use a grown, uniquely owned
+array so literal storage cannot hide the bug. They cover direct/global/callback
+writes, later arguments and nested formatting. **24 focused checks passed in
+2.23 s**; the C-bootstrapped compiler passed **2,013 checks in 136.52 s**.
+[Focused gate](source-core/borrow-mut-focused.log),
+[full gate](source-core/borrow-mut-full.log), [build manifest](source-core/borrow-mut-build.json).
+
+Whole-application results are mixed under shared-machine load. Five wall-clock
+pairs measured baseline/candidate helpers **896.22/902.45 ms**, arrays
+**251.26/268.17 ms**, records **247.80/250.31 ms**, text **376.95/382.89 ms** and
+graph **841.16/769.88 ms**. A seven-pair thread-CPU comparison gave arrays
+**295.54/290.56 ms**, records **245.33/245.54 ms**, and graph **760.74/779.28 ms**.
+All checksums matched C. These do not establish a broad application speedup;
+the focused lookup benefit is much clearer.
+[Wall samples](source-core/borrow-mut-apps.json), [CPU samples](source-core/borrow-mut-cpu-apps.json).
+
+Seven compile pairs measured tour **95.35/73.89 ms**, physics **475.74/490.02 ms**
+and self-build **1879.87/1853.21 ms** wall time. CPU medians were **78.42/68.83**,
+**447.10/452.60** and **1748.47/1719.84 ms**. Compiler self-build stayed close to
+the baseline. [Compile samples](source-core/borrow-mut-compile.json).
+
+Dictionaries also expose `insert_if_absent(key value)`, returning whether a new
+entry was added while preserving existing values, ordering and independent
+copies. Its arguments evaluate eagerly once in order. The **102-check focused
+dictionary/membership selection passed in 4.83 s**; growth, deletion, copied
+managed values and duplicate keys are covered on native/web in both modes.
+[Focused gate](source-core/map-insert-focused.log).
+
+The graph benchmark compares the original lookup/assignment loop, insertion
+through this API, and insertion with dictionary/queue capacity reserved. The
+first API prototype was slower because it paid the map snapshot cost on every
+visit. [Initial samples](source-core/map-insert-before-borrow.json). With the
+final compiler, five runs measured **797.70 / 821.78 / 690.45 ms** respectively,
+with C at **531.66 ms**. Reservation helps this workload; one-probe insertion
+alone is not consistently faster. C uses a different graph/map layout.
+[Final samples](source-core/map-insert-runtime.json).
+
+The application and graph benchmark tools now offer Linux `--clock thread-cpu`
+alongside default wall timing, using matching clocks in Dewy and C and recording
+the adapted harness hashes. It excludes descheduling, but frequency and cache
+contention still affect results.

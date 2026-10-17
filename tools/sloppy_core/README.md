@@ -584,3 +584,28 @@ and remainder operations, including literal power-of-two fast paths. Native/web
 debug/release checks compare 876 quotient/remainder pairs per mode with Python
 integers, spanning zero through `2^64−1` and every power-of-two divisor. Zero
 divisors fail in both modes, and signed literal/narrow-input inference is retained.
+
+Dictionaries support `insert_if_absent(key value)`, returning true only when a
+new entry was added. Existing values and insertion order are preserved; ordinary
+argument evaluation and independent value copies still apply. It combines an
+absence check and insertion without hashing/probing a missing key twice.
+`reserve(count)` on dictionaries and arrays avoids growth when the eventual
+size is known, without changing their contents.
+
+The graph-discovery benchmark compares the original lookup/assignment loop,
+`insert_if_absent`, and an additional capacity-reserving variant, all with the
+same compiler and graph. It checks small and full-run checksums against the C
+program and alternates run order. C uses a different graph/map layout, so this
+is an application comparison, not a universal map ranking:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_map /tmp/dewy-core/bin/dewy-core \
+  --samples 7 --output /tmp/map-results.json
+```
+
+`benchmark_apps` and `benchmark_map` also accept `--clock thread-cpu` on Linux.
+This measures CPU time inside the kernel on both Dewy and C, excluding time the
+thread was descheduled. The default remains elapsed wall time. Both modes retain
+process wall time and record the measured harness hashes. CPU timing still
+depends on clock frequency and shared caches; it does not make a busy host an
+isolated benchmark machine.

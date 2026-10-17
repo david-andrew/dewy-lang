@@ -404,6 +404,22 @@ is collected, while `break`, `continue` and assignment statements do not emit a
 value. `key -> value` creates dictionary entries; duplicate keys take the last
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 
+`values.insert_if_absent(key value)` adds an entry only when the key is missing
+and returns whether it was added. An existing value and its iteration position
+stay unchanged. This combines the lookup and insertion, useful for graph visits,
+deduplication and registering entities:
+
+```dewy
+let visited:dict<int64 int64>=[]
+let queue:array<int64>=[]
+if visited.insert_if_absent(7 1) {queue.push(7)}
+```
+
+Both arguments evaluate once, in order, even if the key already exists; the value
+argument is not lazy. Copies of the dictionary and inserted values remain
+independent. `values.reserve(count)` reserves capacity for a known entry count
+without adding entries or changing their order; arrays have `reserve` too.
+
 ## Loops, text and optional values
 
 Optional types use `T?`, including generic types such as `array<uint16>?`

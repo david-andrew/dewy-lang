@@ -86,6 +86,15 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
         return
     __map_add(m, k, v, h, -2 - e)
 
+# Insert only a new key, preserving an existing value and its position. Returns
+# whether an entry was added; avoids a second hash/probe after checking absence.
+insert_if_absent[K, V] = (m: mut Map[K, V], k: K, v: V) -> bool:
+    h = hash(k)
+    e = __map_probe(m, k, h)
+    if e >= 0: return false
+    __map_add(m, k, v, h, -2 - e)
+    true
+
 # the entry of k, for changing m[k] in place (m[k] += 1, m[k].push(x), m[k].hp -= 5): a missing
 # key is added, its value starting as V's zero value (or the default d, for a struct with
 # default field values)

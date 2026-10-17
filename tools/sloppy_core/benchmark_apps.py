@@ -37,6 +37,28 @@ def prepare_source(name: str, directory: Path) -> Path:
     return source
 
 
+def prepare_clock(directory: Path, clock: str) -> dict[str, str]:
+    """Use the same kernel clock in Dewy and C, retaining the original sources."""
+    harness = directory / 'benchmark_harness.jo'
+    c_header = (APPS / 'harness.h').read_text()
+    if clock == 'thread-cpu':
+        if platform.system() != 'Linux':
+            raise RuntimeError('Thread CPU timing currently requires Linux')
+        timer = '''clock = () -> int:
+    ts: (int, int)
+    if syscall(228, 3, &ts) != 0: panic("thread CPU clock unavailable")
+    ts.0 * 1000000000 + ts.1'''
+        original = harness.read_text()
+        if original.count('clock = () -> int: time_ns()') != 1 or c_header.count('CLOCK_MONOTONIC') != 1:
+            raise RuntimeError('Benchmark clocks changed; update the thread CPU adaptation')
+        harness.write_text(original.replace('clock = () -> int: time_ns()', timer))
+        c_header = c_header.replace('CLOCK_MONOTONIC', 'CLOCK_THREAD_CPUTIME_ID')
+    elif clock != 'wall':
+        raise ValueError(f'Unknown kernel clock: {clock}')
+    (directory / 'harness.h').write_text(c_header)
+    return {'dewy': digest(harness), 'c': digest(directory / 'harness.h')}
+
+
 def run(command: list, env: dict) -> tuple[str, float]:
     started = time.perf_counter()
     result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True,
@@ -56,7 +78,7 @@ def execute(binary: Path, count: int, env: dict) -> tuple[int, dict]:
 
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
-            cc: str, count: int | None = None) -> dict:
+            cc: str, count: int | None = None, clock: str = 'wall') -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = '1'
     result = {
@@ -67,6 +89,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             ['git', 'diff', '--binary', 'HEAD'], cwd=ROOT)).hexdigest(),
         'load_average_start': os.getloadavg(),
         'samples': samples,
+        'kernel_clock': clock,
         'warmups_per_binary': 1,
         'core_flags': ['--release'],
         'emission_workers': 1,
@@ -79,7 +102,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'workloads': {},
         'limits': ['Native 64-bit host; warm filesystem caches; one build per binary.',
                    'C graph uses flat edges and a handwritten map; Dewy uses per-node arrays and an insertion-ordered map.',
-                   'Kernel times exclude input generation; wall times include the complete process.'],
+                   'Kernel times exclude input generation; wall times include the complete process.',
+                   'Thread CPU timing excludes descheduling, but CPU frequency and cache contention still matter.'],
     }
     for label, compiler in compilers.items():
         identity = {'path': str(compiler), 'sha256': digest(compiler)}
@@ -91,7 +115,9 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         work = Path(directory)
         for name in workloads:
             source = prepare_source(name, work)
-            c_source = APPS / f'{name}.c'
+            result['measured_harness_sha256'] = prepare_clock(work, clock)
+            c_source = work / f'{name}.c'
+            shutil.copy2(APPS / c_source.name, c_source)
             binaries = {label: work / f'{name}-{label}' for label in [*compilers, 'c']}
             builds = {}
             for label, compiler in compilers.items():
@@ -131,7 +157,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'median_wall_seconds': {label: statistics.median(row['wall_seconds'] for row in rows)
                                         for label, rows in measured.items()},
             }
-            print(name + ': ' + ', '.join(f'{label} {ms:.2f} ms' for label, ms in medians.items()), flush=True)
+            print(name + f' ({clock} kernel): ' + ', '.join(
+                f'{label} {ms:.2f} ms' for label, ms in medians.items()), flush=True)
     result['load_average_end'] = os.getloadavg()
     return result
 
@@ -144,11 +171,13 @@ if __name__ == '__main__':
     cli.add_argument('--samples', type=positive, default=5)
     cli.add_argument('--count', type=positive, help='Override the input size for every selected workload')
     cli.add_argument('--cc', default='cc')
+    cli.add_argument('--clock', choices=['wall', 'thread-cpu'], default='wall')
     cli.add_argument('--output', type=Path, required=True)
     options = cli.parse_args()
     compilers = {}
     if options.baseline:
         compilers['baseline'] = options.baseline.resolve(strict=True)
     compilers['candidate'] = options.compiler.resolve(strict=True)
-    report = measure(compilers, options.workloads or list(COUNTS), options.samples, options.cc, options.count)
+    report = measure(compilers, options.workloads or list(COUNTS), options.samples, options.cc,
+                     options.count, options.clock)
     options.output.write_text(json.dumps(report, indent=2) + '\n')
