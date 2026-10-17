@@ -22,6 +22,37 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'dictionary-optional-payload': '''main=()=>{
+let values:dict<int64 int64?>=[1->none 2->42]
+if values.get(1) is? none or values.get(3) isnt? none return 1
+if values.get(1) =? none or values.get(3) not=? none return 2
+let empty=values.get(1) let present=values.get(2) let missing=values.get(3)
+if empty is? none or present is? none or missing isnt? none return 3
+let inner_empty=empty let inner_present=present
+if inner_empty isnt? none or inner_present is? none return 4
+return inner_present}''',
+    'dictionary-optional-managed-payload': '''main=()=>{
+let values:dict<int64 array<int64>?>=[1->none 2->[20 22]]
+let found=values.get(2) let empty=values.get(1)
+if found is? none or empty is? none return 1
+let inner=found let absent=empty
+if inner is? none or absent isnt? none return 2
+let saved=inner
+inner[0]=99 values.clear()
+return saved[0]+saved[1]}''',
+    'generic-optional-wrapper': '''Optional:type=int64?
+wrap=<T>(value:T):>T?=>value
+read=(value:Optional?):>int64=>{
+if value is? none return 1
+let inner=value
+if inner is? none return 20
+return inner
+}
+main=()=>{
+let empty:Optional=none let value:Optional=22
+let wrapped:Optional?=empty
+return if read(wrapped)=?20 and read(none)=?1
+read(wrap<Optional>(empty))+read(wrap<Optional>(value)) else 2}''',
     'dictionary-presence-forms': '''main=()=>{
 let values=[1->0 2->42]
 if values.get(1) is? none or values.get(3) isnt? none return 1

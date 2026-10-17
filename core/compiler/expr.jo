@@ -158,6 +158,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .array and tk == .fixed and n != 0 and fixed_literal_ok(n, to): return true
     if tk == .opt:
         if fk == .none_lit: return true
+        if type_eq(from, int(types[to].elem)): return true
         if fk == .opt: return type_eq(int(types[from].elem), int(types[to].elem)) or tkind(int(types[from].elem)) == .var
         return can_coerce(n, from, int(types[to].elem))
     if fk == .null_ and (tk == .ptr or tk == .cfn): return true
@@ -325,6 +326,11 @@ coerce = (n: int, target: int) -> int:
     if tk == .opt:
         if fk == .none_lit:
             nodes[n].type = i32(to)
+            return n
+        # T may itself be optional: wrapping it must preserve a present none.
+        # A bare none above still means the outer optional is absent.
+        if type_eq(from, int(types[to].elem)):
+            wrap_conv(n, .opt, to)
             return n
         if fk == .opt:
             if tkind(int(types[from].elem)) == .var:

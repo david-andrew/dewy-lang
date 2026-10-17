@@ -535,6 +535,23 @@ a presence lookup without constructing the optional value. `is?`, `isnt?`,
 `=?` and `not=?` keep their usual meaning, argument order and custom key callbacks.
 Calls that use the returned value or supply a default still retrieve it.
 
+For a dictionary whose values are optional, `get` adds an outer optional: a
+missing key returns outer `none`, while a present key can hold inner `none`.
+After checking the lookup result, bind its payload to check the stored value:
+
+```dewy
+let settings:dict<string int64?>=["limit"->none]
+let found=settings.get("limit")
+if found isnt? none {
+    let limit=found
+    if limit is? none printl("limit is present but unset")
+}
+```
+
+This also works for generic functions returning `T?` when `T` is optional.
+A bare `none` means the outer optional is absent; wrapping an already-typed
+optional value preserves it as a present payload.
+
 Dictionaries compare by their key/value associations, ignoring insertion order,
 capacity and removed entries. This also holds when they are nested inside other
 values. Their hashes follow the same rule, so dictionaries can be set members

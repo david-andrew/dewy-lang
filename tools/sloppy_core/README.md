@@ -372,6 +372,13 @@ Five paired fresh-build CPU ratios are neutral: tour 0.992, Dunes 0.995 and
 self-compilation 1.006; no compilation-speed improvement is claimed.
 See `map-presence-*` for samples, compiler identities and validation.
 
+An already-typed optional can now be wrapped as the payload of another optional.
+This repairs generic `T -> T?` returns when `T` is itself optional, including
+dictionary `get`: a missing key and a present value of `none` remain distinct.
+Managed payload copies remain independent. The independent C gate passes 3,356
+checks in 69.79 seconds; this is a correctness fix with no speedup claim.
+See `nested-optionals-*` for the validation record.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
