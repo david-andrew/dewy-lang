@@ -640,3 +640,26 @@ latency is effectively unchanged: physics builds 349.93/349.16 ms, paddle
 306.50/308.22 ms, compiler self-build 1365.10/1377.14 ms. This change is retained
 for its simpler scalar lowering and generated-program improvement, not as a
 compiler-speed claim.
+
+## Practical string literals
+
+`strings-build.json` and `strings-full-tests.log` record the independent C
+bootstrap and 933 checks passing in 71.31 seconds. The fast frontend now accepts
+raw strings, triple single/double quotes, raw triple quotes, four-digit and
+braced Unicode scalar escapes, standard control escapes and escaped newlines.
+Multiline whitespace is preserved. Unicode escapes are static hex scalars;
+surrogates, out-of-range values, expressions and oversized literals are diagnosed.
+
+Interpolation extent scanning is shared between tokenization and construction;
+it skips nested raw/triple strings and line comments. Editor masking follows
+these forms, including comments at the cursor and Dewy's block interpolations.
+The inherited numeric-interpolation warning is suppressed for Dewy because it
+suggested implementation-language brace escaping for valid Dewy source.
+
+The gate exercises literal content on native/web in debug/release, malformed
+inputs and unsaved editor completions. The new language-guide example also runs
+and prints `He said "go".` and `Next frame: 42` without warnings.
+`strings-compile.json` records five alternating samples before/after the frontend
+and editor changes (before the final warning-only correction). Results are mixed
+within desktop variability: tour 56.80/64.07 ms, physics check 145.49/135.59 ms,
+physics release build 357.36/352.55 ms. No latency gain is claimed.

@@ -58,7 +58,10 @@ implemented. Calls/indexing use adjacent brackets. Literal coefficients such as
 elements. Other multiplication uses `*`. Multiline infix expressions are supported;
 `[40\n-2\n4]` remains three elements. This deterministic syntax is an intentional
 subset of the old ambiguity resolver, not a promise to preserve every historical
-juxtaposition case. Unsupported string escapes and excessive nesting are diagnosed.
+juxtaposition case. Raw and triple-quoted strings, standard escapes and static Unicode scalar
+escapes are supported. Multiline whitespace is preserved. Interpolation scanning
+handles nested strings and comments; unsupported escapes and excessive nesting
+are diagnosed.
 
 `match value { name:Type => body <literal> => body _ => fallback }` supports
 exact union member types (including aliases), concrete types, optional payloads,
@@ -129,7 +132,7 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 862 checks and takes
+The combined Dewy/editor/shared-core gate now contains 933 checks and takes
 about a minute on the development machine, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model

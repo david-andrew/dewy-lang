@@ -462,6 +462,16 @@ ERRORS = {
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
     'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
     'unpack-nested': ('main=()=>{let [[x]]= [[42]] return x}', 'nested or annotated'),
+    'syntax-unicode-short': ('main=()=>"\\u123"', 'Unicode escape'),
+    'syntax-unicode-bad-digit': ('main=()=>"\\u12G4"', 'hexadecimal'),
+    'syntax-unicode-empty': ('main=()=>"\\u{}"', 'hex digits'),
+    'syntax-unicode-surrogate': ('main=()=>"\\uD800"', 'scalar value'),
+    'syntax-unicode-low-surrogate': ('main=()=>"\\u{DFFF}"', 'scalar value'),
+    'syntax-unicode-range': ('main=()=>"\\u{110000}"', 'scalar value'),
+    'syntax-unicode-huge': ('main=()=>"\\u{FFFFFFFFFFFFFFFFFFFF}"', 'too many digits'),
+    'syntax-unicode-expression': ('main=()=>"\\u{41+1}"', 'hexadecimal'),
+    'syntax-raw-unterminated': ('main=()=>r"missing', 'unterminated string'),
+    'syntax-triple-unterminated': ('main=()=>"""missing', 'unterminated string'),
     'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
     'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
@@ -602,6 +612,51 @@ main=():>void=>{
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.split() == ['-50', '550', '9.75', '18446744073709551615', 'true', '8', '42']
+
+
+@pytest.mark.parametrize(('name', 'expression', 'expected'), [
+    ('constant-interpolation', '"answer {42}"', 'answer 42'),
+    ('unicode', '"\\u0065\\u0301 \\u{1F642} \\U00E9"', 'é 🙂 é'),
+    ('unicode-boundaries', '"\\u0000\\u007F\\u0080\\u07FF\\u0800\\uD7FF\\uE000\\u{10FFFF}"', '\x00\x7f\x80߿ࠀ\ud7ff\ue000\U0010ffff'),
+    ('raw', 'r"C:\\new\\textures\\{sprite}.png"', 'C:\\new\\textures\\{sprite}.png'),
+    ('raw-single', "r'\\u1234 {value}'", '\\u1234 {value}'),
+    ('triple', '"""first "quoted"\n  second"""', 'first "quoted"\n  second'),
+    ('triple-single', "'''first 'quoted'\n  second'''", "first 'quoted'\n  second"),
+    ('raw-triple', 'r"""first \\n {value}\n  second"""', 'first \\n {value}\n  second'),
+    ('nested-raw', '"answer {r"{value}".length}"', 'answer 7'),
+    ('nested-triple', '"answer {"""hello "there"!""".length}"', 'answer 14'),
+    ('interpolation-comment', '"answer { # " } ignored\n 42}"', 'answer 42'),
+    ('continued-line', '"first\\\nsecond"', 'firstsecond'),
+    ('controls', '"\\a\\b\\v\\f\\0".length', '5'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_string_literals(compiler, tmp_path, name, expression, expected, target, release):
+    source = tmp_path / f'{name}.dewy'
+    source.write_text(f'main=():>void=>{{printl({expression})}}')
+    binary = tmp_path / name
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    if name == 'constant-interpolation':
+        assert 'warning:' not in built.stderr, built.stderr
+
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web string checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / f'{name}.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout == (expected + '\n').encode('utf-8')
 
 
 @pytest.mark.parametrize('operator', ['//', '%'])

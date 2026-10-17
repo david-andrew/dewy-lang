@@ -192,6 +192,15 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
     ('main=()=>{let café=[value=42] let text="🙂 {café.§}" return 42}', {'value': 'int64'}, []),
     ('main=()=>42 # ans§', {}, ['printl', 'struct']),
     ('main=()=>{let text="ans§" return 42}', {}, ['printl', 'struct']),
+    ('main=()=>{let text=r"{ans§}" return 42}', {}, ['printl']),
+    ('main=()=>{let text="""line "quoted"\nans§""" return 42}', {}, ['printl']),
+    ("main=()=>{let text='''line 'quoted'\nans§''' return 42}", {}, ['printl']),
+    ('main=()=>{let text=r"""line\n{ans§}""" return 42}', {}, ['printl']),
+    ('main=()=>{let text="\\u{12§}" return 42}', {}, ['printl']),
+    ('main=()=>{let point=[x=42] let text="""answer {point.§}""" return 42}', {'x': 'int64'}, []),
+    ('main=()=>{let point=[x=42] let text="{r"{literal}"} {point.§}" return 42}', {'x': 'int64'}, []),
+    ('main=()=>{let text="{ # ans§\n42}" return 42}', {}, ['printl']),
+    ('main=()=>{let point=[x=42] let text="{{point.§}}" return 42}', {'x': 'int64'}, []),
 ])
 def test_dewy_completions(tmp_path, text, wanted, absent):
     compiler = os.environ.get('DEWY_CORE_COMPILER')

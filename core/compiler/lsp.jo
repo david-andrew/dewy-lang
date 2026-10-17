@@ -1366,7 +1366,7 @@ name_end = (text: str, off: int) -> int:
 
 # for each cursor position in text up to b: 1 if it is inside a string or a comment (not in a
 # string's {interpolations}), the text read from its start as the lexer reads it
-str_mask = (text: str, b0: int) -> u8[]:
+str_mask = (text: str, b0: int, dewy: bool = false) -> u8[]:
     b = max(0, min(b0, len(text)))
     m: u8[]
     m.resize(b + 1)
@@ -1377,13 +1377,13 @@ str_mask = (text: str, b0: int) -> u8[]:
             loop e < len(text) and text[e] != '\n': e += 1
             loop k in [i + 1..min(e, b) + 1): m[k] = 1
             i = e
-        else if ide_str_start(text, i): i = ide_str_end(text, i, m)
+        else if ide_str_start(text, i): i = ide_str_end(text, i, m, 0, dewy)
         else: i += 1
     m
 
 # is off inside a comment or a string (outside its {interpolations})?
-in_comment_or_str = (text: str, off: int) -> bool:
-    m = str_mask(text, off)
+in_comment_or_str = (text: str, off: int, dewy: bool = false) -> bool:
+    m = str_mask(text, off, dewy)
     m[m.len() - 1] != 0
 
 no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
@@ -1412,7 +1412,7 @@ on_completion = (id: int, params: int) -> int:
     if d < 0: return lsp_reply(id, "null")
     text = docs[d].text
     off = req_off(d, params)
-    if in_comment_or_str(text, off): return lsp_reply(id, no_items)
+    if in_comment_or_str(text, off, ends_with(docs[d].path, ".dewy")): return lsp_reply(id, no_items)
     a = name_start(text, off)
     b = name_end(text, off)
     prefix = text[a..off)

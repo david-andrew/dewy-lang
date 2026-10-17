@@ -248,13 +248,16 @@ ide_mark = (m: mut u8[], i: int, v: u8):
 # the end of the string literal at i (after its closing quote), read as the lexer does; marks (by
 # offset, as far as it reaches): 1 where a cursor would be inside the string, not in the code
 # of one of its {interpolations}
-ide_str_end = (src: str, i0: int, marks: mut u8[]) -> int:
+ide_str_end = (src: str, i0: int, marks: mut u8[], nesting: int = 0, dewy: bool = false) -> int:
     n = len(src)
+    if nesting >= 256:
+        loop j in [i0..min(n + 1, marks.len())): ide_mark(marks, j, 1)
+        return n
     i = i0
     raw = src[i] == 'r'
     if raw: i += 1
     q = src[i]
-    triple = q == '"' and i + 2 < n and src[i + 1] == '"' and src[i + 2] == '"'
+    triple = i + 2 < n and src[i + 1] == q and src[i + 2] == q
     i += 1
     if triple:
         ide_mark(marks, i, 1)
@@ -268,15 +271,21 @@ ide_str_end = (src: str, i0: int, marks: mut u8[]) -> int:
             if c == '\\' and not raw:
                 ide_mark(marks, i + 1, 1)
                 i += 2
+                if i < n and src[i] == '{{' and (src[i - 1] == 'u' or src[i - 1] == 'U'):
+                    loop i < n and src[i] != '}}':
+                        ide_mark(marks, i, 1)
+                        i += 1
+                    ide_mark(marks, i, 1)
+                    i += 1
                 continue
             if triple:
-                if c == '"' and i + 2 < n and src[i + 1] == '"' and src[i + 2] == '"':
+                if c == q and i + 2 < n and src[i + 1] == q and src[i + 2] == q:
                     ide_mark(marks, i + 1, 1)
                     ide_mark(marks, i + 2, 1)
                     return i + 3
             else if c == q: return i + 1
             if not raw and c == '{{':
-                if i + 1 < n and src[i + 1] == '{{':
+                if not dewy and not ends_with(ide_doc, ".dewy") and i + 1 < n and src[i + 1] == '{{':
                     ide_mark(marks, i + 1, 1)
                     i += 2
                     continue
@@ -284,16 +293,15 @@ ide_str_end = (src: str, i0: int, marks: mut u8[]) -> int:
         else:
             if c == '{{': depth += 1
             else if c == '}}': depth -= 1
-            else if c == '"' or c == '\'':
-                # (a string in an interpolation: to its quote)
-                i += 1
-                loop i < n and src[i] != c:
+            else if c == '#':
+                loop i < n and src[i] != '\n':
                     ide_mark(marks, i, 1)
-                    if src[i] == '\\':
-                        ide_mark(marks, i + 1, 1)
-                        i += 1
                     i += 1
                 ide_mark(marks, i, 1)
+                continue
+            else if ide_str_start(src, i):
+                i = ide_str_end(src, i, marks, nesting + 1, dewy)
+                continue
         i += 1
     ide_mark(marks, n, 1)
     n

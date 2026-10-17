@@ -4323,7 +4323,7 @@ check_expr = (n: int, expected: int) -> int:
                 if nodes[part].kind != .pair: continue
                 e = int(nodes[part].a)
                 # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
-                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and brace_before(nodes[e].pos):
+                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not ends_with(files[pos_file(nodes[e].pos)].path, ".dewy") and brace_before(nodes[e].pos):
                     warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
                 check_expr(e, 0)
                 finalize_literal(e)

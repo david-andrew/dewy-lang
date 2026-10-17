@@ -152,6 +152,28 @@ loop i in 0.. and character in "café 🙂" {
 
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. Interpolation uses `{expression}` inside a string.
+Single or double quotes support escapes and interpolation. Unicode escapes use
+four hexadecimal digits (`"\u00E9"`) or one to six inside braces
+(`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
+`10FFFF` are errors. Braced escapes currently accept hex literals, not expressions.
+
+Prefix a string with `r` to keep backslashes and braces literally. Three matching
+quotes allow embedded single quotes and multiline text; whitespace is preserved,
+including leading/trailing newlines. Raw triple-quoted strings combine both:
+
+```dewy
+let path = r"assets\textures\{name}.png"
+let caption = """He said "go".
+Next frame: {42}"""
+let pattern = r'''\w+\{item\}'''
+printl(caption)
+```
+
+Standard escapes include `\n`, `\r`, `\t`, `\0`, `\a`, `\b`, `\v`, `\f`,
+backslash, quotes and braces. A backslash immediately followed by a newline
+continues the string without that newline. Interpolations can contain nested
+strings, blocks and line comments.
+
 Use `bytes(text)` for explicit UTF-8 bytes; binary literals such as `0x"ff00"`
 also produce bytes. `$include_bytes(p"asset.png") as image` embeds an asset at
 compile time, including for web builds.
