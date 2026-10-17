@@ -111,7 +111,7 @@ source directory; rerun with `-k <case-name>` for a single-case reproducer. Each
 case has its own module globals, and returned values/output are checked per case.
 String output retains carriage returns and other control characters. The string
 compiler-warning check keeps its own build. Process failures and build failures
-fail the batch. Exact-number and stepped-range panic checks share builds but execute each selected
+fail the batch. Exact-number, range and bounds panic checks share builds but execute each selected
 case in a fresh process, retaining its own exit status and diagnostic. Compiler
 diagnostic, editor, watch and game integration checks keep their dedicated processes.
 

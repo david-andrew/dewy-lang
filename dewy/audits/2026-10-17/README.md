@@ -171,3 +171,26 @@ physics 328.07/339.41 ms and compiler self-build 1,299.18/1,300.80 ms wall time.
 CPU medians were 63.01/55.54, 323.81/333.66 and 1,279.58/1,286.11 ms. The mixed
 differences do not establish an overall compile-time improvement.
 [Complete compile samples](source-core/stepped-range-compile.json).
+
+## Keep bounds checks when a range variable changes
+
+A range's internal counter remains valid when its user-visible variable is
+reassigned, but the latter no longer proves that an array access is in bounds.
+The lowering now requires a stable loop variable before removing checks or
+propagating its nonnegative range into nested loops. Array-path hoisting remains
+available independently. Arithmetic on positive words no longer counts as a
+nonnegative proof because a sum or product can wrap. Nested stepped loops are
+excluded from unit-step assumptions.
+
+The previous compiler returned an unchecked value for a one-element array after
+`i=values.length`; the isolated [regression](source-core/loop-bounds-before.log)
+records that failure. Checks now cover reassignment, references, record fields,
+a prior valid read, nested starts, overflow and descending steps. They share
+error-case builds and keep independent executions/results.
+
+The focused gate passed **100 checks in 4.08 s**. A fresh C bootstrap passed
+**1,739 checks in 57.67 s**. Whole-suite times vary with other desktop workloads;
+this is a correctness change, not a claimed overall performance improvement.
+[Focused gate](source-core/loop-bounds-focused.log),
+[full gate](source-core/loop-bounds-full.log),
+[build manifest](source-core/loop-bounds-build.json).

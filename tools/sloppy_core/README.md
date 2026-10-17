@@ -419,7 +419,7 @@ exhaustion; zero steps panic. Combined stepped loops, slicing and membership
 remain unsupported. See the language guide and the October 17 audit for the
 fresh 1,703-check bootstrap gate and measured lowering/compilation comparisons.
 
-The combined Dewy/editor/shared-core gate now contains 1,608 checks and takes
+The combined Dewy/editor/shared-core gate now contains over 1,700 checks and takes
 roughly one to one-and-a-half minutes locally, including compiler processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

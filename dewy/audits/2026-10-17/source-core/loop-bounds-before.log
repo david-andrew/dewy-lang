@@ -1,0 +1,49 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_core_optimizer_bounds[debug-native-counter-end] _____________
+
+error_batches = <function error_batches.<locals>.result at 0x7f03b7576560>
+body = 'let values=[42] loop i in [0..values.length) {i=values.length printl(values[i])}'
+target = 'native', release = False
+
+    @pytest.mark.parametrize('body', [
+        '''let values=[42] let index:int64=0
+    if values[index] >? 0 and values[index] <? 100 {index=-1}
+    printl"{values[index]}"''',
+        '''let values=[42]
+    if values[0] >? 0 and values[0] <? 100 {values.clear()}
+    printl"{values[0]}"''',
+        '''let values:array<int64>=[] let skip=args().length >? 0
+    if not skip and values[0] >? 0 {printl"unreachable"}
+    printl"{values[0]}"''',
+        '''let values=[42]
+    loop i in [0..2) {
+        if values[0] >? 0 and values[0] <? 100 {values.clear()}
+    }''',
+        'let values=[42] loop i in [0..values.length) {i=values.length printl(values[i])}',
+        'let values=[42] loop i in [0..values.length) {i=-1 printl(values[i])}',
+        'let values=[42] loop i in [0..values.length) {let change=(@x:int64)=>{x=1} change(@i) printl(values[i])}',
+        'let record=[values=[42]] loop i in [0..record.values.length) {i=1 printl(record.values[i])}',
+        'let values=[42] loop i in [0..values.length) {printl(values[i]) i=1 printl(values[i])}',
+        'let values=[42] loop i in [0..values.length) {loop j in [0..values.length) {j=1 printl(values[j])} printl(values[i])}',
+        'let values=[42] loop i in [0..1) {i=-1 loop j in [i..values.length) {printl(values[j])}}',
+        'let values=[42] loop i in [0..1) {loop j in [i+9223372036854775807+1..values.length) {printl(values[j])}}',
+        'let values=[42] loop i in [0..values.length) {loop j in [0,-1..-2] {printl(values[j])} printl(values[i])}',
+    ], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration',
+            'counter-end', 'counter-negative', 'counter-reference',
+            'counter-record-field', 'counter-after-read', 'counter-nested',
+            'counter-nested-start', 'counter-overflowed-start', 'counter-descending'])
+    @pytest.mark.parametrize('target', ['native', 'wasm'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_optimizer_bounds(error_batches, body, target, release):
+        ran = error_batches('bounds', body, release, target)
+>       assert ran.returncode != 0, ran.stdout + ran.stderr
+E       AssertionError: -1
+E         
+E       assert 0 != 0
+E        +  where 0 = CompletedProcess(args=[PosixPath('/tmp/pytest-of-david/pytest-439/errors-native-debug0/batch'), '0'], returncode=0, stdout='-1\n', stderr='').returncode
+
+tests/python_misc/test_sloppy_core.py:2036: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_optimizer_bounds[debug-native-counter-end]
+1 failed, 1627 deselected in 0.47s

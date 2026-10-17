@@ -1320,13 +1320,14 @@ def error_batches(compiler, tmp_path_factory, request):
             continue
         family = {'test_core_bigint_errors': 'bigint',
                   'test_core_rational_errors': 'rational',
-                  'test_core_stepped_range_errors': 'range'}.get(item.originalname)
+                  'test_core_stepped_range_errors': 'range',
+                  'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['body'] if family == 'range' else params['expression']
+        expression = params['body'] if family in ('range', 'bounds') else params['expression']
         case = family, expression
-        if family == 'range':
+        if family in ('range', 'bounds'):
             sources[case] = f'main=():>void=>{{{expression}}}'
         else:
             sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
@@ -2015,30 +2016,23 @@ printl"{values[0]}"''',
 loop i in [0..2) {
     if values[0] >? 0 and values[0] <? 100 {values.clear()}
 }''',
-], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration'])
+    'let values=[42] loop i in [0..values.length) {i=values.length printl(values[i])}',
+    'let values=[42] loop i in [0..values.length) {i=-1 printl(values[i])}',
+    'let values=[42] loop i in [0..values.length) {let change=(@x:int64)=>{x=1} change(@i) printl(values[i])}',
+    'let record=[values=[42]] loop i in [0..record.values.length) {i=1 printl(record.values[i])}',
+    'let values=[42] loop i in [0..values.length) {printl(values[i]) i=1 printl(values[i])}',
+    'let values=[42] loop i in [0..values.length) {loop j in [0..values.length) {j=1 printl(values[j])} printl(values[i])}',
+    'let values=[42] loop i in [0..1) {i=-1 loop j in [i..values.length) {printl(values[j])}}',
+    'let values=[42] loop i in [0..1) {loop j in [i+9223372036854775807+1..values.length) {printl(values[j])}}',
+    'let values=[42] loop i in [0..values.length) {loop j in [0,-1..-2] {printl(values[j])} printl(values[i])}',
+], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration',
+        'counter-end', 'counter-negative', 'counter-reference',
+        'counter-record-field', 'counter-after-read', 'counter-nested',
+        'counter-nested-start', 'counter-overflowed-start', 'counter-descending'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_optimizer_bounds(compiler, tmp_path, body, target, release):
-    source = tmp_path / 'bounds.dewy'
-    source.write_text(f'main=():>void=>{{{body}}}')
-    binary = tmp_path / 'bounds'
-    flags = ['--release'] if release else []
-    if target == 'wasm':
-        flags += ['--target', 'wasm']
-    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
-                           capture_output=True, text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    command = [binary]
-    if target == 'wasm':
-        node = shutil.which('node')
-        if not node:
-            pytest.skip('Node is needed for web bounds checks')
-        scripts = Scripts()
-        scripts.feed(binary.with_suffix('.html').read_text())
-        runner = tmp_path / 'bounds.cjs'
-        runner.write_text('\n'.join(scripts.parts))
-        command = [node, runner]
-    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+def test_core_optimizer_bounds(error_batches, body, target, release):
+    ran = error_batches('bounds', body, release, target)
     assert ran.returncode != 0, ran.stdout + ran.stderr
     assert 'out of bounds' in ran.stdout + ran.stderr
 

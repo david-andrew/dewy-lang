@@ -3602,6 +3602,13 @@ harmless_call = (n: int) -> bool:
         if tk == .fn_ or tk == .cfn: return false
     true
 
+# A loop's control counter stays in range, but its user-visible variable can
+# be reassigned, passed by reference, or changed by a closure in the body.
+stable_loop_index = (l: int) -> bool:
+    if l < 0: return false
+    fl = int(locals[l].flags)
+    fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) == 0 and not is_shared(l)
+
 # e is an integer expression that is never negative
 is_nonneg = (e: int) -> bool:
     if e == 0: return false
@@ -3609,9 +3616,8 @@ is_nonneg = (e: int) -> bool:
     if k == .int_lit: return nodes[e].ival >= 0
     if k == .ident and nodes[e].aux == i32(int(SK.local)): return nonneg_locals.contains(int(nodes[e].sym))
     if k == .intrinsic and (nodes[e].aux as IN) == .len: return true
-    if k == .binary:
-        op = nodes[e].op as Tok
-        if op == .plus or op == .star: return is_nonneg(int(nodes[e].a)) and is_nonneg(int(nodes[e].b))
+    # Positive operands alone do not prove a word-sized sum/product is
+    # nonnegative: it can overflow. Keep the check without a range proof.
     false
 
 # A, if e is A.len() / len(A) for an array local A that is never modified, else -1
@@ -3656,7 +3662,7 @@ same_value = (x: int, y: int) -> bool:
 # the array locals whose length bounds the range `it`
 range_bounds_arrays = (it: int) -> int[]:
     out: int[]
-    if not is_nonneg(int(nodes[it].a)) or has_flag(it, NF_INCLUSIVE): return out
+    if not is_nonneg(int(nodes[it].a)) or has_flag(it, NF_INCLUSIVE) or has_flag(it, NF_STEP): return out
     hi = int(nodes[it].b)
     if hi == 0: return out
     a = fixed_array_len(hi)
@@ -3698,7 +3704,7 @@ other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
     if k == .for_:
         inner = ok
         it = int(nodes[n].a)
-        if int(nodes[n].aux) == 0 and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
+        if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
         return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
     loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
         if other_index_of(c, a, ok, seen): return true
@@ -3733,8 +3739,7 @@ gen_stepped_for = (s: int):
     signed = types[lt].sign
     less = if signed: Op.lts else: Op.ltu
     greater = if signed: Op.gts else: Op.gtu
-    lf = int(locals[l].flags)
-    direct = lf & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF) == 0 and not is_shared(l) and locals[l].offset < 0 and tsize(lt) == 8
+    direct = stable_loop_index(l) and locals[l].offset < 0 and tsize(lt) == 8
     ctr = vreg(VI)
     if direct: ctr = int(locals[l].vreg)
     endv = vreg(VI)
@@ -3817,8 +3822,7 @@ gen_for = (s: int):
         endv = vreg(VI)
         ctr = vreg(VI)
         # (a 64-bit loop variable in a register that the body does not assign is the counter)
-        lf = int(locals[l].flags)
-        direct = lf & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF) == 0 and not is_shared(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
+        direct = stable_loop_index(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
         if direct: ctr = int(locals[l].vreg)
         open_end = false
         stmt_begin()
@@ -3839,7 +3843,7 @@ gen_for = (s: int):
         sg = types[prune(lt)].sign
         safe_arrs: int[]
         nonneg = false
-        if aux == 0 and not open_end:
+        if aux == 0 and not open_end and stable_loop_index(l):
             safe_arrs = range_bounds_arrays(int(nodes[s].a))
             nonneg = is_nonneg(int(nodes[int(nodes[s].a)].a))
         if nonneg: nonneg_locals.push(l)
@@ -4227,7 +4231,7 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
         e_mov(arr, read_place(gen_place(base, false), at))
         n = arr_len(arr)
         lv = -1
-        if key == bound_key: lv = l
+        if key == bound_key and stable_loop_index(l): lv = l
         fixed_paths.push(FixedPath(key, arr, n, lv))
         added += 1
     added
