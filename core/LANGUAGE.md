@@ -135,11 +135,47 @@ can be dictionary keys; construct them through `bigint`, keeping `_sign` and
 `_limbs` as internal representation details.
 
 This is an explicit library type. Ordinary fixed-width arithmetic does not
-automatically widen, and oversized numeric literals, rational `/`, bigint
+automatically widen, and oversized numeric literals, automatic rational promotion, bigint
 bitwise operations and power syntax are not yet implemented. The inherited
 `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
+
+## Exact fractions
+
+```dewy
+from rational import Rational, rational, parse_rational
+main=():>void=>{
+    let half=rational(1 2)
+    printl"{half+rational(1 3)}"  # 5/6
+    printl"{rational(2 3).pow(-3)}"  # 27/8
+    printl"{rational("-7/3").floor()}"  # -3
+}
+```
+
+`rational(numerator denominator)` accepts a machine integer, `BigInt`, or decimal integer text; the denominator
+defaults to one. A single string accepts an integer or `numerator/denominator`.
+`parse_rational(text)` returns `Rational|none` for invalid input, including a zero
+denominator. Decimal points and whitespace inside the string are not accepted.
+
+Values keep a positive denominator and coprime `BigInt` parts. Zero is `0/1`.
+The constructor normalizes signs and common factors. Use it to construct values;
+read `.numerator` and `.denominator` without assigning noncanonical parts directly.
+`Rational[]` defaults to zero. Interpolation prints an integer when the denominator
+is one, otherwise `numerator/denominator`.
+
+Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
+`BigInt`, and signed/unsigned machine words in either order. `//` returns a
+`BigInt` floor quotient; `%` returns a `Rational` remainder with the divisor's
+sign. `.divmod(other)` returns both. `.floor()` and `.ceil()` return `BigInt`;
+`.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return fractions. Division
+by zero, a zero denominator and negative powers of zero panic. Zero to the zeroth
+power is one. Copies are independent, and normalized values can be dictionary
+keys. Floating conversion and automatic promotion of built-in integer `/` are
+not yet supplied.
+
+[The exact-fraction example](../examples/sloppy_core/exact_rationals.dewy) computes
+harmonic sums, dice probabilities and exact time steps.
 
 ## Records and collections
 

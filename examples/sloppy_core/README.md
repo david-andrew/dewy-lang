@@ -42,6 +42,14 @@ compute 100!, choose 50 items from 100, perform signed floor division and print
 python3 -m tools.core run examples/sloppy_core/exact_integers.dewy
 ```
 
+[`exact_rationals.dewy`](exact_rationals.dewy) builds on the same integers to
+compute harmonic sums and dice probabilities as reduced fractions, with exact
+`+`, `-`, `*`, `/`, floor/remainder operations and signed powers.
+
+```sh
+python3 -m tools.core run examples/sloppy_core/exact_rationals.dewy
+```
+
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
 code are Dewy. The pinned Sloppy platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.

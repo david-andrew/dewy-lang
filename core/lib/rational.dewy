@@ -1,0 +1,156 @@
+# Exact fractions over BigInt. Reduction strategies are adapted from the old
+# library/rational.dewy; representation and error handling use the compact core.
+from bigint import BigInt, bigint, parse_bigint
+
+Rational:type=[numerator:BigInt denominator:BigInt=bigint(1)]
+
+_integer = ((value:BigInt):>BigInt=>value)
+    & ((value:int64):>BigInt=>bigint(value))
+    & ((value:uint64):>BigInt=>bigint(value))
+    & ((value:string):>BigInt=>bigint(value))
+
+_make=(numerator:BigInt denominator:BigInt):>Rational=>{
+    if denominator =? 0 panic("rational denominator must be nonzero")
+    if denominator <? 0 {numerator=-numerator denominator=-denominator}
+    if numerator =? 0 return Rational[]
+    let common=numerator.gcd(denominator)
+    return Rational[numerator=numerator//common denominator=denominator//common]
+}
+rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator)))
+    & ((text:string):>Rational=>{
+        let parsed=parse_rational(text)
+        if parsed is? none panic("invalid rational text")
+        return parsed
+    })
+
+parse_rational=(text:string):>Rational|none=>{
+    let parts=text.split("/")
+    if parts.length <? 1 or parts.length >? 2 return none
+    let numerator=parse_bigint(parts[0])
+    if numerator is? none return none
+    let denominator=bigint(1)
+    if parts.length =? 2 {
+        let parsed=parse_bigint(parts[1])
+        if parsed is? none or parsed =? 0 return none
+        denominator=parsed
+    }
+    return _make(numerator denominator)
+}
+
+_neg=(value:Rational):>Rational=>Rational[-value.numerator value.denominator]
+_add=(a:Rational b:Rational):>Rational=>{
+    if a.denominator =? b.denominator return _make(a.numerator+b.numerator a.denominator)
+    let common=a.denominator.gcd(b.denominator)
+    let left=a.denominator//common
+    let right=b.denominator//common
+    let total=a.numerator*right+b.numerator*left
+    let reduction=total.gcd(common)
+    return Rational[total//reduction left*(b.denominator//reduction)]
+}
+_sub=(a:Rational b:Rational):>Rational=>_add(a _neg(b))
+_mul=(a:Rational b:Rational):>Rational=>{
+    let left=a.numerator.gcd(b.denominator)
+    let right=b.numerator.gcd(a.denominator)
+    return Rational[(a.numerator//left)*(b.numerator//right) (a.denominator//right)*(b.denominator//left)]
+}
+reciprocal=(value:Rational):>Rational=>{
+    if value.numerator =? 0 panic("rational division by zero")
+    if value.numerator <? 0 return Rational[-value.denominator -value.numerator]
+    return Rational[value.denominator value.numerator]
+}
+_div=(a:Rational b:Rational):>Rational=>_mul(a reciprocal(b))
+_eq=(a:Rational b:Rational):>bool=>a.numerator =? b.numerator and a.denominator =? b.denominator
+_lt=(a:Rational b:Rational):>bool=>a.numerator*b.denominator <? b.numerator*a.denominator
+floor=(value:Rational):>BigInt=>value.numerator//value.denominator
+ceil=(value:Rational):>BigInt=>-((-value.numerator)//value.denominator)
+abs=(value:Rational):>Rational=>if value.numerator <? 0 _neg(value) else value
+
+pow=(value:Rational exponent:int64):>Rational=>{
+    let remaining=exponent as uint64
+    if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
+    let result=rational(1)
+    # Powers of the same reduced fraction remain coprime: no repeated GCD.
+    loop remaining >? 0 {
+        if (remaining and 1) =? 1 result=Rational[result.numerator*value.numerator result.denominator*value.denominator]
+        remaining=remaining >> 1
+        if remaining >? 0 value=Rational[value.numerator*value.numerator value.denominator*value.denominator]
+    }
+    return result
+}
+RationalDivision:type=[quotient:BigInt remainder:Rational]
+divmod=(a:Rational b:Rational):>RationalDivision=>{
+    let quotient=floor(_div(a b))
+    return RationalDivision[quotient _sub(a _mul(b rational(quotient)))]
+}
+_floordiv=(a:Rational b:Rational):>BigInt=>floor(_div(a b))
+_mod=(a:Rational b:Rational):>Rational=>divmod(a b).remainder
+
+str=(value:Rational):>string=>{
+    if value.denominator =? 1 return "{value.numerator}"
+    return "{value.numerator}/{value.denominator}"
+}
+__unary_sub__=(value:Rational):>Rational=>_neg(value)
+
+__add__ = ((a:Rational b:Rational):>Rational=>_add(a b))
+    & ((a:Rational b:BigInt):>Rational=>_add(a rational(b)))
+    & ((a:BigInt b:Rational):>Rational=>_add(rational(a) b))
+    & ((a:Rational b:int64):>Rational=>_add(a rational(b)))
+    & ((a:int64 b:Rational):>Rational=>_add(rational(a) b))
+    & ((a:Rational b:uint64):>Rational=>_add(a rational(b)))
+    & ((a:uint64 b:Rational):>Rational=>_add(rational(a) b))
+
+__sub__ = ((a:Rational b:Rational):>Rational=>_sub(a b))
+    & ((a:Rational b:BigInt):>Rational=>_sub(a rational(b)))
+    & ((a:BigInt b:Rational):>Rational=>_sub(rational(a) b))
+    & ((a:Rational b:int64):>Rational=>_sub(a rational(b)))
+    & ((a:int64 b:Rational):>Rational=>_sub(rational(a) b))
+    & ((a:Rational b:uint64):>Rational=>_sub(a rational(b)))
+    & ((a:uint64 b:Rational):>Rational=>_sub(rational(a) b))
+
+__mul__ = ((a:Rational b:Rational):>Rational=>_mul(a b))
+    & ((a:Rational b:BigInt):>Rational=>_mul(a rational(b)))
+    & ((a:BigInt b:Rational):>Rational=>_mul(rational(a) b))
+    & ((a:Rational b:int64):>Rational=>_mul(a rational(b)))
+    & ((a:int64 b:Rational):>Rational=>_mul(rational(a) b))
+    & ((a:Rational b:uint64):>Rational=>_mul(a rational(b)))
+    & ((a:uint64 b:Rational):>Rational=>_mul(rational(a) b))
+
+__truediv__ = ((a:Rational b:Rational):>Rational=>_div(a b))
+    & ((a:Rational b:BigInt):>Rational=>_div(a rational(b)))
+    & ((a:BigInt b:Rational):>Rational=>_div(rational(a) b))
+    & ((a:Rational b:int64):>Rational=>_div(a rational(b)))
+    & ((a:int64 b:Rational):>Rational=>_div(rational(a) b))
+    & ((a:Rational b:uint64):>Rational=>_div(a rational(b)))
+    & ((a:uint64 b:Rational):>Rational=>_div(rational(a) b))
+
+__eq__ = ((a:Rational b:Rational):>bool=>_eq(a b))
+    & ((a:Rational b:BigInt):>bool=>_eq(a rational(b)))
+    & ((a:BigInt b:Rational):>bool=>_eq(rational(a) b))
+    & ((a:Rational b:int64):>bool=>_eq(a rational(b)))
+    & ((a:int64 b:Rational):>bool=>_eq(rational(a) b))
+    & ((a:Rational b:uint64):>bool=>_eq(a rational(b)))
+    & ((a:uint64 b:Rational):>bool=>_eq(rational(a) b))
+
+__lt__ = ((a:Rational b:Rational):>bool=>_lt(a b))
+    & ((a:Rational b:BigInt):>bool=>_lt(a rational(b)))
+    & ((a:BigInt b:Rational):>bool=>_lt(rational(a) b))
+    & ((a:Rational b:int64):>bool=>_lt(a rational(b)))
+    & ((a:int64 b:Rational):>bool=>_lt(rational(a) b))
+    & ((a:Rational b:uint64):>bool=>_lt(a rational(b)))
+    & ((a:uint64 b:Rational):>bool=>_lt(rational(a) b))
+
+__floordiv__ = ((a:Rational b:Rational):>BigInt=>_floordiv(a b))
+    & ((a:Rational b:BigInt):>BigInt=>_floordiv(a rational(b)))
+    & ((a:BigInt b:Rational):>BigInt=>_floordiv(rational(a) b))
+    & ((a:Rational b:int64):>BigInt=>_floordiv(a rational(b)))
+    & ((a:int64 b:Rational):>BigInt=>_floordiv(rational(a) b))
+    & ((a:Rational b:uint64):>BigInt=>_floordiv(a rational(b)))
+    & ((a:uint64 b:Rational):>BigInt=>_floordiv(rational(a) b))
+
+__mod__ = ((a:Rational b:Rational):>Rational=>_mod(a b))
+    & ((a:Rational b:BigInt):>Rational=>_mod(a rational(b)))
+    & ((a:BigInt b:Rational):>Rational=>_mod(rational(a) b))
+    & ((a:Rational b:int64):>Rational=>_mod(a rational(b)))
+    & ((a:int64 b:Rational):>Rational=>_mod(rational(a) b))
+    & ((a:Rational b:uint64):>Rational=>_mod(a rational(b)))
+    & ((a:uint64 b:Rational):>Rational=>_mod(rational(a) b))

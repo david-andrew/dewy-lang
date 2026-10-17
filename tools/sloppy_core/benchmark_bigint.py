@@ -10,6 +10,7 @@ import shutil
 import statistics
 import subprocess
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 
 from tools.sloppy_core.benchmark_apps import digest, execute, run
@@ -34,6 +35,13 @@ KERNELS = {
         if word is? none panic("checksum conversion")
         checksum=(checksum+word)%1000000007
     }''',
+    'harmonic100': '''loop i in [0..count) {
+        let sum=rational(0)
+        loop n in [1..101) {sum+=rational(1 n)}
+        let word=((sum.numerator+sum.denominator)%1000000007).to_int64()
+        if word is? none panic("checksum conversion")
+        checksum=(checksum+word)%1000000007
+    }''',
     'decimal2048': '''loop i in [0..count) {
         let text="{decimal}"
         let parsed=bigint(text)
@@ -48,17 +56,22 @@ def expected(name: str, count: int) -> int:
         return math.factorial(150) * count % MODULUS
     if name == 'division512':
         return sum(sum(divmod(NUMERATOR + i, DIVISOR)) for i in range(count)) % MODULUS
+    if name == 'harmonic100':
+        value = sum(Fraction(1, n) for n in range(1, 101))
+        return (value.numerator + value.denominator) * count % MODULUS
     return len(str(TEXT_VALUE)) * count % MODULUS
 
 
-def measure(compilers: dict[str, Path], samples: int, count: int) -> dict:
+def measure(compilers: dict[str, Path], samples: int, count: int, workloads: list[str]) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = '1'
     report = {
         'platform': platform.platform(),
         'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'compilers': {label: {'path': str(path), 'sha256': digest(path),
-                             'library_sha256': digest(path.parent.parent / 'lib/bigint.dewy')}
+                             'library_sha256': digest(path.parent.parent / 'lib/bigint.dewy'),
+                             'rational_sha256': digest(path.parent.parent / 'lib/rational.dewy')
+                             if 'harmonic100' in workloads else None}
                       for label, path in compilers.items()},
         'samples': samples, 'count': count, 'warmups': 1, 'flags': ['--release'],
         'load_average_start': os.getloadavg(),
@@ -73,9 +86,11 @@ def measure(compilers: dict[str, Path], samples: int, count: int) -> dict:
         work = Path(directory)
         shutil.copy2(ROOT / 'tools/sloppy_core/benchmark_harness.jo', work / 'harness.jo')
         report['sources']['harness.jo'] = (work / 'harness.jo').read_text()
-        for name, kernel in KERNELS.items():
+        for name in workloads:
+            kernel = KERNELS[name]
+            imports = 'from rational import rational\n' if name == 'harmonic100' else ''
             source = work / f'{name}.dewy'
-            source.write_text(f'''from bigint import bigint
+            source.write_text(f'''{imports}from bigint import bigint
 from p"harness.jo" import size_argument
 main=():>void=>{{
     let count=size_argument(args() {count})
@@ -128,6 +143,7 @@ if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('compiler', type=Path)
     cli.add_argument('--baseline', type=Path)
+    cli.add_argument('--workload', choices=KERNELS, action='append', dest='workloads')
     cli.add_argument('--samples', type=positive, default=7)
     cli.add_argument('--count', type=positive, default=2000)
     cli.add_argument('--output', type=Path, required=True)
@@ -135,6 +151,7 @@ if __name__ == '__main__':
     selected = {'candidate': options.compiler.resolve(strict=True)}
     if options.baseline:
         selected = {'baseline': options.baseline.resolve(strict=True), **selected}
-    result = measure(selected, options.samples, options.count)
+    result = measure(selected, options.samples, options.count,
+                     options.workloads or ['factorial150', 'division512', 'decimal2048'])
     options.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result['median_kernel_ms'], indent=2))

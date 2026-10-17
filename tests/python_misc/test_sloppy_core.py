@@ -8,6 +8,7 @@ import shutil
 import struct
 import subprocess
 import zlib
+from fractions import Fraction
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -43,6 +44,53 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'rational-parse': '''from rational import rational, parse_rational, Rational
+main=()=>{
+loop text in ["" "+" "-" "1/" "/2" "1/0" "1/2/3" " 1" "1 /2" "1.5" "１２"] {
+    if parse_rational(text) isnt? none return 1
+}
+let half=rational("-0002/-0004")
+if "{half}" not=? "1/2" or "{rational(0 -3)}" not=? "0" return 2
+return if half =? rational("1" "2") and Rational[] =? 0 and rational("+42") =? 42 42 else 3
+}''',
+    'rational-mixed': '''from rational import rational
+from bigint import bigint
+main=()=>{
+let half=rational(1 2) let wide:uint64=18446744073709551615
+if half+2 not=? 2+half or half+bigint(2) not=? rational(5 2) return 1
+if half+wide not=? rational("36893488147419103231" "2") return 2
+if wide-half not=? rational("36893488147419103229" "2") return 3
+if half*wide not=? wide*half or 2/half not=? 4 or half/2 not=? rational(1 4) return 4
+if half//2 not=? 0 or 2//half not=? 4 or half%2 not=? half or 2%half not=? 0 return 5
+return if half <? 1 and 0 <? half and half >=? half and half <=? half and 1 >? half 42 else 6
+}''',
+    'rational-powers': '''from rational import rational
+main=()=>{
+if rational(-2 3).pow(-3) not=? rational(-27 8) return 1
+if rational(-2 3).pow(4) not=? rational(16 81) return 2
+if rational(0).pow(0) not=? 1 or rational(0).pow(7) not=? 0 return 3
+if rational(1).pow(-9223372036854775808) not=? 1 return 4
+if rational(-1).pow(-9223372036854775808) not=? 1 return 5
+if rational(-1).pow(9223372036854775807) not=? -1 return 6
+return if rational(-7 3).floor() =? -3 and rational(-7 3).ceil() =? -2
+    and rational(7 3).floor() =? 2 and rational(7 3).ceil() =? 3 42 else 7
+}''',
+    'rational-copies-and-keys': '''from rational import rational
+main=()=>{
+let a=rational(2 3) let b=a let values=[a a]
+values[0]+=1 values[1]*=2
+if a not=? b or values[0] not=? rational(5 3) or values[1] not=? rational(4 3) return 1
+let keys=[a->42 rational(0)->1]
+return if keys[rational(-4 -6)] =? 42 and keys[rational(0 -17)] =? 1 42 else 2
+}''',
+    'rational-lifetime': '''from rational import rational
+work=():>void=>{
+let a=rational("123456789012345678901234567890" "9876543210123456789")
+loop i in [1..12) {let value=(a+i)/rational(i 3) let parts=value.divmod(rational(2 7))
+let text="{parts.remainder}" if text.length =? 0 panic("missing fraction")}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+return if alloc_count() =? before 42 else 1}''',
     'bigint-parse': '''from bigint import bigint, parse_bigint
 main=()=>{
 loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if parse_bigint(text) isnt? none return 1}
@@ -922,8 +970,99 @@ def test_core_bigint_errors(compiler, tmp_path, expression, diagnostic, target, 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_bigint_example(compiler, tmp_path, target, release):
-    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/exact_integers.dewy'
+def test_core_rational_arithmetic(compiler, tmp_path, target, release):
+    values = [(0, 1), (0, -13), (1, 1), (-1, 1), (1, 2), (-1, 2), (2, -3),
+              (-2, -3), (4, 6), (10**50, 10**25), (2**127-1, 2**96+1), (-2**63, 2**64-1)]
+    pairs = [(a, b) for a in values for b in values if b[0]]
+    rng = random.Random(42027)
+    for _ in range(96):
+        parts = [rng.getrandbits(rng.choice([32, 64, 128, 256])) * rng.choice([-1, 1]) or 1
+                 for _ in range(4)]
+        pairs.append((tuple(parts[:2]), tuple(parts[2:])))
+    (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b} {c} {d}' for (a, b), (c, d) in pairs))
+    source = tmp_path / 'fractions.dewy'
+    source.write_text('''from rational import rational
+main=():>void=>{
+let input=$include_bytes(p"cases.txt") as string|none
+if input is? none panic("invalid test data")
+loop line in input.split("\n") {
+    let fields=line.split(" ")
+    let a=rational(fields[0] fields[1]) let b=rational(fields[2] fields[3])
+    let parts=a.divmod(b)
+    if a//b not=? parts.quotient or a%b not=? parts.remainder panic("division operators disagree")
+    if b*parts.quotient+parts.remainder not=? a panic("division reconstruction")
+    printl"{a+b}|{a-b}|{a*b}|{a/b}|{parts.quotient}|{parts.remainder}|{a <? b}|{a =? b}|{a.floor()}|{a.ceil()}|{a.pow(3)}"
+}
+}
+''')
+    expected = []
+    for left, right in pairs:
+        a, b = Fraction(*left), Fraction(*right)
+        expected.append('|'.join(map(str, [a+b, a-b, a*b, a/b, a//b, a%b]))
+                        + f'|{str(a < b).lower()}|{str(a == b).lower()}'
+                        + f'|{math.floor(a)}|{math.ceil(a)}|{a**3}')
+    binary = tmp_path / 'fractions'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web rational checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'fractions.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('expression, diagnostic', [
+    ('rational(1 0)', 'rational denominator must be nonzero'),
+    ('rational(1)/rational(0)', 'rational division by zero'),
+    ('rational(1)//0', 'rational division by zero'),
+    ('rational(1)%0', 'rational division by zero'),
+    ('rational(0).pow(-1)', 'rational division by zero'),
+    ('rational("1/0")', 'invalid rational text'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_rational_errors(compiler, tmp_path, expression, diagnostic, target, release):
+    source = tmp_path / 'invalid.dewy'
+    source.write_text(f'from rational import rational\nmain=():>void=>{{printl"{{{expression}}}"}}')
+    binary = tmp_path / 'invalid'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web rational checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'invalid.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0
+    assert diagnostic in ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('example', ['exact_integers', 'exact_rationals'])
+def test_core_exact_example(compiler, tmp_path, target, release, example):
+    source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{example}.dewy'
     binary = tmp_path / 'exact'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -943,6 +1082,15 @@ def test_core_bigint_example(compiler, tmp_path, target, release):
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
+    if example == 'exact_rationals':
+        harmonic = sum(Fraction(1, n) for n in range(1, 11))
+        chance = 45 * Fraction(1, 6)**2 * Fraction(5, 6)**8
+        quotient, remainder = divmod(Fraction(-7, 3), Fraction(2, 5))
+        assert ran.stdout.splitlines() == [f'First ten harmonic terms: {harmonic}',
+                                          f'Exactly two sixes in ten rolls: {chance}',
+                                          'Reciprocal cube of 2/3: 27/8', 'Sixty exact time steps: 1',
+                                          f'Floor quotient: {quotient}; remainder: {remainder}']
+        return
     quotient, remainder = divmod(-123456789012345678901234567890, 9876543210987654321)
     assert ran.stdout.splitlines() == [f'100! = {math.factorial(100)}',
                                       f'Ways to choose 50 of 100: {math.comb(100, 50)}',
@@ -1875,7 +2023,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

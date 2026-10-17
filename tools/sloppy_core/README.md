@@ -228,8 +228,29 @@ integer example took a median 91.84 ms (92.26 ms before cleanup); tour builds
 were 85.06/82.22 ms. These small differences do not establish a compilation
 speed change. See `bigint-compile.json`.
 
-The combined Dewy/editor/shared-core gate now contains 1,288 checks and took
-73 seconds in the latest development run, including separate compiler
+The bundled `rational.dewy` builds reduced exact fractions over `BigInt`, with
+ordinary record/operator protocols and no compiler changes. It adapts the old
+rational library's denominator-GCD addition and cross-cancellation multiplication,
+and avoids repeated GCDs when raising a reduced fraction to a power. Signed
+powers include the full `int64` exponent range; division by zero is a runtime
+error. Parsing, formatting, checked construction, floor/remainder operations,
+independent copies and dictionary keys are supported. Integer `/` still needs an
+explicit rational operand; no automatic fixed-width promotion is implied.
+
+Native/web debug/release differential checks compare 216 fraction pairs with
+Python's `Fraction`, including random parts up to 256 bits. The executable
+`exact_rationals.dewy` example covers harmonic sums and exact dice probabilities.
+The numeric benchmark's `--workload harmonic100` measures 2,000 sums of the first
+100 harmonic terms: seven warmed runs gave a 585.26 ms median. Checksums are
+validated independently with Python fractions, and measured compiler/library
+identities and all raw samples are in `rational-runtime.json`. This is a first
+runtime measurement, not a speed comparison with another rational library.
+Seven warmed release builds of the fraction example took a median 63.96 ms
+(`rational-compile.json`). The full 1,340-check gate passes with this library;
+the unchanged compiler was independently C-bootstrapped at the bigint checkpoint.
+
+The combined Dewy/editor/shared-core gate now contains 1,340 checks and took
+68 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a
