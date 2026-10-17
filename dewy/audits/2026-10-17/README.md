@@ -540,3 +540,14 @@ recreates the generated GPU program, and preserves the running frame counter.
 The focused check passed in **4.15 s** on the busy development host.
 [Reload gate](source-core/shader-watch.log). This exercises actual rendered colors
 and resource replacement rather than matching generated shader text.
+
+## Discarded remainder-sign simplification
+
+A smaller arithmetic trial selected a strict remainder sign test from the
+divisor's sign, removing the separate zero comparison. It passed **28 arithmetic
+checks in 5.54 s**, including native/web signed/unsigned boundaries and zero
+divisors. Five paired runs showed no text gain (**402.28/403.92 ms**) and a helper
+regression (**1404.40/1661.60 ms**). The shared host was busy; the results do not
+justify keeping the change. The original helper was restored exactly.
+[Focused gate](source-core/remainder-sign-focused.log),
+[runtime samples](source-core/remainder-sign-rejected.json).
