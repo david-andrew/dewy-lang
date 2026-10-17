@@ -22,6 +22,69 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sequence-value-protocol-demand': '''Box:type=<T>[value:T]
+__eq__=<T>(a:Box<T> b:Box<T>):>bool=>a.value=?b.value
+hash=<T>(box:Box<T>):>uint64=>box.value.special_hash()
+HashOnly:type=<T>[value:T]
+__eq__=<T>(a:HashOnly<T> b:HashOnly<T>):>bool=>a.value.special_equal(b.value)
+hash=<T>(box:HashOnly<T>):>uint64=>(box.value as uint64).hash()
+main=()=>{
+if [Box<int64>[20]] not=?[Box<int64>[20]] return 1
+return if hash([HashOnly<int64>[22]])=?hash([HashOnly<int64>[22]]) 42 else 2}''',
+    'sequence-value-protocol-nesting': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key, Tagged\n'+'''main=()=>{
+let a=Key[7 "first"] let b=Key[7 "other"]
+if [a] not=?[b] or [item=a] not=?[item=b] return 1
+let optional:Key?=a let other:Key?=b
+if optional not=?other return 2
+let variant:Key|string=a let second:Key|string=b
+if variant not=?second return 3
+if hash([a]) not=?hash([b]) or hash([item=a]) not=?hash([item=b]) return 4
+let keys=[[item=[a]]->42]
+if keys[[item=[b]]] not=?42 return 5
+let generic=[Tagged<string>["same" "first"]]
+return if generic=?[Tagged<string>["same" "other"]] 42 else 6}'''),
+    'sequence-value-protocol-outer-override': '''Inner:type=[value:int64]
+Outer:type=[id:int64 ignored:Inner]
+__eq__=(a:Inner b:Inner):>bool=>false
+__eq__=(a:Outer b:Outer):>bool=>a.id=?b.id
+hash=(value:Outer):>uint64=>(value.id as uint64).hash()
+main=()=>{
+let a=Outer[7 Inner[20]] let b=Outer[7 Inner[22]]
+let values=[a->42]
+return if [a]=?[b] and hash([a])=?hash([b]) values[b] else 1}''',
+    'sequence-value-protocol-equality-snapshot': '''Key:type=[value:int64]
+let current:array<Key>=[] let armed=false let calls:int64=0
+__eq__=(a:Key b:Key):>bool=>{
+calls+=1
+if armed {armed=false current.clear()}
+return a.value=?b.value
+}
+through=(values:array<Key>):>int64=>{
+if values not=?[Key[20] Key[22]] return 1
+let noise=[Key[99] Key[100]]
+return if noise.length=?2 values[0].value+values[1].value else 2
+}
+main=()=>{
+current=[Key[20] Key[22]] armed=true
+let result=through(current)
+return if current.length=?0 and calls=?2 result else 3}''',
+    'sequence-value-protocol-hash-snapshot': '''Key:type=[value:int64]
+let current:array<Key>=[] let armed=false let calls:int64=0
+hash=(key:Key):>uint32=>{
+calls+=1
+if armed {armed=false current.clear()}
+return key.value as uint32
+}
+through=(values:array<Key>):>int64=>{
+let code=hash(values)
+let noise=[Key[99] Key[100]]
+return if noise.length=?2 and code=?hash([Key[20] Key[22]])
+values[0].value+values[1].value else 1
+}
+main=()=>{
+current=[Key[20] Key[22]] armed=true
+let result=through(current)
+return if current.length=?0 and calls=?4 result else 2}''',
     'generic-instance-identity': '''A:type=[value:int64]
 B:type=[value:int64]
 identity=<T>(value:T):>T=>value

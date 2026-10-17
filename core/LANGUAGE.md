@@ -378,6 +378,16 @@ Equal keys must return the same hash; here both operations use `id` and ignore
 function, including generic keys. Ordinary keys without a custom hash use the
 library's default hashing.
 
+Equality and hashing defined in a named record's own module also apply when the
+record is nested inside an array, another record, an optional or a union. Thus
+`[Key[7 "first"]]=?[Key[7 "other"]]` is true with the definitions above, and the
+two arrays hash alike. An outer record's own protocol takes precedence over
+comparing or hashing its fields. Without a custom operation, that operation
+continues to use the fields. A callback can change global state; the value being
+compared or hashed stays independent throughout the operation.
+Only the operation being used is instantiated: a generic record can be compared
+even when its hash function does not support that particular payload type.
+
 [The bounded history example](../examples/sloppy_core/history.dewy) uses a
 [generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),
 including operator discovery through an imported type, nested edits and independent

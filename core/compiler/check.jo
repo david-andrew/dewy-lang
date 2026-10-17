@@ -3562,54 +3562,96 @@ synth_str = (s: str, pos: int) -> int:
 
 program_named = false         # (the build block gave the name)
 
-# Generated aggregate comparisons/hashes must preserve the semantic equality
-# of collections inside arrays, optionals, records or enum payloads. Resolve the
-# ordinary library functions during checking, before lowering needs them.
-value_helper_types: {int: bool} = {}
-collection_equal_fns: {int: int} = {}
-collection_hash_fns: {int: int} = {}
+# Generated helpers preserve collection semantics and record protocols defined
+# alongside their types, including inside arrays, optionals and enum payloads.
+value_helper_types: {int: int} = {}  # bit 0: equality, bit 1: hashing
+value_equal_fns: {int: int} = {}
+value_hash_fns: {int: int} = {}
 
-note_value_helpers = (t: int):
+note_value_helpers = (t: int, hashing: bool = false):
     k = tkind(t)
-    if k == .array or k == .fixed or k == .opt or k == .struct_ or k == .tuple or k == .enum_: value_helper_types[t] = true
+    if k == .array or k == .fixed or k == .opt or k == .struct_ or k == .tuple or k == .enum_:
+        bit = if hashing: 2 else: 1
+        value_helper_types[t] = (value_helper_types.get(t) ?? 0) | bit
 
-check_collection_value_members = (t0: int, seen: mut {int: bool}):
+record_value_member = (t: int, hashing: bool) -> int:
+    m = module_of_type(t)
+    if m < 0: return 0
+    protocol_names = [intern("=="), intern("__eq__")]
+    ts = [t, t]
+    if hashing:
+        protocol_names = [intern("hash")]
+        ts = [t]
+    decls: int[]
+    loop name in protocol_names: collect_module(m, name, decls)
+    own: int[]
+    loop d in decls:
+        if int(nodes[d].mod) == m and fn_sig(d).mutmask == 0: own.push(d)
+    if own.len() == 0: return 0
+    pos = nodes[int(structs[int(types[t].st)].decl)].pos
+    f = resolve_from_types(protocol_names[0], own, ts, pos, false)
+    if f == 0: return 0
+    # Helpers pass the record's address directly; conversions belong to explicit calls.
+    loop pt in fns[f].ptypes:
+        if not type_eq(pt, t): return 0
+    expected = if hashing: T_U64 else: T_BOOL
+    result = int(fns[f].ret)
+    compatible = type_eq(result, expected)
+    if hashing: compatible = can_coerce(0, result, expected)
+    if not compatible:
+        fatal(pos, "the value protocol '{name_of(protocol_names[0])}' for {type_str(t)} must return {type_str(expected)}")
+    f
+
+check_value_members = (t0: int, hashing: bool, seen: mut {int: bool}):
     t = prune(t0)
-    if seen.has(t) or has_var(t): return
-    seen[t] = true
+    key = t * 2 + int(hashing)
+    if seen.has(key) or has_var(t): return
+    seen[key] = true
     if is_value_collection_type(t):
-        if not collection_equal_fns.has(t):
-            collection_equal_fns[t] = resolve_by_types(intern("=="), [t, t], 0, true)
-            collection_hash_fns[t] = resolve_by_types(intern("hash"), [t], 0, true)
+        if hashing and not value_hash_fns.has(t):
+            value_hash_fns[t] = resolve_by_types(intern("hash"), [t], 0, true)
+        else if not hashing and not value_equal_fns.has(t):
+            value_equal_fns[t] = resolve_by_types(intern("=="), [t, t], 0, true)
         # Checking these functions discovers the member operations they use.
         # Their backing-storage representation does not need value helpers.
         return
     k = types[t].kind
+    if k == .struct_:
+        f = 0
+        if hashing:
+            if not value_hash_fns.has(t): value_hash_fns[t] = record_value_member(t, true)
+            f = value_hash_fns[t]
+        else:
+            if not value_equal_fns.has(t): value_equal_fns[t] = record_value_member(t, false)
+            f = value_equal_fns[t]
+        if f != 0: return
     if k == .array or k == .fixed or k == .opt:
-        check_collection_value_members(int(types[t].elem), seen)
+        check_value_members(int(types[t].elem), hashing, seen)
     else if k == .tuple:
-        loop i in [0..int(types[t].nargs)): check_collection_value_members(targ(t, i), seen)
+        loop i in [0..int(types[t].nargs)): check_value_members(targ(t, i), hashing, seen)
     else if k == .struct_ or k == .enum_:
         layout(t)
         si = int(types[t].st)
         if k == .struct_:
             loop i in [0..int(structs[si].nfields)):
-                check_collection_value_members(int(fields[int(structs[si].fields) + i].type), seen)
+                check_value_members(int(fields[int(structs[si].fields) + i].type), hashing, seen)
         else:
             loop i in [0..int(structs[si].nvariants)):
                 vi = int(structs[si].variants) + i
                 loop j in [0..int(variants[vi].nfields)):
-                    check_collection_value_members(int(fields[int(variants[vi].fields) + j].type), seen)
+                    check_value_members(int(fields[int(variants[vi].fields) + j].type), hashing, seen)
 
-prepare_collection_value_helpers = () -> bool:
+prepare_value_helpers = () -> bool:
     before = fns.len()
     seen: {int: bool} = {}
-    loop t in value_helper_types: check_collection_value_members(t, seen)
+    loop t, demand in value_helper_types:
+        if demand & 1 != 0: check_value_members(t, false, seen)
+        if demand & 2 != 0: check_value_members(t, true, seen)
     fns.len() > before
 
 check_pending_functions = (start: int) -> int:
     k = start
-    loop k < fns.len() or prepare_collection_value_helpers():
+    loop k < fns.len() or prepare_value_helpers():
         if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
             if fns[k].kind == FK_INIT:
                 m = int(fns[k].mod)

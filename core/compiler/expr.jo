@@ -3239,6 +3239,9 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
     if ts.len() > 0:
         tm = module_of_type(ts[ts.len() - 1])
         if tm >= 0: collect_module(tm, name, decls)
+    resolve_from_types(name, decls, ts, pos, required)
+
+resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> int:
     best = -1
     bestcost = 1 << 30
     bestb: int[]
@@ -3689,7 +3692,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         set_list2(n, refs)
     else if id == .hash:
         nargs_check(n, nargs, 1, 1, "__hash_value")
-        note_value_helpers(arg_type(args, 0, 0))
+        note_value_helpers(arg_type(args, 0, 0), true)
         r = T_U64
     else if id == .shader:
         nargs_check(n, nargs, 2, 2, "shader")

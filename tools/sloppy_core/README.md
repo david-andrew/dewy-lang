@@ -390,6 +390,18 @@ Managed payload copies remain independent. The independent C gate passes 3,356
 checks in 69.79 seconds; this is a correctness fix with no speedup claim.
 See `nested-optionals-*` for the validation record.
 
+Named records retain equality and hashing defined in their own module when
+nested in arrays, records, optionals and unions. Generated helpers call those
+protocols instead of comparing or hashing the record's representation. An outer
+protocol overrides its fields; absent operations retain field-based behavior.
+Only the requested operation is instantiated, so a generic record can be compared
+without compiling an unsupported hash specialization. The existing callback
+effect analysis keeps borrowed values alive when a protocol replaces their owner.
+Checks include generic records, nested dictionary keys, independent operations,
+unsigned narrow hash results and source-clearing callbacks. The independent C
+gate passes 3,384 checks in 68.91 seconds. Five paired fresh-build CPU ratios are
+neutral: tour 0.996, Dunes 1.003, compiler 1.009. See `value-protocol-*`.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
