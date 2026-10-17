@@ -45,7 +45,7 @@ emitting an executable. `build --time` reports compiler phase timings. Use
 `--release` for optimized programs; development builds are the default.
 
 The [VS Code extension](../dewy/vscode-dewy/README.md) supports unsaved diagnostics,
-hover and definitions. Set `dewy.core.path` to the compiler executable.
+completions, hover and definitions. Set `dewy.core.path` to the compiler executable.
 
 ## Functions and values
 

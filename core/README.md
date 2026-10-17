@@ -96,7 +96,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 814-check gate normally takes about a minute locally. It tests expected Dewy
+the earlier compiler suite. The 826-check gate normally takes about a minute locally. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -139,7 +139,7 @@ times. `SLOPPY_PAR_TIME=1` adds optimizer and emission timing.
 ## Editor
 
 The repository's [VS Code extension](../dewy/vscode-dewy/README.md) can use this
-compiler for unsaved diagnostics, hover and definitions. Set `dewy.core.path` to
+compiler for unsaved diagnostics, completions, hover and definitions. Set `dewy.core.path` to
 the built executable, for example `/tmp/dewy-core/bin/dewy-core`. An empty setting
 keeps compiler-backed features disabled. The client is dependency-free and has a
 native-server integration test in the editor gate above.

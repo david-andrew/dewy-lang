@@ -4,7 +4,7 @@ Syntax highlighting and basic editor support for the **Dewy** programming langua
 
 ## Features
 
-- Optional compact-core diagnostics, hover types and go-to-definition for saved `.dewy` paths, including unsaved edits
+- Optional compact-core diagnostics, completions, hover types and go-to-definition for saved `.dewy` paths, including unsaved edits
 - Syntax highlighting for `.dewy` files
 - Bracket matching + auto-closing (`()`, `[]`, `{}`, `""`, `''`)
 - Line comments with `#` and nestable block comments with `#{ ... }#`
@@ -26,7 +26,9 @@ On the `restart/sloppy-frontend` branch, build the experimental compiler followi
 }
 ```
 
-The toolchain needs its sibling `dewy-parse` and `../lib/`. The setting is empty
+The toolchain needs its sibling `../lib/`; the frontend runs in-process.
+`python3 -m tools.core path` builds/reuses the current checkout compiler and prints
+an executable path suitable for this setting. The setting is empty
 by default: highlighting and the existing debugger integration continue to work
 without selecting the experimental compiler. With it configured, the extension
 starts `dewy-core lsp` in a trusted workspace and sends the current editor text,
@@ -36,9 +38,17 @@ features. Compiler messages appear in Problems; transport errors appear in the
 Changing the compiler-path setting also restarts the server; clearing it stops it.
 
 The core supports a growing language subset and reports unsupported forms. Hover
-text currently uses the implementation core's type spelling. Completion, rename,
-semantic highlighting and formatting are not enabled by this client yet. The
-existing native-debugger configuration below still targets the earlier compiler.
+and completion details use Dewy spelling, including imported library signatures.
+Completions include locals, functions, record fields, collection methods, `.length`
+and types in annotations. They work on unsaved text and unfinished expressions;
+comments and literal string text suppress them, while interpolation expressions
+can complete normally. Signatures are described without checking every library
+function's body. Generic library signatures can describe types beyond the current
+Dewy annotation subset.
+
+Rename, signature help, semantic highlighting and formatting are not enabled by
+this client yet. The existing native-debugger configuration below still targets
+the earlier compiler.
 
 The client adapts Sloppy's small JSON-RPC implementation and adds no npm runtime
 dependencies. Tests run its actual transport against the native language server
@@ -84,7 +94,7 @@ See the Reference's [Debugging](https://dewy-lang.org/reference/debugging.html) 
 ## Limitations and roadmap
 
 The TextMate grammar is the fast lexical first pass. The optional core client
-adds diagnostics, hover and definitions from the compiler. The grammar cannot
+adds diagnostics, completions, hover and definitions from the compiler. The grammar cannot
 resolve overloads or distinguish every bracket use; richer semantic editor
 features can be enabled as their Dewy behavior is verified.
 

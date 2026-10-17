@@ -1389,7 +1389,8 @@ in_comment_or_str = (text: str, off: int) -> bool:
 no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
 
 # the keywords to complete: the lexer's, and the words that are keywords where they start something
-comp_words = () -> str[]:
+comp_words = (dewy: bool = false) -> str[]:
+    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "import", "from", "as", "and", "or", "xor", "not", "transmute", "type", "printl"]
     out: str[]
     loop k, _ in keywords: out.push(k)
     loop k in ["type", "from", "soa"]: out.push(k)
@@ -1458,7 +1459,7 @@ on_completion = (id: int, params: int) -> int:
         if k == IK_LOCAL or k == IK_PARAM or k == IK_FIELD or k == IK_VARIANT: so = "0"
         items.push("\{\"label\":{jq(label)},\"kind\":{comp_kind(k)},\"detail\":{jq(c[2])},\"sortText\":{jq(so + label)}\}")
     if not member and r.comps.len() > 0 or not member and items.len() == 0:
-        loop kw in comp_words():
+        loop kw in comp_words(ends_with(docs[d].path, ".dewy")):
             if seen.get(kw) == none: items.push("\{\"label\":{jq(kw)},\"kind\":14,\"sortText\":{jq("2" + kw)}\}")
     lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}")
 

@@ -175,3 +175,51 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
         assert expected in contents, contents
     finally:
         client.close()
+
+
+@pytest.mark.parametrize(('text', 'wanted', 'absent'), [
+    ('main=()=>{let answer:int64=42 return ans§}', {'answer': 'int64', 'printl': None}, ['struct', 'mut', 'while']),
+    ('main=()=>{let point=[x=42 y=2] return point.§}', {'x': 'int64', 'y': 'int64'}, ['struct']),
+    ('main=()=>{let point=[x=42] point.§', {'x': 'int64'}, []),
+    ('main=()=>{let value:in§=42 return value}', {'int64': 'type', 'string': 'type', 'array': 'array<Element>'}, ['int', 'i64', 'str', 'struct']),
+    ('main=()=>{let values=[20 22] values.§}', {'length': 'int64', 'push': 'builtin'}, []),
+    ('main=()=>{let text="hello" text.§}', {'length': 'int64'}, ['push', 'pop', 'resize']),
+    ('main=()=>{let values=["a"->42] values.§}', {'length': 'int64', 'get': None}, ['slots', 'hashes', 'gone', 'ngone']),
+    ('helper=(@value:int64 amount:int64=2):>void=>{value+=amount}\nmain=()=>{hel§}',
+     {'helper': 'helper = (@value: int64 amount: int64 = …):>void'}, []),
+    ('from p"support.jo" import answer\nmain=()=>{ans§}',
+     {'answer': 'answer = (x: int64 n: int64 = …):>int64'}, []),
+    ('main=()=>{let café=[value=42] let text="🙂 {café.§}" return 42}', {'value': 'int64'}, []),
+    ('main=()=>42 # ans§', {}, ['printl', 'struct']),
+    ('main=()=>{let text="ans§" return 42}', {}, ['printl', 'struct']),
+])
+def test_dewy_completions(tmp_path, text, wanted, absent):
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if not compiler:
+        pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
+    (tmp_path / 'support.jo').write_text('answer = (x: int, n: int = 2) -> int: x + n\n')
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>42')
+    before, after = text.split('§')
+    position = {'line': before.count('\n'),
+                'character': len(before.rsplit('\n', 1)[-1].encode('utf-16-le')) // 2}
+    client = Client(Path(compiler).resolve(strict=True), tmp_path)
+    try:
+        client.set_text(source.as_uri(), before + after, 1)
+        response = client.request('textDocument/completion', {
+            'textDocument': {'uri': source.as_uri()}, 'position': position,
+        })
+        items = {item['label']: item for item in response['items']}
+        for name, detail in wanted.items():
+            assert name in items, (name, items)
+            if detail is not None:
+                assert items[name].get('detail') == detail, items[name]
+        assert not any(name in items for name in absent), items
+        if not wanted:
+            assert not items, items
+        # Completion checks must restore the editor snapshot after inserting a sentinel.
+        diagnostics = client.set_text(source.as_uri(), 'main=()=>42', 2)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        assert source.read_text() == 'main=()=>42'
+    finally:
+        client.close()

@@ -200,6 +200,22 @@ function activate(context, vscode) {
                 return Array.isArray(result) ? result.map(location) : location(result);
             },
         }),
+        vscode.languages.registerCompletionItemProvider(selector, {
+            async provideCompletionItems(doc, pos, token) {
+                const result = await ask('textDocument/completion', at(doc, pos), token);
+                if (!result) return null;
+                const items = Array.isArray(result) ? result : result.items || [];
+                return new vscode.CompletionList(items.map((item) => {
+                    // LSP kinds are one-based; VS Code's corresponding enum is zero-based.
+                    const completion = new vscode.CompletionItem(item.label, (item.kind || 1) - 1);
+                    completion.detail = item.detail;
+                    completion.sortText = item.sortText;
+                    completion.filterText = item.filterText;
+                    completion.insertText = item.insertText;
+                    return completion;
+                }), result.isIncomplete || false);
+            },
+        }, '.'),
         vscode.commands.registerCommand('dewy.core.restartServer', restart),
         vscode.workspace.onDidChangeConfiguration((event) => {
             if (event.affectsConfiguration('dewy.core.path')) restart();

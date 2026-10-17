@@ -553,3 +553,26 @@ void/mutable field annotations receive diagnostics. The new cases run in native
 and web debug/release modes. A fresh independent C bootstrap took 17.84
 seconds; all 814 checks pass in 58.14 seconds (`inline-record-build.json`,
 `inline-record-full-tests.log`).
+
+
+## Dewy editor completions
+
+The VS Code client now exposes the native server's completions, including locals,
+functions, record fields, methods, collection `.length` and type annotations.
+Dewy keywords and primitive type spellings replace implementation-language ones.
+Function details are rendered from declarations, keeping generic names and
+Dewy parameter/default/return spelling without checking all library bodies.
+Explicit annotations also describe globals that the completion check has not
+needed to evaluate. Named aliases retain their own names.
+
+Completion tests cover unsaved and unfinished code, imported signatures, arrays,
+strings, dictionaries, type positions and UTF-16 positions within interpolation.
+Literal text/comments suppress completion. Dictionary storage fields, numeric
+tuple-field spellings and array-only string intrinsics are not offered. The
+actual dependency-free client transport checks item kinds, details, opt-in/trust,
+restart and close against the native server; desktop extension-host certification
+remains separate. Setup documentation no longer requires the removed parser
+subprocess.
+
+A fresh C bootstrap takes 17.53 seconds, and all 826 checks pass in 57.84
+seconds (`completion-build.json`, `completion-full-tests.log`).

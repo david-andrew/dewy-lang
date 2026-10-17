@@ -35,8 +35,10 @@ class Location { constructor(uri, range) { Object.assign(this, { uri, range }); 
 class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
 class MarkdownString { constructor(value) { this.value = value; } }
 class Hover { constructor(contents) { this.contents = contents; } }
+class CompletionItem { constructor(label, kind) { Object.assign(this, { label, kind }); } }
+class CompletionList { constructor(items, isIncomplete) { Object.assign(this, { items, isIncomplete }); } }
 const vscode = {
-    Position, Range, Location, Diagnostic, MarkdownString, Hover, Uri: { parse: uri },
+    Position, Range, Location, Diagnostic, MarkdownString, Hover, CompletionItem, CompletionList, Uri: { parse: uri },
     window: { createOutputChannel: () => ({ ...disposable, append: (s) => log.push(s), appendLine: (s) => log.push(s) }) },
     languages: {
         createDiagnosticCollection: () => ({
@@ -46,6 +48,9 @@ const vscode = {
         }),
         registerHoverProvider: (_selector, p) => { providers.hover = p; return disposable; },
         registerDefinitionProvider: (_selector, p) => { providers.definition = p; return disposable; },
+        registerCompletionItemProvider: (_selector, p, trigger) => {
+            assert.equal(trigger, '.'); providers.completion = p; return disposable;
+        },
     },
     commands: { registerCommand: (name, fn) => { commands.set(name, fn); return disposable; } },
     workspace: {
@@ -88,6 +93,16 @@ async function change(text, predicate) {
         assert.match(hover.contents.value, /int|i64/);
         const definitions = await providers.definition.provideDefinition(document, new Position(2, 9));
         assert.equal((Array.isArray(definitions) ? definitions[0] : definitions).range.start.line, 1);
+        const names = await providers.completion.provideCompletionItems(document, new Position(2, 15));
+        const answer = names.items.find((item) => item.label === 'answer');
+        assert.equal(answer.detail, 'int64');
+        assert.equal(answer.kind, 5); // VS Code Variable
+        assert(names.items.some((item) => item.label === 'printl'));
+        assert(!names.items.some((item) => item.label === 'struct'));
+        await change('main=()=>{let point=[x=42 y=1] return point.x}', (ds) => ds.length === 0);
+        const fields = await providers.completion.provideCompletionItems(document, new Position(0, body.lastIndexOf('.x') + 1));
+        assert.equal(fields.items.find((item) => item.label === 'x').kind, 4); // VS Code Field
+        assert.equal(fields.items.find((item) => item.label === 'y').detail, 'int64');
         await change('# 🙂\nmain=()=>unknown_editor', (ds) => ds.some((d) => d.message.includes('unknown_editor')));
         assert.equal(notices.at(-1)[0].range.start.line, 1);
         await change('main=()=>{', (ds) => ds.length > 0 && !ds[0].message.includes('unknown_editor'));
@@ -104,8 +119,9 @@ async function change(text, predicate) {
         fire('configuration', { affectsConfiguration: () => true });
         assert.equal(spawned, 2);
         assert.equal(await providers.hover.provideHover(document, new Position(0, 0)), null);
+        assert.equal(await providers.completion.provideCompletionItems(document, new Position(0, 0)), null);
         assert.equal(fs.readFileSync(source, 'utf8'), disk, 'editor integration modified the file');
-        console.log('core editor: opt-in, trust, snapshots, diagnostics, hover, definition, restart and close passed');
+        console.log('core editor: opt-in, trust, snapshots, diagnostics, hover, definition, completion, restart and close passed');
     } finally {
         client.deactivate();
         for (const item of context.subscriptions.reverse()) item.dispose();
