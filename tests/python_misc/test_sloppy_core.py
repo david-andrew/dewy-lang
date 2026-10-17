@@ -45,6 +45,48 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-bounded-remainder': '''probe=(bytes:array<uint8>):>int64=>{
+let word:int64=0
+loop round in [0..50) {loop byte in bytes {word=(word*131+(byte as int64))%1000000007}}
+return word}
+main=()=>if probe([0 127 128 255 1])=?612902960 42 else 1''',
+    'numeric-bounded-remainder-overflow': '''product=(byte:uint8):>int64=>{
+let word:int64=9223372036854775807
+word=(word*131+(byte as int64))%1000000007 return word}
+sum=(byte:uint8):>int64=>{
+let word:int64=9223372036854775607
+word=(word+(byte as int64))%1000000007 return word}
+narrow=(byte:int8):>int64=>(byte as int64)*131+255
+main=()=>{
+if product(255) not=?708828127 or sum(255) not=?708828057 return 1
+if narrow(-128)%1000000007 not=?999983494 return 2
+let high:uint64=18446744073709551615
+return if ((high as int64)*131+255)%1000000007=?124 42 else 3}''',
+    'numeric-bounded-remainder-writes': '''branch=(negative:bool):>int64=>{
+let word:int64=0 if negative {word=-5}
+word=(word*131+255)%1000000007 return word}
+compound=():>int64=>{
+let word:int64=0 word-=5
+word=(word*131+255)%1000000007 return word}
+tuple_write=():>int64=>{
+let word:int64=0 let other:int64=0
+[word other]=[-5 42]
+word=(word*131+255)%1000000007 return word+other}
+main=()=>if branch(true)=?999999607 and branch(false)=?255
+and compound()=?999999607 and tuple_write()=?999999649 42 else 1''',
+    'numeric-bounded-remainder-escape': '''change=(@value:int64):>void=>{value=-5}
+reference=():>int64=>{
+let word:int64=0 change(@word)
+word=(word*131+255)%1000000007 return word}
+closure=():>int64=>{
+let word:int64=0 let mutate=()=>{word=-5} mutate()
+word=(word*131+255)%1000000007 return word}
+main=()=>if reference()=?999999607 and closure()=?999999607 42 else 1''',
+    'numeric-bounded-remainder-once': '''let calls:int64=0
+byte=():>uint8=>{calls+=1 return 255}
+main=()=>{
+let word:int64=0 loop i in [0..20) {word=(word*131+(byte() as int64))%1000000007}
+return if calls=?20 and word>=?0 42 else 1}''',
     'array-comparison-word-boundaries': '''verify=<T>(values:array<T> different:T):>bool=>{
 loop count in [0..values.length] {
 let a=values[0..count) let b=values[0..count) let shared=a
@@ -4544,6 +4586,21 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_bounded_remainder_ir(compiler, tmp_path, target):
+    source = tmp_path / 'bounded.dewy'
+    source.write_text(CASES['numeric-bounded-remainder'])
+    flags = ['--ir', '--release', *(['--target', 'wasm'] if target == 'wasm' else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bounded', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'bounded recurrence was not emitted'
+    assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
+    assert ' = mulhs ' not in probe[0]
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

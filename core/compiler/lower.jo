@@ -1173,6 +1173,106 @@ gen_map_presence = (call: int, f: int) -> int:
     if nodes[call].c != 0: order = call_eval_order(call)
     gen_direct_call(f, kids(call), order).v
 
+# A positive floor remainder bounds its result even when its input wraps.
+# Recognize the bundled signed helper, never a user overload with this name.
+positive_modulus = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 2: return 0
+    f = int(nodes[n].sym)
+    if prune(int(fns[f].ret)) != T_INT: return 0
+    d = int(fns[f].decl)
+    if d == 0 or nodes[d].name != intern("__floor_mod"): return 0
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo": return 0
+    b = kid(n, 1)
+    if nodes[b].kind != .int_lit or has_flag(b, NF_U64) or nodes[b].ival <= 0: return 0
+    nodes[b].ival
+
+positive_bounds_fn = -1
+positive_bounds: {int: int} = {}
+
+# Upper bound of a nonnegative integer expression, or -1 when unknown.
+# Arithmetic must fit in int64: wrapping a positive product can make it negative.
+# During write collection, do not use local bounds (no circular assumptions).
+positive_bound = (n: int, use_locals: bool) -> int:
+    if n == 0: return -1
+    t = prune(ntype(n))
+    if types[t].kind != .int_: return -1
+    if not types[t].sign and int(types[t].bits) < 64: return (1 << int(types[t].bits)) - 1
+    if t != T_INT: return -1
+    k = nodes[n].kind
+    if k == .int_lit:
+        if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
+        return nodes[n].ival
+    if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
+        return positive_bounds.get(int(nodes[n].sym)) ?? -1
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)):
+        return positive_bound(int(nodes[n].a), use_locals)
+    modulus = positive_modulus(n)
+    if modulus > 0: return modulus - 1
+    if k != .binary or nodes[n].aux != 0: return -1
+    op = nodes[n].op as Tok
+    if op != .plus and op != .star: return -1
+    a = positive_bound(int(nodes[n].a), use_locals)
+    b = positive_bound(int(nodes[n].b), use_locals)
+    if a < 0 or b < 0: return -1
+    if op == .plus:
+        if a > 9223372036854775807 - b: return -1
+        return a + b
+    if b == 0: return 0
+    if a > 9223372036854775807 / b: return -1
+    a * b
+
+positive_local_write = (l: int, bound: int):
+    if l <= 0 or int(locals[l].owner) != cur_fn: return
+    fl = int(locals[l].flags)
+    skip = LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
+    if fl & LF_DECL == 0 or fl & skip != 0 or prune(int(locals[l].type)) != T_INT: return
+    old = positive_bounds.get(l) ?? bound
+    if old < 0 or bound < 0: positive_bounds[l] = -1
+    else: positive_bounds[l] = max(old, bound)
+
+positive_target_write = (n: int, bound: int):
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
+        positive_local_write(int(nodes[n].sym), bound)
+    else if nodes[n].kind == .tuple:
+        loop i in [0..nkids(n)): positive_target_write(kid(n, i), -1)
+
+# All writes must independently establish a bound. Address-taken and captured
+# locals are excluded above, so a call cannot silently invalidate the result.
+positive_writes = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    if k == .vardecl and not has_flag(n, NF_GLOBAL):
+        if nkids(n) == 0:
+            b = int(nodes[n].b)
+            positive_local_write(int(nodes[n].sym), if b == 0: 0 else: positive_bound(b, false))
+        else:
+            loop i in [0..nkids(n)): positive_local_write(int(nodes[kid(n, i)].sym), -1)
+    if k == .assign:
+        bound = -1
+        if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0: bound = positive_bound(int(nodes[n].b), false)
+        positive_target_write(int(nodes[n].a), bound)
+    positive_writes(int(nodes[n].a))
+    positive_writes(int(nodes[n].b))
+    if k != .for_:
+        positive_writes(int(nodes[n].c))
+        if k != .partial: positive_writes(int(nodes[n].d))
+    loop i in [0..nkids(n)): positive_writes(kid(n, i))
+    loop i in [0..nkids2(n)): positive_writes(kid2(n, i))
+
+gen_positive_mod = (n: int) -> int:
+    if not opt_release: return -1
+    modulus = positive_modulus(n)
+    if modulus == 0: return -1
+    if positive_bounds_fn != cur_fn:
+        positive_bounds_fn = cur_fn
+        positive_bounds.clear()
+        positive_writes(int(fns[cur_fn].body))
+    a = kid(n, 0)
+    if positive_bound(a, true) < 0: return -1
+    # The divisor is a pure literal; the dividend is evaluated exactly once.
+    e_bin(.remu, VI, gen_expr(a).v, e_iconst(modulus))
+
 gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     ret = int(fns[f].ret)
     rslot = -1
@@ -2710,6 +2810,8 @@ gen_expr = (e: int) -> Val:
         ir_set_pos(nodes[e].pos)
         aux = int(nodes[e].aux)
         if aux == 0:
+            remainder = gen_positive_mod(e)
+            if remainder >= 0: return V(remainder, false)
             if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             order: int[]
             if nodes[e].c != 0: order = call_eval_order(e)
