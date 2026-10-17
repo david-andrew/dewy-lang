@@ -230,6 +230,7 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
     ('main=()=>{let point=[x=42 y=2] return point.§}', {'x': 'int64', 'y': 'int64'}, ['struct']),
     ('main=()=>{let ratio=1/2 ratio.§}', {'numerator': 'BigInt', 'denominator': 'BigInt'}, []),
     ('main=()=>{let ratio=1/2 rat§}', {'ratio': 'Rational'}, ['$dewy_rational']),
+    ('main=()=>{let huge=18446744073709551616 hu§}', {'huge': 'BigInt'}, ['__dewy$bigint', '$dewy_bigint']),
     ('main=()=>{let point=[x=42] point.§', {'x': 'int64'}, []),
     ('main=()=>{let value:in§=42 return value}', {'int64': 'type', 'string': 'type', 'array': 'array<Element>'}, ['int', 'i64', 'str', 'struct']),
     ('main=()=>{let values=[20 22] values.§}', {'length': 'int64', 'push': 'builtin'}, []),

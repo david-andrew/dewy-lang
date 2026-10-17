@@ -88,7 +88,7 @@ dw_unsigned = (text: str, id: int) -> u64?:
 # Only modules that use a large literal import the exact-integer library. The
 # alias contains a character that cannot occur in a user identifier.
 dw_bigint_import = 0
-const DW_BIGINT_ALIAS = "__dewy$bigint"
+const DW_BIGINT_ALIAS = "$dewy_bigint"
 
 dw_finish_declarations = (declarations: int[]) -> int[]:
     if dw_bigint_import == 0: return declarations
