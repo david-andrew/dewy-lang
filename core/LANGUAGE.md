@@ -464,6 +464,10 @@ value being compared, on either side. For example, `let words:array<uint8>=[0 42
 can be followed by `words =? [0 42]` or `[0 42] =? words`. This includes nested
 arrays, optional arrays, exact integers and record elements. Out-of-range
 literals still fail, and separately constructed arrays keep their own types.
+Integer and boolean array equality recognizes shared storage immediately and
+compares narrow elements a machine word at a time. Floating-point arrays retain
+element comparisons (`NaN` is unequal to itself and signed zeros compare equal),
+and record arrays still call their value protocols even when storage is shared.
 Binary operands evaluate left to right; changing a value while evaluating
 the right operand does not change the left value already read.
 

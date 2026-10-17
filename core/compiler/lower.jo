@@ -5169,17 +5169,57 @@ helper_eq = (t: int):
         pb = e_load(VI, b, 0, ptr_size)
         na = arr_len(pa)
         brif_to(e_bin(.ne, VI, na, arr_len(pb)), fail)
-        i = vreg(VI)
-        e_mov(i, e_iconst(0))
-        blk()
-        lop()
-        brif_to(e_bin(.ges, VI, i, na), ctl - 1)
-        off = e_bin(.mul, VI, i, e_iconst(tsize(et)))
-        eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
-        e_mov(i, e_addi(i, 1))
-        br_to(ctl)
-        endc()
-        endc()
+        ek = types[prune(et)].kind
+        bits_equal = ek == .int_ or ek == .bool_
+        if bits_equal:
+            # A single scalar needs neither a word loop nor a tail loop.
+            iff(e_bin(.eq, VI, na, e_iconst(1)))
+            eq_member(et, e_addi(pa, 24), e_addi(pb, 24), fail)
+            e_mov(r, e_iconst(1))
+            br_to(fail)
+            endc()
+            # Only reflexive scalar equality: floats may contain NaN, and a
+            # record protocol may have effects even when storage is shared.
+            iff(e_bin(.eq, VI, pa, pb))
+            e_mov(r, e_iconst(1))
+            br_to(fail)
+            endc()
+        if bits_equal and tsize(et) < 8:
+            # Emit the word loop here so the equality helper stays a leaf and
+            # release builds can inline it. Finish with whole element loads.
+            bytes = e_bin(.mul, VI, na, e_iconst(tsize(et)))
+            i = vreg(VI)
+            e_mov(i, e_iconst(0))
+            blk()
+            lop()
+            brif_to(e_bin(.gts, VI, e_addi(i, 8), bytes), ctl - 1)
+            aa = e_bin(.add, VI, e_addi(pa, 24), i)
+            bb = e_bin(.add, VI, e_addi(pb, 24), i)
+            brif_to(e_bin(.ne, VI, e_load(VI, aa, 0, 8), e_load(VI, bb, 0, 8)), fail)
+            e_mov(i, e_addi(i, 8))
+            br_to(ctl)
+            endc()
+            endc()
+            blk()
+            lop()
+            brif_to(e_bin(.ges, VI, i, bytes), ctl - 1)
+            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), i), e_bin(.add, VI, e_addi(pb, 24), i), fail)
+            e_mov(i, e_addi(i, tsize(et)))
+            br_to(ctl)
+            endc()
+            endc()
+        else:
+            i = vreg(VI)
+            e_mov(i, e_iconst(0))
+            blk()
+            lop()
+            brif_to(e_bin(.ges, VI, i, na), ctl - 1)
+            off = e_bin(.mul, VI, i, e_iconst(tsize(et)))
+            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
+            e_mov(i, e_addi(i, 1))
+            br_to(ctl)
+            endc()
+            endc()
     else if k == .vec:
         loop i in [0..vec_comps(t)):
             if types[t].sign:

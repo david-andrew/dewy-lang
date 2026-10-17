@@ -402,6 +402,22 @@ unsigned narrow hash results and source-clearing callbacks. The independent C
 gate passes 3,384 checks in 68.91 seconds. Five paired fresh-build CPU ratios are
 neutral: tour 0.996, Dunes 1.003, compiler 1.009. See `value-protocol-*`.
 
+Integer and boolean array equality now recognizes shared storage and compares
+narrow elements in 8-byte chunks, finishing with whole element loads. Single
+elements take a direct comparison. Emitting these loops in the equality helper
+avoids the extra call that initially regressed tiny arrays. Floating-point and
+record comparisons keep their element semantics, including NaN, signed zero and
+custom callbacks. The independent C gate passes 3,396 checks in 48.80 seconds.
+Seven alternating release pairs on CPU 2 compare 200,000-element arrays 300 times:
+median candidate/baseline kernel CPU ratios are 0.112 for uint8, 0.243 for uint16,
+0.491 for uint32 and 0.985 for int64. Comparing shared 20,000-element integer
+storage 2,000 times drops from 43.33 ms to about 0.036 ms by removing the linear
+scan. Two million single-element comparisons show no regression (ratios
+0.959/0.953/0.987/0.943 for those four types); a shared four-element case is 0.773.
+These focused kernels mutate an element between comparisons and verify every
+result. Five fresh-build CPU pairs remain neutral: tour 0.987, Dunes 1.001,
+compiler 1.003. See `array-word-equality-*` for programs and samples.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

@@ -1,0 +1,357 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "samples": 7,
+  "warmups": 1,
+  "clock": "Linux thread CPU",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792279911888790937/bin/dewy-core",
+      "sha256": "d54bce6ebe9a644242924dfb8f2cf6a41e5ef9413ed20a06110d3130aa712800"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792280345229825082/bin/dewy-core",
+      "sha256": "17e00b9aa8acdd3a42d994ceda366fbe2a6ad497b8faad331690c8d705869511"
+    }
+  },
+  "workloads": {
+    "uint8": {
+      "source": "from p\"support.jo\" import clock\nsame=(a:array<uint8> b:array<uint8>):>bool=>a=?b\nmain=()=>{\nlet values=[loop i in [0..200000) i as uint8]\nlet other=values[..]\nlet total:int64=0 let started=clock()\nloop repetition in [0..300) {\nvalues[0]=repetition as uint8\nother[0]=repetition as uint8\nif same(values other) total+=1\n}\nlet elapsed=clock()-started\nprintl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 300,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 63140679,
+            "wall_seconds": 0.06666836910881102
+          },
+          {
+            "kernel_ns": 65510323,
+            "wall_seconds": 0.06885585107374936
+          },
+          {
+            "kernel_ns": 65357962,
+            "wall_seconds": 0.06888165604323149
+          },
+          {
+            "kernel_ns": 65601263,
+            "wall_seconds": 0.06917432392947376
+          },
+          {
+            "kernel_ns": 65305404,
+            "wall_seconds": 0.06887519301380962
+          },
+          {
+            "kernel_ns": 65034342,
+            "wall_seconds": 0.06846040301024914
+          },
+          {
+            "kernel_ns": 65757341,
+            "wall_seconds": 0.06921072502154857
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 8077108,
+            "wall_seconds": 0.010750552057288587
+          },
+          {
+            "kernel_ns": 7104525,
+            "wall_seconds": 0.009871637099422514
+          },
+          {
+            "kernel_ns": 7349740,
+            "wall_seconds": 0.010151719092391431
+          },
+          {
+            "kernel_ns": 7350619,
+            "wall_seconds": 0.009980840957723558
+          },
+          {
+            "kernel_ns": 7311574,
+            "wall_seconds": 0.009965909994207323
+          },
+          {
+            "kernel_ns": 7367610,
+            "wall_seconds": 0.009995408938266337
+          },
+          {
+            "kernel_ns": 7239067,
+            "wall_seconds": 0.009927898063324392
+          }
+        ]
+      },
+      "paired_ratio": 0.11204996159906251
+    },
+    "uint16": {
+      "source": "from p\"support.jo\" import clock\nsame=(a:array<uint16> b:array<uint16>):>bool=>a=?b\nmain=()=>{\nlet values=[loop i in [0..200000) i as uint16]\nlet other=values[..]\nlet total:int64=0 let started=clock()\nloop repetition in [0..300) {\nvalues[0]=repetition as uint16\nother[0]=repetition as uint16\nif same(values other) total+=1\n}\nlet elapsed=clock()-started\nprintl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 300,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 66236327,
+            "wall_seconds": 0.07127809803932905
+          },
+          {
+            "kernel_ns": 66410744,
+            "wall_seconds": 0.07103050500154495
+          },
+          {
+            "kernel_ns": 65956261,
+            "wall_seconds": 0.07087454106658697
+          },
+          {
+            "kernel_ns": 65728211,
+            "wall_seconds": 0.07071485498454422
+          },
+          {
+            "kernel_ns": 64079531,
+            "wall_seconds": 0.06947247392963618
+          },
+          {
+            "kernel_ns": 65574066,
+            "wall_seconds": 0.07052379299420863
+          },
+          {
+            "kernel_ns": 65611154,
+            "wall_seconds": 0.07018047198653221
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 16398188,
+            "wall_seconds": 0.02027406101115048
+          },
+          {
+            "kernel_ns": 16166434,
+            "wall_seconds": 0.019980460056103766
+          },
+          {
+            "kernel_ns": 15931340,
+            "wall_seconds": 0.019756483961828053
+          },
+          {
+            "kernel_ns": 15967687,
+            "wall_seconds": 0.019934586016461253
+          },
+          {
+            "kernel_ns": 15955878,
+            "wall_seconds": 0.01989588502328843
+          },
+          {
+            "kernel_ns": 15897855,
+            "wall_seconds": 0.019793523009866476
+          },
+          {
+            "kernel_ns": 16009703,
+            "wall_seconds": 0.01990287099033594
+          }
+        ]
+      },
+      "paired_ratio": 0.24343100267029083
+    },
+    "uint32": {
+      "source": "from p\"support.jo\" import clock\nsame=(a:array<uint32> b:array<uint32>):>bool=>a=?b\nmain=()=>{\nlet values=[loop i in [0..200000) i as uint32]\nlet other=values[..]\nlet total:int64=0 let started=clock()\nloop repetition in [0..300) {\nvalues[0]=repetition as uint32\nother[0]=repetition as uint32\nif same(values other) total+=1\n}\nlet elapsed=clock()-started\nprintl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 300,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 67042180,
+            "wall_seconds": 0.07217625400517136
+          },
+          {
+            "kernel_ns": 66309361,
+            "wall_seconds": 0.07175475894473493
+          },
+          {
+            "kernel_ns": 65970060,
+            "wall_seconds": 0.07119998696725816
+          },
+          {
+            "kernel_ns": 65329940,
+            "wall_seconds": 0.0705908079398796
+          },
+          {
+            "kernel_ns": 66693344,
+            "wall_seconds": 0.07222112291492522
+          },
+          {
+            "kernel_ns": 66649525,
+            "wall_seconds": 0.07176422397606075
+          },
+          {
+            "kernel_ns": 66646853,
+            "wall_seconds": 0.0721583190606907
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 32898821,
+            "wall_seconds": 0.037726143025793135
+          },
+          {
+            "kernel_ns": 32567573,
+            "wall_seconds": 0.037377747939899564
+          },
+          {
+            "kernel_ns": 32576250,
+            "wall_seconds": 0.03727342002093792
+          },
+          {
+            "kernel_ns": 32437216,
+            "wall_seconds": 0.037372975959442556
+          },
+          {
+            "kernel_ns": 32869016,
+            "wall_seconds": 0.038005499984137714
+          },
+          {
+            "kernel_ns": 32446865,
+            "wall_seconds": 0.037418716005049646
+          },
+          {
+            "kernel_ns": 31774696,
+            "wall_seconds": 0.03671529295388609
+          }
+        ]
+      },
+      "paired_ratio": 0.4911459333773402
+    },
+    "int64": {
+      "source": "from p\"support.jo\" import clock\nsame=(a:array<int64> b:array<int64>):>bool=>a=?b\nmain=()=>{\nlet values=[loop i in [0..200000) i as int64]\nlet other=values[..]\nlet total:int64=0 let started=clock()\nloop repetition in [0..300) {\nvalues[0]=repetition as int64\nother[0]=repetition as int64\nif same(values other) total+=1\n}\nlet elapsed=clock()-started\nprintl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 300,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 73425453,
+            "wall_seconds": 0.08036304102279246
+          },
+          {
+            "kernel_ns": 71494989,
+            "wall_seconds": 0.07805599202401936
+          },
+          {
+            "kernel_ns": 71814173,
+            "wall_seconds": 0.07899035199079663
+          },
+          {
+            "kernel_ns": 70922606,
+            "wall_seconds": 0.07772265106905252
+          },
+          {
+            "kernel_ns": 73046392,
+            "wall_seconds": 0.0796308129793033
+          },
+          {
+            "kernel_ns": 71558079,
+            "wall_seconds": 0.07779416698031127
+          },
+          {
+            "kernel_ns": 71534316,
+            "wall_seconds": 0.07838096702471375
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 70340888,
+            "wall_seconds": 0.07709366304334253
+          },
+          {
+            "kernel_ns": 70220315,
+            "wall_seconds": 0.07705112500116229
+          },
+          {
+            "kernel_ns": 69481736,
+            "wall_seconds": 0.07602091995067894
+          },
+          {
+            "kernel_ns": 71521934,
+            "wall_seconds": 0.07829973404295743
+          },
+          {
+            "kernel_ns": 71979837,
+            "wall_seconds": 0.07903446396812797
+          },
+          {
+            "kernel_ns": 71682461,
+            "wall_seconds": 0.0785810430534184
+          },
+          {
+            "kernel_ns": 71899980,
+            "wall_seconds": 0.07871814793907106
+          }
+        ]
+      },
+      "paired_ratio": 0.9853989366100382
+    },
+    "shared-int64": {
+      "source": "from p\"support.jo\" import clock\nsame=(a:array<int64> b:array<int64>):>bool=>a=?b\nmain=()=>{\nlet values=[loop i in [0..20000) i as int64]\n\nlet total:int64=0 let started=clock()\nloop repetition in [0..2000) {\nvalues[0]=repetition as int64\n\nif same(values values) total+=1\n}\nlet elapsed=clock()-started\nprintl\"{total} {elapsed}\"\n}\n",
+      "expected_checksum": 2000,
+      "samples": {
+        "baseline": [
+          {
+            "kernel_ns": 42972048,
+            "wall_seconds": 0.045908004976809025
+          },
+          {
+            "kernel_ns": 43325703,
+            "wall_seconds": 0.046279571019113064
+          },
+          {
+            "kernel_ns": 42944311,
+            "wall_seconds": 0.04577850201167166
+          },
+          {
+            "kernel_ns": 43373238,
+            "wall_seconds": 0.0462478119879961
+          },
+          {
+            "kernel_ns": 43399778,
+            "wall_seconds": 0.04624748800415546
+          },
+          {
+            "kernel_ns": 43441677,
+            "wall_seconds": 0.04633994004689157
+          },
+          {
+            "kernel_ns": 43174445,
+            "wall_seconds": 0.04594913998153061
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 46784,
+            "wall_seconds": 0.00224341603461653
+          },
+          {
+            "kernel_ns": 35969,
+            "wall_seconds": 0.0022262929705902934
+          },
+          {
+            "kernel_ns": 44835,
+            "wall_seconds": 0.002110111992806196
+          },
+          {
+            "kernel_ns": 31090,
+            "wall_seconds": 0.0020891899475827813
+          },
+          {
+            "kernel_ns": 31964,
+            "wall_seconds": 0.0020691939862444997
+          },
+          {
+            "kernel_ns": 41352,
+            "wall_seconds": 0.0022135369945317507
+          },
+          {
+            "kernel_ns": 31249,
+            "wall_seconds": 0.002070395043119788
+          }
+        ]
+      },
+      "paired_ratio": 0.000830200031607104
+    }
+  },
+  "support_source": "clock = () -> int:\n    ts: (int, int)\n    if syscall(228, 3, &ts) != 0: panic(\"clock failed\")\n    ts.0 * 1000000000 + ts.1\n"
+}

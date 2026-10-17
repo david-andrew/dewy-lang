@@ -22,6 +22,45 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'array-comparison-word-boundaries': '''verify=<T>(values:array<T> different:T):>bool=>{
+loop count in [0..values.length] {
+let a=values[0..count) let b=values[0..count) let shared=a
+if a not=?b or a not=?shared return false
+loop index in [0..count) {
+let changed=b changed[index]=different
+if a=?changed or changed=?a return false
+}
+if count <? values.length and a=?values return false
+}
+return true
+}
+main=()=>{
+let bytes:array<uint8>=[0 1 127 128 254 0 1 127 128 254 0 1 127 128 254 0 1]
+let signed:array<int8>=[-128 -1 0 1 126 -128 -1 0 1 126 -128 -1 0 1 126 0 1]
+let words:array<uint16>=[0 1 255 256 65534 0 1 255 256]
+let ints:array<int32>=[-2147483648 -1 0 1 2147483646]
+let wide:array<uint64>=[0 1 9223372036854775808 18446744073709551614]
+return if verify(bytes 255) and verify(signed 127) and verify(words 65535)
+and verify(ints 2147483647) and verify(wide 18446744073709551615) 42 else 1}''',
+    'array-comparison-bool-snapshots': '''main=()=>{
+let values=[true false true false true false true false true]
+let saved=values let equal=[true false true false true false true false true]
+if values not=?equal or values not=?saved return 1
+loop index in [0..values.length) {
+let changed=values changed[index]=not changed[index]
+if changed=?saved return 2
+}
+let empty:array<bool>=[] let reserved:array<bool>=[] reserved.reserve(16)
+return if values=?saved and empty=?reserved 42 else 3}''',
+    'array-comparison-nonreflexive': '''Key:type=[value:int64]
+let calls:int64=0
+__eq__=(a:Key b:Key):>bool=>{calls+=1 return false}
+main=()=>{
+let zero:float64=0.0 let nan=zero/zero let values=[nan] let shared=values
+if values=?shared return 1
+if [0.0] not=?[-0.0] return 2
+let keys=[Key[42]] let copy=keys
+return if keys not=?copy and calls=?1 42 else 3}''',
     'sequence-value-protocol-demand': '''Box:type=<T>[value:T]
 __eq__=<T>(a:Box<T> b:Box<T>):>bool=>a.value=?b.value
 hash=<T>(box:Box<T>):>uint64=>box.value.special_hash()
