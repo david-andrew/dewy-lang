@@ -415,6 +415,26 @@ let selected=[loop value in values if value >? 20 value]
 let lengths=[loop word in ["café" "🙂"] word->word.length]
 ```
 
+Arrays can select elements with a stored `IntRange` or a stepped slice:
+
+```dewy
+let values=[10 20 30 40 50 60]
+let evens=values[0,2..]       # [10 30 50]
+let backwards=values[5,3..0] # [60 40 20]
+let positions=[1,3..5]
+values[positions]=42        # fill selected elements
+values[0,2..]=[1 2 3]       # one replacement per selected element
+```
+
+A missing endpoint extends to the array's end in the step's direction. `]`
+includes a written endpoint and `)` excludes it. Empty selections return empty
+arrays; every selected index must be in bounds, and replacement arrays must have
+exactly the selected length. A scalar replacement fills each selected element.
+These operations preserve independent copies, including overlapping assignments
+such as `values[5,4..0]=values`. They allocate no intermediate array of indices;
+reads allocate the selected result. Compound updates of selections and stepped
+string slicing are not implemented.
+
 Comprehensions are eager. Nested loops and block bodies work; a final block value
 is collected, while `break`, `continue` and assignment statements do not emit a
 value. `key -> value` creates dictionary entries; duplicate keys take the last
@@ -501,8 +521,8 @@ For bounded signed-word ranges, `(` excludes the first specified value:
 `(0..3]` yields `1, 2, 3`, `(0..3)` yields `1, 2`, and `(0,3..10]` yields
 `3, 6, 9`. This works in ordinary/combined loops, stored values and membership.
 Excluding a single-element interval makes it empty, even at an integer limit.
-Slices with an exclusive first bound and open-ended left-exclusive ranges are
-not implemented.
+An exclusive-first range also selects array elements: `values[(0..3]]` selects
+indices 1, 2 and 3. Open-ended left-exclusive ranges are not implemented.
 
 Combined headers walk supported iterables together:
 

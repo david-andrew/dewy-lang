@@ -150,8 +150,8 @@ __pick_mask[T] = (xs: T[], mask: bool[]) -> T[]:
     out
 __pick[T] = (xs: T[], idxs: int[]) -> T[]:
     out: T[]
-    out.reserve(idxs.len())
-    loop i in idxs: out.push(xs[i])
+    out.resize(idxs.len())
+    loop j in [0..idxs.len()): __at(out, j) = xs[__at(idxs, j)]
     out
 __put_mask[T] = (xs: mut T[], mask: bool[], v: T):
     if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")

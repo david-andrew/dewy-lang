@@ -918,3 +918,43 @@ winning-state exchange. This frontend addition uses the focused gate locally;
 the pushed CI workflow performs the full independent-bootstrap gate.
 [Focused gate](source-core/coalesce-focused.log),
 [build manifest](source-core/coalesce-build.json).
+
+## Range-indexed arrays and stepped selections
+
+Stored `IntRange` values now select array elements. Direct stepped syntax such
+as `xs[0,2..]` and `xs[5,3..0]` uses the same selection helpers, with an omitted
+endpoint extending in the step's direction. Scalar assignments fill a selection;
+array assignments require its exact length. Descending and exclusive-first
+stored ranges, overlapping sources, managed elements and custom-container
+writeback retain value semantics. Stepped strings and compound selection updates
+remain explicitly unsupported.
+
+One unsigned distance/division check validates every selected index before
+copying, including full-width counts and strides that would overflow an endpoint
+multiplication. The loop needs no index array or per-element bounds check. Both
+range and existing integer-index selections now size their output once and fill
+it directly, replacing reserve-plus-push inside the loop. Ordinary integer-index
+selections still check each supplied index.
+
+The first range implementation passed **2,427 checks in 122.94 s** through the
+independent C bootstrap, but its reserve-plus-push loop was slower than existing
+index-array selection: **36.26/29.41 ms** in the first focused run. A countdown
+loop did not help. Pre-sizing the output fixed that regression and also improved
+the existing index-array helper. The final expanded selection passed **617 checks
+in 12.15 s**; pushed CI performs the full final independent-bootstrap gate.
+[Initial bootstrap gate](source-core/range-index-full.log),
+[final focused gate](source-core/range-index-final-focused.log),
+[build/prototype metadata](source-core/range-index-build.json).
+
+The runtime workload repeatedly materializes every other element of a one-million
+integer array, twenty selections per measured kernel. Range/index-array setup is
+outside the timed region, output allocation is inside, and checksums are checked.
+Seven alternating before/after pairs measured **32.19/17.85 ms** median CPU time
+for ranges and **31.47/22.43 ms** for index arrays. Median paired ratios were
+**0.574** and **0.744**, respectively. A final same-compiler comparison measured
+**17.36 ms** for ranges and **23.45 ms** for prebuilt index arrays. These are
+selection-kernel results, not whole-game speedups; the range also avoids the
+index array's storage and construction, which this timing excludes.
+[Initial measurements](source-core/range-index-runtime-initial.json),
+[paired allocation comparison](source-core/range-index-runtime-paired.json),
+[final selection comparison](source-core/range-index-runtime.json).

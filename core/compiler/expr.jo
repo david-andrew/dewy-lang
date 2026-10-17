@@ -4932,6 +4932,12 @@ check_expr = (n: int, expected: int) -> int:
         bt = prune(check_expr(int(nodes[n].a), 0))
         bk = types[bt].kind
         b = int(nodes[n].b)
+        if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP):
+            if bk != .array: fatal(nodes[n].pos, "stepped slicing requires an array")
+            nodes[n].a = i32(last_checked)
+            call = dewy_step_slice(n)
+            nodes[n] = nodes[call]
+            return check_expr(n, expected)
         if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
             base = last_checked
             add_flag(base, NF_CHECKED)
@@ -5881,9 +5887,28 @@ neg_index_check = (b: int):
     if k > 1: e = "end - {k - 1}"
     fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
 
+# A stepped slice computes its default endpoint from the captured receiver's
+# size. Calls retain normal left-to-right operand evaluation and value snapshots.
+dewy_step_slice = (index: int, value: int = 0) -> int:
+    pos = nodes[index].pos
+    r = int(nodes[index].b)
+    base = int(nodes[index].a)
+    add_flag(base, NF_CHECKED)
+    if value != 0: add_flag(base, NF_MUT)
+    last = int(nodes[r].b)
+    inclusive = mk(.bool_lit, pos)
+    nodes[inclusive].ival = if has_flag(r, NF_INCLUSIVE): 1 else: 0
+    bounded = mk(.bool_lit, pos)
+    nodes[bounded].ival = if last != 0: 1 else: 0
+    if last == 0: last = bc_int(0, pos)
+    args = [base, int(nodes[r].a), int(nodes[r].c), last, inclusive, bounded]
+    if value != 0: args.push(value)
+    bc_call((if value == 0: "__dewy_pick_step" else: "__dewy_put_step"), args, pos)
+
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:
     it = prune(check_expr(b, T_INT))
+    if is_dewy_range_type(it, "IntRange"): return base
     if types[it].kind != .array: return ""
     et = prune(int(types[it].elem))
     if types[et].kind == .bool_: return base + "_mask"

@@ -50,3 +50,55 @@ __dewy_range_value = (it: mut __DewyRangeIter) -> int:
     # Wrapping the cursor after the final value is harmless: done guards it.
     it.cursor += it.delta
     value
+
+# Validate every selected index without constructing an index array. Dividing
+# the available distance avoids overflow in (count - 1) * stride, even for a
+# full-width interval or an explicitly constructed IntRange value.
+__dewy_range_indices = (size: int, r: IntRange) -> int:
+    if r._empty or r._stride == 0: return 0
+    if r._first < 0 or r._first >= size: panic("range index {r._first} is out of bounds for {size} elements")
+    distance = if r._up: u64(size - 1 - r._first) else: u64(r._first)
+    if r._count == 0 or r._count - 1 > distance / r._stride:
+        panic("range indexes are out of bounds for {size} elements")
+    int(r._count)
+
+__pick[T] = (xs: T[], r: IntRange) -> T[]:
+    count = __dewy_range_indices(xs.len(), r)
+    out: T[]
+    out.resize(count)
+    index = r._first
+    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    loop j in [0..count):
+        __at(out, j) = __at(xs, index)
+        index += delta
+    out
+
+__put[T] = (xs: mut T[], r: IntRange, value: T):
+    count = __dewy_range_indices(xs.len(), r)
+    index = r._first
+    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    loop j in [0..count):
+        __at(xs, index) = value
+        index += delta
+
+__put[T] = (xs: mut T[], r: IntRange, values: T[]):
+    count = __dewy_range_indices(xs.len(), r)
+    if values.len() != count: panic("{values.len()} values for {count} range indexes")
+    index = r._first
+    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    loop j in [0..count):
+        __at(xs, index) = __at(values, j)
+        index += delta
+
+__dewy_slice_range = (size: int, first: int, second: int, last: int, inclusive: bool, bounded: bool) -> IntRange:
+    stop = if bounded: last else if second > first: size - 1 else: 0
+    __dewy_range(first, second, stop, true, inclusive or not bounded)
+
+__dewy_pick_step[T] = (xs: T[], first: int, second: int, last: int, inclusive: bool, bounded: bool) -> T[]:
+    __pick(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded))
+
+__dewy_put_step[T] = (xs: mut T[], first: int, second: int, last: int, inclusive: bool, bounded: bool, value: T):
+    __put(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded), value)
+
+__dewy_put_step[T] = (xs: mut T[], first: int, second: int, last: int, inclusive: bool, bounded: bool, values: T[]):
+    __put(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded), values)

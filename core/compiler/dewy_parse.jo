@@ -855,7 +855,6 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     if dw_name(dw_child(id, at)) != "..":
         first = dw_unwrap(dw_child(id, at))
         if dw_op(first) == ",":
-            if slice and not membership: return dw_fail(id, "stepped slices")
             if dewy_syntax[first].children.len() != 3: return dw_fail(first, "a stepped range without exactly two starting values")
             nodes[n].a = i32(dw_expr(dw_child(first, 1)))
             nodes[n].c = i32(dw_expr(dw_child(first, 2)))

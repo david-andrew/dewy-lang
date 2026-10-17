@@ -20,6 +20,67 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'range-index-stepped-slices': '''main=()=>{
+let xs=[10 20 30 40 50 60] let empty:array<int64>=[]
+return if xs[0,2..] =? [10 30 50] and xs[5,3..] =? [60 40 20]
+and xs[0,2..4) =? [10 30] and xs[0,2..4] =? [10 30 50]
+and xs[5,3..1] =? [60 40 20] and xs[5,3..1) =? [60 40]
+and empty[0,2..] =? [] 42 else 1
+}''',
+    'range-index-stepped-update': '''main=()=>{
+let xs=[10 20 30 40 50] xs.push(60) let saved=xs
+xs[0,2..]=42 xs[5,3..1]=[1 2 3]
+return if xs =? [42 3 42 2 42 1] and saved =? [10 20 30 40 50 60] 42 else 1
+}''',
+    'range-index-stepped-overlap': '''main=()=>{
+let xs=[10 20 30 40] xs.push(50) xs[4,3..]=xs
+return if xs =? [50 40 30 20 10] 42 else 1
+}''',
+    'range-index-stepped-snapshot': '''let xs:array<int64>=[10 20 30] let trace:int64=0
+first=()=>{trace=trace*10+1 xs[0]=999 return 0}
+second=()=>{trace=trace*10+2 return 2}
+last=()=>{trace=trace*10+3 return 2}
+main=()=>{xs.push(40) let result=xs[first(),second()..last()]
+return if result =? [10 30] and xs[0] =? 999 and trace =? 123 42 else 1}''',
+    'range-index-stepped-pool': '''main=()=>{
+let pool:Pool<array<int64>>=[] let h=pool.add([10 20 30 40]) let saved=pool
+pool[h][0,2..]=42
+return if pool[h] =? [42 20 42 40] and saved[h] =? [10 20 30 40] 42 else 1
+}''',
+    'range-index-values': '''main=()=>{
+let xs=[10 20 30 40 50] let forward=[0,2..4] let reverse=[4,2..0] let empty=[2..2)
+return if xs[forward] =? [10 30 50] and xs[reverse] =? [50 30 10] and xs[empty] =? [] 42 else 1
+}''',
+    'range-index-boundaries': '''main=()=>{
+let xs=[10 20 30 40 50]
+return if xs[(0,2..4]] =? [30 50] and xs[[4,2..0)] =? [50 30]
+and xs[(4,2..0)] =? [30] and xs[[0..5)] =? xs 42 else 1
+}''',
+    'range-index-update': '''main=()=>{
+let xs=[10 20 30 40 50] xs.push(60) let saved=xs let selected=[0,2..4]
+xs[selected]=42
+xs[[5,3..1]]=[1 2 3]
+return if xs =? [42 3 42 2 42 1] and saved =? [10 20 30 40 50 60] 42 else 1
+}''',
+    'range-index-overlap': '''main=()=>{
+let xs=[10 20 30 40] xs.push(50) let reverse=[4,3..0]
+xs[reverse]=xs
+return if xs =? [50 40 30 20 10] 42 else 1
+}''',
+    'range-index-generic': '''select=<T>(xs:array<T> indices:IntRange):>array<T>=>xs[indices]
+main=()=>{let xs=["a" "b" "c"] let picked=select(xs [0,2..2]) picked[0]="new"
+return if picked =? ["new" "c"] and xs =? ["a" "b" "c"] 42 else 1}''',
+    'range-index-snapshot-order': '''let xs:array<int64>=[10 20 30] let calls:int64=0
+indices=():>IntRange=>{calls+=1 xs[0]=999 return [0,2..2]}
+main=()=>{xs.push(40) let result=xs[indices()]
+return if result =? [10 30] and xs[0] =? 999 and calls =? 1 42 else 1}''',
+    'range-index-cleanup': '''work=():>void=>{
+let xs=["a" "b" "c"] xs.push("d") let saved=xs let picked=xs[[3,1..0]]
+xs[[0,2..2]]=picked
+if xs not=? ["d" "b" "b" "d"] or saved not=? ["a" "b" "c" "d"] panic("snapshot changed")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'coalesce-inferred-none': 'main=()=>none??42',
     'coalesce-basic': '''read=(present:bool):>int64?=>if present 42 else none
 main=()=>if (read(true)??0) =? 42 and (read(false)??42) =? 42 42 else 1''',
@@ -1897,6 +1958,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'range-index-stepped-string': ('main=()=>"abc"[0,2..2].length', 'stepped slicing requires an array'),
     'coalesce-nonoptional': ('main=()=>42??0', 'needs an optional on the left'),
     'compound-integer-exact-division': ('main=()=>{let x=42 x/=2 return x}', 'expected int, found Rational'),
     'loop-else-value': ('main=()=>{let x=loop false {1} else 42 return x}', 'loop used as a value'),
@@ -1920,7 +1982,6 @@ ERRORS = {
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
     'stored-range-open': ('main=()=>{let r=[0..] return 0}', 'stored range needs both endpoints'),
     'stored-range-no-start': ('main=()=>{let r=[..4] return 0}', 'stored range needs both endpoints'),
-    'stepped-range-slice': ('main=()=>{let xs=[0 1 2 3] return xs[0,2..3].length}', 'stepped slices'),
     'stepped-range-combined': ('main=()=>{loop i in [0,2..] and j in [0..3] {printl(i+j)}}', 'stepped ranges are only supported in single loops'),
     'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
     'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
@@ -2133,6 +2194,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_rational_errors': 'rational',
                   'test_core_stepped_range_errors': 'range',
                   'test_core_unit_range_errors': 'range',
+                  'test_core_range_index_errors': 'range',
                   'test_core_combined_range_errors': 'range',
                   'test_core_compound_errors': 'compound',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
@@ -3575,6 +3637,22 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs=[10 20] printl(xs[0,0..1])', 'range step must be nonzero'),
+    ('let xs=[10 20] printl(xs[[0,2..2]])', 'range indexes are out of bounds'),
+    ('let xs=[10 20] xs[0,2..4]=42', 'range indexes are out of bounds'),
+    ('let xs=[10 20] printl(xs[[1,0..-1]])', 'range indexes are out of bounds'),
+    ('let xs=[10 20] xs[[0..1]]=[42]', 'values for 2 range indexes'),
+    ('let xs=[10 20] printl(xs[IntRange[0 9223372036854775808 3 true false]])', 'range indexes are out of bounds'),
+    ('let xs=[10 20] printl(xs[IntRange[0 1 0 true false]])', 'range indexes are out of bounds'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_range_index_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('range', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body, diagnostic', [
     ('let value=42 value//=0', 'division by zero'),
     ('let value=-42 value%=0', 'division by zero'),
     ('let value=3/2 value/=0', 'division by zero'),
@@ -4003,7 +4081,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
