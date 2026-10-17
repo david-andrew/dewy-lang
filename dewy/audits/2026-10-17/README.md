@@ -296,3 +296,24 @@ mixed changes do not support an overall speed claim.
 [Final samples](source-core/combined-range-compile.json).
 An [earlier run](source-core/combined-range-compile-initial.json), before the
 last shadowing guard, encountered substantially higher shared-machine load.
+
+## Current compiler profile and discarded entry layouts
+
+An instrumented copy of the current compiler, built outside the checkout,
+separately times lowering, emission and five optimizer stages. Three runs per
+workload put the self-build's median expression-reuse stage at **245 ms**, with
+metadata at 92 ms, scalar replacement at 67 ms, dead-code work at 66 ms and cleanup
+at 44 ms. These are instrumented wall-clock observations under varying desktop
+load, not independent benchmark speed claims. The complete script and raw
+phase logs are preserved in the [profile report](source-core/compiler-profile.json).
+The installed and repository compilers contain none of this instrumentation.
+
+A 64-byte entry record was tested in place of the expression table's ten parallel
+arrays. Its 332-check focused gate passed. Seven compile pairs for the
+constructor-assignment variant measured tour **54.63/52.30 ms**, physics
+**303.61/307.08 ms**, and self-build **1,164.21/1,151.73 ms** wall time. A second
+variant wrote fields in place to avoid whole-record temporary copies; it measured
+**51.41/51.04**, **301.97/298.20**, and **1,136.38/1,123.12 ms** respectively.
+Neither established a substantial, consistent benefit. Both were reverted;
+the simpler existing implementation remains. [Constructor variant](source-core/cse-entry-rejected.json),
+[field-write variant](source-core/cse-entry-fields-rejected.json).
