@@ -21,6 +21,29 @@ import pytest
 from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
+# A small cross-section of user behavior, reusing the full gate's batched cases.
+QUICK_CASES = {
+    'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
+    'sequence-closures', 'sequence-slice-loop-snapshots',
+    'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
+    'dictionary-value-equality', 'set-copy-and-removal', 'numeric-bounds',
+    'rational-division-notation', 'bigint-mixed-and-copies',
+    'generic-instance-identity', 'generic-instance-recursion', 'generic-return-closure',
+    'named-managed-order', 'argument-borrow-callback-write', 'record-spread-order',
+    'unpack-dictionary-nested', 'loop-else-conditions', 'json-typed-nested',
+    'optional-managed-copy', 'grapheme-loop', 'optimizer-nested-exits',
+}
+QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
+
+
+def quick_parameters(names, selected):
+    names = list(names)
+    missing = selected.difference(names)
+    if missing:
+        raise ValueError(f'Quick-suite cases no longer exist: {sorted(missing)}')
+    return [pytest.param(name, marks=pytest.mark.core_quick if name in selected else ()) for name in names]
+
+
 CASES = {
     'array-comparison-word-boundaries': '''verify=<T>(values:array<T> different:T):>bool=>{
 loop count in [0..values.length] {
@@ -3767,7 +3790,7 @@ def value_batches(compiler, tmp_path_factory, request):
     return result
 
 
-@pytest.mark.parametrize('name', CASES)
+@pytest.mark.parametrize('name', quick_parameters(CASES, QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_values(value_batches, name, release):
     code, output = value_batches(name, release, 'native')
@@ -5269,7 +5292,7 @@ def test_core_compound_errors(error_batches, body, diagnostic, target, release):
     assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
-@pytest.mark.parametrize('name', ERRORS)
+@pytest.mark.parametrize('name', quick_parameters(ERRORS, QUICK_ERRORS))
 def test_core_rejects(compiler, tmp_path, name):
     body, diagnostic = ERRORS[name]
     source = tmp_path / f'{name}.dewy'
@@ -5284,6 +5307,7 @@ def test_core_rejects(compiler, tmp_path, name):
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 @pytest.mark.parametrize('style', ['selected', 'namespace', 'module-alias', 'name-alias'])
+@pytest.mark.core_quick
 def test_core_imports(compiler, tmp_path, extension, style):
     dependency = tmp_path / f'helper.{extension}'
     dependency.write_text('twice=(x:int64):>int64=>x*2' if extension == 'dewy'
@@ -5380,6 +5404,7 @@ class Scripts(HTMLParser):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.core_quick
 def test_core_game_model(compiler, tmp_path, target, release):
     node = shutil.which('node')
     if target == 'wasm' and node is None:
@@ -5609,6 +5634,7 @@ def test_core_game_renderer(compiler, tmp_path, game):
     assert struct.unpack('>II', data[16:24]) == (1280, 720)
 
 
+@pytest.mark.core_quick
 def test_core_check_and_format_boundary(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
     text = 'unused=()=>missing\nmain=()=>42'
@@ -5631,6 +5657,7 @@ def test_core_unavailable_cli(compiler, tmp_path, command):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.core_quick
 def test_core_cli_identity(compiler):
     result = subprocess.run([compiler, '--version'], capture_output=True, text=True,
                             timeout=5, check=False)
@@ -5685,7 +5712,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

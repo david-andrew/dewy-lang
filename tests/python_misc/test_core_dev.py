@@ -6,6 +6,8 @@ import pytest
 
 from tools import core
 
+pytestmark = pytest.mark.core_quick
+
 
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
@@ -124,6 +126,30 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
     assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
     assert 'DEWY_CORE_FRONTEND' not in received['env']
     assert 'SLOPPY_LIB' not in received['env']
+
+
+def test_core_driver_quick_command(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, 'toolchain', lambda **kwargs: tmp_path / 'dewy-core')
+    received = {}
+
+    def run(command, **options):
+        received.update(command=command, **options)
+        return 7
+
+    monkeypatch.setattr(core.subprocess, 'call', run)
+    assert core.main(['test', '--quick', '-k', 'dictionary']) == 7
+    command = received['command']
+    assert command[command.index('-m', 3)+1] == 'core_quick'
+    assert command[-2:] == ['-k', 'dictionary']
+    assert '--quick' not in command and 'xdist.plugin' not in command
+    assert all(path in command for path in core.TESTS)
+
+
+def test_core_driver_quick_rejects_marker_override(monkeypatch):
+    monkeypatch.setattr(core, 'toolchain', lambda **kwargs: pytest.fail('validation must precede building'))
+    with pytest.raises(SystemExit) as exited:
+        core.main(['test', '--quick', '-m', 'anything'])
+    assert exited.value.code == 2
 
 
 @pytest.mark.parametrize('arguments, cpus, available, expected_workers', [

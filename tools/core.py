@@ -1,6 +1,7 @@
 """Build and use the current compact core from this checkout.
 
     python3 -m tools.core test [-k expression]
+    python3 -m tools.core test --quick
     python3 -m tools.core build example.dewy --release -o /tmp/example
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
@@ -116,10 +117,16 @@ def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
     cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp', 'fmt'))
-    cli.add_argument('arguments', nargs=argparse.REMAINDER, help='arguments for pytest or the compiler')
+    cli.add_argument('arguments', nargs=argparse.REMAINDER,
+                     help='arguments for pytest or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
     if args.command == 'path' and args.arguments:
         cli.error('path takes no additional arguments')
+    quick = args.command == 'test' and '--quick' in args.arguments
+    if quick:
+        if any(arg.startswith('-m') for arg in args.arguments):
+            cli.error('--quick selects its own test marker; use -k to narrow the smoke suite')
+        args.arguments = ['-m', 'core_quick', *(arg for arg in args.arguments if arg != '--quick')]
     try:
         binary = toolchain(bootstrap=args.bootstrap)
     except (OSError, RuntimeError) as error:
@@ -130,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     env = os.environ.copy()
     if args.command == 'test':
+        if quick:
+            print('Running the quick smoke suite (native/web, default/release).', file=sys.stderr)
         python = ROOT / '.venv/bin/python'
         if not python.exists():
             python = Path(sys.executable)

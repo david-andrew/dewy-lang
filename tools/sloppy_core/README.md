@@ -939,6 +939,17 @@ isolation. Focused commands such as `test -k record` stay serial; `test -n 0`
 forces serial execution and `test -n 2` selects two workers. Without pytest-xdist,
 the default gate falls back to serial execution. CI explicitly uses two workers.
 
+`python3 -m tools.core test --quick` selects an edit-loop smoke suite from the
+same cases: values and language behavior on native/web in default/release modes,
+imports, diagnostics, a headless game model and driver checks. It defaults to
+serial execution and accepts `-k` to narrow the selection. A local run passes
+130 checks in 2.78 pytest seconds (3.35 seconds including the driver); the full
+gate passes 3,398 checks in 48.23 seconds using the same C-built compiler. These
+are different coverage levels, not a faster execution of the full suite. Compiler
+input changes still rebuild before either command, and test programs compile
+afresh. The ordinary `test` command and CI keep the full gate. See
+`quick-validation.json` and its logs for this run.
+
 On the same 2,899 checks, a local four-worker grouped run took 88.10 seconds,
 versus 168.61 seconds serially and 169.33 seconds with whole-file grouping.
 These are pytest times excluding bootstrap, from one run per strategy on a

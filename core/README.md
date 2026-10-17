@@ -13,7 +13,8 @@ Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 ## Work on this checkout
 
 ```sh
-python3 -m tools.core test                       # current compiler + focused gate
+python3 -m tools.core test --quick               # edit-loop smoke suite
+python3 -m tools.core test                       # full compact-core gate
 python3 -m tools.core test -k record             # select relevant checks
 python3 -m tools.core test -n 0                  # run the full gate serially
 python3 -m tools.core test -n 2                  # choose the worker count
@@ -43,6 +44,13 @@ pytest-xdist it runs serially. Commands with additional pytest arguments, such a
 Tests stop at the first failure by default; use `test --maxfail=0` to
 collect every failure. Extra arguments go to pytest; compiler commands forward
 their arguments.
+`test --quick` selects a small set of existing checks: language/value behavior,
+imports, diagnostics, a headless game model and the development driver. Runtime
+cases cover native/web and default/release builds. It runs serially by default
+to avoid worker startup, and `-k` can narrow it further. The compiler is still
+rebuilt when its inputs change, and the test programs compile afresh. The full
+gate adds the broader regression corpus, rendering, networking, watch and editor
+coverage; CI continues to run that full gate.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
 independently from C, regardless of the local cache.
 
