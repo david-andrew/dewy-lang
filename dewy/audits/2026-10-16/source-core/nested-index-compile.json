@@ -1,0 +1,158 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "1622b0d9c001cf5c856856f26f62a505a3b03264",
+  "working_tree": " M core/LANGUAGE.md\n M core/compiler/ast.jo\n M core/compiler/check.jo\n M core/compiler/expr.jo\n M tests/python_misc/test_sloppy_core.py\n",
+  "diff_sha256": "ffe79210a2107e2d6f11b2953481fb8f772812141233ad11f5ac5655cdce0acc",
+  "load_average_start": [
+    7.81494140625,
+    7.42724609375,
+    6.36328125
+  ],
+  "workers": 1,
+  "samples": 7,
+  "warmups_per_compiler": 1,
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792199004843893522/bin/dewy-core",
+      "sha256": "39726dbb1276554d0966e26696d0b08928a9449256d9db492d4dbb8abbc8761b"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792199687477289975/bin/dewy-core",
+      "sha256": "7f48afbcf8326c7b4e8f16d29f0e42dda14493be006c60ce2ec67bada2063b7d"
+    }
+  },
+  "workloads": {
+    "tour": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/tour.dewy",
+        "--release"
+      ],
+      "source_sha256": "885626f43ac0b290e28f95bfad4f04675deb4e366084a420a366af29e499f4bd",
+      "seconds": {
+        "baseline": [
+          0.0815973780117929,
+          0.0852628069696948,
+          0.056782803032547235,
+          0.05695663101505488,
+          0.06583499896805733,
+          0.10590117599349469,
+          0.06249295792076737
+        ],
+        "candidate": [
+          0.06224759004544467,
+          0.08406090794596821,
+          0.060031063039787114,
+          0.06237167096696794,
+          0.0631788179744035,
+          0.06604245502967387,
+          0.06936255900654942
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.06583499896805733,
+        "candidate": 0.0631788179744035
+      }
+    },
+    "entities": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/entities.dewy",
+        "--release"
+      ],
+      "source_sha256": "b71aae3d8901a4e0e2dc009008c0f39c27d87e849d43803c428779b4ace3fc9b",
+      "seconds": {
+        "baseline": [
+          0.05295607994776219,
+          0.051519184024073184,
+          0.054871011059731245,
+          0.04951167409308255,
+          0.04963735898490995,
+          0.051736177993007004,
+          0.05408745491877198
+        ],
+        "candidate": [
+          0.07674902700819075,
+          0.057800077949650586,
+          0.0511861729901284,
+          0.04995306103955954,
+          0.04906915198080242,
+          0.05055163206998259,
+          0.05062203702982515
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.051736177993007004,
+        "candidate": 0.05062203702982515
+      }
+    },
+    "physics": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/physics.dewy",
+        "--release"
+      ],
+      "source_sha256": "0699216ebdc2a8f694adf23b24a743a514991d693673b61c55e27adacdc925a9",
+      "seconds": {
+        "baseline": [
+          0.4930016319267452,
+          0.3574758619070053,
+          0.3428892290685326,
+          0.3472104830434546,
+          0.34554663102608174,
+          0.3275041499873623,
+          0.49035017006099224
+        ],
+        "candidate": [
+          0.3712645299965516,
+          0.4272030589636415,
+          0.35940680594649166,
+          0.34307008201722056,
+          0.35091598599683493,
+          0.3407366130268201,
+          0.33819604699965566
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.3472104830434546,
+        "candidate": 0.35091598599683493
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "7e495d5eb6b4207badf927ac2590da081b73bb65e78673386821a63565588b1e",
+      "seconds": {
+        "baseline": [
+          1.8808729350566864,
+          1.830759336007759,
+          1.993920798995532,
+          1.9505500569939613,
+          1.6829799909610301,
+          1.9501951420679688,
+          1.8358642789535224
+        ],
+        "candidate": [
+          1.860122503945604,
+          1.6927903899922967,
+          1.8319802270270884,
+          1.7930213749641553,
+          1.6594554639887065,
+          1.7099966279929504,
+          1.8586650119395927
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.8808729350566864,
+        "candidate": 1.7930213749641553
+      }
+    }
+  },
+  "load_average_end": [
+    8.87109375,
+    7.71826171875,
+    6.49951171875
+  ]
+}

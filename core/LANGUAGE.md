@@ -156,10 +156,17 @@ python3 -m tools.core run examples/sloppy_core/entities.dewy
 ```
 
 Use `pool.has(handle)` or `pool.get(handle)` when an entity may have been removed.
-`pool[handle].health -= damage` updates a record field. A custom indexed getter
-returns a value: for nested collection edits, read the value, edit it and assign
-it back to `pool[handle]`. Direct nested indexing through such a getter is not yet
-a mutable place.
+`pool[handle].health -= damage` and `pool[handle].inventory[i].amount += 1`
+update fields and nested collections. Custom indexed assignments read the selected
+value, edit it, then write it back through the container’s setter. This also
+composes through nested pools. Receiver indices and the custom key are evaluated
+once and retained for writeback, even if the right side changes an index variable.
+A selected import of a container type makes its indexing operators available.
+
+Read/edit/writeback retains value semantics; it is not a zero-copy borrow. Updating
+a managed collection inside a custom getter can copy that collection, as an
+explicit read/edit/writeback would. For bulk pool iteration, use its `items` array
+when stable-handle lookup is unnecessary.
 
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as

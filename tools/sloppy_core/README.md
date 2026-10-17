@@ -122,6 +122,13 @@ generics, including structural parameter and return annotations containing `T`.
 It does not implement structural conversion between nominal record types.
 The bundled `Pool<T>` and `Heap<T>` are exercised on native and web; see
 `examples/sloppy_core/entities.dewy` for stable handles and queued game events.
+Nested custom-index assignments now compose read/edit/writeback through fields,
+arrays and nested pools. Receiver indices and custom keys are captured for
+writeback, including variable keys changed by the right side. Selected type
+imports find indexing operators in the receiver’s module. Native/web checks in
+both modes cover independent copies, side effects and shared `.jo` behavior.
+This retains the collection-copy cost of explicit read/edit/writeback; it does
+not introduce a mutable borrow through a getter.
 
 Comprehensions build arrays or dictionaries eagerly:
 
@@ -149,8 +156,8 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,057 checks and takes
-about a minute on the development machine, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,087 checks and took
+93 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

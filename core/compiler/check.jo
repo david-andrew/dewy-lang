@@ -1992,43 +1992,74 @@ check_late_global = (s: int):
     # function does)
     fatal(nodes[lhs].pos, "'{name_of(nm)}' is the global variable declared below this function (at {pos_str(gpos)}), so this would change it: for a variable of the function's own, write `let {name_of(nm)} = ...` (or use another name); to mean the global, declare it above the function")
 
-# b[i].f = v (also b[i].f.g += v...) where b's type defines [] and []= (a GpuBuffer...): there
-# is no place b[i] to change in, so the element is read, changed and written back,
-#     e = b[i]; e.f = v; b[i] = e
-# with the index computed once. 0 when the assignment is not of that kind.
+# An update through a custom [] / []= pair reads, edits and writes back the
+# selected value. Walk from the root outward so nested containers compose:
+#     e = pool[h]; e.inventory[i] = v; pool[h] = e
+# Receiver indices and the custom index are captured once, in source order.
 elem_tmp_n = 0
-elem_field_assign = (s: int) -> int:
-    lhs = int(nodes[s].a)
-    ix = lhs
-    loop nodes[ix].kind == .field: ix = int(nodes[ix].a)
-    # (b[f(x)] += v alone: the index once, b[i] = b[i] + v then does the rest)
-    whole = ix == lhs
-    if nodes[ix].kind != .index or nodes[ix].b == 0: return 0
-    recv = int(nodes[ix].a)
-    if has_flag(recv, NF_CHECKED): return 0
-    bt = prune(check_expr(recv, 0))
-    nodes[ix].a = i32(last_checked)
-    if types[bt].kind != .struct_ or is_map_type(bt) or is_soa(bt) or is_part_index(ix): return 0
-    # (the receiver again, unchecked, for reading and for writing back)
-    r0 = clone(int(nodes[ix].a))
-    r1 = clone(int(nodes[ix].a))
-    pos = nodes[s].pos
+
+# The path from an expression back to its root, outermost access first.
+index_update_path = (n: int) -> int[]:
+    path: int[]
+    let n = n
+    loop nodes[n].kind == .field or nodes[n].kind == .index:
+        path.push(n)
+        n = int(nodes[n].a)
+    path
+
+# Capture an index even when it is a variable: the update's right side may
+# change that variable before the selected value is written back.
+index_update_capture = (ix: int, stmts: mut int[]) -> int:
+    pos = nodes[ix].pos
     elem_tmp_n += 1
+    name = intern("__index{elem_tmp_n}")
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(name)
+    nodes[d].b = nodes[ix].b
+    stmts.push(d)
+    nodes[ix].b = i32(comp_ident(name, pos))
+    name
+
+elem_field_assign = (s: int) -> int:
+    if has_flag(s, NF_INDEX_CAPTURED): return 0
+    lhs = int(nodes[s].a)
+    path = index_update_path(lhs)
+    ix = 0
+    i = path.len() - 1
+    loop i >= 0:
+        candidate = path[i]
+        i -= 1
+        if nodes[candidate].kind != .index or nodes[candidate].b == 0: continue
+        if candidate == lhs and nodes[s].op == i32(int(Tok.assign)): continue
+        # Inspect a copy: checking an overloaded index rewrites it to a call,
+        # but the original receiver path is needed for capture and writeback.
+        bt = prune(check_expr(clone(int(nodes[candidate].a)), 0))
+        if types[bt].kind == .struct_ and not is_map_type(bt) and not is_soa(bt) and not is_part_index(candidate):
+            ix = candidate
+            break
+    if ix == 0: return 0
+    pos = nodes[s].pos
     stmts: int[]
-    # (the index, once)
-    iname = intern("__index{elem_tmp_n}")
-    di = mk(.vardecl, pos)
-    nodes[di].name = i32(iname)
-    nodes[di].b = nodes[ix].b
-    stmts.push(di)
-    if whole:
-        nodes[lhs].b = i32(comp_ident(iname, pos))
+    receiver_path = index_update_path(int(nodes[ix].a))
+    j = receiver_path.len() - 1
+    loop j >= 0:
+        part = receiver_path[j]
+        j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0:
+            index_update_capture(part, stmts)
+    iname = index_update_capture(ix, stmts)
+    if ix == lhs:
         c0 = nodes.len()
         nodes.push(nodes[s])
+        add_flag(c0, NF_INDEX_CAPTURED)
+        stmts.push(c0)
         blk0 = mk(.block, pos)
-        set_list(blk0, [di, c0])
+        set_list(blk0, stmts)
         check_stmt(blk0)
         return blk0
+    r0 = clone(int(nodes[ix].a))
+    r1 = clone(int(nodes[ix].a))
+    elem_tmp_n += 1
     ename = intern("__elem{elem_tmp_n}")
     rd = mk(.index, pos)
     nodes[rd].a = i32(r0)
@@ -2037,10 +2068,11 @@ elem_field_assign = (s: int) -> int:
     nodes[de].name = i32(ename)
     nodes[de].b = i32(rd)
     stmts.push(de)
-    # (the field path, from the element instead)
+    # The remaining field/index path operates on the selected value.
     f = lhs
     loop int(nodes[f].a) != ix: f = int(nodes[f].a)
     nodes[f].a = i32(comp_ident(ename, pos))
+    update_at = stmts.len()
     stmts.push(s)
     wr = mk(.index, pos)
     nodes[wr].a = i32(r1)
@@ -2054,7 +2086,7 @@ elem_field_assign = (s: int) -> int:
     # (the original statement, now e.f = v, is checked inside the block)
     c = nodes.len()
     nodes.push(nodes[s])
-    stmts[2] = c
+    stmts[update_at] = c
     set_list(blk, stmts)
     check_stmt(blk)
     blk
@@ -2107,7 +2139,7 @@ check_assign = (s: int) -> int:
             if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {type_str(targ(t, i))} to {type_str(tt)}")
         nodes[s].aux = 1
         return s
-    if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and op != int(Tok.assign) and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .ident and nodes[int(nodes[lhs].b)].kind != .int_lit):
+    if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and (op != int(Tok.assign) or nodes[int(nodes[lhs].a)].kind == .index or nodes[int(nodes[lhs].a)].kind == .field)):
         r = elem_field_assign(s)
         if r != 0: return r
     if nodes[lhs].kind == .index:

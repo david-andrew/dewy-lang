@@ -90,6 +90,28 @@ main=()=>{
     let original=arrays let updated=arrays[handle] updated[0]="changed" arrays[handle]=updated
     return if original[handle][0] =? "hello" and arrays[handle][0] =? "changed" 42 else 6
 }''',
+    'generic-index-parameter-copy': '''edit=(pool:Pool<array<int64>> handle:Handle)=>{pool[handle][0]=42 return pool[handle][0]}
+main=()=>{let p:Pool<array<int64>>=[] let h=p.add([1])
+return if edit(p h) =? 42 and p[h][0] =? 1 42 else 1}''',
+    'generic-index-array': '''main=()=>{
+let pool:Pool<array<int64>>=[] let handle=pool.add([20 22]) let original=pool
+pool[handle][0]=42 pool[handle][1]+=20
+return if pool[handle] =? [42 42] and original[handle] =? [20 22] 42 else 1}''',
+    'generic-index-field-array': '''Item:type=[values:array<[amount:int64]>]
+main=()=>{
+let pool:Pool<Item>=[] let h=pool.add(Item[[[amount=20] [amount=22]]]) let original=pool
+pool[h].values[1].amount+=20
+return if pool[h].values[1].amount =? 42 and original[h].values[1].amount =? 22 42 else 1}''',
+    'generic-index-nested-pools': '''main=()=>{
+let inner:Pool<array<int64>>=[] let a=inner.add([20 22])
+let outer:Pool<Pool<array<int64>>>=[] let b=outer.add(inner) let original=outer
+outer[b][a][0]=42
+return if outer[b][a][0] =? 42 and original[b][a][0] =? 20 and inner[a][0] =? 20 42 else 1}''',
+    'generic-index-array-and-map': '''main=()=>{
+let pool:Pool<array<int64>>=[] let h=pool.add([20])
+let array=[pool] let map=["entry"->pool]
+array[0][h][0]=42 map["entry"][h][0]+=22
+return if array[0][h][0] =? 42 and map["entry"][h][0] =? 42 and pool[h][0] =? 20 42 else 1}''',
     'generic-type-defaults': '''empty=<T>():>array<T>=>[]
 fallback=<T>(values:array<T>=empty<T>()):>array<T>=>values
 Bucket:type=<T>[values:array<T>=empty<T>()]
@@ -825,6 +847,109 @@ main=()=>{
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('language', ['dewy', 'jo'])
+def test_core_indexed_update_order(compiler, tmp_path, target, release, language):
+    (tmp_path / 'store.jo').write_text('''struct Store[T]:
+    values: T[]
+trace = ""
+at = (label: str, value: int) -> int:
+    trace += label
+    value
+([])[T] = (s: Store[T], i: int) -> T:
+    trace += "g"
+    s.values[i]
+([]=)[T] = (s: mut Store[T], i: int, value: T):
+    trace += "s"
+    s.values[i] = value
+reset = (): trace = ""
+events = () -> str: trace
+''')
+    source = tmp_path / 'main.dewy'
+    source.write_text('''from p"store.jo" import Store, at, events, reset
+main=()=>{
+    let root=[Store<array<int64>>[values=[[1 2]]]]
+    let original=root
+    root[at("a" 0)][at("b" 0)][at("c" 1)]+=at("r" 40)
+    if events() not=? "abgcrs" return 1
+    if root[0].values[0][1] not=? 42 or original[0].values[0][1] not=? 2 return 2
+    reset()
+    let store=Store<array<int64>>[values=[[1] [2]]]
+    let index:int64=0
+    store[index][at("c" 0)]={index=1 at("r" 42)}
+    if events() not=? "grcs" or store.values[0][0] not=? 42 or store.values[1][0] not=? 2 return 3
+    reset()
+    let scalars=Store<int64>[values=[2 3]]
+    index=0
+    scalars[index]+={index=1 at("r" 40)}
+    if events() not=? "grs" or scalars.values not=? [42 3] return 4
+    return 42
+}
+''')
+    if language == 'jo':
+        source = tmp_path / 'main.jo'
+        source.write_text('''from "store.jo" import Store, at, events, reset
+change = (index: mut int, value: int) -> int:
+    index = 1
+    at("r", value)
+main = () -> int:
+    let root = [Store[int[]](values = [[1, 2]])]
+    let original = root
+    root[at("a", 0)][at("b", 0)][at("c", 1)] += at("r", 40)
+    if events() != "abgcrs": return 1
+    if root[0].values[0][1] != 42 or original[0].values[0][1] != 2: return 2
+    reset()
+    let store = Store[int[]](values = [[1], [2]])
+    let index = 0
+    store[index][at("c", 0)] = change(index, 42)
+    if events() != "grcs" or store.values[0][0] != 42 or store.values[1][0] != 2: return 3
+    reset()
+    let scalars = Store[int](values = [2, 3])
+    index = 0
+    scalars[index] += change(index, 40)
+    if events() != "grs" or scalars.values != [42, 3]: return 4
+    42
+''')
+    binary = tmp_path / 'order'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web indexed update checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'order.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('setter', [False, True], ids=['missing-setter', 'readonly-receiver'])
+def test_core_indexed_update_rejects(compiler, tmp_path, setter):
+    source = tmp_path / 'readonly.jo'
+    source.write_text('''struct Store:
+    values: int[][]
+([]) = (s: Store, i: int) -> int[]: s.values[i]
+''' + ('([]=) = (s: mut Store, i: int, value: int[]): s.values[i] = value\n' if setter else '') + '''edit = (s: Store):
+    s[0][0] = 42
+main = ():
+    edit(Store(values = [[1]]))
+''')
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'readonly'],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode != 0, 'a getter copy must not silently discard the update'
+    expected = 'read-only' if setter else '[]='
+    assert expected in built.stderr, built.stdout + built.stderr
 
 
 @pytest.mark.parametrize('operator', ['//', '%'])

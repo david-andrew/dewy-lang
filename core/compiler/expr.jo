@@ -1968,7 +1968,13 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     return check_intrinsic(n, int(syms[s].ref) as IN, args, expected)
     if mod_scope >= 0: collect_module(mod_scope, name, decls)
     else: collect_fns(name, decls)
-    if ufcs and args.len() > 0:
+    # Index operators belong to the receiver's module, just like methods. A
+    # selected import of a container type must also make its operators usable.
+    indexed = name == intern("[]") or name == intern("[]=")
+    if (ufcs or indexed) and args.len() > 0:
+        if indexed and not has_flag(args[0], NF_CHECKED):
+            check_expr(args[0], 0)
+            add_flag(args[0], NF_CHECKED)
         tm = module_of_type(ntype(args[0]))
         if tm >= 0: collect_module(tm, name, decls)
     if decls.len() == 0:
