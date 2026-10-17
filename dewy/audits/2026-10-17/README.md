@@ -526,5 +526,10 @@ The fresh C-bootstrap gate passed **1,968 checks in 127.04 s**.
 [Full gate](source-core/dunes-full.log), [build manifest](source-core/dunes-build.json).
 This is correctness and rendering evidence, not a frame-rate comparison.
 
+Seven warmed sequential builds measured **452.27 ms native / 270.96 ms web**
+median wall time, with **432.17 / 233.77 ms** CPU time. Shared-machine load was
+high; these are current build observations, not before/after improvements.
+[Compile samples](source-core/dunes-compile.json).
+
 ![Dunes in WebGL](source-core/dunes-web.png)
 ![Dunes in the native software renderer](source-core/dunes-native.png)

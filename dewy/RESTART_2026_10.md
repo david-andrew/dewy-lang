@@ -58,7 +58,9 @@ libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
 and remaining gaps; compatibility is defined by useful language behavior rather
 than the old representations or proof machinery.
 
-Native/web paddle, physics and forest examples exercise the game libraries.
+Native/web paddle, physics, forest and Dunes examples exercise the game libraries.
+Dunes includes procedural cloth and custom terrain/shadow shaders written in
+Dewy; generated GLSL is compiled and linked by a real offscreen GLES driver in CI.
 The editor checks unsaved source, including opened named libraries. Templates,
 asset embedding, error recovery and native live reload support application work.
 Dewy's 57-body physics scene runs at 178.32 ms versus 178.64 ms for the matching

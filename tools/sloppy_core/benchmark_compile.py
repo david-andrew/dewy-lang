@@ -27,6 +27,8 @@ WORKLOADS = {
     'paddle-web': ('build', 'examples/sloppy_core/paddle.dewy', '--release', '--target', 'wasm'),
     'forest': ('build', 'examples/sloppy_core/forest.dewy', '--release'),
     'forest-web': ('build', 'examples/sloppy_core/forest.dewy', '--release', '--target', 'wasm'),
+    'dunes': ('build', 'examples/sloppy_core/dunes.dewy', '--release'),
+    'dunes-web': ('build', 'examples/sloppy_core/dunes.dewy', '--release', '--target', 'wasm'),
     'compiler': ('build', 'core/compiler/main.jo'),
 }
 

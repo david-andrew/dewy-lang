@@ -15,6 +15,7 @@ Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 ```sh
 python3 -m tools.core test                       # current compiler + focused gate
 python3 -m tools.core test -k record             # select relevant checks
+python3 -m tools.core test -k shader_driver      # compile/link shaders with GLES
 python3 -m tools.core watch examples/sloppy_core/paddle.dewy
 python3 -m tools.core check examples/sloppy_core/tour.dewy
 python3 -m tools.core build examples/sloppy_core/tour.dewy --release -o /tmp/tour
@@ -96,10 +97,12 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   tests/python_misc/test_core_dev.py
 ```
 
-Only pytest and Node (for web/client tests) are needed for this gate. The
+The gate needs pytest and Node (for web/client tests). Shader compilation/linking
+also uses EGL/GLES3 libraries; local runs skip those checks when unavailable,
+while CI ensures that the driver is installed. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The gate has over 1,500 checks and takes roughly one
-to one-and-a-half minutes locally. It tests expected Dewy
+the earlier compiler suite. The gate has over 1,900 checks and typically takes
+one to two minutes locally, depending on host load. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
