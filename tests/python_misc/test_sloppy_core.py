@@ -20,6 +20,84 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'end-index-basic': '''main=()=>{let xs=[10 20 22]
+return xs[end]+xs[end-1]}''',
+    'end-index-once': '''let calls=0
+make=()=>{calls+=1 return [20 22]}
+main=()=>{let value=make()[end]+make()[end-1]
+return if value =? 42 and calls =? 2 42 else 1}''',
+    'end-index-nested': '''main=()=>{let xs=[[1 2] [20 22]] let indices=[0 1]
+return xs[indices[end]][end]+xs[end][end-1]}''',
+    'end-index-slices': '''main=()=>{let xs=[1 2 3 4 5]
+return if xs[end-2..end] =? [3 4 5] and xs[..end) =? [1 2 3 4]
+and xs[end,end-2..0] =? [5 3 1] and xs[0,2..end] =? [1 3 5] 42 else 1}''',
+    'end-index-unicode': '''main=()=>{let text="a👩‍🚀é"
+return if text[end] =? "é" and text[end-1..end] =? "👩‍🚀é" 42 else 1}''',
+    'end-index-managed-result': '''make=()=>["ab"+"cd" "ef"+"gh"]
+main=()=>{let text=make()[end] let tail=make()[end-1..end]
+return if text =? "efgh" and tail =? ["abcd" "efgh"] 42 else 1}''',
+    'end-index-empty-slices': '''main=()=>{let xs:array<int64>=[] let text=""
+return if xs[..end].length =? 0 and text[..end] =? "" 42 else 1}''',
+    'end-index-read-mutation': '''let xs=[20 21]
+change=()=>{xs[2]=99 return 0}
+main=()=>{xs.push(22) let value=xs[end+change()]
+return if value =? 22 and xs[2] =? 99 42 else 1}''',
+    'end-index-length-mutation': '''Series:type=[values:array<int64>]
+let source=Series[[20 22]]
+len=(s:Series)=>{source.values[1]=99 return s.values.length}
+__index__=(s:Series i:int64)=>s.values[i]
+main=()=>{source.values.push(0) let value=source[end-1]
+return if value =? 22 and source.values[1] =? 99 42 else 1}''',
+    'end-index-update': '''main=()=>{let xs=[1 20] xs.push(21) let saved=xs
+xs[end]+=1 xs[end-1]=20
+return if xs[end]+xs[end-1] =? 42 and saved =? [1 20 21] 42 else 1}''',
+    'end-index-update-nested': '''let calls=0
+index=()=>{calls+=1 return 0}
+main=()=>{let xs=[[1 20 21]] xs.push([0]) let saved=xs
+xs[index()][end]+=1
+return if calls =? 1 and xs[0][end] =? 22 and saved[0][end] =? 21 42 else 1}''',
+    'end-index-update-slice': '''main=()=>{let xs=[1 2 3 4 5]
+xs[end-2..end]=[20 21 22] xs[0,2..end]=7
+return if xs =? [7 2 7 21 7] 42 else 1}''',
+    'end-index-update-order': '''let xs=[10 20 21]
+rhs=()=>{xs.push(999) return 1}
+main=()=>{xs[end]+=rhs()
+return if xs =? [10 20 22 999] 42 else 1}''',
+    'end-index-sequence': '''Series:type=[values:array<int64>]
+len=(s:Series)=>s.values.length
+__index__=(s:Series i:int64)=>s.values[i]
+__setindex__=(@s:Series i:int64 value:int64)=>{s.values[i]=value}
+main=()=>{let s=Series[[20 21]] s[end]+=1 return s[end]+s[end-1]}''',
+    'end-index-length-once': '''Series:type=[values:array<int64>]
+let lengths=0 let sources=0
+len=(s:Series)=>{lengths+=1 return s.values.length}
+__index__=(s:Series i:int64)=>s.values[i]
+make=()=>{sources+=1 return Series[[20 22]]}
+main=()=>{let value=make()[end+end-1]
+return if value =? 22 and sources =? 1 and lengths =? 1 42 else 1}''',
+    'end-index-custom-parent': '''Outer:type=[values:array<array<int64>>]
+let gets=0 let sets=0 let indices=0
+index=()=>{indices+=1 return 0}
+__index__=(s:Outer i:int64)=>{gets+=1 return s.values[i]}
+__setindex__=(@s:Outer i:int64 value:array<int64>)=>{sets+=1 s.values[i]=value}
+main=()=>{let s=Outer[[[20 21]]] s[index()][end]+=1
+return if gets =? 1 and sets =? 1 and indices =? 1 and s.values[0] =? [20 22] 42 else 1}''',
+    'end-index-global-name': '''let end=20
+main=()=>{let xs=[20 22] return end+xs[end]}''',
+    'end-index-double-update': '''main=()=>{let xs=[[1] [20 21]]
+xs[end][end]+=1 return xs[end][0]+xs[end][end]}''',
+    'end-index-parameter-copy': '''change=(xs:array<int64>)=>{xs[end]=0 return xs}
+main=()=>{let xs=[20 22] xs.push(42) let changed=change(xs)
+return if changed =? [20 22 0] and xs =? [20 22 42] 42 else 1}''',
+    'compound-resize-storage': '''let xs=[10 20 21] let i=2
+rhs=()=>{xs.push(999) i=0 return 1}
+main=()=>{xs[i]+=rhs()
+return if xs =? [10 20 22 999] 42 else 1}''',
+    'compound-resize-record-storage': '''Item:type=[value:int64]
+let xs=[Item[21]]
+rhs=()=>{xs.push(Item[999]) return 1}
+main=()=>{xs[0].value+=rhs()
+return if xs[0].value =? 22 and xs[1].value =? 999 42 else 1}''',
     'numeric-names': '''main=()=>{let x=42
 return if int8(x) =? 42 and int16(x) =? 42 and int32(x) =? 42 and int64(x) =? 42
 and uint8(x) =? 42 and uint16(x) =? 42 and uint32(x) =? 42 and uint64(x) =? 42
@@ -2081,6 +2159,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'end-index-outside': ('main=()=>end', "unknown name 'end'"),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
     'numeric-bound-unknown': ('main=()=>uint8.maximum', "type has no member 'maximum'"),
     'range-index-stepped-string': ('main=()=>"abc"[0,2..2].length', 'stepped slicing requires an array'),
@@ -3775,6 +3854,8 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs:array<int64>=[] printl(xs[end])', 'out of bounds (length 0)'),
+    ('let text="" printl(text[end])', 'string index out of bounds'),
     ('let xs=[10 20] xs[0..2]=42', 'range indexes are out of bounds'),
     ('let xs=[10 20] xs[..]=[42]', 'values for 2 range indexes'),
     ('let xs=[10 20] xs[-1..1]=42', 'range index -1 is out of bounds'),
@@ -4222,7 +4303,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
@@ -4232,7 +4313,7 @@ def test_core_value_web(value_batches, name, release):
 
 def test_core_slice_bounds_panic(compiler, tmp_path):
     source = tmp_path / 'bounds.dewy'
-    source.write_text('end=()=>9\nmain=()=>{let xs=[20 22] return xs[0..end()].length}')
+    source.write_text('stop=()=>9\nmain=()=>{let xs=[20 22] return xs[0..stop()].length}')
     binary = tmp_path / 'bounds'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)

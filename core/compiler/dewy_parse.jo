@@ -14,6 +14,7 @@ struct DewySyntax:
     children: int[]
 
 dewy_syntax: DewySyntax[]
+dw_index_context: int[]  # enclosing index nodes, for contextual `end`
 
 dw_child = (id: int, at: int) -> int: dewy_syntax[id].children[at]
 dw_multiplications = (id: int) -> int:
@@ -422,6 +423,11 @@ dw_expr = (id: int) -> int:
     if k == "BasedString": return dw_binary(id)
     if k == "Identifier":
         if text == "none": return mk(.none_lit, pos)
+        if text == "end" and dw_index_context.len() > 0:
+            ix = dw_index_context[dw_index_context.len() - 1]
+            name = intern("$index_end{ix}")
+            nodes[ix].sval = i32(name)
+            return comp_ident(name, pos)
         n = mk(.ident, pos)
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
@@ -596,6 +602,7 @@ dw_expr = (id: int) -> int:
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             args: int[]
+            if bracket: dw_index_context.push(n)
             if dewy_syntax[right].kind != "Block": args.push(dw_expr(right))
             else if bracket and xs.len() == 1 and (dw_op(xs[0]) == "RangeJuxtapose" or dw_name(xs[0]) == ".."):
                 args.push(dw_iterable(right, true))
@@ -608,6 +615,7 @@ dw_expr = (id: int) -> int:
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
                         args.push(a)
                     else: args.push(dw_expr(child))
+            if bracket: dw_index_context.pop()
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n

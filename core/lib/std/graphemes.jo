@@ -130,7 +130,7 @@ __dewy_string_index = (s: str, index: int) -> str:
     panic("string index out of bounds")
 
 __dewy_string_slice = (s: str, lo: int, hi: int, inclusive: bool, has_stop: bool) -> str:
-    if lo < 0 or has_stop and (hi < 0 or inclusive and hi == 9223372036854775807): panic("string slice out of bounds")
+    if lo < 0 or has_stop and (hi < 0 and not (inclusive and hi == -1) or inclusive and hi == 9223372036854775807): panic("string slice out of bounds")
     stop = hi
     if has_stop and inclusive: stop += 1
     if has_stop and lo > stop: panic("string slice out of bounds")

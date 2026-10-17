@@ -1008,3 +1008,43 @@ The independent C-bootstrap gate passed **2,529 checks in 132.52 s**. The existi
 `dewy/tests/integer_bounds.dewy` program also compiled and returned 42 unchanged.
 [Full bootstrap gate](source-core/numeric-full.log),
 [toolchain metadata](source-core/numeric-validation.json).
+
+## End-relative indices and safe compound array updates
+
+`end` inside an index denotes that receiver's last index. It works in ordinary
+reads, slices, stepped selections and updates, including nested arrays and
+custom indexed containers. Strings use grapheme indices, and an empty string's
+`[..end]` slice is empty. The receiver and bound are captured before index code
+that can change them; simple builtin reads avoid an ownership temporary. Custom
+getter updates use read/edit/writeback, while stable array paths capture indices
+without copying the array.
+
+The tests exposed an existing stale-address bug in ordinary compound updates
+when the RHS grows the destination array. The checker now captures indices and
+the old value, then reacquires indexed/field storage after evaluating the RHS.
+Dewy's existing local parameter-copy behavior remains intact.
+
+Seven alternating Linux thread-CPU samples of two million operations compare
+explicit `length-1` indexing before/after the change and the new `end` form. Read
+medians were **2.291 / 2.290 / 2.292 ms**; update medians were
+**3.037 / 3.064 / 3.074 ms**. These focused kernels exclude setup, warmup and
+printing, and validate the result; they do not establish application-wide speed.
+[Read sources and samples](source-core/end-read-runtime.json),
+[update sources and samples](source-core/end-index-runtime.json).
+
+A separate experiment always aligned x86 loop entries to 16 bytes. It improved
+some kernels but regressed records (paired median runtime ratio 1.201), so it
+was reverted. It is not part of this change.
+[Discarded experiment's complete application samples](source-core/end-index-alignment-trial.json).
+
+**253 focused checks passed in 17.85 s**. The complete gate using the independent
+C-bootstrap compiler passed **2,622 checks in 182.41 s**. The existing
+`dewy/tests/string_index_facts.dewy` program compiles unchanged and returns 42.
+[Focused checks](source-core/end-index-focused.log),
+[full gate](source-core/end-index-full.log),
+[toolchain metadata](source-core/end-index-validation.json).
+
+Five final alternating compile pairs gave median paired CPU ratios of
+**0.991 tour / 0.990 Dunes / 1.009 compiler self-build**,
+which show no meaningful compile regression on this busy host.
+[Compile samples](source-core/end-index-compile.json).

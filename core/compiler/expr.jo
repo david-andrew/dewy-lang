@@ -4946,6 +4946,27 @@ check_expr = (n: int, expected: int) -> int:
         t = check_call(n, expected)
     else if k == .typeapply: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .index:
+        if nodes[n].sval != 0:
+            pos = nodes[n].pos
+            name = "$index_source{bc_count}"
+            bc_count += 1
+            source = int(nodes[n].a)
+            source_type = prune(check_expr(clone(source), 0))
+            source_kind = types[source_type].kind
+            stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
+            stmts: int[]
+            end_source = clone(source)
+            if not stable:
+                stmts.push(bc_let(name, source, pos))
+                end_source = bc_ident(name, pos)
+                nodes[n].a = i32(bc_ident(name, pos))
+            stmts.push(bc_let(name_of(int(nodes[n].sval)), dewy_index_end(end_source, pos), pos))
+            nodes[n].sval = 0
+            ix = nodes.len()
+            nodes.push(nodes[n])
+            stmts.push(bc_stmt(ix, pos))
+            nodes[n] = nodes[bc_block(stmts, pos)]
+            return check_expr(n, expected)
         bt = prune(check_expr(int(nodes[n].a), 0))
         bk = types[bt].kind
         b = int(nodes[n].b)
@@ -5903,6 +5924,20 @@ neg_index_check = (b: int):
     e = "end"
     if k > 1: e = "end - {k - 1}"
     fatal(nodes[b].pos, "an index counts from 0; from the end it is `{e}` (`xs[end]` is the last, `xs[end - 2..]` the last three)")
+
+# Literal arithmetic around `end` cannot change the receiver. Other index
+# expressions retain a value snapshot before invoking user code.
+dewy_end_arithmetic = (n: int, name: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .int_lit: return true
+    if k == .ident: return nodes[n].name == i32(name)
+    if k == .binary or k == .unary or k == .range:
+        return dewy_end_arithmetic(int(nodes[n].a), name) and dewy_end_arithmetic(int(nodes[n].b), name) and dewy_end_arithmetic(int(nodes[n].c), name)
+    false
+
+dewy_index_end = (source: int, pos: int) -> int:
+    bc_bin(.minus, bc_method(source, "len", [], pos), bc_int(1, pos), pos)
 
 # A stepped slice computes its default endpoint from the captured receiver's
 # size. Calls retain normal left-to-right operand evaluation and value snapshots.

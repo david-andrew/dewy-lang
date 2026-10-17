@@ -1,0 +1,69 @@
+{
+  "toolchain": {
+    "source_identity": "28ecd9f11df062e27a5737cceb737f51bd79a4b9e1730bc845b5547a09c7050d",
+    "binary": "build-1792261696995918118/bin/dewy-core",
+    "binary_sha256": "7e86d9fb73ad4abcd68b7f2b656cc254cdde835024552b7ace1535b0d0b53119"
+  },
+  "clock": "Linux thread CPU",
+  "updates": 2000000,
+  "array_length": 100001,
+  "samples": 7,
+  "harness_sha256": {
+    "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+    "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+  },
+  "variants": {
+    "before-explicit": {
+      "source": "from p\"benchmark_harness.jo\" import clock\nkernel=(@values:array<int64> count:int64):>int64=>{\nloop i in [0..count) values[values.length-1]+=1\nreturn values[values.length-1]\n}\nmain=():>void=>{\nlet values=[loop i in [0..100000) 0] values.push(0)\nif kernel(@values 1000) not=? 1000 panic(\"warmup\")\nlet started=clock() let checksum=kernel(@values 2000000) let elapsed=clock()-started\nprintl\"{checksum} {elapsed}\"\n}\n",
+      "compiler_sha256": "d6d70d11db2eaaa3659fbf298c3f6f5713847b796defae021bdb99896eb7c2e2",
+      "binary_sha256": "d544a2356dcc899fca9f7df0ac63b60e1b6486050b169a253cf8f3000ed091c1",
+      "kernel_ns": [
+        3019645,
+        3003247,
+        3111086,
+        2581259,
+        3092017,
+        3037082,
+        3073745
+      ],
+      "median_ns": 3037082
+    },
+    "after-explicit": {
+      "source": "from p\"benchmark_harness.jo\" import clock\nkernel=(@values:array<int64> count:int64):>int64=>{\nloop i in [0..count) values[values.length-1]+=1\nreturn values[values.length-1]\n}\nmain=():>void=>{\nlet values=[loop i in [0..100000) 0] values.push(0)\nif kernel(@values 1000) not=? 1000 panic(\"warmup\")\nlet started=clock() let checksum=kernel(@values 2000000) let elapsed=clock()-started\nprintl\"{checksum} {elapsed}\"\n}\n",
+      "compiler_sha256": "7e86d9fb73ad4abcd68b7f2b656cc254cdde835024552b7ace1535b0d0b53119",
+      "binary_sha256": "867ce0ba5b0665edaaf8b59c26aacbf799735fd2d4cda29875ed5e9a7f58a629",
+      "kernel_ns": [
+        3033068,
+        3114358,
+        2844163,
+        3064276,
+        3046162,
+        3072476,
+        3083492
+      ],
+      "median_ns": 3064276
+    },
+    "after-end": {
+      "source": "from p\"benchmark_harness.jo\" import clock\nkernel=(@values:array<int64> count:int64):>int64=>{\nloop i in [0..count) values[end]+=1\nreturn values[end]\n}\nmain=():>void=>{\nlet values=[loop i in [0..100000) 0] values.push(0)\nif kernel(@values 1000) not=? 1000 panic(\"warmup\")\nlet started=clock() let checksum=kernel(@values 2000000) let elapsed=clock()-started\nprintl\"{checksum} {elapsed}\"\n}\n",
+      "compiler_sha256": "7e86d9fb73ad4abcd68b7f2b656cc254cdde835024552b7ace1535b0d0b53119",
+      "binary_sha256": "08df1875c2488809e084517adae9ac22c7f77cdf448a0c1060264a1cc07093ec",
+      "kernel_ns": [
+        3016952,
+        3074393,
+        3120872,
+        3232219,
+        2865076,
+        3108099,
+        3014936
+      ],
+      "median_ns": 3074393
+    }
+  },
+  "load_end": [
+    13.822265625,
+    14.3291015625,
+    10.97900390625
+  ],
+  "expected_checksum": 2001000,
+  "scope": "Two million repeated last-element updates in a 100,001-element array. Construction, warmup and printing are excluded from the Linux thread CPU interval. Seven alternating samples per variant. This is a focused kernel comparison, not an application speed claim."
+}

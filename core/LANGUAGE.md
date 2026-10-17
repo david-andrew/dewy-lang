@@ -392,6 +392,13 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
+Inside an index or slice, `end` is the receiver's last index: `xs[end]`,
+`xs[end-2..end]` and `xs[end,end-2..0]`. Nested brackets use their own receiver.
+The receiver and its last index are evaluated once before the index expression;
+strings count grapheme clusters. These forms also support array and custom
+container updates. Ordinary array updates capture indices before the right-hand
+side, then locate the destination again if that side resizes the array.
+
 Array literals take their element type from a function parameter, including
 nested arrays and optional array parameters. For example,
 `sum_words=(xs:array<uint64>)=>xs[0]+xs[1]` accepts `sum_words([20 22])` without

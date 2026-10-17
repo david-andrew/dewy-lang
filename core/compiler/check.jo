@@ -2364,7 +2364,52 @@ append_assign = (s: int):
     else: nodes[spine[spine.len() - 2]].a = i32(rest)
     nodes[s].op = i32(int(Tok.pluseq))
 
+# A checked receiver path that can be aliased without running a getter again.
+dewy_end_place = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .ident: return true
+    if k == .field or k == .index: return dewy_end_place(int(nodes[n].a))
+    false
+
+dewy_end_assign = (s: int) -> int:
+    ix = 0
+    part = int(nodes[s].a)
+    loop nodes[part].kind == .field or nodes[part].kind == .index:
+        if nodes[part].kind == .index and nodes[part].sval != 0: ix = part
+        part = int(nodes[part].a)
+    if ix == 0: return 0
+    pos = nodes[ix].pos
+    receiver = int(nodes[ix].a)
+    check_expr(clone(receiver), 0)
+    stable = dewy_end_place(last_checked)
+    stmts: int[]
+    receiver_path = index_update_path(receiver)
+    j = receiver_path.len() - 1
+    loop j >= 0:
+        part = receiver_path[j]
+        j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0: index_update_capture(part, stmts)
+    name = "$index_target{bc_count}"
+    bc_count += 1
+    end_source = clone(receiver)
+    if not stable:
+        stmts.push(bc_let(name, end_source, pos))
+        end_source = bc_ident(name, pos)
+        nodes[ix].a = i32(bc_ident(name, pos))
+    stmts.push(bc_let(name_of(int(nodes[ix].sval)), dewy_index_end(end_source, pos), pos))
+    nodes[ix].sval = 0
+    update = nodes.len()
+    nodes.push(nodes[s])
+    stmts.push(update)
+    if not stable: stmts.push(bc_assign(receiver, bc_ident(name, pos), pos))
+    blk = bc_block(stmts, pos)
+    check_stmt(blk)
+    blk
+
 check_assign = (s: int) -> int:
+    if files[pos_file(nodes[s].pos)].is_dewy:
+        end_update = dewy_end_assign(s)
+        if end_update != 0: return end_update
     if nodes[s].op == i32(int(Tok.assign)):
         unnarrow_assign(s)
         append_assign(s)
@@ -2516,9 +2561,10 @@ check_assign = (s: int) -> int:
         nodes[s].b = i32(coerce(last_checked, T_INT))
         nodes[s].aux = 3
         return s
-    if nodes[s].sval != 0 or (not is_numeric(l) and types[l].kind != .bool_):
+    if nodes[s].sval != 0 or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
         # Helper calls, overloads and vectors: x = operation(x, y). Capture
         # indices before reading x, including names the right side may change.
+        # Reacquire indexed/field storage after the RHS: it can resize an array.
         pos = nodes[s].pos
         pre: int[]
         x = lhs
