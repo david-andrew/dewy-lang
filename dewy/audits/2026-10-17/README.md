@@ -1178,3 +1178,25 @@ preceding default-build change passed its complete independent C-bootstrap gate
 and CI; this frontend slice uses focused local validation and full CI on push.
 [Focused gate](source-core/array-spread-focused.log),
 [toolchain metadata](source-core/array-spread-validation.json).
+
+## Explicitly specialized generic function values
+
+`let callback=identity<int64>` now resolves a concrete callable, using the same
+specialization machinery as direct calls. It works for selected imports and
+module-qualified functions from Dewy and core modules, mutable parameters,
+generic results, and functions returning specialized callbacks. No runtime
+generic dispatch or new boxed representation is introduced.
+
+Explicit arguments seed the callable-type inference. A callable annotation or
+callback parameter can select among overloads; an unresolved overload is an
+error rather than silently choosing the first declaration. Wrong type-argument
+counts and conflicts with the expected callable type are rejected. Callback
+arguments retain context until overload selection, including generic consumers.
+Editor hover reports the concrete signature, and formatting preserves the syntax.
+
+**469 focused checks passed in 25.88 s**, followed by **43 checks in 3.00 s**
+covering the additional generic-consumer, hover and cross-module cases. Ruff
+and diff checks passed. The preceding array-spread commit passed full CI.
+[Focused gate](source-core/generic-values-focused.log),
+[additional checks](source-core/generic-values-extra.log),
+[toolchain metadata](source-core/generic-values-validation.json).

@@ -679,7 +679,7 @@ variant_enum = (t0: int, name: int) -> int:
 
 ctx_dependent = (a: int) -> bool:
     k = nodes[a].kind
-    if k == .ident or k == .field: return has_flag(a, NF_FNREF_ARG)
+    if k == .ident or k == .field or k == .typeapply: return has_flag(a, NF_FNREF_ARG)
     if k == .dotname: return nodes[a].type == 0        # (E.v is a dotname already typed)
     if k == .call and nodes[a].type == 0 and nodes[int(nodes[a].a)].kind == .dotname: return true     # .v(args)
     if k == .lambda or k == .none_lit or k == .hole: return true
@@ -909,7 +909,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     if ctx_dependent(a):
         k = nodes[a].kind
         if k == .hole: return 0
-        if k == .ident or k == .field:
+        if k == .ident or k == .field or k == .typeapply:
             if pk == .fn_: return 0
             if pk == .cfn: return 0             # (a @cabi function for C: checked when given)
             if pk == .param: return 3        # a function passed to a generic parameter
@@ -1050,14 +1050,16 @@ check_args_untyped = (args: int[]):
         if nodes[a].kind == .array and files[pos_file(nodes[a].pos)].is_dewy and ctx_dependent(a):
             check_args_untyped(kids(a))
             continue
-        if nodes[a].kind == .ident and not has_flag(a, NF_CHECKED):
-            s = lookup(int(nodes[a].name))
+        base = a
+        if nodes[a].kind == .typeapply: base = int(nodes[a].a)
+        if nodes[base].kind == .ident and not has_flag(a, NF_CHECKED):
+            s = lookup(int(nodes[base].name))
             if s != 0 and syms[s].kind == .fns: add_flag(a, NF_FNREF_ARG)
         # (cm.step: a module's function, checked with the parameter's type as a plain one is)
-        if nodes[a].kind == .field and not has_flag(a, NF_CHECKED) and nodes[int(nodes[a].a)].kind == .ident:
-            ms = lookup(int(nodes[int(nodes[a].a)].name))
+        if nodes[base].kind == .field and not has_flag(a, NF_CHECKED) and nodes[int(nodes[base].a)].kind == .ident:
+            ms = lookup(int(nodes[int(nodes[base].a)].name))
             if ms != 0 and syms[ms].kind == .module:
-                fs = module_lookup(int(syms[ms].ref), int(nodes[a].name))
+                fs = module_lookup(int(syms[ms].ref), int(nodes[base].name))
                 if fs != 0 and syms[fs].kind == .fns: add_flag(a, NF_FNREF_ARG)
         if ctx_dependent(a) or has_flag(a, NF_CHECKED): continue
         check_expr(a, 0)
@@ -4530,17 +4532,22 @@ check_lambda = (lam: int, expected: int) -> int:
     fns[f].fntype = i32(t)
     t
 
-fn_value = (n: int, expected: int) -> int:
+fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1) -> int:
     decls: int[]
-    collect_fns(int(nodes[n].name), decls)
+    if mod >= 0: collect_module(mod, int(nodes[n].name), decls)
+    else: collect_fns(int(nodes[n].name), decls)
     et = prune(expected)
     if expected == 0: et = 0
     f = 0
+    selected = 0
+    selected_binds: int[]
     loop d in decls:
         sig = fn_sig(d)
+        if explicit_types.len() > 0 and explicit_types.len() != int(sig.nexplicit): continue
+        binds = fill(0, int(sig.ntp))
+        loop i in [0..explicit_types.len()): binds[i] = explicit_types[i]
         if et != 0 and (types[et].kind == .fn_ or types[et].kind == .cfn):
             if int(types[et].nargs) != nkids(d): continue
-            binds = fill(0, int(sig.ntp))
             ok = true
             loop i in [0..int(types[et].nargs)):
                 r = match_type(sig.params[i], targ(et, i), binds, 0)
@@ -4557,8 +4564,18 @@ fn_value = (n: int, expected: int) -> int:
             if not ok: continue
             f = get_fn_inst(d, binds, nodes[n].pos)
             break
+        else if explicit_types.len() > 0:
+            complete = true
+            loop b in binds:
+                if b == 0: complete = false
+            if not complete: continue
+            if selected != 0: fatal(nodes[n].pos, "multiple versions of '{name_of(int(nodes[n].name))}' match these type arguments; give the function value a callable type")
+            selected = d
+            selected_binds = binds
         else if not sig.generic and decls.len() == 1: f = get_fn_inst(d, [], nodes[n].pos)
+    if selected != 0: f = get_fn_inst(selected, selected_binds, nodes[n].pos)
     if f == 0:
+        if explicit_types.len() > 0: fatal(nodes[n].pos, "no version of '{name_of(int(nodes[n].name))}' matches these type arguments and callable type")
         if et != 0 and types[et].kind == .fn_:
             nm = name_of(int(nodes[n].name))
             hint = ""
@@ -4950,7 +4967,24 @@ check_expr = (n: int, expected: int) -> int:
             add_flag(n, NF_INBOUNDS)
             return check_expr(n, expected)
         t = check_call(n, expected)
-    else if k == .typeapply: t = mk_typeval(resolve_type(int(nodes[n].c)))
+    else if k == .typeapply:
+        base = int(nodes[n].a)
+        name = int(nodes[base].name)
+        s = 0
+        mod = -1
+        if nodes[base].kind == .ident: s = lookup(name)
+        else if nodes[base].kind == .field:
+            mt = prune(check_expr(int(nodes[base].a), 0))
+            if types[mt].kind == .module:
+                mod = int(types[mt].mod)
+                s = module_lookup(mod, name)
+        if s != 0 and syms[s].kind == .fns:
+            targs: int[]
+            loop arg in kids(n): targs.push(resolve_type(arg))
+            nodes[n].name = i32(name)
+            t = fn_value(n, expected, targs, mod)
+            if ide_on: ide_fn_ref(nodes[base].pos, name, int(nodes[n].sym))
+        else: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .index:
         if nodes[n].sval != 0:
             pos = nodes[n].pos

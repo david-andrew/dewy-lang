@@ -59,6 +59,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64> printl(f(42)) return 0}',
     'spread': 'main=()=>{let xs=[20 22] printl([0 xs... 1 (xs)...]) return 0}',
     'sequence': 'Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=()=>{printl([loop x in Series[3] x]) return 0}',
     'slice-update': 'main=()=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs) return 0}',

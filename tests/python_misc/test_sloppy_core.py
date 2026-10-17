@@ -21,6 +21,27 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'generic-value-explicit': '''identity=<T>(x:T):>T=>x
+main=()=>{let integer=identity<int64> let text=identity<string>
+return if text("yes") =? "yes" integer(42) else 1}''',
+    'generic-value-result': '''largest=<T>():>T=>T.max
+main=()=>{let limit=largest<uint8> return if limit() =? 255 42 else 1}''',
+    'generic-value-callback': '''identity=<T>(x:T):>T=>x
+apply=(f:((x:int64):>int64) value:int64)=>f(value)
+main=()=>apply(identity<int64> 42)''',
+    'generic-value-generic-consumer': '''identity=<T>(x:T):>T=>x
+keep=<T>(value:T):>T=>value
+main=()=>{let callback=keep(identity<int64>) return callback(42)}''',
+    'generic-value-mut': '''replace=<T>(@dest:T value:T):>void=>{dest=value}
+main=()=>{let set=replace<int64> let value=0 set(@value 42) return value}''',
+    'generic-value-return': '''identity=<T>(x:T):>T=>x
+factory=<T>()=>identity<T>
+main=()=>{let convert=factory<int64>() return convert(42)}''',
+    'generic-value-overload-context': '''choose=<T>(x:T):>T=>x
+choose=<T>(x:T y:T):>T=>y
+apply=(f:((x:int64):>int64))=>f(42)
+main=()=>{let pair:((x:int64 y:int64):>int64)=choose<int64>
+return pair(0 apply(choose<int64>))}''',
     'spread-arrays': '''main=()=>{let head=[1 2] let tail=[20 22]
 let all=[0 head... 3 tail...]
 return if all =? [0 1 2 3 20 22] all[end]+all[end-1] else 1}''',
@@ -2210,6 +2231,9 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'generic-value-ambiguous': ('choose=<T>(x:T):>T=>x\nchoose=<T>(x:T y:T):>T=>y\nmain=()=>{let f=choose<int64> return 42}', 'multiple versions of'),
+    'generic-value-wrong-type-count': ('identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64 string> return 42}', 'no version of'),
+    'generic-value-conflicting-type': ('identity=<T>(x:T):>T=>x\nmain=()=>{let f:((x:string):>string)=identity<int64> return 42}', 'no version of'),
     'spread-outside-literal': ('main=()=>{let xs=[42] return xs...}', 'spread is supported inside array literals'),
     'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array literals'),
     'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
@@ -3582,8 +3606,13 @@ main=()=>{
     let nested:b.Nested<string>=[value=["one"]]
     let words=Package<array<string>>[["yes"]]
     let item=wrap<string>("wrapped")
+    let dewy_identity=a.identity<int64>
+    let core_identity=b.identity<string>
+    let make_package=wrap<int64>
     return if one.value+b.identity<int64>(two.value) =? 42 and two.extra =? 2
         and nested.value[0] =? "one" and item.value =? "wrapped"
+        and dewy_identity(42) =? 42 and core_identity("ok") =? "ok"
+        and make_package(42).value =? 42
         and a.identity<array<string>>(words.value)[0] =? "yes" 42 else 1
 }
 ''')

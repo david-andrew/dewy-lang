@@ -313,10 +313,14 @@ and an integer alias exposes `.min` and `.max`. The editor completes these
 bounds and shows their integer type on hover; `end` inside brackets hovers as
 `int64`.
 
+Generic functions can also be specialized as values: `let convert=identity<int64>`
+stores a callable, including functions imported from Dewy or core modules.
+Passing `identity<int64>` directly as a callback works too. If several overloads
+remain after specialization, give the value a callable type to select one.
+Without explicit type arguments, an expected callable type can infer them.
+
 This slice accepts plain type parameter names. Constraints such as `T of Bound`
-and explicitly generic local closures remain unsupported. To pass a generic
-function as a value, provide its expected callable type; explicit type arguments
-currently apply to calls and type construction.
+and explicitly generic local closures remain unsupported.
 
 Custom records can define arithmetic and indexing with ordinary functions:
 
