@@ -93,6 +93,39 @@ main=()=>{
     'generic-index-parameter-copy': '''edit=(pool:Pool<array<int64>> handle:Handle)=>{pool[handle][0]=42 return pool[handle][0]}
 main=()=>{let p:Pool<array<int64>>=[] let h=p.add([1])
 return if edit(p h) =? 42 and p[h][0] =? 1 42 else 1}''',
+    'generic-operator-arithmetic': '''Vec:type=[x:int64 y:int64]
+__add__=(a:Vec b:Vec)=>Vec[a.x+b.x a.y+b.y]
+__sub__=(a:Vec b:Vec)=>Vec[a.x-b.x a.y-b.y]
+__mul__=(a:Vec b:int64)=>Vec[a.x*b a.y*b]
+__mul__=(a:int64 b:Vec)=>Vec[a*b.x a*b.y]
+__unary_sub__=(a:Vec)=>Vec[-a.x -a.y]
+main=()=>{let a=Vec[10 11] let b=Vec[1 2]
+let total=2a+2b-2b let negative=-total
+return if negative.x =? -20 and negative.y =? -22 and __add__(a a) =? total 42 else 1}''',
+    'generic-operator-comparison': '''Score:type=[value:int64 label:string]
+__eq__=(a:Score b:Score)=>a.value =? b.value
+__lt__=(a:Score b:Score)=>a.value <? b.value
+main=()=>{let a=Score[1 "a"] let b=Score[2 "b"] let same=Score[1 "different"]
+return if a =? same and a not=? b and a <? b and b >? a and a <=? same and same >=? a 42 else 1}''',
+    'generic-operator-source-order': '''Score:type=[value:int64]
+trace=""
+mark=(label:string value:int64)=>{trace+=label return Score[value]}
+__lt__=(a:Score b:Score)=>a.value <? b.value
+main=()=>{
+if not (mark("a" 42) >? mark("b" 20)) return 1
+if not (mark("c" 20) <=? mark("d" 42)) return 2
+if not (mark("e" 42) >=? mark("f" 20)) return 3
+return if trace =? "abcdef" 42 else 4}''',
+    'generic-operator-specialization': '''Box:type=<T>[value:T]
+__add__=<T>(a:Box<T> b:Box<T>):>Box<T>=>Box<T>[a.value+b.value]
+main=()=>{let number=Box<int64>[20]+Box<int64>[22] let text=Box<string>["hello"]+Box<string>["!"]
+return if number.value =? 42 and text.value =? "hello!" 42 else 1}''',
+    'generic-operator-index': '''Store:type=<T>[values:array<T>]
+__index__=<T>(s:Store<T> i:int64):>T=>s.values[i]
+__setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{s.values[i]=value}
+main=()=>{let s=Store<array<int64>>[[[20 22]]] let old=s
+s[0][1]+=20 s[0][0]=42
+return if s[0] =? [42 42] and old[0] =? [20 22] 42 else 1}''',
     'generic-index-array': '''main=()=>{
 let pool:Pool<array<int64>>=[] let handle=pool.add([20 22]) let original=pool
 pool[handle][0]=42 pool[handle][1]+=20
@@ -513,6 +546,9 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'main-record-result': ('main=()=>[value=42]', 'main must return void or an integer exit code'),
+    'main-float-result': ('main=()=>42.5', 'main must return void or an integer exit code'),
+    'operator-comparison-result': ('Box:type=[value:int64]\n__lt__=(a:Box b:Box)=>a.value-b.value\nmain=()=>Box[1] <? Box[2]', 'must return bool'),
     'named-duplicate': ('add=(x:int64 y:int64)=>x+y\nmain=()=>add(40 x=2)', 'given twice'),
     'match-incomplete': ('main=()=>match 42 {<42>=>42}', 'not exhaustive'),
     'match-incomplete-statement': ('main=()=>{match true {<true>=>42} return 42}', 'not exhaustive'),
@@ -852,7 +888,8 @@ main=()=>{
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('language', ['dewy', 'jo'])
-def test_core_indexed_update_order(compiler, tmp_path, target, release, language):
+@pytest.mark.parametrize('provider', ['dewy', 'jo'])
+def test_core_indexed_update_order(compiler, tmp_path, target, release, language, provider):
     (tmp_path / 'store.jo').write_text('''struct Store[T]:
     values: T[]
 trace = ""
@@ -913,6 +950,16 @@ main = () -> int:
     if events() != "grs" or scalars.values != [42, 3]: return 4
     42
 ''')
+    if provider == 'dewy':
+        (tmp_path / 'store.dewy').write_text('''Store:type=<T>[values:array<T>]
+trace=""
+at=(label:string value:int64):>int64=>{trace+=label return value}
+__index__=<T>(s:Store<T> i:int64):>T=>{trace+="g" return s.values[i]}
+__setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{trace+="s" s.values[i]=value}
+reset=():>void=>{trace=""}
+events=():>string=>trace
+''')
+        source.write_text(source.read_text().replace('store.jo', 'store.dewy'))
     binary = tmp_path / 'order'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -932,6 +979,99 @@ main = () -> int:
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('name, imports', [
+    ('generic-operator-arithmetic', 'Vec, __add__'),
+    ('generic-operator-comparison', 'Score'),
+    ('generic-operator-specialization', 'Box'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_operator_imports(compiler, tmp_path, name, imports, target, release):
+    declarations, body = CASES[name].split('main=', 1)
+    (tmp_path / 'operators.dewy').write_text(declarations)
+    source = tmp_path / 'main.dewy'
+    source.write_text(f'from p"operators.dewy" import {imports}\nmain={body}')
+    binary = tmp_path / 'operators'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web operator checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'operators.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('case', ['history', 'managed-values', 'capacity', 'negative-index', 'past-end'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_ring_example(compiler, tmp_path, case, target, release):
+    examples = Path(__file__).resolve().parents[2] / 'examples/sloppy_core'
+    shutil.copy2(examples / 'ring.dewy', tmp_path / 'ring.dewy')
+    source = tmp_path / 'main.dewy'
+    if case == 'history':
+        source.write_text((examples / 'history.dewy').read_text())
+    elif case == 'managed-values':
+        source.write_text('''from p"ring.dewy" import new_ring
+main=()=>{
+let ring=new_ring<array<string>>(2)
+loop i in [0..7) {ring.push(["{i}"])}
+let snapshot=ring
+ring[0][0]="changed"
+ring[1]=["replacement"]
+if ring[0][0] not=? "changed" or ring[1][0] not=? "replacement" return 1
+if snapshot[0][0] not=? "5" or snapshot[1][0] not=? "6" return 2
+let empty=new_ring<int64>(1)
+if empty.len() not=? 0 return 3
+empty.push(1) empty.push(42)
+return if empty.len() =? 1 and empty[0] =? 42 42 else 4
+}
+''')
+    else:
+        action = {'capacity': 'new_ring<int64>(0)',
+                  'negative-index': 'ring[-1]', 'past-end': 'ring[1]'}[case]
+        source.write_text(f'from p"ring.dewy" import new_ring\n'
+                          f'main=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}')
+    binary = tmp_path / 'ring'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web ring checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'ring.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    if case == 'history':
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert ran.stdout == ('History length: 4\nOldest position: 6, 3\n'
+                              'Newest position: 112, 6\nRewind position: 12, 6\n')
+    elif case == 'managed-values':
+        assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    else:
+        assert ran.returncode != 0
+        message = 'ring capacity must be positive' if case == 'capacity' else 'ring index out of bounds'
+        assert message in ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('setter', [False, True], ids=['missing-setter', 'readonly-receiver'])

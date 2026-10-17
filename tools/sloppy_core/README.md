@@ -130,6 +130,38 @@ both modes cover independent copies, side effects and shared `.jo` behavior.
 This retains the collection-copy cost of explicit read/edit/writeback; it does
 not introduce a mutable borrow through a getter.
 
+Dewy-defined dunder functions now participate in custom-record operator lookup:
+arithmetic, comparisons, unary minus, shifts/xor, and `__index__` / `__setindex__`.
+Their names remain ordinary function names for explicit calls and imports.
+Receiver/operand modules supply protocols even after a selected type import;
+Dewy and `.jo` clients share specialization and dispatch. Comparisons require
+`bool`, and comparisons derived from `<` preserve written operand evaluation
+order. Built-in scalar arithmetic is unchanged; custom logical operators,
+floor division/modulo and power are still outside this slice.
+
+`examples/sloppy_core/ring.dewy` is a generic bounded container implemented in
+Dewy. Its history example covers wraparound, nested indexed edits and independent
+snapshots. Native/web debug/release checks also cover managed elements, capacity
+one, empty length, invalid capacity and invalid indices. The checker now rejects
+non-void/non-integer entry-point results, which previously could emit invalid
+WebAssembly for an aggregate result.
+
+Compare the ring's scalar insertion path with the same algorithm written in the
+core's implementation language:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_ring "$(python3 -m tools.core path)" \
+  --output /tmp/ring-times.json
+```
+
+The runner checks empty, partial, full and wrapped checksums before measuring,
+then alternates warmed runs. The report includes complete sources and raw kernel
+and process timings. This comparison measures frontend/representation overhead
+for the same algorithm; it is not a C comparison or a copied-container workload.
+Seven measured runs of 10 million insertions into a 1,024-slot ring gave median
+kernel times of 71.10 ms for Dewy and 69.37 ms for `.jo`; all checksums matched.
+These are similar results on the development desktop, not a general parity claim.
+
 Comprehensions build arrays or dictionaries eagerly:
 
 ```dewy
@@ -156,8 +188,8 @@ new; `let` explicitly declares/shadows. Managed values retain independent copies
 and module-level unpacking is supported. Nested, annotated and `const` targets
 are not implemented yet; omit unwanted record fields instead of using `_`.
 
-The combined Dewy/editor/shared-core gate now contains 1,087 checks and took
-93 seconds in the latest development run, including separate compiler
+The combined Dewy/editor/shared-core gate now contains 1,150 checks and took
+129 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

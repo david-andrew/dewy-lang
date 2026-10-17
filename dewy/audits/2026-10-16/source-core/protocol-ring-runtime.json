@@ -1,0 +1,126 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "5ef10eb05428c9b182cd8e3ea9564d13da05369e",
+  "compiler": {
+    "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792200110851831503/bin/dewy-core",
+    "sha256": "9a1b27bda975b24a1c6dfecae5138fbaac89c245d24c79ab8ce4ea32d3cc5099"
+  },
+  "samples": 7,
+  "count": 10000000,
+  "capacity": 1024,
+  "warmups": 1,
+  "flags": [
+    "--release"
+  ],
+  "load_average_start": [
+    10.44287109375,
+    9.4013671875,
+    7.7099609375
+  ],
+  "limits": [
+    "Native host; sequential alternating runs; no graphics.",
+    "The .jo baseline is a manual translation of the same ring algorithm, not C.",
+    "Kernel includes insertion, growth and final indexed checksum; excludes process startup.",
+    "Timing covers scalar elements with no retained copies during mutation."
+  ],
+  "sources": {
+    "harness.jo": "# Platform boundary for the Dewy application benchmarks. The original\n# harness uses compiler-specific raw syscalls; this uses the core's library.\nsize_argument = (values: str[], fallback: int) -> int:\n    if values.len() < 2: return fallback\n    text = values[1]\n    value = 0\n    loop byte in text:\n        if byte < 48 or byte > 57: return fallback\n        value = value * 10 + int(byte) - 48\n        if value > 1000000000: return fallback\n    value\n\nclock = () -> int: time_ns()\nmix = (hash: int, value: int) -> int: __floor_mod(hash * 31 + value, 1000000007)\n",
+    "main.dewy": "from p\"ring.dewy\" import new_ring\nfrom p\"harness.jo\" import size_argument\nmain=():>void=>{\n    let count=size_argument(args() 10000000)\n    let ring=new_ring<int64>(1024)\n    let start=time_ns()\n    loop i in [0..count) {ring.push(i)}\n    let checksum:int64=0\n    loop i in [0..ring.len()) {checksum+=ring[i]}\n    let elapsed=time_ns()-start\n    printl\"{checksum} {elapsed}\"\n}\n",
+    "main.jo": "use \"ring.jo\"\nuse \"harness.jo\"\nmain = ():\n    count = size_argument(args(), 10000000)\n    ring = new_ring[int](1024)\n    start = time_ns()\n    loop i in [0..count): ring.push(i)\n    checksum = 0\n    loop i in [0..ring.len()): checksum += ring[i]\n    elapsed = time_ns() - start\n    print(\"{checksum} {elapsed}\")\n",
+    "ring.dewy": "# A bounded history, oldest entry first. Once full, push replaces the oldest\n# entry in constant time. Construct with new_ring<T>(capacity).\nRing:type=<T>[capacity:int64 values:array<T> head:int64=0]\n\nnew_ring=<T>(capacity:int64):>Ring<T>=>{\n    if capacity <=? 0 panic(\"ring capacity must be positive\")\n    return Ring<T>[capacity=capacity]\n}\n\nlen=<T>(ring:Ring<T>):>int64=>ring.values.length\n\npush=<T>(@ring:Ring<T> value:T):>void=>{\n    if ring.values.length <? ring.capacity {\n        ring.values.push(value)\n    } else {\n        ring.values[ring.head]=value\n        ring.head+=1\n        if ring.head =? ring.capacity ring.head=0\n    }\n}\n\nstorage_index=<T>(ring:Ring<T> index:int64):>int64=>{\n    if index <? 0 or index >=? ring.values.length panic(\"ring index out of bounds\")\n    let slot=ring.head+index\n    return if slot >=? ring.capacity slot-ring.capacity else slot\n}\n\n__index__=<T>(ring:Ring<T> index:int64):>T=>ring.values[storage_index(ring index)]\n__setindex__=<T>(@ring:Ring<T> index:int64 value:T):>void=>{\n    ring.values[storage_index(ring index)]=value\n}\n",
+    "ring.jo": "struct Ring[T]:\n    capacity: int\n    values: T[]\n    head = 0\nnew_ring[T] = (capacity: int) -> Ring[T]:\n    if capacity <= 0: panic(\"ring capacity must be positive\")\n    Ring[T](capacity = capacity)\nlen[T] = (ring: Ring[T]) -> int: ring.values.len()\npush[T] = (ring: mut Ring[T], value: T):\n    if ring.values.len() < ring.capacity:\n        ring.values.push(value)\n    else:\n        ring.values[ring.head] = value\n        ring.head += 1\n        if ring.head == ring.capacity: ring.head = 0\nstorage_index[T] = (ring: Ring[T], index: int) -> int:\n    if index < 0 or index >= ring.values.len(): panic(\"ring index out of bounds\")\n    slot = ring.head + index\n    if slot >= ring.capacity: slot - ring.capacity else: slot\n([])[T] = (ring: Ring[T], index: int) -> T: ring.values[storage_index(ring, index)]\n([]=)[T] = (ring: mut Ring[T], index: int, value: T):\n    ring.values[storage_index(ring, index)] = value\n"
+  },
+  "validation": {
+    "dewy": {
+      "0": 0,
+      "1": 0,
+      "17": 136,
+      "1024": 523776,
+      "1025": 524800,
+      "10000": 9715200
+    },
+    "jo": {
+      "0": 0,
+      "1": 0,
+      "17": 136,
+      "1024": 523776,
+      "1025": 524800,
+      "10000": 9715200
+    }
+  },
+  "build_seconds": {
+    "dewy": 0.07599001307971776,
+    "jo": 0.07601596298627555
+  },
+  "measurements": {
+    "dewy": [
+      {
+        "kernel_ns": 58685334,
+        "wall_seconds": 0.06055623898282647
+      },
+      {
+        "kernel_ns": 60259629,
+        "wall_seconds": 0.06124193803407252
+      },
+      {
+        "kernel_ns": 64241958,
+        "wall_seconds": 0.06615089799743146
+      },
+      {
+        "kernel_ns": 87674813,
+        "wall_seconds": 0.089862619061023
+      },
+      {
+        "kernel_ns": 86992150,
+        "wall_seconds": 0.08922860596794635
+      },
+      {
+        "kernel_ns": 71098082,
+        "wall_seconds": 0.0733625910943374
+      },
+      {
+        "kernel_ns": 80513886,
+        "wall_seconds": 0.08255327201914042
+      }
+    ],
+    "jo": [
+      {
+        "kernel_ns": 65940597,
+        "wall_seconds": 0.06794585299212486
+      },
+      {
+        "kernel_ns": 56314133,
+        "wall_seconds": 0.05707970994990319
+      },
+      {
+        "kernel_ns": 69367829,
+        "wall_seconds": 0.07017547998111695
+      },
+      {
+        "kernel_ns": 76750972,
+        "wall_seconds": 0.07870325795374811
+      },
+      {
+        "kernel_ns": 73713718,
+        "wall_seconds": 0.07584225502796471
+      },
+      {
+        "kernel_ns": 69683314,
+        "wall_seconds": 0.07182806998025626
+      },
+      {
+        "kernel_ns": 57301256,
+        "wall_seconds": 0.05922646296676248
+      }
+    ]
+  },
+  "median_kernel_ms": {
+    "dewy": 71.098082,
+    "jo": 69.367829
+  },
+  "load_average_end": [
+    10.44287109375,
+    9.4013671875,
+    7.7099609375
+  ]
+}

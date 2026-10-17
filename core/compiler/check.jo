@@ -3354,7 +3354,11 @@ check_program = (main_path: str):
         calls_main = false
         loop st in modules[mainm].inits:
             if calls_named(st, "main"): calls_main = true
-        if syms[s].kind == .fns and not skip_main and not calls_main: main_fn = get_fn_inst(int(syms[s].decl), [], 0)
+        if syms[s].kind == .fns and not skip_main and not calls_main:
+            main_fn = get_fn_inst(int(syms[s].decl), [], 0)
+            rt = prune(int(fns[main_fn].ret))
+            if rt != T_VOID and rt != T_NEVER and not is_int(rt):
+                fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {type_str(rt)}")
     if let s = modules[mainm].names.get(intern("update")):
         if syms[s].kind == .fns:
             # (update = (dt): ..., its parameter untyped: the seconds the game loop gives it)

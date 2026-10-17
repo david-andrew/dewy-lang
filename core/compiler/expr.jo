@@ -1977,6 +1977,11 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             add_flag(args[0], NF_CHECKED)
         tm = module_of_type(ntype(args[0]))
         if tm >= 0: collect_module(tm, name, decls)
+        if indexed:
+            protocol = intern(if name == intern("[]"): "__index__" else: "__setindex__")
+            if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
+            else: collect_fns(protocol, decls)
+            if tm >= 0: collect_module(tm, protocol, decls)
     if decls.len() == 0:
         if ii >= 0 and not intrinsics[ii].arr:
             if ide_on: ide_builtin_ref(n, name)
@@ -3573,6 +3578,29 @@ takes_seq = (d: int) -> bool:
 
 decl_in_prelude = (d: int) -> bool: d != 0 and modules[int(nodes[d].mod)].is_prelude
 
+# Dewy's named operator functions use the same overloads and specialization as
+# implementation-language symbolic declarations. Keep their real names intact
+# so explicit calls, imports and editor references remain ordinary functions.
+dewy_operator_name = (op: str, unary: bool) -> str:
+    if unary:
+        if op == "-": return "__unary_sub__"
+        return ""
+    match op:
+        "+": "__add__"
+        "-": "__sub__"
+        "*": "__mul__"
+        "/": "__truediv__"
+        "==": "__eq__"
+        "!=": "__ne__"
+        "<": "__lt__"
+        "<=": "__le__"
+        ">": "__gt__"
+        ">=": "__ge__"
+        "<<": "__lshift__"
+        ">>": "__rshift__"
+        "^": "__xor__"
+        _: ""
+
 op_overload = (n: int, opname: str) -> int:
     decls: int[]
     nm = intern(opname)
@@ -3582,6 +3610,14 @@ op_overload = (n: int, opname: str) -> int:
     if nodes[n].b != 0:
         tm2 = module_of_type(ntype(int(nodes[n].b)))
         if tm2 >= 0: collect_module(tm2, nm, decls)
+    protocol = dewy_operator_name(opname, nodes[n].b == 0)
+    if protocol != "":
+        pn = intern(protocol)
+        collect_fns(pn, decls)
+        if tm >= 0: collect_module(tm, pn, decls)
+        if nodes[n].b != 0:
+            pm = module_of_type(ntype(int(nodes[n].b)))
+            if pm >= 0: collect_module(pm, pn, decls)
     if decls.len() == 0: return 0
     a = int(nodes[n].a)
     b = int(nodes[n].b)
@@ -3607,7 +3643,10 @@ op_overload = (n: int, opname: str) -> int:
         args.push(b)
     nodes[n] = Node(kind = .call, pos = nodes[n].pos)
     set_list(n, args)
-    resolve_fn_call(n, nm, decls, args, 0)
+    result = resolve_fn_call(n, nm, decls, args, 0)
+    if opname in ["==", "!=", "<", "<=", ">", ">="] and prune(result) != T_BOOL:
+        fatal(nodes[n].pos, "comparison operator {opname} must return bool, found {type_str(result)}")
+    result
 
 is_struct_like = (t0: int) -> bool:
     t = prune(t0)
@@ -3815,6 +3854,9 @@ check_binary = (n: int, expected: int) -> int:
                 nodes[ltn].b = i32(b)
             r2 = op_overload(ltn, "<")
             if r2 != 0:
+                # Deriving > / <= reverses the parameter slots, not the
+                # evaluation order of the source operands.
+                save_call_order(ltn, [a, b], kids(ltn))
                 if op == .gt: nodes[n] = nodes[ltn]
                 else: nodes[n] = Node(kind = .not_, pos = nodes[n].pos, a = i32(ltn), type = i32(T_BOOL))
                 return r2

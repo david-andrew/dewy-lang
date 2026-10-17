@@ -96,7 +96,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
 
 Only pytest and Node (for web/client tests) are needed for this gate. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The 1,087-check gate took 93 seconds in the latest local run. It tests expected Dewy
+the earlier compiler suite. The 1,150-check gate took 129 seconds in the latest local run. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
@@ -128,7 +128,7 @@ python3 -m tools.sloppy_core.benchmark_compile /tmp/new/bin/dewy-core \
   --baseline /tmp/old/bin/dewy-core --output /tmp/compile-times.json
 ```
 
-The default workloads cover the tour, generic entity/event storage, physics checking/building, native/web
+The default workloads cover the tour, generic entity/event storage and history, physics checking/building, native/web
 paddle and forest builds, and compiler self-compilation. Use `--workload physics --samples 9`
 for a focused comparison. Keep the source tree fixed during a run and avoid
 other CPU-heavy work. The report records all samples, binary/source identities,

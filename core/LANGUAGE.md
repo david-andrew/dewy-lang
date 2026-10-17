@@ -144,6 +144,44 @@ and explicitly generic local closures remain unsupported. To pass a generic
 function as a value, provide its expected callable type; explicit type arguments
 currently apply to calls and type construction.
 
+Custom records can define arithmetic and indexing with ordinary functions:
+
+```dewy
+Point:type=[x:int64 y:int64]
+__add__=(a:Point b:Point):>Point=>Point[a.x+b.x a.y+b.y]
+
+Store:type=<T>[values:array<T>]
+__index__=<T>(store:Store<T> index:int64):>T=>store.values[index]
+__setindex__=<T>(@store:Store<T> index:int64 value:T):>void=>{
+    store.values[index]=value
+}
+```
+
+`a+b` uses `__add__`; `store[i]` uses `__index__`; indexed assignment uses
+`__setindex__`. The setter is the compact core's mutation counterpart to the
+index getter. These are normal generic functions, and explicit calls still work.
+Operators find declarations in either operand's defining module, so importing a
+record type is sufficient. Built-in scalar operations keep their built-in behavior.
+
+| Operation | Record protocol |
+| --- | --- |
+| `+`, binary `-`, `*`, `/` | `__add__`, `__sub__`, `__mul__`, `__truediv__` |
+| unary `-` | `__unary_sub__` |
+| `=?`, `not=?` | `__eq__`, `__ne__` |
+| `<?`, `<=?`, `>?`, `>=?` | `__lt__`, `__le__`, `__gt__`, `__ge__` |
+| `<<`, `>>`, `xor` | `__lshift__`, `__rshift__`, `__xor__` |
+
+Comparisons must return `bool`. When absent, `not=?` derives from `__eq__`,
+and `<=?`, `>?`, `>=?` derive from `__lt__`. Derived comparisons preserve written
+operand evaluation order. Arithmetic compound assignments reuse the corresponding
+operator. Logical `and`/`or`/`not`, floor division/modulo and power do not yet have
+custom record protocols in this implementation.
+
+[The bounded history example](../examples/sloppy_core/history.dewy) uses a
+[generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),
+including operator discovery through an imported type, nested edits and independent
+rewind snapshots. A full ring replaces its oldest entry without shifting elements.
+
 The bundled `Pool<T>` and `Heap<T>` are now available with ordinary Dewy type
 annotations. A pool stores values under stable `Handle`s; removing an entry
 invalidates its handle even when a later entry reuses the slot. A heap pops the
@@ -296,3 +334,6 @@ unbounded arithmetic, general structural conversions and every historical
 juxtaposition form have not been recreated. See the
 [implementation notes](../tools/sloppy_core/README.md) for current boundaries,
 validation and measured performance.
+
+An executable’s `main` returns `void` or an integer exit code. Other result types
+are diagnosed rather than passed to the native/web entry wrapper.

@@ -19,6 +19,21 @@ Replacement health: 100
 Old handle valid: false
 ```
 
+[`history.dewy`](history.dewy) demonstrates a bounded game-position history.
+Its [`ring.dewy`](ring.dewy) module is a generic container written entirely in
+Dewy: `push` overwrites the oldest entry when full, `ring[i]` uses its indexing
+protocol, and nested assignments write back through its setter. The history
+keeps an independent rewind snapshot while editing the current position.
+
+```sh
+python3 -m tools.core run examples/sloppy_core/history.dewy
+```
+
+The container exposes `new_ring<T>(capacity)`, `.push(value)`, `.len()` and indexing
+from oldest to newest. Invalid capacity or indices panic. Use the factory to
+construct it; its public storage fields are implementation details. Copying is
+cheap until a copy is modified, when ordinary array value semantics apply.
+
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
 code are Dewy. The pinned Sloppy platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.
