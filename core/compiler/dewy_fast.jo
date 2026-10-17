@@ -109,7 +109,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             value = source[start..i)
             kind = "Identifier"
             if value == "true" or value == "false": kind = "Bool"
-            if (value == "is" or value == "isnt" or value == "in") and i < stop and source[i] == '?':
+            if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and source[i] == '?':
                 value += "?"
                 i += 1
                 kind = "op"
@@ -216,7 +216,7 @@ dn_power = (op: str) -> int:
         "or": 60
         "xor": 65
         "and": 70
-        "=?", "not=?", "<?", "not<?", ">?", "not>?", "<=?", "not<=?", ">=?", "not>=?", "is?", "isnt?", "in?": 80
+        "=?", "not=?", "<?", "not<?", ">?", "not>?", "<=?", "not<=?", ">=?", "not>=?", "is?", "isnt?", "in?", "notin?": 80
         "|": 85
         "&": 90
         "in": 95
@@ -429,7 +429,7 @@ dn_expr = (minimum: int) -> int:
             left = dn_node("Postfix", "", pos_off(dewy_syntax[left].pos), [dn_node("Operator", "?", token.start), left])
             continue
         # An inverted comparison may be written with a space after `not`.
-        if op == "not" and dn_at + 1 < dn_tokens.len() and dn_tokens[dn_at + 1].text in ["=?", "<?", ">?", "<=?", ">=?"]:
+        if op == "not" and dn_at + 1 < dn_tokens.len() and dn_tokens[dn_at + 1].text in ["=?", "<?", ">?", "<=?", ">=?", "in?"]:
             op += dn_tokens[dn_at + 1].text
             token.stop = dn_tokens[dn_at + 1].stop
         power = dn_power(op)

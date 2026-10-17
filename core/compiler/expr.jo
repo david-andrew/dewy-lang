@@ -3619,6 +3619,9 @@ check_binary = (n: int, expected: int) -> int:
     if op == .kw_in and nodes[int(nodes[n].b)].kind == .range and not has_flag(int(nodes[n].b), NF_STEP):
         return check_in_range(n, expected)
     if op == .kw_in:
+        needle = int(nodes[n].a)
+        container = int(nodes[n].b)
+        dewy = ends_with(files[pos_file(nodes[n].pos)].path, ".dewy")
         call = mk(.call, nodes[n].pos)
         callee = mk(.field, nodes[n].pos)
         nodes[callee].a = nodes[n].b
@@ -3626,7 +3629,22 @@ check_binary = (n: int, expected: int) -> int:
         nodes[call].a = i32(callee)
         set_list(call, [int(nodes[n].a)])
         nodes[n] = nodes[call]
-        return check_expr(n, 0)
+        t = check_expr(n, 0)
+        if dewy:
+            # Method syntax puts the receiver first. Membership reads the
+            # needle first, preserving snapshots and side effects in that order.
+            if nodes[n].kind == .call and nodes[n].aux == 0:
+                save_call_order(n, [needle, container], kids(n))
+            else if nodes[n].kind == .block and nkids(n) >= 3 and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 1)].kind == .vardecl and nodes[kid(n, 0)].b == i32(container) and nodes[kid(n, 1)].b == i32(needle):
+                # Dependent defaults already captured the two explicit values.
+                statements = kids(n)
+                first = statements[0]
+                statements[0] = statements[1]
+                statements[1] = first
+                set_list(n, statements)
+            else: fatal(nodes[n].pos, "membership needs a contains function, not a callable field")
+            if t != T_BOOL: fatal(nodes[n].pos, "membership's contains function must return bool")
+        return t
     is_cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
     is_shift = op == .shl or op == .shr
     hint = 0
@@ -5208,8 +5226,41 @@ check_range_value = (n: int, expected: int) -> int:
     nodes[n] = nodes[bc_block([od, f, bc_stmt(bc_ident(on, pos), pos)], pos)]
     check_expr(n, expected)
 
+# Dewy interval membership evaluates the needle and both endpoints exactly once,
+# in written order, before testing either bound. No range array is constructed.
+check_dewy_in_range = (n: int) -> int:
+    pos = nodes[n].pos
+    r = int(nodes[n].b)
+    statements: int[]
+    values: int[]
+    loop value in [int(nodes[n].a), int(nodes[r].a), int(nodes[r].b)]:
+        if value == 0: values.push(0); continue
+        check_to(value, T_INT)
+        values.push(capture_value(value, T_INT, statements))
+    condition = 0
+    if values[1] != 0: condition = bc_bin(.ge, values[0], values[1], pos)
+    if values[2] != 0:
+        op = Tok.lt
+        if has_flag(r, NF_INCLUSIVE): op = .le
+        upper = bc_bin(op, values[0], values[2], pos)
+        if condition == 0: condition = upper
+        else:
+            both = mk(.and_, pos)
+            nodes[both].a = i32(condition)
+            nodes[both].b = i32(upper)
+            condition = both
+    if condition == 0:
+        condition = mk(.bool_lit, pos)
+        nodes[condition].ival = 1
+    check_to(condition, T_BOOL)
+    statements.push(bc_stmt(condition, pos))
+    nodes[n] = Node(kind = .block, pos = pos, type = i32(T_BOOL), aux = 1, flags = i32(NF_CHECKED))
+    set_list(n, statements)
+    T_BOOL
+
 # x in a..b: a <= x and x <= b (no array)
 check_in_range = (n: int, expected: int) -> int:
+    if ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"): return check_dewy_in_range(n)
     pos = nodes[n].pos
     r = int(nodes[n].b)
     x = int(nodes[n].a)

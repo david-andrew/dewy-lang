@@ -663,3 +663,27 @@ and prints `He said "go".` and `Next frame: 42` without warnings.
 and editor changes (before the final warning-only correction). Results are mixed
 within desktop variability: tour 56.80/64.07 ms, physics check 145.49/135.59 ms,
 physics release build 357.36/352.55 ms. No latency gain is claimed.
+
+## Collection membership
+
+`membership-build.json` and `membership-full-tests.log` record the independent
+C bootstrap and 1,000 checks passing in 76.31 seconds. `in?`, `not in?` and
+`notin?` reuse the core's array equality, dictionary lookup and substring search.
+Integer range literals lower to comparisons without constructing an array,
+including open endpoints and signed extrema. Stepped/stored ranges remain out
+of this slice. Custom `contains` overloads return bool; callable fields are
+explicitly diagnosed rather than evaluated in the wrong order.
+
+The needle is evaluated before its container, using the ordinary call-order and
+snapshot machinery. Dependent defaults on a custom `contains` overload retain
+this order. Range operands are captured in order before either comparison, so
+both bounds run even when the lower comparison is false. Native/web debug/release
+coverage includes narrow values, records, empty containers, managed/scalar
+snapshots, globals, bounds with side effects and the original unmodified
+`dewy/tests/dict_runtime.dewy` application.
+
+`language-survey-before-membership.json` is a read-only check of 215 existing
+Dewy programs, completed in 8.45 seconds before membership was added. 50 passed
+checking; this is not a runtime compatibility certification or a gate. Most
+failures involved unsupported type/proof constructs; ordinary membership was
+one actionable gap that did not require recreating those old internals.

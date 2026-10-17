@@ -472,6 +472,9 @@ ERRORS = {
     'syntax-unicode-expression': ('main=()=>"\\u{41+1}"', 'hexadecimal'),
     'syntax-raw-unterminated': ('main=()=>r"missing', 'unterminated string'),
     'syntax-triple-unterminated': ('main=()=>"""missing', 'unterminated string'),
+    'membership-return-type': ('Box:type=[value:int64]\ncontains=(box:Box value:int64)=>42\nmain=()=>1 in? Box[1]', 'must return bool'),
+    'membership-callable-field': ('main=()=>1 in? [contains=(value:int64)=>true]', 'not a callable field'),
+    'membership-float-range': ('main=()=>1.5 in? [0..2]', 'int'),
     'syntax-unclosed-block': ('main=()=>{42', "expected '}'"),
     'syntax-mismatched-block': ('main=()=>[42}', 'expected an expression'),
     'syntax-unclosed-string': ('main=()=>"hello', 'unterminated string'),
@@ -657,6 +660,50 @@ def test_core_string_literals(compiler, tmp_path, name, expression, expected, ta
     ran = subprocess.run(command, capture_output=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout == (expected + '\n').encode('utf-8')
+
+
+@pytest.mark.parametrize(('name', 'program'), [
+    ('global', 'let found=42 in? [0..100]\nlet key="a" in? ["a"->1]\nprobe=()=>if found and key 42 else 1'),
+    ('array', 'probe=()=>if 42 in? [20 42] and 9 not in? [20 42] and 9 notin? [20 42] 42 else 1'),
+    ('empty-array', 'probe=()=>if 42 notin? [] 42 else 1'),
+    ('narrow', 'probe=()=>{let values:array<uint8>=[20 42] return if 42 in? values and 21 notin? values 42 else 1}'),
+    ('record', 'probe=()=>if [x=42] in? [[x=20] [x=42]] 42 else 1'),
+    ('dictionary', 'probe=()=>{let values=["a"->20 "b"->42] return if "b" in? values and "c" not in? values 42 else 1}'),
+    ('string', 'probe=()=>if "é🙂" in? "café🙂!" and "missing" notin? "café🙂!" and "" in? "" 42 else 1'),
+    ('order', 'let trace:int64=0\nneedle=()=>{trace=trace*10+1 return 42}\ncontainer=()=>{trace=trace*10+2 return [42]}\nprobe=()=>if needle() in? container() and trace =? 12 42 else 1'),
+    ('scalar-snapshot', 'probe=()=>{let x:int64=42 let found=x in? {x=1 [42]} return if found and x =? 1 42 else 1}'),
+    ('managed-snapshot', 'let needle:array<int64>=[42]\nreplace=()=>{needle=[1] return [[42]]}\nprobe=()=>if needle in? replace() and needle[0] =? 1 42 else 1'),
+    ('range', 'probe=()=>if 0 in? [0..10] and 10 in? [0..10] and 10 notin? [0..10)\nand -1 notin? [0..10] and 5 notin? [10..0] and 10 in? 0..10\nand -9223372036854775808 in? [(-9223372036854775808)..9223372036854775807]\nand 9223372036854775807 in? [0..9223372036854775807] 42 else 1'),
+    ('open-range', 'probe=()=>if -42 in? [..0] and 42 in? [0..] and 42 in? .. and 0 notin? [..0) 42 else 1'),
+    ('range-order', 'let trace:int64=0\nneedle=()=>{trace=trace*10+1 return 0}\nlow=()=>{trace=trace*10+2 return 10}\nhigh=()=>{trace=trace*10+3 return 20}\nprobe=()=>{let found=needle() in? [low()..high()] return if not found and trace =? 123 42 else 1}'),
+    ('range-snapshot', 'probe=()=>{let x:int64=3 let found=x in? [{x=99 0}..5] return if found and x =? 99 42 else 1}'),
+    ('custom-default', 'Box:type=[value:int64]\nlet trace:int64=0\nneedle=()=>{trace=trace*10+1 return 21}\ncontainer=()=>{trace=trace*10+2 return Box[42]}\ncontains=(hay:Box needle:int64 extra:int64=needle):>bool=>hay.value =? needle+extra\nprobe=()=>if needle() in? container() and trace =? 12 42 else 1'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_membership(compiler, tmp_path, name, program, target, release):
+    source = tmp_path / f'{name}.dewy'
+    source.write_text(program + '\nmain=():>void=>printl(probe())')
+    binary = tmp_path / name
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web membership checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / f'{name}.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout == '42\n'
 
 
 @pytest.mark.parametrize('operator', ['//', '%'])
@@ -1001,7 +1048,7 @@ def test_core_slice_bounds_panic(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.parametrize('name', ['optional_values', 'include_bytes', 'array_moves', 'object_fields', 'object_nested', 'array_elements'])
+@pytest.mark.parametrize('name', ['optional_values', 'include_bytes', 'array_moves', 'object_fields', 'object_nested', 'array_elements', 'dict_runtime'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_existing_program(compiler, tmp_path, release, name, target):
     source = Path(__file__).resolve().parents[2] / f'dewy/tests/{name}.dewy'

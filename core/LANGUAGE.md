@@ -190,6 +190,26 @@ printl"Length: {size}"
 `match` supports typed bindings, literals and `_` as a fallback. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
 
+Membership uses `in?`; negate it with `not in?` or `notin?`:
+
+```dewy
+let names=["apple" "pear"]
+let counts=["apple"->3 "pear"->5]
+printl("pear" in? names)
+printl("apple" in? counts)
+printl("fé" in? "café")
+printl(42 in? [0..100))
+```
+
+Arrays compare elements, dictionaries check keys, and strings check substrings.
+Integer range literals use bound comparisons without building an array; `[a..b]`
+includes the end, `[a..b)` excludes it, and either endpoint can be omitted. The
+needle and then the container evaluate once in source order. For a range, both
+specified endpoints evaluate once after the needle, even if the lower-bound
+comparison is false. Stepped and stored range membership are not implemented.
+Custom containers can provide a `contains(container, needle):>bool` overload;
+a callable field named `contains` is not used by membership.
+
 ## Modules and games
 
 ```dewy
