@@ -32,7 +32,9 @@ generated directory resets it. No installed compiler is changed.
 
 `test` uses the checkout's `.venv/bin/python` when available, otherwise the current
 Python. Install pytest in that environment and have Node available for the web
-checks. Extra arguments go to pytest; compiler commands forward their arguments.
+checks. Tests stop at the first failure by default; use `test --maxfail=0` to
+collect every failure. Extra arguments go to pytest; compiler commands forward
+their arguments.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
 independently from C, regardless of the local cache.
 

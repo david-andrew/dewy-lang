@@ -110,7 +110,10 @@ def main(argv: list[str] | None = None) -> int:
             python = Path(sys.executable)
         env = {k: v for k, v in env.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
         env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
-        command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', *TESTS, *args.arguments]
+        # A shared compiler/library error otherwise repeats the same failed
+        # build across the gate. A later --maxfail=0 requests every failure.
+        command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
+                   *TESTS, *args.arguments]
         return subprocess.call(command, cwd=ROOT, env=env)
     # The compiler owns the terminal/LSP streams and receives signals directly;
     # there is no wrapper process to leave a watcher or language server orphaned.

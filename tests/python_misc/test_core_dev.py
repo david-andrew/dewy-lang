@@ -117,6 +117,7 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
     monkeypatch.setattr(core.subprocess, 'call', run)
     assert core.main(['test', '-k', 'record']) == 7
     assert received['command'][-2:] == ['-k', 'record']
+    assert '--maxfail=1' in received['command']
     assert all(path in received['command'] for path in core.TESTS)
     assert received['env']['DEWY_CORE_COMPILER'] == str(binary)
     assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
