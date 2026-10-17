@@ -905,9 +905,7 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
         binder = dw_unwrap(dw_child(id, 1))
         binders: int[]
         if dewy_syntax[binder].kind == "Block" and dewy_syntax[binder].text == "[]:":
-            loop element in dewy_syntax[binder].children:
-                if dw_name(element) == "": return dw_fail(element, "this loop binding")
-                binders.push(dw_expr(element))
+            binders = dw_bindings(binder)
         else:
             if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
             binders.push(dw_expr(binder))

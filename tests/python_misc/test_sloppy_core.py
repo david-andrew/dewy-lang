@@ -2185,6 +2185,43 @@ main=()=>get([])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
     'unpack-nested-array': 'main=()=>{let [[a b] [c d]]=[[20 1] [2 19]] return a+b+c+d}',
     'unpack-nested-single': 'main=()=>{let [[answer]]=[[42]] return answer}',
+    'unpack-loop-array': '''main=()=>{let total:int64=0
+loop [a b c] in [[1 2 3] [10 12 14]] {total+=a+b+c} return total}''',
+    'unpack-loop-record': '''main=()=>{let total:int64=0
+loop [x y] in [[x=20 y=1] [x=19 y=2]] {total+=x+y} return total}''',
+    'unpack-loop-nested-map': '''main=()=>{let total:int64=0
+let entries=["a"->[20 1] "b"->[2 19]]
+loop [key [x y]] in entries {if key =? "a" or key =? "b" total+=x+y}
+return total}''',
+    'unpack-loop-nested-array': '''main=()=>{let total:int64=0
+loop [[x y]] in [[20 1] [2 19]] {total+=x+y} return total}''',
+    'unpack-loop-nested-copy': '''main=()=>{let entries=["a"->[[20 22] [99]]]
+loop [key [first _]] in entries {first[0]=0 if first[1] not=? 22 return 1}
+let value=entries.get("a") if value is? none return 2
+return value[0][0]+value[0][1]}''',
+    'unpack-loop-nested-combined': '''main=()=>{let total:int64=0
+loop i in [0..3) and [[x y]] in [[20 1] [2 19] [99 99]] and i <? 2 {
+total+=x+y if i =? 0 continue
+}
+return total}''',
+    'unpack-loop-nested-else': '''main=()=>{let total:int64=0
+let entries:dict<string array<int64>>=[]
+loop [key [x y]] in entries {total+=x+y} else {total=42}
+return total}''',
+    'unpack-loop-nested-guard': '''main=()=>{let total:int64=0
+let entries=["a"->[20 22] "b"->[1 2]]
+loop [key [x y]] in entries and key =? "a" {total+=x+y} else {total=1}
+return total}''',
+    'unpack-loop-map-guard-else': '''main=()=>{let total:int64=0
+let entries=["a"->1 "b"->2]
+loop [key value] in entries and value <? 1 {total+=value} else {total=42}
+loop key in entries and key =? "a" {total+=1}
+return total-1}''',
+    'unpack-loop-nested-sequence': '''Rows:type=[values:array<array<int64>>]
+len=(rows:Rows)=>rows.values.length
+__index__=(rows:Rows i:int64)=>rows.values[i]
+main=()=>{let total:int64=0
+loop [[x y]] in Rows[[[20 1] [2 19]]] {total+=x+y} return total}''',
     'unpack-nested-implicit': 'main=()=>{[[x _] [y]]=[[20 99] [22]] return x+y}',
     'unpack-nested-swap': '''main=()=>{let x:int64=20 let y:int64=22
 [[x] [y]]=[[y] [x]] return if x =? 22 and y =? 20 42 else 1}''',
@@ -2608,6 +2645,7 @@ ERRORS = {
     'unpack-nested-duplicate': ('main=()=>{let [[x] [x]]=[[20] [22]] return x}', 'duplicate unpacking name'),
     'unpack-nested-record-position': ('main=()=>{let [[x]]=[value=[42]] return x}', 'record unpacking needs field names'),
     'unpack-nested-empty': ('main=()=>{let [[]]=[[42]] return 0}', 'empty unpacking target'),
+    'unpack-loop-duplicate': ('main=()=>{loop [x [x]] in [[1 2]] {} return 0}', 'duplicate unpacking name'),
     'syntax-unicode-short': ('main=()=>"\\u123"', 'Unicode escape'),
     'syntax-unicode-bad-digit': ('main=()=>"\\u12G4"', 'hexadecimal'),
     'syntax-unicode-empty': ('main=()=>"\\u{}"', 'hex digits'),
@@ -2959,15 +2997,16 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_stepped_range_errors': 'range',
                   'test_core_unit_range_errors': 'range',
                   'test_core_range_index_errors': 'range',
+                  'test_core_unpack_errors': 'unpack',
                   'test_core_combined_range_errors': 'range',
                   'test_core_compound_errors': 'compound',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['body'] if family in ('range', 'bounds', 'compound') else params['expression']
+        expression = params['body'] if family in ('range', 'bounds', 'compound', 'unpack') else params['expression']
         case = family, expression
-        if family in ('range', 'bounds', 'compound'):
+        if family in ('range', 'bounds', 'compound', 'unpack'):
             sources[case] = f'main=():>void=>{{{expression}}}'
         else:
             sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
@@ -4442,6 +4481,18 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
     assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
+@pytest.mark.parametrize('body', [
+    'loop [x y] in [[1] [2 3]] {printl(x+y)}',
+    'loop [key [x y]] in ["a"->[1]] {printl(x+y)}',
+    'loop i in [0..1) and [[x y]] in [[1]] {printl(x+y)}',
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_unpack_errors(error_batches, body, target, release):
+    ran = error_batches('unpack', body, release, target)
+    assert ran.returncode != 0 and 'unpacking requires exactly 2 elements' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
 @pytest.mark.parametrize('body, diagnostic', [
     ('let value=42 value//=0', 'division by zero'),
     ('let value=-42 value%=0', 'division by zero'),
@@ -5308,13 +5359,19 @@ def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
 @pytest.mark.parametrize('nested', [False, True])
 def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch, nested):
     (tmp_path / 'helper.jo').write_text('''pair = () -> (int, str): (39, "abc")
-nested = () -> ((int, str), int[]): ((39, "abc"), [0])''')
+nested = () -> ((int, str), int[]): ((39, "abc"), [0])
+pairs = () -> (str, int[])[]: [("a", [20, 1]), ("b", [2, 19])]''')
     source = tmp_path / 'unpack.dewy'
     if mismatch:
         program = ('main=()=>{let [[first second] [_]]=[[42] [0]] return first+second}' if nested else
                    'main=()=>{let [first second]=[42] return first+second}')
     else:
-        program = ('main=()=>{let [[count text] [extra]]=helper.nested() return count+text.length+extra}' if nested else
+        program = ('''main=()=>{let [[count text] [extra]]=helper.nested()
+let total:int64=0
+loop [key [x y]] in helper.pairs() {total+=x+y}
+loop i in [0..2) and [key [x y]] in helper.pairs() {total+=x+y}
+if total not=? 84 return 1
+return count+text.length+extra}''' if nested else
                    'main=()=>{let [count text]=helper.pair() return count+text.length}')
     source.write_text('import p"helper.jo"\n' + program)
     binary = tmp_path / 'unpack'

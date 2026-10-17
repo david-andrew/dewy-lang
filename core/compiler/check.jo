@@ -1779,7 +1779,8 @@ soa_alias_field = (n: int, l: int) -> int:
 
 # loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
 unpack_loop = (s: int):
-    if nkids(s) != 2 or nodes[s].ival == 1: return
+    dewy = files[pos_file(nodes[s].pos)].is_dewy
+    if nkids(s) < 2 or (not dewy and nkids(s) != 2) or nodes[s].ival == 1: return
     it = int(nodes[s].a)
     if nodes[it].kind == .range: fatal(nodes[s].pos, "`loop a, b in` unpacks pairs; a range has single numbers")
     t = prune(check_expr(it, 0))
@@ -1787,7 +1788,7 @@ unpack_loop = (s: int):
     if types[t].kind != .array: return
     pos = nodes[s].pos
     et = prune(int(types[t].elem))
-    if types[et].kind != .tuple or int(types[et].nargs) != 2: fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {type_str(et)}; to count them write `loop i in 0.. and x in xs`")
+    if not dewy and (types[et].kind != .tuple or int(types[et].nargs) != 2): fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {type_str(et)}; to count them write `loop i in 0.. and x in xs`")
     if has_flag(s, NF_MUT): fatal(pos, "`loop mut` cannot unpack pairs")
     tn = "__lt{bc_count}"
     bc_count += 1
@@ -1920,7 +1921,29 @@ dewy_sequence_loop = (s: int) -> bool:
     check_stmt(s)
     true
 
+# A nested loop binding first receives the ordinary iteration value, then uses
+# the same destructuring declaration as local code. This also handles a map's
+# value without changing its key/value iteration or snapshot behavior.
+dewy_nested_loop_bindings = (s: int):
+    if not files[pos_file(nodes[s].pos)].is_dewy: return
+    declarations: int[]
+    loop i in [0..nkids(s)):
+        binding = kid(s, i)
+        if nodes[binding].kind != .tuple: continue
+        if has_flag(s, NF_MUT): fatal(nodes[binding].pos, "nested loop bindings yield independent values, not mutable aliases")
+        name = "$unpack_loop{bc_count}"
+        bc_count += 1
+        d = mk(.vardecl, nodes[binding].pos)
+        set_list(d, kids(binding))
+        nodes[d].b = i32(bc_ident(name, nodes[binding].pos))
+        declarations.push(d)
+        set_kid(s, i, bc_ident(name, nodes[binding].pos))
+    if declarations.len() > 0:
+        body = int(nodes[s].b)
+        set_list(body, declarations + kids(body))
+
 check_for = (s: int):
+    dewy_nested_loop_bindings(s)
     soa_loop(s)
     unpack_loop(s)
     if dewy_cursor_loop(s): return

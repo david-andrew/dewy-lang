@@ -2144,15 +2144,16 @@ desugar_loopx = (lx: int) -> int:
                     # Only a literal zero is exactly the sequence index.
                     # Other offsets need one evaluation and checked exhaustion.
                     if nodes[lo].kind != .int_lit or nodes[lo].ival != 0: ok = false
-        # A range followed only by conditions is still a single range loop.
-        # Keep its typed/counting lowering and evaluate conditions in the body.
+        # One binder followed only by conditions is still a native for loop.
+        # Keep its typed iteration (including dictionary key/value bindings)
+        # and evaluate the conditions after binding each element.
         # Restrict this to a leading binder so earlier conditions cannot see a
         # newly shadowing name that was not in scope at their source position.
         first = terms[0]
-        direct_range = nodes[first].op == 1 and nodes[int(nodes[first].a)].kind == .range and nkids(first) == 1 and not has_flag(first, NF_MUT)
+        direct_binder = nodes[first].op == 1 and not has_flag(first, NF_MUT)
         loop i in [1..terms.len()):
-            if nodes[terms[i]].op != 4: direct_range = false
-        if direct_range:
+            if nodes[terms[i]].op != 4: direct_binder = false
+        if direct_binder:
             f = mk(.for_, pos)
             nodes[f].sval = nodes[lx].sval
             nodes[f].a = nodes[first].a
@@ -2253,7 +2254,8 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
     v = int(nodes[kid(t, 0)].name)
     it = int(nodes[t].a)
     # (i in 0.. and name, cost in items: each element unpacked into the names)
-    many = nkids(t) > 1
+    nested_single = nkids(t) == 1 and nodes[kid(t, 0)].kind == .tuple
+    many = nkids(t) > 1 or nested_single
     if many:
         if optional or has_flag(t, NF_MUT) or nodes[it].kind == .range: fatal(nodes[t].pos, "several names in a combined loop unpack an array's elements, joined with `and` (`i in 0.. and name, cost in items`)")
         v = intern("__each" + id)
@@ -2331,7 +2333,7 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
         head.push(lx_let(v, value, pos))
         if many:
             tp = mk(.tuple, pos)
-            set_list(tp, kids(t))
+            set_list(tp, (if nested_single: kids(kid(t, 0)) else: kids(t)))
             a = mk(.assign, pos)
             nodes[a].op = i32(int(Tok.assign))
             nodes[a].a = i32(tp)

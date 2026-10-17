@@ -83,6 +83,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
     env['SLOPPY_EMIT_WORKERS'] = '1'
     result = {
         'platform': platform.platform(),
+        'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
         'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'working_tree': subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True),
         'diff_sha256': hashlib.sha256(subprocess.check_output(

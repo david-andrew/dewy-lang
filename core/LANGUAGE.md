@@ -585,6 +585,21 @@ let port = to_int(env("PORT") ?? "47200") ?? 47200
 The left operand must be optional; use `mapping.get(key) ?? fallback` for an
 optional dictionary lookup. Direct indexing returns the stored element itself.
 
+Loop bindings can unpack structured values, including nested groups:
+
+```dewy
+let scores=["red"->[20 22] "blue"->[4 8]]
+loop [team [home away]] in scores {printl"{team}: {home+away}"}
+loop [x y z] in [[1 2 3] [4 5 6]] {printl(x+y+z)}
+```
+
+With two bindings, dictionaries yield keys and values. Several bindings over an array unpack
+each element by position for arrays/tuples or by field name for records. Nested
+values follow the same declaration rules and keep independent value semantics.
+A dictionary binder may be followed by `and` conditions, and `else` runs if its
+body never enters. Nested groups also work in indexed-sequence `and` headers;
+`or` headers yield optional values and do not support unpacking groups.
+
 Records with `len(container)` and `__index__(container index)` work as finite
 indexed sequences in loops and comprehensions. Length describes integer positions
 from zero through `len(container)-1`. For example:

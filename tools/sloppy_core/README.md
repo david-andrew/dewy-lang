@@ -232,6 +232,19 @@ swaps, nested value copies and length failures. `nested-unpack-compile.json`
 records fresh-build timings; `nested-unpack-validation.json` records the tested
 toolchain and gate scope.
 
+Loop binders reuse this destructuring path. Dictionary entries can bind a key
+and nested value, multiple names can unpack array/tuple/record elements, and
+indexed user sequences support nested groups. Combined sequence
+`and` headers use the same checked declarations. A single binder followed only
+by conditions now retains native iteration, fixing dictionary key/value loops
+with guards or fallback arms instead of routing them through integer indexing.
+This step passes 3,010 checks from the independent C seed. Five fresh-build CPU
+pairs pinned to CPU 2 give ratios of tour 0.999, Dunes 0.991 and compiler 1.027;
+there is no compilation speedup claim. Benchmark reports now record CPU affinity.
+The pinned follow-up for the preceding nested-assignment change is also neutral
+(self-build ratio 0.996). See `nested-loop-*` and
+`nested-unpack-compile-affinity.json` in the source-core audits.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and
