@@ -958,3 +958,19 @@ index array's storage and construction, which this timing excludes.
 [Initial measurements](source-core/range-index-runtime-initial.json),
 [paired allocation comparison](source-core/range-index-runtime-paired.json),
 [final selection comparison](source-core/range-index-runtime.json).
+
+## Contiguous slice assignments
+
+Ordinary array slices now use the same assignment helper as stepped selections.
+`xs[lo..hi]`, `xs[lo..hi)`, omitted bounds and `xs[..]` accept a scalar fill or an
+array with exactly the selected length. Explicit bounds evaluate once before
+the replacement; overlapping arrays and custom-container writeback preserve
+independent values. The shared range validator checks bounds before updating.
+
+**113 focused checks passed in 4.06 s**, covering native/web debug/release modes,
+empty and whole selections, overlap, bound evaluation order, managed cleanup,
+custom-container updates, invalid bounds/lengths and formatter execution.
+[Focused gate](source-core/slice-update-focused.log),
+[toolchain metadata](source-core/slice-update-validation.json).
+The preceding final range-selection commit also passed its
+[full CI bootstrap gate](https://github.com/david-andrew/dewy-lang/actions/runs/39055201117).

@@ -557,6 +557,8 @@ Stored ranges also select array elements, including descending and exclusive-fir
 ranges. Direct stepped slices such as `xs[0,2..]` and `xs[5,3..0]` reuse the same
 selection helpers. Scalar assignments fill selected positions; array assignments
 require one replacement per position and preserve overlapping input snapshots.
+Contiguous slice assignments, including omitted bounds, use the same fixed-length
+replacement/fill operation. Explicit bounds evaluate once before the replacement.
 Selection validates the full interval with unsigned distance/division before
 accessing elements, then traverses it without constructing an index array.
 Stepped string slices and compound selection updates remain unsupported.

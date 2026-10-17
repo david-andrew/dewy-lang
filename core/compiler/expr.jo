@@ -4935,7 +4935,7 @@ check_expr = (n: int, expected: int) -> int:
         if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP):
             if bk != .array: fatal(nodes[n].pos, "stepped slicing requires an array")
             nodes[n].a = i32(last_checked)
-            call = dewy_step_slice(n)
+            call = dewy_array_slice(n)
             nodes[n] = nodes[call]
             return check_expr(n, expected)
         if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
@@ -5889,21 +5889,27 @@ neg_index_check = (b: int):
 
 # A stepped slice computes its default endpoint from the captured receiver's
 # size. Calls retain normal left-to-right operand evaluation and value snapshots.
-dewy_step_slice = (index: int, value: int = 0) -> int:
+dewy_array_slice = (index: int, value: int = 0) -> int:
     pos = nodes[index].pos
     r = int(nodes[index].b)
     base = int(nodes[index].a)
     add_flag(base, NF_CHECKED)
     if value != 0: add_flag(base, NF_MUT)
+    first = int(nodes[r].a)
+    second = int(nodes[r].c)
+    if first == 0: first = bc_int(0, pos)
+    if second == 0: second = bc_int(0, pos)
     last = int(nodes[r].b)
+    stepped = mk(.bool_lit, pos)
+    nodes[stepped].ival = if has_flag(r, NF_STEP): 1 else: 0
     inclusive = mk(.bool_lit, pos)
     nodes[inclusive].ival = if has_flag(r, NF_INCLUSIVE): 1 else: 0
     bounded = mk(.bool_lit, pos)
     nodes[bounded].ival = if last != 0: 1 else: 0
     if last == 0: last = bc_int(0, pos)
-    args = [base, int(nodes[r].a), int(nodes[r].c), last, inclusive, bounded]
+    args = [base, first, second, last, inclusive, bounded, stepped]
     if value != 0: args.push(value)
-    bc_call((if value == 0: "__dewy_pick_step" else: "__dewy_put_step"), args, pos)
+    bc_call((if value == 0: "__dewy_pick_slice" else: "__dewy_put_slice"), args, pos)
 
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:

@@ -432,8 +432,10 @@ arrays; every selected index must be in bounds, and replacement arrays must have
 exactly the selected length. A scalar replacement fills each selected element.
 These operations preserve independent copies, including overlapping assignments
 such as `values[5,4..0]=values`. They allocate no intermediate array of indices;
-reads allocate the selected result. Compound updates of selections and stepped
-string slicing are not implemented.
+reads allocate the selected result. Contiguous slices accept the same assignments:
+`values[1..3]=[10 20 30]`, `values[1..3)=[10 20]`, or `values[..]=42`.
+These assignments retain the array's length. Compound updates of selections and
+stepped string slicing are not implemented.
 
 Comprehensions are eager. Nested loops and block bodies work; a final block value
 is collected, while `break`, `continue` and assignment statements do not emit a

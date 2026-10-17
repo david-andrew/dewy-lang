@@ -20,6 +20,35 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'slice-update-bounds': '''main=()=>{
+let xs=[10 20 30 40 50] xs.push(60) let saved=xs
+xs[1..2]=[1 2] xs[..1)=3 xs[4..]=42 xs[3..3)=[]
+return if xs =? [3 1 2 40 42 42] and saved =? [10 20 30 40 50 60] 42 else 1
+}''',
+    'slice-update-whole': '''main=()=>{
+let xs=[1 2 3] xs[..]=[10 20 30] xs[..]=42
+let empty:array<int64>=[] empty[..]=42 empty[..]=[]
+return if xs =? [42 42 42] and empty =? [] 42 else 1
+}''',
+    'slice-update-overlap': '''main=()=>{
+let xs=[10 20 30 40] xs.push(50) let saved=xs
+xs[1..3]=xs[..3)
+return if xs =? [10 10 20 30 50] and saved =? [10 20 30 40 50] 42 else 1
+}''',
+    'slice-update-order': '''let trace:int64=0
+start=()=>{trace=trace*10+1 return 0}
+stop=()=>{trace=trace*10+2 return 1}
+replacement=()=>{trace=trace*10+3 return [20 22]}
+main=()=>{let xs=[0 0 0] xs[start()..stop()]=replacement()
+return if xs =? [20 22 0] and trace =? 123 42 else 1
+}''',
+    'slice-update-managed': '''work=():>void=>{
+let pool:Pool<array<string>>=[] let h=pool.add(["a" "b" "c"])
+let saved=pool pool[h][1..]=["new" "last"]
+if pool[h] not=? ["a" "new" "last"] or saved[h] not=? ["a" "b" "c"] panic("snapshot changed")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'range-index-stepped-slices': '''main=()=>{
 let xs=[10 20 30 40 50 60] let empty:array<int64>=[]
 return if xs[0,2..] =? [10 30 50] and xs[5,3..] =? [60 40 20]
@@ -3637,6 +3666,9 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs=[10 20] xs[0..2]=42', 'range indexes are out of bounds'),
+    ('let xs=[10 20] xs[..]=[42]', 'values for 2 range indexes'),
+    ('let xs=[10 20] xs[-1..1]=42', 'range index -1 is out of bounds'),
     ('let xs=[10 20] printl(xs[0,0..1])', 'range step must be nonzero'),
     ('let xs=[10 20] printl(xs[[0,2..2]])', 'range indexes are out of bounds'),
     ('let xs=[10 20] xs[0,2..4]=42', 'range indexes are out of bounds'),
@@ -4081,7 +4113,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

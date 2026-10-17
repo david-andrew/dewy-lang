@@ -59,6 +59,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'slice-update': 'main=()=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs) return 0}',
     'range-index': 'main=()=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]]) return 0}',
     'coalesce': 'read=():>int64?=>none\nmain=()=>{printl"{read()??20+22}" return 0}',
     'compound': 'main=()=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}" return 0}',

@@ -2361,14 +2361,15 @@ check_assign = (s: int) -> int:
         bt = prune(check_expr(int(nodes[lhs].a), 0))
         nodes[lhs].a = i32(last_checked)
         range = int(nodes[lhs].b)
-        if range != 0 and nodes[range].kind == .range and has_flag(range, NF_STEP):
-            if types[bt].kind != .array: fatal(nodes[s].pos, "stepped slicing requires an array")
-            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
-            call = dewy_step_slice(lhs, int(nodes[s].b))
-            es = mk(.exprstmt, nodes[s].pos)
-            check_expr(call, 0)
-            nodes[es].a = i32(last_checked)
-            return es
+        if range != 0 and nodes[range].kind == .range:
+            if types[bt].kind == .array:
+                if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
+                call = dewy_array_slice(lhs, int(nodes[s].b))
+                es = mk(.exprstmt, nodes[s].pos)
+                check_expr(call, 0)
+                nodes[es].a = i32(last_checked)
+                return es
+            if has_flag(range, NF_STEP): fatal(nodes[s].pos, "stepped slicing requires an array")
         if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
         if types[bt].kind == .array and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .int_lit and nodes[int(nodes[lhs].b)].kind != .range:
             put = index_array_fn(int(nodes[lhs].b), "__put")
