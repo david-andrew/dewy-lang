@@ -169,6 +169,18 @@ working-tree state and system load; small desktop differences are not a speedup
 claim. `build ... --time` reports checking, lowering/code generation and output
 times. `SLOPPY_PAR_TIME=1` adds optimizer and emission timing.
 
+To measure type-checking growth separately, generate increasing numbers of
+distinct records wrapped in one generic type:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_types /tmp/new/bin/dewy-core \
+  --baseline /tmp/old/bin/dewy-core --output /tmp/type-times.json
+```
+
+This checks 500, 1,000 and 2,000 record types by default. Use `--count` to select
+sizes. It measures synthetic type-checking scale, not whole-build or application
+performance; pair it with the representative compile workloads above.
+
 ## Measure generated programs
 
 Run the original helper, array, particle-record, text and graph workloads against

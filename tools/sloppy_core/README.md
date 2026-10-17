@@ -291,6 +291,17 @@ show no material compilation change: median paired CPU ratios are 0.984 for the
 tour, 1.012 for Dunes and 1.004 for the compiler. See `sets-*` in the October 17
 source-core audit directory.
 
+Record/enum instantiation now searches only instances of the same declaration,
+preserving structural matching for arguments still undergoing inference. The
+independent C gate passes 3,226 checks in 47.34 seconds. Seven alternating
+type-check pairs on CPU 2 give median paired CPU ratios of 0.975, 0.933 and 0.905
+for synthetic programs with 500, 1,000 and 2,000 distinct records wrapped in one
+generic type. Representative fresh builds remain neutral: tour 1.009, Dunes
+1.003 and compiler 0.999 over five pairs. These are scaling results, not a broad
+application build speedup; the reproducible generator is
+`python3 -m tools.sloppy_core.benchmark_types`. See `struct-index-*` in the same
+audit directory.
+
 The bundled `bigint.dewy` supplies exact signed integers using owned arrays of
 base-2^32 limbs. It reuses Dewy's magnitude algorithms, with ordinary compact-core
 records and no refinement-proof representation. Constructors accept signed and

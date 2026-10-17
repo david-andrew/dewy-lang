@@ -788,11 +788,20 @@ type_nesting = (t0: int, lim: int) -> int:
 const MAX_TYPE_NESTING = 48
 
 # ---------- struct instances ----------
+# Group by declaration, but keep structural matching within each group: type
+# arguments can still contain inference variables whose bindings later change.
+struct_instance_groups: int[][]
+struct_instance_group: {int: int} = {}
+
 get_struct_inst = (decl: int, targs: int[]) -> int:
     if decl == 0: return mk_union(targs)
     if decl == soa_decl: return soa_inst(targs[0])
-    loop i in 0.. and si in structs:
-        if int(si.decl) != decl or int(si.ntargs) != targs.len(): continue
+    group = struct_instance_group.get(decl) ?? -1
+    instances: int[]
+    if group >= 0: instances = struct_instance_groups[group]
+    loop i in instances:
+        si = structs[i]
+        if int(si.ntargs) != targs.len(): continue
         same = true
         loop k in [0..targs.len()):
             if not type_eq(struct_targ(i, k), targs[k]):
@@ -817,4 +826,11 @@ get_struct_inst = (decl: int, targs: int[]) -> int:
     if hv: flags = TF_HAS_VAR
     types.push(TypeInfo(kind = kind, st = i32(idx), flags = i32(flags)))
     structs[idx].type = i32(types.len() - 1)
+    if group < 0:
+        group = struct_instance_groups.len()
+        struct_instance_groups.push([])
+        struct_instance_group[decl] = group
+    # Release the lookup snapshot before appending to the group's owned array.
+    instances = []
+    struct_instance_groups[group].push(idx)
     types.len() - 1
