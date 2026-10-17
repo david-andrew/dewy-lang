@@ -345,3 +345,29 @@ change, with small mixed timing differences rather than a claimed speedup.
 The fresh C bootstrap passed **1,896 checks in 62.85 s**.
 [Full gate](source-core/array-equality-full.log),
 [build manifest](source-core/array-equality-build.json).
+
+## Scalar, vector and matrix operand values
+
+Binary expressions now capture a scalar left value before evaluating the right
+operand, reusing the existing argument-capture operation. Vectors and matrices
+use the same mutation analysis and aggregate copying as record equality. This
+fixes ordinary expressions such as `x + {x = 2; 3}` reading the new value of `x`.
+The [previous compiler fails all four regression groups](source-core/operand-values-before.log).
+
+The focused native/web debug/release gate passed **48 checks in 1.82 s**.
+[Focused gate](source-core/operand-values-focused.log). The independent C bootstrap
+passed **1,912 checks in 61.24 s**. [Full gate](source-core/operand-values-full.log),
+[build manifest](source-core/operand-values-build.json).
+
+Seven compile pairs measured baseline/candidate wall medians of **77.28/71.08 ms**
+for the tour, **302.46/305.45 ms** for physics and **1,302.42/1,285.48 ms** for
+self-build. CPU medians were 75.10/64.62, 296.73/299.38 and 1283.63/1272.17 ms.
+These mixed results under variable desktop load do not establish a compiler
+speedup. [Compile samples](source-core/operand-values-compile.json).
+
+Five paired application samples retained matching checksums against independent
+C implementations. Baseline/candidate medians were helpers **1207.40/1211.21 ms**,
+arrays **272.88/252.81 ms**, records **163.41/164.88 ms**, text **372.35/288.65 ms**
+and graph **612.58/591.19 ms**. This correctness change shows no broad runtime
+regression in these workloads; the varying host load limits stronger claims.
+[Runtime samples](source-core/operand-values-runtime.json).

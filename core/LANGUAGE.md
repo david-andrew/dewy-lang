@@ -376,7 +376,7 @@ value being compared, on either side. For example, `let words:array<uint8>=[0 42
 can be followed by `words =? [0 42]` or `[0 42] =? words`. This includes nested
 arrays, optional arrays, exact integers and record elements. Out-of-range
 literals still fail, and separately constructed arrays keep their own types.
-Comparison operands evaluate left to right; changing a value while evaluating
+Binary operands evaluate left to right; changing a value while evaluating
 the right operand does not change the left value already read.
 
 `let [a b] = xs` unpacks arrays or tuple results by position, with an exact array

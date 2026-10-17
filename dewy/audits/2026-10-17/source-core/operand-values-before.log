@@ -1,0 +1,80 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+___________ test_core_values[debug-optimizer-scalar-operand-values] ____________
+
+value_batches = <function value_batches.<locals>.result at 0x7fdc7d291d20>
+name = 'optimizer-scalar-operand-values', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: optimizer-scalar-operand-values: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1686: AssertionError
+____________ test_core_values[debug-optimizer-float-operand-values] ____________
+
+value_batches = <function value_batches.<locals>.result at 0x7fdc7d291d20>
+name = 'optimizer-float-operand-values', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: optimizer-float-operand-values: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1686: AssertionError
+___________ test_core_values[debug-optimizer-vector-operand-values] ____________
+
+value_batches = <function value_batches.<locals>.result at 0x7fdc7d291d20>
+name = 'optimizer-vector-operand-values', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: optimizer-vector-operand-values: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1686: AssertionError
+___________ test_core_values[debug-optimizer-matrix-operand-values] ____________
+
+value_batches = <function value_batches.<locals>.result at 0x7fdc7d291d20>
+name = 'optimizer-matrix-operand-values', release = False
+
+    @pytest.mark.parametrize('name', CASES)
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_values(value_batches, name, release):
+        code, output = value_batches(name, release, 'native')
+>       assert code == '42', f'{name}: {code}\n{output}'
+E       AssertionError: optimizer-matrix-operand-values: 1
+E         
+E       assert '1' == '42'
+E         
+E         - 42
+E         + 1
+
+tests/python_misc/test_sloppy_core.py:1686: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-optimizer-scalar-operand-values]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-optimizer-float-operand-values]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-optimizer-vector-operand-values]
+FAILED tests/python_misc/test_sloppy_core.py::test_core_values[debug-optimizer-matrix-operand-values]
+4 failed, 1797 deselected in 0.56s

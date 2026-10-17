@@ -98,6 +98,66 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'optimizer-scalar-operand-values': '''main=()=>{
+let x:int64=10
+if x+{x=20; 3} not=? 13 return 1
+x=10
+if x-{x=20; 3} not=? 7 return 2
+x=10
+if x*{x=20; 3} not=? 30 return 3
+x=10
+if x//{x=20; 3} not=? 3 return 4
+x=10
+if x%{x=20; 3} not=? 1 return 5
+x=10
+if x<<{x=20; 1} not=? 20 return 6
+x=10
+if (x xor {x=20; 3}) not=? 9 return 7
+x=10
+if x <? {x=0; 5} return 8
+x=10
+if (x as uint64)+{x=20; 3} not=? 13 return 9
+let small:int8=10
+if small+{small=20; 3} not=? 13 return 10
+let flag:bool=true
+return if flag xor {flag=false; false} 42 else 11
+}''',
+    'optimizer-float-operand-values': '''main=()=>{
+let x:float64=12.0
+if x+{x=20.0; 3.0} not=? 15.0 return 1
+x=12.0
+if x-{x=20.0; 3.0} not=? 9.0 return 2
+x=12.0
+if x*{x=20.0; 3.0} not=? 36.0 return 3
+x=12.0
+if x/{x=20.0; 3.0} not=? 4.0 return 4
+x=13.0
+if x <? {x=0.0; 5.0} return 5
+let single:float32=1.5
+return if single+{single=2.5; 3.0} =? 4.5 42 else 6
+}''',
+    'optimizer-vector-operand-values': '''main=()=>{
+let v=vec2(1 2)
+let sum=v+{v=vec2(10 20); vec2(3 4)}
+if sum not=? vec2(4 6) return 1
+v=vec2(1 2)
+let scaled=v*{v=vec2(10 20); 2.0}
+if scaled not=? vec2(2 4) return 2
+let factor:float32=2.0
+let reverse=factor*{factor=10.0; vec2(3 4)}
+if reverse not=? vec2(6 8) return 3
+let iv=ivec2(1 2)
+let integers=iv+{iv=ivec2(10 20); ivec2(3 4)}
+return if integers =? ivec2(4 6) 42 else 4
+}''',
+    'optimizer-matrix-operand-values': '''main=()=>{
+let matrix=mat4()
+let product=matrix*{matrix=mat4(2); mat4()}
+if product not=? mat4() return 1
+matrix=mat4()
+let point=matrix*{matrix=mat4(2); vec4(1 2 3 1)}
+return if point =? vec4(1 2 3 1) 42 else 2
+}''',
     'optimizer-short-circuit-scan': '''scan=(text:array<uint8>):>int64=>{
 let i:int64=0 let total:int64=0
 loop i <? text.length {

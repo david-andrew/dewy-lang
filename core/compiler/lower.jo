@@ -773,6 +773,14 @@ call_eval_order = (n: int) -> int[]:
         loop i in [0..nkids(n)): order.push(i)
     order
 
+# A scalar expression can name a local's mutable register. Keep the value
+# already read before evaluating a later operand/argument that can assign it.
+freeze_scalar = (v: int, t: int) -> int:
+    if v < 0 or is_kv(v): return v
+    saved = vreg(vt_of(t))
+    e_mov(saved, v)
+    saved
+
 call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: int = 0, order: int[] = []):
     if order.len() > 0:
         ordered_args: int[]
@@ -803,10 +811,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         val = gen_expr(a)
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
-        if i + 1 < args.len() and vc(pt) != VC_AGG and val.v >= 0 and not is_kv(val.v):
-            saved = vreg(vt_of(pt))
-            e_mov(saved, val.v)
-            val.v = saved
+        if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
         if not val.owned and is_managed(pt) and (any_mut or borrow_may_change(a, args, i, callee)): val = own(val, pt)
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
@@ -1593,8 +1598,8 @@ float_op = (op: Tok) -> Op:
 
 is_slice = (x: int) -> bool: nodes[x].kind == .index and nodes[x].aux == 1
 
-# the address of x's value, computed (and kept to the statement's end), for comparing it
-eq_operand_addr = (x: int, t: int) -> int:
+# The address of x's value, kept through later operand evaluation.
+kept_operand_addr = (x: int, t: int) -> int:
     kv = own(gen_expr(x), t)
     borrow(kv, t)
     if vc(t) != VC_AGG:
@@ -1602,6 +1607,10 @@ eq_operand_addr = (x: int, t: int) -> int:
         e_store(e_slot(ks), 0, kv.v, 8)
         return e_slot(ks)
     kv.v
+
+left_operand_addr = (a: int, t: int, keep: bool) -> int:
+    if keep: return kept_operand_addr(a, t)
+    place_addr(gen_place(a, false), t)
 
 gen_binary = (e: int) -> Val:
     a = int(nodes[e].a)
@@ -1612,17 +1621,17 @@ gen_binary = (e: int) -> Val:
     is_cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
     # Read the left value before evaluating the right. Explicit mutation of a
     # local (including an intrinsic or assignment inside a block) matters too,
-    # and aggregate equality needs a copy even for records without references.
+    # and aggregate operations need a copy even for values without references.
     keep_left = false
-    if is_managed(lt) or (aux == 1 and vc(lt) == VC_AGG):
+    if is_managed(lt) or vc(lt) == VC_AGG:
         if place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1:
         ad = 0
         # (a slice, xs[a..b) == ys: a new array, not a place to take the address of)
-        if keep_left or is_slice(a): ad = eq_operand_addr(a, lt)
+        if keep_left or is_slice(a): ad = kept_operand_addr(a, lt)
         else: ad = place_addr(gen_place(a, false), lt)
         bd = 0
-        if is_slice(b): bd = eq_operand_addr(b, lt)
+        if is_slice(b): bd = kept_operand_addr(b, lt)
         else: bd = place_addr(gen_place(b, false), lt)
         r = gen_eq(lt, ad, bd)
         if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
@@ -1650,22 +1659,22 @@ gen_binary = (e: int) -> Val:
         if is_managed(et): retain_elems(r, et)
         return V(r, true)
     if aux == 4:
-        p = gen_expr(a).v
+        p = freeze_scalar(gen_expr(a).v, lt)
         i = gen_expr(b).v
         d = e_bin(.mul, VI, i, e_iconst(tsize(int(types[lt].elem))))
         if op == .plus: return V(e_bin(.add, VI, p, d), false)
         return V(e_bin(.sub, VI, p, d), false)
     if aux == 5:
-        pa = gen_expr(a).v
+        pa = freeze_scalar(gen_expr(a).v, lt)
         pb = gen_expr(b).v
         d = e_bin(.sub, VI, pa, pb)
         sz = tsize(int(types[lt].elem))
         if sz > 1: d = e_bin(.divs, VI, d, e_iconst(sz))
         return V(d, false)
-    if aux >= 7: return gen_vec_binary(e)
+    if aux >= 7: return gen_vec_binary(e, keep_left)
     if vc(lt) == VC_FLT:
         ty = vt_of(lt)
-        va = gen_expr(a).v
+        va = freeze_scalar(gen_expr(a).v, lt)
         vb = gen_expr(b).v
         if op == .percent:
             q = e_un(.ftrunc, ty, e_bin(.fdiv, ty, va, vb))
@@ -1677,7 +1686,7 @@ gen_binary = (e: int) -> Val:
         if nodes[m].kind == .int_lit and nodes[m].ival > 0 and nodes[m].ival & (nodes[m].ival - 1) == 0 and vc(ntype(int(nodes[a].a))) == VC_INT:
             low = e_bin(.and_, VI, gen_expr(int(nodes[a].a)).v, e_iconst(nodes[m].ival - 1))
             return V(e_bin(int_op(op, false), VI, low, e_iconst(0)), false)
-    va = gen_expr(a).v
+    va = freeze_scalar(gen_expr(a).v, lt)
     vb = gen_expr(b).v
     sg = (types[lt].kind == .int_ and types[lt].sign)
     if op == .slash or op == .percent:
@@ -1712,9 +1721,7 @@ gen_left = (a: int, t: int, keep: bool) -> int:
         v = own(v, t)
         if vc(t) != VC_AGG:
             # Retaining the object does not freeze a local's mutable register.
-            saved = vreg(vt_of(t))
-            e_mov(saved, v.v)
-            v.v = saved
+            v.v = freeze_scalar(v.v, t)
     borrow(v, t)
     v.v
 
@@ -1767,7 +1774,7 @@ vec_comps = (t: int) -> int:
     if prune(t) == T_MAT4: return 16
     int(types[prune(t)].bits)
 
-gen_vec_binary = (e: int) -> Val:
+gen_vec_binary = (e: int, keep_left: bool) -> Val:
     a = int(nodes[e].a)
     b = int(nodes[e].b)
     op = nodes[e].op as Tok
@@ -1776,12 +1783,12 @@ gen_vec_binary = (e: int) -> Val:
     s = new_temp(t)
     d = e_slot(s)
     if aux == 7:
-        pa = place_addr(gen_place(a, false), T_MAT4)
+        pa = left_operand_addr(a, T_MAT4, keep_left)
         pb = place_addr(gen_place(b, false), T_MAT4)
         e_call(rt("__mat4_mul"), [d, pa, pb], -1)
         return Val(d, true, s)
     if aux == 8:
-        pa = place_addr(gen_place(a, false), T_MAT4)
+        pa = left_operand_addr(a, T_MAT4, keep_left)
         pb = place_addr(gen_place(b, false), T_VEC4)
         e_call(rt("__mat4_mul_vec4"), [d, pa, pb], -1)
         return Val(d, true, s)
@@ -1802,20 +1809,20 @@ gen_vec_binary = (e: int) -> Val:
     else if op == .slash: vk = 3
     if not integer and vk >= 0 and n >= 2 and n <= 4:
         if aux == 9:
-            pa = place_addr(gen_place(a, false), t)
+            pa = left_operand_addr(a, t, keep_left)
             pb = place_addr(gen_place(b, false), t)
             e_vop(d, pa, pb, vk, n, 0)
         else if aux == 10:
-            pa = place_addr(gen_place(a, false), t)
+            pa = left_operand_addr(a, t, keep_left)
             y = gen_expr(b).v
             e_vop(d, pa, y, vk, n, VOP_SPLAT_C)
         else:
-            x = gen_expr(a).v
+            x = freeze_scalar(gen_expr(a).v, ntype(a))
             pb = place_addr(gen_place(b, false), t)
             e_vop(d, x, pb, vk, n, VOP_SPLAT_B)
         return Val(d, true, s)
     if aux == 9:
-        pa = place_addr(gen_place(a, false), t)
+        pa = left_operand_addr(a, t, keep_left)
         pb = place_addr(gen_place(b, false), t)
         loop i in [0..n):
             x = e_load(ty, pa, 4 * i, mode)
@@ -1825,7 +1832,7 @@ gen_vec_binary = (e: int) -> Val:
             e_store(d, 4 * i, r, mode)
         return Val(d, true, s)
     if aux == 10:
-        pa = place_addr(gen_place(a, false), t)
+        pa = left_operand_addr(a, t, keep_left)
         y = gen_expr(b).v
         loop i in [0..n):
             x = e_load(ty, pa, 4 * i, mode)
@@ -1833,7 +1840,7 @@ gen_vec_binary = (e: int) -> Val:
             if integer: r = e_un(.sext32, VI, r)
             e_store(d, 4 * i, r, mode)
         return Val(d, true, s)
-    x = gen_expr(a).v
+    x = freeze_scalar(gen_expr(a).v, ntype(a))
     pb = place_addr(gen_place(b, false), t)
     loop i in [0..n):
         y = e_load(ty, pb, 4 * i, mode)
@@ -2664,7 +2671,7 @@ gen_expr = (e: int) -> Val:
             nodes[neg].b = i32(m1)
             nodes[neg].aux = 10
             nodes[neg].type = i32(t)
-            return gen_vec_binary(neg)
+            return gen_vec_binary(neg, false)
         v = gen_expr(a).v
         if nodes[e].op == i32(int(Tok.minus)):
             if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
