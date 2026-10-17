@@ -135,7 +135,7 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert definition['uri'] == uri and definition['range']['start']['line'] == 0, definition
         edits = client.request('textDocument/formatting', {'textDocument': {'uri': uri},
                                                          'options': {'tabSize': 4, 'insertSpaces': True}})
-        assert not edits, 'the Sloppy formatter must not rewrite Dewy source'
+        assert edits and edits[0]['newText'] == 'answer = () => 42\nmain = () => answer()\n', edits
 
         bad = '# 🙂\nmain=()=>missing'
         diagnostics = client.set_text(uri, bad, 2)

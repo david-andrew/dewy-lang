@@ -2,6 +2,7 @@
 
     python3 -m tools.core test [-k expression]
     python3 -m tools.core build example.dewy --release -o /tmp/example
+    python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
     python3 -m tools.core path
 """
@@ -23,6 +24,7 @@ CACHE = ROOT / '__dewycache__' / 'compact-core'
 TESTS = (
     'tests/python_misc/test_sloppy_core.py',
     'tests/python_misc/test_sloppy_core_editor.py',
+    'tests/python_misc/test_sloppy_core_format.py',
     'tests/python_misc/test_sloppy_core_watch.py',
     'tests/python_misc/test_sloppy_core_upstream.py',
     'tests/python_misc/test_core_dev.py',
@@ -90,7 +92,7 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
-    cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp'))
+    cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp', 'fmt'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER, help='arguments for pytest or the compiler')
     args = cli.parse_args(argv)
     if args.command == 'path' and args.arguments:

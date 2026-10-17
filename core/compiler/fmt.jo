@@ -9,6 +9,7 @@
 use 'util.jo'
 use 'lex.jo'
 use 'ide.jo'
+use 'dewy_fmt.jo'
 
 # classes of the pieces of a line
 const FK_WORD = 0       # a name, keyword or number
@@ -326,6 +327,7 @@ trim_right = (s: str) -> str:
 # element of an array, or a unit), before the = of and=, or=, xor= and .+=, and around a sign in
 # an array ([a -b] is two elements)
 fmt_tokens = (file: int, src: str) -> str[]:
+    if files[file].is_dewy: return df_tokens(file, src)
     toks = lex(file, src)
     out: str[]
     arr: bool[]
@@ -362,6 +364,7 @@ fmt_failed = false      # a file did not lex, or could not be formatted
 
 # the tokens, or none when the text does not lex (the lexer has said why)
 fmt_lexes = (path: str, src: str) -> str[]?:
+    saved_dn_file = df_file()
     files.push(SrcFile(path, ".", src, ends_with(path, ".dewy")))
     f = files.len() - 1
     when not BOOTSTRAP:
@@ -373,6 +376,7 @@ fmt_lexes = (path: str, src: str) -> str[]?:
             files.pop()
             return toks
         __repl_jmp = null
+        df_file(saved_dn_file)
         files.pop()
         return none
     else:
@@ -386,12 +390,19 @@ fmt_checked = (path: str, src: str) -> str:
     if a == ["?"]:
         fmt_failed = true
         return src
-    out = fmt_text(src)
+    out = src
+    if ends_with(path, ".dewy"):
+        if let formatted = df_text(src): out = formatted
+        else:
+            fmt_failed = true
+            eprint("dewy-core fmt: {path}: unbalanced or excessively nested delimiters; left unchanged")
+            return src
+    else: out = fmt_text(src)
     if out == src: return src
     b = fmt_lexes(path, out) ?? ["?"]
     if a != b:
         fmt_failed = true
-        eprint("sloppy fmt: {path}: left as it is (formatting it would have changed its code: a bug in sloppy fmt)")
+        eprint("dewy-core fmt: {path}: left unchanged because formatting would change its tokens or meaningful spacing")
         return src
     out
 
@@ -399,22 +410,18 @@ fmt_walk = (d: str, out: mut str[]):
     loop n in list_dir(d):
         if starts_with(n, ".") or n == "build" or n == "node_modules": continue
         full = d + "/" + n
-        if ends_with(n, ".jo"): out.push(full)
+        if ends_with(n, ".jo") or ends_with(n, ".dewy"): out.push(full)
         else if find_byte(n, '.') < 0 or file_exists(full + "/."): fmt_walk(full, out)
 
 # sloppy fmt [--check] files or directories... | sloppy fmt - (standard input to standard output)
 fmt_main = (a: str[]):
-    loop path in a[2..):
-        if ends_with(path, ".dewy"):
-            eprint("Dewy formatting is not implemented in this core experiment")
-            exit(2)
     check = false
     paths: str[]
     loop x in a[2..):
         if x == "--check": check = true
         else: paths.push(x)
     if paths.len() == 0:
-        eprint("usage: sloppy fmt [--check] file.jo or directory...   (sloppy fmt -: standard input to standard output)")
+        eprint("usage: dewy-core fmt [--check] file.dewy or directory...   (fmt -: Dewy on standard input/output)")
         exit(2)
     if paths.len() == 1 and paths[0] == "-":
         buf: u8[]
@@ -426,7 +433,7 @@ fmt_main = (a: str[]):
                 buf.resize(n)
                 break
             buf.resize(n + r)
-        write(fmt_checked("<stdin>", str_from_bytes(buf)))
+        write(fmt_checked("<stdin>.dewy", str_from_bytes(buf)))
         if fmt_failed: exit(1)
         return
     todo: str[]
@@ -437,13 +444,13 @@ fmt_main = (a: str[]):
     loop p in todo:
         src = read_file(p) ?? ""
         if len(src) == 0 and not file_exists(p):
-            eprint("sloppy fmt: cannot read {p}")
+            eprint("dewy-core fmt: cannot read {p}")
             exit(1)
         out = fmt_checked(p, src)
         if out == src: continue
         changed += 1
         if check: print(p)
         else if not write_file(p, out):
-            eprint("sloppy fmt: cannot write {p}")
+            eprint("dewy-core fmt: cannot write {p}")
             exit(1)
     if check and changed > 0 or fmt_failed: exit(1)

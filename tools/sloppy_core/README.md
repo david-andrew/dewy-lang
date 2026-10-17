@@ -463,9 +463,13 @@ Dewy text. The parser reads the compiler's source snapshot in memory;
 the experimental compiler host currently requires Linux. Syntax errors
 use the core's diagnostic transport, including original file/byte locations.
 Hover text uses Dewy type spellings and function signatures, including for
-imported implementation-language functions. Defaulted parameters are marked `= …`. Formatting Dewy is deliberately
-unavailable: the CLI rejects it and LSP returns no edits, instead of applying
-Sloppy's syntax formatter. Other inherited editor features remain experimental.
+imported implementation-language functions. Defaulted parameters are marked `= …`.
+The Dewy formatter uses the Dewy lexer to preserve meaningful adjacency and literal
+contents. CLI `fmt` and editor Format Document normalize indentation and declaration
+spacing; `fmt --check` checks without writing. Tests in
+`tests/python_misc/test_sloppy_core_format.py` cover CLI, unsaved buffers and
+native/web execution before and after formatting. Other inherited editor features
+remain experimental.
 
 The existing nested-record particle benchmark runs unchanged except for its
 platform harness import: `benchmark_harness.jo` replaces raw compiler-specific

@@ -50,7 +50,15 @@ Closures keep their captured state when assets used by their bodies change.
 Dependency discovery cannot follow arbitrary calls through function values yet.
 
 The [VS Code extension](../dewy/vscode-dewy/README.md) supports unsaved diagnostics,
-completions, hover and definitions. Set `dewy.core.path` to the compiler executable.
+completions, hover, definitions and Format Document. Set `dewy.core.path` to the compiler executable.
+
+`python3 -m tools.core fmt file.dewy` formats declarations and indentation in
+place. Add `--check` to report needed changes without writing, or pass a directory
+to format its source files. `fmt -` reads Dewy from stdin and writes to stdout.
+Formatting uses four spaces per nesting level and preserves line breaks, comments,
+string contents and meaningful spacing such as `2x`, `f(x)` and `[1 -2 3]`.
+Ordinary arithmetic spacing stays as written; invalid literals and unbalanced
+delimiters leave the file unchanged with an error.
 
 ## Functions and values
 

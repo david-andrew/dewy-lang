@@ -1,0 +1,151 @@
+"""Dewy formatting through the CLI and editor, including spacing-sensitive code."""
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from tests.python_misc.test_sloppy_core import Scripts
+from tests.python_misc.test_sloppy_core_editor import Client
+
+
+@pytest.fixture(scope='module')
+def compiler():
+    path = os.environ.get('DEWY_CORE_COMPILER')
+    if not path:
+        pytest.skip('set DEWY_CORE_COMPILER for formatter checks')
+    return Path(path).resolve(strict=True)
+
+
+def command(compiler, *args, **options):
+    return subprocess.run([compiler, *args], capture_output=True, text=True,
+                          timeout=30, check=False, **options)
+
+
+def test_core_format_layout(compiler, tmp_path):
+    path = tmp_path / 'main.dewy'
+    path.write_text('\tmain=()=>{\nlet x:int64=20\n if x>?0{\n return x+22   # keep 🙂\n }\nreturn 0\n}')
+    expected = 'main = () => {\n    let x: int64 = 20\n    if x>?0{\n        return x+22   # keep 🙂\n    }\n    return 0\n}\n'
+    before = path.read_bytes()
+    check = command(compiler, 'fmt', '--check', path)
+    assert check.returncode == 1 and str(path) in check.stdout
+    assert path.read_bytes() == before
+    formatted = command(compiler, 'fmt', path)
+    assert formatted.returncode == 0, formatted.stderr
+    assert path.read_text() == expected
+    assert command(compiler, 'fmt', '--check', path).returncode == 0
+    stdin = command(compiler, 'fmt', '-', input=expected)
+    assert stdin.returncode == 0 and stdin.stdout == expected, stdin.stderr
+
+
+@pytest.mark.parametrize('text', ['main=()=>{', 'main=()=>[42}', 'main=()=>"missing',
+                                 'main=()=>"{1', 'main=()=>42`'])
+def test_core_format_invalid(compiler, tmp_path, text):
+    path = tmp_path / 'bad.dewy'
+    path.write_text(text)
+    formatted = command(compiler, 'fmt', path)
+    assert formatted.returncode != 0 and formatted.stderr
+    assert path.read_text() == text
+
+
+def test_core_format_implementation_language(compiler, tmp_path):
+    path = tmp_path / 'main.jo'
+    path.write_text('main=()->int:\n  return 20+22')
+    formatted = command(compiler, 'fmt', path)
+    assert formatted.returncode == 0, formatted.stderr
+    assert path.read_text() == 'main = () -> int:\n    return 20 + 22\n'
+    assert command(compiler, 'check', path).returncode == 0
+
+
+PROGRAMS = {
+    'adjacency': '''identity=<T>(x:T):>T=>x
+main=()=>{
+let x=5
+let values=[1 -2 3]
+let optional:array<array<int64>?>=[]
+let points:array<int64>=[]
+loop point in [0,2..8) { points.push(point) }
+printl(identity<int64>(2x+2(x+1)))
+printl(values) printl(points) printl(optional.length)
+return 0
+}''',
+    'strings': '''main=()=>{
+let raw=r"""first  
+\t{raw # untouched}  
+  last"""
+let quoted="""first  
+{"nested"}  
+  last"""
+printl(raw) printl(quoted) printl(0x"cafe")
+return 0
+}''',
+    'crlf': 'main=()=>{\r\nlet text=r"""a  \r\n\tb\r\nc"""\r\nprintl(text)\r\nreturn 0\r\n}',
+}
+
+
+@pytest.mark.parametrize('name', PROGRAMS)
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_format_execution(compiler, tmp_path, name, target):
+    path = tmp_path / 'main.dewy'
+    path.write_bytes(PROGRAMS[name].encode())
+
+    def execute(label):
+        output = tmp_path / label
+        flags = ['--target', 'wasm'] if target == 'wasm' else []
+        built = command(compiler, 'build', path, '-o', output, *flags)
+        assert built.returncode == 0, built.stdout + built.stderr
+        args = [output]
+        if target == 'wasm':
+            node = shutil.which('node')
+            if not node:
+                pytest.skip('Node is needed for web formatting checks')
+            scripts = Scripts()
+            scripts.feed(output.with_suffix('.html').read_text())
+            runner = output.with_suffix('.cjs')
+            runner.write_text('\n'.join(scripts.parts))
+            args = [node, runner]
+        ran = subprocess.run(args, capture_output=True, timeout=10, check=False)
+        assert ran.returncode == 0, ran.stderr
+        return ran.stdout
+
+    before = execute('before')
+    formatted = command(compiler, 'fmt', path)
+    assert formatted.returncode == 0, formatted.stderr
+    assert execute('after') == before
+    check = command(compiler, 'fmt', '--check', path)
+    assert check.returncode == 0, check.stdout + check.stderr
+    if name == 'crlf':
+        assert path.read_bytes().endswith(b'}\r\n')
+
+
+def test_core_format_examples(compiler, tmp_path):
+    examples = Path(__file__).resolve().parents[2] / 'examples/sloppy_core'
+    directory = tmp_path / 'examples'
+    shutil.copytree(examples, directory)
+    formatted = command(compiler, 'fmt', directory)
+    assert formatted.returncode == 0, formatted.stdout + formatted.stderr
+    checked = command(compiler, 'fmt', '--check', directory)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    for name in ['tour', 'dunes']:
+        checked = command(compiler, 'check', directory / f'{name}.dewy')
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+def test_core_format_unsaved_recovery(compiler, tmp_path):
+    path = tmp_path / 'main.dewy'
+    path.write_text('main=()=>0')
+    client = Client(compiler, tmp_path)
+    request = {'textDocument': {'uri': path.as_uri()}, 'options': {'tabSize': 4, 'insertSpaces': True}}
+    try:
+        client.set_text(path.as_uri(), 'main=()=>"missing', 1)
+        assert client.request('textDocument/formatting', request) == []
+        client.set_text(path.as_uri(), 'main=()=>{\nreturn 42\n}', 2)
+        edits = client.request('textDocument/formatting', request)
+        assert edits and edits[0]['newText'] == 'main = () => {\n    return 42\n}\n', edits
+        client.set_text(path.as_uri(), 'main=()=>"🙂"', 3)
+        edits = client.request('textDocument/formatting', request)
+        assert edits[0]['range']['end'] == {'line': 0, 'character': 13}, edits
+        assert path.read_text() == 'main=()=>0', 'Editor formatting must use the unsaved buffer'
+    finally:
+        client.close()

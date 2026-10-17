@@ -92,6 +92,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   .venv/bin/python -m pytest -q -o addopts='' \
   tests/python_misc/test_sloppy_core.py \
   tests/python_misc/test_sloppy_core_editor.py \
+  tests/python_misc/test_sloppy_core_format.py \
   tests/python_misc/test_sloppy_core_watch.py \
   tests/python_misc/test_sloppy_core_upstream.py \
   tests/python_misc/test_core_dev.py
@@ -131,7 +132,14 @@ referenced inputs: creating a missing asset, imported file or parent directory
 retries the build, including on first launch. Arbitrary initializer reads
 inside helper functions and more complex reload scenarios remain experimental.
 
-Dewy formatting, package editing, an interactive prompt and automatic updates
+`fmt file.dewy` formats in place; `fmt --check directory` reports files needing
+formatting without changing them. `fmt -` reads Dewy from stdin. Dewy formatting
+normalizes four-space indentation, declaration spacing and trailing whitespace;
+it preserves physical line breaks, literal contents, comments and meaningful
+adjacency. Ordinary operator spacing stays as written. The editor uses the same
+formatter on unsaved text. `.jo` files retain their own formatter.
+
+Package editing, an interactive prompt and automatic updates
 are not yet exposed; their inherited versions would produce or install the
 wrong language.
 

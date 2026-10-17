@@ -3463,8 +3463,8 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     assert checked.returncode != 0 and 'unknown' in checked.stderr, checked.stdout + checked.stderr
     formatted = subprocess.run([compiler, 'fmt', source], capture_output=True,
                                text=True, timeout=10, check=False)
-    assert formatted.returncode != 0 and 'not implemented' in formatted.stderr
-    assert source.read_text() == text
+    assert formatted.returncode == 0, formatted.stdout + formatted.stderr
+    assert source.read_text() == 'unused = () => missing\nmain = () => 42\n'
 
 
 @pytest.mark.parametrize('command', ['update', 'upgrade', 'repl', 'add'])

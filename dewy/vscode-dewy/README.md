@@ -46,7 +46,11 @@ can complete normally. Signatures are described without checking every library
 function's body. Generic signatures and instantiated types use Dewy `<T>` notation, including
 user declarations and imported containers such as `Pool<Enemy>`.
 
-Rename, signature help, semantic highlighting and formatting are not enabled by
+Format Document uses the core's Dewy formatter on the unsaved buffer, with fixed
+four-space indentation. It preserves strings, comments, line breaks and
+spacing-sensitive expressions. Results for an older document version are discarded.
+
+Rename, signature help and semantic highlighting are not enabled by
 this client yet. The existing native-debugger configuration below still targets
 the earlier compiler.
 

@@ -1912,19 +1912,17 @@ on_workspace_symbol = (id: int, params: int) -> int:
     all = out[0] + out[1] + out[2]
     lsp_reply(id, "[{join(all[..min(all.len(), 1000)), ",")}]")
 
-# sloppy fmt's layout, as one edit of the whole text (none when it is laid out so already, or
-# does not lex)
+# Language-specific layout as one edit of the current buffer.
 on_formatting = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "null")
-    if ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
     text = docs[d].text
     quiet_errors = true
     out = fmt_checked(docs[d].path, text)
     quiet_errors = false
     if out == text: return lsp_reply(id, "[]")
-    n = split(text, "\n").len()
-    lsp_reply(id, "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":\{\"line\":{n},\"character\":0\}\},\"newText\":{jq(out)}\}]")
+    end = jpos(lpos_of(text, line_starts_of(text), len(text)))
+    lsp_reply(id, "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":{end}\},\"newText\":{jq(out)}\}]")
 
 # ---------------- quick fixes: edits that errors suggest ----------------
 

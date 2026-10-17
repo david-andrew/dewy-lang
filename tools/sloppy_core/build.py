@@ -70,15 +70,17 @@ def build(output: Path, *, dewy: Path | None = None, parser: Path | None = None,
     if bootstrap:
         # Build the implementation-language frontend first. This permits the
         # main compiler to use features outside the intentionally small C seed.
-        frontend = output / 'compiler/frontend.jo'
-        shutil.copy2(CORE / 'bootstrap/frontend.jo', frontend)
+        bootstrap_modules = ('frontend.jo', 'dewy_fmt.jo')
+        for name in bootstrap_modules:
+            shutil.copy2(CORE / 'bootstrap' / name, output / 'compiler' / name)
         stage0 = output / 'stage0/sloppy0'
         seed = binary_dir / 'core-bootstrap'
         try:
             run(['make', '-s', '-C', str(output / 'stage0')], 'bootstrap-c.log')
             run([stage0, output / 'compiler/main.jo', '-o', seed], 'bootstrap-core.log')
         finally:
-            shutil.copy2(CORE / 'compiler/frontend.jo', frontend)
+            for name in bootstrap_modules:
+                shutil.copy2(CORE / 'compiler' / name, output / 'compiler' / name)
         bootstrap_hashes = [identity(p) for p in (stage0, seed)]
     if seed is None:
         raise ValueError('provide --seed or --bootstrap')

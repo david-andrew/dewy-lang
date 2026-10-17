@@ -200,6 +200,14 @@ function activate(context, vscode) {
                 return Array.isArray(result) ? result.map(location) : location(result);
             },
         }),
+        vscode.languages.registerDocumentFormattingEditProvider(selector, {
+            async provideDocumentFormattingEdits(doc, options, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/formatting', { textDocument: document(doc), options }, token);
+                if (!result || doc.version !== version) return null;
+                return result.map((edit) => new vscode.TextEdit(range(edit.range), edit.newText));
+            },
+        }),
         vscode.languages.registerCompletionItemProvider(selector, {
             async provideCompletionItems(doc, pos, token) {
                 const result = await ask('textDocument/completion', at(doc, pos), token);

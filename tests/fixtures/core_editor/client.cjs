@@ -37,8 +37,9 @@ class MarkdownString { constructor(value) { this.value = value; } }
 class Hover { constructor(contents) { this.contents = contents; } }
 class CompletionItem { constructor(label, kind) { Object.assign(this, { label, kind }); } }
 class CompletionList { constructor(items, isIncomplete) { Object.assign(this, { items, isIncomplete }); } }
+class TextEdit { constructor(range, newText) { Object.assign(this, { range, newText }); } }
 const vscode = {
-    Position, Range, Location, Diagnostic, MarkdownString, Hover, CompletionItem, CompletionList, Uri: { parse: uri },
+    Position, Range, Location, Diagnostic, MarkdownString, Hover, CompletionItem, CompletionList, TextEdit, Uri: { parse: uri },
     window: { createOutputChannel: () => ({ ...disposable, append: (s) => log.push(s), appendLine: (s) => log.push(s) }) },
     languages: {
         createDiagnosticCollection: () => ({
@@ -48,6 +49,7 @@ const vscode = {
         }),
         registerHoverProvider: (_selector, p) => { providers.hover = p; return disposable; },
         registerDefinitionProvider: (_selector, p) => { providers.definition = p; return disposable; },
+        registerDocumentFormattingEditProvider: (_selector, p) => { providers.formatting = p; return disposable; },
         registerCompletionItemProvider: (_selector, p, trigger) => {
             assert.equal(trigger, '.'); providers.completion = p; return disposable;
         },
@@ -99,6 +101,14 @@ async function change(text, predicate) {
         assert.equal(answer.kind, 5); // VS Code Variable
         assert(names.items.some((item) => item.label === 'printl'));
         assert(!names.items.some((item) => item.label === 'struct'));
+        const format = () => providers.formatting.provideDocumentFormattingEdits(document, { tabSize: 4, insertSpaces: true });
+        const edits = await format();
+        assert.equal(edits.length, 1);
+        assert.equal(edits[0].newText, '# 🙂\nlet answer: int64 = 42\nmain = () => answer\n');
+        assert.equal(edits[0].range.end.character, 15);
+        const stale = format();
+        document.version++;
+        assert.equal(await stale, null, 'formatting an old document version must not replace newer edits');
         await change('main=()=>{let point=[x=42 y=1] return point.x}', (ds) => ds.length === 0);
         const fields = await providers.completion.provideCompletionItems(document, new Position(0, body.lastIndexOf('.x') + 1));
         assert.equal(fields.items.find((item) => item.label === 'x').kind, 4); // VS Code Field
@@ -106,6 +116,7 @@ async function change(text, predicate) {
         await change('# 🙂\nmain=()=>unknown_editor', (ds) => ds.some((d) => d.message.includes('unknown_editor')));
         assert.equal(notices.at(-1)[0].range.start.line, 1);
         await change('main=()=>{', (ds) => ds.length > 0 && !ds[0].message.includes('unknown_editor'));
+        assert.deepEqual(await format(), []);
         await change('main=()=>42', (ds) => ds.length === 0);
         const seen = notices.length;
         commands.get('dewy.core.restartServer')();
@@ -120,6 +131,7 @@ async function change(text, predicate) {
         assert.equal(spawned, 2);
         assert.equal(await providers.hover.provideHover(document, new Position(0, 0)), null);
         assert.equal(await providers.completion.provideCompletionItems(document, new Position(0, 0)), null);
+        assert.equal(await format(), null);
         assert.equal(fs.readFileSync(source, 'utf8'), disk, 'editor integration modified the file');
         console.log('core editor: opt-in, trust, snapshots, diagnostics, hover, definition, completion, restart and close passed');
     } finally {

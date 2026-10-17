@@ -1,0 +1,101 @@
+# Dewy layout uses its own lexer. Preserve meaningful adjacency and physical
+# line breaks; normalize indentation, declarations and whitespace around them.
+use 'dewy_fast.jo'
+
+df_lexemes: DewyLexeme[]
+df_file = () -> int: dn_file
+df_file = (file: int): dn_file = file
+
+df_assignment = (s: str) -> bool:
+    s in ["=", "=>", ":>", "+=", "-=", "*=", "/=", "//=", "%=", "<<=", ">>="]
+
+# Only these boundaries are independent of adjacency in the Dewy grammar.
+# In particular, preserve calls/indexing, coefficients, generic applications,
+# optional suffixes and the distinction between a-b and [a -b].
+df_free_gap = (left: str, right: str) -> bool:
+    df_assignment(left) or df_assignment(right) or left in [":", ",", ";", "{"] or right in [":", ",", ";", "}"]
+
+df_gap = (left: DewyLexeme, right: DewyLexeme) -> str:
+    if right.text in [":", ",", ";"]: return ""
+    if left.text == "{" and right.text == "}": return ""
+    if df_free_gap(left.text, right.text): return " "
+    if right.space: " " else: ""
+
+df_tokens = (file: int, src: str) -> str[]:
+    saved = dn_file
+    dn_file = file
+    df_lexemes = dn_lex(file, 0, len(src))
+    dn_file = saved
+    out: str[]
+    loop i in 0.. and t in df_lexemes:
+        if t.kind == "eof": break
+        sig = "{t.kind}:{src[t.start..t.stop)}"
+        if i > 0:
+            sig += " n{t.newline}"
+            if not df_free_gap(df_lexemes[i - 1].text, t.text): sig += " s{t.space}"
+        out.push(sig)
+    out
+
+df_text = (src: str) -> str?:
+    tokens = df_lexemes
+    lines: str[]
+    stack: str[]
+    at = 0
+    start = 0
+    opaque_end = 0
+    final_newline = if find(src, "\r\n") >= 0: "\r\n" else: "\n"
+    loop start < len(src):
+        end = find_byte(src, '\n', start)
+        if end < 0: end = len(src)
+        content_end = end
+        if content_end > start and src[content_end - 1] == '\r': content_end -= 1
+        newline = if content_end < end: "\r\n" else: "\n"
+        if end == len(src): newline = final_newline
+        protected = start < opaque_end
+        stop = at
+        loop stop < tokens.len() and tokens[stop].kind != "eof" and tokens[stop].start < content_end:
+            if tokens[stop].stop > content_end: opaque_end = tokens[stop].stop
+            stop += 1
+        lead = 0
+        loop at + lead < stop and tokens[at + lead].kind == "op" and tokens[at + lead].text in [")", "]", "}"]: lead += 1
+        depth = max(0, stack.len() - lead)
+        first = start
+        loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
+        last = content_end
+        if not protected and opaque_end <= content_end:
+            loop last > first and (src[last - 1] == ' ' or src[last - 1] == '\t'): last -= 1
+        if protected:
+            lines.push(src[start..content_end))
+        else if first == content_end:
+            lines.push("")
+        else:
+            parts = [repeat(" ", depth * 4)]
+            if at == stop:
+                # A comment-only line has no lexer tokens.
+                parts.push(src[first..last))
+            else:
+                loop i in [at..stop):
+                    if i > at: parts.push(df_gap(tokens[i - 1], tokens[i]))
+                    t = tokens[i]
+                    parts.push(src[t.start..min(t.stop, content_end)))
+                cursor = min(tokens[stop - 1].stop, content_end)
+                if cursor < last: parts.push(src[cursor..last))
+            lines.push(join(parts, ""))
+        # Strings can span physical lines, including closing quotes followed by
+        # code. Their contents stay untouched, but following delimiters count.
+        loop i in [at..stop):
+            t = tokens[i]
+            if t.kind != "op": continue
+            if t.text in ["(", "[", "{"]:
+                stack.push(t.text)
+                if stack.len() > 256: return none
+            else if t.text in [")", "]", "}"]:
+                if stack.len() == 0: return none
+                opening = stack.pop()
+                if (opening == "{") != (t.text == "}"): return none
+                # [a..b) and (a..b] are valid Dewy range delimiters.
+        lines.push(newline)
+        at = stop
+        start = end + 1
+    if stack.len() != 0: return none
+    join(lines, "")

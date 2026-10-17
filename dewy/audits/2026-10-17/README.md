@@ -614,3 +614,25 @@ The application and graph benchmark tools now offer Linux `--clock thread-cpu`
 alongside default wall timing, using matching clocks in Dewy and C and recording
 the adapted harness hashes. It excludes descheduling, but frequency and cache
 contention still affect results.
+
+## Dewy formatting in the CLI and editor
+
+`fmt` now accepts Dewy files, directories, `--check`, and Dewy on stdin. It
+uses the Dewy lexer to preserve meaningful adjacency, physical line breaks,
+comments and original literal spelling while normalizing indentation, declaration
+spacing and trailing whitespace. Ordinary arithmetic spacing stays as written.
+Multiline/raw/interpolated strings and CRLF are preserved. Malformed literals
+or unbalanced delimiters leave the file unchanged and report failure.
+
+VS Code Format Document uses the unsaved buffer and discards results if the
+document version has changed. Replacement ranges use UTF-16 positions. Tests
+exercise the actual client transport, error recovery, implementation-language
+formatting, the example corpus, and native/web execution before and after
+formatting spacing-sensitive programs. The C bootstrap uses a formatter stub
+only while building the first implementation-language compiler, as it already
+does for the Dewy frontend; subsequent stages compile the real formatter.
+
+The independent C bootstrap succeeded and **2,028 checks passed in 76.09 s**.
+Ruff, JavaScript syntax checking and diff whitespace checks also passed.
+[Full gate](source-core/formatter-full.log),
+[build manifest](source-core/formatter-build.json).
