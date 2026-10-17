@@ -249,8 +249,23 @@ Seven warmed release builds of the fraction example took a median 63.96 ms
 (`rational-compile.json`). The full 1,340-check gate passes with this library;
 the unchanged compiler was independently C-bootstrapped at the bigint checkpoint.
 
-The combined Dewy/editor/shared-core gate now contains 1,340 checks and took
-68 seconds in the latest development run, including separate compiler
+Dewy `^` now parses as right-associative power above multiplication, literal
+coefficients and unary minus. Records use `__pow__`; `xor` remains `__xor__`.
+BigInt and Rational expose their existing exact power algorithms through this
+syntax. Machine `int64`/`uint64` power uses exponentiation by squaring, wraps like
+fixed-width multiplication and rejects negative exponents with guidance to use a
+rational or floating base. The implementation language's own `pow` contract is
+unchanged. Both float widths use the inherited floating math implementation.
+The gate checks precedence, evaluation order, custom protocols, error behavior,
+and 252 signed/unsigned word-power results against Python modular arithmetic on
+native/web in debug/release modes. Both exact-arithmetic examples now use `^`.
+A fresh C bootstrap and all 1,381 checks pass. Seven alternating warmed build
+pairs gave tour 73.82/78.00 ms, physics 490.94/491.78 ms and compiler self-build
+1,961.99/1,879.92 ms (before/after). Shared-desktop variability and mixed results
+do not establish a compilation speed change; raw samples are in `power-compile.json`.
+
+The combined Dewy/editor/shared-core gate now contains 1,381 checks and took
+80 seconds in the latest development run, including separate compiler
 processes and program execution.
 Value cases run in debug and release modes. It includes the paddle game model
 on native and WebAssembly targets in both modes, and a

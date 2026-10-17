@@ -1,0 +1,126 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "362389944125ed85047a50505f2baa814c58cc9e",
+  "working_tree": " M core/LANGUAGE.md\n M core/compiler/dewy_fast.jo\n M core/compiler/dewy_parse.jo\n M core/compiler/expr.jo\n M core/lib/bigint.dewy\n M core/lib/rational.dewy\n M examples/sloppy_core/exact_integers.dewy\n M examples/sloppy_core/exact_rationals.dewy\n M tests/python_misc/test_sloppy_core.py\n M tools/sloppy_core/README.md\n?? core/lib/std/dewy.jo\n?? dewy/audits/2026-10-16/source-core/power-full-tests.log\n",
+  "diff_sha256": "137c547f792a8afcb358270e896a9994649d5b71df7fb460167e663955f06520",
+  "load_average_start": [
+    6.92431640625,
+    6.79931640625,
+    7.61865234375
+  ],
+  "workers": 1,
+  "samples": 7,
+  "warmups_per_compiler": 1,
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792202954976148801/bin/dewy-core",
+      "sha256": "a584e363af0ad3360f26032028190d0254781af91bd0630b4085e5d849b7d468"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792203351686083158/bin/dewy-core",
+      "sha256": "74657e227650cab8b83c8a0e479c20958492aebe0fae4fef3044056ec830c909"
+    }
+  },
+  "workloads": {
+    "tour": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/tour.dewy",
+        "--release"
+      ],
+      "source_sha256": "885626f43ac0b290e28f95bfad4f04675deb4e366084a420a366af29e499f4bd",
+      "seconds": {
+        "baseline": [
+          0.06149452493991703,
+          0.06334058498032391,
+          0.08301318506710231,
+          0.09620069595985115,
+          0.08490404300391674,
+          0.0519029590068385,
+          0.07382336899172515
+        ],
+        "candidate": [
+          0.12334118003491312,
+          0.15867278701625764,
+          0.0779960670042783,
+          0.10774209105875343,
+          0.07464790600351989,
+          0.05279558291658759,
+          0.05427343992050737
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.07382336899172515,
+        "candidate": 0.0779960670042783
+      }
+    },
+    "physics": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/physics.dewy",
+        "--release"
+      ],
+      "source_sha256": "0699216ebdc2a8f694adf23b24a743a514991d693673b61c55e27adacdc925a9",
+      "seconds": {
+        "baseline": [
+          0.4909367699874565,
+          0.4769635439151898,
+          0.596974365063943,
+          0.4979950439883396,
+          0.4744330949615687,
+          0.4934980319812894,
+          0.48894673504401
+        ],
+        "candidate": [
+          0.5451392139075324,
+          0.4959956230595708,
+          0.5700328840175644,
+          0.478674337035045,
+          0.47241666598711163,
+          0.47795786801725626,
+          0.49177970399614424
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.4909367699874565,
+        "candidate": 0.49177970399614424
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "7e495d5eb6b4207badf927ac2590da081b73bb65e78673386821a63565588b1e",
+      "seconds": {
+        "baseline": [
+          2.0486316879978403,
+          2.0584168760105968,
+          1.4963575890287757,
+          1.700357842957601,
+          1.961994281038642,
+          1.5804076850181445,
+          2.046696612960659
+        ],
+        "candidate": [
+          1.8720345180481672,
+          1.879918845021166,
+          1.6426391550339758,
+          1.8855692689539865,
+          1.431118517066352,
+          1.9339288650080562,
+          1.9116122929845005
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.961994281038642,
+        "candidate": 1.879918845021166
+      }
+    }
+  },
+  "load_average_end": [
+    7.3818359375,
+    6.935546875,
+    7.6298828125
+  ]
+}

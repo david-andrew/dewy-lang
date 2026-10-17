@@ -1889,7 +1889,7 @@ collect_fns = (name: int, out: mut int[]):
     collect_in(prelude, name, out)
     hide_private = false
 
-dewy_floor_call = (n: int, name: int, args: int[], expected: int) -> int:
+dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     literal_divisor = nodes[args[1]].kind == .int_lit
     checked: int[]
     loop arg in args:
@@ -1899,17 +1899,20 @@ dewy_floor_call = (n: int, name: int, args: int[], expected: int) -> int:
     a = checked[0]
     b = checked[1]
     modulo = name == intern("__floor_mod")
+    power = name == intern("__dewy_power")
     if is_struct_like(ntype(a)) or is_struct_like(ntype(b)):
-        op = if modulo: "%" else: "//"
+        op = if power: "**" else if modulo: "%" else: "//"
         nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b))
         result = op_overload(n, op)
-        if result == 0: fatal(nodes[n].pos, "operator {op} is not defined for {type_str(ntype(a))} and {type_str(ntype(b))}")
+        if result == 0:
+            label = if power: "^" else: op
+            fatal(nodes[n].pos, "operator {label} is not defined for {type_str(ntype(a))} and {type_str(ntype(b))}")
         return result
     # Only built-in arithmetic may replace a literal divisor with a shift or
     # mask. Custom protocols receive the original operand, including 1 or 2^k.
     helper = name
     divisor = nodes[b].ival
-    if literal_divisor and nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
+    if not power and literal_divisor and nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
         if modulo:
             helper = intern("__floor_mod_pow2")
             nodes[b].ival = divisor - 1
@@ -1931,9 +1934,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(args[0], 0)
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
-    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod")) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
+    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power")) and ends_with(files[pos_file(nodes[n].pos)].path, ".dewy"):
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
-            return dewy_floor_call(n, name, args, expected)
+            return dewy_arithmetic_call(n, name, args, expected)
     ii = intrinsic_of(name)
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0:
         a0 = args[0]
@@ -3631,6 +3634,7 @@ dewy_operator_name = (op: str, unary: bool) -> str:
         "*": "__mul__"
         "/": "__truediv__"
         "//": "__floordiv__"
+        "**": "__pow__"
         "%": "__mod__"
         "==": "__eq__"
         "!=": "__ne__"

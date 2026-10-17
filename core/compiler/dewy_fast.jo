@@ -225,6 +225,7 @@ dn_power = (op: str) -> int:
         "<<", ">>": 110
         "+", "-": 120
         "*", "/", "//", "%": 130
+        "^": 140
         _: 0
 
 dn_can_start = () -> bool:
@@ -442,7 +443,7 @@ dn_expr = (minimum: int) -> int:
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_node("Flat", "", pos_off(dewy_syntax[left].pos), parts)
             continue
-        right = dn_expr(if op == "=>": power else: power + 1)
+        right = dn_expr(if op == "=>" or op == "^": power else: power + 1)
         if op == ",":
             parts: int[]
             if dw_op(left) == ",": parts = dewy_syntax[left].children

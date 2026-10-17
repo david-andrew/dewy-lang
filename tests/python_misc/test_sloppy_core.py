@@ -44,6 +44,38 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'power-precedence': '''main=()=>{
+if 2^3^2 not=? 512 or (2^3)^2 not=? 64 return 1
+if -2^2 not=? -4 or (-2)^2 not=? 4 return 2
+let x:int64=3
+return if 2x^2 =? 18 and 2*3^2 =? 18 and 2^3*2 =? 16 and 0^0 =? 1 42 else 3
+}''',
+    'power-unsigned': '''main=()=>{
+let value:uint64=18446744073709551615
+if value^2 not=? 1 or value^3 not=? value return 1
+if 18446744073709551615^1 not=? value return 2
+return if (2 as uint64)^63 =? 9223372036854775808 and value^0 =? 1 42 else 3
+}''',
+    'power-floating': '''main=()=>{
+let a:float64=2.0^(-3.0) let b:float32=(2.0 as float32)^(3.0 as float32)
+return if abs(a-0.125) <? 0.000001 and abs(b-8.0) <? 0.0001 and abs(9.0^0.5-3.0) <? 0.000001 42 else 1
+}''',
+    'power-exact': '''from bigint import bigint
+from rational import rational
+main=()=>{
+if bigint(2)^100 not=? bigint("1267650600228229401496703205376") return 1
+if rational(2 3)^(-3) not=? rational(27 8) return 2
+return if bigint(2)^3^2 =? 512 and rational(0)^0 =? 1 42 else 3
+}''',
+    'power-custom-order': '''Box:type=[value:int64]
+let trace:string=""
+base=()=>{trace+="a" return Box[40]}
+exponent=()=>{trace+="b" return 2}
+__pow__=(base:Box exponent:int64)=>Box[base.value+exponent]
+__xor__=(a:Box b:Box)=>Box[a.value xor b.value]
+main=()=>{let answer=base()^exponent()
+return if answer.value =? 42 and trace =? "ab" and (Box[40] xor Box[2]).value =? 42 42 else 1}
+''',
     'rational-parse': '''from rational import rational, parse_rational, Rational
 main=()=>{
 loop text in ["" "+" "-" "1/" "/2" "1/0" "1/2/3" " 1" "1 /2" "1.5" "１２"] {
@@ -681,6 +713,7 @@ loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 ERRORS = {
     'overload-group-value': ('choose=(()=>42)&42\nmain=()=>choose()', 'overload group member other than a function literal'),
     'overload-group-local': ('main=()=>{let choose=(()=>40)&((n:int64)=>n) return choose()+choose(2)}', 'local overload group'),
+    'power-missing-protocol': ('Box:type=[value:int64]\nmain=()=>Box[2]^3', 'operator ^ is not defined'),
     'overload-group-main': ('main=(()=>42)&((n:int64)=>n)', 'overloaded entry point'),
     'main-record-result': ('main=()=>[value=42]', 'main must return void or an integer exit code'),
     'main-float-result': ('main=()=>42.5', 'main must return void or an integer exit code'),
@@ -939,6 +972,9 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
     ('bigint(42)//bigint(0)', 'big integer division by zero'),
     ('bigint(42)%0', 'big integer division by zero'),
     ('bigint(2).pow(-1)', 'big integer exponent must be nonnegative'),
+    ('bigint(2)^(-1)', 'big integer exponent must be nonnegative'),
+    ('2^(-1)', 'negative integer exponent: use a rational or floating base'),
+    ('(2 as uint64)^(-1)', 'negative integer exponent: use a rational or floating base'),
     ('bigint("12x")', 'invalid decimal integer'),
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -1029,6 +1065,7 @@ loop line in input.split("\n") {
     ('rational(1)//0', 'rational division by zero'),
     ('rational(1)%0', 'rational division by zero'),
     ('rational(0).pow(-1)', 'rational division by zero'),
+    ('rational(0)^(-1)', 'rational division by zero'),
     ('rational("1/0")', 'invalid rational text'),
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -1154,6 +1191,49 @@ loop line in input.split("\n") {
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_word_power_arithmetic(compiler, tmp_path, target, release):
+    signed = [-2**63, -2**63+1, -65537, -3, -2, -1, 0, 1, 2, 3, 65537, 2**63-1]
+    unsigned = [0, 1, 2, 3, 2**32-1, 2**32, 2**63, 2**64-2, 2**64-1]
+    exponents = [0, 1, 2, 3, 7, 16, 31, 32, 63, 64, 127, 255]
+    source = tmp_path / 'powers.dewy'
+    source.write_text(f'''main=():>void=>{{
+let signed:array<int64>=[{' '.join(map(str, signed))}]
+let unsigned:array<uint64>=[{' '.join(map(str, unsigned))}]
+let exponents:array<int64>=[{' '.join(map(str, exponents))}]
+loop a in signed {{loop n in exponents {{printl"{{a^n}}"}}}}
+loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
+}}
+''')
+    expected = []
+    for a in signed:
+        for n in exponents:
+            value = pow(a, n, 2**64)
+            expected.append(str(value if value < 2**63 else value - 2**64))
+    expected.extend(str(pow(a, n, 2**64)) for a in unsigned for n in exponents)
+    binary = tmp_path / 'powers'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web power checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'powers.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
 
@@ -2023,7 +2103,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
+@pytest.mark.parametrize('name', [*[name for name in CASES if name.startswith(('power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

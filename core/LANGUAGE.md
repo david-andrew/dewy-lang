@@ -103,6 +103,16 @@ Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
 for general multiplication. A semicolon discards an expression's result.
 
+`^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
+It binds above multiplication, literal coefficients and unary minus, so `2x^2`
+is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
+Machine-integer powers use a nonnegative `int64` exponent and wrap at 64 bits,
+like repeated fixed-width multiplication; negative exponents panic with guidance
+to use an explicit rational or floating base. Float powers use the inherited
+floating math library. `BigInt` powers remain exact for nonnegative exponents;
+`Rational` supports signed exponents. All these types define zero to the zero
+power as one. `^=` is not implemented yet.
+
 ## Exact large integers
 
 ```dewy
@@ -110,7 +120,7 @@ from bigint import BigInt, bigint, parse_bigint
 main=():>void=>{
     let value=bigint("123456789012345678901234567890")
     printl"{value*value}"
-    printl"{bigint(2).pow(256)}"
+    printl"{bigint(2)^256}"
     let parts=(-value).divmod(bigint(7))
     printl"{parts.quotient} {parts.remainder}"
 }
@@ -127,7 +137,7 @@ down and the remainder has the divisor's sign. `.divmod(other)` computes both
 results together. Parenthesize a negative numerator as `(-value)//other`:
 Dewy's unary minus binds below multiplication and division.
 
-`.pow(nonnegative_exponent)`, `.abs()` and `.gcd(other)` operate exactly;
+`^` (also `.pow(nonnegative_exponent)`), `.abs()` and `.gcd(other)` operate exactly;
 `gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
 panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
 truncate. Interpolation formats decimal text. Values are independent copies and
@@ -135,8 +145,8 @@ can be dictionary keys; construct them through `bigint`, keeping `_sign` and
 `_limbs` as internal representation details.
 
 This is an explicit library type. Ordinary fixed-width arithmetic does not
-automatically widen, and oversized numeric literals, automatic rational promotion, bigint
-bitwise operations and power syntax are not yet implemented. The inherited
+automatically widen. Oversized numeric literals, automatic rational promotion and
+bigint bitwise operations are not yet implemented. The inherited
 `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/sloppy_core/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
@@ -148,13 +158,13 @@ from rational import Rational, rational, parse_rational
 main=():>void=>{
     let half=rational(1 2)
     printl"{half+rational(1 3)}"  # 5/6
-    printl"{rational(2 3).pow(-3)}"  # 27/8
+    printl"{rational(2 3)^(-3)}"  # 27/8
     printl"{rational("-7/3").floor()}"  # -3
 }
 ```
 
-`rational(numerator denominator)` accepts a machine integer, `BigInt`, or decimal integer text; the denominator
-defaults to one. A single string accepts an integer or `numerator/denominator`.
+`rational(numerator denominator)` accepts machine integers, `BigInt` values, or
+decimal integer text for its parts; the denominator defaults to one. A single string accepts an integer or `numerator/denominator`.
 `parse_rational(text)` returns `Rational|none` for invalid input, including a zero
 denominator. Decimal points and whitespace inside the string are not accepted.
 
@@ -259,6 +269,7 @@ record type is sufficient. Built-in scalar operations keep their built-in behavi
 | --- | --- |
 | `+`, binary `-`, `*`, `/` | `__add__`, `__sub__`, `__mul__`, `__truediv__` |
 | `//`, `%` | `__floordiv__`, `__mod__` |
+| `^` | `__pow__` |
 | unary `-` | `__unary_sub__` |
 | `=?`, `not=?` | `__eq__`, `__ne__` |
 | `<?`, `<=?`, `>?`, `>=?` | `__lt__`, `__le__`, `__gt__`, `__ge__` |
@@ -269,7 +280,8 @@ and `<=?`, `>?`, `>=?` derive from `__lt__`. Derived comparisons preserve writte
 operand evaluation order. Arithmetic compound assignments reuse the corresponding
 operator. Floor protocols receive the written divisor, including literal powers
 of two; the built-in shift/mask optimizations do not change custom operands.
-Logical `and`/`or`/`not` and power do not yet have custom record protocols.
+Logical `and`/`or`/`not` do not yet have custom record protocols. Power uses
+`__pow__` and keeps bitwise `xor`/`__xor__` separate.
 
 [The bounded history example](../examples/sloppy_core/history.dewy) uses a
 [generic ring buffer written entirely in Dewy](../examples/sloppy_core/ring.dewy),
