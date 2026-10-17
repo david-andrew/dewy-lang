@@ -1164,18 +1164,16 @@ def test_core_frontend_selection(compiler, tmp_path, mode):
         assert checked.returncode == 1 and 'DEWY_CORE_FRONTEND' in checked.stderr, checked.stderr
 
 
-def run_value_batch(compiler, directory, cases, release, target):
-    """Keep source modules independent while amortizing compiler/runtime startup."""
-    imports, body = [], []
-    names = list(cases)
+def build_case_batch(compiler, directory, cases, body, release, target, *, arguments=False):
+    """Build independent source modules with a caller-supplied test entry point."""
+    imports = []
     for i, (name, source) in enumerate(cases.items()):
         (directory / f'{name}.dewy').write_text(source)
         imports.append(f'from p"{name}.dewy" import (main as case_{i})')
-        body.extend([f'printl"__DEWY_CASE_BEGIN__:{name}"',
-                     f'let result_{i}=case_{i}()',
-                     f'printl"__DEWY_CASE_END__:{name}:{{result_{i}}}"'])
     source = directory / 'batch.dewy'
-    source.write_text('\n'.join(imports) + '\nmain=():>void=>{\n' + '\n'.join(body) + '\n}\n')
+    parameters = 'argv:array<string>' if arguments else ''
+    source.write_text('\n'.join(imports) + f'\nmain=({parameters}):>void=>{{\n'
+                      + '\n'.join(body) + '\n}\n')
     binary = directory / 'batch'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1184,8 +1182,8 @@ def run_value_batch(compiler, directory, cases, release, target):
                            capture_output=True, text=True, timeout=30, check=False)
     if built.returncode:
         message = f'Batch build failed; sources in {directory}\n{built.stdout}{built.stderr}'
-        return {name: (None, message) for name in names}
-    command = [binary, 'extra']
+        return None, message
+    command = [binary]
     if target == 'wasm':
         node = shutil.which('node')
         if node is None:
@@ -1193,8 +1191,25 @@ def run_value_batch(compiler, directory, cases, release, target):
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = directory / 'batch.cjs'
-        runner.write_text('\n'.join(scripts.parts))
+        prefix = 'const sloppyArgs = process.argv.slice(1);\n' if arguments else ''
+        runner.write_text(prefix + '\n'.join(scripts.parts))
         command = [node, runner]
+    return command, None
+
+
+def run_value_batch(compiler, directory, cases, release, target):
+    """Keep source modules independent while amortizing compiler/runtime startup."""
+    names = list(cases)
+    body = []
+    for i, name in enumerate(names):
+        body.extend([f'printl"__DEWY_CASE_BEGIN__:{name}"',
+                     f'let result_{i}=case_{i}()',
+                     f'printl"__DEWY_CASE_END__:{name}:{{result_{i}}}"'])
+    command, failure = build_case_batch(compiler, directory, cases, body, release, target)
+    if failure:
+        return {name: (None, failure) for name in names}
+    if target == 'native':
+        command = [*command, 'extra']
     ran = subprocess.run(command, capture_output=True, timeout=10, check=False)
     # Decode without text-mode newline translation: string tests also verify
     # carriage returns and other control characters in the program's output.
@@ -1220,6 +1235,69 @@ def run_value_batch(compiler, directory, cases, release, target):
         if name not in outcomes:
             outcomes[name] = (None, f'Missing result for {name}; sources in {directory}\n{stdout}{stderr}')
     return outcomes
+
+
+def build_exit_batch(compiler, directory, cases, release, target):
+    # One selected case per fresh process: a panic must not prevent the other
+    # cases from executing, and a normal return must remain a normal return.
+    body = ['if argv.length not=? 2 panic("missing test selector")']
+    body.extend(f'if argv[1] =? "{i}" {{case_{i}() return}}' for i in range(len(cases)))
+    body.append('panic("invalid test selector")')
+    return build_case_batch(compiler, directory, cases, body, release, target, arguments=True)
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_exit_batch_results(compiler, tmp_path, target):
+    cases = {'first': 'main=()=>panic("first case panic")',
+             'normal': 'main=()=>printl"normal return"',
+             'last': 'main=()=>panic("last case panic")'}
+    command, failure = build_exit_batch(compiler, tmp_path, cases, False, target)
+    assert failure is None, failure
+    for index, message in enumerate(['first case panic', 'normal return', 'last case panic']):
+        ran = subprocess.run([*command, str(index)], capture_output=True, text=True,
+                             timeout=10, check=False)
+        assert (ran.returncode == 0) == (index == 1), ran.stdout + ran.stderr
+        assert message in ran.stdout + ran.stderr
+
+
+@pytest.fixture(scope='module')
+def exact_error_batches(compiler, tmp_path_factory, request):
+    selected, sources = {}, {}
+    for item in request.session.items:
+        if item.module is not request.module:
+            continue
+        family = {'test_core_bigint_errors': 'bigint',
+                  'test_core_rational_errors': 'rational'}.get(item.originalname)
+        if family is None:
+            continue
+        params = item.callspec.params
+        expression = params['expression']
+        case = family, expression
+        sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
+        selected.setdefault((params['target'], params['release']), []).append(case)
+    groups = {}
+    for (target, release), cases in selected.items():
+        for start in range(0, len(cases), 16):
+            group = tuple(cases[start:start + 16])
+            for case in group:
+                groups[target, release, case] = group
+    cached = {}
+
+    def result(family, expression, release, target):
+        case = family, expression
+        group = groups[target, release, case]
+        key = target, release, group
+        if key not in cached:
+            directory = tmp_path_factory.mktemp(f'errors-{target}-{"release" if release else "debug"}')
+            programs = {f'case_{i}': sources[item] for i, item in enumerate(group)}
+            cached[key] = build_exit_batch(compiler, directory, programs, release, target)
+        command, failure = cached[key]
+        if failure:
+            pytest.fail(failure)
+        return subprocess.run([*command, str(group.index(case))], capture_output=True,
+                              text=True, timeout=10, check=False)
+
+    return result
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -1357,27 +1435,8 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_bigint_errors(compiler, tmp_path, expression, diagnostic, target, release):
-    source = tmp_path / 'invalid.dewy'
-    source.write_text(f'from bigint import bigint\nmain=():>void=>{{printl"{{{expression}}}"}}')
-    binary = tmp_path / 'invalid'
-    flags = ['--release'] if release else []
-    if target == 'wasm':
-        flags += ['--target', 'wasm']
-    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
-                           capture_output=True, text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    command = [binary]
-    if target == 'wasm':
-        node = shutil.which('node')
-        if not node:
-            pytest.skip('Node is needed for web bigint checks')
-        scripts = Scripts()
-        scripts.feed(binary.with_suffix('.html').read_text())
-        runner = tmp_path / 'invalid.cjs'
-        runner.write_text('\n'.join(scripts.parts))
-        command = [node, runner]
-    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+def test_core_bigint_errors(exact_error_batches, expression, diagnostic, target, release):
+    ran = exact_error_batches('bigint', expression, release, target)
     assert ran.returncode != 0
     assert diagnostic in ran.stdout + ran.stderr
 
@@ -1543,27 +1602,8 @@ loop line in input.split("\n") {
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_rational_errors(compiler, tmp_path, expression, diagnostic, target, release):
-    source = tmp_path / 'invalid.dewy'
-    source.write_text(f'from rational import rational\nmain=():>void=>{{printl"{{{expression}}}"}}')
-    binary = tmp_path / 'invalid'
-    flags = ['--release'] if release else []
-    if target == 'wasm':
-        flags += ['--target', 'wasm']
-    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
-                           capture_output=True, text=True, timeout=30, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    command = [binary]
-    if target == 'wasm':
-        node = shutil.which('node')
-        if not node:
-            pytest.skip('Node is needed for web rational checks')
-        scripts = Scripts()
-        scripts.feed(binary.with_suffix('.html').read_text())
-        runner = tmp_path / 'invalid.cjs'
-        runner.write_text('\n'.join(scripts.parts))
-        command = [node, runner]
-    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+def test_core_rational_errors(exact_error_batches, expression, diagnostic, target, release):
+    ran = exact_error_batches('rational', expression, release, target)
     assert ran.returncode != 0
     assert diagnostic in ran.stdout + ran.stderr
 

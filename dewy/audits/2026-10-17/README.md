@@ -109,3 +109,25 @@ evidence, not a controlled whole-suite speed comparison.
 The aggregated [timing profile](source-core/validation-profile.json) identifies
 further setup costs: the 76 exact-number panic checks still spend about nine
 seconds compiling and launching separate programs.
+
+## Share exact-number error builds
+
+The 76 exact-number panic checks now share compilation in groups of at most 16
+modules. A selector executes one case per fresh process, preserving its own exit
+status, diagnostic and isolated globals. The runner is checked with two distinct
+panics and a normal return on both native and web. Compile failures still fail
+the batch; a missing or invalid selector is not treated as a successful test.
+
+With the same compiler, the selected 76 cases improved from **13.88 to 6.43 s**,
+about **2.2×**, with **76 compiler launches reduced to eight**. The broader
+84-check selection, including the batch runner's success/failure checks, passed
+in 8.83 s. Selecting one native debug invalid-rational case passed just that case
+in 1.60 s. [Before](source-core/exact-errors-before.log),
+[after](source-core/exact-errors-after.log),
+[runner checks](source-core/exact-errors-focused.log),
+[selection check](source-core/exact-errors-selection.log).
+
+All **1,655 checks pass in 90.64 s** with the existing independently bootstrapped
+compiler. The machine remains shared with other CPU-heavy work, so compare the
+focused setup changes rather than attributing the entire whole-suite wall-time
+difference to this patch. [Full gate](source-core/exact-errors-full.log).
