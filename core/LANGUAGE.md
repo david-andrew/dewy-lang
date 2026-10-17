@@ -514,6 +514,11 @@ sorting is needed, then cached while integer positions are sorted. Records and
 their managed fields keep ordinary independent-value behavior; modifying a
 record in `leaderboard` leaves `players` unchanged.
 
+`values.sort_with(less)` takes a comparison function with two arguments for
+orderings that depend on both values. It is stable too: values for which neither
+argument compares less than the other retain their order. A comparator should
+define a consistent ordering; use `sort_by` when a cached key expresses it.
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`

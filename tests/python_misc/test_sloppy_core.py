@@ -22,6 +22,30 @@ from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
 
 CASES = {
+    'sort-with-managed': '''Item:type=[score:int64 id:int64 payload:array<int64>]
+main=()=>{
+let values=[loop i in [0..65) Item[(i*17)%13 i [i]]]
+let snapshot=values
+let comparisons:int64=0
+let descending=true
+let less=(a:Item b:Item):>bool=>{
+    comparisons+=1
+    return if descending a.score >? b.score else a.score <? b.score
+}
+loop pass in [0..2) {
+    values.sort_with(less)
+    loop i in [1..65) {
+        let a=values[i-1] let b=values[i]
+        if a.score =? b.score and a.id >? b.id return 1
+        if descending and a.score <? b.score return 2
+        if not descending and a.score >? b.score return 3
+    }
+    descending=false
+}
+if comparisons <? 1 return 4
+values[0].payload[0]=999
+loop i in [0..65) {if snapshot[i].id not=? i or snapshot[i].payload[0] not=? i return 5}
+return 42}''',
     'sort-key-stable': '''Item:type=[score:int64 id:int64]
 key=(item:Item):>int64=>item.score
 main=()=>{
@@ -2491,17 +2515,29 @@ ERRORS = {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_sort_key_order(compiler, tmp_path, target, release):
-    (tmp_path / 'keys.jo').write_text('key = (i: int) -> (int, int): (i % 7, -i)\n')
-    statements = ['from p"keys.jo" import key', 'main=()=>{']
+@pytest.mark.parametrize('ordering', ['key', 'comparison'])
+def test_core_sort_order(compiler, tmp_path, target, release, ordering):
+    (tmp_path / 'keys.jo').write_text('''key = (i: int) -> (int, int): (i % 7, -i)
+less = (a: int, b: int) -> bool: key(a) < key(b)
+more = (a: int, b: int) -> bool: key(b) < key(a)
+''')
+    statements = ['from p"keys.jo" import key, less, more', 'main=()=>{']
     expected = []
     for size in [0, 1, 2, 15, 16, 17, 31, 32, 33, 129]:
         values = [(i * 79) % 137 for i in range(size)]
         literal = ' '.join(map(str, values))
-        statements += [f'let values_{size}:array<int64>=[{literal}]',
-                       f'printl(to_json(values_{size}.sorted_by(key)))',
-                       f'printl(to_json(values_{size}.sorted_by(key true)))',
-                       f'printl(to_json(values_{size}))']
+        statements += [f'let values_{size}:array<int64>=[{literal}]']
+        if ordering == 'key':
+            statements += [f'printl(to_json(values_{size}.sorted_by(key)))',
+                           f'printl(to_json(values_{size}.sorted_by(key true)))']
+        else:
+            statements += [f'let ascending_{size}=values_{size}',
+                           f'let descending_{size}=values_{size}',
+                           f'ascending_{size}.sort_with(less)',
+                           f'descending_{size}.sort_with(more)',
+                           f'printl(to_json(ascending_{size}))',
+                           f'printl(to_json(descending_{size}))']
+        statements += [f'printl(to_json(values_{size}))']
         expected += [sorted(values, key=lambda i: (i % 7, -i)),
                      sorted(values, key=lambda i: (i % 7, -i), reverse=True), values]
     statements += ['return 42', '}']

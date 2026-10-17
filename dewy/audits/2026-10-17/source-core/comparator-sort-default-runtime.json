@@ -1,0 +1,176 @@
+{
+  "mode": "default",
+  "clock": "Linux thread CPU, sorting only; source setup and checksum outside timing",
+  "samples": 7,
+  "elements": 20000,
+  "repetitions": 10,
+  "source": "from p\"benchmark_harness.jo\" import clock, mix\nItem:type=[score:int64 id:int64 name:string]\nscore_less=(a:Item b:Item):>bool=>a.score <? b.score\nname_less=(a:Item b:Item):>bool=>a.name <? b.name\nmain=():>void=>{\n    loop mode in [0..5) {\n        let source=[loop i in [0..20000) {\n            let score=if mode =? 1 i//4 else if mode =? 2 (20000-i)//4 else if mode =? 3 42 else (i*7919)%1009\n            Item[score i \"group{i%128}\"]\n        }]\n        let elapsed:int64=0\n        let hash:int64=0\n        loop repeat in [0..10) {\n            let start=clock()\n            let ordered=source\n            if mode =? 4 ordered.sort_with(name_less) else ordered.sort_with(score_less)\n            elapsed+=clock()-start\n            loop item in ordered {hash=mix(hash item.id)}\n        }\n        printl\"{mode} {hash} {elapsed}\"\n    }\n}\n",
+  "harness_sha256": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+  "baseline": {
+    "source_identity": "f901a426cfb4d730651f0dfad3bec2049a884aa4447fdc1c10a2370badb0b367",
+    "binary": "build-1792267245442442200/bin/dewy-core",
+    "binary_sha256": "4184ca5cf4fcb96c18b060a92de007eb3def60a566b4264ba6cc51c222a6de4f",
+    "validation": {
+      "command": "python3 -m tools.core --bootstrap test",
+      "passed": 2831,
+      "seconds": 128.94,
+      "focused_passed": 56,
+      "focused_seconds": 4.24,
+      "ruff": "passed",
+      "git_diff_check": "passed",
+      "coverage": "Native/web default/release: stable ascending/descending, tuple-key Python oracle, merge boundaries, key evaluation once in source order, managed snapshots, finite float keys"
+    }
+  },
+  "candidate": {
+    "source_identity": "a0667354ed38f8a2508d1bffb1109f50723cc9a0ecc9254427c6236d3babc97d",
+    "binary": "build-1792267546455739829/bin/dewy-core",
+    "binary_sha256": "053ee96a9e5b00a8c5c233b808a9f40674078f4a387f50b625d96b4cd3b5ab92"
+  },
+  "variants": {
+    "baseline": {
+      "compiler_sha256": "4184ca5cf4fcb96c18b060a92de007eb3def60a566b4264ba6cc51c222a6de4f",
+      "binary_sha256": "201769cfd5c78ae6ede0d54c61614bb64ec5ea1aedbd21bb871cf212893f09cb",
+      "build_wall_s": 0.10322973097208887,
+      "build_cpu_s": 0.05923,
+      "workloads": {
+        "random-integer": [
+          134705995,
+          126891257,
+          132181707,
+          190553096,
+          176709065,
+          182812195,
+          182573163
+        ],
+        "ordered-integer": [
+          53175112,
+          56159679,
+          55612786,
+          71485368,
+          70180039,
+          73506697,
+          81617497
+        ],
+        "reversed-integer": [
+          128188382,
+          132313644,
+          129312715,
+          161824325,
+          164191272,
+          135505528,
+          177646229
+        ],
+        "equal-integer": [
+          56201706,
+          52007600,
+          53825963,
+          70588645,
+          73361973,
+          52213920,
+          81331624
+        ],
+        "string": [
+          101956256,
+          106320809,
+          100495518,
+          143274839,
+          142684494,
+          94699974,
+          121375963
+        ]
+      }
+    },
+    "candidate": {
+      "compiler_sha256": "053ee96a9e5b00a8c5c233b808a9f40674078f4a387f50b625d96b4cd3b5ab92",
+      "binary_sha256": "bbf31b925620d056f86aa8af615721fb21116bc88465f5ea23aa070cfc0cee8a",
+      "build_wall_s": 0.08960346109233797,
+      "build_cpu_s": 0.058159,
+      "workloads": {
+        "random-integer": [
+          120372041,
+          123846326,
+          112533258,
+          114040365,
+          185108890,
+          179651387,
+          123274053
+        ],
+        "ordered-integer": [
+          33622832,
+          33767841,
+          37098847,
+          38133680,
+          41845753,
+          42933650,
+          36072738
+        ],
+        "reversed-integer": [
+          95816967,
+          91270103,
+          94829644,
+          93217913,
+          140828619,
+          126018807,
+          106830921
+        ],
+        "equal-integer": [
+          34023361,
+          33112113,
+          34888840,
+          34178913,
+          40688018,
+          40441925,
+          36262675
+        ],
+        "string": [
+          99448791,
+          91738286,
+          99788192,
+          112140037,
+          147658017,
+          135621596,
+          106443655
+        ]
+      }
+    }
+  },
+  "expected_checksums": {
+    "random-integer": 163863088,
+    "ordered-integer": 65047250,
+    "reversed-integer": 519777273,
+    "equal-integer": 65047250,
+    "string": 259001946
+  },
+  "summary": {
+    "random-integer": {
+      "baseline_median_ns": 176709065,
+      "candidate_median_ns": 123274053,
+      "paired_ratio": 0.8935908234819097
+    },
+    "ordered-integer": {
+      "baseline_median_ns": 70180039,
+      "candidate_median_ns": 37098847,
+      "paired_ratio": 0.5962628917889317
+    },
+    "reversed-integer": {
+      "baseline_median_ns": 135505528,
+      "candidate_median_ns": 95816967,
+      "paired_ratio": 0.7333358053769113
+    },
+    "equal-integer": {
+      "baseline_median_ns": 56201706,
+      "candidate_median_ns": 34888840,
+      "paired_ratio": 0.6053795057395589
+    },
+    "string": {
+      "baseline_median_ns": 106320809,
+      "candidate_median_ns": 106443655,
+      "paired_ratio": 0.97540646255194
+    }
+  },
+  "load_end": [
+    6.1572265625,
+    8.7041015625,
+    9.21728515625
+  ]
+}

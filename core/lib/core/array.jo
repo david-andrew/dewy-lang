@@ -239,12 +239,17 @@ swap[T] = (xs: mut T[], i: int, j: int):
 __insertion_sort[T] = (xs: mut T[], lo: int, hi: int, less: (T, T) -> bool):
     i = lo + 1
     loop i < hi:
-        j = i
-        loop j > lo and less(xs[j], xs[j - 1]):
-            t = xs[j]
-            xs[j] = xs[j - 1]
-            xs[j - 1] = t
-            j -= 1
+        # Already-ordered elements need no copy or write, especially when T
+        # contains strings/arrays. Once movement is needed, shift rather than
+        # swapping a whole managed value at every position.
+        if less(xs[i], xs[i - 1]):
+            value = xs[i]
+            j = i
+            loop true:
+                xs[j] = xs[j - 1]
+                j -= 1
+                if j <= lo or not less(value, xs[j - 1]): break
+            xs[j] = value
         i += 1
 
 # (stable: elements that are equal keep their order; sorted runs of 16, merged back and forth
@@ -276,14 +281,27 @@ __merge_pass[T] = (src: T[], dst: mut T[], w: int, less: (T, T) -> bool):
         i = lo
         j = mid
         k = lo
-        loop k < hi:
-            if j < hi and (i >= mid or less(src[j], src[i])):
-                dst[k] = src[j]
-                j += 1
-            else:
+        if mid >= hi or not less(src[mid], src[mid - 1]):
+            loop k < hi:
+                dst[k] = src[k]
+                k += 1
+        else:
+            loop i < mid and j < hi:
+                if less(src[j], src[i]):
+                    dst[k] = src[j]
+                    j += 1
+                else:
+                    dst[k] = src[i]
+                    i += 1
+                k += 1
+            loop i < mid:
                 dst[k] = src[i]
                 i += 1
-            k += 1
+                k += 1
+            loop j < hi:
+                dst[k] = src[j]
+                j += 1
+                k += 1
         lo += 2 * w
 
 # tuples compare element by element, the first that differs deciding (sorting (score, name)

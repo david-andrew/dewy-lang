@@ -689,3 +689,14 @@ Fresh-build paired CPU ratios are tour 0.998, Dunes 0.965 and compiler 1.003;
 there is no broad compilation speedup claim. Independent C-bootstrap validation
 passes 2,831 checks in 129 seconds, including native/web tuple-key ordering
 against Python and managed-copy checks.
+
+The separate `sort_with` comparator path now shifts insertion-sort entries instead
+of swapping managed records repeatedly, leaves already-ordered entries untouched,
+and merges with separate remainder-copy loops. In seven alternating thread-CPU
+pairs on the same 20,000-record inputs, release random/reversed integer ordering
+improves by 17–23%, ordered/equal inputs by 52–55%, and string ordering by about 5%.
+Default builds improve by 11–27% on random/reversed integer inputs and about 40%
+on ordered/equal inputs; the string result is near neutral (paired ratio 0.975).
+Independent Python checksums agree, and 64 focused native/web default/release
+checks pass. See `comparator-sort-{release,default}-runtime.json` and
+`comparator-sort-validation.json` for the measured toolchains and scope.
