@@ -636,3 +636,27 @@ The independent C bootstrap succeeded and **2,028 checks passed in 76.09 s**.
 Ruff, JavaScript syntax checking and diff whitespace checks also passed.
 [Full gate](source-core/formatter-full.log),
 [build manifest](source-core/formatter-build.json).
+
+## Follow-up compiler profile and discarded bookkeeping changes
+
+A fresh instrumented profile after formatting measured the self-build's expression
+reuse phase at a median **213 ms**, metadata **85 ms**, and dead-code work **64 ms**.
+Its 1,693,764 hash lookups visited 385,307 occupied slots in total (including
+hits), with a longest occupied run of 10. Hash collisions are not the main issue.
+[Profile and instrumentation script](source-core/compiler-profile-formatter.json).
+
+Halving the expression table size measured tour **52.13/51.53 ms**, physics
+**297.18/297.96 ms**, and self-build **1182.45/1160.11 ms** baseline/candidate
+wall time in seven alternating pairs. This small mixed result did not justify
+a capacity change. [Samples](source-core/cse-half-table-rejected.json).
+
+An operand-field mask replaced scratch-list construction in metadata and
+use-count passes. **299 focused checks passed in 9.76 s**, but seven compile pairs
+showed self-build CPU time regressing **1674.10 to 1751.57 ms**. Retaining the
+original scratch-list decoder for other consumers produced **1743.97/1749.18 ms**
+CPU time, effectively no gain. Neither prototype was applied to repository
+compiler sources. These trials ran sequentially, but host load varied; the
+stronger runtime/compile benefit needed to keep them was absent.
+[Focused gate](source-core/operand-mask-focused.log),
+[first prototype](source-core/operand-mask-compile-rejected.json),
+[limited prototype](source-core/operand-mask-hot-compile-rejected.json).

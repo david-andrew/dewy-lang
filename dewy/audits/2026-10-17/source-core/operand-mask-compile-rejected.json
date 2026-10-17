@@ -1,0 +1,202 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "ed671e396d61dc931b5286f57d870530f49676e0",
+  "working_tree": "?? dewy/audits/2026-10-17/source-core/compiler-profile-formatter.json\n",
+  "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "load_average_start": [
+    6.6318359375,
+    5.07861328125,
+    6.66845703125
+  ],
+  "workers": 1,
+  "samples": 7,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792250986980542020/bin/dewy-core",
+      "sha256": "d0db8ee6a45f0abff3a3b26014ac29020352a4cd32404d0a6b79afc10030bb8e"
+    },
+    "candidate": {
+      "path": "/tmp/dewy-source-core/operand-mask/bin/dewy-core",
+      "sha256": "85933fcf56cb3ca41a0d247f71013a413632261b95e8a458b5e4a422c4296d6b"
+    }
+  },
+  "workloads": {
+    "tour": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/tour.dewy",
+        "--release"
+      ],
+      "source_sha256": "885626f43ac0b290e28f95bfad4f04675deb4e366084a420a366af29e499f4bd",
+      "seconds": {
+        "baseline": [
+          0.07986636995337903,
+          0.08055809396319091,
+          0.08039730391465127,
+          0.0809327739989385,
+          0.09668741899076849,
+          0.08733603695873171,
+          0.07957178191281855
+        ],
+        "candidate": [
+          0.07948124303948134,
+          0.08139214897528291,
+          0.0804796100128442,
+          0.08620974502991885,
+          0.11494268989190459,
+          0.0883180039236322,
+          0.12545685598161072
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.08055809396319091,
+        "candidate": 0.08620974502991885
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.07728799999999995,
+          0.07736500000000004,
+          0.07740499999999999,
+          0.07828999999999998,
+          0.078278,
+          0.07911400000000002,
+          0.07712699999999996
+        ],
+        "candidate": [
+          0.07765999999999999,
+          0.07782299999999999,
+          0.077631,
+          0.07833400000000011,
+          0.07877400000000005,
+          0.07875400000000009,
+          0.075931
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.07740499999999999,
+        "candidate": 0.07782299999999999
+      }
+    },
+    "physics": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/physics.dewy",
+        "--release"
+      ],
+      "source_sha256": "0699216ebdc2a8f694adf23b24a743a514991d693673b61c55e27adacdc925a9",
+      "seconds": {
+        "baseline": [
+          0.46502299804706126,
+          0.4706163950031623,
+          0.4641010200139135,
+          0.47009982296731323,
+          0.49444631300866604,
+          0.5595090680290014,
+          0.4706305939471349
+        ],
+        "candidate": [
+          0.4655929320724681,
+          0.47288894990924746,
+          0.4695268429350108,
+          0.61769074795302,
+          0.4714460619725287,
+          0.48537853197194636,
+          0.4766646350035444
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.4706163950031623,
+        "candidate": 0.47288894990924746
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.45741599999999993,
+          0.4571080000000003,
+          0.455432,
+          0.45627500000000004,
+          0.462924,
+          0.46235199999999976,
+          0.4588900000000002
+        ],
+        "candidate": [
+          0.45865900000000015,
+          0.45964699999999936,
+          0.45869700000000035,
+          0.4677879999999997,
+          0.4635819999999994,
+          0.46422300000000066,
+          0.46596799999999927
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.45741599999999993,
+        "candidate": 0.4635819999999994
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "7e495d5eb6b4207badf927ac2590da081b73bb65e78673386821a63565588b1e",
+      "seconds": {
+        "baseline": [
+          1.7452526200795546,
+          1.5708057000301778,
+          1.7820558870444074,
+          1.6082547219702974,
+          1.7181425699964166,
+          1.8806749939685687,
+          1.4407002739608288
+        ],
+        "candidate": [
+          1.927882673102431,
+          1.6979718239745125,
+          1.7949428900610656,
+          1.939719821093604,
+          1.7408866620389745,
+          1.8942071369383484,
+          1.6446469409856945
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.7181425699964166,
+        "candidate": 1.7949428900610656
+      },
+      "cpu_seconds": {
+        "baseline": [
+          1.7205150000000007,
+          1.5446769999999987,
+          1.7308790000000012,
+          1.579828,
+          1.6740960000000011,
+          1.7553169999999994,
+          1.418809000000002
+        ],
+        "candidate": [
+          1.8169849999999994,
+          1.6670699999999976,
+          1.7574309999999995,
+          1.7515660000000004,
+          1.6427359999999975,
+          1.7893299999999983,
+          1.5875529999999982
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 1.6740960000000011,
+        "candidate": 1.7515660000000004
+      }
+    }
+  },
+  "load_average_end": [
+    8.23974609375,
+    5.69482421875,
+    6.8095703125
+  ],
+  "disposition": "Not adopted: no substantial consistent end-to-end improvement.",
+  "prototype_script": "from pathlib import Path\nimport shutil,subprocess,json,os\nr=Path.cwd(); work=Path('/tmp/dewy-source-core/operand-mask')\nshutil.copytree(r/'core/compiler',work/'compiler',dirs_exist_ok=True)\n(work/'bin').mkdir(exist_ok=True)\nif not (work/'lib').exists(): (work/'lib').symlink_to(r/'core/lib',target_is_directory=True)\np=work/'compiler/opt.jo'; s=p.read_text()\nstart=s.index('# fills o_buf'); end=s.index('# rewrite the used vregs',start)\nnew='''# Register-bearing fields of an instruction. Calls additionally use ir.args.\nconst OU_A = 1\nconst OU_B = 2\nconst OU_C = 4\nconst OU_DST = 8\nconst OU_ARGS = 16\nconst OU_DEF = 32\n\no_operand_mask = (ins: Ins) -> int:\n    match ins.op:\n        nop, block, loop, end, else_, br, trap, zeroslots, vzu: 0\n        iconst, fconst, slot, gaddr, daddr, faddr: OU_DEF\n        intr, call, syscall: OU_DEF | OU_ARGS\n        calli, callc: OU_DEF | OU_ARGS | OU_C\n        if_, brif, brtable, assume, zero: OU_A\n        ret: if ins.a >= 0: OU_A else: 0\n        store: OU_A | OU_B | (if int(ins.c) & M_INDEX != 0: OU_DST else: 0)\n        vst: OU_A | OU_B | OU_DST\n        copy: OU_A | OU_B\n        memcpy, memset, vop: OU_A | OU_B | OU_C\n        select: OU_DEF | OU_A | OU_B | OU_C\n        load: OU_DEF | OU_A | (if int(ins.c) & M_INDEX != 0: OU_B else: 0)\n        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat: OU_DEF | OU_A\n        _: OU_DEF | OU_A | OU_B\n\n# Scratch operands for algorithms that need to revisit an instruction's uses.\no_operands = (ins: Ins) -> int:\n    m = o_operand_mask(ins)\n    o_buf.clear()\n    if m & OU_A != 0: o_buf.push(int(ins.a))\n    if m & OU_B != 0: o_buf.push(int(ins.b))\n    if m & OU_ARGS != 0:\n        loop k in [0..int(ins.b)): o_buf.push(int(ir.args[int(ins.a) + k]))\n    if m & OU_C != 0: o_buf.push(int(ins.c))\n    if m & OU_DST != 0: o_buf.push(int(ins.dst))\n    if m & OU_DEF != 0: int(ins.dst) else: -1\n\no_note_use = (u: int, pos: int):\n    if o_first[u] > pos: o_first[u] = i32(pos)\n    o_lastuse[u] = i32(pos)\n\n# The common passes consume fields directly instead of constructing a list.\no_note_operands = (ins: Ins, pos: int) -> int:\n    m = o_operand_mask(ins)\n    if m & OU_A != 0: o_note_use(int(ins.a), pos)\n    if m & OU_B != 0: o_note_use(int(ins.b), pos)\n    if m & OU_C != 0: o_note_use(int(ins.c), pos)\n    if m & OU_DST != 0: o_note_use(int(ins.dst), pos)\n    if m & OU_ARGS != 0:\n        loop k in [0..int(ins.b)): o_note_use(int(ir.args[int(ins.a) + k]), pos)\n    if m & OU_DEF != 0: int(ins.dst) else: -1\n\no_count_operands = (ins: Ins, delta: int):\n    m = o_operand_mask(ins)\n    if m & OU_A != 0: o_nuse[int(ins.a)] += i32(delta)\n    if m & OU_B != 0: o_nuse[int(ins.b)] += i32(delta)\n    if m & OU_C != 0: o_nuse[int(ins.c)] += i32(delta)\n    if m & OU_DST != 0: o_nuse[int(ins.dst)] += i32(delta)\n    if m & OU_ARGS != 0:\n        loop k in [0..int(ins.b)): o_nuse[int(ir.args[int(ins.a) + k])] += i32(delta)\n\n'''\ns=s[:start]+new+s[end:]\nold='''        d = o_operands(ins)\n        loop u in o_buf:\n            if o_first[u] > pos: o_first[u] = i32(pos)\n            o_lastuse[u] = i32(pos)'''\nassert s.count(old)==1;s=s.replace(old,'        d = o_note_operands(ins, pos)')\nold='''        o_operands(ins)\n        loop u in o_buf: o_nuse[u] += 1'''\nassert s.count(old)==1;s=s.replace(old,'        o_count_operands(ins, 1)')\nold='''                o_operands(ins)\n                loop u in o_buf: o_nuse[u] -= 1'''\nassert s.count(old)==1;s=s.replace(old,'                o_count_operands(ins, -1)')\np.write_text(s)\nstate=json.loads((r/'__dewycache__/compact-core/current.json').read_text()); compiler=r/'__dewycache__/compact-core'/state['binary']\nenv={k:v for k,v in os.environ.items() if not k.startswith(('DEWY_','SLOPPY_'))};env.update(SLOPPY_LIB=str(work/'lib'),SLOPPY_EMIT_WORKERS='1')\nsubprocess.run([compiler,'build',work/'compiler/main.jo','-o',work/'bin/dewy-core'],env=env,check=True)\n",
+  "variant": "all consumers use operand mask"
+}
