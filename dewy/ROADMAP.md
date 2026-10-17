@@ -1,13 +1,22 @@
 # Dewy roadmap after the native bootstrap
 
 **Restart, 2026-10-16:** [the Sloppy comparison and restart plan](RESTART_2026_10.md)
-prioritizes fast focused validation, an identical application benchmark, and a
-bounded experiment using Sloppy's implementation core. It preserves the
-semantic requirements below while proposing a shorter route to a usable
-compiler and games/numerics applications. Experimental performance targets
-and historical certification evidence remain distinct.
+prioritizes fast focused validation, representative application benchmarks, and
+a Sloppy-derived implementation core. Preserve Dewy's useful user-facing
+language experience while changing internals where that shortens the route to
+a usable compiler and games/numerics applications. Experimental performance
+targets and historical certification evidence remain distinct.
 [Language goals](GOALS.md) record what Dewy should be able to do, including
 the ordinary path used by games and the stricter lane for systems work.
+
+**Current direction, 2026-10-17:** those language goals supersede conflicting
+requirements in the historical phase plan below. Ordinary programs use COW
+arrays and strings, inline small values and runtime checks where needed. The
+opt-in systems lane will require checked absence of forbidden costs and exits;
+completing that lane is not a prerequisite for ordinary language and game work.
+Maintaining exact legacy behavior, proof machinery or parallel Python/native
+feature implementations is not a gate for the compact core. Its current
+capabilities and validation commands live in [the core guide](../core/README.md).
 
 This is the high-level roadmap for taking the language from "a native
 compiler pair exists" to a practical compiler and the language as it was
