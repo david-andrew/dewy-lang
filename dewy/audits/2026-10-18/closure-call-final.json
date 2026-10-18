@@ -1,0 +1,121 @@
+{
+  "source": "make=()=>{let n=0 return ()=>{n+=1; n}}\nmain=()=>{let next=make() let sum=0\nloop i in [0..10000000) {sum+=next()}\nprintl(sum)\n}\n",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792336330175251138/bin/dewy-core",
+      "sha256": "dddc83b50148b512d3f81471c26380f4a05dc62c6b5d78ac2141e81a6b07b044"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792340680998060119/bin/dewy-core",
+      "sha256": "d84fde4312ebd9308a20267ec97553473595bf5318e40e9a21b763b14864fc95"
+    }
+  },
+  "modes": {
+    "default": {
+      "baseline": [
+        {
+          "wall_seconds": 0.03881525500037242,
+          "cpu_seconds": 0.03182099999999998
+        },
+        {
+          "wall_seconds": 0.06557898099708837,
+          "cpu_seconds": 0.031664000000000025
+        },
+        {
+          "wall_seconds": 0.06863177299965173,
+          "cpu_seconds": 0.031445999999999974
+        },
+        {
+          "wall_seconds": 0.035217254000599496,
+          "cpu_seconds": 0.03201499999999996
+        },
+        {
+          "wall_seconds": 0.035048568999627605,
+          "cpu_seconds": 0.031926
+        }
+      ],
+      "candidate": [
+        {
+          "wall_seconds": 0.03147338300186675,
+          "cpu_seconds": 0.028676
+        },
+        {
+          "wall_seconds": 0.03344059999653837,
+          "cpu_seconds": 0.028679999999999976
+        },
+        {
+          "wall_seconds": 0.06793878999451408,
+          "cpu_seconds": 0.029579000000000022
+        },
+        {
+          "wall_seconds": 0.0627324020024389,
+          "cpu_seconds": 0.028669
+        },
+        {
+          "wall_seconds": 0.0800141080035246,
+          "cpu_seconds": 0.028589999999999997
+        }
+      ]
+    },
+    "release": {
+      "baseline": [
+        {
+          "wall_seconds": 0.030679726995003875,
+          "cpu_seconds": 0.027607999999999994
+        },
+        {
+          "wall_seconds": 0.05658269699779339,
+          "cpu_seconds": 0.02723100000000002
+        },
+        {
+          "wall_seconds": 0.05431713700090768,
+          "cpu_seconds": 0.027183
+        },
+        {
+          "wall_seconds": 0.04257302699988941,
+          "cpu_seconds": 0.02749300000000003
+        },
+        {
+          "wall_seconds": 0.030022129001736175,
+          "cpu_seconds": 0.027645000000000072
+        }
+      ],
+      "candidate": [
+        {
+          "wall_seconds": 0.029599345005408395,
+          "cpu_seconds": 0.027432000000000026
+        },
+        {
+          "wall_seconds": 0.029849820995877963,
+          "cpu_seconds": 0.027491000000000057
+        },
+        {
+          "wall_seconds": 0.0786419450014364,
+          "cpu_seconds": 0.02826300000000008
+        },
+        {
+          "wall_seconds": 0.042999803998100106,
+          "cpu_seconds": 0.027968000000000034
+        },
+        {
+          "wall_seconds": 0.03312090700637782,
+          "cpu_seconds": 0.028072999999999945
+        }
+      ]
+    }
+  },
+  "load_average_start": [
+    8.568359375,
+    10.12451171875,
+    12.02001953125
+  ],
+  "load_average_end": [
+    8.60302734375,
+    10.10546875,
+    12.00341796875
+  ],
+  "measurement": "10,000,000 counter calls per fresh process; process startup included; one unrecorded warmup per compiler/mode, then five alternating samples; every result checked against 50000005000000.",
+  "cpu_time_definition": "User plus system CPU seconds for the waited-for executable. Wall time also includes subprocess launch and waiting under concurrent host load.",
+  "candidate_revision": "56ff8655b40132529d4a80967ca81367333d395e",
+  "scope": "One local-state callback microbenchmark, not a general application runtime comparison."
+}

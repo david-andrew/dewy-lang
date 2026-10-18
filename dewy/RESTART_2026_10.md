@@ -58,6 +58,29 @@ libraries. See the [language guide](../core/LANGUAGE.md) for supported behavior
 and remaining gaps; compatibility is defined by useful language behavior rather
 than the old representations or proof machinery.
 
+Closure state now follows the user's value-semantics decision: ordinary
+captures are snapshots, copied counters advance independently, and `[@name]()`
+explicitly shares an enclosing local. Parameters, returns and nested containers
+preserve private copies; module globals retain their identity. Immutable private
+environments can be retained without copying. Function-containing arrays currently
+copy eagerly, while ordinary data arrays retain copy-on-write storage.
+Value-returning dictionary getters also return independent callbacks; passing
+`@counters[key]` to an `@` parameter advances the stored value. Fixing a lost `@`
+marker in dictionary lookup rewriting makes that explicit path work.
+
+A ten-million-call counter pilot exposed a threefold CPU regression from
+unconditional lifetime pinning. Pinning only owners that can be replaced removes
+that regression: default/release CPU medians are 28.7/28.0 ms, versus 31.8/27.5 ms
+for the previous compiler. Five alternating compilation samples show essentially
+unchanged self-build CPU time and about 3% higher Netpong CPU time. Wall times
+were noisy; these are workload measurements, not a general speedup claim. The
+[validation and raw measurements](audits/2026-10-18/closure-value-validation.json)
+record the semantic coverage, compiler identities and remaining copy costs.
+The independent C-bootstrap CI passes 5,624 checks with five skips in 70.54
+pytest seconds, followed by passing Windows, macOS ARM64 and Linux ARM64 smoke,
+editor, watch and relocated-package checks. All four standalone downloads are
+available from the [validated run](https://github.com/david-andrew/dewy-lang/actions/runs/39145494743).
+
 Native/web paddle, physics, forest, Dunes and Netpong examples exercise the game
 libraries. Netpong adds tested native/browser multiplayer and a bundled invite UI.
 Dunes includes procedural cloth and custom terrain/shadow shaders written in

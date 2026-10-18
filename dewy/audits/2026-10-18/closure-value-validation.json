@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-18",
+  "decision": "Ordinary captures and closure copies own independent private state; sharing is explicit.",
+  "implementation_revision": "f709d45a7a45a34a2044b388ee3e09718ca2030b",
+  "commits": {
+    "semantics": "e15505f21dfc314f4773abeb9994dd5091809422",
+    "stable_call_performance": "56ff8655b40132529d4a80967ca81367333d395e",
+    "dictionary_mutable_arguments": "f709d45a7a45a34a2044b388ee3e09718ca2030b"
+  },
+  "behavior": [
+    "Closure literals snapshot unlisted enclosing locals; [@name]() explicitly captures a shared local cell.",
+    "Plain copies of private counters return 1, 1; explicit shared counters return 1, 2.",
+    "Parameters, returns, recursive containers and nested closures preserve private value copies.",
+    "Const callable invocations use temporary private copies; captured const locals remain read-only.",
+    "Value-returning dictionary getters return private copies. An @ callback parameter can update @counters[key].",
+    "Module globals keep their identity. Implementation-language .jo closures keep their lexical sharing behavior."
+  ],
+  "validation": {
+    "ci_url": "https://github.com/david-andrew/dewy-lang/actions/runs/39145494743",
+    "ci_conclusion": "success",
+    "linux_full": {
+      "passed": 5624,
+      "skipped": 5,
+      "pytest_seconds": 70.54,
+      "independent_C_bootstrap": true
+    },
+    "other_native_hosts": [
+      "Windows x64",
+      "macOS ARM64",
+      "Linux ARM64"
+    ],
+    "per_host_checks": {
+      "language_native_and_web": 145,
+      "project_tests": 37,
+      "editor_transport": 1,
+      "watch": 15,
+      "relocated_package": 3
+    },
+    "windows_watch_exception": "14 passed, 1 POSIX signal check skipped.",
+    "standalone_artifacts": "All four dewy-core host downloads uploaded successfully.",
+    "local_selections": [
+      {
+        "checks": 1051,
+        "seconds": 36.65,
+        "purpose": "Affected arithmetic, bounds, callback, collection and closure regression migration."
+      },
+      {
+        "checks": 160,
+        "seconds": 10.36,
+        "purpose": "Closure, formatting, watch and shared-core checks after an independent C bootstrap; before the stable-call optimization."
+      },
+      {
+        "checks": 304,
+        "seconds": 17.08,
+        "purpose": "Closures, argument evaluation, shared core and prompt behavior after the stable-call optimization."
+      },
+      {
+        "checks": 240,
+        "seconds": 4.21,
+        "purpose": "Dictionary copies, mutable entries and callback argument regression checks."
+      }
+    ],
+    "scope": "The extra native hosts execute a smoke selection, not every Linux or graphics-driver check."
+  },
+  "performance": {
+    "benchmark_revision": "56ff8655b40132529d4a80967ca81367333d395e",
+    "baseline_source_revision": "52a8caaf",
+    "files": [
+      "closure-call-baseline.json",
+      "closure-call-final.json",
+      "closure-value-compile.json"
+    ],
+    "protocol": "Five alternating fresh-process samples after one warmup per compiler/workload/mode; one emission worker. All counter results checked.",
+    "initial_pin_regression": "Always pinning the called environment raised ten-million-call CPU medians from roughly 27–31 ms to 86–101 ms.",
+    "final_counter_cpu_ms": {
+      "default": {
+        "baseline": 31.821,
+        "candidate": 28.676
+      },
+      "release": {
+        "baseline": 27.493,
+        "candidate": 27.968
+      }
+    },
+    "final_compile_cpu_ms": {
+      "tour_default": {
+        "baseline": 69.879,
+        "candidate": 68.746
+      },
+      "netpong_default": {
+        "baseline": 460.042,
+        "candidate": 473.375
+      },
+      "compiler": {
+        "baseline": 1520.438,
+        "candidate": 1526.307
+      }
+    },
+    "interpretation": "The stable-call path removes the counter regression. Self-build CPU time is essentially unchanged, and Netpong compilation costs about 3% more in this pilot. Wall measurements are noisy; no broad runtime speedup is claimed.",
+    "later_change": "The subsequent dictionary fix preserves the @ syntax marker during AST rewriting; it was tested but the performance pilot was not repeated for it."
+  },
+  "remaining_limits": [
+    "Arrays that can contain functions eagerly copy their elements and private environments. Ordinary data arrays retain COW; immutable private closure environments can share storage.",
+    "Shared captures currently name enclosing local bindings, not arbitrary places or escaping mutable parameters.",
+    "Shared cells that can contain functions are rejected conservatively to prevent reference cycles.",
+    "Dewy partial-application syntax remains unsupported; use a closure wrapper."
+  ]
+}
