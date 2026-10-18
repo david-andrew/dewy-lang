@@ -1,0 +1,23 @@
+{
+  "upstream": "Sloppy 4d8c4b361c51a7d9f6a1acbede72dd6ef6fbe4e0",
+  "change": "Warn on known nondeterministic operations and global mutations through directly supplied tick functions and their user helper calls.",
+  "adaptations": [
+    "Check-only mode scans checked calls, including entry functions not scheduled for lowering.",
+    "unix_time(Date) is a deterministic conversion, not a clock read.",
+    "Advice uses the game fixed timestep rather than asserting every tick lasts 1/60 s."
+  ],
+  "compiler": "build-1792303408064940650/bin/dewy-core",
+  "source_identity": "5ebe19e801acf981d7d499a668b74768063b86912723e73b58ec17b5e99560bf",
+  "bootstrap": "Independent included C seed, three compiler generations.",
+  "full_result": "4349 passed in 79.51s",
+  "focused_result": "111 passed, 4238 deselected in 14.49s",
+  "coverage": "Native/web default/release named and inline ticks, helper and recursive calls, clock/input/global RNG/global writes, seeded RNG and shuffle, user-defined random, pure date conversion, sessions in main and at module scope. Native check diagnostics and existing rollback simulations included.",
+  "compile_median_ratios": {
+    "tour": 1.000022156044208,
+    "physics-check": 1.0151404657481435,
+    "netpong": 1.0164021878795124,
+    "netpong-web": 1.0033076514807662,
+    "compiler": 0.9907650547510473
+  },
+  "limits": "Advisory warnings, not a determinism proof. Indirect callbacks, external calls and captured state are not comprehensively analyzed. Compilation timings are local alternating warmed-process measurements with other work on the host; no speedup claim."
+}

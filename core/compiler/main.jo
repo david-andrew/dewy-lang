@@ -335,6 +335,7 @@ compile = (path: str, out0: str) -> str:
     if target_wasm and not program_named: web_save_name_check()
     # (functions left unchecked after errors in them cannot be lowered)
     if lower_only and ide_skip.len() > 0: return ""
+    if lower_only: det_check_program()
     if repl_image: repl_set_main()
     t1 = time()
     roots: int[]

@@ -1200,6 +1200,14 @@ See the [multiplayer run instructions](../examples/sloppy_core/README.md#multipl
 value snapshots, predicts remote input, then rewinds and replays when late input
 differs. The tick callback must be deterministic for its state and inputs; keep
 random seeds in the state and leave clocks and rendering outside that callback.
+The compiler warns about known clock, unseeded random and live-input calls,
+and writes to globals, in a directly supplied named or inline tick callback
+and the user functions it calls. These warnings appear during `check` and native
+or web builds. An `Rng` carried in the game state supplies reproducible random
+numbers; `unix_time(date)` is a value conversion and does not trigger the clock
+warning. This is an advisory scan, not a determinism guarantee: indirect function
+values, external calls and captured state can still need care.
+
 The [rollback lab](../examples/sloppy_core/rollback_lab.dewy) runs two peers on a
 simulated link with adjustable latency, jitter and loss. Its
 [model](../examples/sloppy_core/rollback_model.dewy) shows session construction,

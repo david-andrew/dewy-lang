@@ -1446,3 +1446,17 @@ Older fixtures that used a redundant bracket level now supply genuinely nested
 inputs. The 571 unpacking, sequence and comprehension checks pass in 8.62 seconds;
 see `single-loop-*` audits. No additional full local gate was needed after the
 preceding 4,216-test C gate; hosted CI covers the final parser adjustment.
+
+
+Sloppy `4d8c4b3`'s rollback diagnostics now follow directly supplied tick functions
+and user helper calls, including recursion. They warn about known clock, random,
+input and global-write operations. Seeded RNG use remains quiet, as does the
+pure `unix_time(Date)` conversion, which was a false positive upstream. Check-only
+mode visits checked calls too, including entry functions it does not lower.
+These are advisory warnings, with no new proof requirement.
+
+The independent three-generation C bootstrap passes all 4,349 checks in 79.51
+pytest seconds; 111 focused checks pass in 14.49 seconds. Seven alternating
+compilation samples show similar latency: tour 44.41/44.41 ms, native Netpong
+347.58/353.28 ms and compiler 1153.33/1142.68 ms (baseline/candidate). These are
+local warmed-process observations, not a speedup claim. See `netplay-warning-*`.

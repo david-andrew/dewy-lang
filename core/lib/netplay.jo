@@ -103,6 +103,7 @@ struct __NpPacket[I]:
     held = 0.0                      # long ago that came (ms): the round trip is now - echo - held
 
 # a session of `players` players, this machine's being player `me` (from 0)
+@deterministic
 session[S, I] = (start: S, step: (S, I[]) -> S, players: int, me: int, delay: int = 2) -> Session[S, I]:
     s = Session[S, I](step = step, players = players, me = me, delay = delay, state = start)
     zero: I

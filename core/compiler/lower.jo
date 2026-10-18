@@ -1273,6 +1273,118 @@ gen_positive_mod = (n: int) -> int:
     # The divisor is a pure literal; the dividend is evaluated exactly once.
     e_bin(.remu, VI, gen_expr(a).v, e_iconst(modulus))
 
+# ---------------- ticks that must agree ----------------
+# A function given to a @deterministic function (netplay.session's tick) must give the same game
+# on every machine from the same game and inputs: no random numbers but from a seed in the game,
+# no clock, no input read there (it comes as the tick's input), and no globals changed (a
+# rollback does not put them back) -- also not in the functions it calls. Warnings: random()
+# after seed() from the game, say, is the same everywhere.
+det_done: {int: bool} = {}
+DET_CALLS = ["random", "random_int", "random_normal", "random_direction", "random_point", "random_in_circle", "random_color", "rand", "randn", "shuffle",
+             "time", "elapsed", "frame_time", "fps", "frame_number", "unix_time", "now",
+             "mouse_pos", "mouse_down", "mouse_pressed", "mouse_delta", "key_down", "key_pressed", "action_down", "action_pressed", "action_axis",
+             "action_value", "input_axis", "touches", "gamepad_down", "gamepad_pressed", "gamepad_axis"]
+
+# Check mode can type-check entry functions without scheduling them for lowering.
+# Visit their checked calls so its diagnostics agree with a normal build.
+det_check_program = ():
+    enabled = false
+    loop f in fns:
+        if f.deterministic: enabled = true; break
+    if not enabled: return
+    loop f in fns:
+        if f.body != 0 and f.state == 2 and not in_lib(nodes[int(f.body)].pos): det_calls(int(f.body))
+
+det_calls = (n: int):
+    if n == 0 or nodes[n].kind == .lambda: return
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
+        f = int(nodes[n].sym)
+        if fns[f].deterministic: det_check(f, kids(n), nodes[n].pos)
+    det_calls(int(nodes[n].a))
+    det_calls(int(nodes[n].b))
+    if k != .for_:
+        det_calls(int(nodes[n].c))
+        if k != .partial: det_calls(int(nodes[n].d))
+    loop child in kids(n): det_calls(child)
+    loop child in kids2(n): det_calls(child)
+
+det_check = (callee: int, args: int[], pos: int):
+    if in_lib(pos): return
+    d = int(fns[callee].decl)
+    whose = "{name_of(int(modules[int(nodes[d].mod)].name))}.{name_of(int(nodes[d].name))}'s tick"
+    loop a in args:
+        if tkind(ntype(a)) == .fn_: det_arg(a, whose)
+
+# (who: "tick is netplay.session's tick", said in each warning)
+det_arg = (a: int, whose: str):
+    k = nodes[a].kind
+    if k == .conv: det_arg(int(nodes[a].a), whose)
+    else if k == .lambda: det_scan(int(fns[int(nodes[a].sym)].body), "this function is " + whose)
+    else if k == .fnref: det_named(int(nodes[a].sym), "{name_of(int(nodes[int(fns[int(nodes[a].sym)].decl)].name))} is {whose}")
+    else if k == .partial:
+        if nodes[a].aux == 1: det_arg(int(nodes[a].a), whose)
+        else: det_named(int(nodes[a].sym), "{name_of(int(nodes[int(fns[int(nodes[a].sym)].decl)].name))} is {whose}")
+
+det_named = (f: int, who: str):
+    if det_done.contains(f) or fns[f].body == 0 or fns[f].decl == 0: return
+    det_done[f] = true
+    if in_lib(int(nodes[int(fns[f].decl)].pos)): return
+    det_scan(int(fns[f].body), who)
+
+det_scan = (n: int, who: str):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda: return
+    if k == .assign: det_target(int(nodes[n].a), who, nodes[n].pos)
+    else if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend:
+            det_target(kid(n, 0), who, nodes[n].pos)
+    else if k == .call:
+        loop i in [0..nkids(n)):
+            if has_flag(kid(n, i), NF_MUT): det_target(kid(n, i), who, nodes[kid(n, i)].pos)
+        g = int(nodes[n].sym)
+        if int(nodes[n].aux) == 0 and g > 0 and fns[g].decl != 0:
+            d = int(fns[g].decl)
+            nm = name_of(int(nodes[d].name))
+            if in_lib(int(nodes[d].pos)):
+                # (shuffle(rng, xs) and the like, from an Rng kept in the game, are the same everywhere)
+                # unix_time(Date) converts a supplied value; only unix_time() reads the clock.
+                clock_conversion = nm == "unix_time" and fns[g].ptypes.len() > 0
+                if DET_CALLS.contains(nm) and not det_has_rng(g) and not clock_conversion:
+                    what = "reads the clock"
+                    if starts_with(nm, "rand") or nm == "shuffle": what = "takes random numbers"
+                    else if nm == "frame_number" or nm == "fps": what = "reads the frame count"
+                    else if nm != "time" and nm != "elapsed" and nm != "frame_time" and nm != "unix_time" and nm != "now": what = "reads the input"
+                    warn(nodes[n].pos, "{who}, and here it {what} ({nm}()), which can differ between machines and cause a desync; {det_hint(nm)}")
+            else: det_named(g, who)
+    else if k == .for_ and has_flag(n, NF_MUT): det_target(int(nodes[n].a), who, nodes[n].pos)
+    det_scan(int(nodes[n].a), who)
+    det_scan(int(nodes[n].b), who)
+    if k != .for_:
+        det_scan(int(nodes[n].c), who)
+        if k != .partial: det_scan(int(nodes[n].d), who)
+    loop i in [0..nkids(n)): det_scan(kid(n, i), who)
+    loop i in [0..nkids2(n)): det_scan(kid2(n, i), who)
+
+det_hint = (nm: str) -> str:
+    if starts_with(nm, "rand") or nm == "shuffle": return "make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it"
+    if nm == "time" or nm == "elapsed" or nm == "frame_time" or nm == "unix_time" or nm == "now" or nm == "frame_number" or nm == "fps": return "count ticks in the game and use a fixed timestep"
+    "read it in update, and give it to the tick as the player's input"
+
+# (a function with an Rng among its parameters takes its numbers from that)
+det_has_rng = (g: int) -> bool:
+    loop t in fns[g].ptypes:
+        tt = prune(int(t))
+        if tkind(tt) == .struct_ and type_str(tt) == "Rng": return true
+    false
+
+det_target = (t: int, who: str, pos: int):
+    n = place_var(t)
+    if n == 0 or nodes[n].aux != i32(int(SK.global)): return
+    warn(pos, "{who}, and here it changes the global '{name_of(int(nodes[n].name))}', which a rollback does not put back (ticks are played again from an earlier game): keep it in the game")
+
 gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     ret = int(fns[f].ret)
     rslot = -1
@@ -2851,6 +2963,7 @@ gen_expr = (e: int) -> Val:
             remainder = gen_positive_mod(e)
             if remainder >= 0: return V(remainder, false)
             if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
+            if fns[int(nodes[e].sym)].deterministic: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             order: int[]
             if nodes[e].c != 0: order = call_eval_order(e)
             r = gen_direct_call(int(nodes[e].sym), kids(e), order)

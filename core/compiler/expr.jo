@@ -1520,7 +1520,6 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
     np = nkids(decl)
     if (name == id_rgb or name == id_rgba) and np >= 3 and decl_in_prelude(decl): rgb_check(n, cd.args)
     if name == id_hsv and np >= 3 and decl_in_prelude(decl): hsv_check(n, cd.args)
-    if pos_in_lib(nodes[decl].pos) and not decl_in_prelude(decl) and not pos_in_lib(nodes[n].pos): netplay_tick_check(decl, cd.args)
     if not decl_in_prelude(decl) and cx >= 0:
         # (make_world never called: a function of the program's, used from somewhere else)
         ci0 = int(ctxs[cx].inst)
@@ -2590,38 +2589,6 @@ shader_draw_check = (decl: int, args: int[]):
         if nodes[a].type == 0 or type_eq(prune(ntype(a)), prune(ut)): return
         gn = name_of(int(globals[g].name))
         fatal(nodes[a].pos, "{gn}'s shader functions take {type_str(ut)} as their uniforms, and this is {type_str(ntype(a))}: give it a {type_str(ut)}")
-
-# (netplay.session(start, tick): a tick reading random() or the clock gives each machine another
-# game, found later as a desync: said where it is read)
-netplay_tick_check = (decl: int, args: int[]):
-    if name_of(int(nodes[decl].name)) != "session" or args.len() < 2 or args[1] == 0: return
-    if name_of(int(modules[int(nodes[decl].mod)].name)) != "netplay": return
-    a = unnamed(args[1])
-    if nodes[a].kind != .ident: return
-    s = lookup(int(nodes[a].name))
-    if s == 0 or syms[s].kind != .fns or syms[s].decl == 0: return
-    fd = int(syms[s].decl)
-    if nodes[fd].kind != .fn_ or nodes[fd].b == 0: return
-    loop w in ["random", "random_int", "time", "elapsed", "now", "unix_time", "frame_time", "mouse_pos"]:
-        at = call_named_at(int(nodes[fd].b), w)
-        if at == 0: continue
-        how = if starts_with(w, "random"): "keep a seed in the game and draw from it (`hash(g.tick * 7 + i)`)" else: "a tick is always 1/60 s: count ticks in the game"
-        warn(nodes[at].pos, "{name_of(int(nodes[a].name))} is the session's tick, and {w}() differs from one machine to the other: the two games will not be the same (a desync): {how}")
-        return
-
-# the first call of a function so named in n (not inside a function written in it), or 0
-call_named_at = (n: int, name: str) -> int:
-    if n == 0: return 0
-    k = nodes[n].kind
-    if k == .lambda or k == .fn_: return 0
-    if k == .call and nodes[n].a != 0 and nodes[int(nodes[n].a)].kind == .ident and name_of(int(nodes[int(nodes[n].a)].name)) == name: return n
-    r = call_named_at(int(nodes[n].a), name)
-    if r == 0: r = call_named_at(int(nodes[n].b), name)
-    if r == 0 and k != .for_: r = call_named_at(int(nodes[n].c), name)
-    loop i in [0..nkids(n)):
-        if r != 0: return r
-        r = call_named_at(kid(n, i), name)
-    r
 
 # the uniforms type of the shader functions named in e (make_shader(shader(vs, fs))), or 0
 shader_uniforms_in = (e: int) -> int:

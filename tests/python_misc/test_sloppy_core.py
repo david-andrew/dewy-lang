@@ -6449,6 +6449,46 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
         assert json.loads(lines[7]) == {'positions': [0, 0], 'scores': [0, 0], 'hits': 0}
 
 
+@pytest.mark.parametrize(('setup', 'callback', 'start', 'diagnostic'), [
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(time())', 'tick', '0', 'reads the clock'),
+    ('clock=()=>time()\ntick=(state:int64 _inputs:array<int64>)=>state+int64(clock())', 'tick', '0', 'reads the clock'),
+    ('', '((state:int64 _inputs:array<int64>)=>state+int64(random()))', '0', 'takes random numbers'),
+    ('let count=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', 'tick', '0', "changes the global 'count'"),
+    ('input=()=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', 'tick', '0', 'reads the input'),
+    ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', 'tick', '0', 'reads the clock'),
+    ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10) return state}', 'tick', 'rng(7)', None),
+    ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', 'tick', 'rng(7)', None),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', 'tick', '0', None),
+    ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', 'tick', '0', "changes the global 'random_state'"),
+    ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', 'tick', '0', None),
+    ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', 'tick', '0', None),
+], ids=['clock', 'helper-clock', 'lambda-random', 'helper-global', 'helper-input', 'recursive-clock', 'seeded-rng', 'seeded-shuffle', 'date-conversion', 'global-rng', 'user-random', 'pure'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('at_top', [False, True], ids=['main', 'global'])
+def test_core_netplay_tick_warnings(compiler, tmp_path, setup, callback, start, diagnostic, target, release, at_top):
+    source = tmp_path / 'tick.dewy'
+    session = f'let game=netplay.session({start} {callback} players=2 me=0)'
+    program = f'{session}\nmain=()=>game.tick+42' if at_top else f'main=()=>{{{session} return game.tick+42}}'
+    source.write_text(f'import netplay\n{setup}\n{program}')
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', tmp_path / 'tick', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    outputs = [built.stderr]
+    if target == 'native' and not release:
+        checked = subprocess.run([compiler, 'check', source], capture_output=True,
+                                 text=True, timeout=30, check=False)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+        outputs.append(checked.stderr)
+    for output in outputs:
+        warnings = [line for line in output.splitlines() if "'s tick" in line and 'warning:' in line]
+        if diagnostic:
+            assert len(warnings) == 1 and diagnostic in warnings[0], output
+        else:
+            assert not warnings, output
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_netplay_restart(compiler, tmp_path, target, release):
