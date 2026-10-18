@@ -730,6 +730,37 @@ Validation: 207 smoke checks passed, followed by an independent C bootstrap and
 overloads, named/default argument evaluation order, native/web values and
 rejections, formatter/editor, networking, reload and compiler tooling.
 
+## Numeric storage paths during lowering
+
+Loop analysis previously formatted local/global variables and nested field
+selectors as strings such as `L123.0.2`, then compared those strings and their
+prefixes. It now interns numeric parent/field edges for each lowered function.
+Root identity includes the local/global distinction, equality uses canonical
+IDs, and containment walks parent IDs. The table resets between functions;
+IDs remain stable throughout nested loop lowering. Alias, escape and mutation
+rules are unchanged.
+
+Seven alternating single-worker pairs against `9371fef2` measured CPU ratios
+of **0.9885** for the generated Dewy program, **0.9922** for its Jo equivalent,
+**0.9908** for the conformance corpus, **0.9639** for Netpong, **0.9940** for
+Tour and **0.9887** for the release compiler self-build. This is a modest gain,
+about 1% on the large programs and 3.6% on Netpong.
+[Compile samples](audits/2026-10-18/numeric-paths-compile.json).
+
+Validation: 207 smoke checks and five new native/web/default/release behavior
+and rejection checks passed. The new cases replace a nested record during an
+indexed loop, retain whole-record copies before nested array writes, and reject
+replacing an ancestor through a mutable call during mutable element iteration.
+An independent C bootstrap passed **3,792 value, rejection and upstream checks**
+in 27.81 seconds with two workers.
+
+Five-sample thread-CPU comparisons retained the array, record and graph kernel
+checksums in default and release builds. Candidate/baseline medians were
+299/297 and 270/269 ms for arrays, 175/175 and 175/173 ms for records, and
+803/818 and 613/618 ms for graphs. These are effectively unchanged runtime
+results, not a generated-code speedup claim.
+[Runtime samples](audits/2026-10-18/numeric-paths-runtime.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

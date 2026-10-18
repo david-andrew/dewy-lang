@@ -4007,7 +4007,7 @@ view_decl = (s: int, l: int) -> bool:
     loop nodes[e].kind == .field and nodes[e].aux >= 0: e = int(nodes[e].a)
     if nodes[e].kind != .index: return false
     base = int(nodes[e].a)
-    if len(lpath_key(base)) == 0 or tkind(ntype(base)) != .array: return false
+    if lpath_key(base) == 0 or tkind(ntype(base)) != .array: return false
     rn = lpath_root(base)
     root_global = nodes[rn].aux == i32(int(SK.global))
     r = int(nodes[rn].sym)
@@ -4051,7 +4051,7 @@ plain_read = (n: int) -> bool:
 
 # is e a variable (or a field path of one) that code n cannot change?
 unchanged_by = (e: int, n: int) -> bool:
-    if len(lpath_key(e)) == 0: return false
+    if lpath_key(e) == 0: return false
     rn = lpath_root(e)
     if nodes[rn].aux != i32(int(SK.global)):
         r = int(nodes[rn].sym)
@@ -4901,7 +4901,7 @@ gen_for = (s: int):
     if aux == 2 and types[ct].kind == .array:
         spelling = mutable_loop_syntax(nodes[s].pos)
         key = lpath_key(int(nodes[s].a))
-        if len(key) > 0:
+        if key != 0:
             at = lm_change_at(int(nodes[s].b), key)
             if at != 0:
                 p = place_text(int(nodes[s].a))
@@ -5000,31 +5000,46 @@ each_done = (s: int, ct: int, i: int, n_snap: int, n_fixed: int, more: bool) -> 
 # A path the loop writes elements of gets its copy-on-write check there too, unless a copy of
 # it (or of what holds it) is made in the loop.
 struct FixedPath:
-    key: str
+    key: int
     arr: int            # vreg: the array
     len: int            # vreg: its length
     loopvar: int        # local: indexes by this loop variable are in bounds (-1: none)
 fixed_paths: FixedPath[]
 
 fp_bases: int[]         # index bases in the loop that are paths
-fp_kill: str[]          # paths the loop may replace or resize (with everything inside them)
-fp_escape: str[]        # paths copied or handed on by value in the loop
-fp_written: str[]       # paths whose elements the loop writes
+fp_kill: int[]          # paths the loop may replace or resize (with everything inside them)
+fp_escape: int[]        # paths copied or handed on by value in the loop
+fp_written: int[]       # paths whose elements the loop writes
 fp_calls = false        # the loop calls code that might reach a mut parameter's variable
 fp_lambda = false
 
-# "L<local>.<field>..." (or G<global>), or "" when n is not such a path
-lpath_key = (n: int) -> str:
+# Canonical paths live for one lowered function. Roots use the low 32 bits
+# (symbol index plus local/global tag); field edges use a nonzero parent ID in
+# the high 32 bits and the field index below it. Symbol/field indexes are i32.
+# Zero is not a path. Walking parents replaces string-prefix comparisons.
+lpath_ids: {int: int} = {}
+lpath_parents: int[] = [0]
+
+lpath_intern = (parent: int, part: int) -> int:
+    edge = (parent << 32) | part
+    if let id = lpath_ids.get(edge): return id
+    id = lpath_parents.len()
+    lpath_parents.push(parent)
+    lpath_ids[edge] = id
+    id
+
+lpath_key = (n: int) -> int:
     k = nodes[n].kind
-    if k == .ident and nodes[n].aux == i32(int(SK.local)): return "L{nodes[n].sym}"
-    if k == .ident and nodes[n].aux == i32(int(SK.global)): return "G{nodes[n].sym}"
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)): return lpath_intern(0, int(nodes[n].sym) * 2)
+        if nodes[n].aux == i32(int(SK.global)): return lpath_intern(0, int(nodes[n].sym) * 2 + 1)
     if k == .field and nodes[n].aux >= 0:
         a = int(nodes[n].a)
-        if tkind(ntype(a)) != .struct_: return ""
-        b = lpath_key(a)
-        if len(b) == 0: return ""
-        return "{b}.{nodes[n].aux}"
-    ""
+        if tkind(ntype(a)) != .struct_: return 0
+        parent = lpath_key(a)
+        if parent == 0: return 0
+        return lpath_intern(parent, int(nodes[n].aux))
+    0
 
 # the variable a path starts at (its ident node)
 lpath_root = (n0: int) -> int:
@@ -5033,7 +5048,12 @@ lpath_root = (n0: int) -> int:
     n
 
 # k is p or a path that p is inside of
-path_within = (p: str, k: str) -> bool: p == k or starts_with(p, k + ".")
+path_within = (p: int, k: int) -> bool:
+    path = p
+    loop path != 0:
+        if path == k: return true
+        path = lpath_parents[path]
+    false
 
 # ctx: 0 the value is used (copied, passed), 1 it is only indexed or measured
 fp_scan = (n: int, ctx: int):
@@ -5045,11 +5065,11 @@ fp_scan = (n: int, ctx: int):
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
         # (x of `mut x in xs` in a combined loop: writing x writes xs, which the body does not show)
         key = lpath_key(int(nodes[int(locals[int(nodes[n].sym)].alias)].a))
-        if len(key) > 0: fp_kill.push(key)
+        if key != 0: fp_kill.push(key)
         return
     if k == .ident or k == .field:
         key = lpath_key(n)
-        if len(key) > 0:
+        if key != 0:
             if ctx == 0: fp_escape.push(key)
             if k == .field: fp_scan(int(nodes[n].a), 1)
             return
@@ -5057,7 +5077,7 @@ fp_scan = (n: int, ctx: int):
         return
     if k == .index:
         base = int(nodes[n].a)
-        if len(lpath_key(base)) > 0 and tkind(ntype(base)) == .array: fp_bases.push(base)
+        if lpath_key(base) != 0 and tkind(ntype(base)) == .array: fp_bases.push(base)
         fp_scan(base, 1)
         fp_scan(int(nodes[n].b), 0)
         loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
@@ -5070,14 +5090,14 @@ fp_scan = (n: int, ctx: int):
     # array one of its own first, which may move it)
     if k == .addr or (k == .cast or k == .conv) and raw_view(n):
         key = lpath_key(int(nodes[n].a))
-        if len(key) > 0: fp_kill.push(key)
+        if key != 0: fp_kill.push(key)
         fp_scan(int(nodes[n].a), 1)
         return
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
             key = lpath_key(kid(n, 0))
-            if len(key) > 0: fp_kill.push(key)
+            if key != 0: fp_kill.push(key)
             fp_scan(kid(n, 0), 1)
             loop i in [1..nkids(n)): fp_scan(kid(n, i), 0)
             return
@@ -5089,11 +5109,11 @@ fp_scan = (n: int, ctx: int):
         loop i in [0..nkids(n)):
             if has_flag(kid(n, i), NF_MUT):
                 key = lpath_key(kid(n, i))
-                if len(key) > 0: fp_kill.push(key)
+                if key != 0: fp_kill.push(key)
     if k == .for_ and has_flag(n, NF_MUT):
         # (loop mut x in p may make p a copy of its own)
         key = lpath_key(int(nodes[n].a))
-        if len(key) > 0: fp_kill.push(key)
+        if key != 0: fp_kill.push(key)
     fp_scan(int(nodes[n].a), 0)
     fp_scan(int(nodes[n].b), 0)
     if k != .for_:
@@ -5105,23 +5125,23 @@ fp_scan = (n: int, ctx: int):
 # where loop body n changes how many elements path `key` has, or replaces it, by itself (not
 # through what it calls): 0 if it does not. (`loop mut` writes the elements in place: a body
 # adding or removing them would skip or repeat elements.)
-lm_change_at = (n: int, key: str) -> int:
+lm_change_at = (n: int, key: int) -> int:
     if n == 0: return 0
     k = nodes[n].kind
     if k == .lambda: return 0
     if k == .assign:
         tk = lpath_key(int(nodes[n].a))
-        if len(tk) > 0 and path_within(key, tk): return nodes[n].pos
+        if tk != 0 and path_within(key, tk): return nodes[n].pos
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .resize or id == .truncate or id == .extend:
             tk = lpath_key(kid(n, 0))
-            if len(tk) > 0 and path_within(key, tk): return nodes[n].pos
+            if tk != 0 and path_within(key, tk): return nodes[n].pos
     if k == .call:
         loop i in [0..nkids(n)):
             if has_flag(kid(n, i), NF_MUT):
                 tk = lpath_key(kid(n, i))
-                if len(tk) > 0 and path_within(key, tk): return nodes[kid(n, i)].pos
+                if tk != 0 and path_within(key, tk): return nodes[kid(n, i)].pos
     r = lm_change_at(int(nodes[n].a), key)
     if r == 0: r = lm_change_at(int(nodes[n].b), key)
     if r == 0 and k != .for_:
@@ -5145,7 +5165,7 @@ fp_target = (t: int):
     if k == .index:
         base = int(nodes[t].a)
         key = lpath_key(base)
-        if len(key) > 0:
+        if key != 0:
             fp_written.push(key)
             if tkind(ntype(base)) == .array: fp_bases.push(base)
             fp_scan(base, 1)
@@ -5154,7 +5174,7 @@ fp_target = (t: int):
         loop i in [0..nkids(t)): fp_scan(kid(t, i), 0)
         return
     key = lpath_key(t)
-    if len(key) > 0:
+    if key != 0:
         fp_kill.push(key)
         if k == .field: fp_scan(int(nodes[t].a), 1)
         return
@@ -5175,14 +5195,14 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
     fp_scan(int(nodes[s].b), 0)
     # (a while loop's condition runs in the loop too)
     if nodes[s].kind == .while_: fp_scan(int(nodes[s].a), 0)
-    if place != 0 and len(lpath_key(place)) > 0 and tkind(ntype(place)) == .array:
+    if place != 0 and lpath_key(place) != 0 and tkind(ntype(place)) == .array:
         fp_bases.push(place)
         fp_written.push(lpath_key(place))
     if fp_lambda or fp_bases.len() == 0: return 0
-    bound_key = ""
+    bound_key = 0
     if bound != 0: bound_key = lpath_key(bound)
     added = 0
-    done: str[]
+    done: int[]
     loop base in fp_bases:
         key = lpath_key(base)
         if done.contains(key): continue
@@ -5225,7 +5245,7 @@ fp_end = (n: int):
 fixed_path_of = (a: int) -> int:
     if fixed_paths.len() == 0: return -1
     key = lpath_key(a)
-    if len(key) == 0: return -1
+    if key == 0: return -1
     i = fixed_paths.len() - 1
     loop i >= 0:
         if fixed_paths[i].key == key: return i
@@ -5559,6 +5579,8 @@ lower_inst = (lf: int, f: int):
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 
 lower_function = (lf: int):
+    lpath_ids.clear()
+    lpath_parents.truncate(1)
     f = lfuncs[lf]
     lop_watch = false
     if want_loop_watch and f.kind == LK_INST and prelude.get(intern("__loop_budget")) != none:

@@ -5365,6 +5365,26 @@ loop i in [0,3..empty.length) {return empty[i]}
 return if sum =? 42 and saved =? [0 1 2 3 4 5 6 7 8 9]
 and record.values =? [10 22 30 42] and record_saved.values =? [10 20 30 40] 42 else 1
 }''',
+    'sequence-nested-field-paths': '''Inner:type=[values:array<int64>]
+Outer:type=[left:Inner right:Inner]
+main=()=>{
+let world=Outer(Inner([10 11]) Inner([100 200]))
+let sum:int64=0
+loop i in [0..world.left.values.length) {
+    sum+=world.left.values[i]
+    if i =? 0 world.left=Inner([900 32])
+}
+let snapshots:array<Outer>=[]
+loop i in [0..world.left.values.length) {
+    snapshots.push(world)
+    world.left.values[i]+=1
+    world.right.values[i]+=2
+}
+return if sum =? 42 and world.left.values =? [901 33]
+and world.right.values =? [102 202]
+and snapshots[0].left.values =? [900 32] and snapshots[1].left.values =? [901 32]
+and snapshots[0].right.values =? [100 200] and snapshots[1].right.values =? [102 200] 42 else 1
+}''',
     'stepped-range-nested-indices': '''main=()=>{
 let values=[10 20 30 40] let sum:int64=0
 loop i in [0,2..values.length) {
@@ -5480,6 +5500,7 @@ ERRORS = {
     'sequence-mutable-push': ('main=()=>{let xs=[1] loop @x in xs {xs.push(2) x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-replace': ('main=()=>{let xs=[1] loop @x in xs {xs=[2] x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-parent': ('Box:type=[xs:array<int64>]\nmain=()=>{let box=Box[[1]] loop @x in box.xs {box=Box[[2]] x+=1}}', '`loop @item` changes the elements'),
+    'sequence-mutable-nested-parent': ('Inner:type=[values:array<int64>]\nOuter:type=[inner:Inner]\nreplace=(@inner:Inner)=>{inner=Inner([42])}\nmain=()=>{let world=Outer(Inner([1])) loop @x in world.inner.values {replace(@world.inner) x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-global-call': ('let xs=[1]\ngrow=()=>xs.push(2)\nmain=()=>{loop @x in xs {grow() x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-escape': ('main=()=>{let xs=[1] loop @x in xs {let later=($capture @x)=>{x+=1} later()}}', 'stands for an element only while the loop is there'),
     'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
