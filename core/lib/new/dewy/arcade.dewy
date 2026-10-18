@@ -1,0 +1,186 @@
+# Collect the gold and dodge the rocks. Arrows/WASD or a gamepad move the player.
+# Escape/Start pauses; leaving the window pauses too. Menus accept mouse or keys.
+# Adapted from Sloppy's MIT-licensed lib/new/arcade.jo; see the toolchain LICENSE.
+
+const SPEED = 420.0
+const PLAYER_R = 16.0
+const GOLD_R = 12.0
+const ROCK_SPEED = 150.0
+const ROCK_SPEED_MAX = 420.0
+const ROCK_GAP = 1.0
+const ROCK_GAP_MIN = 0.25
+
+Rock: type = [pos: vec2 vel: vec2 r: float64 angle: float64 = 0.0 spin: float64 = 0.0]
+Game: type = [
+    player: vec2 = vec2(640 360) vel: vec2 = vec2(0 0) gold: vec2 = vec2(900 360)
+    rocks: array<Rock> = [] score: int64 = 0 elapsed: float64 = 0.0 rock_wait: float64 = 1.0
+    over: bool = false random: Rng = rng(1)
+]
+random_between = (@random: Rng low: float64 high: float64) :> float64 => low+(high-low)*random.next_float()
+
+new_gold = (@game: Game) :> void => {
+    loop true {
+        game.gold = vec2(random_between(@game.random 80.0 1200.0) random_between(@game.random 100.0 660.0))
+        if length(game.gold-game.player)>?260.0 break
+    }
+}
+fresh = (seed: int64) :> Game => {
+    let game = Game[random = rng(seed)]
+    new_gold(@game)
+    return game
+}
+
+spawn_rock = (@game: Game) :> void => {
+    let side = game.random.next_int(0 4)
+    let at = vec2(random_between(@game.random 0.0 1280.0) -60)
+    if side=?1 at = vec2(random_between(@game.random 0.0 1280.0) 780)
+    else if side=?2 at = vec2(-60 random_between(@game.random 0.0 720.0))
+    else if side=?3 at = vec2(1340 random_between(@game.random 0.0 720.0))
+    let aim = game.player+vec2(random_between(@game.random -200.0 200.0) random_between(@game.random -200.0 200.0))
+    let speed = min(ROCK_SPEED+game.elapsed*6.0 ROCK_SPEED_MAX)*random_between(@game.random 0.8 1.2)
+    game.rocks.push(Rock[pos = at vel = normalize(aim-at)*speed
+            r = random_between(@game.random 16.0 42.0) spin = random_between(@game.random -2.0 2.0)])
+}
+
+# The simulation uses only the game value, input and dt, including its random state.
+advance = (@game: Game move: vec2 dt: float64) :> void => {
+    if game.over return
+    game.elapsed += dt
+    game.vel = approach(game.vel move*SPEED 12.0 dt)
+    game.player = clamp(game.player+game.vel*dt vec2(PLAYER_R PLAYER_R) vec2(1280.0-PLAYER_R 720.0-PLAYER_R))
+    if circles_overlap(game.player PLAYER_R game.gold GOLD_R) {
+        game.score += 1
+        new_gold(@game)
+    }
+    game.rock_wait -= dt
+    if game.rock_wait<=?0.0 {
+        spawn_rock(@game)
+        game.rock_wait = max(ROCK_GAP-game.elapsed*0.01 ROCK_GAP_MIN)
+    }
+    loop i in [0..game.rocks.length) {
+        game.rocks[i].pos += game.rocks[i].vel*dt
+        game.rocks[i].angle += game.rocks[i].spin*dt
+    }
+    game.rocks = game.rocks.filter((rock: Rock) => rock.pos.x>?-100 and rock.pos.x<?1380 and rock.pos.y>?-100 and rock.pos.y<?820)
+    loop rock in game.rocks {
+        if circles_overlap(game.player PLAYER_R*0.8 rock.pos rock.r*0.9) {
+            game.over = true
+            return
+        }
+    }
+}
+
+test "a saved game replays the same random rock" {
+    let game = fresh(42)
+    game.rock_wait = 0.0
+    let replay = game
+    advance(@game vec2(1 0) 1.0/60.0)
+    advance(@replay vec2(1 0) 1.0/60.0)
+    assert(game=?replay and game.rocks.length=?1)
+}
+
+test "collecting gold preserves a saved game" {
+    let game = fresh(42)
+    game.player = game.gold
+    let saved = game
+    advance(@game vec2(0 0) 1.0/60.0)
+    assert(game.score=?1 and saved.score=?0 and game.gold not=?saved.gold)
+}
+
+# Presentation and live game state.
+window("Dewy / Gold Rush" 1280 720)
+let Screen = [title = 0 playing = 1 paused = 2 over = 3]
+let screen = Screen.title
+let game = fresh(1)
+let sparks = Particles[gravity = vec2(0 0) drag = 2.5]
+let best = to_int(load_data("best")??"0")??0
+let shake = Shake[]
+let t = 0.0
+let snd_gold = sfx_coin()
+let snd_crash = sfx_explosion()
+
+start = () :> void => {
+    game = fresh(random_int(1 1000000000))
+    sparks = Particles[gravity = vec2(0 0) drag = 2.5]
+    shake = Shake[]
+    screen = Screen.playing
+}
+crash = () :> void => {
+    sparks.emit(game.player 60 420 rgb(1.0 0.5 0.2) life = 1.2 size = 5)
+    play(snd_crash 0.8)
+    shake.add(0.9)
+    if game.score>?best {
+        best = game.score
+        save_data("best" "{best}")
+    }
+    screen = Screen.over
+}
+update = (dt: float64) :> void => {
+    t += dt
+    shake.update(dt)
+    sparks.update(dt)
+    if screen not=?Screen.playing return
+    if key_pressed(Key.escape) or gamepad_pressed(PadButton.start) or not window_focused() {
+        screen = Screen.paused
+        return
+    }
+    let old_score = game.score
+    let old_gold = game.gold
+    advance(@game input_axis() dt)
+    if game.score>?old_score {
+        sparks.emit(old_gold 24 220 rgb(1.0 0.85 0.3) life = 0.6)
+        play(snd_gold 0.5 pitch = 1.0+0.02*min(game.score 30))
+    }
+    if game.over crash()
+}
+
+draw_rock = (rock: Rock) :> void => {
+    let points = [loop i in [0..7) {
+            let angle = rock.angle+i/7.0*TAU
+            let bump = 0.8+0.2*sin(i*2.7+rock.r)
+            rock.pos+from_angle(angle)*rock.r*bump
+    }]
+    polygon(points rgb(0.42 0.38 0.4))
+    polyline(points 3 rgb(0.62 0.58 0.6) closed = true)
+}
+draw = () :> void => {
+    clear(rgb(0.06 0.07 0.11))
+    camera2d(vec2(640 360)+shake.offset())
+    loop x in [0..33) { loop y in [0..19) circle(vec2(x*40 y*40) 1.5 rgba(1 1 1 0.06)) }
+    if screen not=?Screen.title {
+        let pulse = 1.0+0.15*sin(t*6.0)
+        circle_gradient(game.gold GOLD_R*3.0*pulse rgba(1 0.8 0.2 0.35) rgba(1 0.6 0.1 0))
+        circle(game.gold GOLD_R rgb(1.0 0.82 0.25))
+        loop rock in game.rocks draw_rock(rock)
+        if screen not=?Screen.over {
+            circle_gradient(game.player PLAYER_R*2.5 rgba(0.3 0.7 1.0 0.3) rgba(0.3 0.7 1.0 0))
+            circle(game.player PLAYER_R rgb(0.55 0.85 1.0))
+        }
+    }
+    sparks.draw()
+    camera2d(vec2(640 360))
+    if screen=?Screen.playing or screen=?Screen.paused text("{game.score}" vec2(30 20) 48)
+    text("BEST {best}" vec2(1090 30) 24 rgba(1 1 1 0.5))
+    if screen=?Screen.title {
+        text_centered("GOLD RUSH" vec2(640 230) 96 rgb(1.0 0.82 0.25))
+        text_centered("Collect the gold. Dodge the rocks." vec2(640 310) 24 rgba(1 1 1 0.65))
+        ui_begin("title" vec2(640 390))
+        if ui_button("Play") start()
+        if can_quit() and ui_button("Quit") quit()
+        ui_end()
+    } else if screen=?Screen.paused {
+        text_centered("Paused" vec2(640 260) 64)
+        ui_begin("pause" vec2(640 340))
+        if ui_button("Resume") or ui_back() screen = Screen.playing
+        if ui_button("Quit to the title") screen = Screen.title
+        ui_end()
+    } else if screen=?Screen.over {
+        text_centered("{game.score}" vec2(640 230) 96 rgb(1.0 0.82 0.25))
+        if game.score=?best and game.score>?0 text_centered("A new best" vec2(640 300) 32)
+        ui_begin("over" vec2(640 360))
+        if ui_button("Play again") start()
+        if ui_button("Title") screen = Screen.title
+        ui_end()
+    }
+    text_centered("Arrows / WASD: move    Escape: pause" vec2(640 680) 20 rgba(1 1 1 0.5))
+}

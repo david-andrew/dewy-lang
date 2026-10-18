@@ -8544,13 +8544,13 @@ def test_core_cli_identity(compiler):
     assert result.returncode == 0 and 'file.dewy' in result.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'platformer', '3d', 'online', 'program'])
+@pytest.mark.parametrize('kind', ['game', 'arcade', 'platformer', '3d', 'online', 'program'])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
                           text=True, timeout=5, check=False)
     assert made.returncode == 0, made.stdout + made.stderr
-    source = project / ('project-with-spaces.dewy' if kind == 'online' else 'main.dewy')
+    source = project / ('project-with-spaces.dewy' if kind in {'online', 'arcade'} else 'main.dewy')
     assert source.is_file() and (project / 'README.md').is_file()
     assert not list(project.glob('*.jo'))
     binary = project / 'main'
@@ -8705,8 +8705,74 @@ main=()=>{
     assert result == '42', output
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_arcade_starter_model(compiler, tmp_path, target, release):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/arcade.dewy'
+    model = template.read_text().split('# Presentation and live game state.', 1)[0]
+    body = model + r'''
+main=()=>{
+    let game=fresh(42)
+    let saved=game
+    if length(game.gold-game.player)<=?260.0 return 1
+    game.rock_wait=0.0
+    let replay=game
+    advance(@game vec2(1 0) 1.0/60.0)
+    advance(@replay vec2(1 0) 1.0/60.0)
+    if game not=?replay or game.rocks.length not=?1 return 2
+    if saved.rocks.length not=?0 or saved.elapsed not=?0.0 return 3
+    if game.player.x<=?640.0 or game.vel.x<=?0.0 return 4
+    game.player=vec2(1263 703)
+    game.vel=vec2(420 420)
+    advance(@game vec2(1 1) 0.1)
+    if game.player not=?vec2(1264 704) return 5
+
+    let collecting=fresh(7)
+    collecting.player=collecting.gold
+    let before=collecting
+    advance(@collecting vec2(0 0) 0.01)
+    if collecting.score not=?1 or before.score not=?0 return 6
+    if length(collecting.gold-collecting.player)<=?260.0 return 7
+
+    let moving=fresh(19)
+    moving.rocks=[Rock[pos=vec2(200 200) vel=vec2(30 -20) r=20 spin=2.0]
+                  Rock[pos=vec2(1500 200) vel=vec2(30 0) r=20]]
+    let old=moving
+    advance(@moving vec2(0 0) 0.1)
+    if moving.rocks.length not=?1 or moving.rocks[0].pos not=?vec2(203 198) return 8
+    if abs(moving.rocks[0].angle-0.2)>?0.00001 or old.rocks[0].angle not=?0.0 or old.rocks.length not=?2 return 9
+    moving.rocks=[Rock[pos=moving.player vel=vec2(0 0) r=20]]
+    advance(@moving vec2(0 0) 0.01)
+    if not moving.over return 10
+    let crashed=moving
+    advance(@moving vec2(1 1) 1.0)
+    if moving not=?crashed return 11
+
+    let late=fresh(23)
+    late.elapsed=1000.0
+    late.rock_wait=0.0
+    advance(@late vec2(0 0) 0.01)
+    if late.rock_wait not=?ROCK_GAP_MIN or length(late.rocks[0].vel)>?ROCK_SPEED_MAX*1.2+0.001 return 12
+    loop seed in [0..64) {
+        let trial=fresh(seed)
+        if trial.gold.x<?80 or trial.gold.x>=?1200 or trial.gold.y<?100 or trial.gold.y>=?660 return 13
+        let same=trial
+        loop frame in [0..180) {
+            let input=vec2(sin(float64(frame)*0.1) cos(float64(frame)*0.1))
+            advance(@trial input 1.0/60.0)
+            advance(@same input 1.0/60.0)
+        }
+        if trial not=?same return 14
+    }
+    return 42
+}
+'''
+    result, output = run_value_batch(compiler, tmp_path, {'arcade-model': body}, release, target)['arcade-model']
+    assert result == '42', output
+
+
 @pytest.mark.parametrize('flags', [[], ['--release']])
-@pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1)])
+@pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2)])
 def test_core_game_starter_tests(compiler, flags, kind, count):
     template = Path(__file__).resolve().parents[2] / f'core/lib/new/dewy/{kind}.dewy'
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2'}
@@ -8752,13 +8818,43 @@ main=()=>{
 
 @pytest.mark.parametrize('directory, entry', [('Coin Race!', 'coin-race.dewy'),
                                              ('___', '___.dewy'), ('!!!', 'online.dewy')])
-def test_core_online_starter_filename(compiler, tmp_path, directory, entry):
+@pytest.mark.parametrize('kind', ['online', 'arcade'])
+def test_core_named_starter_filename(compiler, tmp_path, directory, entry, kind):
+    if directory == '!!!':
+        entry = f'{kind}.dewy'
     project = tmp_path / directory
-    made = subprocess.run([compiler, 'new', str(project) + '/', 'online'],
+    made = subprocess.run([compiler, 'new', str(project) + '/', kind],
                           capture_output=True, text=True, timeout=5, check=False)
     assert made.returncode == 0, made.stdout + made.stderr
     assert (project / entry).is_file()
     assert f'dewy-core watch {entry}' in (project / 'README.md').read_text()
+
+
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_core_arcade_starter_saved_score(compiler, tmp_path, flags):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/arcade.dewy'
+    source = tmp_path / 'score-test.dewy'
+    source.write_text(template.read_text() + '''
+test "save round" {
+    best=0
+    game.score=7
+    crash()
+    assert(best=?7 and screen=?Screen.over and load_data("best")??""=?"7")
+    game.score=3
+    crash()
+    assert(best=?7 and load_data("best")??""=?"7")
+    start()
+    assert(screen=?Screen.playing and game.score=?0 and not game.over and best=?7)
+}
+test "load round" {assert(best=?7)}
+''')
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
+           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
+    for name in ['save round', 'load round']:
+        result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
+                                capture_output=True, text=True, timeout=30, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert '1 test passed' in result.stdout
 
 
 def test_core_new_existing_directory(compiler, tmp_path):

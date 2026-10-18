@@ -1,0 +1,20 @@
+{
+  "change": "Add a Dewy arcade starter with title/pause/game-over menus, escalating rocks, generated effects/audio, deterministic saved game state and persistent high scores. Derive arcade source filenames from the project directory to name their saved data.",
+  "validated_compiler": "build-1792325888713489463/bin/dewy-core",
+  "source_identity": "abffc0bbceb95cf9de1075e41c32a7e79866ee044355fde9556bb613a71617df",
+  "validation": [
+    "21 starter/new-project checks passed in 10.47s using a compiler built from the previous core.",
+    "8 saved-score and filename checks passed in 3.13s after adding persistence coverage.",
+    "Formatter, Ruff and git diff --check passed. Independent C bootstrap/full gate is delegated to hosted CI for this increment."
+  ],
+  "coverage": [
+    "Native/web, default/release: movement/clamping, collecting gold, moving/removing rocks, collisions and frozen game-over state, difficulty cap and saved-value independence.",
+    "64 seeded games replay 180 matching inputs identically.",
+    "Native/default/release: saved high score survives a new process, lower score does not replace it, and a new round resets play while retaining best. Tests use an isolated save directory.",
+    "Directory-derived filename sanitizing and empty-name fallback for online and arcade templates.",
+    "Generated native software render and web build. Manual browser: title, Play, movement, Escape pause, Resume, focus-loss pause and return to title; no console/network errors."
+  ],
+  "limits": [
+    "Physical gamepad, browser storage reload and a complete browser game-over round were not exercised. Native persistence and deterministic collision/game-over tests cover those underlying behaviors."
+  ]
+}

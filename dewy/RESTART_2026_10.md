@@ -73,7 +73,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 5,100 checks; recent local full runs took
+The development gate now has over 5,300 checks; recent local full runs took
 151–186 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects a small cross-section of those checks. Focused
 selections also typically take seconds. Value
@@ -83,6 +83,14 @@ retaining individual results and test selection. The local driver caches an
 immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
+
+The generated arcade, platformer and 3D starters now exercise menus, saved scores,
+text tilemaps, slopes and one-way platforms, character physics and ray-cast shots.
+Each includes project tests, with additional native/web simulation checks in the
+gate. Browser play exposed and fixed a pointer-capture camera jump in the shared
+input layer. A small headless 3D yard measured roughly 0.066 ms per simulated frame
+in default native code and 0.214 ms under Node/wasm, excluding rendering; see the
+[baseline and its limits](audits/2026-10-17/source-core/3d-yard-physics-baseline.json).
 
 Numeric array work now includes fused dotted expressions and updates, CPU/GPU
 broadcasting, matrix slices and eager comprehensions. Straight-line indexed and

@@ -1,0 +1,43 @@
+{
+  "purpose": "Separate 3D starter physics cost from browser software-GPU rendering. No optimization or C-parity claim.",
+  "compiler": "build-1792325450252906056/bin/dewy-core",
+  "compiler_commit": "f78110ae",
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "node": "v26.8.1",
+  "frames": 600,
+  "samples": {
+    "native-default": [
+      "39858258 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "33632426 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "40239473 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+    ],
+    "native-release": [
+      "22403440 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "22771557 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "23190889 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+    ],
+    "wasm-default": [
+      "128148297 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "124623783 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "130164449 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+    ],
+    "wasm-release": [
+      "101832720 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "106482370 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+      "103163534 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+    ]
+  },
+  "median_ms_per_frame": {
+    "native-default": 0.06643043,
+    "native-release": 0.037952595,
+    "wasm-default": 0.213580495,
+    "wasm-release": 0.17193922333333334
+  },
+  "method": "Three fresh-process runs per native/wasm mode, pinned to CPU 2, SLOPPY_THREADS=1. Program timer surrounds only 600 walk/step calls and periodic impulses. Setup, rendering and process startup are excluded; wasm JIT warmup during the measured loop is included. Default and release results match final-state checksum and player position.",
+  "source": "import physics3d\nmain=()=>{\n    let world=physics3d.World[gravity=vec3(0 -18 0)]\n    world.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(0 1.5 -20) vec3(40 3 1) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(0 1.5 20) vec3(40 3 1) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(-20 1.5 0) vec3(1 3 40) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(20 1.5 0) vec3(1 3 40) kind=physics3d.BodyKind.fixed)\n    let crates:array<physics3d.Body>=[]\n    seed_random(3)\n    loop i in [0..18) {\n        let size=random(1.2 2.8)\n        let center=vec3(random(-16.0 16.0) size/2.0 random(-16.0 16.0))\n        if length(vec2(center.x center.z)-vec2(0 8))<?3.0 continue\n        crates.push(world.add_box(center vec3(size size size) density=150))\n    }\n    let player=world.character(vec3(0 0 8) radius=0.35)\n    let before=time_ns()\n    loop frame in [0..600) {\n        if frame%60=?0 {\n            let body=crates[(frame//60)%crates.length]\n            world.push(body vec3(400 500 0) world.pos(body))\n        }\n        let direction=if frame%240<?120 1.0 else -1.0\n        let jump=if frame%120=?0 6.5 else 0.0\n        world.walk(@player vec3(direction 0 0) 1.0/60.0 jump=jump)\n        world.step(1.0/60.0)\n    }\n    let elapsed=time_ns()-before\n    let sum=0.0\n    loop body in crates sum+=float64(world.pos(body).x+world.pos(body).y+world.pos(body).z)\n    printl\"{elapsed} {sum} {player.feet}\"\n}\n",
+  "limits": [
+    "Small 18-candidate-crate yard, 5 static boxes and one character, 600 frames at dt=1/60. Not a dense physics stress test.",
+    "Reported times are elapsed program-clock observations under shared host load, not CPU-time or paired optimization measurements.",
+    "Browser rendering cost is excluded; browser SwiftShader slowness is not presented as hardware GPU performance."
+  ]
+}

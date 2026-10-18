@@ -94,9 +94,17 @@ variable locations instead of running the default local optimization pass.
 `coin-race/coin-race.dewy`, with practice mode, rollback networking and invite
 screens. The online template derives a safe source filename from the directory
 name; keep it the same for native and web builds because it names saved data and
-rooms. Other templates use `main.dewy`. Run `dewy-core watch coin-race/coin-race.dewy`
+rooms. The arcade template also derives its filename this way for saved scores;
+the other templates use `main.dewy`. Run `dewy-core watch coin-race/coin-race.dewy`
 to start editing. Its generated README explains web links and the optional
 matchmaking service; no public server is configured by default.
+
+`dewy-core new gold-rush arcade` creates `gold-rush/gold-rush.dewy`, a complete
+collect-and-dodge game with title, pause and game-over menus, particles, sound,
+increasing difficulty and a saved high score. Arrows/WASD or a gamepad move;
+Escape/Start or leaving the window pauses. Its `Game` includes an explicit random
+generator, allowing saved states to replay deterministically. Two included
+project tests cover replay and saved-value behavior.
 
 `dewy-core new hillside platformer` creates a complete single-file platformer:
 text-defined terrain, slopes, one-way platforms, coins, camera follow and generated
