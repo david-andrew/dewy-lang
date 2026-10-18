@@ -1474,13 +1474,20 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
         else if nodes[root].aux == i32(int(SK.global)): frozen_value = readonly_global(int(nodes[root].sym))
     if frozen_value: cval = own(cval, ft)
     borrow(cval, ft)
-    # Pin the exact environment being invoked, without making a semantic copy.
-    # Arguments or the callback itself can replace the original function value.
-    saved = new_temp(ft)
-    cv = e_slot(saved)
-    e_copy(cv, cval.v, tsize(ft))
-    retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
-    reg_temp_slot(saved, ft)
+    # Pin the exact environment when arguments or the callback can replace its
+    # owner. Owned temporaries already stay alive through statement cleanup, and
+    # an unaliased local callable needs no refcount traffic on every invocation.
+    pin = not cval.owned and (root == 0 or borrow_may_change(callee, args, -1, 0))
+    if not cval.owned and not pin and root != 0:
+        loop arg in args:
+            if has_flag(arg, NF_MUT) or may_write_root(arg, root): pin = true
+    cv = cval.v
+    if pin:
+        saved = new_temp(ft)
+        cv = e_slot(saved)
+        e_copy(cv, cval.v, tsize(ft))
+        retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
+        reg_temp_slot(saved, ft)
     fp = e_load(VI, cv, 0, ptr_size)
     # (a field or variable of a function type never given one: none, said as that)
     iff(e_bin(.eq, VI, fp, e_iconst(0)))

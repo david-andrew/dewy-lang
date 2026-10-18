@@ -124,6 +124,16 @@ return if b()=?1 and b()=?2 42 else 2}''',
     'closure-wrapper-copy': '''make=()=>{let n=0 return (step:int64)=>{n+=step; n}}
 main=()=>{let a=make() let p=(step:int64)=>a(step) let q=p
 return if p(1)=?1 and q(2)=?2 and p(3)=?4 and a(1)=?1 42 else 1}''',
+    'closure-local-replacement': '''make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
+main=()=>{let current=make(40)
+let before=current({current=make(100); 2})
+return if before=?42 and current(1)=?101 42 else 1}''',
+    'closure-alias-replacement': '''Counter:type=(x:int64):>int64
+make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
+replace=(@f:Counter)=>{f=make(100); 2}
+main=()=>{let current=make(40)
+let before=current(replace(@current))
+return if before=?42 and current(1)=?101 42 else 1}''',
     'closure-self-replacement': '''Counter:type=(x:int64):>int64
 let current:Counter
 make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
@@ -2659,7 +2669,7 @@ return if value =? 22 and source.values[1] =? 99 42 else 1}''',
 xs[end]+=1 xs[end-1]=20
 return if xs[end]+xs[end-1] =? 42 and saved =? [1 20 21] 42 else 1}''',
     'end-index-update-nested': '''let calls=0
-index=[@calls]()=>{calls+=1 return 0}
+index=()=>{calls+=1 return 0}
 main=()=>{let xs=[[1 20 21]] xs.push([0]) let saved=xs
 xs[index()][end]+=1
 return if calls =? 1 and xs[0][end] =? 22 and saved[0][end] =? 21 42 else 1}''',
