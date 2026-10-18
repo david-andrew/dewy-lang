@@ -310,6 +310,17 @@ exposed this hang and is now a timeout-bounded regression check. The independent
 C-bootstrap gate passes 3,421 checks in 49.29 seconds. See `type-capacity-*`;
 this is a completion fix, not a claimed finite baseline speed ratio.
 
+Concrete generic record/enum arguments now also have an index. A separate list
+retains instances with inference-bearing arguments, which may match after their
+variables bind; an earlier such match still wins over a later indexed instance.
+Unresolved requests retain structural matching. Seven alternating type-check
+pairs against the capacity-fixed baseline give CPU ratios of 0.969, 0.662 and
+0.353 for 500, 2,000 and 5,000 record specializations. Five fresh-build pairs give
+tour 0.989, Dunes 1.004 and compiler 1.015, with no ordinary build speedup claimed.
+All 3,431 checks pass on the independently C-built compiler in 45.19 seconds,
+including late inference bindings, ordered type arguments and recursive managed
+records. See `record-index-*` for the sources, samples and toolchain identities.
+
 Generic functions now look up concrete specializations by declaration and
 interned type arguments. Arguments still carrying inference variables retain
 the existing structural comparison path. Seven alternating fresh type-check

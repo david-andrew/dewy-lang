@@ -46,6 +46,27 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'generic-record-ordered-arguments': '''Box:type=<T>[value:T]
+Pair:type=<A B>[left:A right:B]
+score=(box:Box<array<int64>>):>int64=>box.value[0]
+score=(box:Box<array<string>>):>int64=>box.value[0].length
+main=()=>{
+let numbers=Box<array<int64>>[[40]]
+let words=Box<array<string>>[["hi"]]
+let fixed=Box<array<int64>>[[20 22]]
+let pair=Pair(numbers words) let reversed=Pair(words numbers)
+let saved=numbers numbers.value[0]=99
+if fixed.value[0]+fixed.value[1] not=?42 or saved.value[0] not=?40 return 1
+return if reversed.left.value[0]=?"hi" and reversed.right.value[0]=?40
+score(pair.left)+score(pair.right) else 2}''',
+    'generic-record-recursive-storage': '''Node:type=<T>[value:T children:array<Node<T>>=[]]
+sum=<T>(node:Node<T>):>T=>{
+let result=node.value loop child in node.children {result+=sum(child)} return result}
+main=()=>{
+let tree=Node<int64>[20 [Node<int64>[10] Node<int64>[12]]]
+let strings=Node<string>["a" [Node<string>["b"]]]
+let saved=tree tree.children[0].value=99
+return if sum(strings)=?"ab" and sum(saved)=?42 and sum(tree)=?131 42 else 1}''',
     'numeric-bounded-remainder': '''probe=(bytes:array<uint8>):>int64=>{
 let word:int64=0
 loop round in [0..50) {loop byte in bytes {word=(word*131+(byte as int64))%1000000007}}
@@ -4612,6 +4633,19 @@ def test_core_many_record_types(compiler, tmp_path):
     checked = subprocess.run([compiler, 'check', source], capture_output=True,
                              text=True, timeout=10, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_record_instance_inference(compiler, tmp_path, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/type_instances.jo'
+    binary = tmp_path / 'type_instances'
+    built = subprocess.run([compiler, 'build', source, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout == 'ok\n'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

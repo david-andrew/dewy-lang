@@ -1,0 +1,30 @@
+{
+  "source_identity": "5c76cb366bd4860b1c8e20d1c40b72f9cda1c6038c3fc278a1396e636e9c33f8",
+  "binary": "build-1792281921048855091/bin/dewy-core",
+  "binary_sha256": "dd65785e766a5030c23204c51823a25c522893387857dcf37cc316d4b8e281ef",
+  "validation": {
+    "command": "TMPDIR=<workspace>/__dewycache__/task-tmp python3 -m tools.core --bootstrap test -n 4 --durations=10",
+    "passed": 3431,
+    "seconds": 45.19,
+    "focused": {
+      "passed": 26,
+      "seconds": 3.33
+    },
+    "coverage": [
+      "concrete generic record and enum keys",
+      "inference-bearing instance before and after concrete entries",
+      "later variable bindings",
+      "declaration and type argument order",
+      "recursive managed records and COW copies"
+    ],
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "performance_toolchain": {
+    "source_identity": "5c76cb366bd4860b1c8e20d1c40b72f9cda1c6038c3fc278a1396e636e9c33f8",
+    "binary": "build-1792281880755024308/bin/dewy-core",
+    "binary_sha256": "3c496c958e849b679b403e89eb89bbc2eeec2c90a1921cd3017185583dbc2521",
+    "origin": "Scaling comparison uses a previous-core rebuild of the same sources validated independently from C; ordinary compile comparison uses the C-built compiler."
+  },
+  "baseline": "aeb45a8f, including the type interner capacity fix; that independent completion fix is not counted as an indexing speedup."
+}

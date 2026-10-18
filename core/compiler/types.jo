@@ -791,18 +791,36 @@ type_nesting = (t0: int, lim: int) -> int:
 const MAX_TYPE_NESTING = 48
 
 # ---------- struct instances ----------
-# Group by declaration, but keep structural matching within each group: type
-# arguments can still contain inference variables whose bindings later change.
+# Concrete argument lists use an index. Keep inference-bearing instances in
+# declaration order: their variables can bind later, making an earlier instance
+# match a concrete request. They must still precede a later indexed match.
+struct StructInstanceKey:
+    decl: int
+    args: int[]
+
+struct_instances: {StructInstanceKey: int} = {}
 struct_instance_groups: int[][]
+struct_instance_pending: int[][]
 struct_instance_group: {int: int} = {}
 
 get_struct_inst = (decl: int, targs: int[]) -> int:
     if decl == 0: return mk_union(targs)
     if decl == soa_decl: return soa_inst(targs[0])
+    stable = true
+    loop t in targs:
+        # Test the stored argument, not prune(t): a bound inference variable
+        # still has a different ID from its eventual concrete type.
+        if has_var(t): stable = false
+    indexed = stable and targs.len() > 0
     group = struct_instance_group.get(decl) ?? -1
+    found = -1
     instances: int[]
-    if group >= 0: instances = struct_instance_groups[group]
+    if indexed:
+        found = struct_instances.get(StructInstanceKey(decl, targs)) ?? -1
+        if group >= 0: instances = struct_instance_pending[group]
+    else if group >= 0: instances = struct_instance_groups[group]
     loop i in instances:
+        if found >= 0 and i > found: break
         si = structs[i]
         if int(si.ntargs) != targs.len(): continue
         same = true
@@ -811,6 +829,7 @@ get_struct_inst = (decl: int, targs: int[]) -> int:
                 same = false
                 break
         if same: return int(si.type)
+    if found >= 0: return int(structs[found].type)
     # (a generic struct whose fields use it with bigger type arguments would expand without end)
     loop t in targs:
         if type_nesting(t, MAX_TYPE_NESTING + 1) > MAX_TYPE_NESTING:
@@ -832,8 +851,11 @@ get_struct_inst = (decl: int, targs: int[]) -> int:
     if group < 0:
         group = struct_instance_groups.len()
         struct_instance_groups.push([])
+        struct_instance_pending.push([])
         struct_instance_group[decl] = group
     # Release the lookup snapshot before appending to the group's owned array.
     instances = []
     struct_instance_groups[group].push(idx)
+    if indexed: struct_instances[StructInstanceKey(decl, targs)] = idx
+    else if not stable: struct_instance_pending[group].push(idx)
     types.len() - 1
