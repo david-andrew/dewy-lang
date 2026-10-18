@@ -185,11 +185,12 @@ rel_finish = ():
 emit_now = (finish: bool):
     if finish: rel_finish()
     else if not opt_release and not dbg_on:
-        # Tiny leaves expand before the one local pass; there is no release
-        # optimization pipeline. Debug builds retain original local locations.
+        # Tiny leaves expand before the local pass; short raw float kernels
+        # also get vectorization. Debug builds retain original local locations.
         kc_fn += 1
         if not watch_build and not repl_image: fast_inline_into()
         optimize()
+        if not watch_build and not repl_image: fast_vectorize()
     if dump: dump_ir()
     if target_wasm: wasm_collect()
     else if target_arm64: arm64_function()
@@ -361,7 +362,7 @@ compile = (path: str, out0: str) -> str:
     pinit = init_fns[0]
     pinit_lf = roots[0]
     # (vectorized loops ask whether the processor has AVX2: the runtime finds out at start)
-    lx_vec_on = opt_release and not target_wasm and not target_arm64 and not lower_only
+    lx_vec_on = (opt_release or not dbg_on and not watch_build and not repl_image) and not target_wasm and not target_arm64 and not lower_only
     if lx_vec_on:
         cs = prelude.get(intern("__cpu_avx2")) ?? 0
         if cs != 0 and syms[cs].kind == .global: global_addr_off(int(syms[cs].ref))

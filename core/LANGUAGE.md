@@ -942,8 +942,10 @@ blocks. Its normal-equation example uses small, well-scaled times; it is not a
 general numerical fitting package.
 
 Matrix multiplication uses contiguous rows and shares large products among the
-native worker pool. Release builds can vectorize the inner loop; web builds use
-the same scalar operations. `SLOPPY_THREADS=1` restricts native execution to the
+native worker pool. Native x86-64 default builds vectorize short raw-memory float
+kernels; release builds apply broader optimization. Both retain scalar fallbacks
+for overlapping memory and tail elements. Web builds use the same scalar
+operations. `SLOPPY_THREADS=1` restricts native execution to the
 calling thread. To compare default/release builds, one/two threads and the same
 flat-buffer algorithm in C:
 
@@ -953,10 +955,12 @@ python3 -m tools.sloppy_core.benchmark_matrix "$(python3 -m tools.core path)" \
 ```
 
 The recorded 192×192 and 384×384 runs put single-thread release at roughly
-1.17× and 1.11× C's kernel time, respectively; default builds still took about
-3.02× and 2.58×. These are specific bundled-library workloads with allocation
-included, not general C performance parity. The
+1.17× and 1.11× C's kernel time, respectively. A subsequent focused default-build
+optimization reduced the 192×192 workload by another 29%, to about 2.10× C's time.
+These are specific bundled-library workloads with allocation included, not
+general C performance parity. The
 [paired results](../dewy/audits/2026-10-17/source-core/matrix-performance-validation.json)
+and [default-build follow-up](../dewy/audits/2026-10-17/source-core/default-vector-validation.json)
 record compiler identities, input checks, flags and limits.
 
 ## Parallel CPU work

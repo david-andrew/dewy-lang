@@ -22,14 +22,15 @@ def digest(path: Path) -> str:
 
 
 def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
-            samples: int, frames: int, threads: int, baseline_sources: Path | None = None) -> dict:
+            samples: int, frames: int, threads: int, baseline_sources: Path | None = None,
+            mode: str = 'release') -> dict:
     artifacts.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(SLOPPY_SOFTWARE='1', SLOPPY_WINDOW='1280x720', SLOPPY_FRAMES=str(frames),
                SLOPPY_FRAME_STATS='1', SLOPPY_THREADS=str(threads), SLOPPY_EMIT_WORKERS='1')
     report = {
         'platform': platform.platform(), 'samples': samples, 'warmups': 1,
-        'last_frame_index': frames, 'threads': threads,
+        'last_frame_index': frames, 'threads': threads, 'mode': mode,
         'affinity': sorted(os.sched_getaffinity(0)), 'load_start': os.getloadavg(),
         'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'diff_sha256': hashlib.sha256(subprocess.check_output(['git', 'diff', 'HEAD'], cwd=ROOT)).hexdigest(),
@@ -38,7 +39,7 @@ def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
                               'softgl_sha256': digest(path.parent.parent / 'lib/game/softgl.jo')}
                       for label, path in compilers.items()},
         'limits': [
-            'Fresh release executables, fixed 1/60-second simulation steps, no interactive window or GPU.',
+            f'Fresh {mode} executables, fixed 1/60-second simulation steps, no interactive window or GPU.',
             'frame_ms is monotonic elapsed update/draw/submit time, despite the runtime label "frame cpu".',
             'process_cpu_seconds includes startup and PNG writing, and sums CPU time across threads.',
             'Shadow quality can differ; inspect retained images before accepting a speedup.',
@@ -53,7 +54,8 @@ def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
             sources[label] = {'path': str(source), 'sha256': digest(source)}
             binaries[label] = artifacts / f'{game}-{label}'
             images[label] = artifacts / f'{game}-{label}.png'
-            built = subprocess.run([compiler, 'build', source, '--release', '-o', binaries[label]],
+            flags = ['--release'] if mode == 'release' else []
+            built = subprocess.run([compiler, 'build', source, *flags, '-o', binaries[label]],
                                    cwd=ROOT, env=env, capture_output=True, text=True, timeout=60, check=False)
             if built.returncode:
                 raise RuntimeError(built.stdout + built.stderr)
@@ -102,6 +104,7 @@ if __name__ == '__main__':
     cli.add_argument('--samples', type=positive, default=7)
     cli.add_argument('--frames', type=positive, default=30)
     cli.add_argument('--threads', type=positive, default=2)
+    cli.add_argument('--mode', choices=['default', 'release'], default='release')
     cli.add_argument('--artifacts', type=Path, required=True)
     cli.add_argument('--output', type=Path, required=True)
     args = cli.parse_args()
@@ -111,5 +114,5 @@ if __name__ == '__main__':
     compilers['candidate'] = args.compiler.resolve(strict=True)
     report = measure(compilers, args.game or ['paddle', 'forest', 'dunes'],
                      args.artifacts.resolve(), args.samples, args.frames, args.threads,
-                     args.baseline_sources.resolve() if args.baseline_sources else None)
+                     args.baseline_sources.resolve() if args.baseline_sources else None, args.mode)
     args.output.write_text(json.dumps(report, indent=2) + '\n')

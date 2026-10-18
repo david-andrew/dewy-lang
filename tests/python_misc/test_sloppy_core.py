@@ -6849,6 +6849,59 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_pointer_loop_aliases(compiler, tmp_path, target, release):
+    (tmp_path / 'loops.jo').write_text('''axpy[T] = (left: mut T[], right: T[], scale: T):
+    assert(left.len() == right.len())
+    p = data(left)
+    q = data(right)
+    loop i in [0..left.len()): p[i] += scale * q[i]
+overlap[T] = (values: mut T[]):
+    p = data(values)
+    q = p + 1
+    loop i in [0..max(values.len() - 1, 0)): q[i] += p[i]
+same[T] = (values: mut T[]):
+    p = data(values)
+    q = p
+    loop i in [0..values.len()): q[i] += p[i]
+ordered = (values: f64[]) -> f64:
+    p = data(values)
+    total = 0.0
+    loop i in [0..values.len()): total += p[i]
+    total
+''')
+    program = '''from p"loops.jo" import axpy, overlap, same, ordered
+exercise=<T>(one:T):>void=>{
+loop count in [0..20) {
+    let a=fill(one count) let b=fill(one+one count) let saved=a
+    axpy(@a b one+one)
+    loop v in a {assert(v =? one+one+one+one+one)}
+    loop v in saved {assert(v =? one)}
+    let ascending=fill(one count)
+    overlap(@ascending)
+    loop i in [0..count) {assert(ascending[i] =? ((i+1) as T))}
+    same(@ascending)
+    loop i in [0..count) {assert(ascending[i] =? ((2*(i+1)) as T))}
+}
+}
+main=()=>{
+exercise<float64>(1.0) exercise<float32>(1.0)
+assert(ordered([1e16 1.0 -1e16 2.0]) =? 2.0)
+return 42
+}'''
+    command, error = build_case_batch(compiler, tmp_path, {'loops': program},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    modes = [False, True] if target == 'native' else [False]
+    for no_avx in modes:
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+        if no_avx:
+            env['SLOPPY_NO_AVX'] = '1'
+        ran = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10, check=False)
+        assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_numeric_ranges_custom_index(compiler, tmp_path, target, release):
     (tmp_path / 'lookup.jo').write_text('''struct Lookup:
     value: int

@@ -1,4 +1,4 @@
-# Loop transformations on optimized IR (release builds).
+# Loop transformations on optimized IR, including bounded default-build kernels.
 #
 # Versioning: a counting loop (rotated by lowering: `block { brif done; loop { body; ctr += 1;
 # brif ctr < end, loop } }`) whose bounds checks index by the counter (plus a constant) or by
@@ -505,10 +505,19 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
     if not plan.avx_only: lx_vloop(code, L, checks, plan, VX, out)
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
 
+# Default builds only consider short raw-memory float kernels, where no bounds
+# checks need versioning. The existing overlap guard and scalar tail remain.
+fast_vectorize = ():
+    if not lx_vec_on or not ir.raw_mem or ir.code.len() > 400: return
+    floats = false
+    loop ins in ir.code:
+        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv: floats = true
+    if floats: loop_versioning(true)
+
 # version the counting loops of the current function that have checks to drop
 lx_dbg_read = false
 lx_dbg = ""
-loop_versioning = ():
+loop_versioning = (vector_only: bool = false):
     if not lx_dbg_read:
         lx_dbg_read = true
         lx_dbg = env("SLOPPY_LXDBG") ?? ""
@@ -537,6 +546,7 @@ loop_versioning = ():
     loop L in cl:
         if L.pe - L.pl > 400: continue
         checks = lx_checks(code, ends, L)
+        if vector_only and checks.len() > 0: continue
         plan = VPlan(false, 0, false, [], [], [])
         if lx_vec_on: plan = lx_vec_plan(code, L, checks, first, last)
         # (one check costs about as much as testing for it in front: not worth a copy)

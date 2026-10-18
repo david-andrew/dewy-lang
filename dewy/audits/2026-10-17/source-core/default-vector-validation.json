@@ -1,0 +1,59 @@
+{
+  "change": "Default x86-64 emission considers functions with raw memory, floating-point arithmetic and at most 400 IR instructions for the existing vectorizer. Only loops with no bounds checks to version qualify. The original overlap guard, SSE2/AVX2 selection and scalar remainder remain; debug/watch/REPL and non-x86 targets retain their prior paths.",
+  "compiler": "build-1792315562875631118/bin/dewy-core",
+  "source_identity": "9ad5a1d5c838209e9d799caddbe47151c21fdcd4162c350c5a3629f015ae6adf",
+  "bootstrap_generations_sha256": [
+    "da4d4171e123f72d3bb082efecf19f10cca35874c277929777824fd01c62d3e0",
+    "12220661a1feb6f9e2f7ed4112843723ccc3ae244ff4186d482d4bfd46d6fcf5",
+    "9049f4b69b388c128a995b2de92f3d4d60bca20a678cde74b9c5ced12cf6dd3f"
+  ],
+  "validation": "4933 passed in 166.76s with two test workers, following independent three-generation C bootstrap. Focused 289 passed in 13.61s; new pointer alias and parallel checks 28 passed in 5.70s. Ruff and git diff --check passed.",
+  "coverage": [
+    "Default/release native/web, float32/float64, explicit SSE2 fallback also in default builds",
+    "Disjoint, exactly aliased and overlapping pointer loops for lengths 0 through 19; original values remain independent on COW updates",
+    "Ordered floating-point reduction remains scalar: [1e16, 1, -1e16, 2] sums to 2 in the explicit loop",
+    "Full language, game/network, editor, debugger, watch, packaging, upstream and development-driver gate"
+  ],
+  "paired_matrix_candidate_over_baseline": {
+    "default-1": 0.7075248299014545,
+    "default-2": 0.7046946393075793,
+    "release-1": 1.005934371482545,
+    "release-2": 0.984631336499961
+  },
+  "paired_compile_candidate_over_baseline": {
+    "tour-default": {
+      "seconds": 0.9917209907417159,
+      "cpu_seconds": 0.991340978235433
+    },
+    "netpong-default": {
+      "seconds": 0.9606412172025297,
+      "cpu_seconds": 0.9981586285762802
+    },
+    "dunes-default": {
+      "seconds": 0.9888971353584857,
+      "cpu_seconds": 0.9963504985212374
+    },
+    "compiler": {
+      "seconds": 1.0138579820707785,
+      "cpu_seconds": 1.0059827479603465
+    }
+  },
+  "paired_apps_candidate_over_baseline": {
+    "helpers": 1.000749172806491,
+    "arrays": 1.0230245664126039,
+    "records": 1.0050833004224995,
+    "text": 0.99929647445315,
+    "graph": 1.016887790898825
+  },
+  "images_match": {
+    "forest": true,
+    "dunes": true
+  },
+  "decision": "Keep: about 29% less elapsed time for the default matrix workload, with paired compilation CPU changes around -1% to +0.6%. Broad application results range from approximately neutral to 2.3% slower; no broad application speedup claim.",
+  "limits": [
+    "Native matrix wall time with CPUs 2/3 and one/two threads; thread CPU application timings on CPU 2. Seven paired samples each for matrix/compilation/apps.",
+    "Rendering was a short three-pair validation run (nine fixed simulation frames per process), with substantial host noise. Forest/Dunes PNGs matched exactly and were visually inspected; no game-frame speedup claimed.",
+    "Default matrix remains about 2.10x the serial C kernel time. Release remains a separate broader optimization pipeline.",
+    "Comments in the compiler were clarified after the full gate; executable code is unchanged. Benchmark render now accepts --mode default while retaining release as its default."
+  ]
+}

@@ -107,7 +107,7 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
         runner.write_text('\n'.join(scripts.parts))
         args = [node, runner]
     modes = [('1', False), ('2', False)] if target == 'native' else [('1', False)]
-    if target == 'native' and release and name.startswith('matrix-product'):
+    if target == 'native' and name.startswith('matrix-product'):
         modes.append(('2', True))
     for threads, no_avx in modes:
         env['SLOPPY_THREADS'] = threads
