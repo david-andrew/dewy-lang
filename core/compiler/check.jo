@@ -2502,6 +2502,58 @@ dewy_end_assign = (s: int) -> int:
     check_stmt(blk)
     blk
 
+# A dotted selection update reads the original source, captures its selector,
+# computes the result, then reacquires the destination for writeback. An open
+# slice becomes a small stored range before the RHS can resize the destination.
+dewy_selection_update = (s: int) -> int:
+    lhs = int(nodes[s].a)
+    pos = nodes[s].pos
+    stmts: int[]
+    path = index_update_path(int(nodes[lhs].a))
+    j = path.len() - 1
+    loop j >= 0:
+        part = path[j]
+        j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0: index_update_capture(part, stmts)
+    elem_tmp_n += 1
+    source = "$selection_source{elem_tmp_n}"
+    selector = "$selection_index{elem_tmp_n}"
+    value = "$selection_value{elem_tmp_n}"
+    captured = "$selection{elem_tmp_n}"
+    reads = [bc_let(source, clone(int(nodes[lhs].a)), pos)]
+    spec = int(nodes[lhs].b)
+    if nodes[spec].kind == .range:
+        size = bc_method(bc_ident(source, pos), "len", [], pos)
+        spec = bc_call("__dewy_slice_range", [size] + dewy_slice_args(spec, pos), pos)
+    reads.push(bc_let(selector, spec, pos))
+    picked = mk(.index, pos)
+    nodes[picked].a = i32(bc_ident(source, pos))
+    nodes[picked].b = i32(bc_ident(selector, pos))
+    pair = mk(.tuple, pos)
+    set_list(pair, [bc_ident(selector, pos), picked])
+    reads.push(bc_stmt(pair, pos))
+    # Release the whole-source snapshot after selecting the old values. Keeping
+    # it through writeback would force a full-array COW copy for a tiny update.
+    stmts.push(bc_let(captured, bc_block(reads, pos), pos))
+    loop i in [0..2):
+        field = mk(.field, pos)
+        nodes[field].a = i32(bc_ident(captured, pos))
+        nodes[field].aux = -2
+        nodes[field].ival = i
+        name = if i == 0: selector else: value
+        stmts.push(bc_let(name, field, pos))
+    update = nodes.len()
+    nodes.push(nodes[s])
+    nodes[update].a = i32(bc_ident(value, pos))
+    stmts.push(update)
+    nodes[lhs].b = i32(bc_ident(selector, pos))
+    # Capturing receiver indices changed checked paths; resolve those paths
+    # again with the new index bindings before generating the write.
+    stmts.push(bc_assign(clone(lhs), bc_ident(value, pos), pos))
+    block = bc_block(stmts, pos)
+    check_stmt(block)
+    block
+
 check_assign = (s: int) -> int:
     if files[pos_file(nodes[s].pos)].is_dewy:
         end_update = dewy_end_assign(s)
@@ -2547,6 +2599,7 @@ check_assign = (s: int) -> int:
         range = int(nodes[lhs].b)
         if range != 0 and nodes[range].kind == .range:
             if types[bt].kind == .array or types[bt].kind == .fixed:
+                if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
                 if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
                 call = dewy_array_slice(lhs, int(nodes[s].b))
                 es = mk(.exprstmt, nodes[s].pos)
@@ -2559,6 +2612,7 @@ check_assign = (s: int) -> int:
             put = index_array_fn(int(nodes[lhs].b), "__put")
             if len(put) > 0:
                 # xs[mask] = v, xs[idxs] = vs: sets the elements picked
+                if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
                 if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")
                 recv = int(nodes[lhs].a)
                 add_flag(recv, NF_MUT)

@@ -49,6 +49,79 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-broadcast-selection-ranges': '''main=()=>{
+let xs=[1 2 3 4 5 6] let saved=xs
+xs[1..3] .+= 10
+xs[5,3..] .*= 2
+xs[0,2..4] .-= [1 2 3]
+if xs not=? [0 24 11 28 2 12] or saved not=? [1 2 3 4 5 6] return 1
+xs[..] .//= 2
+xs[0..0) .+= 99
+xs[[]] .+= 99
+return if xs =? [0 12 5 14 1 6] 42 else 2
+}''',
+    'numeric-broadcast-selection-indices': '''main=()=>{
+let xs=[1 2 3 4] let saved=xs
+let positions=[0 2] xs[positions] .+= [10 20]
+xs[[false true false true]] .*= 3
+let span=[1,3..3] xs[span] .-= 1
+xs[[0 0]] .+= [1 2]
+let empty_mask:array<bool>=[] let empty:array<int64>=[]
+empty[empty_mask] .+= 1 assert(empty.length =? 0)
+return if xs =? [13 5 23 11] and saved =? [1 2 3 4] 42 else 1
+}''',
+    'numeric-broadcast-selection-fixed': '''main=()=>{
+let xs:array<float32 length=4>=[1.0 2.0 3.0 4.0] let saved=xs
+xs[1..] .*= 2.0 xs[[true false false true]] ./= 2.0
+let indexes:array<int64 length=2>=[1 2] xs[indexes] .+= 0.5
+return if xs =? [0.5 4.5 6.5 4.0] and saved =? [1.0 2.0 3.0 4.0] 42 else 1
+}''',
+    'numeric-broadcast-selection-place': '''let rows=[[1 2 3 4]] let index=0 let trace=0
+at=()=>{trace=trace*10+1 return index}
+lower=()=>{trace=trace*10+2 rows[0]=[10 20 30 40] return 1}
+upper=()=>{trace=trace*10+3 return 3}
+right=()=>{trace=trace*10+4 rows.push([99]) index=1 return 10}
+main=()=>{let saved=rows
+rows[at()][lower()..upper()) .+= right()
+return if trace =? 1234 and rows =? [[10 12 13 40] [99]]
+and saved =? [[1 2 3 4]] 42 else 1}''',
+    'numeric-broadcast-selection-growth': '''let xs=[1 2 3]
+right=()=>{xs.push(99) return 10}
+main=()=>{xs[1..] .+= right()
+return if xs =? [1 12 13 99] 42 else 1}''',
+    'numeric-broadcast-selection-selector': '''let xs=[1 2 3] let mask=[true false true]
+indexes=():>array<int64>=>{xs=[100 200 300] return [0 2]}
+right=()=>{mask=[false true false] return 10}
+main=()=>{
+xs[indexes()] .+= 10
+if xs not=? [11 200 13] return 1
+xs[mask] .+= right()
+return if xs =? [21 200 23] and mask =? [false true false] 42 else 2
+}''',
+    'numeric-broadcast-selection-custom': '''Box:type=[rows:array<array<int64>>]
+let trace="" let index=0
+__index__=(box:Box i:int64):>array<int64>=>{trace+="g" return box.rows[i]}
+__setindex__=(@box:Box i:int64 value:array<int64>)=>{trace+="s" box.rows[i]=value}
+at=()=>{trace+="i" return index}
+right=()=>{trace+="r" index=1 return 10}
+main=()=>{let box=Box[[[1 2 3] [4 5 6]]] let saved=box
+box[at()][1..] .+= right()
+return if box.rows =? [[1 12 13] [4 5 6]] and saved.rows =? [[1 2 3] [4 5 6]]
+and trace =? "igrs" 42 else 1}''',
+    'numeric-broadcast-selection-managed': '''work=()=>{
+let xs=["a" "b" "c"] let saved=xs
+xs[0,2..] .+= "!"
+xs[[false true false]] .+= ["?"]
+assert(xs =? ["a!" "b?" "c!"] and saved =? ["a" "b" "c"])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'numeric-broadcast-selection-end': '''main=()=>{
+let xs=[1 2 3 4 5] let saved=xs
+xs[end,end-2..0] .+= 10
+xs[0..end) .*= 2
+return if xs =? [22 4 26 8 15] and saved =? [1 2 3 4 5] 42 else 1
+}''',
     'comprehension-value-arrays': '''main=()=>{
 let empty:array<int64>=[]
 let a=[loop x in empty x*2]
@@ -4694,6 +4767,8 @@ loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
     'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
+    'numeric-broadcast-selection-constant': ('main=()=>{const xs=[1 2] xs[..] .+= 1 return 0}', 'constant'),
+    'numeric-broadcast-selection-mask-constant': ('main=()=>{const xs=[1 2] xs[[true false]] .+= 1 return 0}', 'constant'),
     'gpu-array-cpu-input': ('main=()=>{printl(cpu(gpu([1.0 2.0]) .+ [3.0 4.0]))}',
                             'this array is in CPU memory'),
     'gpu-array-exact-division': ('main=()=>{printl(cpu(gpu([1 2]) ./ 2))}',
@@ -7090,6 +7165,13 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
     ('let a=[1 2 3] let b=[4 5] printl([loop i in [0..a.length) a[i]+b[i]])', 'out of bounds'),
     ('let xs=[1 2] xs .+= [1 2 3]', 'shapes do not match'),
     ('let xs:array<int64 length=1>=[1] xs .+= [1 2]', 'fixed-size array needs 1 elements'),
+    ('let xs=[1 2] xs[0..0] .+= [10 20]', 'values for 1 range indexes'),
+    ('let xs=[1 2] xs[[true false]] .+= [10 20]', 'values for the 1 elements in the mask'),
+    ('let xs=[1 2] xs[[0]] .+= [10 20]', 'values for 1 indexes'),
+    ('let xs=[1 2] xs[0,0..1] .+= 10', 'range step must be nonzero'),
+    ('let xs=[1 2] right=()=>{xs.pop() return 10} xs[..] .+= right()', 'out of bounds'),
+    ('let xs=[1 2] right=()=>{panic("RHS evaluated") return 10} xs[[2]] .+= right()', 'out of bounds'),
+    ('let xs=[1 2] xs[[true]] .+= 10', 'a mask of 1 for 2 elements'),
     ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),
     ('printl(zeros(0 3) .+ zeros(2 3))', 'do not match for an elementwise operation'),
     ('let m=zeros(0 3) printl(m[end 0])', 'out of bounds'),

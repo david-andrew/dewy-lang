@@ -749,8 +749,9 @@ Bounds still evaluate once, from left to right, and are checked before the body.
 When the body can modify the source, iteration keeps the ordinary slice copy.
 Contiguous slices accept the same assignments:
 `values[1..3]=[10 20 30]`, `values[1..3)=[10 20]`, or `values[..]=42`.
-These assignments retain the array's length. Compound updates of selections and
-stepped string slicing are not implemented.
+These assignments retain the array's length. Dotted updates such as
+`values[1..3) .+= 10` also work on slices, stepped ranges, index lists and masks.
+Stepped string slicing is not implemented.
 
 Comprehensions are eager. Nested loops and block bodies work; a final block value
 is collected, while `break`, `continue` and assignment statements do not emit a
@@ -980,9 +981,24 @@ assert(saved =? [1.0 2.0 3.0])
 
 Updates retain the destination's type; their result must fit it. Broadcasting
 may change a dynamic matrix's shape, while fixed-size arrays check the resulting
-length. Array slices and selections currently require an explicit read and
-assignment (`xs[range] = xs[range] .+ amount`). Dotted prefix operators remain
-unsupported.
+length. Ordinary and fixed arrays also support dotted selection updates:
+
+```dewy
+positions[1..end] .+= 0.5
+positions[[true false true]] .*= 2.0
+```
+
+Receiver indices and selectors evaluate once before the right side. Selected
+values come from the original array; writeback reacquires the destination if the
+right side resizes it. Open range endpoints are fixed before that right side
+runs, and the result must have exactly the selected length. Repeated indices
+read the same original value and write in selection order, with the last write
+winning. Saved copies remain independent. These operations allocate the selected
+values and result; an otherwise unique destination does not need a full-array
+copy merely to keep the temporary input snapshot alive.
+
+Matrix slices still require an explicit read and assignment. Dotted prefix
+operators remain unsupported.
 
 Put a range in its own brackets when selecting axes:
 

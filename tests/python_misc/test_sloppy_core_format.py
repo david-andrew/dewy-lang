@@ -63,6 +63,7 @@ PROGRAMS = {
 main=()=>{
 let xs=[1.0 4.0 9.0]
 xs .+=1.0 xs .*=2.0
+xs[1..end] .+=0.5 xs[[true false true]] .*=2.0
 printl(square.(sqrt.(xs) .+ 1.0))
 printl(reshape([1 2 3 4] 2 2) .* [10 20])
 printl([1 2 3] .not<=? 2)

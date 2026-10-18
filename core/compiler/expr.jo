@@ -6348,12 +6348,7 @@ dewy_index_end = (source: int, pos: int) -> int:
 
 # A stepped slice computes its default endpoint from the captured receiver's
 # size. Calls retain normal left-to-right operand evaluation and value snapshots.
-dewy_array_slice = (index: int, value: int = 0) -> int:
-    pos = nodes[index].pos
-    r = int(nodes[index].b)
-    base = int(nodes[index].a)
-    add_flag(base, NF_CHECKED)
-    if value != 0: add_flag(base, NF_MUT)
+dewy_slice_args = (r: int, pos: int) -> int[]:
     first = int(nodes[r].a)
     second = int(nodes[r].c)
     if first == 0: first = bc_int(0, pos)
@@ -6366,7 +6361,14 @@ dewy_array_slice = (index: int, value: int = 0) -> int:
     bounded = mk(.bool_lit, pos)
     nodes[bounded].ival = if last != 0: 1 else: 0
     if last == 0: last = bc_int(0, pos)
-    args = [base, first, second, last, inclusive, bounded, stepped]
+    [first, second, last, inclusive, bounded, stepped]
+
+dewy_array_slice = (index: int, value: int = 0) -> int:
+    pos = nodes[index].pos
+    base = int(nodes[index].a)
+    add_flag(base, NF_CHECKED)
+    if value != 0: add_flag(base, NF_MUT)
+    args = [base] + dewy_slice_args(int(nodes[index].b), pos)
     if value != 0: args.push(value)
     if value != 0: return dewy_array_selection_call("__dewy_put_slice", args, prune(ntype(base)), pos)
     dewy_array_selection_call("__dewy_pick_slice", args, prune(ntype(base)), pos)
