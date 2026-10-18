@@ -398,6 +398,21 @@ was essentially flat: self-build 1821 → 1806 ms CPU and the fixed conformance
 bundle 839 → 841 ms. This change is retained for runtime improvement, with no
 compilation-throughput gain claimed.
 
+Editor checks now stop while running when their request is cancelled, their
+document changes or closes, or the editor disconnects/shuts down. This adapts
+Sloppy's `ef76b155b2eb968b0d78bf0c63e1bda4db56fbaf` cancellation work, with
+nonblocking framed input, parsed envelope matching and preserved active-request
+JSON state. Interrupted results do not replace diagnostics or reference caches;
+completion restores its temporary source edits. Child processes are terminated
+and reaped on both POSIX and Windows. Cancellation polls at most every 50 ms
+on POSIX (Windows already polls every 5 ms); these are polling intervals, not
+an end-to-end latency guarantee. All 89 local editor checks passed in 53.39 s.
+The portable protocol regression waits until a deliberately delayed checker
+starts, then requires cancellation within 1.5 s instead of its 3 s delay. It
+also covers request IDs with escapes/Unicode, numeric versus string IDs,
+rename errors, changed versions, disconnects, and fragmented headers/bodies.
+The native-host CI selection includes this regression on every supported host.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
