@@ -1,0 +1,40 @@
+{
+  "source_identity": "23ad09c51506e75dc3b401bf1b4653c0b6a3a026504643e22c991dfd7830c9a6",
+  "binary": "build-1792291960681806017/bin/dewy-core",
+  "binary_sha256": "8c1dc898dd1307b11a7d954ae262c4f19f6e5e8455ff6b44219552b1bb5d456b",
+  "validation": {
+    "focused": "330 passed in 7.43s",
+    "quick": "149 passed in 4.11s",
+    "full_independent_c_gate": "Hosted CI for this increment; previous inline-array commit passed hosted C bootstrap.",
+    "ruff": "Passed, excluding pre-existing FURB167/RUF007 in test file",
+    "diff_check": "passed"
+  },
+  "coverage": [
+    "Native/WebAssembly default/release",
+    "Inclusive/exclusive/open/empty contiguous slices",
+    "Bounds with source mutation and managed value snapshots",
+    "Slice loop lifetimes, temporary receivers, counted/zipped loops",
+    "One-result-allocation budget for contiguous scalar slices",
+    "Stepped/index/mask/stored-range selections",
+    "Spread inference, narrow expected types and generic fixed parameters",
+    "Wrong-length spreads, negative/oversize/reversed bounds",
+    "Slice assignment rejected instead of modifying a temporary"
+  ],
+  "compile_paired_cpu_ratios": {
+    "compile": {
+      "tour": 1.0344185353497732,
+      "dunes": 1.0453166454139429,
+      "compiler": 1.0576381857869346
+    },
+    "compile-repeat": {
+      "dunes": 1.004091103945725,
+      "compiler": 0.9928951751428005
+    }
+  },
+  "limits": [
+    "No compile-speed claim: runs vary with shared host load. Both sample sets retained.",
+    "Stepped/indexed selections and fixed-array spreads currently materialize an ordinary array.",
+    "Contiguous slices capture inline storage before bound evaluation; large inline snapshots still copy inline bytes.",
+    "Updating fixed-array selections remains unsupported; individual elements can be updated."
+  ]
+}

@@ -3044,7 +3044,9 @@ gen_slice_bounds = (e: int, p: int) -> (int, int):
     if nodes[r].b != 0:
         hi = gen_expr(int(nodes[r].b)).v
         if has_flag(r, NF_INCLUSIVE): hi = e_addi(hi, 1)
-    else: hi = arr_len(p)
+    else:
+        bt = prune(ntype(int(nodes[e].a)))
+        hi = if types[bt].kind == .fixed: e_iconst(fixed_len(bt)) else: arr_len(p)
     (lo, hi)
 
 gen_slice = (e: int) -> Val:
@@ -3059,7 +3061,10 @@ gen_slice = (e: int) -> Val:
     lo, hi = gen_slice_bounds(e, p)
     if types[bt].kind == .str_: return V(e_call(rt("__str_slice"), [p, lo, hi], VI), true)
     et = int(types[bt].elem)
-    q = e_call(rt("__arr_slice"), [p, lo, hi, e_iconst(tsize(et))], VI)
+    q = 0
+    if types[bt].kind == .fixed:
+        q = e_call(rt("__fixed_slice"), [p, e_iconst(fixed_len(bt)), lo, hi, e_iconst(tsize(et))], VI)
+    else: q = e_call(rt("__arr_slice"), [p, lo, hi, e_iconst(tsize(et))], VI)
     if is_managed(et): retain_elems(q, et)
     V(q, true)
 
@@ -4338,11 +4343,11 @@ gen_for = (s: int):
         # (iterating a variable the loop does not change needs no snapshot of it: the loop
         # borrows the array, with no reference counting)
         it = int(nodes[s].a)
-        sliced = aux == 1 and types[ct].kind == .array and nodes[it].kind == .index and nodes[it].aux == 1
+        sliced = aux == 1 and types[ct].kind == .array and is_slice(it) and tkind(ntype(int(nodes[it].a))) == .array
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not sliced and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
+        borrowed = not sliced and not is_slice(it) and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.

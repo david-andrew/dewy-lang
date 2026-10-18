@@ -1237,6 +1237,44 @@ source=()=>{calls+=1 return [20 22]}
 make=():>Pair=>source()
 main=()=>{let pair=make() let [a b]=pair
 return if calls =? 1 a+b else 1}''',
+    'fixed-array-slices': '''main=()=>{let values:array<int64 length=4>=[10 11 12 9]
+let middle=values[1..3) let tail=values[2..] let empty=values[2..2)
+if middle not=? [11 12] or tail not=? [12 9] or empty.length not=? 0 return 1
+let whole=values[..] whole[0]=99
+return if values[0] =? 10 and values[0..1] =? [10 11] and values[1..end] =? [11 12 9] 42 else 2}''',
+    'fixed-array-selections': '''main=()=>{let values:array<int64 length=4>=[10 11 12 9]
+let backwards=values[end,end-1..0] let odds=values[1,3..]
+let picked=values[[3 0 3]] let masked=values[[true false true false]]
+let selection=[0,2..3] let selected=values[selection]
+return if backwards =? [9 12 11 10] and odds =? [11 9] and picked =? [9 10 9]
+and masked =? [10 12] and selected =? [10 12] 42 else 1}''',
+    'fixed-array-slice-snapshots': '''Pair:type=array<array<int64> length=2>
+let values:Pair=[[20] [22]] let calls:int64=0
+bound=()=>{calls+=1 values[0][0]=99 values[1].push(5) return 2}
+main=()=>{let slice=values[0..bound())
+slice[0].push(1)
+return if calls =? 1 and slice[0] =? [20 1] and slice[1] =? [22]
+and values[0] =? [99] and values[1] =? [22 5] 42 else 1}''',
+    'fixed-array-slice-loops': '''Pair:type=array<array<int64> length=2>
+make=():>Pair=>[[20] [22]]
+work=()=>{let total:int64=0 loop value in make()[..] {total+=value[0]}
+let values=make() loop i in 0.. and value in values[..] {if value[0] not=? values[i][0] return 1}
+loop value in values[..] and expected in [20 22] {if value[0] not=? expected return 2}
+return total}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}''',
+    'fixed-array-slice-allocation': '''main=()=>{let values:array<int64 length=4>=[10 11 12 9]
+let before=alloc_count() let selected=values[1..3)
+return if alloc_count() =? before+1 and selected =? [11 12] 42 else 1}''',
+    'fixed-array-spread-context': '''sum=(values:array<uint8 length=2>)=>(values[0] as int64)+(values[1] as int64)
+first=<T>(values:array<T length=2>):>T=>values[0]
+main=()=>{let pair:array<uint8 length=2>=[20 22]
+let values:array<uint8 length=3>=[pair... 99]
+let dynamic=[pair...] dynamic[0]=0
+let zeros:array<int64 length=2>=[]
+return if values[2] =? 99 and pair[0] =? 20 and zeros[0]+zeros[1] =? 0
+and first([pair...]) =? 20 sum([[]... 20 22]) else 1}''',
     'fixed-array-cleanup': '''Pair:type=array<array<int64> length=2>
 work=()=>{let pair:Pair=[[20] [22]] let copy=pair copy[0].push(1)
 let values:array<Pair>=[pair copy] values[0][1][0]=0
@@ -3698,6 +3736,7 @@ ERRORS = {
     'fixed-array-unpack-length': ('main=()=>{let values:array<int64 length=2>=[20 22] let [a b c]=values return 42}', 'exactly 3 elements'),
     'fixed-array-zero-length': ('main=()=>{let values:array<int64 length=0>=[] return 42}', 'at least 1'),
     'fixed-array-grow': ('main=()=>{let values:array<int64 length=2>=[20 22] values.push(0) return 42}', 'fixed size'),
+    'fixed-array-slice-assignment': ('main=()=>{let values:array<int64 length=2>=[20 22] values[..]=[0 0] return 42}', 'cannot assign to a fixed-array slice'),
     'fixed-array-mutable-conversion': ('change=(@xs:array<int64 length=2>)=>{xs[0]=42}\nmain=()=>{let xs=[20 22] change(@xs) return 42}', 'exact match'),
     'fixed-array-unknown-constraint': ('main=()=>{let values:array<int64 capacity=2>=[20 22] return 42}', 'length=N'),
     'record-spread-set': ('main=()=>{let values=set[1] let record=[values... answer=42] return 42}', 'only records can be spread into a record'),
@@ -5786,6 +5825,10 @@ def test_core_unpack_errors(error_batches, body, target, release):
     ('let input=[20 22 99] printl(input as array<int64 length=2>)', 'fixed-size array needs 2 elements'),
     ('let input:array<string>=[] let pair:array<string length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),
     ('let rows:array<array<int64 length=2>>=[] printl(rows[args().length].length)', 'out of bounds'),
+    ('let values:array<int64 length=2>=[20 22] let stop=args().length+3 printl(values[0..stop))', 'slice'),
+    ('let values:array<int64 length=2>=[20 22] printl(values[2..1))', 'slice'),
+    ('let values:array<int64 length=2>=[20 22] let first=0-args().length-1 printl(values[first..1))', 'slice'),
+    ('let values:array<uint8 length=2>=[20 22] let triple:array<uint8 length=3>=[values...] printl(triple)', 'fixed-size array needs 3 elements'),
 ])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])

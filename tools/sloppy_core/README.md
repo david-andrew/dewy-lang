@@ -1153,3 +1153,17 @@ with two workers. New checks run natively and on WebAssembly in default/release
 modes, including managed-value cleanup, runtime shape failures, generic context,
 side effects and mutable-argument rejection. See `fixed-array-*` source-core
 audits for raw measurements and validation.
+
+Inline arrays now compose with contiguous read slices, stepped selections,
+index arrays, masks and stored ranges. Contiguous slices copy only the selected
+range into one growable result; they retain a snapshot before bound expressions
+run. Stepped/indexed selections currently convert through the ordinary array
+helpers. Fixed-array slices used in loops own their result through the loop,
+including managed values and temporary receivers. Slice assignment is rejected
+with guidance to update individual elements.
+
+Spread literals infer their element type from inline operands and accept fixed
+array contexts, including narrow integers and generic parameters. The existing
+runtime shape check handles an expanded literal of the wrong length. See
+`fixed-slice-*` audits for focused native/web checks, allocation cleanup and
+invalid bounds; the full independent C-bootstrap gate runs in hosted CI.

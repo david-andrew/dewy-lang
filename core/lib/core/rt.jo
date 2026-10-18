@@ -711,6 +711,16 @@ __arr_slice = (p: *u8, a: int, b: int, es: int) -> *u8:
     mem_copy(q + 24, p + 24 + a * es, (b - a) * es)
     q
 
+# Inline storage has no header; copy only the selected elements into a growable
+# result. The compiler retains managed elements after this raw copy.
+__fixed_slice = (data: *u8, n: int, a: int, b: int, es: int) -> *u8:
+    if a < 0 or b > n or a > b: __panic_slice("slice", a, b, n)
+    if a == b: return null
+    q = __arr_new_raw(b - a, es)
+    (q as *int)[1] = b - a
+    mem_copy(q + 24, data + a * es, (b - a) * es)
+    q
+
 __arr_concat = (a: *u8, b: *u8, es: int) -> *u8:
     na = 0
     nb = 0

@@ -614,6 +614,7 @@ check_place = (n: int, for_mut: bool):
         bk = types[bt].kind
         if bk == .ptr: return
         if bk == .str_: fatal(nodes[n].pos, "a string's characters cannot be changed in place: make a new string, `s = s[..i) + \"x\" + s[i + 1..]`, or change `cs = chars(s)` and `join(cs)` it back")
+        if bk == .fixed and nodes[n].aux == 1: fatal(nodes[n].pos, "cannot assign to a fixed-array slice; update elements by index")
         cp_inner += 1
         if bk == .vec or bk == .fixed:
             check_place(int(nodes[n].a), for_mut)
@@ -990,7 +991,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 target = prune(int(types[target].elem))
                 cost = 2
             tk = types[target].kind
-            if tk == .array or (tk == .fixed and fixed_literal_ok(a, target)):
+            if tk == .array or (tk == .fixed and (fixed_literal_ok(a, target) or array_has_spread(a))):
                 et = int(types[target].elem)
                 loop element in kids(a):
                     ep = et
@@ -3506,6 +3507,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         source = last_checked
         add_flag(source, NF_CHECKED)
         if is_dewy_set_type(source_type): source = bc_call("__dewy_set_values", [source], nodes[source].pos)
+        if types[source_type].kind == .fixed and has_var(int(types[t].elem)):
+            unify(int(types[t].elem), int(types[source_type].elem))
         expanded = [args[0], source]
         arg_type(expanded, 1, t)
         set_list(n, expanded)
@@ -5303,7 +5306,7 @@ check_expr = (n: int, expected: int) -> int:
         bk = types[bt].kind
         b = int(nodes[n].b)
         if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP):
-            if bk != .array: fatal(nodes[n].pos, "stepped slicing requires an array")
+            if bk != .array and bk != .fixed: fatal(nodes[n].pos, "stepped slicing requires an array")
             nodes[n].a = i32(last_checked)
             call = dewy_array_slice(n)
             nodes[n] = nodes[call]
@@ -5369,9 +5372,10 @@ check_expr = (n: int, expected: int) -> int:
                 check_to(int(nodes[b].b), T_INT)
                 neg_index_check(int(nodes[b].b))
             nodes[b].type = i32(T_RANGE)
-            if bk != .array and bk != .str_: fatal(nodes[n].pos, "cannot slice {type_str(bt)}")
+            if bk != .array and bk != .fixed and bk != .str_: fatal(nodes[n].pos, "cannot slice {type_str(bt)}")
             nodes[n].aux = 1
             t = bt
+            if bk == .fixed: t = mk_array(int(types[bt].elem))
         else if b == 0 and nkids(n) > 0 and bk == .struct_:
             # m[i, j]: the `[]` operator with several indexes
             call = mk(.call, nodes[n].pos)
@@ -5387,7 +5391,7 @@ check_expr = (n: int, expected: int) -> int:
         else:
             if b == 0: fatal(nodes[n].pos, "invalid index")
             if (bk == .array or bk == .str_) and nodes[b].kind == .int_lit: neg_index_check(b)
-            if bk == .array:
+            if bk == .array or bk == .fixed:
                 pick = index_array_fn(b, "__pick")
                 if len(pick) > 0:
                     # xs[mask], xs[idxs]: the elements picked, as an array
@@ -5399,11 +5403,8 @@ check_expr = (n: int, expected: int) -> int:
                     return t
                 check_to(b, T_INT)
                 t = int(types[bt].elem)
-            else if bk == .fixed:
-                check_to(b, T_INT)
-                t = int(types[bt].elem)
                 ib = int(nodes[n].b)
-                if nodes[ib].kind == .int_lit and (nodes[ib].ival < 0 or nodes[ib].ival >= fixed_len(bt)): fatal(nodes[ib].pos, "index {nodes[ib].ival} is out of bounds for {type_str(bt)}")
+                if bk == .fixed and nodes[ib].kind == .int_lit and (nodes[ib].ival < 0 or nodes[ib].ival >= fixed_len(bt)): fatal(nodes[ib].pos, "index {nodes[ib].ival} is out of bounds for {type_str(bt)}")
             else if bk == .str_:
                 check_to(b, T_INT)
                 t = T_U8
@@ -5566,6 +5567,7 @@ check_expr = (n: int, expected: int) -> int:
         nodes[d].name = i32(acc)
         nodes[d].b = i32(mk(.array, pos))
         if ex != 0 and exk == .array: nodes[d].a = i32(type_node_of(ex, pos))
+        if ex != 0 and exk == .fixed: nodes[d].a = i32(type_node_of(mk_array(int(types[ex].elem)), pos))
         stmts.push(d)
         loop i in [0..nkids(n)):
             c = kid(n, i)

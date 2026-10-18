@@ -465,6 +465,16 @@ Both conversions require the same element type and also support `as` casts.
 Mutable arguments require the exact array type, so conversion cannot silently
 redirect a mutation into a temporary copy.
 
+Inline arrays also support read slices (`pair[..]`, `pair[1..]`), stepped
+selections, index lists, masks and stored ranges. Their results are growable
+arrays with independent values. A contiguous slice allocates only its result;
+stepped and indexed selections currently use the growable-array helpers.
+Bounds evaluate after capturing the source value, so changing the source in a
+bound expression does not change the value being sliced. To update an inline
+array, assign individual elements; assignment to its slices is not yet supported.
+Spreading inline arrays into ordinary arrays works, and a spread literal can
+initialize a fixed array with a runtime length check: `let pair:Pair<int64>=[xs...]`.
+
 Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before
 the next operand runs. The result has independent value semantics, including
