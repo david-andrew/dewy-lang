@@ -39,7 +39,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.1.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -797,7 +797,10 @@ web_save_name_check = ():
         nm = name_of(int(nodes[d].name))
         if nm == "save_data" or nm == "save_value":
             at = -1
+            hint = "give it a name of its own: `build:` and `name = \"Drone Arena\"` below it"
             loop m in modules:
-                if m.is_main: at = mkpos(int(m.file), 0)
-            warn(at, "this web page saves under the name '{program_name}' (its file's): pages on one site, as itch.io's, share their storage, so give it a name of its own: `build:` and `name = \"Drone Arena\"` below it")
+                if m.is_main:
+                    at = mkpos(int(m.file), 0)
+                    if files[int(m.file)].is_dewy: hint = "choose a distinct .dewy source filename before publishing, and keep it the same for native and web builds"
+            warn(at, "this web page saves under the name '{program_name}' (its file's): pages on one site, as itch.io's, share their storage, so {hint}")
             return

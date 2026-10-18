@@ -2,14 +2,23 @@
 use 'util.jo'
 
 new_usage = ():
-    eprint("usage: dewy-core new <directory> [game|program] (game is the default)")
+    eprint("usage: dewy-core new <directory> [game|online|program] (game is the default)")
     exit(2)
+
+new_online_name = (dir: str) -> str:
+    name = ""
+    loop c in file_name(abs_path(dir)).lower():
+        if is_alnum(c) or c == '_': name += byte_str(c)
+        else if len(name) > 0 and name[len(name) - 1] != '-': name += "-"
+    loop len(name) > 0 and name[len(name) - 1] == '-': name = name[..len(name) - 1)
+    if len(name) == 0: name = "online"
+    name + ".dewy"
 
 new_project = (lib: str, a: str[]):
     if a.len() < 3 or a.len() > 4 or starts_with(a[2], "-"): new_usage()
     kind = "game"
     if a.len() == 4: kind = a[3]
-    if kind != "game" and kind != "program":
+    if kind != "game" and kind != "online" and kind != "program":
         eprint("dewy-core: no template '{kind}'")
         new_usage()
     dir = a[2]
@@ -21,11 +30,14 @@ new_project = (lib: str, a: str[]):
     if len(src) == 0:
         eprint("dewy-core: cannot read {template}")
         exit(1)
-    readme = "# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core main.dewy\ndewy-core check main.dewy\ndewy-core watch main.dewy\ndewy-core build main.dewy -o main\n```\n"
-    if kind == "game":
-        readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build main.dewy --target wasm -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
+    entry = if kind == "online": new_online_name(dir) else: "main.dewy"
+    readme = "# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core {entry}\ndewy-core check {entry}\ndewy-core watch {entry}\ndewy-core build {entry} -o main\n```\n"
+    if kind != "program":
+        readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build {entry} --target wasm -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
+    if kind == "online":
+        readme += "\n## Play together\n\nPractice plays locally. Invite a friend shares a code; the friend pastes it into\nJoin a friend and sends the displayed reply back. Set WEB_PAGE in {entry} to\nyour hosted web build so native invitations can share a browser link.\n\nFor short room codes with no reply to copy, configure MATCH_SERVER in the source\nor run `DEWY_MATCH_SERVER=ws://your-server:7700 ./main`. Browser pages accept\n`?server=ws://your-server:7700`; HTTPS pages need a wss:// service. The Dewy\nrepository includes tools/sloppy_core/rendezvous.jo and setup instructions in\nexamples/sloppy_core/README.md. No public server is configured by default.\n\nKeep {entry}'s filename the same in native and web builds: it is PROGRAM_NAME,\nwhich scopes saved data and room names. Choose a distinct name before publishing.\nThe tick function consumes ordinary Game and Pad values; rollback replays it,\nso keep clocks, live input and unseeded randomness outside it.\n"
     make_dirs(dir)
-    if not write_file("{dir}/main.dewy", src) or not write_file("{dir}/README.md", readme) or not write_file("{dir}/.gitignore", "/main\n/main.exe\n/main.html\n/main.zip\n"):
+    if not write_file("{dir}/{entry}", src) or not write_file("{dir}/README.md", readme) or not write_file("{dir}/.gitignore", "/main\n/main.exe\n/main.html\n/main.zip\n"):
         eprint("dewy-core: cannot write the project in {dir}")
         exit(1)
-    print("Created {dir}/main.dewy. See {dir}/README.md to run, check and build it.")
+    print("Created {dir}/{entry}. See {dir}/README.md to run, check and build it.")

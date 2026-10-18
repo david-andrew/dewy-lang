@@ -181,6 +181,10 @@ not repeated build medians. See the restart audit for evidence and limitations.
 For a smaller starting point, run `dewy-core new my-game`, then
 `dewy-core watch my-game/main.dewy`. The generated README includes native and web
 build commands. `dewy-core new my-program program` starts a terminal program.
+`dewy-core new coin-race online` creates a playable multiplayer starter with
+practice mode, deterministic rollback ticks, and invite/room screens. Run
+`dewy-core watch coin-race/coin-race.dewy`; its generated README covers sharing
+native and browser builds.
 
 The physics model gate checks gravity, dragging, joint/body removal and independent
 world copies on both targets and in both modes. The browser was also exercised

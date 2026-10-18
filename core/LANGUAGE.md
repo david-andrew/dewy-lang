@@ -50,6 +50,14 @@ function. `--release` adds cross-function inlining and further loop optimization
 Use `-g` without `--release` for native variable debugging; it preserves local
 variable locations instead of running the default local optimization pass.
 
+`dewy-core new coin-race online` creates a playable two-player game in
+`coin-race/coin-race.dewy`, with practice mode, rollback networking and invite
+screens. The online template derives a safe source filename from the directory
+name; keep it the same for native and web builds because it names saved data and
+rooms. Other templates use `main.dewy`. Run `dewy-core watch coin-race/coin-race.dewy`
+to start editing. Its generated README explains web links and the optional
+matchmaking service; no public server is configured by default.
+
 Native game reload keeps unrelated live state. Changed assets refresh globals
 initialized from them, including through direct helper calls across modules.
 Closures keep their captured state when assets used by their bodies change.

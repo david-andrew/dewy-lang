@@ -231,7 +231,7 @@ def room_binaries(compiler, tmp_path_factory, request):
     server, game = work / 'rendezvous', work / 'room_game'
     build(compiler, ROOT / 'tools/sloppy_core/rendezvous.jo', server, request.param)
     build(compiler, ROOT / 'core/tests/room_game.jo', game, request.param)
-    return server, game
+    return server, game, request.param
 
 
 @contextmanager
@@ -332,3 +332,71 @@ def test_core_room_fragmented_messages(room_binaries, tmp_path):
         assert receive(2) == b'\x8a\x00'
         frame(0x80, b'x' * 3000)
         assert peer.recv(1) == b''
+
+
+def test_core_online_starter_room(compiler, room_binaries, tmp_path):
+    project = tmp_path / 'race'
+    made = subprocess.run([compiler, 'new', project, 'online'], capture_output=True,
+                          text=True, timeout=5, check=False, env=environment())
+    assert made.returncode == 0, made.stdout + made.stderr
+    path = project / 'race.dewy'
+    source = path.read_text().replace('1280 720)', '320 200)')
+    start, end = source.index('my_pad=()'), source.index('update=(dt:float64)')
+    source = source[:start] + 'my_pad=():>Pad=>Pad[x=if me()=?0 1 else -1]\n\n' + source[end:]
+    source = source.replace('update=(dt:float64)=>{', 'advance_game=(dt:float64)=>{')
+    source += '''
+import rtc
+rtc.rtc_stun_servers=[]
+if env("ROLE")=?"host" invite.start(reliable=false)
+let wrote=false
+let reported=-1.0
+let started=time()
+update=(dt:float64)=>{
+    advance_game(dt)
+    if not wrote and invite.__inv_room_state=?"open" {
+        printl("room {invite.room_code()}") wrote=true
+    }
+    if mode=?Mode.online and reported<?0.0 and session.tick>?60 and session.confirmed()>?60 {
+        if session.desync>=?0 {printl("desync") exit(1)}
+        let snapshot=session.__states[60]
+        if snapshot.players[0].pos not=?vec2(748 360) or snapshot.players[1].pos not=?vec2(532 360) {
+            printl("wrong movement: {to_json(snapshot)}") exit(3)
+        }
+        printl("state {to_json(snapshot)}")
+        reported=time()
+    }
+    if reported>?0.0 and time()-reported>?0.25 quit()
+    if time()-started>?10.0 {printl("timeout") exit(2)}
+}
+'''
+    path.write_text(source)
+    binary = project / 'main'
+    build(compiler, path, binary, room_binaries[2])
+    processes = []
+    with room_server(room_binaries[0], tmp_path) as port:
+        def start_peer(role, room=''):
+            env = environment()
+            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', SLOPPY_SOFTWARE='1',
+                       SLOPPY_THREADS='1', SLOPPY_FRAMES='900', ROLE=role,
+                       ROOM=room, XDG_DATA_HOME=str(tmp_path / role))
+            process = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True)
+            processes.append(process)
+            return process
+
+        try:
+            host = start_peer('host')
+            with selectors.DefaultSelector() as selector:
+                selector.register(host.stdout, selectors.EVENT_READ)
+                assert selector.select(10), 'starter host did not open a room'
+            line = host.stdout.readline().strip()
+            assert line.startswith('room '), line
+            start_peer('guest', line.split()[1])
+            outputs = [p.communicate(timeout=15) for p in processes]
+            for process, (out, err) in zip(processes, outputs, strict=True):
+                assert process.returncode == 0, out + err
+            assert outputs[0][0].startswith('state '), outputs
+            assert outputs[0][0] == outputs[1][0], outputs
+        finally:
+            for process in processes:
+                stop(process)

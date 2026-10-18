@@ -175,7 +175,7 @@ fail the batch. Exact-number, range and bounds panic checks share builds but exe
 case in a fresh process, retaining its own exit status and diagnostic. Compiler
 diagnostic, editor, watch and game integration checks keep their dedicated processes.
 
-`check file.dewy` and `lsp` use the same compiler as `build`. `new <directory> [game|program]` creates a Dewy starting point with build/run
+`check file.dewy` and `lsp` use the same compiler as `build`. `new <directory> [game|online|program]` creates a Dewy starting point with build/run
 instructions. `watch` reruns terminal programs and reloads native game code in
 place. Imported-module edits, recovery from compiler errors, and preserving live
 state through a record layout change are covered by the gate. A changed global

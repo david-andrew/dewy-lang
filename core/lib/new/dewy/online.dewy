@@ -1,0 +1,140 @@
+# A two-player coin race with rollback networking, or practice on your own.
+# Adapted from Sloppy's MIT-licensed lib/new/online.jo; see the toolchain LICENSE.
+# Move with arrows/WASD, a gamepad, or held mouse/touch input. First to 10 wins.
+# Keep the source filename the same for native and web builds: it names the game.
+import net
+import netplay
+import invite
+
+const SPEED=6.0
+const WIN=10
+const WEB_PAGE=""       # Hosted web build: native invites can link to it.
+const MATCH_SERVER=""   # Optional room service; DEWY_MATCH_SERVER overrides it.
+
+Pad:type=[x:int64=0 y:int64=0]
+Player:type=[pos:vec2 score:int64=0]
+Game:type=[
+    players:array<Player>=[Player[pos=vec2(400 360)] Player[pos=vec2(880 360)]]
+    coin:vec2=vec2(640 200)
+    taken:int64=0
+    winner:int64=-1
+]
+
+# Everything a replayed tick needs comes from its values, including coin placement.
+# Input, clocks and rendering stay outside this function.
+tick=(state:Game pads:array<Pad>):>Game=>{
+    let next=state
+    if next.winner>=?0 return next
+    loop i in [0..2) {
+        let p=next.players[i].pos+vec2(f32(pads[i].x) f32(pads[i].y))*f32(SPEED)
+        next.players[i].pos=vec2(clamp(p.x 20 1260) clamp(p.y 20 700))
+        if length(next.players[i].pos-next.coin)<?34.0 {
+            next.players[i].score+=1
+            next.taken+=1
+            next.coin=vec2(f32(100+int64(hash(next.taken*2)%1080)) f32(100+int64(hash(next.taken*2+1)%520)))
+            if next.players[i].score>=?WIN next.winner=i
+        }
+    }
+    return next
+}
+
+# Connection and presentation state is separate from the rollback snapshot.
+let Mode=[menu=0 online=1 practice=2]
+let mode=Mode.menu
+let session=netplay.session(Game[] tick players=2 me=0)
+let friend=-1
+let practice=Game[]
+let spare=0.0
+let status=""
+let colors=[rgb(0.35 0.7 1.0) rgb(1.0 0.6 0.3)]
+
+begin=(connection:invite.Invited)=>{
+    friend=connection.peer
+    let player=if connection.inviter 0 else 1
+    session=netplay.session(Game[] tick players=2 me=player)
+    let peers=[-1 -1]
+    peers[1-player]=friend
+    session.over(peers)
+    spare=0.0
+    status=""
+    mode=Mode.online
+}
+
+leave=()=>{
+    if friend>=?0 net.close(friend)
+    friend=-1
+    mode=Mode.menu
+}
+
+game=():>Game=>if mode=?Mode.online session.state else practice
+me=():>int64=>if mode=?Mode.online session.me else 0
+
+my_pad=():>Pad=>{
+    let axis=input_axis()
+    let pad=Pad[x=int64(round(float64(axis.x))) y=int64(round(float64(axis.y)))]
+    if mouse_down(Mouse.left) {
+        let d=mouse_pos()-game().players[me()].pos
+        if abs(d.x)>?8.0 pad.x=int64(sign(float64(d.x)))
+        if abs(d.y)>?8.0 pad.y=int64(sign(float64(d.y)))
+    }
+    return pad
+}
+
+update=(dt:float64)=>{
+    loop event in net.receive() {
+        if event.kind=?net.NetKind.left and event.peer=?friend {
+            status="Your friend left."
+            friend=-1
+            mode=Mode.menu
+        }
+    }
+    if mode=?Mode.menu return
+    if key_pressed(Key.escape) {leave() return}
+    spare=min(spare+dt 0.1)
+    loop spare>=?1.0/60.0 {
+        spare-=1.0/60.0
+        if mode=?Mode.online session.play(my_pad())
+        else practice=tick(practice [my_pad() Pad[]])
+    }
+}
+
+draw_menu=()=>{
+    if invite.active() {
+        let connection=invite.screen("Coin race" WEB_PAGE)
+        if connection not=? none begin(connection)
+        return
+    }
+    text_centered("COIN RACE" vec2(640 170) 80 colors[0])
+    ui_begin("menu" vec2(640 300))
+    if ui_button("Invite a friend") invite.start(reliable=false)
+    if ui_button("Join a friend") invite.join()
+    if ui_button("Practice") {practice=Game[] spare=0.0 mode=Mode.practice}
+    ui_end()
+    text_centered("Arrows / WASD, gamepad, or touch. First to 10 coins wins." vec2(640 600) 22 gray(0.7))
+    if status.length>?0 text_centered(status vec2(640 560) 22 gray(0.7))
+}
+
+draw=()=>{
+    clear(rgb(0.07 0.08 0.11))
+    if mode=?Mode.menu {draw_menu() return}
+    let state=game()
+    circle(state.coin 14 rgb(1.0 0.85 0.3))
+    loop i in 0.. and player in state.players {
+        circle(player.pos 20 colors[i])
+        if i=?me() ring(player.pos 26 2 WHITE)
+    }
+    text("{state.players[0].score}" vec2(40 30) 48 colors[0])
+    text_centered("{state.players[1].score}" vec2(1220 54) 48 colors[1])
+    if state.winner>=?0 {
+        text_centered(if state.winner=?me() "You won" else "You lost" vec2(640 330) 72)
+        text_centered("Leave to return to the menu" vec2(640 400) 24 gray(0.7))
+    }
+    if mode=?Mode.online and session.waiting and session.silent(1-session.me)>?1.0 {
+        text_centered("Waiting for your friend..." vec2(640 660) 24 gray(0.7))
+    }
+    if hud_button(Rect(1150 660 110 40) "Leave") leave()
+}
+
+window("Dewy / Coin race" 1280 720)
+invite.server(MATCH_SERVER)
+invite.from_link()

@@ -7036,13 +7036,13 @@ def test_core_cli_identity(compiler):
     assert result.returncode == 0 and 'file.dewy' in result.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'program'])
+@pytest.mark.parametrize('kind', ['game', 'online', 'program'])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
                           text=True, timeout=5, check=False)
     assert made.returncode == 0, made.stdout + made.stderr
-    source = project / 'main.dewy'
+    source = project / ('project-with-spaces.dewy' if kind == 'online' else 'main.dewy')
     assert source.is_file() and (project / 'README.md').is_file()
     assert not list(project.glob('*.jo'))
     binary = project / 'main'
@@ -7061,6 +7061,54 @@ def test_core_new_project(compiler, tmp_path, kind):
                                capture_output=True, text=True, timeout=30, check=False)
         assert built.returncode == 0, built.stdout + built.stderr
         assert (project / 'main.html').is_file()
+        if kind == 'online':
+            assert 'distinct .dewy source filename' in built.stderr
+            assert '`build:`' not in built.stderr
+
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_online_starter_model(compiler, tmp_path, target, release):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/online.dewy'
+    model = template.read_text().split('# Connection and presentation state', 1)[0]
+    body = model + """
+main=()=>{
+    let original=Game[]
+    let moving=tick(original [Pad[x=1 y=-1] Pad[x=-1 y=1]])
+    if moving.players[0].pos not=?vec2(406 354) or moving.players[1].pos not=?vec2(874 366) return 1
+    if original.players[0].pos not=?vec2(400 360) return 2
+    let edge=Game[]
+    edge.players[0].pos=vec2(1259 21)
+    let clamped=tick(edge [Pad[x=1 y=-1] Pad[]])
+    if clamped.players[0].pos not=?vec2(1260 20) return 3
+    let state=Game[]
+    loop i in [0..WIN) {
+        state.players[0].pos=state.coin
+        let saved=state
+        let next=tick(state [Pad[] Pad[]])
+        if next not=?tick(state [Pad[] Pad[]]) return 4
+        if state not=?saved or next.players[0].score not=?i+1 return 5
+        state=next
+    }
+    if state.winner not=?0 or state.taken not=?WIN return 6
+    if tick(state [Pad[x=1] Pad[y=1]]) not=?state return 7
+    return 42
+}
+"""
+    result, output = run_value_batch(compiler, tmp_path, {'online-model': body}, release, target)['online-model']
+    assert result == '42', output
+
+
+@pytest.mark.parametrize('directory, entry', [('Coin Race!', 'coin-race.dewy'),
+                                             ('___', '___.dewy'), ('!!!', 'online.dewy')])
+def test_core_online_starter_filename(compiler, tmp_path, directory, entry):
+    project = tmp_path / directory
+    made = subprocess.run([compiler, 'new', str(project) + '/', 'online'],
+                          capture_output=True, text=True, timeout=5, check=False)
+    assert made.returncode == 0, made.stdout + made.stderr
+    assert (project / entry).is_file()
+    assert f'dewy-core watch {entry}' in (project / 'README.md').read_text()
 
 
 def test_core_new_existing_directory(compiler, tmp_path):
