@@ -351,6 +351,24 @@ flat on existing workloads: tour 58.1 → 57.7 ms CPU, Netpong 378.1 → 376.4 m
 scaling fix, not a demonstrated broad throughput improvement. The 291 focused
 import/module/smoke checks passed.
 
+A [refreshed native application comparison](audits/2026-10-18/apps-target-baseline.json)
+checks the C-level runtime target separately from compilation throughput. Five
+alternating samples with thread-CPU kernel timing measured:
+
+| Workload | Default Dewy (ms) | Release Dewy (ms) | C `-O2` (ms) |
+| --- | ---: | ---: | ---: |
+| Helpers | 1064.3 | 986.9 | 878.1 |
+| Arrays | 301.2 | 275.3 | 271.8 |
+| Records | 180.9 | 176.5 | 198.3 |
+| Text | 293.1 | 287.8 | 231.9 |
+| Graph | 831.0 | 625.2 | 535.7 |
+
+The kernels verify matching results on boundary and measured inputs. Input
+construction is outside the timed kernel; the C graph uses a different table
+and flat neighbor storage. Host contention can still affect CPU frequency and
+caches. These five workloads do not establish general C/Rust parity. Default
+graph code and text scanning remain useful optimization targets.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
