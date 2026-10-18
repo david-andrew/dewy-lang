@@ -1252,3 +1252,14 @@ give 0.939/0.970. Seven fresh-build pairs give tour 0.982, Dunes 1.029 and compi
 gain is claimed. The independent C-bootstrap suite passes 3,872 checks in 88.06
 pytest seconds with two workers. See `parameter-view-*` audits for samples,
 source/binary identities and scope.
+
+
+Index lists and boolean masks may now be inline arrays too. The shared selection
+helpers specialize on selector storage as well as receiver and element types,
+so both reads and writes avoid converting an inline selector to a growable one.
+Repeated indexes retain their written order, overlapping selectors retain their
+value snapshots, and masks still require the receiver's length. A bare empty
+selector (`values[[]]`) now infers integer indexes and selects no elements.
+The focused gate passes 272 checks in 10.92 seconds after an independent C
+bootstrap, and the quick suite passes 149 in 4.78 seconds. See `fixed-selector-*`
+audits; this increment makes no runtime performance claim.

@@ -144,22 +144,22 @@ __unpack4[T] = (xs: T[]) -> (T, T, T, T):
 
 # (xs[mask]: the elements where mask is true; xs[idxs]: the elements at those indexes, in
 # their order; xs[mask] = v and xs[idxs] = v set them)
-__pick_mask[A, T] = (xs: A, mask: bool[]) -> T[]:
+__pick_mask[A, T, S] = (xs: A, mask: S) -> T[]:
     if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
     out: T[]
     loop i in 0.. and x in xs:
         if __at(mask, i): out.push(x)
     out
-__pick[A, T] = (xs: A, idxs: int[]) -> T[]:
+__pick_indices[A, T, S] = (xs: A, idxs: S) -> T[]:
     out: T[]
     out.resize(idxs.len())
     loop j in [0..idxs.len()): __at(out, j) = xs[__at(idxs, j)]
     out
-__put_mask[A, T] = (xs: mut A, mask: bool[], v: T):
+__put_mask[A, T, S] = (xs: mut A, mask: S, v: T):
     if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
     loop i in [0..xs.len()):
         if __at(mask, i): xs[i] = v
-__put_mask[A, T] = (xs: mut A, mask: bool[], vs: T[]):
+__put_mask[A, T, S] = (xs: mut A, mask: S, vs: T[]):
     if mask.len() != xs.len(): panic("a mask of {mask.len()} for {xs.len()} elements")
     k = 0
     loop i in [0..xs.len()):
@@ -168,9 +168,9 @@ __put_mask[A, T] = (xs: mut A, mask: bool[], vs: T[]):
             xs[i] = vs[k]
             k += 1
     if k != vs.len(): panic("{vs.len()} values for the {k} elements in the mask")
-__put[A, T] = (xs: mut A, idxs: int[], v: T):
+__put_indices[A, T, S] = (xs: mut A, idxs: S, v: T):
     loop i in idxs: xs[i] = v
-__put[A, T] = (xs: mut A, idxs: int[], vs: T[]):
+__put_indices[A, T, S] = (xs: mut A, idxs: S, vs: T[]):
     if vs.len() != idxs.len(): panic("{vs.len()} values for {idxs.len()} indexes")
     loop j in 0.. and i in idxs: xs[i] = vs[j]
 

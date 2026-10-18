@@ -474,6 +474,9 @@ without first converting the entire source to a growable array. Bounds evaluate
 after capturing the source value, so changing the source in a bound expression
 does not change the value being selected.
 
+Index lists and boolean masks can themselves be growable or inline arrays;
+selection reads either directly. A bare `values[[]]` selects no elements.
+
 The same selections support updates: `pair[..]=0`, `pair[0..1]=[20 22]`,
 `values[0,2..]=42`, `values[indexes]=replacements` and `values[mask]=0`.
 A scalar fills the selected elements; an array supplies exactly one replacement

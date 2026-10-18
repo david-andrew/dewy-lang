@@ -1384,6 +1384,30 @@ let middle=values[1..3) let tail=values[2..] let empty=values[2..2)
 if middle not=? [11 12] or tail not=? [12 9] or empty.length not=? 0 return 1
 let whole=values[..] whole[0]=99
 return if values[0] =? 10 and values[0..1] =? [10 11] and values[1..end] =? [11 12 9] 42 else 2}''',
+    'fixed-array-empty-selector': '''main=()=>{let values:array<string length=2>=["a" "b"] let dynamic=[20 22]
+let empty=values[[]] let empty_numbers=dynamic[[]]
+values[[]]="unused" values[[]]=[] dynamic[[]]=0 dynamic[[]]=[]
+return if empty =? [] and empty_numbers =? [] and values =? ["a" "b"] and dynamic =? [20 22] 42 else 1}''',
+    'fixed-array-selectors': '''main=()=>{let values=[10 20 30 40]
+let indexes:array<int64 length=3>=[3 0 3] let mask:array<bool length=4>=[false true false true]
+if values[indexes] not=? [40 10 40] or values[mask] not=? [20 40] return 1
+values[indexes]=[1 2 3] values[mask]=42
+let inline:array<int64 length=4>=[10 20 30 40]
+inline[indexes]=[5 6 7] inline[mask]=[8 9]
+return if values =? [2 42 30 42] and inline =? [6 8 30 9] and inline[indexes] =? [9 6 9] 42 else 2}''',
+    'fixed-array-selector-snapshots': '''main=()=>{let values:array<int64 length=2>=[1 0]
+values[values]=[20 22]
+if values not=? [22 20] return 1
+let indexes:array<int64 length=2>=[1 0]
+replacement=()=>{indexes[0]=0 return [40 42]}
+values[indexes]=replacement()
+return if values =? [42 40] and indexes =? [0 0] 42 else 2}''',
+    'fixed-array-mask-managed': '''work=():>void=>{let rows:array<array<string> length=3>=[["a"] ["b"] ["c"]]
+let mask:array<bool length=3>=[true false true] let saved=rows
+let chosen=rows[mask] rows[mask]=[["x"] ["y"]] chosen[0].push("copy")
+if rows not=? [["x"] ["b"] ["y"]] or saved not=? [["a"] ["b"] ["c"]] panic("mask snapshot changed")}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'fixed-array-selections': '''main=()=>{let values:array<int64 length=4>=[10 11 12 9]
 let backwards=values[end,end-1..0] let odds=values[1,3..]
 let picked=values[[3 0 3]] let masked=values[[true false true false]]
@@ -5994,6 +6018,8 @@ def test_core_unpack_errors(error_batches, body, target, release):
     ('let xs:array<int64 length=2>=[20 22] xs[[true]]=0', 'a mask of 1 for 2 elements'),
     ('let xs:array<int64 length=2>=[20 22] xs[[true false]]=[0 0]', 'values for the 1 elements in the mask'),
     ('let xs:array<int64 length=2>=[20 22] xs[[0 1]]=[0]', 'values for 2 indexes'),
+    ('let values=[20 22] let mask:array<bool length=1>=[true] printl(values[mask])', 'a mask of 1 for 2 elements'),
+    ('let values:array<int64 length=2>=[20 22] let indexes:array<int64 length=1>=[2] values[indexes]=0', 'out of bounds'),
     ('let input=[20] let pair:array<int64 length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),
     ('let input=[20 22 99] printl(input as array<int64 length=2>)', 'fixed-size array needs 2 elements'),
     ('let input:array<string>=[] let pair:array<string length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),

@@ -6325,7 +6325,11 @@ dewy_array_slice = (index: int, value: int = 0) -> int:
 dewy_array_selection_call = (name: str, args: int[], storage: int, pos: int) -> int:
     callee = mk(.typeapply, pos)
     nodes[callee].a = i32(bc_ident(name, pos))
-    set_list(callee, [type_node_of(storage, pos), type_node_of(int(types[storage].elem), pos)])
+    targs = [type_node_of(storage, pos), type_node_of(int(types[storage].elem), pos)]
+    # Index/mask storage can also be inline; do not materialize it just to read it.
+    if ends_with(name, "_indices") or ends_with(name, "_mask"):
+        targs.push(type_node_of(prune(ntype(args[1])), pos))
+    set_list(callee, targs)
     call = mk(.call, pos)
     nodes[call].a = i32(callee)
     set_list(call, args)
@@ -6333,12 +6337,13 @@ dewy_array_selection_call = (name: str, args: int[], storage: int, pos: int) -> 
 
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:
-    it = prune(check_expr(b, T_INT))
+    expected = if nodes[b].kind == .array and nkids(b) == 0 and nodes[b].b == 0: mk_array(T_INT) else: T_INT
+    it = prune(check_expr(b, expected))
     if is_dewy_range_type(it, "IntRange"): return base
-    if types[it].kind != .array: return ""
+    if types[it].kind != .array and types[it].kind != .fixed: return ""
     et = prune(int(types[it].elem))
     if types[et].kind == .bool_: return base + "_mask"
-    if et == T_INT: return base
+    if et == T_INT: return base + "_indices"
     fatal(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {type_str(it)})")
     ""
 
