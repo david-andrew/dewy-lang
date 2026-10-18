@@ -105,7 +105,9 @@ at module level. `main` must have one entry-point definition.
 
 Use `let` to declare a local or deliberately shadow a name. Assignment updates a
 visible variable; otherwise it can introduce a new variable. Parameters have
-value semantics. Use `@` in both a parameter and its call to change the caller:
+value semantics. Release builds can avoid a redundant entry copy when a
+parameter is only read; this needs no annotation and preserves independent
+values. Use `@` in both a parameter and its call to change the caller:
 
 ```dewy
 bump=(@value:int64):>void=>{value+=1}

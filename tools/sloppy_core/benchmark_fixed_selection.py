@@ -19,9 +19,12 @@ SELECTIONS = {
 }
 
 
-def source(selection: str) -> str:
+def source(selection: str, helper: bool = False) -> str:
+    declaration = (f'select=(values:array<int64 length=512> indexes:array<int64>)=>values[{selection}]\n'
+                   if helper else '')
+    expression = 'select(values indexes)' if helper else f'values[{selection}]'
     return f'''from p"benchmark_harness.jo" import size_argument, clock
-main=()=>{{
+{declaration}main=()=>{{
     let count=size_argument(args() 20000)
     let values:array<int64 length=512>=[]
     loop i in [0..512) {{values[i]=i}}
@@ -29,7 +32,7 @@ main=()=>{{
     let checksum:int64=0
     let start=clock()
     loop iteration in [0..count) {{
-        let chosen=values[{selection}]
+        let chosen={expression}
         loop value in chosen {{checksum+=value}}
     }}
     let elapsed=clock()-start
@@ -37,7 +40,7 @@ main=()=>{{
 }}'''
 
 
-def measure(compilers: dict[str, Path], count: int, samples: int, clock: str) -> dict:
+def measure(compilers: dict[str, Path], count: int, samples: int, clock: str, helper: bool = False) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = '1'
     report = {
@@ -45,7 +48,7 @@ def measure(compilers: dict[str, Path], count: int, samples: int, clock: str) ->
         'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
         'load_average_start': os.getloadavg(),
         'count': count, 'samples': samples, 'warmups': 1, 'clock': clock,
-        'flags': ['--release'],
+        'flags': ['--release'], 'through_helper': helper,
         'compilers': {k: {'path': str(p), 'sha256': digest(p),
                           'array_sha256': digest(p.parent.parent / 'lib/core/array.jo'),
                           'ranges_sha256': digest(p.parent.parent / 'lib/std/dewy_ranges.jo')}
@@ -61,7 +64,7 @@ def measure(compilers: dict[str, Path], count: int, samples: int, clock: str) ->
         report['harness'] = prepare_clock(work, clock)
         for kind, (selection, indexes) in SELECTIONS.items():
             program = work / f'{kind}.dewy'
-            program.write_text(source(selection))
+            program.write_text(source(selection, helper))
             binaries = {k: work / k for k in compilers}
             builds = {}
             for label, compiler in compilers.items():
@@ -101,6 +104,7 @@ if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('compiler', type=Path)
     cli.add_argument('--baseline', type=Path, required=True)
+    cli.add_argument('--helper', action='store_true', help='Select through an ordinary Dewy function')
     cli.add_argument('--count', type=positive, default=20_000)
     cli.add_argument('--samples', type=positive, default=7)
     cli.add_argument('--clock', choices=['wall', 'thread-cpu'], default='thread-cpu')
@@ -108,5 +112,5 @@ if __name__ == '__main__':
     args = cli.parse_args()
     report = measure({'baseline': args.baseline.resolve(strict=True),
                       'candidate': args.compiler.resolve(strict=True)},
-                     args.count, args.samples, args.clock)
+                     args.count, args.samples, args.clock, args.helper)
     args.output.write_text(json.dumps(report, indent=2) + '\n')

@@ -1,0 +1,39 @@
+{
+  "source_identity": "1dd43a0c85d4b2e5210cd3323d6237ffb967daa033626fc08864c80603f8e212",
+  "binary": "build-1792295455427370928/bin/dewy-core",
+  "binary_sha256": "991da0f76bca30d5f5cce6e80daf27c6bc001a52e61481c15aec95df1cf53458",
+  "validation": {
+    "focused": "334 passed in 6.41s before the final debugger exclusion",
+    "full_independent_c_gate": "3872 passed in 88.06s, two workers, excluding bootstrap; final code",
+    "ruff": "Passed, excluding pre-existing FURB167/RUF007 in test file",
+    "diff_check": "passed"
+  },
+  "coverage": [
+    "Native/WebAssembly default/release",
+    "Readonly managed records and inline arrays",
+    "Callback mutation of caller globals preserves parameter snapshots",
+    "Returned values and captured parameters remain independent after return",
+    "Raw data access retains its own writable copy",
+    "Existing nested updates, parameter copies, shader, debugger and cleanup coverage"
+  ],
+  "application_paired_cpu_ratios": {
+    "text": 0.939181463102185,
+    "graph": 0.9700784934887353
+  },
+  "compile_paired_cpu_ratios": {
+    "tour": 0.9822572757708375,
+    "dunes": 1.0289048937890095,
+    "compiler": 0.9628043905862872
+  },
+  "helper_paired_cpu_ratios": {
+    "stepped": 0.48262118933646214,
+    "indexed": 0.2937912691699984
+  },
+  "limits": [
+    "Release builds only; variable-debug builds retain the local storage.",
+    "Only a same-named readonly binding initialized from a readonly Dewy parameter is eligible.",
+    "Mutation, captured bindings, address-taking and raw views retain separate storage.",
+    "The helper benchmark repeatedly selects from 512 inline integers; it is not a universal parameter-passing speedup.",
+    "Dunes release compilation measured a 1.029 paired CPU ratio; other compilation ratios were 0.982/0.963. No general compile-speed gain claimed."
+  ]
+}

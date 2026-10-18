@@ -3616,7 +3616,7 @@ gen_vardecl = (s: int):
         return
     l = int(nodes[s].sym)
     t = int(locals[l].type)
-    if view_decl(s, l): return
+    if param_view_decl(s, l) or view_decl(s, l): return
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
     if nodes[s].b != 0:
@@ -3631,6 +3631,34 @@ gen_vardecl = (s: int):
         if pl.mem: e_zero(pl.v, tsize(t))
         else: e_mov(pl.v, zero_val(t))
     scope_add_local(l)
+
+# Dewy gives each value parameter a same-named mutable local. When that local
+# stays read-only, it can use the borrowed parameter storage instead of copying
+# and retaining it again. Calls already preserve borrowed parameter snapshots.
+# Keep real local storage for captures, address-taking and raw buffer access.
+param_view_decl = (s: int, l: int) -> bool:
+    if not opt_release or dbg_on or not files[pos_file(nodes[s].pos)].is_dewy: return false
+    fl = int(locals[l].flags)
+    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
+    t = prune(int(locals[l].type))
+    if not is_managed(t) and vc(t) != VC_AGG: return false
+    iv = int(nodes[s].b)
+    if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)): return false
+    source = int(nodes[iv].sym)
+    flags = int(locals[source].flags)
+    if flags & LF_PARAM == 0 or flags & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) != 0: return false
+    if locals[source].owner != i32(cur_fn) or locals[source].name != locals[l].name or not type_eq(ntype(iv), t): return false
+    root = mk(.ident, nodes[s].pos)
+    nodes[root].aux = i32(int(SK.local))
+    nodes[root].sym = i32(l)
+    nodes[root].type = i32(t)
+    if may_write_root(int(fns[cur_fn].body), root): return false
+    # Treat this binding as another read-only view of the parameter. It owns
+    # no reference and must not be dropped as a separately initialized local.
+    locals[l].vreg = locals[source].vreg
+    locals[l].offset = locals[source].offset
+    locals[l].flags = i32(fl | LF_PARAM)
+    true
 
 # ---------------- views ----------------
 # `b = agents[j]` copies a struct out of an array (and retains what it holds), but when b is

@@ -1,0 +1,209 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "load_average_start": [
+    6.6240234375,
+    6.3134765625,
+    5.90771484375
+  ],
+  "count": 500000,
+  "samples": 7,
+  "warmups": 1,
+  "clock": "thread-cpu",
+  "flags": [
+    "--release"
+  ],
+  "through_helper": true,
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792294941106437268/bin/dewy-core",
+      "sha256": "576a902dcd85224b06f0e963d16b6ba4494ed840f83ae71262af793173679b19",
+      "array_sha256": "25a14ad0c0e77c75543321201bd40b7201fa50bf16069d3fb084078f7d76cd59",
+      "ranges_sha256": "bc178771496c0c6f8ef759235dc147018e910a05ce50afd5264d7237d08b8e18"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792295287828867882/bin/dewy-core",
+      "sha256": "6a32adb16dee02b964c228b2fe4a507c6069714f40327f7fe4158737286acea4",
+      "array_sha256": "25a14ad0c0e77c75543321201bd40b7201fa50bf16069d3fb084078f7d76cd59",
+      "ranges_sha256": "bc178771496c0c6f8ef759235dc147018e910a05ce50afd5264d7237d08b8e18"
+    }
+  },
+  "workloads": {
+    "stepped": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nselect=(values:array<int64 length=512> indexes:array<int64>)=>values[1,17..]\nmain=()=>{\n    let count=size_argument(args() 20000)\n    let values:array<int64 length=512>=[]\n    loop i in [0..512) {values[i]=i}\n    let indexes=[1 100 300 511]\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {\n        let chosen=select(values indexes)\n        loop value in chosen {checksum+=value}\n    }\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "ddc43a4803d7cdaf9054fcbad6c5480a16b109226b46624fda9277874b93f33a",
+      "binary_sha256": {
+        "baseline": "ea614ff5f435b76da1ee502ddb2022614d97a9d7e31cb43266b3cb7c988c4799",
+        "candidate": "803e06f5509c0244976debd46e0cdf406a34882e9a2d625ceaedc44e8681762b"
+      },
+      "build_seconds": {
+        "baseline": 0.053774664999764354,
+        "candidate": 0.05313102599939157
+      },
+      "checksum": 3984000000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 117321515,
+            "wall_seconds": 0.12067810200005624
+          },
+          {
+            "kernel_ns": 101416677,
+            "wall_seconds": 0.10479059099998267
+          },
+          {
+            "kernel_ns": 103953273,
+            "wall_seconds": 0.10826881100001629
+          },
+          {
+            "kernel_ns": 115079670,
+            "wall_seconds": 0.1184283200000209
+          },
+          {
+            "kernel_ns": 113652755,
+            "wall_seconds": 0.11719846199957829
+          },
+          {
+            "kernel_ns": 116269007,
+            "wall_seconds": 0.11956881200057978
+          },
+          {
+            "kernel_ns": 114763486,
+            "wall_seconds": 0.11847119200047018
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 49746536,
+            "wall_seconds": 0.0524840519992722
+          },
+          {
+            "kernel_ns": 49793991,
+            "wall_seconds": 0.05230725700039329
+          },
+          {
+            "kernel_ns": 55184279,
+            "wall_seconds": 0.05798701399999118
+          },
+          {
+            "kernel_ns": 52256174,
+            "wall_seconds": 0.05513823900037096
+          },
+          {
+            "kernel_ns": 51500174,
+            "wall_seconds": 0.054358236000553006
+          },
+          {
+            "kernel_ns": 49662334,
+            "wall_seconds": 0.05224070900021616
+          },
+          {
+            "kernel_ns": 50374634,
+            "wall_seconds": 0.053171733999988646
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 114.763486,
+        "candidate": 50.374634
+      },
+      "paired_candidate_baseline_ratio": 0.45313616902643494
+    },
+    "indexed": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nselect=(values:array<int64 length=512> indexes:array<int64>)=>values[indexes]\nmain=()=>{\n    let count=size_argument(args() 20000)\n    let values:array<int64 length=512>=[]\n    loop i in [0..512) {values[i]=i}\n    let indexes=[1 100 300 511]\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {\n        let chosen=select(values indexes)\n        loop value in chosen {checksum+=value}\n    }\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "4c247d0348ca413f95edaf155d0250ec984ec03e5ea6395f4ed1406017114a9e",
+      "binary_sha256": {
+        "baseline": "f596703ed49463f104ef1c57aa8ca133cff422cfbff3a9fadd933be260e46460",
+        "candidate": "8b937cf16d8fca5318758132fcad44c66dfb13e9515171109e75f177c3c1dbe5"
+      },
+      "build_seconds": {
+        "baseline": 0.05047907900006976,
+        "candidate": 0.053299417999369325
+      },
+      "checksum": 456000000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 96345562,
+            "wall_seconds": 0.09987646600075095
+          },
+          {
+            "kernel_ns": 84271021,
+            "wall_seconds": 0.08731321300001582
+          },
+          {
+            "kernel_ns": 88355304,
+            "wall_seconds": 0.09134116299992456
+          },
+          {
+            "kernel_ns": 92070787,
+            "wall_seconds": 0.0949019869995027
+          },
+          {
+            "kernel_ns": 86922867,
+            "wall_seconds": 0.08964998900046339
+          },
+          {
+            "kernel_ns": 88088737,
+            "wall_seconds": 0.09102122300009796
+          },
+          {
+            "kernel_ns": 74387815,
+            "wall_seconds": 0.0771386899996287
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 26631660,
+            "wall_seconds": 0.029421228000501287
+          },
+          {
+            "kernel_ns": 22994116,
+            "wall_seconds": 0.025506954999400477
+          },
+          {
+            "kernel_ns": 22622794,
+            "wall_seconds": 0.02490214899989951
+          },
+          {
+            "kernel_ns": 23515351,
+            "wall_seconds": 0.02562186399973143
+          },
+          {
+            "kernel_ns": 23002269,
+            "wall_seconds": 0.025282865000008314
+          },
+          {
+            "kernel_ns": 23266502,
+            "wall_seconds": 0.02550325299944234
+          },
+          {
+            "kernel_ns": 22700627,
+            "wall_seconds": 0.02492567099943699
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 88.088737,
+        "candidate": 23.002269
+      },
+      "paired_candidate_baseline_ratio": 0.2646285125408944
+    }
+  },
+  "limits": [
+    "Same source and fixed-size representation for both toolchains.",
+    "Input construction is outside timing; selection allocation and summation are timed.",
+    "Isolated selection workloads; no application-wide speed claim."
+  ],
+  "harness": {
+    "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+    "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+  },
+  "load_average_end": [
+    6.734375,
+    6.341796875,
+    5.91943359375
+  ]
+}

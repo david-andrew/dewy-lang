@@ -1029,6 +1029,24 @@ main=()=>{
 let sum:int64=0
 loop i in 0.. and i <? 4 {loop j in 0.. and j <? i {sum+=j}}
 return if sum =? 4 and fallback(0) =? 42 and fallback(2) =? 2 42 else 1}''',
+    'optimizer-parameter-snapshot': '''Box:type=[values:array<array<int64>> label:string]
+let shared=Box[[[20] [22]] "old"]
+read=(box:Box action:(():>void)):>int64=>{action() return box.values[0][0]+box.values[1][0]}
+change=():>void=>{shared.values[0][0]=99 shared.label="new"}
+main=()=>{let result=read(shared change)
+return if result =? 42 and shared.values[0][0] =? 99 and shared.label =? "new" 42 else 1}''',
+    'optimizer-parameter-return': '''Row:type=array<array<string> length=2>
+identity=(value:Row):>Row=>value
+capture=(value:Row):>(():>Row)=>()=>value
+work=():>void=>{let row:Row=[["a"] ["b"]]
+let result=identity(row) let get=capture(row)
+row[0].push("changed") result[1].push("copy")
+if get() not=? [["a"] ["b"]] or result not=? [["a"] ["b" "copy"]] panic("escaped snapshot changed")}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'optimizer-parameter-raw-copy': '''edit=(values:array<int64>):>array<int64>=>{let p=values.data() p[0]=42 return values}
+main=()=>{let values=[20 22] values.push(0) let edited=edit(values)
+return if values =? [20 22 0] and edited =? [42 22 0] 42 else 1}''',
     'optimizer-interval-guarded-reads': '''inside=(take:bool xs:array<int64>):>bool=>take and xs[0] >=? 0 and xs[0] <=? 42
 outside=(skip:bool xs:array<int64>):>bool=>skip or xs[0] <? 0 or xs[0] >? 42
 main=()=>{let empty:array<int64>=[]

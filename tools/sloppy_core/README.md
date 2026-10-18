@@ -1232,3 +1232,23 @@ separate medians fluctuate substantially with host load and are not evidence of
 a compilation gain. The independent C-bootstrap suite passes 3,860 checks in
 68.57 pytest seconds with two workers. See `range-load-*` and `range-chain-*`
 audits for measurements, the initial neutral experiment and validation limits.
+
+
+Release builds now avoid the redundant copy from a value parameter into Dewy's
+same-named local when that local only reads the input. Existing caller-side
+snapshot handling protects the borrowed value; returned values still acquire
+their own ownership. Mutation, captures, address-taking, raw-buffer access and
+variable-debug builds keep independent local storage. This needs no source
+annotation and does not change parameter value semantics.
+
+The selection benchmark's `--helper` option runs the same selections through an
+ordinary Dewy function. Seven alternating pairs at 500,000 calls give median
+candidate/baseline thread-CPU ratios of 0.483 for stepped and
+0.294 for indexed reads. These are isolated helper calls over 512 inline
+integers; result allocation and summation stay timed. An earlier run before the
+debugger exclusion is also retained. Five pairs on unchanged text/graph programs
+give 0.939/0.970. Seven fresh-build pairs give tour 0.982, Dunes 1.029 and compiler
+0.963: Dunes release compilation has a measured cost, and no general compile-speed
+gain is claimed. The independent C-bootstrap suite passes 3,872 checks in 88.06
+pytest seconds with two workers. See `parameter-view-*` audits for samples,
+source/binary identities and scope.
