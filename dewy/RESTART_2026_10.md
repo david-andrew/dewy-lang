@@ -102,6 +102,16 @@ was rejected: it regressed particle and physics workloads. Future work should
 keep vector values in registers; [the rejected trial](audits/2026-10-17/source-core/wasm-vector-slots-rejected.json)
 retains its patch and measurements so it need not be repeated.
 
+The web baseline also reflects runtime tiering: identical release artifacts
+under normal versus optimizing-only Node take about 1,127/466 ms for text and
+887/356 ms for arrays. Normal execution closely tracks baseline-only execution
+for these one-shot kernels. [The diagnostic](audits/2026-10-17/source-core/web-kernel-tiering.json)
+keeps the engine flags separate from deployment defaults. The emitter now
+combines immediate local-store/reload pairs with `local.tee`, reducing the text
+module by 7.5% raw and 3.1% gzipped at unchanged measured compile cost. Runtime
+results are mixed; [validation and raw results](audits/2026-10-17/source-core/wasm-tee-validation.json)
+make no general speedup claim.
+
 Profiling that graph exposed dependent reads from map slots to dense keys.
 Slots now cache complete integer keys (and full hashes for other key types),
 keeping insertion order and independent value copies. In a paired comparison,

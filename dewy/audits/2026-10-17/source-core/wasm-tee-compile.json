@@ -1,0 +1,142 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "revision": "237e21d60475746cb54328bf9af1e2324a041b84",
+  "working_tree": " M core/compiler/wasm.jo\n",
+  "diff_sha256": "2828817cf55db2a06d2f089e33f2f0f3bf509bf3b347a974b95a7f0fca4a8e7c",
+  "load_average_start": [
+    4.7041015625,
+    5.34130859375,
+    7.09521484375
+  ],
+  "workers": 1,
+  "samples": 5,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792330364134074469/bin/dewy-core",
+      "sha256": "9aef0fed50c379ba9a452fa2a31928127f7845cca2937654b7223955cc23c90a"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792330615509850916/bin/dewy-core",
+      "sha256": "3f79e6d2e95aadcc8fff856b1cd55c92f0fea7616b9687684f0da397c4cb3519"
+    }
+  },
+  "workloads": {
+    "netpong-web-default": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/netpong.dewy",
+        "--target",
+        "wasm"
+      ],
+      "source_sha256": "ba8fa7622bae35141c188a9d4ace1fefdb90c488cfe2cc9f1ac571f25c8113f6",
+      "seconds": {
+        "baseline": [
+          0.16758808899612632,
+          0.16543673900014255,
+          0.17073806600092212,
+          0.1649988700009999,
+          0.167819258000236
+        ],
+        "candidate": [
+          0.16481078299693763,
+          0.17053565500100376,
+          0.1715157700018608,
+          0.1652361020023818,
+          0.16529699500097195
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.16758808899612632,
+        "candidate": 0.16529699500097195
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.163628,
+          0.16179300000000002,
+          0.16590399999999997,
+          0.16080599999999995,
+          0.16408499999999973
+        ],
+        "candidate": [
+          0.16115399999999996,
+          0.1645530000000001,
+          0.166964,
+          0.16138400000000006,
+          0.1617260000000001
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.163628,
+        "candidate": 0.1617260000000001
+      },
+      "output_bytes": {
+        "candidate": 1054306,
+        "baseline": 1092950
+      }
+    },
+    "forest-web": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/forest.dewy",
+        "--release",
+        "--target",
+        "wasm"
+      ],
+      "source_sha256": "435cca799020032e602b5cbeb342c7e2da15280f0fafc8dc73d9222a3c7159cb",
+      "seconds": {
+        "baseline": [
+          0.15712652699585306,
+          0.156807758998184,
+          0.15946965100010857,
+          0.15667287100222893,
+          0.15486588000203483
+        ],
+        "candidate": [
+          0.1561228709979332,
+          0.1557499840055243,
+          0.15761621099954937,
+          0.1569097609972232,
+          0.15609591400425415
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.156807758998184,
+        "candidate": 0.1561228709979332
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.1531020000000003,
+          0.15267999999999976,
+          0.1550339999999996,
+          0.15278600000000014,
+          0.15157700000000013
+        ],
+        "candidate": [
+          0.1525869999999999,
+          0.1520600000000002,
+          0.15338699999999975,
+          0.153065,
+          0.15258700000000008
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.15278600000000014,
+        "candidate": 0.15258700000000008
+      },
+      "output_bytes": {
+        "candidate": 883433,
+        "baseline": 932361
+      }
+    }
+  },
+  "load_average_end": [
+    4.6474609375,
+    5.31884765625,
+    7.078125
+  ]
+}

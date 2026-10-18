@@ -129,17 +129,29 @@ loc_of: int[]             # vreg -> local index
 fp_local = 0
 cur_frame = 0
 cur_wf: IrFn
+last_set_v = -1
+last_set_pos = 0
+last_set_end = 0
 
 op = (x: int): wb.push(u8(x))
 lget = (v: int):
     if int(cur_wf.vtypes[v]) == VK:
         i64c(cur_wf.kval[v])
         return
+    # Keep an immediately consumed result on the operand stack. local.tee
+    # still writes the local, so later reads and loop-carried values are safe.
+    if v == last_set_v and wb.len() == last_set_end:
+        wb[last_set_pos] = 0x22
+        last_set_v = -1
+        return
     op(0x20)
     uleb(wb, loc_of[v])
 lset = (v: int):
+    last_set_pos = wb.len()
     op(0x21)
     uleb(wb, loc_of[v])
+    last_set_end = wb.len()
+    last_set_v = v
 i64c = (v: int):
     op(0x42)
     sleb(wb, v)
@@ -720,6 +732,7 @@ wasm_live = (f: IrFn) -> (int[], int[]):
 
 wasm_body = (f: IrFn) -> u8[]:
     cur_wf = f
+    last_set_v = -1
     wb = []
     w_sites = []
     nv = f.vtypes.len()

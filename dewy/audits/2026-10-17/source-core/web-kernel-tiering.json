@@ -1,0 +1,133 @@
+{
+  "compiler": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792330364134074469/bin/dewy-core",
+  "compiler_sha256": "9aef0fed50c379ba9a452fa2a31928127f7845cca2937654b7223955cc23c90a",
+  "node": "v26.8.1",
+  "cpu_affinity": [
+    2
+  ],
+  "node_flags": {
+    "normal": [],
+    "optimizing": [
+      "--no-liftoff"
+    ],
+    "baseline": [
+      "--liftoff-only"
+    ]
+  },
+  "workloads": {
+    "text": {
+      "source": "# Text scanning and parsing: split generated text into words and numbers.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\n# `count` tokens: words of lowercase letters and decimal numbers, separated\n# by spaces and newlines.\ngenerate = (count:int64):>array<uint8> => {\n    let text:array<uint8>=[]\n    let seed:int64=99\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        let size=seed%7+1\n        let digits=(seed//8)%3 =? 0\n        let j:int64=0\n        loop j <? size {\n            seed=(seed*1103515245+12345)%2147483648\n            if digits {text.push((48+seed%10) as uint8)} else {text.push((97+seed%26) as uint8)}\n            j+=1\n        }\n        text.push(if i%12 =? 11 10 as uint8 else 32 as uint8)\n        i+=1\n    }\n    return text\n}\n\nkernel = (text:array<uint8>):>int64 => {\n    let words:int64=0\n    let lines:int64=0\n    let total:int64=0\n    let hash:int64=5\n    let i:int64=0\n    loop i <? text.length {\n        let byte=text[i] as int64\n        if byte =? 10 {\n            lines+=1\n            i+=1\n        } else if byte =? 32 {i+=1} else if byte >=? 48 and byte <=? 57 {\n            let value:int64=0\n            loop i <? text.length and text[i] >=? 48 and text[i] <=? 57 {\n                value=value*10+(text[i] as int64)-48\n                i+=1\n            }\n            total=(total+value)%1000000007\n        } else {\n            let word:int64=0\n            loop i <? text.length and text[i] >=? 97 and text[i] <=? 122 {\n                word=(word*131+(text[i] as int64))%1000000007\n                i+=1\n            }\n            words+=1\n            hash=mix(hash word)\n        }\n    }\n    return mix(mix(mix(hash words) lines) total)\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let text=generate(count)\n    let started=clock()\n    let result=kernel(text)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "artifact_sha256": "8c46f1bfce90f1acda07a34c57c90e2e7bea6244b2ce9f54656f4585f31efdba",
+      "checksum": 879199283,
+      "samples": {
+        "normal": [
+          {
+            "kernel_ns": 1124758116,
+            "wall_seconds": 3.1425800990036805
+          },
+          {
+            "kernel_ns": 1136250422,
+            "wall_seconds": 3.165600866996101
+          },
+          {
+            "kernel_ns": 1126908506,
+            "wall_seconds": 3.1530472519953037
+          }
+        ],
+        "optimizing": [
+          {
+            "kernel_ns": 466096676,
+            "wall_seconds": 1.3718455720008933
+          },
+          {
+            "kernel_ns": 465114141,
+            "wall_seconds": 1.3667089939990547
+          },
+          {
+            "kernel_ns": 466417953,
+            "wall_seconds": 1.373135916001047
+          }
+        ],
+        "baseline": [
+          {
+            "kernel_ns": 1081472571,
+            "wall_seconds": 3.163387116001104
+          },
+          {
+            "kernel_ns": 1080263959,
+            "wall_seconds": 3.1623598380028852
+          },
+          {
+            "kernel_ns": 1085074144,
+            "wall_seconds": 3.1506382659936207
+          }
+        ]
+      },
+      "median_kernel_ms": {
+        "normal": 1126.908506,
+        "optimizing": 466.096676,
+        "baseline": 1081.472571
+      }
+    },
+    "arrays": {
+      "source": "# Flat integer-array loops: fill, prefix sums, a sieve, an in-place reverse.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nfill = (count:int64):>array<int64> => {\n    let values:array<int64>=[]\n    let seed:int64=12345\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        values.push(seed%1000)\n        i+=1\n    }\n    return values\n}\n\nprefix_sums = (@values:array<int64>):>void => {\n    let total:int64=0\n    loop i in 0.. and i <? values.length {\n        total=(total+values[i])%1000000007\n        values[i]=total\n    }\n}\n\n# Primes below the length of `flags`, which starts as all ones.\nsieve = (@flags:array<int64>):>int64 => {\n    let found:int64=0\n    loop i in 2.. and i <? flags.length {\n        if flags[i] =? 1 {\n            found+=1\n            let j=i+i\n            loop j <? flags.length {\n                flags[j]=0\n                j+=i\n            }\n        }\n    }\n    return found\n}\n\nreverse = (@values:array<int64>):>void => {\n    let low:int64=0\n    let high=values.length\n    loop low+1 <? high {\n        high-=1\n        let kept=values[low]\n        values[low]=values[high]\n        values[high]=kept\n        low+=1\n    }\n}\n\nkernel = (@values:array<int64> @flags:array<int64>):>int64 => {\n    prefix_sums(@values)\n    reverse(@values)\n    let hash=sieve(@flags)\n    loop i in 0.. and i <? values.length {hash=mix(hash values[i])}\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let values=fill(count)\n    let flags:array<int64>=[]\n    let i:int64=0\n    loop i <? count {\n        flags.push(1)\n        i+=1\n    }\n    let started=clock()\n    let result=kernel(@values @flags)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "artifact_sha256": "eb92ed9b2af2c379b201060afa2846644de16b3ed0f1d78b07dd4e1a5eabcb4c",
+      "checksum": 8511638,
+      "samples": {
+        "normal": [
+          {
+            "kernel_ns": 882551853,
+            "wall_seconds": 1.521105453997734
+          },
+          {
+            "kernel_ns": 894377735,
+            "wall_seconds": 1.5266426939997473
+          },
+          {
+            "kernel_ns": 887182633,
+            "wall_seconds": 1.5239372930009267
+          }
+        ],
+        "optimizing": [
+          {
+            "kernel_ns": 359745368,
+            "wall_seconds": 0.8373223779999535
+          },
+          {
+            "kernel_ns": 356398594,
+            "wall_seconds": 0.8295707100041909
+          },
+          {
+            "kernel_ns": 354778508,
+            "wall_seconds": 0.8234614380053245
+          }
+        ],
+        "baseline": [
+          {
+            "kernel_ns": 886124904,
+            "wall_seconds": 1.5594580149991089
+          },
+          {
+            "kernel_ns": 870792886,
+            "wall_seconds": 1.5095117129967548
+          },
+          {
+            "kernel_ns": 868680459,
+            "wall_seconds": 1.5305562200010172
+          }
+        ]
+      },
+      "median_kernel_ms": {
+        "normal": 887.182633,
+        "optimizing": 356.398594,
+        "baseline": 870.792886
+      }
+    }
+  },
+  "limits": [
+    "Same release WebAssembly artifact per workload; fresh Node process per sample, three alternating samples.",
+    "Node engine flags diagnose tiering; they are not browser deployment settings.",
+    "Canonical workloads at 10000000; initialization excluded from kernel timer but included in wall time."
+  ],
+  "measurement_script": "from pathlib import Path\nimport os,json,re,subprocess,hashlib,statistics,time\nfrom tools.sloppy_core.benchmark_apps import prepare_source,execute\nroot=Path('__dewycache__/task-tmp/web-kernel-tiering').resolve()\ncompiler=Path('__dewycache__/compact-core/build-1792330364134074469/bin/dewy-core').resolve()\nenv={k:v for k,v in os.environ.items() if not k.startswith(('DEWY_','SLOPPY_'))};env.update(SLOPPY_EMIT_WORKERS='1',SLOPPY_THREADS='1')\nflags={'normal':[],'optimizing':['--no-liftoff'],'baseline':['--liftoff-only']}\nreport={'compiler':str(compiler),'compiler_sha256':hashlib.sha256(compiler.read_bytes()).hexdigest(),'node':subprocess.check_output(['node','--version'],text=True).strip(),'cpu_affinity':list(os.sched_getaffinity(0)),'node_flags':flags,'workloads':{},'limits':['Same release WebAssembly artifact per workload; fresh Node process per sample, three alternating samples.', 'Node engine flags diagnose tiering; they are not browser deployment settings.', 'Canonical workloads at 10000000; initialization excluded from kernel timer but included in wall time.']}\nfor name in ['text','arrays']:\n source=prepare_source(name,root);artifact=root/f'{name}.html'\n built=subprocess.run([compiler,'build',source,'--target','wasm','--release','-o',artifact],env=env,capture_output=True,text=True,timeout=60)\n assert built.returncode==0,built.stdout+built.stderr\n runner=artifact.with_suffix('.cjs');runner.write_text('const sloppyArgs=process.argv.slice(1);\\n'+'\\n'.join(re.findall(r'<script[^>]*>(.*?)</script>',artifact.read_text(),re.S)))\n rows={label:[] for label in flags};checks=set()\n for i in range(3):\n  for label in (list(flags) if i%2==0 else list(flags)[::-1]):\n   checksum,timing=execute(['node',*flags[label],runner],10000000,env);checks.add(checksum);rows[label].append(timing)\n assert len(checks)==1,checks\n group={'source':source.read_text(),'artifact_sha256':hashlib.sha256(artifact.read_bytes()).hexdigest(),'checksum':checks.pop(),'samples':rows,'median_kernel_ms':{label:statistics.median(r['kernel_ns'] for r in samples)/1e6 for label,samples in rows.items()}}\n report['workloads'][name]=group;print(name,group['median_kernel_ms'],flush=True)\n (root/'results.json').write_text(json.dumps(report,indent=2)+'\\n')\n"
+}
