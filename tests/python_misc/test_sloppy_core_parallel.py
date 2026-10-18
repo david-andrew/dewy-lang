@@ -22,6 +22,21 @@ def compiler():
 
 PROGRAMS = {
     'particles': MODEL.read_text(),
+    'matrix-product': '''main=()=>{
+let rows=65 let inner=64 let cols=67
+let a=reshape([loop i in [0..rows*inner) ((i//inner%3+1)*(i%inner+1)) as float64] rows inner)
+let b=reshape([loop i in [0..inner*cols) ((i//cols+1)*(i%cols%5+1)) as float64] inner cols)
+let saved=a
+let product=a*b
+let squares=(inner*(inner+1)*(2*inner+1)//6) as float64
+loop i in [0..rows) {loop j in [0..cols) {
+    assert(product[i j] =? (i%3+1)*(j%5+1)*squares)
+}}
+assert(product.shape =? [rows cols] and a.data =? saved.data)
+product[0 0]=0.0
+assert(a[0 0] =? 1.0 and b[0 0] =? 1.0)
+return 0
+}''',
     'managed-lifetimes': '''work=():>void=>{
 let values=parallel_range(257 (i:int64)=>[name="item {i}" items=[i i+1]])
 parallel_update(@values (p)=>{p.items.push(42) p.name+="!" return p})
@@ -66,6 +81,8 @@ return 0
 }''',
 }
 
+PROGRAMS['matrix-product-f32'] = PROGRAMS['matrix-product'].replace('float64', 'float32')
+
 
 @pytest.mark.parametrize('name', PROGRAMS)
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
@@ -89,8 +106,13 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
         runner = output.with_suffix('.cjs')
         runner.write_text('\n'.join(scripts.parts))
         args = [node, runner]
-    for threads in (['1', '2'] if target == 'native' else ['1']):
+    modes = [('1', False), ('2', False)] if target == 'native' else [('1', False)]
+    if target == 'native' and release and name.startswith('matrix-product'):
+        modes.append(('2', True))
+    for threads, no_avx in modes:
         env['SLOPPY_THREADS'] = threads
+        if no_avx:
+            env['SLOPPY_NO_AVX'] = '1'
         result = subprocess.run(args, env=env, capture_output=True, text=True,
                                 timeout=15, check=False)
         assert result.returncode == 0, result.stdout + result.stderr

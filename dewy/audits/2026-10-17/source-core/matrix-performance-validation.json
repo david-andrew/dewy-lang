@@ -1,0 +1,44 @@
+{
+  "change": "Precompute output and input row pointers outside the matrix inner loop, exposing the column-only memory index to the existing vectorizer. No reassociation or fused multiply-add change.",
+  "compiler": "build-1792314961498136034/bin/dewy-core",
+  "source_identity": "fdafca288561a609ae9e6a49dd7f0d5822da3bbb73a8fb13af12864027c6df97",
+  "bootstrap_generations_sha256": [
+    "a74ed75f9bf5b8b29652e645deb1ee69ebee438dd19ff821d6c7b1292924f2ae",
+    "9c25001c7c3da6c1d35596aa54623286835cbcf72b6681b9d21bdc8d4ddd606e",
+    "1e8dc03a398258c968c87681e37e762c4afbbe574047c94c049bcc58ae7a0df2"
+  ],
+  "validation": "289 checks passed in 12.15s using the independent C-bootstrap compiler; native/web default/release, float32/float64 products, native one/two threads and explicit SSE2 fallback. Earlier focused run: 285 passed in 9.36s.",
+  "initial_result": "192x192, eight products: about 96ms single-thread default/release against 22ms C, identifying missing vectorization. See before.json for all samples; do not compare these absolute times against later runs.",
+  "paired_192": {
+    "candidate_over_baseline": {
+      "default-1": 0.6863399297753785,
+      "default-2": 0.6843995923157404,
+      "release-1": 0.2644084481447446,
+      "release-2": 0.26750595265337146
+    },
+    "candidate_single_thread_over_C": {
+      "default": 3.016908130962412,
+      "release": 1.170537430051223
+    }
+  },
+  "paired_384": {
+    "candidate_over_baseline": {
+      "default-1": 0.5972318735537525,
+      "default-2": 0.6722060848765948,
+      "release-1": 0.30793206538095796,
+      "release-2": 0.25976051637861325
+    },
+    "candidate_single_thread_over_C": {
+      "default": 2.5831470755304746,
+      "release": 1.1148910183828877
+    }
+  },
+  "method": "Seven alternating paired samples per shape, CPUs 2/3, one/two Dewy threads. C always one thread, -O3 -march=native -ffp-contract=off. Initialization/worker startup excluded; allocations, zeroing, and replacing prior output included. Independent integer checksum oracle for 0/1/17/65, C checksum for full workload; regression test checks every output against a closed-form reference on a 65x64 by 64x67 product.",
+  "ir_evidence": "The extracted matrix callback has no vector memory operations before; after it contains AVX2 and SSE2 vector load, multiply, add and store loops, plus scalar tail.",
+  "limits": [
+    "This measures the bundled numeric matrix operator, not all user loops or tuned BLAS. Default remains materially slower than C.",
+    "Large-case baseline two-thread release had substantial host noise; retain all samples, prioritize paired single-thread comparisons for language costs.",
+    "A comment explaining the invariant pointers was added after compiler builds; executable code is unchanged.",
+    "Initial benchmark fixtures needed parenthesized Dewy casts and the missing C dimension argument; fixed before measurements. A Python fixture-registration line was initially inserted inside a Dewy test string; moved before successful validation."
+  ]
+}

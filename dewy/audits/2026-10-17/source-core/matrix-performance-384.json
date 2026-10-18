@@ -1,0 +1,188 @@
+{
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792314520909251039/bin/dewy-core",
+      "sha256": "72fc8b4f0d9503eb3c8b7655fbf3b6d57beba85af429ab04b1f0128155835003"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792314961498136034/bin/dewy-core",
+      "sha256": "1e8dc03a398258c968c87681e37e762c4afbbe574047c94c049bcc58ae7a0df2"
+    }
+  },
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2,
+    3
+  ],
+  "revision": "d43c6523d1eaabce2f60661a9038fe26087a6079",
+  "working_tree": " M core/lib/std/nd.jo\n M tests/python_misc/test_sloppy_core_parallel.py\n?? tools/sloppy_core/benchmark_matrix.py\n",
+  "size": 384,
+  "steps": 4,
+  "samples": 7,
+  "threads_requested": 2,
+  "load_average_start": [
+    5.5546875,
+    5.69677734375,
+    7.166015625
+  ],
+  "source_sha256": {
+    "dewy": "e5ef98ceb02d29b44a932fc429a64e2e18a64e4bb4a0875a11d51b21e1fbff89",
+    "c": "01f68a8c5fb2aa79b66a2b5a99420a60088acd0a307ed62c691cbf535dffd442"
+  },
+  "limits": [
+    "Native float64 square matrices, identical row/k/column loop order and zero skipping.",
+    "The timed region includes allocation/zeroing and releasing the previous result.",
+    "Initialization and one multiplication (including worker startup) precede timing.",
+    "Wall-clock kernel time; C always uses one thread. Compare single-thread variants for language cost.",
+    "Dyadic input values make every multiply/add exact at these sizes; checksums do not need tolerances.",
+    "This is the bundled matrix operator, not a claim about arbitrary user-written loops or a tuned BLAS."
+  ],
+  "build_seconds": {
+    "baseline-default": 0.047202221998304594,
+    "baseline-release": 0.05847688700305298,
+    "candidate-default": 0.050552887998492224,
+    "candidate-release": 0.06350150599973858
+  },
+  "c_flags": [
+    "-O3",
+    "-march=native",
+    "-ffp-contract=off",
+    "-std=c11"
+  ],
+  "c_version": "cc (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)",
+  "binary_sha256": {
+    "baseline-default": "7362e50a60738153ca65712d3576071580e196967a45d989f3cad4fe2254a7dc",
+    "baseline-release": "0ef73766f105f6309ca6199196ab45f40936629e6c30a8f2c5b946f98477f4d6",
+    "candidate-default": "ee21748ce6710ef0e91af61d6992b788ef7ff57366c90e279157399a27f03375",
+    "candidate-release": "051af721757179296bf7c7c9b278bf5c5fe7742b162a0e12ec640c7683d3446f",
+    "c": "f3e658bc9c25ac4279c51b606bfa0261d1dea10b691641afbb28e76af7512a79"
+  },
+  "preflight_checksums": {
+    "0": 0,
+    "1": 72,
+    "17": -2601,
+    "65": 470739
+  },
+  "checksum": 14228720,
+  "nanoseconds": {
+    "baseline-default-1": [
+      339004851,
+      338025403,
+      334100417,
+      336605179,
+      332899727,
+      337435664,
+      335611114
+    ],
+    "baseline-default-2": [
+      338934992,
+      164305179,
+      164370683,
+      242306492,
+      164251088,
+      184825716,
+      162760904
+    ],
+    "baseline-release-1": [
+      339569952,
+      286417629,
+      283202495,
+      280898668,
+      287647355,
+      338555349,
+      333629135
+    ],
+    "baseline-release-2": [
+      348290528,
+      305811318,
+      287528021,
+      165174304,
+      244258324,
+      164561734,
+      177195891
+    ],
+    "candidate-default-1": [
+      227858095,
+      227145609,
+      199535418,
+      195824855,
+      191552784,
+      226359071,
+      194513955
+    ],
+    "candidate-default-2": [
+      227834164,
+      198460558,
+      110062406,
+      119541116,
+      121359378,
+      109211558,
+      188620779
+    ],
+    "candidate-release-1": [
+      89047290,
+      92717523,
+      87496329,
+      86497707,
+      89304580,
+      85348867,
+      88325314
+    ],
+    "candidate-release-2": [
+      89191774,
+      89854061,
+      77730768,
+      43923546,
+      43725440,
+      42746641,
+      42929449
+    ],
+    "c": [
+      81037524,
+      78841574,
+      77245086,
+      77584002,
+      78008115,
+      79175169,
+      83066760
+    ]
+  },
+  "median_ms": {
+    "baseline-default-1": 336.605179,
+    "baseline-default-2": 164.370683,
+    "baseline-release-1": 287.647355,
+    "baseline-release-2": 244.258324,
+    "candidate-default-1": 199.535418,
+    "candidate-default-2": 121.359378,
+    "candidate-release-1": 88.325314,
+    "candidate-release-2": 43.923546,
+    "c": 78.841574
+  },
+  "paired_over_c": {
+    "baseline-default-1": 4.267501233685752,
+    "baseline-default-2": 2.1279111916581983,
+    "baseline-release-1": 3.6874029708319447,
+    "baseline-release-2": 3.1311912100426986,
+    "candidate-default-1": 2.5831470755304746,
+    "candidate-default-2": 1.555727606031757,
+    "candidate-release-1": 1.1148910183828877,
+    "candidate-release-2": 0.5661417929949012
+  },
+  "paired_parallel_over_serial": {
+    "baseline-default": 0.4933950816967777,
+    "baseline-release": 0.8491589432484091,
+    "candidate-default": 0.6335558036055482,
+    "candidate-release": 0.5078001200656105
+  },
+  "paired_candidate_over_baseline": {
+    "default-1": 0.5972318735537525,
+    "default-2": 0.6722060848765948,
+    "release-1": 0.30793206538095796,
+    "release-2": 0.25976051637861325
+  },
+  "load_average_end": [
+    6.37255859375,
+    5.875,
+    7.201171875
+  ]
+}
