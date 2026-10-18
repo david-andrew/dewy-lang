@@ -8529,7 +8529,7 @@ def test_core_cli_identity(compiler):
     assert result.returncode == 0 and 'file.dewy' in result.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'online', 'program'])
+@pytest.mark.parametrize('kind', ['game', 'platformer', 'online', 'program'])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
@@ -8543,7 +8543,8 @@ def test_core_new_project(compiler, tmp_path, kind):
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='3', SLOPPY_SCREENSHOT=str(project / 'frame.png'))
+    env.update(SLOPPY_SOFTWARE='1', SLOPPY_THREADS='2', SLOPPY_FRAMES='3',
+               SLOPPY_SCREENSHOT=str(project / 'frame.png'))
     ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     if kind == 'program':
@@ -8557,6 +8558,91 @@ def test_core_new_project(compiler, tmp_path, kind):
         if kind == 'online':
             assert 'distinct .dewy source filename' in built.stderr
             assert '`build:`' not in built.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_platformer_starter_model(compiler, tmp_path, target, release):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/platformer.dewy'
+    model = template.read_text().split('# Presentation and live game state.', 1)[0]
+    body = model + r'''
+main=()=>{
+    let map=make_level("........\n........\n........\n........\n########")
+    let at=vec2(72 168)
+    let p=spawn(at)
+    loop i in [0..60) p=tick(p map at Pad[] 1.0/120.0).player
+    if not p.on_ground or abs(p.box.y-152.0)>?0.001 or p.vel.y not=?0.0 return 1
+    let saved=p
+    let jumping=tick(p map at Pad[pressed=true held=true] 1.0/120.0)
+    if not jumping.jumped or jumping.player.box.y>=?p.box.y or p not=?saved return 2
+    p=jumping.player
+    loop i in [0..14) p=tick(p map at Pad[held=true] 1.0/120.0).player
+    if tick(p map at Pad[pressed=true held=true] 1.0/120.0).jumped return 3
+    let held=tick(p map at Pad[held=true] 1.0/120.0).player
+    let released=tick(p map at Pad[] 1.0/120.0).player
+    if released.vel.y<=?held.vel.y or released.box.y<=?held.box.y return 4
+
+    # A recent ledge departure permits one jump; an expired window does not.
+    let ledge=spawn(vec2(500 100))
+    ledge.coyote=0.05
+    if not tick(ledge map at Pad[pressed=true held=true] 0.01).jumped return 5
+    ledge.coyote=0.0
+    if tick(ledge map at Pad[pressed=true held=true] 0.01).jumped return 6
+
+    # Press just before landing: consume the buffered jump on the next step.
+    let falling=spawn(vec2(72 170))
+    falling.vel.y=600.0
+    let landed=tick(falling map at Pad[pressed=true held=true] 0.01)
+    if not landed.player.on_ground or landed.jumped or landed.impact<?600.0 return 7
+    if not tick(landed.player map at Pad[held=true] 0.01).jumped return 8
+
+    let platforms=make_level("........\n........\n========\n........\n########")
+    let standing=spawn(vec2(72 76))
+    standing.on_ground=true
+    let stay=tick(standing platforms at Pad[] 0.01).player
+    let drop=tick(standing platforms at Pad[drop=true] 0.01).player
+    if not stay.on_ground or drop.on_ground or drop.box.y<=?stay.box.y return 9
+    let rising=spawn(vec2(72 120))
+    rising.vel.y=-600.0
+    let through=tick(rising platforms at Pad[held=true] 0.01).player
+    if through.box.y>=?96.0 or through.vel.y>=?0.0 return 10
+
+    let slopes=make_level(r"/\")
+    let up=tilemap_move(slopes 0 Rect(10 -60 28 40) vec2(0 100))
+    let down=tilemap_move(slopes 0 Rect(58 -60 28 40) vec2(0 100))
+    if not up.hit_y or not down.hit_y or abs(up.rect.y+16.0)>?0.001 or abs(down.rect.y+16.0)>?0.001 return 11
+    let wall=make_level("..#\n..#\n..#")
+    let stopped=tilemap_move(wall 0 Rect(20 20 28 40) vec2(100 0))
+    if not stopped.hit_x or stopped.rect.x not=?68.0 return 12
+
+    let lost=spawn(vec2(500 900))
+    lost.vel=vec2(50 600)
+    if tick(lost map at Pad[] 0.01).player not=?spawn(at) return 13
+    let moving=tick(saved map at Pad[move=-1.0] 0.01).player
+    if moving.facing not=?-1.0 or moving.vel.x>=?0.0 return 14
+
+    let coins=[Coin[pos=vec2(72 100)] Coin[pos=vec2(150 100)]]
+    let original=coins
+    if collect(@coins vec2(72 100) 0.01) not=?1 return 15
+    if collect(@coins vec2(72 100) 0.01) not=?0 return 16
+    if not coins[0].taken or coins[1].taken or original[0].taken return 17
+    if coins[0].pop.t<=?0.0 or original[0].pop.t not=?0.0 return 18
+    if markers("o").length not=?16 or markers("@")[0] not=?vec2(72 600) return 19
+    return 42
+}
+'''
+    result, output = run_value_batch(compiler, tmp_path, {'platformer-model': body}, release, target)['platformer-model']
+    assert result == '42', output
+
+
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_core_platformer_starter_tests(compiler, flags):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/platformer.dewy'
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2'}
+    result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
+                            text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '2 tests passed' in result.stdout
 
 
 

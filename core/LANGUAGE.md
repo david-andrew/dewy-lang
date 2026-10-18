@@ -98,6 +98,14 @@ rooms. Other templates use `main.dewy`. Run `dewy-core watch coin-race/coin-race
 to start editing. Its generated README explains web links and the optional
 matchmaking service; no public server is configured by default.
 
+`dewy-core new hillside platformer` creates a complete single-file platformer:
+text-defined terrain, slopes, one-way platforms, coins, camera follow and generated
+art/sound. Use arrows or A/D to move, Space/W/up to jump, and down to drop through
+a platform; gamepads also work. The `tick` function takes player/input values,
+so movement can be checked without live input. Run `dewy-core test
+hillside/main.dewy` for its two starter tests. Edit `LEVEL` to change the terrain
+and `RUN`, `JUMP` or `GRAVITY` to tune its feel.
+
 Native game reload keeps unrelated live state. Changed assets refresh globals
 initialized from them, including through direct helper calls across modules.
 Closures keep their captured state when assets used by their bodies change.

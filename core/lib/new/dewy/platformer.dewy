@@ -1,0 +1,212 @@
+# A platformer: slopes, one-way platforms, buffered jumps and coins.
+# Adapted from Sloppy's MIT-licensed lib/new/platformer.jo; see the toolchain LICENSE.
+# Arrows/A/D or gamepad: move. Space/W/up/pad A: jump. Down: drop through platforms.
+# Run `dewy-core watch main.dewy`, edit update/draw and save to keep playing.
+
+const T = 48
+const RUN = 330.0
+const ACCEL = 12.0
+const JUMP = 820.0
+const GRAVITY = 2400.0
+const COYOTE = 0.1       # Jump briefly after leaving a ledge.
+const BUFFER = 0.12      # Remember a jump pressed just before landing.
+
+# '#' ground, '=' one-way platform, '/' and '\' slopes, 'o' coin, '@' start.
+const LEVEL = r"
+............................................................
+............................................................
+............................................................
+...................................o.o.o....................
+..................................=======...................
+..............................o...........................o.
+.............................===.............o...........===
+.............o.o............/##\............===.............
+............=====........../####\......o..............o.....
+....o...................../######\....===............===....
+...==....o.............../########\...........o.....o.......
+......../#\............./##########\.............../\.......
+.@...../###\........o../############\....o../#\.../##\......
+############################################################
+############################################################
+"
+
+make_level = (layout: string = LEVEL) :> Tilemap => {
+    # Collision needs tile sizes, not a texture; drawing adds that below.
+    let map = tilemap(Tileset[tile_w = T tile_h = T columns = 4]
+        [tile_layer("ground" layout r"#=/\")])
+    set_tile_shape(@map 2 TileShape.platform)
+    set_tile_shape(@map 3 TileShape.slope(0.0 1.0))
+    set_tile_shape(@map 4 TileShape.slope(1.0 0.0))
+    return map
+}
+
+# Positions of markers in the text map, in pixels.
+markers = (symbol: string) :> array<vec2> => {
+    let found: array<vec2> = []
+    let rows = lines(trim(LEVEL))
+    loop y in [0..rows.length) {
+        loop x in [0..rows[y].length) {
+            if rows[y][x]=?symbol found.push(vec2((x+0.5)*T (y+0.5)*T))
+        }
+    }
+    return found
+}
+
+Player: type = [
+    box: Rect vel: vec2 = vec2(0 0) on_ground: bool = false
+    coyote: float64 = 0.0 jump_wait: float64 = 0.0 facing: float64 = 1.0
+]
+Pad: type = [move: float64 = 0.0 pressed: bool = false held: bool = false drop: bool = false]
+Step: type = [player: Player jumped: bool = false impact: float64 = 0.0]
+spawn = (at: vec2) :> Player => Player[box = Rect(at.x-14.0 at.y-20.0 28 40)]
+
+# A step takes ordinary values. Clocks, live input and sound stay outside it.
+tick = (state: Player map: Tilemap start: vec2 pad: Pad dt: float64) :> Step => {
+    let next = Step[player = state]
+    let p = state
+    if pad.move not=?0.0 p.facing = sign(pad.move)
+    p.vel.x = approach(p.vel.x pad.move*RUN ACCEL dt)
+    p.vel.y += GRAVITY*dt
+    if p.vel.y<?0.0 and not pad.held p.vel.y += GRAVITY*dt  # Release early: short hop.
+    p.coyote -= dt
+    p.jump_wait -= dt
+    if p.on_ground p.coyote = COYOTE
+    if pad.pressed p.jump_wait = BUFFER
+    if p.jump_wait>?0.0 and p.coyote>?0.0 {
+        p.vel.y = -JUMP
+        p.jump_wait = 0.0
+        p.coyote = 0.0
+        next.jumped = true
+    }
+    let falling = p.vel.y
+    let collision = tilemap_move(map 0 p.box p.vel*dt drop = pad.drop)
+    p.box = collision.rect
+    if collision.hit_x p.vel.x = 0.0
+    p.on_ground = collision.hit_y and p.vel.y>?0.0
+    if collision.hit_y {
+        if p.on_ground next.impact = falling
+        p.vel.y = 0.0
+    }
+    if p.box.y>?tilemap_size(map).y+400.0 p = spawn(start)
+    next.player = p
+    return next
+}
+
+Coin: type = [pos: vec2 taken: bool = false pop: Tween<float64> = tween(0.0 1.0 0.35 ease_out)]
+collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
+    let count = 0
+    loop i in [0..coins.length) {
+        if coins[i].taken coins[i].pop.update(dt)
+        else if length(coins[i].pos-at)<?30.0 {
+            coins[i].taken = true
+            count += 1
+        }
+    }
+    return count
+}
+
+test "landing and jumping keep the previous player value" {
+    let map = make_level()
+    let at = markers("@")[0]
+    let p = spawn(at)
+    loop i in [0..30) p = tick(p map at Pad[] 1.0/120.0).player
+    assert(p.on_ground)
+    let before = p
+    let step = tick(p map at Pad[pressed = true held = true] 1.0/120.0)
+    assert(step.jumped and step.player.vel.y<?0.0)
+    assert(p=?before and p.on_ground)
+}
+
+test "coins are collected once and saved coins stay unchanged" {
+    let coins = [Coin[pos = vec2(20 20)] Coin[pos = vec2(100 20)]]
+    let before = coins
+    assert(collect(@coins vec2(20 20) 0.01)=?1)
+    assert(collect(@coins vec2(20 20) 0.01)=?0)
+    assert(coins[0].taken and not coins[1].taken and not before[0].taken)
+}
+
+# Presentation and live game state.
+window("Dewy / Platformer" 1280 720)
+
+make_tiles = () :> Texture => {
+    let img = image(4*T T)
+    loop y in [0..T) {
+        loop x in [0..T) {
+            let n = noise(x*0.3 y*0.3)
+            let dirt = rgb(0.36+0.06*n 0.25+0.04*n 0.18+0.03*n)
+            img.set(x y dirt)
+            if y<?10 img.set(T+x y rgb(0.62 0.42 0.24))
+            if y=?9 img.set(T+x y rgb(0.4 0.26 0.14))
+            if y>=?T-1-x img.set(2*T+x y dirt)
+            if y>=?x img.set(3*T+x y dirt)
+            if y>=?T-4-x and y<?T+2-x img.set(2*T+x y rgb(0.35 0.7 0.3))
+            if y>=?x-3 and y<?x+3 img.set(3*T+x y rgb(0.35 0.7 0.3))
+        }
+    }
+    return texture(img false)
+}
+
+make_scene = () :> Tilemap => {
+    let map = make_level()
+    map.tilesets = [tileset(make_tiles() T T)]
+    return map
+}
+let level = make_scene()
+let start = markers("@")[0]
+let player = spawn(start)
+let coins = [loop at in markers("o") Coin[pos = at]]
+let got = 0
+let run_time = 0.0
+let t = 0.0
+let cam = start
+let shake = Shake[]
+let snd_jump = sfx_jump()
+let snd_coin = sfx_coin()
+let snd_land = sfx_hit()
+action("Jump" [Input.key(Key.space) Input.key(Key.up) Input.key(Key.w) Input.button(PadButton.a)])
+
+update = (dt: float64) :> void => {
+    if key_pressed(Key.escape) quit()
+    t += dt
+    if got<?coins.length run_time += dt
+    let axis = input_axis()
+    let pad = Pad[move = axis.x pressed = action_pressed("Jump") held = action_down("Jump") drop = axis.y>?0.5]
+    let step = tick(player level start pad dt)
+    player = step.player
+    if step.jumped play(snd_jump)
+    if step.impact>?1300.0 { shake.add(0.35); play(snd_land 0.5) }
+    let box = player.box
+    let center = vec2(box.x+box.w/2.0 box.y+box.h/2.0)
+    let taken = collect(@coins center dt)
+    got += taken
+    if taken>?0 play(snd_coin)
+    let size = tilemap_size(level)
+    cam = follow(cam center dt 6.0 vec2(140 90))
+    cam = clamp(cam vec2(640 360) vec2(max(size.x-640.0 640.0) max(size.y-360.0 360.0)))
+    shake.update(dt)
+}
+
+draw = () :> void => {
+    clear(rgb(0.45 0.68 0.9))
+    camera2d(cam+shake.offset())
+    draw_tilemap(level)
+    loop coin in coins {
+        if not coin.taken {
+            let bob = sin(t*4.0+coin.pos.x*0.05)*4.0
+            circle(coin.pos+vec2(0 bob) 12 rgb(1.0 0.82 0.25))
+            circle(coin.pos+vec2(-3 bob-3) 4 rgb(1.0 0.95 0.7))
+        } else if not coin.pop.done() {
+            let k = coin.pop.value()
+            circle(coin.pos-vec2(0 30.0*k) 12.0+14.0*k rgba(1.0 0.82 0.25 1.0-k))
+        }
+    }
+    let box = player.box
+    rect(box.x box.y box.w box.h rgb(0.9 0.35 0.3))
+    let ex = box.x+box.w/2.0+player.facing*6.0
+    circle(vec2(ex-5.0 box.y+12) 3 WHITE)
+    circle(vec2(ex+5.0 box.y+12) 3 WHITE)
+    camera2d(vec2(640 360))
+    text("COINS {got} / {coins.length}" vec2(24 24) 32 WHITE)
+    text("Arrows / A D: move    Space: jump    Down: drop" vec2(24 66) 20 WHITE)
+    if got=?coins.length text_centered("All the coins in {format(run_time ".1f")} s" vec2(640 120) 48 WHITE)
+}
