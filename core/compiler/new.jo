@@ -2,7 +2,7 @@
 use 'util.jo'
 
 new_usage = ():
-    eprint("usage: dewy-core new <directory> [game|arcade|platformer|3d|online|program] (game is the default)")
+    eprint("usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)")
     exit(2)
 
 new_project_name = (dir: str, fallback: str) -> str:
@@ -23,7 +23,7 @@ new_project = (lib: str, a: str[]):
     if a.len() < 3 or a.len() > 4 or starts_with(a[2], "-"): new_usage()
     kind = "game"
     if a.len() == 4: kind = a[3]
-    if kind != "game" and kind != "arcade" and kind != "platformer" and kind != "3d" and kind != "online" and kind != "program":
+    if kind != "game" and kind != "arcade" and kind != "platformer" and kind != "3d" and kind != "story" and kind != "online" and kind != "program":
         eprint("dewy-core: no template '{kind}'")
         new_usage()
     dir = a[2]
@@ -35,12 +35,14 @@ new_project = (lib: str, a: str[]):
     if len(src) == 0:
         eprint("dewy-core: cannot read {template}")
         exit(1)
-    entry = if kind == "online" or kind == "arcade": new_project_name(dir, kind) else: "main.dewy"
+    entry = if kind == "online" or kind == "arcade" or kind == "story": new_project_name(dir, kind) else: "main.dewy"
     readme = "# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core {entry}\ndewy-core check {entry}\ndewy-core watch {entry}\ndewy-core build {entry} -o main\n```\n"
     if kind != "program":
         readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build {entry} --target wasm -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
     if kind == "arcade":
         readme += "\nCollect gold and avoid the rocks with arrows/WASD or a gamepad. Escape/Start\npauses, as does leaving the window. Menus accept mouse, keyboard and gamepad.\nThe high score is saved locally. Keep {entry}'s filename the same between builds;\nit names the saved data. Use a distinct source filename before publishing.\nRun `dewy-core test {entry}` for the two simulation tests. Its Game value includes\nits random generator, so saved states replay the same input identically.\n"
+    if kind == "story":
+        readme += "\nSpace/Enter/click reveals the current line, then advances. Choose by clicking\nor pressing its number. Escape exits natively. The reading place, background\nand characters are saved on exit; reopening shows the same line or choice.\nEdit SCRIPT to write the story, or load it with str_from_bytes(embed(\"story.txt\")).\nRun `dewy-core test {entry}` for the two story tests. Keep the source filename\nstable across native/web builds: it names saved data. Choose a distinct filename\nbefore publishing. Character circles and scene colors can be replaced by images.\n"
     if kind == "platformer":
         readme += "\nMove with arrows/A/D or a gamepad. Jump with Space/W/up or gamepad A; hold down\nto drop through a platform. Collect every coin. Edit LEVEL to change the map,\nRUN/JUMP/GRAVITY to tune movement, and tick to change the player rules.\nThe tile art and sounds are generated in the source; no assets are required.\nRun `dewy-core test main.dewy` for the included movement and coin tests.\n"
     if kind == "3d":

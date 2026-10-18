@@ -1,0 +1,147 @@
+# A short visual novel with choices, colored dialogue, and a saved reading place.
+# Adapted from Sloppy's MIT-licensed lib/new/story.jo; see the toolchain LICENSE.
+# Space/Enter/click reveals a line, then advances. Click a choice or press its number.
+# For a longer story: const SCRIPT=str_from_bytes(embed("story.txt"))
+const SCRIPT = r"""
+character m "Mira" #f4a6c6
+character r "Ren" #8fc7ff
+
+label start:
+    scene square
+    "The bell rang twice across the empty square."
+    show mira at left
+    m "You came! I wasn't sure you would."
+    show ren at right
+    r "Neither was I. [i]Somebody[/i] said it would rain."
+    menu:
+        "\"I wouldn't miss it.\"":
+            $ mira += 1
+            m "Good. Then let's go [color=yellow]up the tower[/color]."
+        "\"I almost didn't.\"":
+            $ ren += 1
+            r "Honest. I like that."
+    scene tower
+    if mira > ren:
+        m "See? The whole town, all at once."
+    else:
+        r "Not bad, for a bell tower."
+    hide ren
+    "And the bell rang again."
+"""
+const SCENES = ["square"->rgb(0.32 0.38 0.5) "tower"->rgb(0.55 0.42 0.36)]
+const PEOPLE = ["mira"->rgb(0.96 0.65 0.78) "ren"->rgb(0.56 0.78 1.0)]
+const SPEED = 45.0
+
+# Save the position BEFORE the visible step, so reopening repeats the same line
+# or choice. Scene state is included; a resumed conversation keeps its portraits.
+Bookmark: type = [position: StorySave background: vec4 shown: dict<string string>]
+Reading: type = [
+    script: Story step: StoryStep = StoryStep[kind = StoryKind.end]
+    background: vec4 = rgb(0.1 0.1 0.14) shown: dict<string string> = []
+    bookmark: Bookmark
+]
+advance = (@reading: Reading) :> void => {
+    loop true {
+        reading.bookmark = Bookmark[reading.script.save() reading.background reading.shown]
+        reading.step = reading.script.next()
+        if reading.step.kind not=?StoryKind.command return
+        let words = reading.step.words
+        if words.length<?2 continue
+        if words[0]=?"scene" {
+            reading.background = SCENES.get(words[1])??rgb(0.2 0.2 0.25)
+            reading.shown.clear()
+        } else if words[0]=?"show" {
+            let at = "center"
+            if words.length>?3 and words[end-1]=?"at" at = words[end]
+            reading.shown[words[1]] = at
+        } else if words[0]=?"hide" reading.shown.remove(words[1])
+    }
+}
+fresh = () :> Reading => {
+    let reading = Reading[script = story(SCRIPT)]
+    if reading.script.error.length>?0 panic(reading.script.error)
+    advance(@reading)
+    return reading
+}
+resume = (bookmark: Bookmark) :> Reading => {
+    let reading = Reading[script = story(SCRIPT) background = bookmark.background shown = bookmark.shown]
+    if reading.script.error.length>?0 panic(reading.script.error)
+    reading.script.load(bookmark.position)
+    advance(@reading)
+    return reading
+}
+choose = (@reading: Reading index: int64) :> void => {
+    if reading.step.kind not=?StoryKind.choice or index<?0 or index>=?reading.step.choices.length return
+    reading.script.choose(index)
+    advance(@reading)
+}
+
+test "a resumed line keeps its scene and characters" {
+    let reading = fresh()
+    advance(@reading)
+    assert(reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left")
+    let loaded = resume(reading.bookmark)
+    assert(loaded.step=?reading.step and loaded.background=?reading.background and loaded.shown=?reading.shown)
+}
+
+test "the two choices lead to different replies" {
+    let reading = fresh()
+    loop reading.step.kind not=?StoryKind.choice { advance(@reading) }
+    let other = reading
+    choose(@reading 0)
+    choose(@other 1)
+    assert(reading.step.speaker=?"Mira" and other.step.speaker=?"Ren")
+    assert(reading.script.vars.get("mira")??0=?1 and other.script.vars.get("ren")??0=?1)
+}
+
+# Presentation and live game state.
+window("Dewy / The Bell Tower" 1280 720)
+let reading = resume(load_value("place" fresh().bookmark))
+let typed = 0.0
+on_quit = () => { save_value("place" reading.bookmark) }
+
+update = (dt: float64) :> void => {
+    if key_pressed(Key.escape) quit()
+    if reading.step.kind=?StoryKind.line {
+        typed += dt*SPEED
+        if key_pressed(Key.space) or key_pressed(Key.enter) or mouse_pressed(Mouse.left) {
+            if typed<?float64(char_count(reading.step.text)) typed = 1e9
+            else { advance(@reading); typed = 0.0 }
+        }
+    } else if reading.step.kind=?StoryKind.choice {
+        loop i in [0..min(9 reading.step.choices.length)) {
+            if key_pressed((int64(Key.n1)+i) as Key) { choose(@reading i); typed = 0.0; break }
+        }
+    }
+}
+draw = () :> void => {
+    clear(reading.background)
+    loop [who at] in reading.shown {
+        let x = 640.0
+        if at=?"left" x = 300.0
+        else if at=?"right" x = 980.0
+        circle(vec2(x 330) 130 PEOPLE.get(who)??GRAY)
+        text_centered(who vec2(x 330) 32 rgba(0 0 0 0.6))
+    }
+    if reading.step.kind=?StoryKind.line {
+        hud_panel(Rect(60 470 1160 220))
+        if reading.step.speaker.length>?0 {
+            let color = WHITE
+            if reading.step.color.length>?0 color = hex(reading.step.color)
+            text(reading.step.speaker vec2(90 486) 28 color)
+        }
+        text_rich(reading.step.text vec2(90 530) 28 WHITE width = 1100 chars = int64(typed))
+        text("Space / Enter / click to continue" vec2(90 650) 18 rgba(1 1 1 0.5))
+    } else if reading.step.kind=?StoryKind.choice {
+        loop i in [0..reading.step.choices.length) {
+            if hud_button(Rect(340 220+float32(i)*80 600 64) "{i+1}. {reading.step.choices[i]}") {
+                choose(@reading i)
+                typed = 0.0
+                break
+            }
+        }
+    } else {
+        text_centered("The end" vec2(640 360) 48 WHITE)
+        if hud_button(Rect(540 440 200 56) "Again") { reading = fresh(); typed = 0.0 }
+    }
+}

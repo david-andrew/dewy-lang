@@ -94,7 +94,7 @@ variable locations instead of running the default local optimization pass.
 `coin-race/coin-race.dewy`, with practice mode, rollback networking and invite
 screens. The online template derives a safe source filename from the directory
 name; keep it the same for native and web builds because it names saved data and
-rooms. The arcade template also derives its filename this way for saved scores;
+rooms. The arcade and story templates also derive their filenames this way for saved data;
 the other templates use `main.dewy`. Run `dewy-core watch coin-race/coin-race.dewy`
 to start editing. Its generated README explains web links and the optional
 matchmaking service; no public server is configured by default.
@@ -119,6 +119,13 @@ movable crates, ray-cast shots, glowing targets, shadows and fog. Click to captu
 the mouse, use WASD/Space to walk/jump, and click to shoot; Escape releases the
 mouse. It also supports gamepad sticks, A and RB/right trigger. Its included test
 checks shot selection. The yard, meshes and sounds are generated in the source.
+
+`dewy-core new bell-tower story` creates `bell-tower/bell-tower.dewy`, a visual
+novel with dialogue, branching choices, typewriter text and a saved reading place.
+Space/Enter/click reveals a line, then advances; choices accept clicks or number
+keys. A bookmark includes the background and characters and replays the displayed
+step when reopened. Edit the embedded `SCRIPT` or use an embedded text asset.
+The included tests cover choices and restoring a conversation.
 
 Native game reload keeps unrelated live state. Changed assets refresh globals
 initialized from them, including through direct helper calls across modules.

@@ -1,0 +1,20 @@
+{
+  "change": "Port the story starter to Dewy with bookmarks before visible steps and saved backgrounds/characters, so a reopened line or choice is restored rather than skipped. Add project-derived story filenames and include the web input regression fixture in CI path filters.",
+  "validated_compiler": "build-1792326185479134327/bin/dewy-core",
+  "source_identity": "861f4c390bf4c3e78daac84888546d0585876f99d31cc625bc5a0abbf2e2f392",
+  "validation": [
+    "30 focused starter/new-project checks passed in 11.97s using a compiler built from the previous core.",
+    "Two native saved-reading checks (default/release) passed in 4.12s.",
+    "Formatter, Ruff and git diff --check passed. Full independent C bootstrap is assigned to hosted CI for this increment."
+  ],
+  "coverage": [
+    "Native/web, default/release: both choice branches to end, invalid choices, unchanged snapshots, branch variables, scene/show/hide commands, restart, bookmark resume and text serialization at every visible step.",
+    "Native/default/release: on_quit saves a displayed Mira line; a new process restores that same line, character position and square background using an isolated save directory.",
+    "Project filename sanitization/fallback, native software render and web build; included two project tests in both native modes.",
+    "Browser: Enter reveal/advance to choice, reload restores both choices and characters; clicking second choice displays Ren reply; reload repeats that reply with its characters/background. No console/network errors."
+  ],
+  "limits": [
+    "Prototype portraits are circles and scenes are flat colors, as in the original starter; generated projects can replace them with images.",
+    "No claim of full RenPy language compatibility. Saving relies on the ordinary on_quit/pagehide hook; abrupt process/browser termination can lose the latest progress."
+  ]
+}

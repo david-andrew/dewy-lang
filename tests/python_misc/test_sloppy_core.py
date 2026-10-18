@@ -8544,13 +8544,13 @@ def test_core_cli_identity(compiler):
     assert result.returncode == 0 and 'file.dewy' in result.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'arcade', 'platformer', '3d', 'online', 'program'])
+@pytest.mark.parametrize('kind', ['game', 'arcade', 'platformer', '3d', 'story', 'online', 'program'])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
                           text=True, timeout=5, check=False)
     assert made.returncode == 0, made.stdout + made.stderr
-    source = project / ('project-with-spaces.dewy' if kind in {'online', 'arcade'} else 'main.dewy')
+    source = project / ('project-with-spaces.dewy' if kind in {'online', 'arcade', 'story'} else 'main.dewy')
     assert source.is_file() and (project / 'README.md').is_file()
     assert not list(project.glob('*.jo'))
     binary = project / 'main'
@@ -8559,7 +8559,7 @@ def test_core_new_project(compiler, tmp_path, kind):
     assert built.returncode == 0, built.stdout + built.stderr
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(SLOPPY_SOFTWARE='1', SLOPPY_THREADS='2', SLOPPY_FRAMES='3',
-               SLOPPY_SCREENSHOT=str(project / 'frame.png'))
+               SLOPPY_SCREENSHOT=str(project / 'frame.png'), SLOPPY_SAVE_DIR=str(project / 'saves'))
     ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     if kind == 'program':
@@ -8771,11 +8771,65 @@ main=()=>{
     assert result == '42', output
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_story_starter_model(compiler, tmp_path, target, release):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/story.dewy'
+    model = template.read_text().split('# Presentation and live game state.', 1)[0]
+    body = model + r'''
+main=()=>{
+    loop option in [0..2) {
+        let reading=fresh()
+        if reading.step.text not=?"The bell rang twice across the empty square." return 1
+        let menus=0
+        let ending=false
+        loop i in [0..20) {
+            let restored=resume(reading.bookmark)
+            if restored.step not=?reading.step or restored.background not=?reading.background or restored.shown not=?reading.shown return 2
+            if restored.script.vars not=?reading.script.vars return 3
+            let saved=to_text(reading.bookmark)
+            let decoded=from_text<Bookmark>(saved)
+            match decoded {
+                bookmark:Bookmark=>{
+                    let loaded=resume(bookmark)
+                    if loaded.step not=?reading.step or loaded.shown not=?reading.shown or loaded.background not=?reading.background return 4
+                }
+                error:TextError=>{printl(error.message); return 5}
+            }
+            if reading.step.kind=?StoryKind.end {ending=true; break}
+            if reading.step.kind=?StoryKind.choice {
+                menus+=1
+                if reading.shown.length not=?2 or reading.step.choices.length not=?2 return 6
+                let snapshot=reading
+                choose(@reading -1)
+                choose(@reading 99)
+                if reading not=?snapshot return 7
+                choose(@reading option)
+                if snapshot.script.vars.length not=?0 return 8
+                if option=?0 and reading.step.speaker not=?"Mira" return 9
+                if option=?1 and reading.step.speaker not=?"Ren" return 10
+            } else advance(@reading)
+        }
+        if not ending or menus not=?1 or reading.shown.length not=?0 return 11
+        if reading.background not=?SCENES["tower"] return 12
+        if option=?0 and reading.script.vars.get("mira")??0 not=?1 return 13
+        if option=?1 and reading.script.vars.get("ren")??0 not=?1 return 14
+        let restarted=fresh()
+        if restarted.step.text not=?"The bell rang twice across the empty square." or restarted.script.vars.length not=?0 return 15
+    }
+    return 42
+}
+'''
+    result, output = run_value_batch(compiler, tmp_path, {'story-model': body}, release, target)['story-model']
+    assert result == '42', output
+
+
 @pytest.mark.parametrize('flags', [[], ['--release']])
-@pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2)])
-def test_core_game_starter_tests(compiler, flags, kind, count):
+@pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2), ('story', 2)])
+def test_core_game_starter_tests(compiler, tmp_path, flags, kind, count):
     template = Path(__file__).resolve().parents[2] / f'core/lib/new/dewy/{kind}.dewy'
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2'}
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
+           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
     result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -8818,7 +8872,7 @@ main=()=>{
 
 @pytest.mark.parametrize('directory, entry', [('Coin Race!', 'coin-race.dewy'),
                                              ('___', '___.dewy'), ('!!!', 'online.dewy')])
-@pytest.mark.parametrize('kind', ['online', 'arcade'])
+@pytest.mark.parametrize('kind', ['online', 'arcade', 'story'])
 def test_core_named_starter_filename(compiler, tmp_path, directory, entry, kind):
     if directory == '!!!':
         entry = f'{kind}.dewy'
@@ -8851,6 +8905,31 @@ test "load round" {assert(best=?7)}
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
            'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save round', 'load round']:
+        result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
+                                capture_output=True, text=True, timeout=30, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert '1 test passed' in result.stdout
+
+
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_core_story_starter_saved_reading(compiler, tmp_path, flags):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/story.dewy'
+    source = tmp_path / 'reading-test.dewy'
+    source.write_text(template.read_text() + '''
+test "save reading" {
+    reading=fresh()
+    advance(@reading)
+    assert(reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left")
+    on_quit()
+}
+test "load reading" {
+    assert(reading.step.speaker=?"Mira" and reading.step.text=?"You came! I wasn't sure you would.")
+    assert(reading.shown["mira"]=?"left" and reading.background=?SCENES["square"])
+}
+''')
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
+           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
+    for name in ['save reading', 'load reading']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
