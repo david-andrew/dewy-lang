@@ -8127,7 +8127,7 @@ def test_core_rejects(compiler, tmp_path, name):
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode != 0 and diagnostic in built.stderr, built.stdout + built.stderr
-    assert str(source) in built.stderr
+    assert os.path.normcase(str(source)) in os.path.normcase(built.stderr)
     assert not binary.exists()
 
 

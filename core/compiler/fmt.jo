@@ -410,8 +410,8 @@ fmt_walk = (d: str, out: mut str[]):
     loop n in list_dir(d):
         if starts_with(n, ".") or n == "build" or n == "node_modules": continue
         full = d + "/" + n
-        if ends_with(n, ".jo") or ends_with(n, ".dewy"): out.push(full)
-        else if find_byte(n, '.') < 0 or file_exists(full + "/."): fmt_walk(full, out)
+        if is_dir(full): fmt_walk(full, out)
+        else if ends_with(n, ".jo") or ends_with(n, ".dewy"): out.push(full)
 
 # sloppy fmt [--check] files or directories... | sloppy fmt - (standard input to standard output)
 fmt_main = (a: str[]):
@@ -438,8 +438,8 @@ fmt_main = (a: str[]):
         return
     todo: str[]
     loop p in paths:
-        if ends_with(p, ".jo") or not file_exists(p + "/."): todo.push(p)
-        else: fmt_walk(p, todo)
+        if is_dir(p): fmt_walk(p, todo)
+        else: todo.push(p)
     changed = 0
     loop p in todo:
         src = read_file(p) ?? ""
