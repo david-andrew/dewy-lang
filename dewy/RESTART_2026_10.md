@@ -78,10 +78,11 @@ unchanged self-build CPU time and about 3% higher Netpong CPU time. Wall times
 were noisy; these are workload measurements, not a general speedup claim. The
 [validation and raw measurements](audits/2026-10-18/closure-value-validation.json)
 record the semantic coverage, compiler identities and remaining copy costs.
-The independent C-bootstrap CI passes 5,624 checks with five skips in 70.54
+The independent C-bootstrap CI, including the unified `$capture` parameter
+syntax, passes 5,652 checks with five skips in 91.32
 pytest seconds, followed by passing Windows, macOS ARM64 and Linux ARM64 smoke,
 editor, watch and relocated-package checks. All four standalone downloads are
-available from the [validated run](https://github.com/david-andrew/dewy-lang/actions/runs/39145494743).
+available from the [validated run](https://github.com/david-andrew/dewy-lang/actions/runs/39147250518).
 
 Native/web paddle, physics, forest, Dunes and Netpong examples exercise the game
 libraries. Netpong adds tested native/browser multiplayer and a bundled invite UI.
