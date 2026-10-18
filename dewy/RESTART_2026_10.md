@@ -102,6 +102,17 @@ was rejected: it regressed particle and physics workloads. Future work should
 keep vector values in registers; [the rejected trial](audits/2026-10-17/source-core/wasm-vector-slots-rejected.json)
 retains its patch and measurements so it need not be repeated.
 
+Profiling that graph exposed dependent reads from map slots to dense keys.
+Slots now cache complete integer keys (and full hashes for other key types),
+keeping insertion order and independent value copies. In a paired comparison,
+the unchanged million-node graph improved from 1,023 to 777 ms default and
+731 to 602 ms release; Node/web improved from 1,656 to 1,233 ms and
+1,440 to 1,086 ms. Text timings and compiler CPU time were roughly unchanged.
+The tradeoff is larger slots: whole-process graph peak memory rose from 218 to
+250 MiB, while compiler peak memory stayed near 239 MiB. The
+[profile, raw measurements and validation](audits/2026-10-17/source-core/map-slot-key-validation.json)
+record the memory cost, noisy compiler wall times and platform limits.
+
 The development gate now has over 5,400 checks; recent local full runs took
 151–208 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects a small cross-section of those checks. Focused

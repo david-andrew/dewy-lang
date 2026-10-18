@@ -1,12 +1,27 @@
 # Hash map {K: V}: insertion ordered, open addressing over a dense entry list.
 # The first two fields must stay `keys` and `vals` (the compiler iterates them in mutable loops).
 # A removed entry stays in place, marked gone (so the others keep theirs), its slot a tombstone
-# (1 << 32: probes go on past it); when half of them are gone, they are taken out at once.
+# (entry -1: probes go on past it); when half of them are gone, they are taken out at once.
+
+struct __MapSlot:
+    tag: u64
+    entry: int       # 0 = empty, -1 = removed, otherwise dense entry index + 1
+
+# Integer tags hold the complete key; other keys use a full hash and equality.
+# This avoids a dependent read from the dense key array for integer lookups.
+# Keep equality's array access inside the generic overload: evaluating keys[e]
+# before calling it would pay that read even when the integer tag is sufficient.
+__map_tag = (k: int, h: u64) -> u64: u64(k)
+__map_tag = (k: u64, h: u64) -> u64: k
+__map_tag[K] = (k: K, h: u64) -> u64: h
+__map_slot_equal = (keys: int[], e: int, k: int) -> bool: true
+__map_slot_equal = (keys: u64[], e: int, k: u64) -> bool: true
+__map_slot_equal[K] = (keys: K[], e: int, k: K) -> bool: __at(keys, e) == k
 
 struct Map[K, V]:
     keys: K[]
     vals: V[]
-    slots: u64[]      # 0 = empty, otherwise the entry's hash's upper 32 bits | entry index + 1
+    slots: __MapSlot[]
     hashes: u64[]
     gone: bool[]      # (entries removed since the last compaction: true; shorter than keys when
                       # entries were added after the last removal)
@@ -56,23 +71,23 @@ hash = (x): __hash_value(x)
 # bootstrap compiler calls this)
 __at[T] = (xs: T[], i: int) -> T: xs[i]
 
-# (slots has a power-of-two length when not empty, its entries are 0 or an entry index + 1
-# with the upper half of the entry's hash above it, and keys, vals and hashes have an element per
-# entry: every index here is in bounds. A slot whose hash half differs is passed over without
-# looking at the entry, which is elsewhere in memory)
+# Slots has a power-of-two length when not empty. Positive slot entries index
+# keys, vals and hashes, which each have an element per dense entry. Empty and
+# removed slots are distinguished independently of the tag (zero is a valid
+# key/hash). A differing tag skips equality and its separate key-array read.
 # k's entry, or -2 - the empty slot where it would go (-1 when there are no slots yet)
 __map_probe[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
     ns = m.slots.len()
     if ns == 0: return -1
     mask = ns - 1
     i = int(h) & mask
-    hi = h & 0xFFFFFFFF00000000
+    tag = __map_tag(k, h)
     loop true:
         s = __at(m.slots, i)
-        if s == 0: return -2 - i
-        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
-            e = int(s & 0xFFFFFFFF) - 1
-            if __at(m.keys, e) == k: return e
+        if s.entry == 0: return -2 - i
+        if s.entry > 0 and s.tag == tag:
+            e = s.entry - 1
+            if __map_slot_equal(m.keys, e, k): return e
         i = (i + 1) & mask
 
 __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
@@ -80,13 +95,13 @@ __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
     if ns == 0: return -1
     mask = ns - 1
     i = int(h) & mask
-    hi = h & 0xFFFFFFFF00000000
+    tag = __map_tag(k, h)
     loop true:
         s = __at(m.slots, i)
-        if s == 0: return -1
-        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
-            e = int(s & 0xFFFFFFFF) - 1
-            if __at(m.keys, e) == k: return e
+        if s.entry == 0: return -1
+        if s.entry > 0 and s.tag == tag:
+            e = s.entry - 1
+            if __map_slot_equal(m.keys, e, k): return e
         i = (i + 1) & mask
 
 __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
@@ -97,8 +112,8 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
     loop e in 0.. and h in m.hashes:
         if e < ng and __at(m.gone, e): continue
         i = int(h) & mask
-        loop m.slots[i] != 0: i = (i + 1) & mask
-        m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(e + 1)
+        loop m.slots[i].entry != 0: i = (i + 1) & mask
+        m.slots[i] = __MapSlot(__map_tag(__at(m.keys, e), h), e + 1)
 
 # Method lookup also finds hash in the key's defining module, just as equality
 # finds its operator there. A lexical hash(k) can miss that overload in a caller.
@@ -170,8 +185,8 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
     if i < 0:
         mask = m.slots.len() - 1
         i = int(h) & mask
-        loop m.slots[i] != 0: i = (i + 1) & mask
-    m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(n + 1)
+        loop m.slots[i].entry != 0: i = (i + 1) & mask
+    m.slots[i] = __MapSlot(__map_tag(k, h), n + 1)
 
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
     e = __map_find(m, k, k.hash())
@@ -273,15 +288,15 @@ remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
     h = k.hash()
     mask = ns - 1
     i = int(h) & mask
-    hi = h & 0xFFFFFFFF00000000
+    tag = __map_tag(k, h)
     loop true:
         s = m.slots[i]
-        if s == 0: return false
-        if s & 0xFFFFFFFF00000000 == hi and s & 0xFFFFFFFF != 0:
-            e = int(s & 0xFFFFFFFF) - 1
-            if m.keys[e] == k:
+        if s.entry == 0: return false
+        if s.entry > 0 and s.tag == tag:
+            e = s.entry - 1
+            if __map_slot_equal(m.keys, e, k):
                 # (a tombstone where its slot was; the entry gone, letting go of what it held)
-                m.slots[i] = 0x100000000
+                m.slots[i] = __MapSlot(0, -1)
                 if m.gone.len() < m.keys.len(): m.gone.resize(m.keys.len())
                 m.gone[e] = true
                 zk: K

@@ -4416,6 +4416,53 @@ if keys not=? ["first" "last"] or items not=? [[20] [22]] panic("projection")
 }
 main=()=>{work() let before=alloc_count() loop i in [0..30) work()
 return if alloc_count() =? before 42 else 1}''',
+    'dictionary-key-word-boundaries': '''main=()=>{
+let signed=[int64.min int64.max -1 0 4294967295 4294967296 -4294967296]
+let values:dict<int64 array<int64>>=[]
+loop i in [0..signed.length) values[signed[i]]=[i]
+let saved=values
+values.reserve(100)
+loop i in [0..signed.length) {
+if values.get(signed[i]) is? none or values[signed[i]] not=?[i] return 1
+values[signed[i]].push(42)
+if saved[signed[i]] not=?[i] return 2
+}
+if values.has(1) or values.has(-4294967295) return 3
+loop i in [0..4) {if not values.remove(signed[i]) return 4}
+loop i in [0..4) values[signed[i]]=[42]
+if values.keys() not=?[4294967295 4294967296 -4294967296 int64.min int64.max -1 0] return 5
+let unsigned:array<uint64>=[0 uint64.max uint64.max-1 4294967295 4294967296]
+let wide:dict<uint64 int64>=[]
+loop i in [0..unsigned.length) wide[unsigned[i]]=i
+let prior=wide
+wide.remove(uint64.max) wide.reserve(100) wide[uint64.max]=42
+loop i in [0..unsigned.length) {
+if prior[unsigned[i]] not=?i return 6
+if wide[unsigned[i]] not=? (if i=?1 42 else i) return 7
+}
+return if not wide.has(1 as uint64) 42 else 8}''',
+    'dictionary-full-hash-collisions': '''Key:type=[value:int64 label:string]
+hash=(key:Key):>uint64=>0
+__eq__=(a:Key b:Key):>bool=>a.value=?b.value
+main=()=>{
+let values:dict<Key array<int64>>=[]
+loop i in [0..80) values[Key[i "first"]]=[i]
+let saved=values
+loop i in [0..61) {if not values.remove(Key[i "remove"]) return 1}
+if values.has(Key[100 "missing"]) return 2
+values.reserve(300)
+loop i in [0..61) {
+if not values.insert_if_absent(Key[i "again"] [i+100]) return 3
+}
+loop i in [0..80) {
+if values.insert_if_absent(Key[i "duplicate"] [999]) return 4
+if saved[Key[i "snapshot"]] not=?[i] return 5
+if values[Key[i "lookup"]] not=?[if i<?61 i+100 else i] return 6
+}
+let keys=values.keys()
+if keys.length not=?80 or keys[0].value not=?61 or keys[19].value not=?0 return 7
+values[Key[0 "mutate"]].push(42)
+return if saved[Key[0 "original"]]=?[0] 42 else 8}''',
     'dictionary-insert-growth': '''main=()=>{let values:dict<int64 int64>=[]
 loop i in [0..300) {if not values.insert_if_absent(i i+1) return 1}
 let snapshot=values
