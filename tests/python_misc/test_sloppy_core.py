@@ -1294,6 +1294,61 @@ source=()=>{calls+=1 return [20 22]}
 make=():>Pair=>source()
 main=()=>{let pair=make() let [a b]=pair
 return if calls =? 1 a+b else 1}''',
+    'fixed-array-slice-update': '''main=()=>{let xs:array<int64 length=6>=[10 20 30 40 50 60] let saved=xs
+xs[1..2]=[1 2] xs[..1)=3 xs[4..]=42 xs[3..3)=[]
+return if xs =? [3 1 2 40 42 42] and saved =? [10 20 30 40 50 60] 42 else 1}''',
+    'fixed-array-selection-update': '''main=()=>{let xs:array<int64 length=6>=[10 20 30 40 50 60]
+xs[0,2..]=42 xs[5,3..1]=[1 2 3]
+if xs not=? [42 3 42 2 42 1] return 1
+let selected=[4 0] xs[selected]=[8 9]
+let mask=[false true false true false false] xs[mask]=[20 22]
+let r=[5,3..1] xs[r]=7
+return if xs =? [9 7 42 7 8 7] 42 else 2}''',
+    'fixed-array-update-context': '''main=()=>{let xs:array<uint8 length=4>=[]
+xs[..]=12 xs[1..]=[20 21 22] xs[[0 2]]=[3 4] xs[[false true false true]]=5
+let rhs:array<uint8 length=2>=[30 40] xs[1..2]=rhs
+return if xs =? [3 30 40 5] 42 else 1}''',
+    'fixed-array-update-overlap': '''main=()=>{let xs:array<int64 length=4>=[10 20 30 40]
+xs[1..3]=xs[..3) if xs not=? [10 10 20 30] return 1
+xs[[3 2 1 0]]=xs
+return if xs =? [30 20 10 10] 42 else 2}''',
+    'fixed-array-update-order': '''let trace:int64=0
+start=()=>{trace=trace*10+1 return 0}
+stop=()=>{trace=trace*10+2 return 1}
+replacement=()=>{trace=trace*10+3 return [20 22]}
+main=()=>{let xs:array<int64 length=3>=[] xs[start()..stop()]=replacement()
+return if xs =? [20 22 0] and trace =? 123 42 else 1}''',
+    'fixed-array-update-parameters': '''Row:type=array<int64 length=2>
+change=(xs:Row):>Row=>{xs[..]=0 return xs}
+edit=(@xs:Row)=>{xs[..]=42}
+main=()=>{let xs:Row=[20 22] let result=change(xs)
+if xs not=? [20 22] or result not=? [0 0] return 1
+edit(@xs) return if xs =? [42 42] 42 else 2}''',
+    'fixed-array-update-places': '''Row:type=array<int64 length=3>
+Box:type=[row:Row]
+main=()=>{let rows:array<Box>=[Box[[10 20 30]] Box[[40 50 60]]] let saved=rows
+let which:int64=0 let calls:int64=0
+select=()=>{calls+=1 return which}
+replace=()=>{which=1 return [7 8]}
+rows[select()].row[1..end]=replace()
+if calls not=? 1 or rows[0].row not=? [10 7 8] or rows[1].row not=? [40 50 60] return 1
+let m:dict<string Row>=['a'->[10 20 30]] let old=m
+m['a'][0,2..]=[5 6]
+return if m['a'] =? [5 20 6] and old['a'] =? [10 20 30]
+and saved[0].row =? [10 20 30] 42 else 2}''',
+    'fixed-array-update-managed-broadcast': '''main=()=>{let xs:array<array<int64> length=3>=[[1] [2] [3]]
+xs[..]=xs[0] xs[1].push(42)
+return if xs =? [[1] [1 42] [1]] 42 else 1}''',
+    'fixed-array-update-managed': '''Row:type=array<array<string> length=3>
+work=():>void=>{let row:Row=[['a'] ['b'] ['c']] let saved=row
+row[1..]=[['new'] ['last']] row[0..0]=row[2..2]
+row[0].push('!')
+if saved not=? [['a'] ['b'] ['c']] or row not=? [['last' '!'] ['new'] ['last']] panic("snapshot changed")
+let pool:Pool<Row>=[] let h=pool.add(saved) let old=pool
+pool[h][1..]=[['x'] ['y']]
+if pool[h] not=? [['a'] ['x'] ['y']] or old[h] not=? saved panic("writeback failed")}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'fixed-array-slices': '''main=()=>{let values:array<int64 length=4>=[10 11 12 9]
 let middle=values[1..3) let tail=values[2..] let empty=values[2..2)
 if middle not=? [11 12] or tail not=? [12 9] or empty.length not=? 0 return 1
@@ -1305,6 +1360,14 @@ let picked=values[[3 0 3]] let masked=values[[true false true false]]
 let selection=[0,2..3] let selected=values[selection]
 return if backwards =? [9 12 11 10] and odds =? [11 9] and picked =? [9 10 9]
 and masked =? [10 12] and selected =? [10 12] 42 else 1}''',
+    'fixed-array-selection-snapshots': '''Pair:type=array<array<int64> length=2>
+let values:Pair=[[20] [22]] let calls:int64=0
+indexes=()=>{calls+=1 values[0][0]=99 return [0 1]}
+last=()=>{calls+=1 values[1][0]=88 return 1}
+main=()=>{let picked=values[indexes()]
+if picked not=? [[20] [22]] or values[0][0] not=? 99 return 1
+let selected=values[0,1..last()]
+return if selected =? [[99] [22]] and values[1][0] =? 88 and calls =? 2 42 else 2}''',
     'fixed-array-slice-snapshots': '''Pair:type=array<array<int64> length=2>
 let values:Pair=[[20] [22]] let calls:int64=0
 bound=()=>{calls+=1 values[0][0]=99 values[1].push(5) return 2}
@@ -3792,8 +3855,8 @@ ERRORS = {
     'fixed-array-wrong-length': ('main=()=>{let values:array<int64 length=2>=[1 2 3] return 42}', '2 elements'),
     'fixed-array-unpack-length': ('main=()=>{let values:array<int64 length=2>=[20 22] let [a b c]=values return 42}', 'exactly 3 elements'),
     'fixed-array-zero-length': ('main=()=>{let values:array<int64 length=0>=[] return 42}', 'at least 1'),
+    'fixed-array-compound-slice': ('main=()=>{let xs:array<int64 length=2>=[20 22] xs[..]+=1 return 42}', 'compound assignment to picked elements'),
     'fixed-array-grow': ('main=()=>{let values:array<int64 length=2>=[20 22] values.push(0) return 42}', 'fixed size'),
-    'fixed-array-slice-assignment': ('main=()=>{let values:array<int64 length=2>=[20 22] values[..]=[0 0] return 42}', 'cannot assign to a fixed-array slice'),
     'fixed-array-mutable-conversion': ('change=(@xs:array<int64 length=2>)=>{xs[0]=42}\nmain=()=>{let xs=[20 22] change(@xs) return 42}', 'exact match'),
     'fixed-array-unknown-constraint': ('main=()=>{let values:array<int64 capacity=2>=[20 22] return 42}', 'length=N'),
     'record-spread-set': ('main=()=>{let values=set[1] let record=[values... answer=42] return 42}', 'only records can be spread into a record'),
@@ -5878,6 +5941,14 @@ def test_core_unpack_errors(error_batches, body, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let xs:array<int64 length=2>=[20 22] xs[0..2]=0', 'range indexes are out of bounds'),
+    ('let xs:array<int64 length=2>=[20 22] xs[-1..1]=0', 'range index -1 is out of bounds'),
+    ('let xs:array<int64 length=2>=[20 22] xs[..]=[0]', 'values for 2 range indexes'),
+    ('let xs:array<int64 length=2>=[20 22] xs[0,0..1]=0', 'range step must be nonzero'),
+    ('let xs:array<int64 length=2>=[20 22] xs[[2]]=0', 'out of bounds'),
+    ('let xs:array<int64 length=2>=[20 22] xs[[true]]=0', 'a mask of 1 for 2 elements'),
+    ('let xs:array<int64 length=2>=[20 22] xs[[true false]]=[0 0]', 'values for the 1 elements in the mask'),
+    ('let xs:array<int64 length=2>=[20 22] xs[[0 1]]=[0]', 'values for 2 indexes'),
     ('let input=[20] let pair:array<int64 length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),
     ('let input=[20 22 99] printl(input as array<int64 length=2>)', 'fixed-size array needs 2 elements'),
     ('let input:array<string>=[] let pair:array<string length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),

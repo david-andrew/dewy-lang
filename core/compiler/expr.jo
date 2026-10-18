@@ -614,7 +614,7 @@ check_place = (n: int, for_mut: bool):
         bk = types[bt].kind
         if bk == .ptr: return
         if bk == .str_: fatal(nodes[n].pos, "a string's characters cannot be changed in place: make a new string, `s = s[..i) + \"x\" + s[i + 1..]`, or change `cs = chars(s)` and `join(cs)` it back")
-        if bk == .fixed and nodes[n].aux == 1: fatal(nodes[n].pos, "cannot assign to a fixed-array slice; update elements by index")
+        if bk == .fixed and nodes[n].aux == 1: fatal(nodes[n].pos, "a fixed-array slice is a copy; pass the whole array as a mutable argument")
         cp_inner += 1
         if bk == .vec or bk == .fixed:
             check_place(int(nodes[n].a), for_mut)
@@ -5395,7 +5395,7 @@ check_expr = (n: int, expected: int) -> int:
                 pick = index_array_fn(b, "__pick")
                 if len(pick) > 0:
                     # xs[mask], xs[idxs]: the elements picked, as an array
-                    call = bc_call(pick, [int(nodes[n].a), b], nodes[n].pos)
+                    call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
                     add_flag(int(nodes[n].a), NF_CHECKED)
                     nodes[n] = nodes[call]
                     t = check_expr(n, expected)
@@ -6317,7 +6317,19 @@ dewy_array_slice = (index: int, value: int = 0) -> int:
     if last == 0: last = bc_int(0, pos)
     args = [base, first, second, last, inclusive, bounded, stepped]
     if value != 0: args.push(value)
-    bc_call((if value == 0: "__dewy_pick_slice" else: "__dewy_put_slice"), args, pos)
+    if value != 0: return dewy_array_selection_call("__dewy_put_slice", args, prune(ntype(base)), pos)
+    dewy_array_selection_call("__dewy_pick_slice", args, prune(ntype(base)), pos)
+
+# Bind both storage and element types. The same library loops select and update
+# growable and inline arrays directly, preserving element context for literals.
+dewy_array_selection_call = (name: str, args: int[], storage: int, pos: int) -> int:
+    callee = mk(.typeapply, pos)
+    nodes[callee].a = i32(bc_ident(name, pos))
+    set_list(callee, [type_node_of(storage, pos), type_node_of(int(types[storage].elem), pos)])
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    call
 
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:

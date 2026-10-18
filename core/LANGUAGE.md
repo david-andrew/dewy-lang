@@ -467,11 +467,19 @@ redirect a mutation into a temporary copy.
 
 Inline arrays also support read slices (`pair[..]`, `pair[1..]`), stepped
 selections, index lists, masks and stored ranges. Their results are growable
-arrays with independent values. A contiguous slice allocates only its result;
-stepped and indexed selections currently use the growable-array helpers.
-Bounds evaluate after capturing the source value, so changing the source in a
-bound expression does not change the value being sliced. To update an inline
-array, assign individual elements; assignment to its slices is not yet supported.
+arrays with independent values. Selection reads the inline storage directly
+without first converting the entire source to a growable array. Bounds evaluate
+after capturing the source value, so changing the source in a bound expression
+does not change the value being selected.
+
+The same selections support updates: `pair[..]=0`, `pair[0..1]=[20 22]`,
+`values[0,2..]=42`, `values[indexes]=replacements` and `values[mask]=0`.
+A scalar fills the selected elements; an array supplies exactly one replacement
+per selected element. Updates preserve the fixed length and independent copies,
+including nested managed values and overlapping source/destination selections.
+They also work inside record fields, dictionaries and custom containers such as
+`Pool`. As with ordinary arrays, compound assignment to a selection needs an
+explicit loop.
 Spreading inline arrays into ordinary arrays works, and a spread literal can
 initialize a fixed array with a runtime length check: `let pair:Pair<int64>=[xs...]`.
 

@@ -1188,3 +1188,29 @@ The `outlines.dewy` example shows thick zigzags, a closed star, rounded outlines
 repeated inputs and a 6,000-point plot crossing multiple batches. Fifteen focused
 native/web checks pass in 3.91 seconds and the 149-check quick suite in 3.41.
 See `polyline-*` source-core audits for raw results, baseline patch and limits.
+
+
+Inline-array selections now also support assignment: contiguous/stepped slices,
+stored ranges, index arrays and masks accept scalar fills or an exact number of
+replacement values. The compiler supplies storage and element types to shared
+library helpers, which write inline storage directly. This retains narrow literal
+context, overlap snapshots, parameter value copies and nested writeback through
+records, dictionaries and custom containers. Compound selection assignment still
+requires an explicit loop.
+
+Read selections use the same storage-generic helpers. Stepped/index/mask/stored
+range reads no longer materialize a growable copy of the complete inline source;
+only the selected result needs growable storage. Source snapshots still precede
+side-effecting index expressions. Contiguous slices retain their existing direct
+copy path. `fixed-update-*` source-core audits record validation and paired
+selection measurements; `benchmark_fixed_selection.py` reruns unchanged source
+against two standalone toolchains.
+
+Seven alternating thread-CPU pairs selecting from 512 inline integers 100,000
+times measured 18.63/10.42 ms for stepped reads and 13.80/4.80 ms for index-list
+reads (baseline/candidate). Median paired ratios are 0.560/0.336. Both toolchains
+compile the same source; input construction is excluded and result allocation
+and summation are included. These are isolated selection workloads, not a broad
+application speed claim. Five fresh-build pairs show no compile-speed gain.
+The independent C-bootstrap suite passes 3,824 checks in 83.61 pytest seconds
+with two workers; the focused selection passes 448 checks in 6.86 seconds.

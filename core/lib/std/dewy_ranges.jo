@@ -62,7 +62,7 @@ __dewy_range_indices = (size: int, r: IntRange) -> int:
         panic("range indexes are out of bounds for {size} elements")
     int(r._count)
 
-__pick[T] = (xs: T[], r: IntRange) -> T[]:
+__pick[A, T] = (xs: A, r: IntRange) -> T[]:
     count = __dewy_range_indices(xs.len(), r)
     out: T[]
     out.resize(count)
@@ -73,7 +73,7 @@ __pick[T] = (xs: T[], r: IntRange) -> T[]:
         index += delta
     out
 
-__put[T] = (xs: mut T[], r: IntRange, value: T):
+__put[A, T] = (xs: mut A, r: IntRange, value: T):
     count = __dewy_range_indices(xs.len(), r)
     index = r._first
     delta = int(if r._up: r._stride else: u64(0) - r._stride)
@@ -81,7 +81,7 @@ __put[T] = (xs: mut T[], r: IntRange, value: T):
         __at(xs, index) = value
         index += delta
 
-__put[T] = (xs: mut T[], r: IntRange, values: T[]):
+__put[A, T] = (xs: mut A, r: IntRange, values: T[]):
     count = __dewy_range_indices(xs.len(), r)
     if values.len() != count: panic("{values.len()} values for {count} range indexes")
     index = r._first
@@ -94,11 +94,11 @@ __dewy_slice_range = (size: int, first: int, second: int, last: int, inclusive: 
     stop = if bounded: last else if not stepped or second > first: size - 1 else: 0
     __dewy_range(first, second, stop, stepped, inclusive or not bounded)
 
-__dewy_pick_slice[T] = (xs: T[], first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool) -> T[]:
-    __pick(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped))
+__dewy_pick_slice[A, T] = (xs: A, first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool) -> T[]:
+    __pick[A, T](xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped))
 
-__dewy_put_slice[T] = (xs: mut T[], first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, value: T):
-    __put(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped), value)
+__dewy_put_slice[A, T] = (xs: mut A, first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, value: T):
+    __put[A, T](xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped), value)
 
-__dewy_put_slice[T] = (xs: mut T[], first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, values: T[]):
-    __put(xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped), values)
+__dewy_put_slice[A, T] = (xs: mut A, first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, values: T[]):
+    __put[A, T](xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped), values)
