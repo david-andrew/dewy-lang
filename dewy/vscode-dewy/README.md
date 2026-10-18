@@ -54,6 +54,14 @@ Format Document uses the core's Dewy formatter on the unsaved buffer, with fixed
 four-space indentation. It preserves strings, comments, line breaks and
 spacing-sensitive expressions. Results for an older document version are discarded.
 
+**Dewy: Test Current File (Core)** saves open files and runs the current file's
+`test "description" { ... }` blocks with the configured compiler. It is also in
+the editor context menu. **Dewy: Test Current File in Release Mode (Core)** checks
+optimized code. Results appear in the task terminal; compilation errors also
+appear in Problems. Use **Tasks: Terminate Task** to stop a run, or **Tasks: Rerun
+Last Task** to repeat it. No `tasks.json` or Python test runner is needed. For name
+filtering, use `dewy-core test file.dewy words` in a terminal.
+
 Rename, signature help and semantic highlighting are not enabled by
 this client yet. The existing native-debugger configuration below still targets
 the earlier compiler.

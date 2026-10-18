@@ -29,7 +29,8 @@
     "LICENSE",
     "core-client.js",
     "THIRD_PARTY_NOTICES.md",
-    "core-debug.js"
+    "core-debug.js",
+    "core-test.js"
   ],
   "contributes": {
     "languages": [
@@ -188,6 +189,14 @@
       {
         "command": "dewy.core.debug",
         "title": "Dewy: Debug Current File (Core)"
+      },
+      {
+        "command": "dewy.core.test",
+        "title": "Dewy: Test Current File (Core)"
+      },
+      {
+        "command": "dewy.core.testRelease",
+        "title": "Dewy: Test Current File in Release Mode (Core)"
       }
     ],
     "menus": {
@@ -199,6 +208,21 @@
         {
           "command": "dewy.core.debug",
           "when": "editorLangId == dewy"
+        },
+        {
+          "command": "dewy.core.test",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported"
+        },
+        {
+          "command": "dewy.core.testRelease",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dewy.core.test",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported",
+          "group": "navigation@20"
         }
       ]
     },

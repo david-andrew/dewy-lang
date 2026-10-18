@@ -37,6 +37,7 @@ function activate(context) {
     const vscode = require('vscode');
     require('./core-client').activate(context, vscode);
     require('./core-debug').activate(context, vscode, splitArguments);
+    require('./core-test').activate(context, vscode);
     context.subscriptions.push(vscode.commands.registerCommand('dewy.programArguments', async () => {
         const typed = await vscode.window.showInputBox({
             prompt: 'Command-line arguments for the program (split like a shell)',

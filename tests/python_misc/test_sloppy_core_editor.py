@@ -213,6 +213,21 @@ def test_vscode_core_debug(tmp_path):
     assert 'debug builds, arguments, failures and cleanup passed' in result.stdout
 
 
+def test_vscode_core_test_tasks(tmp_path):
+    import shutil
+    node = shutil.which('node')
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if node is None or not compiler:
+        pytest.skip('Node and DEWY_CORE_COMPILER are needed for editor test tasks')
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run([node, root / 'tests/fixtures/core_editor/test.cjs',
+                             root / 'dewy/vscode-dewy/core-test.js',
+                             Path(compiler).resolve(), tmp_path], capture_output=True,
+                            text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'test tasks: saved sources, release mode, failures and literal paths passed' in result.stdout
+
+
 @pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
     ('', 'let xs=[42] return xs[end]', 'end', 'int64'),
     ('', 'let value=uint8.max return if value >? 0 42 else 1', 'max', 'uint8'),

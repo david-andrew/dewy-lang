@@ -1699,3 +1699,10 @@ paired ratio is 0.525 (about 47% less kernel wall time). Next-frame allocation i
 included; initialization and pool warmup are excluded. This is one substantial
 numerical workload, not a claim for tiny callbacks or all games. Several parallel
 samples were affected by other system work. See `parallel-dewy-*` audits.
+
+The VS Code extension now exposes default/release project-test commands using
+the configured compiler. They save open files, preserve literal paths, and use
+editor-owned process tasks for output, cancellation and reruns. Real compiler
+execution behind VS Code API doubles passes alongside the existing client/debug
+integration: 25 focused checks in 4.51 seconds. This is not a desktop extension-host
+certification; see `editor-test-tasks-*` audits.

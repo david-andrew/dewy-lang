@@ -54,6 +54,9 @@ The standalone compiler accepts the same `test` command. It compiles the selecte
 file once and runs its test blocks in declaration order. Optional words after the
 filename select test names containing any of those words. A failed test, no tests,
 or no matching names produces a nonzero exit status. Names must be constant strings.
+The VS Code extension also provides **Dewy: Test Current File (Core)** and a release
+variant, using `dewy.core.path`. These save open files and show results in a task
+terminal; the editor's task commands can stop or rerun them.
 
 On Linux and macOS, each test runs in a separate child process: assertions and
 panics fail that test, later tests still run, and changes to globals stay local to
