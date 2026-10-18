@@ -34,7 +34,7 @@ dn_quote_width = (source: str, start: int, stop: int) -> int:
 
 # Find a closing interpolation brace, skipping nested strings and line comments.
 # Both token scanning and string construction use this, including unsaved text.
-dn_interpolation_end = (source: str, start: int, stop: int, nesting: int) -> int:
+dn_interpolation_end = (source: str, start: int, stop: int, nesting: int, allow_incomplete: bool = false) -> int:
     i = start
     depth = 1
     loop i < stop:
@@ -43,21 +43,26 @@ dn_interpolation_end = (source: str, start: int, stop: int, nesting: int) -> int
             loop i < stop and source[i] != '\n': i += 1
             continue
         if c == 'r' and i + 1 < stop and (source[i + 1] == '"' or source[i + 1] == '\'') and (i == start or not dn_ident_part(source[i - 1])):
-            i = dn_quote_end(source, i + 1, stop, nesting, true)
+            i = dn_quote_end(source, i + 1, stop, nesting, true, allow_incomplete)
+            if i < 0: return -1
             continue
         if c == '"' or c == '\'':
-            i = dn_quote_end(source, i, stop, nesting)
+            i = dn_quote_end(source, i, stop, nesting, false, allow_incomplete)
+            if i < 0: return -1
             continue
         if c == '{': depth += 1
         else if c == '}':
             depth -= 1
             if depth == 0: return i
         i += 1
+    if allow_incomplete: return -1
     dn_error(start, "unterminated string interpolation")
 
 # Skip a quoted token, including nested quoted strings inside interpolation.
-dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool = false) -> int:
-    if nesting >= 256: return dn_error(start, "string interpolation is nested too deeply")
+dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool = false, allow_incomplete: bool = false) -> int:
+    if nesting >= 256:
+        if allow_incomplete: return -1
+        return dn_error(start, "string interpolation is nested too deeply")
     quote = source[start]
     width = dn_quote_width(source, start, stop)
     i = start + width
@@ -68,9 +73,12 @@ dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool 
             if width == 1: return i + 1
             if i + 2 < stop and source[i + 1] == quote and source[i + 2] == quote: return i + 3
         if not raw and c == '{':
-            i = dn_interpolation_end(source, i + 1, stop, nesting + 1) + 1
+            end = dn_interpolation_end(source, i + 1, stop, nesting + 1, allow_incomplete)
+            if end < 0: return -1
+            i = end + 1
             continue
         i += 1
+    if allow_incomplete: return -1
     dn_error(start, "unterminated string")
 
 dn_matches = (source: str, at: int, stop: int, value: str) -> bool:

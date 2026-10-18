@@ -1,5 +1,5 @@
 use 'frontend.jo'
-# The interactive prompt: `sloppy` with no file.
+# The Dewy interactive prompt: `dewy-core repl`.
 #
 # The program lives in a session process (lib/std/repl.jo): a program compiled at the start,
 # whose main waits for code. This process keeps the compiler's state; for each input it checks
@@ -40,6 +40,7 @@ lf_abs: int[]                           # function (lfunc) -> its address in the
 ro_segs: (int, int, int)[]              # read-only data: (from, to) offsets and their address
 ro_shipped = 0
 repl_inited: {int: bool} = {}           # library globals initialized in the session
+repl_modules_inited: {int: bool} = {}   # imported module initializers already run
 repl_cabi_abs: {int: int} = {}          # (Windows) function -> its @cabi adapter's address
 repl_to = -1                            # pipes to and from the session (Windows: handles)
 repl_from = -1
@@ -73,9 +74,7 @@ repl_started = () -> bool:
 repl_start = () -> str:
     repl_next = repl_region()
     src = "__repl_main = (): __repl_serve({repl_next}, {REPL_REGION_SIZE})\n"
-    cache = "/tmp/sloppy-cache"
-    when TARGET == "windows":
-        cache = os_path(temp_dir()) + "/sloppy-cache"
+    cache = os_path(temp_dir()) + "/dewy-repl"
     mkdir(cache)
     me = 0
     when TARGET == "windows":
@@ -97,6 +96,8 @@ repl_start = () -> str:
     late_binding = true
     # (inputs `use` files relative to the current directory)
     modules[repl_mainm].dir = cwd()
+    files[int(modules[repl_mainm].file)].is_dewy = true
+    loop f in init_fns: repl_modules_inited[int(fns[f].mod)] = true
     loop i in [0..lfuncs.len()):
         a = 0
         if i < fn_addr.len() and fn_addr[i] >= 0: a = img_text_addr + fn_addr[i]
@@ -212,7 +213,6 @@ repl_end = ():
 
 struct ReplOut:
     show: bool          # the input ends with an expression with a value: show it
-    expr_at: int        # (where that expression starts, in the input)
     type: str           # (its type)
     code: u8[]
     entry: int          # the offset of the input's entry point in code
@@ -222,8 +222,11 @@ struct ReplOut:
 repl_compile = (text: str, n: int) -> ReplOut:
     out = ReplOut()
     m = repl_mainm
+    fb = fns.len()
+    first_module = modules.len()
+    first_import = from_imports.len()
     fi = files.len()
-    files.push(SrcFile("<input>", ".", text))
+    files.push(SrcFile("<input>", ".", text, true))
     decls = source_declarations(fi)
     # declaring a name again replaces it (code compiled already keeps the old one)
     loop d in decls:
@@ -232,11 +235,17 @@ repl_compile = (text: str, n: int) -> ReplOut:
             nm = int(nodes[d].name)
             if modules[m].names.get(nm) != none: modules[m].names.remove(nm)
     n0 = modules[m].inits.len()
+    modules[m].decls.extend(decls)
     register_decls(m, decls)
+    mi = first_module
+    loop mi < modules.len():
+        register_module(mi)
+        mi += 1
+    bind_from_imports(first_import)
+    setup_module_contexts(init_fns[0])
     stmts: int[]
     loop i in [n0..modules[m].inits.len()): stmts.push(modules[m].inits[i])
     # check: the statements as a function of their own, and the functions declared
-    fb = fns.len()
     ci = new_inst(FK_INIT, m, "input_{n}")
     body = mk(.block, mkpos(fi, 0))
     set_list(body, stmts)
@@ -249,6 +258,19 @@ repl_compile = (text: str, n: int) -> ReplOut:
     mark = scope_mark()
     ctxs[cx].floor = i32(sc_names.len())
     loop s in stmts: check_stmt(s)
+    # an expression with a value at the end: shown
+    if stmts.len() > 0:
+        last = stmts[stmts.len() - 1]
+        if nodes[last].kind == .exprstmt:
+            t = prune(ntype(int(nodes[last].a)))
+            if t != 0 and tkind(t) != .void_ and t != T_NEVER:
+                out.show = true
+                out.type = type_str(zonk(t), true)
+                if len(repl_sig) > 0: out.type = repl_sig
+                if not repl_sig_query:
+                    shown = synth_call("__repl_show", [int(nodes[last].a)], nodes[last].pos)
+                    check_stmt(shown)
+                    nodes[last] = nodes[shown]
     scope_reset(mark)
     zonk_tree(body)
     loop l in fns[ci].locals: locals[l].type = i32(zonk(int(locals[l].type)))
@@ -257,20 +279,12 @@ repl_compile = (text: str, n: int) -> ReplOut:
     cx = -1
     loop d in decls:
         if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
-    k = fb
-    loop k < fns.len():
-        if fns[k].state == 0 and fns[k].kind == FK_NORMAL: check_fn_body(k)
-        k += 1
-    # an expression with a value at the end: shown
-    if stmts.len() > 0:
-        last = stmts[stmts.len() - 1]
-        if nodes[last].kind == .exprstmt:
-            t = prune(ntype(int(nodes[last].a)))
-            if t != 0 and tkind(t) != .void_ and t != T_NEVER:
-                out.show = true
-                out.expr_at = pos_off(nodes[last].pos)
-                out.type = type_str(zonk(t))
-                if len(repl_sig) > 0: out.type = repl_sig
+    loop imported in [first_module..modules.len()):
+        if modules[imported].is_prelude: continue
+        loop d in modules[imported].decls:
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
+    check_pending_functions(fb)
+    if open_globals.len() > 0: settle_open_globals()
     # lower and compile what is new
     lf0 = lfuncs.len()
     init_lf = lf_of_inst(ci)
@@ -285,6 +299,14 @@ repl_compile = (text: str, n: int) -> ReplOut:
     a_data_fix = []
     elf_syms = []
     pinits: int[]
+    minits: int[]
+    dfs_state = fill(false, modules.len())
+    order: int[]
+    order_modules(m, order)
+    loop imported in order:
+        if imported == m or modules[imported].is_prelude or repl_modules_inited.has(imported): continue
+        repl_modules_inited[imported] = true
+        minits.push(lf_of_inst(int(modules[imported].init_fn)))
     i = lf0
     loop true:
         loop i < lfuncs.len():
@@ -313,6 +335,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
         fns[pi].state = 2
         zonk_tree(pb)
         pinits.push(lf_of_inst(pi))
+    pinits.extend(minits)
     if target_arm64: return repl_place_arm64(out, pinits, init_lf, lf0)
     # the entry: library globals first (in the order they were found), then the input
     loop code.len() % 16 != 0: b(0xCC)
@@ -425,14 +448,12 @@ repl_ro_addr = (off: int) -> int:
 struct ReplTry:
     ok: bool
     show: bool
-    expr_at: int
     type: str
     out: ReplOut
 
-# compile text as the next input. What it adds stays (ready to send) with keep 1 if it compiles,
-# with keep 2 if it compiles and shows no value; else (and after errors, which it tells) the
-# compiler is as it was: its memory is put back as it was (lib/std/snapshot.jo).
-repl_try = (text: str, keep: int) -> ReplTry:
+# Compile an input, keeping it ready to send, or restore state after a type query.
+# Errors always restore the compiler's memory (lib/std/snapshot.jo).
+repl_try = (text: str, keep: bool) -> ReplTry:
     t = ReplTry()
     when not BOOTSTRAP:
         lo, n = __image_data()
@@ -442,22 +463,20 @@ repl_try = (text: str, keep: int) -> ReplTry:
             __repl_jmp = repl_jbuf
             o = repl_compile(text, repl_inputs)
             __repl_jmp = null
-            if keep == 1 or keep == 2 and not o.show:
+            if keep:
                 __snap_drop(s)
                 __os_raw_free(box as *u8, 4096)
-                return ReplTry(true, o.show, o.expr_at, o.type, o)
+                return ReplTry(true, o.show, o.type, o)
             box[0] = 1
             if o.show: box[1] = 1
-            box[2] = o.expr_at
-            box[3] = __snap_keep(o.type) as int
+            box[2] = __snap_keep(o.type) as int
         __repl_jmp = null
         __snap_restore(s)
         __snap_drop(s)
         if box[0] == 1:
             t.ok = true
             t.show = box[1] == 1
-            t.expr_at = box[2]
-            t.type = __snap_unkeep(box[3] as *u8)
+            t.type = __snap_unkeep(box[2] as *u8)
         __os_raw_free(box as *u8, 4096)
     t
 
@@ -477,17 +496,22 @@ repl_code_end = (s: str) -> int:
 
 # run an input: compile, send, run; false if the session ended
 repl_run = (text: str) -> bool:
-    c = repl_try(text, 2)
-    if not c.ok: return true
-    if c.show:
-        # show the value: the last expression becomes __repl_show(expression)
-        e = trim_end(text)
-        last = e[c.expr_at..]
-        code_end = repl_code_end(last)
-        shown = e[..c.expr_at) + "__repl_show(" + trim_end(last[..code_end)) + ")\n"
-        c = repl_try(shown, 1)
-        if not c.ok: c = repl_try(text, 1)
-        if not c.ok: return true
+    # A failed runtime input must roll back its declarations and compiled-code
+    # bookkeeping too. Keep owned compilation temporaries in the helper, so
+    # they are released before restoring the compiler's heap.
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        snapshot = __snap_take(lo, lo + n)
+        status = repl_run_input(text)
+        if status != 0: __snap_restore(snapshot)
+        __snap_drop(snapshot)
+        return status != 2
+    false
+
+# 0: completed, 1: failed input (keep the session), 2: session ended.
+repl_run_input = (text: str) -> int:
+    c = repl_try(text, true)
+    if not c.ok: return 1
     o = c.out
     repl_inputs += 1
     repl_send(1, o.addr, o.code)
@@ -497,14 +521,15 @@ repl_run = (text: str) -> bool:
     r = repl_wait_reply()
     if r < 0:
         eprint("the session ended")
-        return false
+        return 2
     if r >= 512:
-        if r - 512 == 101: return true          # a panic (it said why)
+        if r - 512 == 101: return 1             # a panic (it said why)
         repl_end()
         exit(r - 512)                          # exit() in the input
     if r == 256 + 2: eprint("interrupted; the session is as it was before this input")
     else if r >= 256: eprint("crashed (signal {r - 256}); the session is as it was before this input")
-    true
+    if r >= 256: return 1
+    0
 
 # ---- reading input ----
 
@@ -740,35 +765,29 @@ repl_before = ""          # (the lines of the input typed so far, for completion
 # brackets and strings still open at the end of text
 repl_open = (text: str) -> int:
     depth = 0
-    q: u8 = 0
     i = 0
     loop i < len(text):
         c = text[i]
-        if q != 0:
-            if c == '\\': i += 1
-            else if c == q: q = 0
-        else if c == '"' or c == '\'': q = c
-        else if c == '#':
+        raw = c == 'r' and i + 1 < len(text) and (text[i + 1] == '"' or text[i + 1] == '\'') and (i == 0 or not (is_alnum(text[i - 1]) or text[i - 1] == '_' or text[i - 1] >= 128))
+        if raw or c == '"' or c == '\'':
+            start = if raw: i + 1 else: i
+            i = source_quote_end(text, start, raw)
+            if i < 0: return depth + 1
+            continue
+        if c == '#':
             loop i < len(text) and text[i] != '\n': i += 1
             continue
-        else if c == '(' or c == '[' or c == '{{': depth += 1
+        if c == '(' or c == '[' or c == '{{': depth += 1
         else if c == ')' or c == ']' or c == '}}': depth -= 1
         i += 1
-    if q != 0: return depth + 1
     depth
 
-# one input: a line, or a block (a line ending with ':' and the indented lines after it, up to
-# an empty line), or lines with brackets still open
+# One Dewy input, continued while its brackets or quoted text remain open.
 repl_read = () -> str?:
     text = ""
-    indent = ""
-    block = false
     loop true:
-        prompt = ">>> "
-        if len(text) > 0: prompt = "... "
-        l: str? = none
-        if repl_tty: l = repl_edit(prompt, indent)
-        else: l = repl_plain()
+        prompt = if len(text) == 0: ">>> " else: "... "
+        l = if repl_tty: repl_edit(prompt, "") else: repl_plain()
         if l == none:
             if len(text) > 0: return text
             return none
@@ -777,35 +796,24 @@ repl_read = () -> str?:
             repl_before = ""
             return ""
         if len(text) == 0 and len(trim(line)) == 0: return ""
-        # (history keeps lines, as typed)
         if repl_tty and len(trim(line)) > 0 and (repl_history.len() == 0 or repl_history[repl_history.len() - 1] != line): repl_history.push(line)
         text += line + "\n"
         repl_before = text
-        line_code = trim_end(line[..repl_code_end(line)))
-        if ends_with(line_code, ":"): block = true
-        if repl_open(text) > 0:
-            indent = ""
-            continue
-        if block:
-            if len(trim(line)) == 0:
-                repl_before = ""
-                return text
-            # (the next line indented like this one, or more after a ':')
-            k = 0
-            loop k < len(line) and line[k] == ' ': k += 1
-            indent = line[..k)
-            if ends_with(line_code, ":"): indent += "    "
-            continue
+        if repl_open(text) > 0: continue
         repl_before = ""
         return text
     none
 
 repl_load_history = ():
-    home = env("HOME") ?? ""
-    when TARGET == "windows":
-        if len(home) == 0: home = os_path(env("USERPROFILE") ?? "")
-    if len(home) == 0: return
-    repl_hist_path = "{home}/.sloppy_history"
+    if let path = env("DEWY_REPL_HISTORY"):
+        repl_hist_path = path
+    else:
+        home = env("HOME") ?? ""
+        when TARGET == "windows":
+            if len(home) == 0: home = os_path(env("USERPROFILE") ?? "")
+        if len(home) == 0: return
+        repl_hist_path = "{home}/.dewy_history"
+    if len(repl_hist_path) == 0: return
     if let h = read_file(repl_hist_path):
         loop l in lines(h):
             if len(l) > 0: repl_history.push(l)
@@ -819,18 +827,24 @@ repl_save_history = ():
 
 # ---- the prompt ----
 
-repl_help = "Type Sloppy: declarations and statements run as you enter them, and the value of an
-expression at the end of an input is shown. A line ending with ':' starts a block (functions,
-loops, structs...), and an empty line ends it. Names you declare stay, and declaring one again
-replaces it. If an input panics or crashes, everything is as it was before it.
-  :type expr   the type of an expression (without running it); of a function, its versions
-  tab          complete a name (or indent, at the start of a line)
-  up, down     earlier lines
-  ctrl-c       drop the line, or stop what is running
-  ctrl-d, exit leave
+repl_help = "Type Dewy expressions, declarations and statements. Values at the end of an input
+are shown. Braces and brackets may span lines. Names persist between inputs:
+  let score=20       declare or replace a binding
+  score=40           update the existing binding
+  twice=(x)=>2x      define a function
+  twice(score)      evaluate an expression
+  :type expr        show its type without running it
+  :help             show this help
+  tab               complete a name
+  up, down          earlier lines
+  ctrl-c            drop the input, or stop what is running
+  ctrl-d, :quit     leave
+An input that fails leaves session values and declarations as they were.
+External effects, such as printed output or file writes, are not rolled back.
 "
 
 repl_main = ():
+    ide_doc = "<input>.dewy"
     when TARGET == "windows":
         m: u32[] = [0]
         repl_tty = GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
@@ -845,14 +859,14 @@ repl_main = ():
         syscall(13, 2, data(act), 0, 8)                # rt_sigaction(SIGINT)
     why = repl_start()
     if len(why) > 0:
-        eprint("sloppy: {why}")
+        eprint("dewy-core: {why}")
         exit(1)
     when TARGET == "windows":
         # (ctrl-c stops what an input is running, not the prompt; set after the session started,
         # which would have this too)
         SetConsoleCtrlHandler(null, 1)
     if repl_tty:
-        repl_out("Sloppy (type an expression or a statement; a line ending with ':' starts a block, an empty line ends it; ctrl-d quits)\n")
+        repl_out("Dewy (:help for help; braces may span lines; ctrl-d quits)\n")
         repl_load_history()
     loop true:
         repl_raw(true)
@@ -875,7 +889,7 @@ repl_main = ():
             repl_sig = ""
             quiet = len(bi) > 0
             if quiet: quiet_errors = true
-            c = repl_try(what + "\n", 0)
+            c = repl_try(what + "\n", false)
             quiet_errors = false
             repl_sig_query = false
             repl_sig = ""
@@ -898,25 +912,13 @@ when TARGET == "windows":
 
 # the language's own functions, which have no declaration to show (as docs/API.md's Built-in
 # functions and Arrays tell them)
-REPL_BUILTINS = ["print", "print(values...)    prints the values, separated by spaces, and a line break",
-    "assert", "assert(ok: bool, message: str = \"\")    stops the program, with the message, if ok is false",
-    "panic", "panic(message: str)    stops the program, with the message and where",
-    "fill", "fill(x: T, n: int) -> T[]    an array of n copies of x",
-    "sqrt", "sqrt(x: f64) -> f64, sqrt(x: f32) -> f32    the square root",
-    "len", "len(xs: T[]) -> int, len(s: str) -> int    how many elements (a string's: bytes)",
-    "push", "push(xs: mut T[], x: T)    adds x at the end",
-    "pop", "pop(xs: mut T[]) -> T    removes the last element and gives it back",
-    "insert", "insert(xs: mut T[], i: int, x: T)    puts x in at index i",
-    "remove", "remove(xs: mut T[], i: int) -> T    takes out the element at i and gives it back",
-    "extend", "extend(xs: mut T[], ys: T[])    adds all of ys at the end",
-    "clear", "clear(xs: mut T[])    removes every element",
-    "truncate", "truncate(xs: mut T[], n: int)    keeps the first n elements",
-    "resize", "resize(xs: mut T[], n: int)    makes it n long (new elements are zero)",
-    "str", "str(x) -> str    any value as text, as print shows it",
-    "int", "int(x) -> int    a number as a whole number (a float cut toward zero); text: to_int(s)",
-    "f64", "f64(x) -> f64    a number as a float; text: to_float(s)",
-    "embed", "embed(path: str) -> u8[]    a file's bytes, built into the program",
-    "bytes", "bytes(s: str) -> u8[]    a string's bytes (UTF-8)"]
+REPL_BUILTINS = ["print", "print(value)    writes a value without a line break",
+    "printl", "printl(value)    writes a value and a line break",
+    "assert", "assert(ok message=\"\")    stops this input if ok is false",
+    "panic", "panic(message)    stops this input with a message",
+    "fill", "fill(value count)    makes an array of count copies of value",
+    "len", "len(values)    number of elements; for strings, bytes (text.length counts graphemes)",
+    "bytes", "bytes(text)    UTF-8 bytes as array<uint8>"]
 
 repl_builtin_doc = (name: str) -> str:
     i = 0

@@ -62,8 +62,10 @@ Native/web paddle, physics, forest, Dunes and Netpong examples exercise the game
 libraries. Netpong adds tested native/browser multiplayer and a bundled invite UI.
 Dunes includes procedural cloth and custom terrain/shadow shaders written in
 Dewy; generated GLSL is compiled and linked by a real offscreen GLES driver in CI.
-The editor checks unsaved source, including opened named libraries. Templates,
-asset embedding, error recovery and native live reload support application work.
+The editor checks unsaved source, including opened named libraries. A native
+interactive prompt retains Dewy values and definitions and recovers from failed
+inputs. Templates, asset embedding, error recovery and native live reload support
+application work.
 Dewy's 57-body physics scene runs at 178.32 ms versus 178.64 ms for the matching
 Sloppy source in the recorded headless comparison; this is one workload, not a
 general runtime parity claim. The earlier nested-particle comparison brought the
@@ -72,7 +74,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [example guide](../examples/sloppy_core/README.md).
 
 The development gate now has over 3,900 checks; recent local full runs took
-88–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
+78–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects 149 checks and takes roughly 3–4 pytest seconds. Focused
 selections also typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced

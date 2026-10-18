@@ -1,4 +1,10 @@
 # Only the implementation language is needed to build the first full compiler.
 use 'parse.jo'
+use 'util.jo'
 
 source_declarations = (file: int) -> int[]: parse_file(file)
+
+# The temporary implementation-language seed has no Dewy interactive frontend.
+source_quote_end = (text: str, start: int, raw: bool) -> int:
+    fatal(-1, "the bootstrap seed does not support the Dewy prompt")
+    -1

@@ -20,3 +20,7 @@ source_declarations = (file: int) -> int[]:
             i -= 1
         return decls
     parse_file(file)
+
+# The prompt uses the same quote scanner, accepting an unfinished input.
+source_quote_end = (text: str, start: int, raw: bool) -> int:
+    dn_quote_end(text, start, len(text), 0, raw, true)

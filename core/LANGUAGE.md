@@ -69,6 +69,39 @@ string contents and meaningful spacing such as `2x`, `f(x)` and `[1 -2 3]`.
 Ordinary arithmetic spacing stays as written; invalid literals and unbalanced
 delimiters leave the file unchanged with an error.
 
+### Interactive prompt
+
+Run `python3 -m tools.core repl`, `tools/dewy repl`, or `dewy-core repl` to try
+Dewy without creating a source file:
+
+```text
+>>> let score=20
+>>> twice=(x)=>2x
+>>> twice(score)+2
+42
+>>> score=21
+>>> twice(score)
+42
+>>> :type score
+int64
+```
+
+Variables, functions, types and imports persist for the session. Braces, brackets,
+and quoted text may span input lines; the final expression's value is displayed.
+`:type expression` checks its type without running it. `:help` lists commands,
+`:quit` or Ctrl-D exits, and Ctrl-C cancels an input or interrupts running code.
+Tab completes names; the arrow keys recall previous lines.
+
+Assignment updates an existing binding. An explicit `let` redeclaration creates
+a new binding; functions already defined retain the bindings they captured.
+Compile errors, panics and interrupted inputs restore both session values and
+new declarations. External effects such as printed output and file writes
+remain. Imported modules initialize once, in dependency order.
+
+Terminal history lives in `~/.dewy_history`. `DEWY_REPL_HISTORY` selects another
+file; an empty value disables history persistence. The prompt is currently
+validated on the Linux compiler host.
+
 ## Functions and values
 
 Arguments and array elements are separated by whitespace. Calls use adjacent

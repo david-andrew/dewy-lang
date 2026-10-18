@@ -20,6 +20,7 @@ python3 -m tools.core test -n 0                  # run the full gate serially
 python3 -m tools.core test -n 2                  # choose the worker count
 python3 -m tools.core test -k shader_driver      # compile/link shaders with GLES
 python3 -m tools.core watch examples/sloppy_core/paddle.dewy
+python3 -m tools.core repl                      # interactive Dewy session
 python3 -m tools.core check examples/sloppy_core/tour.dewy
 python3 -m tools.core build examples/sloppy_core/tour.dewy --release -o /tmp/tour
 python3 -m tools.core path                       # immutable executable for scripts/benchmarks

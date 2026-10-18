@@ -47,6 +47,18 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'record-top-level-updates': '''Pair:type=[left:int64 right:int64]
+let pair=Pair[1 2]
+let values=[10 20]
+pair.left=20
+values[1]=22
+counter=1
+read=()=>counter
+counter=40
+main=()=>if pair.left+values[1] =? 42 and read() =? 40 42 else 1''',
+    'unpack-top-level-updates': '''[left right]=[1 2]
+[left right]=[20 22]
+main=()=>left+right''',
     'game-polyline-joins': '''import p"@lib/game/draw2d.jo" as surface
 vertex=(buffer:array<float32> i:int64):>vec2=>vec2(buffer[i*9] buffer[i*9+1])
 work=(buffer:array<float32>):>int64=>{
@@ -6481,7 +6493,134 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     assert source.read_text() == 'unused = () => missing\nmain = () => 42\n'
 
 
-@pytest.mark.parametrize('command', ['update', 'upgrade', 'repl', 'add'])
+@pytest.mark.parametrize(('text', 'expected', 'errors'), [
+    (('1+2\nlet xs=[20 22]\nlet saved=xs\nxs[0]=99\nsaved[0]+saved[1]\n'
+     'Point:type=[x:int64 y:int64]\nlet point=Point[20 22]\npoint.x=40\npoint.x+point.y\n'
+     '1/2+1/3\n:type 1/2\n'), ['3', '42', '62', '5/6', 'Rational'], []),
+    (('let score=20\nread=()=>score\nscore=40\nread()+2\nlet score=99\nread()\nscore\n'
+     'identity=<T>(value:T):>T=>value\nidentity(42)\n'), ['42', '40', '99', '42'], []),
+    ('repl_add=(x:int64 y:int64):>int64=>x+y\n:type repl_add\n:type [1 2]\n:type 40+2\n',
+     ['repl_add = (x: int64 y: int64):>int64', 'array<int64>', 'int64'], []),
+    (('{\n# A comment inside the final expression.\nlet x=20\nx+22\n}\n'
+     'f=(x)=>{\nx+2\n}\nf(40)\n[loop i in [0..3) i*2]\n'
+     'let text="""first\nan unmatched " inside triple quotes\nlast"""\ntext.length >? 10\n'
+     'let raw=r"\\hello"\nraw.length\n'), ['42', '42', '[0, 2, 4]', 'true', '6'], []),
+    (('let xs=[20 22]\n{xs[0]=99 panic("restore values")}\nxs[0]\n'
+     'missing_repl_name\nxs[1]\nbroken=()=>missing_repl_name\n'
+     'explode=():>int64=>{panic("restore declarations") return 42}\n'
+     'let transient_repl=explode()\ntransient_repl\nlet transient_repl=42\ntransient_repl\n'),
+     ['20', '22', '42'], ['panic: restore values', "unknown name 'missing_repl_name'",
+                         'panic: restore declarations', "unknown name 'transient_repl'"]),
+    ('let calls=0\nnext=()=>{calls+=1 return 42}\n:type next()\ncalls\nnext()\ncalls\n',
+     ['int64', '0', '42', '1'], []),
+], ids=['values', 'bindings', 'types', 'multiline', 'recovery', 'query-effects'])
+def test_core_repl_inputs(compiler, tmp_path, text, expected, errors):
+    env = {**os.environ, 'TMPDIR': str(tmp_path)}
+    ran = subprocess.run([compiler, 'repl'], input=text + ':quit\n', cwd=tmp_path,
+                         env=env, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected, ran.stdout + ran.stderr
+    if errors:
+        for message in errors:
+            assert message in ran.stderr, ran.stderr
+    else:
+        assert not ran.stderr, ran.stderr
+    assert not list((tmp_path / 'dewy-repl').glob('*.bin'))
+
+
+def test_core_repl_imports(compiler, tmp_path):
+    (tmp_path / 'seed.dewy').write_text('printl"seed"\nlet offset=2\n')
+    (tmp_path / 'helper.dewy').write_text('from seed import offset\nprintl"helper"\n'
+                                         'twice=(x)=>x*2+offset\n')
+    (tmp_path / 'helper.jo').write_text('twice = (x: int) -> int: 0\n')
+    text = ('import helper as h\nh.twice(20)\nfrom helper import twice\ntwice(20)\n'
+            'import p"helper.dewy" as again\nagain.twice(20)\n:quit\n')
+    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
+                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
+                         text=True, timeout=20, check=False)
+    assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['seed', 'helper', '42', '42', '42']
+
+
+
+def test_core_repl_failed_import(compiler, tmp_path):
+    (tmp_path / 'gate.dewy').write_text('if not file_exists("ready") panic("retry import")\n'
+                                       'let answer=42\n')
+    text = ('import gate as g\ng.answer\nwrite_file("ready" "yes")\n'
+            'import gate as g\ng.answer\n:quit\n')
+    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
+                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
+                         text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['true', '42'], ran.stdout + ran.stderr
+    assert 'panic: retry import' in ran.stderr
+    assert "unknown name 'g'" in ran.stderr
+
+
+def test_core_repl_help_and_eof(compiler, tmp_path):
+    ran = subprocess.run([compiler, 'repl'], input=':help\n40+2\n', cwd=tmp_path,
+                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
+                         text=True, timeout=20, check=False)
+    assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
+    assert 'Type Dewy' in ran.stdout and 'Sloppy' not in ran.stdout
+    assert ran.stdout.endswith('42\n')
+
+
+def test_core_repl_terminal(compiler, tmp_path):
+    import pty
+    import select
+    import signal
+    import time
+
+    master, slave = pty.openpty()
+    env = {**os.environ, 'TMPDIR': str(tmp_path),
+           'DEWY_REPL_HISTORY': str(tmp_path / 'history')}
+    process = subprocess.Popen([compiler, 'repl'], cwd=tmp_path, env=env,
+                               stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+    os.close(slave)
+    output = bytearray()
+    position = 0
+
+    def expect(needle):
+        nonlocal position
+        deadline = time.monotonic() + 10
+        while True:
+            found = output.find(needle, position)
+            if found >= 0:
+                position = found + len(needle)
+                return
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, bytes(output)
+            ready, _, _ = select.select([master], [], [], remaining)
+            assert ready, bytes(output)
+            output.extend(os.read(master, 16384))
+
+    try:
+        expect(b'Dewy (:help')
+        expect(b'>>> ')
+        os.write(master, b'let repl_unique=40\nrepl_uni\t+2\n')
+        expect(b'\r\n42\r\n')
+        # Cancel an unfinished input, then recall the preceding complete line.
+        os.write(master, b'bad_partial\x03\x1b[A\n')
+        expect(b'\r\n42\r\n')
+        os.write(master, b'{repl_unique=99 printl"running" loop true {}}\n')
+        expect(b'\r\nrunning\r\n')
+        os.killpg(process.pid, signal.SIGINT)
+        expect(b'interrupted; the session is as it was before this input')
+        os.write(master, b'repl_unique+2\n')
+        expect(b'\r\n42\r\n')
+        expect(b'>>> ')
+        os.write(master, b'\x04')
+        assert process.wait(timeout=5) == 0, bytes(output)
+        assert 'repl_unique+2' in (tmp_path / 'history').read_text()
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+        os.close(master)
+
+
+@pytest.mark.parametrize('command', ['update', 'upgrade', 'add'])
 def test_core_unavailable_cli(compiler, tmp_path, command):
     result = subprocess.run([compiler, command], cwd=tmp_path, capture_output=True,
                             text=True, timeout=5, check=False)

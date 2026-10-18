@@ -701,10 +701,10 @@ dw_stmt = (id: int, top: bool = false) -> int:
         nodes[n].b = i32(dw_expr(dw_child(id, 2)))
         return n
     if dw_op(id) == "=" or dw_op(id) == ":":
-        if top or dw_op(id) == ":": return dw_declare(id, false, top)
+        lhs = dw_unwrap(dw_child(id, 1))
+        if dw_op(id) == ":" or top and dw_op(lhs) == ":": return dw_declare(id, false, top)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
-        lhs = dw_unwrap(dw_child(id, 1))
         if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
             pattern = mk(.tuple, dewy_syntax[lhs].pos)
             set_list(pattern, dw_bindings(lhs))

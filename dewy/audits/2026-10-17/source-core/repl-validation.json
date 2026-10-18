@@ -1,0 +1,28 @@
+{
+  "source_identity": "71ef06f53506f3dcd06b24af865197ba70062a9548bf909db36aac937b8b9ebf",
+  "binary": "build-1792297871004045213/bin/dewy-core",
+  "binary_sha256": "25368b09d3a4cbb15774c472b5c002454c07cc24dad2064a787c72afc243ff20",
+  "validation": {
+    "focused": "606 passed in 10.78s before final terminal/bootstrap adjustments",
+    "terminal_and_top_level": "29 passed in 2.45s before adding failed-import test",
+    "full_gate": "3933 passed in 78.19s, two workers; final compiler built independently from C. Rerun corrected a test expectation for write_file returning true; compiler unchanged.",
+    "cli_launcher": "python3 -m tools.core repl evaluates 40+2 and exits cleanly",
+    "ruff": "Passed excluding pre-existing FURB167/RUF007",
+    "diff_check": "passed"
+  },
+  "coverage": [
+    "Persistent arrays, records, generic functions and exact rational values",
+    "Assignments update existing globals; let redeclarations create new bindings",
+    "Nested module initialization once, selected and named imports, Dewy source preference",
+    "Compile errors, runtime panics and failed imports restore compiler and program state",
+    "Type queries do not execute effects",
+    "Multiline blocks/comments, raw and triple-quoted strings",
+    "Real PTY: completion, history, cancelled input, interrupting an infinite loop, Ctrl-D",
+    "Ordinary top-level assignments and unpacking on native/WebAssembly default/release"
+  ],
+  "limits": [
+    "Prompt validated on Linux x86-64; no Windows/macOS host claim.",
+    "External effects such as output and file writes cannot be rolled back.",
+    "Latency measures simple mutable-block inputs in a retained compiler session, not arbitrary fresh program builds."
+  ]
+}

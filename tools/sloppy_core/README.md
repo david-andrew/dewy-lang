@@ -1293,3 +1293,24 @@ for the tour, 0.987 for Dunes and 0.975 for self-compilation. The focused
 optimizer/bounds/loop selection passes 600 checks; the independent C-bootstrap
 suite passes 3,916 in 82.39 pytest seconds with two workers. See `direct-fact-*`
 audits. No generated-program speedup is claimed for this lookup change.
+
+
+`dewy-core repl` now uses the Dewy frontend with the inherited native session
+engine. Variables, functions, types and imports persist; assignment updates an
+existing binding, while explicit `let` redeclaration creates a new one. New
+imports are registered, checked and initialized in dependency order once per
+session. Failed inputs restore both program values and compiler declarations,
+including failed module imports. External output and file effects remain.
+Result display wraps the checked AST, avoiding a second compilation and fragile
+text splicing. Multiline input shares Dewy's quote scanner, including raw,
+interpolated and triple-quoted strings. Type queries use Dewy spellings without
+running code. Terminal completion, history and Ctrl-C/Ctrl-D are exercised with
+a real PTY. The local driver exposes `python3 -m tools.core repl` too.
+
+The full gate passes 3,933 checks in 78.19 pytest seconds with two workers using
+the independently C-bootstrapped compiler. Five fresh, CPU-2 sessions each
+processed 100 checked mutable-block inputs: median startup through the first
+value was 45.37 ms and median subsequent input latency 6.09 ms. These are simple
+interactive inputs in a retained session, not general fresh-build timings.
+See `repl-*` audits and the [language guide](../../core/LANGUAGE.md#interactive-prompt)
+for behavior, commands and limits.

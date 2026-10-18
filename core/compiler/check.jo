@@ -850,7 +850,7 @@ register_decls = (m: int, decls: int[]):
                 # Exclude the importing file itself (physics.dewy may import
                 # the bundled physics implementation).
                 current = files[int(modules[m].file)].path
-                dewy = ends_with(current, ".dewy")
+                dewy = files[int(modules[m].file)].is_dewy
                 path = module_source("{modules[m].dir}/{rel}", dewy, current, true)
                 # (a file beside it with a library module's name: that file, said once)
                 if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source("{lib_dir}/{rel}", dewy)) > 0:
