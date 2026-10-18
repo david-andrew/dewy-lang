@@ -145,6 +145,15 @@ process per test; Linux and macOS retain their fork path. Windows initialization
 therefore repeats for each test. Test mode is established before imported
 initializers, including headless window behavior and the original user arguments.
 
+CI now publishes relocatable standalone downloads for Linux x86-64/ARM64,
+macOS ARM64 and Windows x64, with SHA-256 sidecars and recorded build provenance.
+Each native host extracts its package into a path containing spaces, compiles
+and runs a native and web sample, and builds a generated game for both targets
+with build tools removed from `PATH`. All four jobs and artifact uploads passed
+at `353fa45d` ([CI run](https://github.com/david-andrew/dewy-lang/actions/runs/39140006944)).
+See the [download instructions](../README.md); these are development toolchains,
+not certification of every graphics driver or debugger integration.
+
 VS Code now exposes resolved references and occurrence highlighting, including
 shadowed locals, closures, interpolation and named arguments in unsaved files.
 References cover the current program and other open programs; unopened reverse
@@ -161,6 +170,12 @@ and the existing dependency watcher. The focused watch/native-test gate passes
 executed on the three additional native CI hosts. A later regression check
 found and fixed missing-import tracking in test-watch mode, so creating a
 missing import or its parent directories can recover without touching the tests.
+Quitting or restarting test watch now stops the active test and its descendants.
+POSIX interruption/termination forwards to the test process group, and Windows
+test drivers use a job object whose closure terminates remaining descendants.
+Native-host regression checks exercise cancellation, including a test that
+would otherwise sleep indefinitely; the signal helper also passes the
+independent C-bootstrap path.
 
 The generated arcade, platformer and 3D starters now exercise menus, saved scores,
 text tilemaps, slopes and one-way platforms, character physics and ray-cast shots.
