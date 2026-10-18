@@ -605,6 +605,28 @@ kind has no compact equivalent, and preserves legacy combined call labels. Eight
 representative legacy-parser programs produced the same correct results as the
 previous compiler. The in-process smoke suite also passed all 207 checks.
 
+## Dispatch punctuation directly
+
+After the preceding changes, a fresh check-only profile had 952 samples and no
+losses: 89 in lexing and 52 in string equality (down from 224 of 1,378 in the
+original profile). The lexer now selects punctuation by its first byte, trying
+only relevant longer spellings, and retains canonical token text instead of
+allocating a one-character string for each punctuation token. Dotted operators
+also dispatch on the following byte; nested generic closers before `=>` retain
+their existing split. The formatter still sees the same token text.
+
+Five alternating single-worker CPU pairs against `9bb7e669` measured **756 →
+702 ms** on the generated Dewy program (median paired ratio **0.939**) and
+**762 → 744 ms** on the conformance corpus (ratio **0.974**). Jo, Tour, Netpong
+and the compiler self-build were essentially flat by paired ratios. These are
+about **6%** and **3%** improvements on the two large Dewy inputs, without a
+change to the language or optimizer policy.
+[Measurements](audits/2026-10-18/byte-dispatch-compile.json).
+
+Validation: **207 smoke checks** and **4,062 syntax/value, rejection, string,
+membership, frontend-selection and formatter checks** passed. The focused run
+took 35.53 seconds with two workers and covered native/web and default/release.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

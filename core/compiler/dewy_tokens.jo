@@ -18,36 +18,38 @@ enum DewyToken:
     dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
     multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end
 
+dn_single_token = (c: u8) -> DewyToken:
+    match c:
+        '(': return .lparen
+        ')': return .rparen
+        '[': return .lbrack
+        ']': return .rbrack
+        '{': return .lbrace
+        '}': return .rbrace
+        '<': return .langle
+        '>': return .rangle
+        ':': return .colon
+        '.': return .dot
+        ',': return .comma
+        ';': return .semi
+        '=': return .assign
+        '+': return .plus
+        '-': return .minus
+        '*': return .star
+        '/': return .slash
+        '%': return .percent
+        '@': return .at
+        '&': return .amp
+        '|': return .pipe
+        '^': return .caret
+        '?': return .question
+        '!': return .bang
+        '~': return .tilde
+    return .none
+
 dn_token_kind = (text: str) -> DewyToken:
     if len(text) == 0: return .none
-    if len(text) == 1:
-        match text[0]:
-            '(': return .lparen
-            ')': return .rparen
-            '[': return .lbrack
-            ']': return .rbrack
-            '{': return .lbrace
-            '}': return .rbrace
-            '<': return .langle
-            '>': return .rangle
-            ':': return .colon
-            '.': return .dot
-            ',': return .comma
-            ';': return .semi
-            '=': return .assign
-            '+': return .plus
-            '-': return .minus
-            '*': return .star
-            '/': return .slash
-            '%': return .percent
-            '@': return .at
-            '&': return .amp
-            '|': return .pipe
-            '^': return .caret
-            '?': return .question
-            '!': return .bang
-            '~': return .tilde
-        return .none
+    if len(text) == 1: return dn_single_token(text[0])
     match text[0]:
         '%':
             match text:

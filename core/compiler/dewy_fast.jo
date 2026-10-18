@@ -89,11 +89,87 @@ dn_matches = (source: str, at: int, stop: int, value: str) -> bool:
         if source[at + i] != value[i]: return false
     true
 
-# Read-only operator tables, initialized once and shared across tokens/files.
-# Use stored globals: implementation-language const arrays expand at each use.
-# Keep longest spellings first so the scan preserves maximal munch.
-dn_dotted_operators = [".not>=?", ".not<=?", ".not=?", ".not>?", ".not<?", ".>=?", ".<=?", ".//=", ".+=", ".-=", ".*=", "./=", ".%=", ".^=", ".//", ".=?", ".>?", ".<?", ".+", ".-", ".*", "./", ".%", ".^"]
-dn_operators = ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "??", "//", "<<", ">>", "..", "|>", "<|"]
+# Dispatch punctuation by its leading byte, trying only relevant longer
+# spellings. Canonical token text avoids allocating a string per punctuation.
+dn_lex_symbol = (source: str, at: int, stop: int) -> DewyToken:
+    match source[at]:
+        '%':
+            if dn_matches(source, at, stop, "%="): return .percent_assign
+        '*':
+            if dn_matches(source, at, stop, "*="): return .star_assign
+        '+':
+            if dn_matches(source, at, stop, "+="): return .plus_assign
+        '-':
+            if dn_matches(source, at, stop, "->"): return .arrow
+            if dn_matches(source, at, stop, "-="): return .minus_assign
+        '.':
+            if at + 1 < stop:
+                match source[at + 1]:
+                    '%':
+                        if dn_matches(source, at, stop, ".%="): return .dot_percent_assign
+                        if dn_matches(source, at, stop, ".%"): return .dot_percent
+                    '*':
+                        if dn_matches(source, at, stop, ".*="): return .dot_star_assign
+                        if dn_matches(source, at, stop, ".*"): return .dot_star
+                    '+':
+                        if dn_matches(source, at, stop, ".+="): return .dot_plus_assign
+                        if dn_matches(source, at, stop, ".+"): return .dot_plus
+                    '-':
+                        if dn_matches(source, at, stop, ".-="): return .dot_minus_assign
+                        if dn_matches(source, at, stop, ".-"): return .dot_minus
+                    '.':
+                        if dn_matches(source, at, stop, "..."): return .ellipsis
+                        if dn_matches(source, at, stop, ".."): return .range
+                    '/':
+                        if dn_matches(source, at, stop, ".//="): return .dot_floor_assign
+                        if dn_matches(source, at, stop, "./="): return .dot_slash_assign
+                        if dn_matches(source, at, stop, ".//"): return .dot_floor
+                        if dn_matches(source, at, stop, "./"): return .dot_slash
+                    '<':
+                        if dn_matches(source, at, stop, ".<=?"): return .dot_le
+                        if dn_matches(source, at, stop, ".<?"): return .dot_lt
+                    '=':
+                        if dn_matches(source, at, stop, ".=?"): return .dot_eq
+                    '>':
+                        if dn_matches(source, at, stop, ".>=?"): return .dot_ge
+                        if dn_matches(source, at, stop, ".>?"): return .dot_gt
+                    '^':
+                        if dn_matches(source, at, stop, ".^="): return .dot_power_assign
+                        if dn_matches(source, at, stop, ".^"): return .dot_caret
+                    'n':
+                        if dn_matches(source, at, stop, ".not>=?"): return .dot_not_ge
+                        if dn_matches(source, at, stop, ".not<=?"): return .dot_not_le
+                        if dn_matches(source, at, stop, ".not=?"): return .dot_not_eq
+                        if dn_matches(source, at, stop, ".not>?"): return .dot_not_gt
+                        if dn_matches(source, at, stop, ".not<?"): return .dot_not_lt
+        '/':
+            if dn_matches(source, at, stop, "//="): return .floor_assign
+            if dn_matches(source, at, stop, "/="): return .slash_assign
+            if dn_matches(source, at, stop, "//"): return .floor
+        ':':
+            if dn_matches(source, at, stop, ":>"): return .returns
+        '<':
+            if dn_matches(source, at, stop, "<=?"): return .le
+            if dn_matches(source, at, stop, "<<="): return .shl_assign
+            if dn_matches(source, at, stop, "<?"): return .lt
+            if dn_matches(source, at, stop, "<<"): return .shl
+            if dn_matches(source, at, stop, "<|"): return .pipe_left
+        '=':
+            if dn_matches(source, at, stop, "=>"): return .function
+            if dn_matches(source, at, stop, "=?"): return .eq
+        '>':
+            if dn_matches(source, at, stop, ">=?"): return .ge
+            # Nested generic closers before => are >> then =>, not >>= then >.
+            if dn_matches(source, at, stop, ">>=") and not dn_matches(source, at, stop, ">>=>"): return .shr_assign
+            if dn_matches(source, at, stop, ">?"): return .gt
+            if dn_matches(source, at, stop, ">>"): return .shr
+        '?':
+            if dn_matches(source, at, stop, "??"): return .coalesce
+        '^':
+            if dn_matches(source, at, stop, "^="): return .power_assign
+        '|':
+            if dn_matches(source, at, stop, "|>"): return .pipe_right
+    dn_single_token(source[at])
 
 dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
     source = files[file].src
@@ -114,6 +190,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             continue
         start = i
         kind = DewyKind.op
+        symbol = DewyToken.none
         value = ""
         if c == 'r' and i + 1 < stop and (source[i + 1] == '"' or source[i + 1] == '\''):
             i = dn_quote_end(source, i + 1, stop, 0, true)
@@ -173,29 +250,11 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             kind = .quoted
             value = source[start..i)
         else:
-            if c == '.':
-                loop op in dn_dotted_operators:
-                    if dn_matches(source, start, stop, op):
-                        value = op
-                        i += len(op)
-                        break
-            # Longest spelling wins. Dewy's comparison ? belongs to the operator.
-            loop op in dn_operators:
-                if value != "": break
-                if op[0] != c: continue
-                if dn_matches(source, start, stop, op):
-                    # Adjacent generic closers followed by a function arrow:
-                    # `array<array<T>>=>` is `>>` then `=>`, not `>>=` then `>`.
-                    if op == ">>=" and dn_matches(source, start, stop, ">>=>"): continue
-                    value = op
-                    i += len(op)
-                    break
-            if value == "":
-                if find_byte("()[]{{}}<>:.,;=+-*/%@&|^?!~", c) < 0: dn_error(start, "unexpected character in Dewy source")
-                i += 1
-                value = source[start..i)
-        symbol = DewyToken.none
-        if kind == .op or kind == .identifier: symbol = dn_token_kind(value)
+            symbol = dn_lex_symbol(source, start, stop)
+            if symbol == .none: dn_error(start, "unexpected character in Dewy source")
+            value = dn_token_text(symbol)
+            i += len(value)
+        if symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
         out.push(DewyLexeme(kind, value, start, i, spaced, newline, symbol))
         spaced = false
         newline = false
