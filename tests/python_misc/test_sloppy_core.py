@@ -6869,6 +6869,86 @@ def test_core_library_import(compiler, tmp_path, style):
     assert subprocess.run([binary], timeout=10, check=False).returncode == 42
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('indent', ['    ', '\t'], ids=['spaces', 'tabs'])
+@pytest.mark.parametrize('use_invalid', [False, True], ids=['deferred', 'called'])
+def test_core_conditional_library_bodies(compiler, tmp_path, target, release, indent, use_invalid):
+    library = tmp_path / 'lib'
+    library.mkdir()
+    for item in (compiler.parent.parent / 'lib').iterdir():
+        if item.name != 'std':
+            (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
+    (library / 'std').mkdir()
+    for item in (compiler.parent.parent / 'lib/std').iterdir():
+        (library / 'std' / item.name).symlink_to(item)
+    # Declaration branches, sibling bodies, multiline strings, comments and local
+    # closures must keep their boundaries when library bodies are parsed on demand.
+    text = '''when true:
+    when false:
+        conditional_pick = () -> int:
+            return )
+    else when TARGET == "wasm":
+        conditional_pick = () -> int:
+            text = """first
+unindented text
+last"""
+            return if len(text) > 0: 40 else: 0
+    else:
+        conditional_pick = () -> int:
+            return 40
+# A comment outside the function does not end the declaration branch.
+    conditional_tail = () -> int:
+        f = (x: int) -> int:
+            when true:
+                return x + 1
+        return f(1)
+    conditional_invalid = () -> int:
+        return )
+conditional_runtime = () -> int:
+    if true:
+        local = (x: int) -> int:
+            return x + 1
+        return local(1) - 2
+    else:
+        local = (x: int) -> int:
+            return x + 2
+        return local(1) - 3
+'''
+    if indent == '\t':
+        text = '\n'.join(indent * ((len(line) - len(line.lstrip(' '))) // 4)
+                         + line.lstrip(' ') for line in text.split('\n'))
+    fixture = library / 'std/conditional_bodies.jo'
+    fixture.write_text(text)
+    source = tmp_path / 'main.dewy'
+    expression = 'conditional_invalid()' if use_invalid else (
+        'conditional_pick()+conditional_tail()+conditional_runtime()')
+    source.write_text(f'main=()=>{expression}\n')
+    binary = tmp_path / 'program'
+    flags = ['--release'] if release else []
+    env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                           env=env, capture_output=True, text=True, timeout=30, check=False)
+    if use_invalid:
+        line = text.splitlines().index('        return )'.replace('    ', indent), 5) + 1
+        assert built.returncode != 0
+        assert f'{fixture}:{line}:' in built.stderr, built.stderr
+        return
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web library parsing checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'conditional.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
 @pytest.mark.parametrize('source_text', [
     'divide=(a b)=>a/b\nmain=()=>if divide(3.0 2.0) =? 1.5 42 else 1',
     'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=()=>BigInt[84]/BigInt[2]',

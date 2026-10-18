@@ -1263,3 +1263,22 @@ selector (`values[[]]`) now infers integer indexes and selects no elements.
 The focused gate passes 272 checks in 10.92 seconds after an independent C
 bootstrap, and the quick suite passes 149 in 4.78 seconds. See `fixed-selector-*`
 audits; this increment makes no runtime performance claim.
+
+
+Bundled library functions inside top-level `when` / `else` branches now defer
+body parsing until needed, as ordinary top-level library functions already did.
+The lexer tracks declaration scopes and each header's indentation, so nested
+target branches work without treating local closures as module declarations.
+This cuts initial prelude AST construction from 79,697 nodes to 41,709 in the
+instrumented profile. It does not introduce a persistent program cache or defer
+checks in ordinary user modules.
+
+Seven alternating fresh-build pairs give median candidate/baseline compiler-CPU
+ratios of 0.888 for the tour, 1.011 for physics checking, 1.008 for native Dunes,
+0.929 for web Dunes and 0.982 for self-compilation. The small and web builds
+benefit; native Dunes and physics checking are approximately neutral in this
+run. The independent C-bootstrap gate passes 3,912 checks in 134.74 pytest
+seconds with two workers. Sixteen focused cases cover nested branches, spaces,
+tabs, multiline strings, local closures and original source locations for a
+body first parsed when called. See `lazy-when-*` and `check-profile*.json` audits
+for measurements, commands and toolchain identities.

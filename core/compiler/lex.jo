@@ -152,7 +152,8 @@ lx_space_indent = false
 lx_ctx: int[]
 lx_line_indent = 0
 lx_lazy = false                 # (a library file: top-level function bodies become one .lazy token each)
-lx_line_tok0 = 0                # the first token of the line at the top level
+lx_line_tok0 = 0                # the first token of the current logical line
+lx_decl_lines: Tok[]            # last header at each indentation level (library declarations)
 
 # source offset of the text being lexed (non-zero for expressions inside string literals)
 lx_base = 0
@@ -202,23 +203,42 @@ lx_decl_line = () -> bool:
         k += 1
     false
 
-# where the indented lines from offset `from` end (the next line that is not indented, blank or a
-# comment), or -1 when they do not make a body (not indented, or a string that does not end)
-lx_body_end = (from: int) -> int:
+# A module's `when` branches contain declarations too. Remember their headers so a
+# local function in a runtime block never becomes a lazy top-level declaration.
+lx_decl_context = () -> bool:
+    depth = lx_indents.len()
+    first = lx_line_tok0
+    if first >= lx_toks.len(): return false
+    kind = lx_toks[first].kind
+    if kind == .kw_else and depth <= lx_decl_lines.len() and lx_decl_lines[depth - 1] == .kw_when: kind = .kw_when
+    lx_decl_lines.resize(depth)
+    lx_decl_lines[depth - 1] = kind
+    loop i in [0..depth - 1):
+        if lx_decl_lines[i] != .kw_when: return false
+    true
+
+# where the indented lines from offset `from` end (the next line at or outside the header's
+# indentation, other than a blank or comment), or -1 when they do not make a body
+# (not indented, or a string that does not end)
+lx_body_end = (from: int, header_indent: int) -> int:
     p = lx_p
     i = from
     first = true
     loop i < lx_n:
         # a line: its indentation, then what is on it
         j = i
-        loop j < lx_n and (p[j] == ' ' or p[j] == '\t' or p[j] == '\r'): j += 1
+        ind = 0
+        loop j < lx_n and (p[j] == ' ' or p[j] == '\t' or p[j] == '\r'):
+            if p[j] == ' ': ind += 1
+            else if p[j] == '\t': ind = (ind + 4) & ~3
+            j += 1
         if j >= lx_n: return lx_n
         c = p[j]
         if c == '\n' or c == '#':
             loop j < lx_n and p[j] != '\n': j += 1
             i = j + 1
             continue
-        if j == i:
+        if ind <= header_indent:
             if first: return -1
             return i
         first = false
@@ -652,6 +672,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     lx_toks = []
     lx_toks.reserve((lx_n - lx_i) / 5 + 16)     # (about a token per five bytes of source)
     lx_indents = [0]
+    lx_decl_lines = []
+    lx_line_tok0 = 0
     lx_tab_indent = false
     lx_space_indent = false
     lx_ctx = [(1 << 1) | 1]
@@ -675,8 +697,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
             loop lx_i < lx_n and p[lx_i] != '\n': lx_i += 1
             continue
         if c == '\n':
-            if lx_lazy and lx_ctx.len() == 1 and lx_indents.len() == 1 and lx_last_kind() == .colon and lx_decl_line():
-                end = lx_body_end(lx_i + 1)
+            if lx_lazy and lx_ctx.len() == 1 and lx_decl_context() and lx_last_kind() == .colon and lx_decl_line():
+                end = lx_body_end(lx_i + 1, lx_line_indent)
                 if end > 0:
                     lx_emit_newline()
                     lx_emit(.lazy, lx_i + 1, end - (lx_i + 1))
