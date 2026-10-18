@@ -47,6 +47,63 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'game-polyline-joins': '''import p"@lib/game/draw2d.jo" as surface
+vertex=(buffer:array<float32> i:int64):>vec2=>vec2(buffer[i*9] buffer[i*9+1])
+work=(buffer:array<float32>):>int64=>{
+polyline([vec2(10 10) vec2(100 10) vec2(100 100)] 10 WHITE)
+if surface.__b_count not=? 12 return 1
+if vertex(buffer 1) not=? vertex(buffer 6) or vertex(buffer 2) not=? vertex(buffer 11) return 2
+if vertex(buffer 1) not=? vec2(94 16) or vertex(buffer 2) not=? vec2(106 4) return 3
+surface.__b_count=0
+polyline([vec2(10 10) vec2(100 10) vec2(100 10) vec2(100 100) vec2(10 10)] 10 WHITE closed=true)
+if surface.__b_count not=? 18 return 4
+if vertex(buffer 0) not=? vertex(buffer 13) or vertex(buffer 5) not=? vertex(buffer 14) return 5
+return 42}
+main=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
+let previous=surface.__b_buf
+surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
+let result=work(buffer) surface.__b_buf=previous surface.__b_count=0
+return result}''',
+    'game-polyline-degenerate': '''import p"@lib/game/draw2d.jo" as surface
+work=(buffer:array<float32>):>int64=>{
+polyline([] 10 WHITE) polyline([vec2(10 10)] 10 WHITE)
+polyline([vec2(10 10) vec2(10 10) vec2(10 10)] 10 WHITE closed=true)
+if surface.__b_count not=? 0 return 1
+polyline([vec2(10 10) vec2(100 10) vec2(100 10)] 10 WHITE closed=true)
+if surface.__b_count not=? 6 return 2
+surface.__b_count=0
+polyline([vec2(0 0) vec2(100 0) vec2(1 1)] 10 WHITE)
+let offset=vec2(buffer[9] buffer[10])-vec2(100 0)
+if not (length(offset) <=? 18) return 3
+surface.__b_count=0
+polyline([vec2(0 0) vec2(100 0) vec2(0 0)] 10 WHITE)
+loop i in [0..surface.__b_count) {
+if not (abs(buffer[i*9]) <=? 106) or not (abs(buffer[i*9+1]) <=? 6) return 4}
+return 42}
+main=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
+let previous=surface.__b_buf
+surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
+let before=alloc_count() let result=work(buffer)
+if alloc_count() not=? before result=5
+surface.__b_buf=previous surface.__b_count=0
+return result}''',
+    'game-polyline-batches': '''import p"@lib/game/draw2d.jo" as surface
+main=()=>{let points:array<vec2>=[] loop i in [0..3000) {points.push(vec2(i as float32 (i%2) as float32))}
+let buffer:array<float32>=[] buffer.resize(points.length*6*9)
+let previous=surface.__b_buf let previous_effect=surface.__fx_draw let previous_on=surface.__fx_on
+surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
+let seen:int64=0 let batches:int64=0
+let baseline:int64=0
+surface.__fx_on=true
+surface.__fx_draw=():>void=>{
+if surface.__b_count >? surface.__BATCH_MAX panic("polyline exceeded its vertex batch")
+if batches =? 0 and alloc_count() not=? baseline panic("polyline allocated scratch buffers")
+seen+=surface.__b_count batches+=1
+if batches =? 1 points.clear()}
+baseline=alloc_count()
+polyline(points 2 WHITE) surface.flush()
+surface.__fx_draw=previous_effect surface.__fx_on=previous_on surface.__b_buf=previous
+return if seen =? 2999*6 and batches =? 2 and points.length =? 0 42 else 1}''',
     'game-camera-roll': '''import p"@lib/game/draw2d.jo" as surface
 main=()=>{
 surface.__target_w=1280 surface.__target_h=720
@@ -6209,7 +6266,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -6232,7 +6289,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
@@ -6328,7 +6385,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

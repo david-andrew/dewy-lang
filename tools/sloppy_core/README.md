@@ -1167,3 +1167,24 @@ array contexts, including narrow integers and generic parameters. The existing
 runtime shape check handles an expanded literal of the wrong length. See
 `fixed-slice-*` audits for focused native/web checks, allocation cleanup and
 invalid bounds; the full independent C-bootstrap gate runs in hosted CI.
+
+
+Joined polylines now follow Sloppy's `64b6646` band geometry: adjacent segments
+share their corner vertices, including the closing edge, and sharp joins are
+capped. Repeated points are skipped. Dewy's adaptation streams normals and joins
+without scratch arrays and reserves each quad individually, so a long path can
+cross the renderer's batch boundary. A COW snapshot protects the active path if
+an effect callback changes the caller's points during a flush.
+
+Seven alternating thread-CPU pairs drawing 512-point paths 1,000 times measured
+71.33/55.17 ms for open paths and 69.15/52.40 ms for closed paths, comparing the
+initial temporary-array adaptation with the streaming version. Median paired
+ratios are 0.773/0.737. These measure vertex generation only, excluding GPU work,
+window setup and input construction. The initial adaptation already reserves
+quads safely; the comparison isolates streaming work, not an unsafe baseline.
+Use `python3 -m tools.sloppy_core.benchmark_polyline --help` to repeat it.
+
+The `outlines.dewy` example shows thick zigzags, a closed star, rounded outlines,
+repeated inputs and a 6,000-point plot crossing multiple batches. Fifteen focused
+native/web checks pass in 3.91 seconds and the 149-check quick suite in 3.41.
+See `polyline-*` source-core audits for raw results, baseline patch and limits.

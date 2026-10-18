@@ -1,5 +1,10 @@
 # Dewy on the compact core
 
+[`outlines.dewy`](outlines.dewy) shows joined open/closed paths, rounded outlines,
+repeated points and a 6,000-point plot that crosses drawing batches. Run it with
+`python3 -m tools.core run examples/sloppy_core/outlines.dewy`, or build with
+`--target wasm` for the browser.
+
 [`rollback_lab.dewy`](rollback_lab.dewy) runs two copies of a small game over a
 simulated network. Adjust latency, jitter and packet loss to see prediction,
 rewinding and replay; **P** pauses and **R** resets. Each pane shows its peer's

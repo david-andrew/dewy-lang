@@ -1032,6 +1032,13 @@ The [camera-roll example](../examples/sloppy_core/camera_roll.dewy) combines thi
 with cursor picking and a settings menu. Menu rows expand for long labels and
 choice values, sharing the widest row's width on the next frame.
 
+`polyline(points thickness color closed=true)` joins the segments into one band,
+including the closing edge. Consecutive repeated points are ignored and sharp
+joins are capped to prevent long spikes. Open paths leave their ends flat.
+`rect_rounded_outline` uses the same joins. See the
+[outlines example](../examples/sloppy_core/outlines.dewy) for these shapes and a
+dense plot that spans several drawing batches.
+
 Dunes also defines vertex and fragment shaders as ordinary Dewy functions, with
 typed input/output records and texture uniforms. The compiler generates GPU
 shader code and the software renderer can execute the same shader functions.

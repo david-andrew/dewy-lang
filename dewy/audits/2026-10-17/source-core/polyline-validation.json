@@ -1,0 +1,25 @@
+{
+  "upstream": "Sloppy 64b6646c8024ad1cd46bcf4b35491219dec0df37",
+  "binary": "__dewycache__/compact-core/build-1792293425528044754/bin/dewy-core",
+  "binary_sha256": "ea9b1daf0d912cd0879fbeb25925c3554979007d3e6971b4e782f9f99e2f15e1",
+  "validation": {
+    "focused": "15 passed in 3.91s; native/web default/release plus example builds and native software rendering",
+    "quick": "149 passed in 3.41s",
+    "visual": "Inspected native 1280x720 software-rendered outlines example",
+    "full_independent_c_gate": "Hosted CI after push"
+  },
+  "coverage": [
+    "Shared join vertices at right angles and closure",
+    "Consecutive duplicates, repeated closing endpoint and fewer than three unique points",
+    "Bounded acute joins and U-turn coordinates",
+    "No scratch allocations during drawing",
+    "Batch capacity with 3000 points",
+    "Caller mutation during flush preserves the active path snapshot"
+  ],
+  "baseline": "Initial joined-band adaptation with temporary filtered-point and join arrays; includes per-quad batch reservation. Apply polyline-baseline.patch to the committed library to reproduce the baseline.",
+  "limits": [
+    "Isolated vertex-generation CPU timings; no application or GPU speed claim.",
+    "A retained path snapshot can trigger COW if the caller changes its points during a flush callback.",
+    "Sharp joins are capped; arbitrary self-intersecting strokes are not tessellated into a non-overlapping fill."
+  ]
+}

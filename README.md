@@ -14,8 +14,9 @@ Dewy is a general purpose programming language with a focus on engineering.
 
 The `restart/sloppy-frontend` branch develops a faster implementation in
 [core/](core/README.md), derived from Sloppy with Dewy syntax and language behavior.
-It already runs native/web game examples and has a focused validation gate taking
-one to two minutes. It is an experimental subset; see its README for building and limitations.
+It runs native/web game examples, with a quick smoke suite taking a few seconds
+and a full validation gate taking roughly one to two minutes. It is still experimental;
+see its README for building and limitations.
 The [compact-core language guide](core/LANGUAGE.md) includes an executable tour
 and the native/web game workflow. From a checkout, the everyday commands are:
 

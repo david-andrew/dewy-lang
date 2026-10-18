@@ -1,0 +1,30 @@
+# Joined paths, rounded outlines and a dense plot, using the bundled renderer.
+# Adapted from Sloppy's outlines fixture (64b6646), with a multi-batch plot.
+let plot:array<vec2>=[]
+
+main=():>void=>{
+    window("Dewy / Joined outlines" 1280 720)
+    loop i in [0..6000) {
+        let x=(i as float64)/5999.0
+        plot.push(vec2(f32(50.0+x*1180.0) f32(600.0+sin(x*PI*12.0)*42.0)))
+    }
+}
+
+draw=():>void=>{
+    clear(rgb(0.04 0.055 0.085))
+    text("JOINED OUTLINES" vec2(48 26) 30 WHITE)
+    text("Open and closed paths, repeated points, sharp bends and a 6,000-point plot." vec2(48 70) 21 WHITE)
+    let zig:array<vec2>=[]
+    loop i in [0..7) {zig.push(vec2(f32(60+i*65) f32(if i%2 =? 0 145 else 260)))}
+    polyline(zig 12 rgb(1.0 0.8 0.3))
+    let star:array<vec2>=[]
+    loop i in [0..10) {
+        let angle=(i as float64)*PI/5.0-PI/2.0
+        let radius=if i%2 =? 0 105.0 else 46.0
+        star.push(vec2(f32(880.0+cos(angle)*radius) f32(220.0+sin(angle)*radius)))
+    }
+    polyline(star 8 rgb(0.4 0.8 1.0) closed=true)
+    rect_rounded_outline(60 345 360 140 30 14 rgb(0.9 0.9 0.9))
+    polyline([vec2(600 370) vec2(750 370) vec2(750 370) vec2(765 485) vec2(1120 450)] 16 rgb(0.6 1.0 0.5))
+    polyline(plot 4 rgb(0.7 0.6 1.0))
+}

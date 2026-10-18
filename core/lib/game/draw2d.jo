@@ -848,9 +848,64 @@ line = (a: vec2, b: vec2, thickness: f64, c: vec4):
     __use_tex(__white.id, 6)
     __quad(a + n, b + n, b - n, a - n, vec2(0, k), vec2(0, k), vec2(0, -k), vec2(0, -k), c, 3)
 
+# Average the two segment normals, capping the length at a sharp turn.
+__polyline_join = (before: vec2, after: vec2) -> vec2:
+    m = before + after
+    if length(m) < 0.001: return before
+    m = normalize(m)
+    m / max(dot(m, before), f32(0.34))
+
+# One joined band. Skip repeated points and carry adjacent normals instead of
+# allocating filtered points and an array of joins on every draw.
 polyline = (points: vec2[], thickness: f64, c: vec4, closed: bool = false):
-    loop i in [0..points.len() - 1): line(points[i], points[i + 1], thickness, c)
-    if closed and points.len() > 2: line(points[points.len() - 1], points[0], thickness, c)
+    # An effect callback during a batch flush can change the caller's points.
+    # Keep a value snapshot while streaming through them.
+    ps = points
+    n = ps.len()
+    if n < 2: return
+    if closed:
+        loop n > 1 and ps[n - 1] == ps[0]: n -= 1
+    j = 1
+    loop j < n and ps[j] == ps[0]: j += 1
+    if j == n: return
+    k = j + 1
+    loop k < n and ps[k] == ps[j]: k += 1
+    if k == n:
+        line(ps[0], ps[j], thickness, c)
+        return
+    h = thickness / 2.0
+    e = f32(h + 1.0)
+    uv = f32((h + 1.0) / max(h, 0.0001))
+    normal = perp(normalize(ps[j] - ps[0]))
+    first = normal
+    if closed: first = __polyline_join(perp(normalize(ps[0] - ps[n - 1])), normal)
+    across = first
+    i = 0
+    loop j < n:
+        k = j + 1
+        loop k < n and ps[k] == ps[j]: k += 1
+        next_normal = normal
+        next_across = normal
+        if k < n:
+            next_normal = perp(normalize(ps[k] - ps[j]))
+            next_across = __polyline_join(normal, next_normal)
+        else if closed:
+            next_normal = perp(normalize(ps[0] - ps[j]))
+            next_across = __polyline_join(normal, next_normal)
+        # A path may exceed one batch; reserve each quad before writing it.
+        __use_tex(__white.id, 6)
+        a = ps[i]
+        b = ps[j]
+        __quad(a + across * e, b + next_across * e, b - next_across * e, a - across * e, vec2(0, uv), vec2(0, uv), vec2(0, -uv), vec2(0, -uv), c, 3)
+        i = j
+        j = k
+        normal = next_normal
+        across = next_across
+    if closed:
+        __use_tex(__white.id, 6)
+        a = ps[i]
+        b = ps[0]
+        __quad(a + across * e, b + first * e, b - first * e, a - across * e, vec2(0, uv), vec2(0, uv), vec2(0, -uv), vec2(0, -uv), c, 3)
 
 # a filled polygon, its points in order around it (either way round); a concave one (a star, an
 # L) is cut into triangles
