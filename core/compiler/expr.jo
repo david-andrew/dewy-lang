@@ -581,7 +581,7 @@ check_place = (n: int, for_mut: bool):
             if ag >= 0 and readonly_global(ag): fatal(nodes[n].pos, "cannot modify const '{nm}'")
             if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; mark it `mut` or copy it with `let {nm} = {nm}`)")
             if rf & LF_BYREF != 0 and via_closure: fatal(nodes[n].pos, "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")
-            if rf & LF_BYREF != 0: fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `loop mut` to modify elements)")
+            if rf & LF_BYREF != 0: fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes[n].pos)}` to modify elements)")
             nf = f | LF_ASSIGNED
             if cp_inner == 0: nf |= LF_RESIZED
             if for_mut and f & LF_CAPTURE == 0: nf |= LF_ADDR
@@ -612,7 +612,7 @@ check_place = (n: int, for_mut: bool):
         cp_inner -= 1
         return
     if k == .index:
-        if has_flag(n, NF_RDONLY): fatal(nodes[n].pos, "cannot modify loop variable '{name_of(int(nodes[n].name))}' (use `loop mut`)")
+        if has_flag(n, NF_RDONLY): fatal(nodes[n].pos, "cannot modify loop variable '{name_of(int(nodes[n].name))}' (use `{mutable_loop_syntax(nodes[n].pos)}`)")
         bt = prune(ntype(int(nodes[n].a)))
         bk = types[bt].kind
         if bk == .ptr: return

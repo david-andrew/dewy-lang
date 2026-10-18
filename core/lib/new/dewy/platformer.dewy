@@ -95,10 +95,10 @@ tick = (state: Player map: Tilemap start: vec2 pad: Pad dt: float64) :> Step => 
 Coin: type = [pos: vec2 taken: bool = false pop: Tween<float64> = tween(0.0 1.0 0.35 ease_out)]
 collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
     let count = 0
-    loop i in [0..coins.length) {
-        if coins[i].taken coins[i].pop.update(dt)
-        else if length(coins[i].pos-at)<?30.0 {
-            coins[i].taken = true
+    loop @coin in coins {
+        if coin.taken coin.pop.update(dt)
+        else if length(coin.pos-at)<?30.0 {
+            coin.taken = true
             count += 1
         }
     }

@@ -26,7 +26,7 @@ from tools.sloppy_core.benchmark_types import record_source
 QUICK_CASES = {
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
-    'sequence-closures', 'sequence-slice-loop-snapshots',
+    'sequence-closures', 'sequence-slice-loop-snapshots', 'sequence-mutable-snapshot-in-body',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
     'dictionary-value-equality', 'set-copy-and-removal', 'numeric-bounds',
     'rational-division-notation', 'bigint-mixed-and-copies',
@@ -1351,6 +1351,80 @@ if values.length not=?0 or hash_calls not=?1 or equal_calls not=?1 return 2
 armed=false values=[Key[1]->[42]] hash_calls=0 equal_calls=0 armed=true
 if values.get(Key[2]) not=? none return 3
 return if values.length=?0 and hash_calls=?1 and equal_calls=?1 42 else 4}''',
+    'sequence-mutable-scalars': """main=()=>{
+let values=[20 21] let saved=values
+loop @value in values {value+=1}
+if values not=?[21 22] or saved not=?[20 21] return 1
+loop value in values {let copy=value copy=0}
+return if values=?[21 22] 42 else 2}""",
+    'sequence-mutable-managed': """Item:type=[count:int64 parts:array<int64>]
+bump=(@item:Item):>void=>{item.count+=1 item.parts.push(22)}
+main=()=>{
+let items=[Item[19 [20]] Item[21 [20]]] let saved=items
+loop @item in items {bump(@item) item.parts[0]+=1}
+return if items[0].count=?20 and items[1].count=?22
+and items[0].parts=?[21 22] and items[1].parts=?[21 22]
+and saved[0].count=?19 and saved[0].parts=?[20] 42 else 1}""",
+    'sequence-mutable-fields-fixed': """Box:type=[items:array<array<int64> length=2>]
+Outer:type=[box:Box]
+update=(@outer:Outer):>void=>{loop @row in outer.box.items row.push(22)}
+main=()=>{
+let outer=Outer[Box[[[20] [21]]]] let saved=outer
+update(@outer)
+return if outer.box.items[0]=?[20 22] and outer.box.items[1]=?[21 22]
+and saved.box.items[0]=?[20] and saved.box.items[1]=?[21] 42 else 1}""",
+    'sequence-mutable-snapshot-in-body': """main=()=>{
+let values=[[20] [21]] let snapshots:array<array<array<int64>>>=[]
+loop @value in values {snapshots.push(values) value[0]+=1 value.push(22)}
+return if values=?[[21 22] [22 22]]
+and snapshots[0]=?[[20] [21]] and snapshots[1]=?[[21 22] [21]] 42 else 1}""",
+    'sequence-mutable-nested': """main=()=>{
+let rows=[[19 20] [21 22]] let saved=rows
+loop @row in rows {loop @value in row value+=1}
+return if rows=?[[20 21] [22 23]] and saved=?[[19 20] [21 22]] 42 else 1}""",
+    'sequence-mutable-closure-snapshots': """main=()=>{
+let values=[[20] [22]] let readers:array<(():>array<int64>)>=[]
+loop @value in values {let captured=value readers.push(()=>captured) value[0]=99}
+return if readers[0]()=?[20] and readers[1]()=?[22] and values=?[[99] [99]] 42 else 1}""",
+    'sequence-mutable-control': """main=()=>{
+let values=[0 1 2 3] let empty:array<int64>=[] let total=0
+loop @value in empty {return 1} else {total+=10}
+loop @value in values {
+value+=10
+if value=?10 continue
+if value=?12 break
+} else {return 2}
+$outer
+loop @value in values {
+loop i in [0..2) {value+=1 continue $outer}
+} else {return 3}
+return if total=?10 and values=?[11 12 13 4] 42 else 4}""",
+    'sequence-mutable-comprehension': """main=()=>{
+let values=[19 21] let saved=values
+let doubled=[loop @value in values {value+=1; value*2}]
+let empty:array<int64>=[]
+let fallback=[loop @value in empty value else 42]
+return if values=?[20 22] and saved=?[19 21]
+and doubled=?[40 44] and fallback=?[42] 42 else 1}""",
+    'sequence-mutable-replace-element': """Item:type=[parts:array<int64>]
+main=()=>{let values=[Item[[1]] Item[[2]]] let saved=values
+loop @item in values {let old=item item=Item[[20 22]] old.parts[0]=99}
+return if values[0].parts=?[20 22] and values[1].parts=?[20 22]
+and saved[0].parts=?[1] and saved[1].parts=?[2] 42 else 1}""",
+    'sequence-mutable-value-parameter': """update=(values:array<int64>):>array<int64>=>{
+loop @value in values value+=1
+return values
+}
+main=()=>{let values=[19 21] let result=update(values)
+return if result=?[20 22] and values=?[19 21] 42 else 1}""",
+    'sequence-mutable-return-cleanup': """first=(@values:array<array<int64>>):>array<int64>=>{
+loop @value in values {value.push(22) return value}
+return []
+}
+main=()=>{
+let values=[[20] [99]] let saved=values let result=first(@values)
+values[0][0]=0
+return if result=?[20 22] and saved=?[[20] [99]] and values=?[[0 22] [99]] 42 else 1}""",
     'sequence-slice-loop-bound-locals': '''main=()=>{
 let values=[99 20 22 100] let start:int64=1
 let chosen=values[start..({start=0; 3}))
@@ -4969,6 +5043,22 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'sequence-mutable-value-write': ('main=()=>{let xs=[1] loop x in xs x+=1}', '`loop @item`'),
+    'sequence-mutable-const': ('main=()=>{const xs=[1] loop @x in xs x+=1}', 'cannot modify const'),
+    'sequence-mutable-range': ('main=()=>{let xs=[0..2) loop @x in xs x+=1}', 'needs stored array elements'),
+    'sequence-mutable-string': ('main=()=>{let xs="abc" loop @x in xs printl(x)}', 'needs stored array elements'),
+    'sequence-mutable-dict': ('main=()=>{let xs=[1->2] loop @x in xs x+=1}', 'needs stored array elements'),
+    'sequence-mutable-custom': ('Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=()=>{let xs=Series[2] loop @x in xs x+=1}', 'needs stored array elements'),
+    'sequence-mutable-call': ('items=()=>[1]\nmain=()=>{loop @x in items() x+=1}', 'use an array binding'),
+    'sequence-mutable-index': ('main=()=>{let xs=[[1]] loop @x in xs[0] x+=1}', 'use an array binding'),
+    'sequence-mutable-slice': ('main=()=>{let xs=[1] loop @x in xs[..] x+=1}', 'use an array binding'),
+    'sequence-mutable-combined': ('main=()=>{let xs=[1] loop @x in xs and x<?2 x+=1}', 'mutable binding in a combined loop'),
+    'sequence-mutable-pattern': ('main=()=>{let xs=[[1]] loop @[x] in xs x+=1}', 'unpacking a mutable loop binding'),
+    'sequence-mutable-push': ('main=()=>{let xs=[1] loop @x in xs {xs.push(2) x+=1}}', '`loop @item` changes the elements'),
+    'sequence-mutable-replace': ('main=()=>{let xs=[1] loop @x in xs {xs=[2] x+=1}}', '`loop @item` changes the elements'),
+    'sequence-mutable-parent': ('Box:type=[xs:array<int64>]\nmain=()=>{let box=Box[[1]] loop @x in box.xs {box=Box[[2]] x+=1}}', '`loop @item` changes the elements'),
+    'sequence-mutable-global-call': ('let xs=[1]\ngrow=()=>xs.push(2)\nmain=()=>{loop @x in xs {grow() x+=1}}', '`loop @item` changes the elements'),
+    'sequence-mutable-escape': ('main=()=>{let xs=[1] loop @x in xs {let later=()=>{x+=1} later()}}', 'stands for an element only while the loop is there'),
     'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-constant': ('main=()=>{const xs=[1 2] xs[..] .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-mask-constant': ('main=()=>{const xs=[1 2] xs[[true false]] .+= 1 return 0}', 'constant'),
@@ -5530,6 +5620,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_fixed_array_errors': 'bounds',
                   'test_core_extend_slice_errors': 'bounds',
                   'test_core_numeric_array_errors': 'bounds',
+                  'test_core_mutable_loop_errors': 'bounds',
                   'test_core_web_array_size_errors': 'bounds',
                   'test_core_set_errors': 'set',
                   'test_core_format_errors': 'format',
@@ -7711,6 +7802,17 @@ def test_core_compound_errors(error_batches, body, diagnostic, target, release):
 def test_core_format_errors(error_batches, body, diagnostic, target, release):
     ran = error_batches('format', body, release, target)
     assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('body', [
+    'let xs=[1 2] let shrink=()=>xs.clear() loop @x in xs {shrink() x+=1}',
+    'let xs=[[1] [2]] let shrink=()=>xs.clear() loop @x in xs {shrink() x.push(3)}',
+])
+def test_core_mutable_loop_errors(error_batches, body, target, release):
+    ran = error_batches('bounds', body, release, target)
+    assert ran.returncode != 0 and 'out of bounds' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('name', quick_parameters(ERRORS, QUICK_ERRORS))

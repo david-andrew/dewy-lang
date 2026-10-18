@@ -983,8 +983,13 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
     if op == "in":
         nodes[n].op = 1
         binder = dw_unwrap(dw_child(id, 1))
+        if dw_op(binder) == "@":
+            if combined: return dw_fail(binder, "a mutable binding in a combined loop; use a separate loop @item in items")
+            add_flag(n, NF_MUT)
+            binder = dw_unwrap(dw_child(binder, 1))
         binders: int[]
         if dewy_syntax[binder].kind == "Block" and dewy_syntax[binder].text == "[]:":
+            if has_flag(n, NF_MUT): return dw_fail(binder, "unpacking a mutable loop binding; use a named @item and its fields")
             binders = dw_bindings(binder)
             # A one-element pattern still unpacks the iteration value. Keep
             # its brackets instead of collapsing it to an ordinary name.
@@ -996,7 +1001,14 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
             binders.push(dw_expr(binder))
         set_list(n, binders)
-        it = dw_iterable(dw_child(id, 2))
+        it = if has_flag(n, NF_MUT): dw_expr(dw_child(id, 2)) else: dw_iterable(dw_child(id, 2))
+        if has_flag(n, NF_MUT):
+            # Element aliases reuse this route. Indexed/call routes need a captured
+            # selector rather than reevaluating effects at each access.
+            root = it
+            loop nodes[root].kind == .field: root = int(nodes[root].a)
+            if nodes[root].kind != .ident:
+                return dw_fail(id, "mutable iteration over this expression; use an array binding or a field of one")
         if combined and nodes[it].kind == .range and has_flag(it, NF_STEP):
             if nodes[it].b == 0:
                 it = bc_call("__dewy_open_range_iter", [int(nodes[it].a), int(nodes[it].c)], nodes[it].pos)
@@ -1091,6 +1103,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
         else if nodes[head].op == 1:
             nodes[n].kind = .for_
             nodes[n].a = nodes[head].a
+            if has_flag(head, NF_MUT): add_flag(n, NF_MUT)
             set_list(n, kids(head))
         else if nodes[head].op == 4: nodes[n].a = nodes[head].a
         else:

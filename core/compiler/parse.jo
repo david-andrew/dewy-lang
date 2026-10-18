@@ -2150,13 +2150,14 @@ desugar_loopx = (lx: int) -> int:
         # Restrict this to a leading binder so earlier conditions cannot see a
         # newly shadowing name that was not in scope at their source position.
         first = terms[0]
-        direct_binder = nodes[first].op == 1 and not has_flag(first, NF_MUT)
+        direct_binder = nodes[first].op == 1 and (not has_flag(first, NF_MUT) or terms.len() == 1)
         loop i in [1..terms.len()):
             if nodes[terms[i]].op != 4: direct_binder = false
         if direct_binder:
             f = mk(.for_, pos)
             nodes[f].sval = nodes[lx].sval
             nodes[f].a = nodes[first].a
+            if has_flag(first, NF_MUT): add_flag(f, NF_MUT)
             set_list(f, kids(first))
             stmts: int[]
             loop i in [1..terms.len()): stmts.push(lx_if(lx_not(int(nodes[terms[i]].a), pos), mk(.break_, pos), pos))

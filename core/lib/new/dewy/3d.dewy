@@ -130,7 +130,7 @@ shoot = () :> void => {
 update = (dt: float64) :> void => {
     if not done run_time += dt
     flash = max(flash-dt*8.0 0.0)
-    loop i in [0..orbs.length) { if orbs[i].pop>?0.0 orbs[i].pop += dt }
+    loop @orb in orbs { if orb.pop>?0.0 orb.pop += dt }
     if mouse_pressed(Mouse.left) and not is_mouse_locked() mouse_lock()
     else if mouse_pressed(Mouse.left) or gamepad_pressed(PadButton.rb) or (gamepad_axis(5)>?0.5 and frame_number()%8=?0) shoot()
     if key_pressed(Key.escape) mouse_lock(false)

@@ -73,7 +73,16 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 5,300 checks; recent local full runs took
+Explicit element updates now use `loop @item in items`, including nested record
+fields, managed values and fixed arrays. The platformer, arcade and 3D starters
+use it for their update loops. Copies remain independent, including snapshots
+made during iteration; the full C-bootstrap gate passes 5,458 checks. A
+250,000-record update pilot allocates nothing inside either indexed or mutable
+loops, with overlapping native timings. The same pilot exposes a web release
+slowdown in both forms, which remains a performance investigation; see the
+[measurements and scope](audits/2026-10-17/source-core/mutable-loop-validation.json).
+
+The development gate now has over 5,400 checks; recent local full runs took
 151–186 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects a small cross-section of those checks. Focused
 selections also typically take seconds. Value

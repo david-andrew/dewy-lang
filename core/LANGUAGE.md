@@ -1304,6 +1304,38 @@ The [Ring example](../examples/sloppy_core/ring.dewy) and
 [history program](../examples/sloppy_core/history.dewy) use this interface across
 module imports without a separate iterator allocation.
 
+Use an explicit place binding to update stored array elements:
+
+```dewy
+let values = [20 21]
+let saved = values
+loop @value in values { value += 1 }
+# values is [21 22]; saved is still [20 21]
+
+loop @rock in game.rocks {
+    rock.pos += rock.vel*dt
+    rock.angle += rock.spin*dt
+}
+```
+
+`@item` names the current element. Assigning it, changing its fields, calling a
+mutating method, or passing `@item` to a function updates the array. Copies of
+the array or element remain independent, including copies made inside the loop.
+Ordinary function parameters still hold independent values: a mutable loop over
+a value parameter changes that function's copy; an `@` parameter reaches the caller.
+
+This form accepts dynamic or fixed arrays named by a binding or field path
+(`items`, `game.rocks`). Indexed sources, slices, temporary expressions, custom
+sequences, mutable destructuring and combined headers are not supported yet.
+Nested mutable loops work, as do comprehensions, labels, early exits and fallback
+arms. A fallback runs only when the body never ran, as for ordinary loops.
+Keep the source array's length and storage intact during iteration: collect
+removals/additions separately and apply them afterwards. The compiler rejects
+visible resizing or replacement; indirect changes through callbacks still have
+runtime bounds checks. For an escaping callback, explicitly copy the element
+first (`let captured = item`, then `() => captured`); the mutable place itself
+cannot be kept for later changes.
+
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 

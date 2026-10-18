@@ -59,6 +59,12 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'mutable-loop': """main=()=>{
+let values=[20 22] let saved=values
+loop @value in values {value+=1}
+printl(values) printl(saved)
+return 0
+}""",
     'broadcast': '''square=(x:float64)=>x*x
 main=()=>{
 let xs=[1.0 4.0 9.0]

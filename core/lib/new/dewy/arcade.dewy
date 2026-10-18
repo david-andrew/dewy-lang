@@ -57,9 +57,9 @@ advance = (@game: Game move: vec2 dt: float64) :> void => {
         spawn_rock(@game)
         game.rock_wait = max(ROCK_GAP-game.elapsed*0.01 ROCK_GAP_MIN)
     }
-    loop i in [0..game.rocks.length) {
-        game.rocks[i].pos += game.rocks[i].vel*dt
-        game.rocks[i].angle += game.rocks[i].spin*dt
+    loop @rock in game.rocks {
+        rock.pos += rock.vel*dt
+        rock.angle += rock.spin*dt
     }
     game.rocks = game.rocks.filter((rock: Rock) => rock.pos.x>?-100 and rock.pos.x<?1380 and rock.pos.y>?-100 and rock.pos.y<?820)
     loop rock in game.rocks {

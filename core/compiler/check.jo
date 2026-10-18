@@ -1989,7 +1989,16 @@ dewy_nested_loop_bindings = (s: int):
         body = int(nodes[s].b)
         set_list(body, declarations + kids(body))
 
+mutable_loop_syntax = (pos: int) -> str:
+    if files[pos_file(pos)].is_dewy: return "loop @item"
+    "loop mut"
+
 check_for = (s: int):
+    if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
+        source_type = prune(check_expr(int(nodes[s].a), 0))
+        nodes[s].a = i32(last_checked)
+        if types[source_type].kind != .array and types[source_type].kind != .fixed:
+            fatal(nodes[s].pos, "`loop @item in items` needs stored array elements; ordinary iteration yields values")
     soa_loop(s)
     unpack_loop(s)
     dewy_nested_loop_bindings(s)
