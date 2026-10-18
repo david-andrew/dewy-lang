@@ -3198,6 +3198,10 @@ place_root = (n: int) -> int:
     if r != 0 and nodes[r].kind == .ident: return r
     0
 
+warn_unused_copy = (pos: int, name: str):
+    alias = if files[pos_file(pos)].is_dewy: "loop @e in xs" else: "loop mut e in xs"
+    warn(pos, "'{name}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `{alias}`)")
+
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
 copy_write_warnings = (f: int):
@@ -3208,7 +3212,7 @@ copy_write_warnings = (f: int):
         if not copy_writes.has(l) or int(locals[l].flags) & skip != 0: continue
         nm = name_of(int(locals[l].name))
         if starts_with(nm, "#") or starts_with(nm, "$") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
-        warn(copy_writes[l], "'{nm}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop mut e in xs`)")
+        warn_unused_copy(copy_writes[l], nm)
 
 # how many times w appears in src as a whole word
 word_count = (src: str, w: str) -> int:
@@ -3232,6 +3236,20 @@ in_comment = (src: str, i: int) -> bool:
         else if src[k] == '#' and not quoted: return true
     false
 
+# Dewy suggestions use names visible here, including explicit import aliases.
+# A similarly named global in an unrelated loaded file is not a useful hint.
+dewy_unused_name_hint = (name: str, module: int) -> str:
+    if module < 0 or modules[module].is_prelude or len(name) < 3: return ""
+    limit = if len(name) >= 6: 2 else: 1
+    loop nm, sym in modules[module].names:
+        if syms[sym].kind != .global or globals[int(syms[sym].ref)].is_const or lookup(nm) != sym: continue
+        candidate = name_of(nm)
+        if candidate == name or len(candidate) == 0 or candidate[0] != name[0]: continue
+        if candidate == upper(candidate) or lower(candidate) == lower(name): continue
+        if edit_distance(candidate, name, limit) <= limit:
+            return " (did you mean the visible variable '{candidate}'?)"
+    ""
+
 # (scor = 1 in a function, for the global score: a variable of its own, made and never read)
 unused_local_warnings = (f: int):
     skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
@@ -3243,23 +3261,31 @@ unused_local_warnings = (f: int):
         # Their values may be overridden; they are not bindings the user can fix.
         if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or starts_with(nm, "$") or pos_in_lib(locals[l].pos): continue
         near = ""
-        loop gi in [0..globals.len()):
-            gn = name_of(int(globals[gi].name))
-            lim = 1
-            if len(nm) >= 6: lim = 2
-            if gn != nm and len(nm) >= 3 and len(gn) > 0 and gn[0] == nm[0] and not globals[gi].is_const and not modules[int(globals[gi].mod)].is_prelude and gn != upper(gn) and lower(gn) != lower(nm) and edit_distance(gn, nm, lim) <= lim:
-                near = " (did you mean the variable '{gn}'? that one is changed by writing its name exactly)"
-                break
-            # (the global of a file this one does not use: the assignment made a variable of the
-            # function's own instead of changing it)
-            gf = int(modules[int(globals[gi].mod)].file)
-            lf = pos_file(locals[l].pos)
-            if gn == nm and not modules[int(globals[gi].mod)].is_prelude and gf >= 0 and lf >= 0 and gf != lf:
-                # (as `use` would name it from here)
-                shown = files[gf].path
-                if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
-                near = ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
-                break
+        if files[pos_file(locals[l].pos)].is_dewy:
+            m = int(fns[f].mod)
+            near = dewy_unused_name_hint(nm, m)
+            if len(near) == 0 and m >= 0:
+                loop used in modules[m].uses:
+                    near = dewy_unused_name_hint(nm, used)
+                    if len(near) > 0: break
+        else:
+            loop gi in [0..globals.len()):
+                gn = name_of(int(globals[gi].name))
+                lim = 1
+                if len(nm) >= 6: lim = 2
+                if gn != nm and len(nm) >= 3 and len(gn) > 0 and gn[0] == nm[0] and not globals[gi].is_const and not modules[int(globals[gi].mod)].is_prelude and gn != upper(gn) and lower(gn) != lower(nm) and edit_distance(gn, nm, lim) <= lim:
+                    near = " (did you mean the variable '{gn}'? that one is changed by writing its name exactly)"
+                    break
+                # (the global of a file this one does not use: the assignment made a variable of the
+                # function's own instead of changing it)
+                gf = int(modules[int(globals[gi].mod)].file)
+                lf = pos_file(locals[l].pos)
+                if gn == nm and not modules[int(globals[gi].mod)].is_prelude and gf >= 0 and lf >= 0 and gf != lf:
+                    # (as `use` would name it from here)
+                    shown = files[gf].path
+                    if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
+                    near = ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
+                    break
         # (score = 0 in update, then score += 1: it starts again each frame, and nothing reads it)
         fnm = ""
         if fns[f].decl != 0 and nodes[int(fns[f].decl)].kind == .fn_: fnm = name_of(int(nodes[int(fns[f].decl)].name))
@@ -4179,7 +4205,7 @@ check_program = (main_path: str):
         if g < global_read.len() and global_read[g]: continue
         if modules[int(globals[g].mod)].is_prelude or pos_in_lib(wp): continue
         nm = name_of(int(globals[g].name))
-        warn(wp, "'{nm}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop mut e in xs`)")
+        warn_unused_copy(wp, nm)
     # prelude init: referenced prelude globals in declaration order
     pl: int[]
     loop g in global_ids:

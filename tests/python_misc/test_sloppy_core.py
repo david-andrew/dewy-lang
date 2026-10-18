@@ -5739,6 +5739,49 @@ def test_core_generated_binding_warnings(compiler, tmp_path, release, unused):
         assert "'forgotten' is given a value here but never used" in warnings[0]
 
 
+@pytest.mark.parametrize('scope', ['unrelated', 'visible', 'alias', 'shadowed'])
+def test_core_unused_global_hint_scope(compiler, tmp_path, scope):
+    (tmp_path / 'other.dewy').write_text('let score=0\nkeep=()=>42\n')
+    programs = {
+        'unrelated': ('from p"other.dewy" import keep\n'
+                      'main=()=>{let score=1 let scroe=2 return keep()}'),
+        'visible': 'let score=0\nmain=()=>{let scroe=1 return 42}',
+        'shadowed': ('let score=0\nprobe=(score:int64)=>{let scroe=1 return 42}\n'
+                     'main=()=>probe(9)'),
+        'alias': ('from p"other.dewy" import (score as points), keep\n'
+                  'main=()=>{let poitns=1 return keep()}'),
+    }
+    source = tmp_path / 'main.dewy'
+    source.write_text(programs[scope])
+    checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
+                             timeout=30, check=False)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert 'never used' in checked.stderr
+    assert 'not seen from this file' not in checked.stderr
+    assert "use '" not in checked.stderr
+    if scope in ('unrelated', 'shadowed'):
+        assert 'did you mean' not in checked.stderr
+    else:
+        name = 'points' if scope == 'alias' else 'score'
+        assert f"did you mean the visible variable '{name}'" in checked.stderr
+
+
+@pytest.mark.parametrize('scope', ['local', 'global'])
+def test_core_copy_warning_dewy_syntax(compiler, tmp_path, scope):
+    bindings = 'let xs=[Item[42]] let item=xs[0]\n'
+    body = 'item.hp-=5 return xs[0].hp'
+    source = tmp_path / 'copy.dewy'
+    source.write_text('Item:type=[hp:int64]\n' +
+                      (bindings + f'main=()=>{{{body}}}' if scope == 'global'
+                       else f'main=()=>{{{bindings}{body}}}'))
+    checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
+                             timeout=30, check=False)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert 'holds a copy' in checked.stderr
+    assert 'loop @e in xs' in checked.stderr
+    assert 'loop mut' not in checked.stderr
+
+
 @pytest.mark.parametrize('mode', [None, 'invalid'])
 def test_core_frontend_selection(compiler, tmp_path, mode):
     source = tmp_path / 'main.dewy'
