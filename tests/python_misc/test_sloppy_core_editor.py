@@ -264,6 +264,11 @@ def test_vscode_core_test_tasks(tmp_path):
     ('choose=((value:int64)=>value+2)&((text:string)=>text.length)\n',
      'return choose("answer")', 'choose', 'choose = (text: string):>int64'),
 
+    ('', 'let value:array<int64 length=2>=[20 22] return value[0]', 'value', 'array<int64 length=2>'),
+    ('', 'let value:array<array<string length=2>>=[["a" "b"]] return value.length',
+     'value', 'array<array<string length=2>>'),
+    ('', 'const value=[20 22] return value[0]', 'value', '(constant)'),
+    ('const value=[20 22]\n', 'return value[0]', 'value', '(constant)'),
     ('', 'let value:Pool<array<int64>>=[] return value.items.length', 'value', 'Pool<array<int64>>'),
     ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: float64):>float64'),
     ('from p"support.jo" import answer\n', 'return answer(40)', 'answer', 'answer = (x: int64 n: int64 = …):>int64'),
@@ -353,5 +358,73 @@ def test_dewy_completions(tmp_path, text, wanted, absent):
         diagnostics = client.set_text(source.as_uri(), 'main=()=>42', 2)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
         assert source.read_text() == 'main=()=>42'
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize('marked', [
+    'main=()=>{let xs=[20 22] loop §x in xs {x+=1} return 42}',
+    'main=()=>{\nlet xs=[20 22]\nloop §x in xs {\nloop x in [0..2) {printl(x)}\nx+=1\n}\nreturn 42}',
+    'main=()=>{let game=[items=[[hp=20] [hp=22]]] loop §item in game.items {item.hp+=1} return 42}',
+    'main=()=>{let xs:array<int64 length=2>=[20 22] loop §x in xs {x+=1} return 42}',
+    'main=()=>{let text="🙂" let xs=[20 22] loop §café in xs {café+=1} return 42}',
+    'main=()=>{let xs=[20 22] loop §x in xs # stored values\n{x+=1} return 42}',
+])
+def test_dewy_mutable_loop_quickfix(tmp_path, marked):
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if not compiler:
+        pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>42')
+    before, after = marked.split('§')
+    text = before + after
+    client = Client(Path(compiler).resolve(strict=True), tmp_path)
+    try:
+        diagnostics = client.set_text(source.as_uri(), text, 1)
+        errors = [d for d in diagnostics if d['severity'] == 1]
+        assert len(errors) == 1 and 'cannot modify loop variable' in errors[0]['message'], diagnostics
+        actions = client.request('textDocument/codeAction', {
+            'textDocument': {'uri': source.as_uri()}, 'range': errors[0]['range'],
+            'context': {'diagnostics': errors},
+        })
+        assert len(actions) == 1, actions
+        edits = actions[0]['edit']['changes'][source.as_uri()]
+        expected_position = {'line': before.count('\n'),
+                             'character': len(before.rsplit('\n', 1)[-1].encode('utf-16-le')) // 2}
+        assert edits == [{'range': {'start': expected_position, 'end': expected_position},
+                          'newText': '@'}], edits
+        fixed = before + '@' + after
+        diagnostics = client.set_text(source.as_uri(), fixed, 2)
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        assert source.read_text() == 'main=()=>42'
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize('text', [
+    'main=()=>{const xs=[20 22] loop x in xs {x+=1} return 42}',
+    'const xs=[20 22]\nmain=()=>{loop x in xs {x+=1} return 42}',
+    'main=()=>{const game=[items=[20 22]] loop x in game.items {x+=1} return 42}',
+    'items=()=>[20 22]\nmain=()=>{loop x in items() {x+=1} return 42}',
+    'main=()=>{let xs=[[20 22]] loop x in xs[0] {x+=1} return 42}',
+    'main=()=>{let xs=[20 22] loop x in xs[..] {x+=1} return 42}',
+    'main=()=>{let xs=[20 22] loop x in xs {let later=()=>{x+=1} later()} return 42}',
+])
+def test_dewy_mutable_loop_quickfix_unsupported(tmp_path, text):
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if not compiler:
+        pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>42')
+    client = Client(Path(compiler).resolve(strict=True), tmp_path)
+    try:
+        diagnostics = client.set_text(source.as_uri(), text, 1)
+        errors = [d for d in diagnostics if d['severity'] == 1]
+        assert errors and 'cannot modify loop variable' in errors[0]['message'], diagnostics
+        actions = client.request('textDocument/codeAction', {
+            'textDocument': {'uri': source.as_uri()}, 'range': errors[0]['range'],
+            'context': {'diagnostics': errors},
+        })
+        assert actions == [], actions
     finally:
         client.close()

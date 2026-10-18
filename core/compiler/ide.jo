@@ -158,6 +158,7 @@ ide_local_root = (l0: int) -> int:
     l
 
 ide_local_kind = (l: int) -> int:
+    if int(locals[l].flags) & LF_CONST != 0: return IK_CONST
     if int(locals[l].flags) & LF_PARAM != 0: return IK_PARAM
     IK_LOCAL
 
@@ -176,7 +177,8 @@ ide_sym_ref = (n: int, s: int):
         ide_ref(p, nm, ide_local_kind(r), locals[r].pos, int(locals[l].type), 0)
     else if sk == .global:
         g = int(syms[s].ref)
-        ide_ref(p, nm, IK_GLOBAL, nodes[int(syms[s].decl)].pos, int(globals[g].type), 0)
+        kind = if readonly_global(g): IK_CONST else: IK_GLOBAL
+        ide_ref(p, nm, kind, nodes[int(syms[s].decl)].pos, int(globals[g].type), 0)
     else if sk == .const_:
         g = int(syms[s].ref)
         dp = 0
@@ -670,7 +672,7 @@ ide_sym_decls = (s0: int):
             else if sk == .global or sk == .const_:
                 g = int(syms[s].ref)
                 k = IK_GLOBAL
-                if sk == .const_: k = IK_CONST
+                if sk == .const_ or readonly_global(g): k = IK_CONST
                 t = ide_type_info(int(globals[g].type))
                 if k == IK_GLOBAL: ide_decl(p, nm, k, "{name_of(nm)}: {t}", ide_doc_of(nodes[d].pos))
                 else: ide_decl(p, nm, k, ide_snippet(nodes[d].pos, false), ide_doc_of(nodes[d].pos))

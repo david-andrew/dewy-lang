@@ -1992,6 +1992,51 @@ line_above = (text: str, p: int, pred: (str) -> bool) -> int:
         if pred(text[a..b)): return a
     -1
 
+# A Dewy element-update fix must use the declaration actually resolved by the
+# checker, not a nearby loop mentioning the same name. Offer it only for the
+# supported single-binder, stored-array form with a block body.
+qf_dewy_space = (text: str, at: int) -> int:
+    i = at
+    loop i < len(text):
+        if text[i] == ' ' or text[i] == '\t' or text[i] == '\r' or text[i] == '\n': i += 1
+        else if text[i] == '#':
+            loop i < len(text) and text[i] != '\n': i += 1
+        else: break
+    i
+
+qf_dewy_element = (d: int, off: int, name: str) -> int:
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return -1
+    dp = split_pos(h.ref.decl)
+    if dp.0 < 0 or dp.0 >= h.res.paths.len() or h.res.paths[dp.0] != docs[d].path: return -1
+    at = unmap_off(h.res, docs[d].path, dp.1)
+    text = docs[d].text
+    if at < 0 or not starts_with(text[at..], name): return -1
+    before = at
+    loop before > 0 and (text[before - 1] == ' ' or text[before - 1] == '\t' or text[before - 1] == '\n' or text[before - 1] == '\r'): before -= 1
+    if before < 4 or text[before - 4..before) != "loop": return -1
+    if before > 4 and is_ident_char(text[before - 5]): return -1
+    i = qf_dewy_space(text, at + len(name))
+    if not starts_with(text[i..], "in") or (i + 2 < len(text) and is_ident_char(text[i + 2])): return -1
+    i = qf_dewy_space(text, i + 2)
+    root = i
+    last = i
+    loop true:
+        if i >= len(text) or not is_ident_start(text[i]): return -1
+        last = i
+        loop i < len(text) and is_ident_char(text[i]): i += 1
+        i = qf_dewy_space(text, i)
+        if i >= len(text) or text[i] != '.': break
+        i = qf_dewy_space(text, i + 1)
+    if i >= len(text) or text[i] != '{{': return -1
+    source = ref_at(d, last)
+    if not source.found or not starts_with(source.ref.info, "array<"): return -1
+    base = ref_at(d, root)
+    if not base.found: return -1
+    if let declaration = base.res.decls.get(base.ref.decl):
+        if declaration.kind == IK_CONST: return -1
+    at
+
 on_code_action = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "[]")
@@ -2030,6 +2075,12 @@ on_code_action = (id: int, params: int) -> int:
         if starts_with(msg, "use `not`") and starts_with(text[p..], "!"): out.push(qf_json(d, "Change '!' to 'not'", dg, p, p + 1, "not "))
         if starts_with(msg, "cannot modify loop variable '"):
             nm = quoted(msg, 0)
+            if ends_with(docs[d].path, ".dewy"):
+                if contains(msg, "`loop @item`"):
+                    ensure_checked(d)
+                    at = qf_dewy_element(d, p, nm)
+                    if at >= 0: out.push(qf_json(d, "Update stored elements with `@{nm}`", dg, at, at, "@"))
+                continue
             hd = line_above(text, p, (l: str) -> bool: starts_with(trim(l), "loop ") and not starts_with(trim(l), "loop mut ") and find(l, " {nm} ") >= 0)
             if hd >= 0:
                 lp = find(text, "loop ", hd)

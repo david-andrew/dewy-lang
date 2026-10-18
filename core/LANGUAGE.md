@@ -137,6 +137,11 @@ completions, hover, definitions and Format Document. Set `dewy.core.path` to a
 standalone compiler executable, or to the checkout's absolute `tools/dewy` path.
 With the development launcher, restarting the language server picks up compiler
 source changes without changing the editor setting.
+For a rejected update to an ordinary loop binding, the editor can insert `@`
+at that binding's declaration when it is a supported stored-array loop with a
+block body. It follows resolved bindings through nested scopes and avoids
+suggesting mutable iteration over constants, temporary results or slices.
+Fixed arrays display as `array<Element length=N>`; constants are marked readonly.
 
 `python3 -m tools.core fmt file.dewy` formats declarations and indentation in
 place. Add `--check` to report needed changes without writing, or pass a directory

@@ -586,7 +586,9 @@ type_str_in = (t0: int, dewy: bool) -> str:
         array:
             if dewy: return "array<{type_str(int(ti.elem), dewy)}>"
             "{type_str_postfix(int(ti.elem), dewy)}[]"
-        fixed: "{type_str_postfix(int(ti.elem), dewy)}[{ti.bits}]"
+        fixed:
+            if dewy: return "array<{type_str(int(ti.elem), dewy)} length={ti.bits}>"
+            "{type_str_postfix(int(ti.elem), dewy)}[{ti.bits}]"
         ptr: "*{type_str(int(ti.elem), dewy)}"
         opt: "{type_str_postfix(int(ti.elem), dewy)}?"
         null_: "null"
