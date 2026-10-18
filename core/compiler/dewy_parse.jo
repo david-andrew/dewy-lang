@@ -648,6 +648,7 @@ dw_expr = (id: int) -> int:
                         nodes[a].name = i32(intern(dw_name(dw_child(child, 1))))
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
                         args.push(a)
+                    else if bracket and xs.len() > 1: args.push(dw_iterable(child, true, true))
                     else: args.push(dw_expr(child))
             if bracket: dw_index_context.pop()
             set_list(n, args)
@@ -890,18 +891,7 @@ dw_import_name = (id: int) -> int:
     if alias != "": nodes[n].aux = i32(intern(alias))
     return n
 
-dw_range_value = (range: int) -> int:
-    pos = nodes[range].pos
-    if nodes[range].a == 0 or nodes[range].b == 0: fatal(pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
-    step = has_flag(range, NF_STEP)
-    second = if step: int(nodes[range].c) else: bc_int(0, pos)
-    stepped = mk(.bool_lit, pos)
-    nodes[stepped].ival = if step: 1 else: 0
-    inclusive = mk(.bool_lit, pos)
-    nodes[inclusive].ival = if has_flag(range, NF_INCLUSIVE): 1 else: 0
-    result = bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
-    if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
-    result
+dw_range_value = (range: int) -> int: dewy_range_value(range)
 
 dw_membership = (id: int) -> int:
     r = dw_iterable(id, true, true)

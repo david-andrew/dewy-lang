@@ -909,11 +909,31 @@ column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
 `det(matrix)` provide linear algebra on square `float64` matrices; a singular
 matrix raises an error in `solve` and `inverse`.
 
+Put a range in its own brackets when selecting axes:
+
+```dewy
+let matrix = reshape([1 2 3 4 5 6] 2 3)
+let column = matrix[[..] 1]           # shape [2], values [2 5]
+let row = matrix[1 [..]]              # shape [3], values [4 5 6]
+let block = matrix[[0..2) [1..3)]     # shape [2 2], values [2 3 5 6]
+matrix[[..] 1] = [20 50]
+matrix[0 [1..3)] = 99                # fill each selected element
+assert(column.data =? [2 5])
+```
+
+A scalar index removes that axis; a range keeps it, and omitted trailing axes
+are selected in full. A selection is an independent `NDArray` value. Assign a
+scalar to fill it, or an array/matrix with the same number of elements to replace
+it in row-major order. Bounds and replacement lengths are checked. The explicit
+inner brackets matter: `matrix[.. 1]` is one range ending at 1, while
+`matrix[[..] 1]` selects column 1. Matrix slices currently support forward unit
+ranges, inclusive starts and inclusive or exclusive stops; stepped and stored
+range selectors remain a gap for multidimensional arrays.
+
 [`trajectory_fit.dewy`](../examples/sloppy_core/trajectory_fit.dewy) fits a
 quadratic to sampled heights, predicts another height, and includes native test
 blocks. Its normal-equation example uses small, well-scaled times; it is not a
-general numerical fitting package. Multi-axis range slicing is not yet exposed
-through Dewy's bracket syntax; use `row`, `col`, or indexed loops for now.
+general numerical fitting package.
 
 ## Parallel CPU work
 

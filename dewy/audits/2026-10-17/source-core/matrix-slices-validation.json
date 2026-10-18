@@ -1,0 +1,17 @@
+{
+  "change": "Keep Dewy multi-axis range syntax until receiver typing. NDArray reads and assignments use existing __nd_slice/__nd_slice_set; constructors and custom indexing receive stored range values.",
+  "compiler": "build-1792314294058113220/bin/dewy-core",
+  "source_identity": "2ff7450658f97ed0371ce0b8b20f0d081d8cf87354911a7f6fed76d8dc82d5b2",
+  "validation": "1611 passed, 3282 deselected in 28.88s; Ruff and git diff --check passed",
+  "coverage": [
+    "Native/web and default/release; row/column/block selection and scalar/array/matrix assignment; trailing full axes; 3D/4D shapes; empty selections; managed elements and independent copies; updates through fields",
+    "Receiver and range endpoint evaluation order; constructor ranges including stepped and exclusive-first ranges; custom Jo library index/get/set operators receive IntRange values",
+    "Existing one-dimensional ranges, sequences, generic constructors and records; bounds, wrong replacement length and rank diagnostics; unsupported stepped/exclusive-first matrix slice diagnostics"
+  ],
+  "bootstrap": "Independent three-generation C bootstrap built the initial implementation. The broad run then caught a single-axis wrapped range regression. Restricting new parse behavior to multi-argument brackets fixed it; the final broad run used the previous-core rebuild. Hosted CI will bootstrap the final revision.",
+  "notes": [
+    "The first constructor fixture used invalid Dewy type-declaration syntax; corrected before broad validation.",
+    "Whole axes need explicit inner brackets: matrix[[..] j]. Whitespace alone makes matrix[.. j] one interval ending at j.",
+    "Stored or stepped multi-axis ranges and exclusive-first matrix slices are not added."
+  ]
+}

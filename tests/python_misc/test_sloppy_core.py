@@ -24,7 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
-    'constant-local-once', 'numeric-sum-literal-exact',
+    'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
     'sequence-closures', 'sequence-slice-loop-snapshots',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
@@ -294,6 +294,72 @@ let other:Pair=values return other[0]+other[1]}''',
 const base=1 const width=base+1
 let base=7 let values:array<int64 length=width>=[20 22]
 return values[0]+values[1]}''',
+    'numeric-matrix-slices': '''main=()=>{
+let a=reshape([1 2 3 4 5 6] 2 3)
+assert(a[[..] 1].shape =? [2] and a[[..] 1].data =? [2 5])
+assert(a[1 [..]].shape =? [3] and a[1 [..]].data =? [4 5 6])
+let block=a[[0..2) [1..3)]
+assert(block.shape =? [2 2] and block.data =? [2 3 5 6])
+assert(a[0 [1..]].data =? [2 3])
+assert(a[[..] [..]].data =? a.data)
+assert(a[[0..0) [..]].shape =? [0 3] and size(a[[0..0) [..]]) =? 0)
+return 42}''',
+    'numeric-matrix-slice-updates': '''main=()=>{
+let a=reshape([1 2 3 4 5 6] 2 3) let saved=a
+let column=a[[..] 1]
+a[[..] 1]=[20 50]
+a[0 [1..3)]=99
+assert(a.data =? [1 99 99 4 50 6] and saved.data =? [1 2 3 4 5 6])
+assert(column.data =? [2 5])
+a[[..] 0]=a[[..] 2]
+assert(a.data =? [99 99 99 6 50 6])
+a[[0..0) [..]]=[]
+let box=[matrix=a] let old=box
+box.matrix[[..] 1]=0
+assert(box.matrix.data =? [99 0 99 6 0 6] and old.matrix.data =? a.data)
+return 42}''',
+    'numeric-matrix-slice-ranks': '''main=()=>{
+let a=reshape([0 1 2 3 4 5 6 7 8 9 10 11] 2 2 3)
+let part=a[1 [..] [1..3)]
+assert(part.shape =? [2 2] and part.data =? [7 8 10 11])
+let remaining=a[[0..1) [..]]
+assert(remaining.shape =? [1 2 3] and remaining.data =? [0 1 2 3 4 5])
+a[1 [..] [1..3)]=[70 80 100 110]
+assert(a.data =? [0 1 2 3 4 5 6 70 80 9 100 110])
+let b=ones(2 2 2 2) b[1 [..] 0 [..]]=0.0
+assert(b[1 [..] 0 [..]].shape =? [2 2] and sum(b) =? 12.0)
+return 42}''',
+    'numeric-matrix-slice-managed': '''main=()=>{
+let a=reshape(["a" "b" "c" "d"] 2 2) let saved=a
+let part=a[[..] 0] part[0]="new"
+a[[..] 1]=a[[..] 0]
+assert(a.data =? ["a" "a" "c" "c"] and saved.data =? ["a" "b" "c" "d"])
+assert(part.data =? ["new" "c"])
+return 42}''',
+    'numeric-matrix-slice-evaluation': '''let calls=""
+source=()=>{calls+="s" return reshape([1 2 3 4 5 6] 2 3)}
+first=()=>{calls+="a" return 0}
+stop=()=>{calls+="b" return 2}
+column=()=>{calls+="c" return 1}
+replacement=()=>{calls+="v" return [20 50]}
+main=()=>{
+let part=source()[[first()..stop()) column()]
+assert(calls =? "sabc" and part.data =? [2 5])
+let a=source() calls=""
+a[[first()..stop()) column()]=replacement()
+assert(calls =? "abcv" and a.data =? [1 20 3 4 50 6])
+return 42}''',
+    'numeric-range-bracket-constructors': '''Pair:type=[a:IntRange b:IntRange]
+Single:type=[range:IntRange]
+main=()=>{
+let pair=Pair[[0..2] (2..4]]
+assert([loop i in pair.a i] =? [0 1 2])
+assert([loop i in pair.b i] =? [3 4])
+let stepped=Pair[[0,2..4] [4,2..0]]
+assert([loop i in stepped.a i] =? [0 2 4] and [loop i in stepped.b i] =? [4 2 0])
+let single=Single[0..2]
+assert([loop i in single.range i] =? [0 1 2])
+return 42}''',
     'numeric-matrix-copy': '''main=()=>{
 let a=reshape([3.0 1.0 1.0 2.0] 2 2) let saved=a
 let flat=flatten(a) let reshaped=reshape(a 1 4)
@@ -4323,6 +4389,8 @@ ERRORS = {
     'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array or record literals'),
     'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
     'end-index-outside': ('main=()=>end', "unknown name 'end'"),
+    'numeric-matrix-stepped-slice': ('main=()=>{let m=zeros(2 3) printl(m[[..] [0,2..2]])}', 'stepped ranges cannot select parts of arrays'),
+    'numeric-matrix-exclusive-start-slice': ('main=()=>{let m=zeros(2 3) printl(m[[..] (0..2]])}', 'matrix slice with an exclusive first bound'),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
     'numeric-bound-unknown': ('main=()=>uint8.maximum', "type has no member 'maximum'"),
     'range-index-stepped-string': ('main=()=>"abc"[0,2..2].length', 'stepped slicing requires an array'),
@@ -6675,6 +6743,10 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let m=zeros(2 3) printl(m[[..] 3])', 'out of bounds'),
+    ('let m=zeros(2 3) printl(m[[..] [0..4)])', 'out of bounds'),
+    ('let m=zeros(2 3) m[[..] 1]=[1.0]', 'assigning 1 elements to a part of 2'),
+    ('let m=zeros(2 3) printl(m[[..] [..] 0])', '3 indexes for an array'),
     ('printl(fill(0 (1<<61)+1).length)', 'array is too large'),
     ('let xs:array<int64>=[] xs.reserve((1<<61)+1)', 'array is too large'),
     ('let xs=[1] xs.reserve((1<<61)+1)', 'array is too large'),
@@ -6725,6 +6797,28 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout == ('height = 1.501 + 8.008*t + -4.909*t*t\n'
                           'height at 0.6 seconds: 4.538\n')
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_ranges_custom_index(compiler, tmp_path, target, release):
+    (tmp_path / 'lookup.jo').write_text('''struct Lookup:
+    value: int
+([]) = (x: Lookup, a: IntRange, b: IntRange) -> int: x.value + a._first + b._first
+([]=) = (x: mut Lookup, a: IntRange, b: IntRange, value: int): x.value = value + a._first + b._first
+''')
+    program = '''from p"lookup.jo" import Lookup
+main=()=>{
+let x=Lookup[10]
+assert(x[[1..3] (1..3]] =? 13)
+x[[1,3..5] [4,2..0]]=37
+return x.value
+}'''
+    command, error = build_case_batch(compiler, tmp_path, {'custom_index': program},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('body, diagnostic', [

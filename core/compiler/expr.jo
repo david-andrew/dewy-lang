@@ -5303,6 +5303,8 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n] = nodes[bc_block(stmts, pos)]
             return check_expr(n, expected)
         bt = prune(check_expr(int(nodes[n].a), 0))
+        nodes[n].a = i32(last_checked)
+        dewy_index_ranges(n, bt)
         bk = types[bt].kind
         b = int(nodes[n].b)
         if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP):
@@ -6203,6 +6205,32 @@ check_matrix = (n: int, expected: int) -> int:
 # elements, broadcast like numpy (a dimension of length 1, or a missing leading one, stretches).
 bc_count = 0
 
+# Brackets also construct records and call user-defined indexing operators. Keep
+# range syntax until the receiver type is known: NDArray uses axis slices, while
+# other multi-argument brackets receive ordinary stored range values.
+dewy_index_ranges = (n: int, receiver: int):
+    if not files[pos_file(nodes[n].pos)].is_dewy or is_nd(receiver): return
+    if nkids(n) < 2 and types[receiver].kind != .typeval: return
+    loop i in [0..nkids(n)):
+        r = kid(n, i)
+        if nodes[r].kind == .range:
+            value = dewy_range_value(r)
+            set_kid(n, i, value)
+            if nodes[n].b == r: nodes[n].b = i32(value)
+
+dewy_range_value = (range: int) -> int:
+    pos = nodes[range].pos
+    if nodes[range].a == 0 or nodes[range].b == 0: fatal(pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
+    step = has_flag(range, NF_STEP)
+    second = if step: int(nodes[range].c) else: bc_int(0, pos)
+    stepped = mk(.bool_lit, pos)
+    nodes[stepped].ival = if step: 1 else: 0
+    inclusive = mk(.bool_lit, pos)
+    nodes[inclusive].ival = if has_flag(range, NF_INCLUSIVE): 1 else: 0
+    result = bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
+    if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
+    result
+
 # m[...] with a range among its indexes (or a single range on an n-dimensional array)
 is_part_index = (n: int) -> bool:
     b = int(nodes[n].b)
@@ -6224,6 +6252,7 @@ part_spec = (n: int) -> int:
             elems.push(bc_int(0, pos))
             continue
         if has_flag(x, NF_STEP): fatal(nodes[x].pos, "stepped ranges cannot select parts of arrays")
+        if has_flag(x, NF_EXCL_FIRST): fatal(nodes[x].pos, "a matrix slice with an exclusive first bound (use an inclusive start)")
         lo = int(nodes[x].a)
         if lo == 0: lo = bc_int(0, pos)
         elems.push(lo)

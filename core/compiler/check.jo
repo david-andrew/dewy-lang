@@ -2538,6 +2538,7 @@ check_assign = (s: int) -> int:
     if nodes[lhs].kind == .index:
         bt = prune(check_expr(int(nodes[lhs].a), 0))
         nodes[lhs].a = i32(last_checked)
+        dewy_index_ranges(lhs, bt)
         range = int(nodes[lhs].b)
         if range != 0 and nodes[range].kind == .range:
             if types[bt].kind == .array or types[bt].kind == .fixed:
