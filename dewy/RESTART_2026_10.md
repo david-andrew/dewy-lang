@@ -383,6 +383,21 @@ The [compilation comparison](audits/2026-10-18/string-equal-compile.json) measur
 850.9 → 837.2 ms CPU for the fixed conformance bundle and 1839.7 → 1803.4 ms
 for self-build; small-app differences were mixed and wall times remained noisy.
 
+Built-in string equality now borrows an indexed left value when evaluating
+the right operand is only a direct read. Calls, custom getters, alias expansion
+and potentially effectful index expressions retain the snapshot path. This
+removes per-comparison retain/release traffic without changing evaluation order.
+The [five-pair comparison](audits/2026-10-18/string-borrow-runtime.json) reduced
+string-equality CPU from 166.4 to 143.1 ms (default) and 165.9 to 132.3 ms
+(release); C remained about 52.1 ms. The 290 focused checks include right operands
+that replace or free the left operand's array before returning a value.
+The initial [unpinned compilation comparison](audits/2026-10-18/string-borrow-compile.json)
+had large CPU-time variation and an apparent self-build regression. A
+[seven-pair same-CPU follow-up](audits/2026-10-18/string-borrow-pinned-compile.json)
+was essentially flat: self-build 1821 → 1806 ms CPU and the fixed conformance
+bundle 839 → 841 ms. This change is retained for runtime improvement, with no
+compilation-throughput gain claimed.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

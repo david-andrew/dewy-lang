@@ -54,6 +54,15 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'array-comparison-string-effectful-right': '''let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
+change=()=>{values=[] let noise=str_from_bytes([120 121 122] as array<uint8>)
+return if noise.length=?3 "abc" else "wrong"}
+main=()=>{let same=values[0]=?change()
+return if same and values.length=?0 42 else 1}''',
+    'array-comparison-string-effectful-index': '''let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
+change=()=>{values=[] values.push(str_from_bytes([120 121 122] as array<uint8>)) return 0}
+main=()=>{let same=values[0]=?values[change()]
+return if not same and values[0]=?"xyz" 42 else 1}''',
     'array-comparison-memory-tails': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/memory_equal.jo').as_posix()+'"\n'
                               + 'main=()=>memory_equal.probe()'),
     'closure-stack-local-noheap': '''work=()=>{let before=alloc_count() let n=0

@@ -2036,7 +2036,10 @@ gen_binary = (e: int) -> Val:
     # and aggregate operations need a copy even for values without references.
     keep_left = false
     if is_managed(lt) or vc(lt) == VC_AGG:
-        if place_var(a) != 0: keep_left = not unchanged_by(a, b)
+        # Built-in string equality invokes no user code. A plain right-hand
+        # read cannot invalidate the left value, even through an indexed place.
+        plain_string = aux == 2 and (op == .eq or op == .ne) and plain_read(b)
+        if not plain_string and place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1:
         ad = 0
         # (a slice, xs[a..b) == ys: a new array, not a place to take the address of)
@@ -4025,6 +4028,26 @@ view_decl = (s: int, l: int) -> bool:
     locals[l].vreg = i32(v)
     locals[l].flags = i32(fl | LF_BYREF)
     true
+
+# Only direct reads: custom getters, calls, conversions and computed indexes
+# outside this whitelist stay on the ordinary snapshot path. Alias identifiers
+# can expand into expressions, so do not assume that reading them is inert.
+plain_read = (n: int) -> bool:
+    if n <= 0: return false
+    k = nodes[n].kind
+    if k == .int_lit or k == .str_lit: return true
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)): return true
+        if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].flags) & LF_ALIAS == 0
+        return false
+    if k == .field:
+        a = int(nodes[n].a)
+        return nodes[n].aux >= 0 and tkind(ntype(a)) == .struct_ and plain_read(a)
+    if k == .index:
+        a = int(nodes[n].a)
+        kind = tkind(ntype(a))
+        return (kind == .array or kind == .fixed) and plain_read(a) and plain_read(int(nodes[n].b))
+    false
 
 # is e a variable (or a field path of one) that code n cannot change?
 unchanged_by = (e: int, n: int) -> bool:
