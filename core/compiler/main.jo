@@ -710,6 +710,8 @@ main = ():
         test_mode = true
         first += 1
     if test_mode: cli_target = "native"  # tests run natively even for web games
+    when TARGET == "windows":
+        if test_mode: __test_process_group()
     path = os_path(a[first])
     if not file_exists(path) and not ends_with(path, ".jo") and not ends_with(path, ".dewy") and find(path, "/") < 0:
         near = ""

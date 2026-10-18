@@ -63,10 +63,11 @@ class Watch:
 
     def close(self):
         try:
-            self.process.stdin.write(b'q\n')
-            self.process.stdin.flush()
+            if self.process.poll() is None:
+                self.process.stdin.write(b'q\n')
+                self.process.stdin.flush()
             self.process.wait(timeout=5)
-        except (BrokenPipeError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired):
             if self.process.poll() is None:
                 if os.name == 'nt':
                     subprocess.run(['taskkill', '/PID', str(self.process.pid), '/T', '/F'],
@@ -75,7 +76,7 @@ class Watch:
                     os.killpg(self.process.pid, signal.SIGKILL)
             self.process.wait(timeout=5)
         finally:
-            with contextlib.suppress(BrokenPipeError):
+            with contextlib.suppress(OSError):
                 self.process.stdin.close()
             self.reader.join(timeout=5)
             assert not self.reader.is_alive(), 'watcher left an output pipe open after shutdown'
@@ -142,7 +143,12 @@ test "excluded" { panic("must not run excluded test") }
         watcher.close()
 
 
-def test_core_watch_tests_cancel_child(compiler, tmp_path):
+@pytest.mark.parametrize('stop', [
+    'quit',
+    pytest.param('interrupt', marks=pytest.mark.skipif(os.name == 'nt', reason='POSIX signal')),
+    'terminate',
+])
+def test_core_watch_tests_cancel_child(compiler, tmp_path, stop):
     helper = tmp_path / 'process.jo'
     save(helper, '''pid = () -> int:
     when TARGET == "windows": return int(GetCurrentProcessId())
@@ -184,8 +190,13 @@ test "waiting" {
         watcher.expect('child is waiting')
         child = int((tmp_path / 'child.pid').read_text())
         assert running(child)
-        watcher.process.stdin.write(b'q\n')
-        watcher.process.stdin.flush()
+        if stop == 'quit':
+            watcher.process.stdin.write(b'q\n')
+            watcher.process.stdin.flush()
+        elif stop == 'interrupt':
+            watcher.process.send_signal(signal.SIGINT)
+        else:
+            watcher.process.terminate()
         watcher.process.wait(timeout=5)
         deadline = time.monotonic() + 3
         while running(child) and time.monotonic() < deadline:
