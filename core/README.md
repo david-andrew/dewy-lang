@@ -22,7 +22,7 @@ python3 -m tools.core test -k shader_driver      # compile/link shaders with GLE
 python3 -m tools.core watch examples/sloppy_core/paddle.dewy
 python3 -m tools.core check examples/sloppy_core/tour.dewy
 python3 -m tools.core build examples/sloppy_core/tour.dewy --release -o /tmp/tour
-python3 -m tools.core path                       # executable for editor settings
+python3 -m tools.core path                       # immutable executable for scripts/benchmarks
 python3 -m tools.core --bootstrap test           # also verify the independent C seed
 ```
 
@@ -53,6 +53,13 @@ gate adds the broader regression corpus, rendering, networking, watch and editor
 coverage; CI continues to run that full gate.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
 independently from C, regardless of the local cache.
+
+For routine edits, start with the relevant `test -k ...` selection and use the
+quick suite when the change crosses language/tooling boundaries. Push a tested
+increment and use CI's full C-bootstrap gate while continuing development.
+A local full gate is useful for broad changes or diagnosing a CI failure; an
+independent bootstrap need not block every focused edit. Report the checks
+actually run, and resolve broader failures before relying on the change.
 
 ## Use the current compiler from another project
 
