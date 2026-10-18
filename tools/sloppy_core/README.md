@@ -48,8 +48,10 @@ combined `and` loop headers, and `in?`/`not in?` membership for arrays,
 dictionaries, strings and integer range literals. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
 
-Dewy closure literals snapshot enclosing locals; `[@name]()` opts specific
-locals into lexical sharing. Copying a closure duplicates mutable private
+Dewy closure literals snapshot enclosing locals; `$capture @name` in the
+parameter list opts specific locals into lexical sharing. `$capture name`
+explicitly lists a private snapshot. Captures can be interspersed with caller
+parameters and consume no call arguments. Copying a closure duplicates mutable private
 captures and retains explicit shared cells. Immutable private environments can
 be retained without an allocation. Calls pin the environment being invoked so
 replacing the callable during argument evaluation does not free it prematurely.

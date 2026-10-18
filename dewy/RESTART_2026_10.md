@@ -59,8 +59,10 @@ and remaining gaps; compatibility is defined by useful language behavior rather
 than the old representations or proof machinery.
 
 Closure state now follows the user's value-semantics decision: ordinary
-captures are snapshots, copied counters advance independently, and `[@name]()`
-explicitly shares an enclosing local. Parameters, returns and nested containers
+captures are snapshots, copied counters advance independently, and `$capture @name`
+in the regular parameter list explicitly shares an enclosing local. Captures can
+appear among caller parameters, without consuming call arguments; `$capture name`
+explicitly lists a private snapshot. Parameters, returns and nested containers
 preserve private copies; module globals retain their identity. Immutable private
 environments can be retained without copying. Function-containing arrays currently
 copy eagerly, while ordinary data arrays retain copy-on-write storage.

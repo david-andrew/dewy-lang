@@ -15,6 +15,8 @@ receiver its own value. Sharing is either unobservable or written in the source:
 Closures follow the same rule. An ordinary capture takes a snapshot, and copying
 a stateful closure gives the copy independent private state. Shared captures are
 explicit. Copying a callback must not silently introduce shared mutable state.
+Capture declarations belong alongside ordinary parameters: `$capture` selects
+the enclosing scope as the binding's source, and `@` explicitly selects sharing.
 
 Ordinary programs should be comfortable to write. Common code should run well
 without pervasive annotations. A whole program, including the compiler, should

@@ -307,12 +307,12 @@ main = () => {
 }
 ```
 
-Use an explicit capture list to share an enclosing local binding:
+Use `$capture @name` in the parameter list to share an enclosing local binding:
 
 ```dewy
 main = () => {
     let count = 0
-    let next = [@count]() => { count += 1; count }
+    let next = ($capture @count) => { count += 1; count }
     let other = next
     printl(next()) # 1
     printl(other()) # 2
@@ -320,8 +320,21 @@ main = () => {
 }
 ```
 
-Keep `](` adjacent. A list contains `@name` entries; other referenced locals
-still become private snapshots. Shared locals remain alive after the enclosing
+Captures can appear anywhere among ordinary parameters. `$capture` applies to
+the following binding: `$capture name` takes a private snapshot and
+`$capture @name` shares the enclosing binding. Both are bound when the closure
+is created, so neither takes an argument when called:
+
+```dewy
+let update = (step:int64 $capture @count extra:int64) => {
+    count += step + extra
+}
+update(2 3) # changes the enclosing count by 5
+```
+
+Each explicit capture names an enclosing local; capture and parameter names
+must be distinct. Other referenced locals still become private snapshots.
+Shared locals remain alive after the enclosing
 call returns, and copies retain that deliberate sharing. A mutable parameter
 or loop element place cannot escape through a shared capture; copy its value
 into a local first. Shared cells that could hold functions are rejected to

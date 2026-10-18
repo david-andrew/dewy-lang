@@ -61,8 +61,9 @@ def test_core_format_implementation_language(compiler, tmp_path):
 PROGRAMS = {
     'closure-captures': '''main=()=>{
 let n=0 let xs=[10]
-let next=[@n]()=>{n+=1 xs[0]+=1; n+xs[0]}
-let other=next printl(next()) printl(other()) printl(n) return 0
+let next=($capture @n step:int64
+$capture xs extra:int64)=>{n+=step xs[0]+=extra; n+xs[0]}
+let other=next printl(next(1 2)) printl(other(3 4)) printl(n) return 0
 }''',
     'mutable-loop': """main=()=>{
 let values=[20 22] let saved=values

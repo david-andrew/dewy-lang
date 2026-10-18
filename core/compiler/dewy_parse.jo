@@ -358,18 +358,8 @@ dw_function = (id: int, name: str) -> int:
     if dw_op(signature) == ":>":
         params = dw_child(signature, 1)
         result = dw_child(signature, 2)
-    captures: int[]
     if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "[]:":
-        if name != "": return dw_fail(params, "a capture list on a module function")
-        seen: {str: bool} = {}
-        loop cap in dewy_syntax[dw_child(params, 1)].children:
-            if dw_op(cap) != "@": return dw_fail(cap, "a capture list entry without @")
-            nm = dw_name(dw_child(cap, 1))
-            if nm == "": return dw_fail(cap, "a shared capture other than a local name")
-            if seen.has(nm): fatal(dewy_syntax[cap].pos, "duplicate shared capture '{nm}'")
-            seen[nm] = true
-            captures.push(dw_expr(dw_child(cap, 1)))
-        params = dw_child(params, 2)
+        return dw_fail(params, "a separate capture list; use ($capture @name) in the parameter list")
     type_params: int[]
     if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "<>:":
         if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
@@ -378,7 +368,6 @@ dw_function = (id: int, name: str) -> int:
     if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
-    if captures.len() > 0: set_list2(n, captures)
     if type_params.len() > 0:
         if name == "main": return dw_fail(id, "a generic entry point")
         set_list2(n, type_params)
@@ -387,8 +376,27 @@ dw_function = (id: int, name: str) -> int:
         if dw_name(result) == "void": add_flag(n, NF_VOID)
         else: nodes[n].a = i32(dw_type(result))
     ps: int[]
+    captures: int[]
+    capture = false
     bound: {int: bool} = {}
     loop p in dewy_syntax[params].children:
+        if dewy_syntax[p].kind == "Metatag":
+            if dewy_syntax[p].text != "capture": return dw_fail(p, "this parameter modifier; use $capture")
+            if capture: return dw_fail(p, "$capture without a local name")
+            if name != "": return dw_fail(p, "$capture on a module function")
+            capture = true
+            continue
+        if capture:
+            target = if dw_op(p) == "@": dw_child(p, 1) else: p
+            nm = dw_name(target)
+            if nm == "" or nm == "_": return dw_fail(p, "a capture other than an enclosing local name")
+            cap = dw_expr(target)
+            if dw_op(p) == "@": add_flag(cap, NF_MUT)
+            if bound.has(int(nodes[cap].name)): fatal(nodes[cap].pos, "duplicate parameter binding '{nm}'")
+            bound[int(nodes[cap].name)] = true
+            captures.push(cap)
+            capture = false
+            continue
         param = dw_param(p, .param)
         let bound_nodes = if nkids(param) > 0: binding_leaves(kids(param)) else: [param]
         loop binding in bound_nodes:
@@ -397,6 +405,8 @@ dw_function = (id: int, name: str) -> int:
             if bound.has(nm): fatal(nodes[binding].pos, "duplicate parameter binding '{name_of(nm)}'")
             bound[nm] = true
         ps.push(param)
+    if capture: return dw_fail(params, "$capture without a local name")
+    if captures.len() > 0: set_list2(n, captures)
     body = dw_block(dw_child(id, 2))
     prefix: int[]
     loop param in ps:
