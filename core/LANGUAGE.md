@@ -985,6 +985,19 @@ column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
 `det(matrix)` provide linear algebra on square `float64` matrices; a singular
 matrix raises an error in `solve` and `inverse`.
 
+`dot(a b)` computes a dot product. `norm(values)` computes the Euclidean length
+of a `float64` array; `hypot(x y)` computes the length of two coordinates.
+They rescale extreme values so that squaring a large or tiny coordinate does
+not unnecessarily overflow or underflow: both `norm([3e200 4e200])` and
+`hypot(3e200 4e200)` give approximately `5e200`, and the same works at `1e-200`
+scale. An empty or all-zero array has positive zero length. `norm` propagates
+any NaN; `hypot` returns infinity if either coordinate is infinite, even when
+the other is NaN. Floating `abs(-0.0)` returns positive zero.
+
+GPU `hypot` uses the shader's `float32` arithmetic and a corresponding scaled
+implementation. Shader precision and handling of subnormal values still depend
+on the graphics driver; the CPU and WebAssembly routines use `float64`.
+
 Dotted operators apply scalar arithmetic to each element. Adjacent dotted
 operations and calls fuse into one traversal without intermediate result arrays:
 

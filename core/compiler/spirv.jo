@@ -1281,6 +1281,7 @@ sv_math = (nm: str, e: int) -> int:
     if nm == "dot":
         if not is_vec(ntype(kid(e, 0))): return sv_val(133, ty, [args[0], args[1]])
         return sv_val(148, ty, args)
+    if nm == "hypot": return sv_hypot(args[0], args[1])
     if nm == "transpose": return sv_val(84, ty, args)
     if nm == "fwidth":
         if sv_stage != "fragment": sv_err(nodes[e].pos, "fwidth() can only be used in the fragment shader")
@@ -1308,6 +1309,25 @@ sv_math = (nm: str, e: int) -> int:
     loop a in args: w.push(a)
     # (abs(i8(-128)) is -128, as on the CPU)
     sv_narrow(sv_val(12, ty, w), t)
+
+# The same float32 power-of-two scaling as sl_hypot_body in GLSL/Metal.
+sv_hypot = (x: int, y: int) -> int:
+    u = sv_u32()
+    f = sv_f32()
+    b = sv_bool()
+    ax = sv_val(199, u, [sv_val(124, u, [x]), sv_cu(0x7FFFFFFF)])
+    ay = sv_val(199, u, [sv_val(124, u, [y]), sv_cu(0x7FFFFFFF)])
+    hi = sv_val(12, u, [sv_std, 41, ax, ay]) # UMax
+    inf = sv_cu(0x7F800000)
+    exponent = sv_val(199, u, [hi, inf])
+    scale = sv_val(124, f, [sv_val(12, u, [sv_std, 41, exponent, sv_cu(0x00800000)])])
+    sx = sv_val(136, f, [x, scale])
+    sy = sv_val(136, f, [y, scale])
+    squared = sv_val(129, f, [sv_val(133, f, [sx, sx]), sv_val(133, f, [sy, sy])])
+    result = sv_val(133, f, [scale, sv_val(12, f, [sv_std, 31, squared])])
+    result = sv_val(169, f, [sv_val(172, b, [hi, inf]), sv_val(129, f, [x, y]), result])
+    infinite = sv_val(166, b, [sv_val(170, b, [ax, inf]), sv_val(170, b, [ay, inf])])
+    sv_val(169, f, [infinite, sv_val(124, f, [inf]), result])
 
 # ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
 # A GpuBuffer here is (its address, its length): struct { uvec2, i32 }. Reads past either end read

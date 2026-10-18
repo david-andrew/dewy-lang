@@ -710,7 +710,7 @@ ml_math_names: {str: str} = {
     "fract": "fract", "min": "min", "max": "max", "clamp": "clamp", "mix": "mix", "lerp": "mix",
     "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
     "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "sl_inverse",
-    "sign": "sign", "sinf": "sin", "cosf": "cos", "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "mod": "sl_mod",
+    "sign": "sign", "sinf": "sin", "cosf": "cos", "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "mod": "sl_mod", "hypot": "sl_hypot",
 }
 
 ml_call = (e: int) -> str:
@@ -805,6 +805,8 @@ ml_math = (nm: str, e: int) -> str:
     if nm == "atan" and n == 2: return "atan2({args[0]}, {args[1]})"
     if nm == "inverse":
         if ml_first("inverse"): ml_decls.push(ML_INVERSE())
+    if nm == "hypot" and ml_first("hypot"):
+        ml_decls.push(sl_hypot_body("as_type<uint>", "as_type<float>"))
     if nm == "mod":
         if ml_first("mod"): ml_decls.push("template <typename T, typename U> T sl_mod(T x, U y) \{ return x - y * floor(x / y); }\n")
         if not ml_is_floaty(t): return "({args[0]} % {args[1]})"

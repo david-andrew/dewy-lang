@@ -49,6 +49,24 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-scaled-magnitudes': '''main=()=>{
+if abs(hypot(3e200 4e200)/5e200-1.0)>?1e-15 return 1
+if abs(hypot(3e-200 4e-200)/5e-200-1.0)>?1e-15 return 2
+if abs(norm([3e200 4e200])/5e200-1.0)>?1e-15 return 3
+if abs(norm([3e-200 4e-200])/5e-200-1.0)>?1e-15 return 4
+let tiny=f64_from_bits(1 as uint64)
+if norm([tiny]) not=?tiny or hypot(tiny 0.0) not=?tiny return 5
+return 42}''',
+    'numeric-magnitude-special-values': '''main=()=>{
+let empty:array<float64>=[]
+if f64_bits(norm(empty)) not=?0 or f64_bits(norm([-0.0 0.0])) not=?0 return 1
+if f64_bits(hypot(-0.0 -0.0)) not=?0 return 2
+if hypot(NAN INF) not=?INF or hypot(-INF NAN) not=?INF return 3
+if not is_nan(hypot(NAN 1.0)) or not is_nan(norm([NAN INF])) return 4
+if norm([-INF 1.0]) not=?INF return 5
+if f64_bits(abs(-0.0)) not=?0 or f32_bits(abs(f32_from_bits(0x80000000))) not=?0 return 6
+if f64_bits(abs(f64_from_bits(0xfff8000000000042))) not=?0x7ff8000000000042 return 7
+return 42}''',
     'game-camera-pointer-lock': '''import p"@lib/game/window.jo" as input
 main=()=>{
 input.__mouse_x=72.0 input.__mouse_y=48.0
@@ -6075,6 +6093,77 @@ loop line in input.split("\n") {
     assert ran.stdout.splitlines() == expected
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_magnitude_reference(compiler, tmp_path, target, release):
+    # Python's independently implemented hypot is the numerical reference.
+    smallest = math.ulp(0.0)
+    largest = float.fromhex('0x1.fffffffffffffp+1023')
+    boundary = largest / math.sqrt(2.0)
+    cases = [[], [0.0, -0.0], [3.0, 4.0], [3e200, 4e200], [3e-200, 4e-200],
+             [smallest], [smallest, smallest], [largest], [largest, smallest],
+             [largest, largest], [math.inf, math.nan], [math.nan, -math.inf],
+             [math.nan, 1.0], [-math.inf, 0.0]]
+    for direction in [0.0, math.inf]:
+        value = boundary
+        for _ in range(4):
+            cases.append([value, value])
+            value = math.nextafter(value, direction)
+    rng = random.Random(73021)
+    for exponent in [-1074, -1060, -1022, -540, -512, -500, -1, 0, 500, 512, 1000, 1022]:
+        for count in [1, 2, 3, 9, 64, 257]:
+            cases.append([math.ldexp(rng.uniform(-1.0, 1.0), exponent) for _ in range(count)])
+    for _ in range(40):
+        cases.append([math.ldexp(rng.uniform(-1.0, 1.0), rng.randrange(-1074, 1023))
+                      for _ in range(rng.choice([2, 3, 9, 64]))])
+
+    def bits(value):
+        return struct.unpack('>Q', struct.pack('>d', value))[0]
+
+    rows = '\n'.join('[' + ' '.join(str(bits(v)) for v in values) + ']' for values in cases)
+    source = tmp_path / 'magnitudes.dewy'
+    source.write_text('let rows:array<array<uint64>>=[\n' + rows + '''\n]
+main=()=>{
+loop words in rows {
+let values=[loop word in words f64_from_bits(word)]
+let pair=if values.length =? 2 hypot(values[0] values[1]) else 0.0
+printl"{f64_bits(norm(values))}|{f64_bits(pair)}"
+}
+return 0
+}
+''')
+    binary = tmp_path / 'magnitudes'
+    flags = (['--release'] if release else []) + (['--target', 'wasm'] if target == 'wasm' else [])
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web magnitude checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'magnitudes.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    outputs = ran.stdout.splitlines()
+    assert len(outputs) == len(cases), ran.stdout
+    for values, output in zip(cases, outputs, strict=True):
+        actual = [struct.unpack('>d', struct.pack('>Q', int(v)))[0] for v in output.split('|')]
+        expected = [math.nan if any(math.isnan(v) for v in values) else math.hypot(*values),
+                    math.hypot(*values) if len(values) == 2 else 0.0]
+        for got, want in zip(actual, expected, strict=True):
+            if math.isnan(want):
+                assert math.isnan(got), (values, got, want)
+            elif not math.isfinite(want) or want == 0.0:
+                assert bits(got) == bits(want), (values, got, want)
+            else:
+                assert math.isfinite(got) and abs(got-want) <= 8*math.ulp(want), (values, got, want)
+
+
 @pytest.mark.parametrize('expression, diagnostic', [
     ('rational(1 0)', 'rational denominator must be nonzero'),
     ('1/0', 'rational denominator must be nonzero'),
@@ -7671,6 +7760,14 @@ let h=half.(g) .* 2.0 .+ 1.0
 assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
 assert(cpu(.-(half.(g) .* 2.0 .+ 1.0)).data =? [-2.5 -3.5 -4.5 -5.5])
 assert(cpu(.+g).data =? [1.0 2.0 3.0 4.0])
+assert(cpu(hypot.(gpu([3.0 5.0]) gpu([4.0 12.0]))).data =? [5.0 13.0])
+let magnitudes=cpu(hypot.(gpu([3e30 3e-30 0.0 -3e30 INF NAN NAN])
+                         gpu([4e30 4e-30 -0.0 4e30 NAN INF 1.0]))).data
+assert(abs(magnitudes[0]/5e30-1.0) <? 1e-6)
+assert(abs(magnitudes[1]/5e-30-1.0) <? 1e-6)
+assert(magnitudes[2] =? 0.0 and 1.0/magnitudes[2] >? 0.0)
+assert(abs(magnitudes[3]/5e30-1.0) <? 1e-6)
+assert(magnitudes[4] =? INF and magnitudes[5] =? INF and is_nan(magnitudes[6]))
 let zeros=cpu(.-gpu([0.0 -0.0])).data
 assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
 assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
@@ -7707,6 +7804,28 @@ return 0
     assert ran.stdout.startswith(expected[backend] +
                                 f'Generated 33x33 height field (GPU available: {available}).\n'), ran.stdout + ran.stderr
     assert ran.stdout.splitlines()[2].startswith('Maximum CPU difference: '), ran.stdout
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_metal_magnitude(compiler, tmp_path, release):
+    # Source cross-compilation only: execution requires Apple hardware.
+    source = tmp_path / 'magnitude.dewy'
+    source.write_text('main=()=>{printl(cpu(hypot.(gpu([3.0]) gpu([4.0]))).data) return 0}')
+    shaders = tmp_path / 'shaders'
+    shaders.mkdir()
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env['SLOPPY_MSL_DUMP'] = str(shaders)
+    built = subprocess.run([compiler, 'build', source, '--target', 'macos', '-o', tmp_path / 'magnitude',
+                            *(['--release'] if release else [])], env=env,
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    kernels = list(shaders.glob('*.kernel.metal'))
+    assert len(kernels) == 1
+    text = kernels[0].read_text()
+    assert 'float sl_hypot(float x, float y)' in text
+    assert 'as_type<uint>(x)' in text and 'as_type<float>(max(hi &' in text
+    assert 'f64_bits' not in text and 'floatBitsToUint' not in text
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])

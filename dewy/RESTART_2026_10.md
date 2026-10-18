@@ -160,6 +160,15 @@ fixes unary plus in GLSL and SPIR-V shader output. The
 [unary broadcast validation](audits/2026-10-17/source-core/broadcast-unary-validation.json)
 records CPU/GPU tests, raw timings and compilation costs.
 
+`norm` and `hypot` now rescale extreme coordinates, avoiding premature infinity
+or zero when intermediate squares exceed the float range. Floating `abs` also
+clears negative zero. The 613-check independent-bootstrap gate includes a Python
+numerical reference, native/web execution and float32 GPU implementations.
+Ordinary array norms retain their measured throughput; robust scalar `hypot`
+adds about 1–3 ns per call in this local pilot. The
+[magnitude validation](audits/2026-10-18/scaled-magnitude-validation.json)
+records that cost, numerical tolerances and graphics-platform limits.
+
 Default-build performance is now a separate measurement target, alongside
 release builds. Positive constant floor arithmetic lowers directly, and ordinary
 builds expand tiny leaf functions before their single local optimization pass.

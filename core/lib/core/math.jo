@@ -11,12 +11,8 @@ const MIN_INT = -9223372036854775807 - 1
 abs = (x: int) -> int:
     if x < 0: return -x
     x
-abs = (x: f64) -> f64:
-    if x < 0.0: return -x
-    x
-abs = (x: f32) -> f32:
-    if x < 0.0: return -x
-    x
+abs = (x: f64) -> f64: ((x as u64) & 0x7FFFFFFFFFFFFFFF) as f64
+abs = (x: f32) -> f32: ((x as u32) & 0x7FFFFFFF) as f32
 
 min = (a: int, b: int) -> int:
     if a < b: return a
@@ -663,7 +659,31 @@ f64_from_bits = (b: u64) -> f64: b as f64
 f32_bits = (x: f32) -> u32: x as u32
 f32_from_bits = (b: u32) -> f32: b as f32
 
-hypot = (x: f64, y: f64) -> f64: sqrt(x * x + y * y)
+# Power-of-two scaling avoids rounding normal intermediate magnitudes.
+# Use the minimum normal scale for subnormal inputs.
+__norm_scale = (largest: f64) -> f64:
+    bits = f64_bits(largest) & 0x7FF0000000000000
+    if bits == 0: bits = 0x0010000000000000
+    f64_from_bits(bits)
+
+hypot = (x: f64, y: f64) -> f64:
+    squared = x * x + y * y
+    # Keep the ordinary path short; rescale when squaring loses range.
+    if squared >= 2.2250738585072014e-308 and squared < INF: return sqrt(squared)
+    __hypot_scaled(x, y, squared)
+
+__hypot_scaled = (x: f64, y: f64, squared: f64) -> f64:
+    ax = abs(x)
+    ay = abs(y)
+    # As in the C math function, an infinite magnitude dominates a NaN.
+    if ax == INF or ay == INF: return INF
+    if squared != squared: return squared
+    hi = max(ax, ay)
+    if hi == 0.0: return 0.0
+    scale = __norm_scale(hi)
+    sx = ax / scale
+    sy = ay / scale
+    scale * sqrt(sx * sx + sy * sy)
 radians = (deg: f64) -> f64: deg * PI / 180.0
 degrees = (rad: f64) -> f64: rad * 180.0 / PI
 

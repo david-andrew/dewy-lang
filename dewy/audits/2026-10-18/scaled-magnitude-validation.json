@@ -1,0 +1,140 @@
+{
+  "change": [
+    "Rescale hypot and norm with powers of two when their direct sum of squares loses range.",
+    "Clear the float32/float64 sign bit for abs, including negative zero and NaNs.",
+    "Use float32 scaling in GLSL, SPIR-V and Metal hypot instead of translating a float64 bit helper."
+  ],
+  "validation": "Independent C bootstrap; 613 focused numerical, shader, GPU-array and web-game checks passed in 33.19 seconds.",
+  "compiler": {
+    "binary": "build-1792332162501136277/bin/dewy-core",
+    "source_identity": "a88ed2966525c5aff2da943fb100f2d9cdf532a10c53a2fe5564109963c38bd8"
+  },
+  "reference_coverage": "134 seeded arrays compared with Python math.hypot in native and Node/WebAssembly, default and release. Includes zeros, subnormals, overflow boundaries, infinities, NaNs, mixed exponents and array lengths through 257. Finite results allow 8 ulps; special classifications and positive zero are checked separately.",
+  "gpu_coverage": "Executed ordinary, 1e30 and 1e-30 inputs, signed zero, infinities and NaNs with local OpenGL ES and Vulkan software drivers, plus native/web CPU fallback. Metal source cross-compilation only; no Apple execution.",
+  "ordinary_performance": {
+    "compilers": {
+      "baseline": {
+        "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792331110869015264/bin/dewy-core",
+        "sha256": "80ecb1e6fdfb21eec6d24c764fc1fc6c306e441883031051788d57861d298117"
+      },
+      "candidate": {
+        "path": "__dewycache__/compact-core/build-1792331704310702326/bin/dewy-core",
+        "sha256": "c26c04f70788533b9dacfd21a12ef73d7f03798e9701389cb2c20b2feecf69b1"
+      }
+    },
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "samples": 5,
+    "warmups": 1,
+    "sources": {
+      "hypot": "main=()=>{\nlet total=0.0 let start=time_ns()\nloop i in [0..4000000) {\nlet x=((i%1024) as float64)*0.125+1.0\nlet y=(((i*7)%1024) as float64)*0.0625+1.0\ntotal+=hypot(x y)\n}\nlet elapsed=time_ns()-start\nprintl\"{total} {elapsed}\"\nreturn 0\n}",
+      "norm": "main=()=>{\nlet values=[loop i in [0..262144) ((i%1024) as float64)*0.125+1.0]\nlet total=0.0 let start=time_ns()\nloop step in [0..128) {\nvalues[0]=(step as float64)*0.125\ntotal+=norm(values)\n}\nlet elapsed=time_ns()-start\nprintl\"{total} {elapsed}\"\nreturn 0\n}"
+    },
+    "workloads": {
+      "hypot": {
+        "checksum": 306178887.52517617,
+        "nanoseconds": {
+          "baseline-default": [
+            16552881,
+            16768240,
+            16809048,
+            16512276,
+            16417141
+          ],
+          "baseline-release": [
+            15083637,
+            15066565,
+            18727242,
+            15034386,
+            15059204
+          ],
+          "candidate-default": [
+            28318498,
+            28983208,
+            28218408,
+            28172473,
+            28027281
+          ],
+          "candidate-release": [
+            20384606,
+            20679293,
+            20548593,
+            21296255,
+            20358356
+          ]
+        },
+        "median_ms": {
+          "baseline-default": 16.552881,
+          "baseline-release": 15.066565,
+          "candidate-default": 28.218408,
+          "candidate-release": 20.548593
+        }
+      },
+      "norm": {
+        "checksum": 4896469.624261133,
+        "nanoseconds": {
+          "baseline-default": [
+            24575204,
+            24279305,
+            22670574,
+            21874274,
+            23286718
+          ],
+          "baseline-release": [
+            23767772,
+            23219645,
+            21424323,
+            22106611,
+            22093536
+          ],
+          "candidate-default": [
+            24644029,
+            22658214,
+            23059575,
+            21482765,
+            21563305
+          ],
+          "candidate-release": [
+            24945111,
+            22990074,
+            21492912,
+            21846456,
+            21473966
+          ]
+        },
+        "median_ms": {
+          "baseline-default": 23.286718,
+          "baseline-release": 22.106611,
+          "candidate-default": 22.658214,
+          "candidate-release": 21.846456
+        }
+      }
+    },
+    "limits": [
+      "Native ordinary finite inputs; extreme-input correctness is covered by independent-reference tests.",
+      "Same source for both compilers; alternating fresh processes. Times exclude setup but include result consumption.",
+      "No C performance comparison and no universal library throughput claim."
+    ]
+  },
+  "cost": "Four million ordinary hypot calls: 16.55 to 28.22 ms default, 15.07 to 20.55 ms release (about 2.9/1.4 ns additional per call). Norm unchanged within noise. Correctness improvement, not a throughput improvement; splitting the slow helper did not recover the old inlining performance.",
+  "limits": [
+    "No correctly-rounded guarantee. The numerical tolerance applies to the recorded cases, not every possible array.",
+    "GPU arithmetic uses float32; subnormal treatment depends on the driver. No GPU performance claim.",
+    "The prior norm propagates NaN even with infinity; hypot follows the common infinity-dominates-NaN convention.",
+    "No changes to dot-product reassociation or compiler-wide inlining thresholds.",
+    "The full gate runs in branch CI after push."
+  ],
+  "references": [
+    "https://docs.python.org/3/library/math.html#math.hypot",
+    "https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html"
+  ],
+  "rejected": "Scaling by the actual largest magnitude falsely overflowed a two-coordinate result near the largest finite float. Power-of-two scaling fixes that case without rounding normal scaled coordinates."
+}

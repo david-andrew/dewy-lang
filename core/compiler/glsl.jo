@@ -126,8 +126,21 @@ builtin_map: {str: str} = {
     "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
     "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "inverse",
     "sign": "sign", "sinf": "sin", "cosf": "cos", "sample": "texture", "sample_lod": "textureLod",
-    "exp2": "exp2", "log2": "log2", "fwidth": "fwidth",
+    "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "hypot": "sl_hypot",
 }
+
+# Shader arithmetic is float32, even for a CPU float64 function. Scale with
+# float32 exponent bits rather than translating core/math's float64 helper.
+sl_hypot_body = (to_bits: str, from_bits: str) -> str: join([
+    "float sl_hypot(float x, float y) \{\n",
+    "    uint ax = {to_bits}(x) & 0x7fffffffu, ay = {to_bits}(y) & 0x7fffffffu;\n",
+    "    if (ax == 0x7f800000u || ay == 0x7f800000u) return {from_bits}(0x7f800000u);\n",
+    "    uint hi = max(ax, ay);\n",
+    "    if (hi > 0x7f800000u) return x + y;\n",
+    "    float s = {from_bits}(max(hi & 0x7f800000u, 0x00800000u));\n",
+    "    float sx = x / s, sy = y / s;\n",
+    "    return s * sqrt(sx * sx + sy * sy);\n}\n",
+], "")
 
 gl_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
 
@@ -440,6 +453,8 @@ gl_expr = (e: int) -> str:
         loop i in [0..nkids(e)): args.push(gl_expr(kid(e, i)))
         if modules[int(nodes[decl].mod)].is_prelude:
             if let g = builtin_map.get(nm):
+                if nm == "hypot" and gl_first("hypot"):
+                    gl_decls.push(sl_hypot_body("floatBitsToUint", "uintBitsToFloat"))
                 # (abs of the smallest integer is itself, as on the CPU: GLSL's is undefined)
                 if nm == "abs" and (types[t].kind == .int_ or (is_vec(t) and types[t].sign)):
                     tn = gl_type(t, nodes[e].pos)

@@ -619,7 +619,22 @@ dot = (a: f64[], b: f64[]) -> f64:
         i += 1
     (s0 + s1) + (s2 + s3)
 
-norm = (a: f64[]) -> f64: sqrt(dot(a, a))
+norm = (a: f64[]) -> f64:
+    squared = dot(a, a)
+    if squared >= 2.2250738585072014e-308 and squared < INF: return sqrt(squared)
+    # Preserve NaN propagation. A finite norm can still have an overflowing
+    # sum of squares, or one too small to represent accurately before sqrt.
+    if squared != squared: return squared
+    scale = 0.0
+    loop x in a: scale = max(scale, abs(x))
+    if scale == 0.0: return 0.0
+    if scale == INF: return INF
+    scale = __norm_scale(scale)
+    total = 0.0
+    loop x in a:
+        ratio = x / scale
+        total += ratio * ratio
+    scale * sqrt(total)
 
 # the variance: the mean of the squared distances from the mean (NumPy's var; std_dev squared)
 variance = (xs: f64[]) -> f64:
