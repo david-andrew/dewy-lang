@@ -476,7 +476,14 @@ dn_stmt = () -> int:
     token = dn_tokens[dn_at]
     word = token.text
     result = 0
-    if word in ["let", "const", "return", "break", "continue", "import", "from"]:
+    # Contextual keyword: ordinary bindings/calls named `test` still work.
+    if word == "test" and dn_tokens[dn_at + 1].space and dn_tokens[dn_at + 1].kind in ["quoted", "rawquoted"] and not dn_tokens[dn_at + 1].newline:
+        dn_at += 1
+        name = dn_string(dn_take())
+        if dewy_syntax[name].kind != "String": return dn_error(token.start, "a test name must be a constant string")
+        if dn_peek() != "{": return dn_error(dn_tokens[dn_at].start, "expected '{{' after the test name")
+        result = dn_node("KeywordExpr", "", token.start, [dn_node("Keyword", word, token.start), name, dn_block()])
+    else if word in ["let", "const", "return", "break", "continue", "import", "from"]:
         dn_at += 1
         parts = [dn_node("Keyword", word, token.start)]
         if word != "break" and word != "continue":

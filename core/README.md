@@ -10,6 +10,11 @@ The supported language and measured results are documented in
 experimental subset, not a replacement for the published Dewy compiler.
 Start with the [language guide and executable tour](LANGUAGE.md) to try it.
 
+Projects can use native `test "description" { assert(...) }` blocks and run them
+with `./tools/dewy test file.dewy [name filters...]`; see the
+[project testing guide](LANGUAGE.md#test-a-project). This command uses the compiler's
+test runner. The Python commands below validate development of the compiler itself.
+
 ## Work on this checkout
 
 ```sh
@@ -186,6 +191,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   tests/python_misc/test_sloppy_core_format.py \
   tests/python_misc/test_sloppy_core_network.py \
   tests/python_misc/test_sloppy_core_package.py \
+  tests/python_misc/test_sloppy_core_testing.py \
   tests/python_misc/test_sloppy_core_watch.py \
   tests/python_misc/test_sloppy_core_upstream.py \
   tests/python_misc/test_core_dev.py

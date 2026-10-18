@@ -687,6 +687,13 @@ dw_stmt = (id: int, top: bool = false) -> int:
         return s
     if k == "KeywordExpr":
         word = dewy_syntax[dw_child(id, 0)].text
+        if word == "test":
+            if not top: return dw_fail(id, "a test block inside another block; declare tests at the top level")
+            n = mk(.test_, pos)
+            nodes[n].sval = i32(intern(dewy_syntax[dw_child(id, 1)].text))
+            nodes[n].b = i32(dw_block(dw_child(id, 2)))
+            add_flag(n, NF_TERMINATED)
+            return n
         if word == "from" or word == "import":
             if not top: return dw_fail(id, "local imports")
             return dw_import(id)

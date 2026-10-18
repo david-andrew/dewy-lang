@@ -39,7 +39,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.1.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--release] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -676,6 +676,9 @@ main = ():
         return
     first = 1
     if a[1] == "run": first = 2          # (sloppy run game.jo is sloppy game.jo)
+    if a[1] == "test":
+        test_mode = true
+        first = 2
     # options for running come before the file (what follows it goes to the program)
     loop first < a.len() and starts_with(a[first], "--"):
         x = a[first]
@@ -699,8 +702,8 @@ main = ():
     if a[first] == "test":
         if a.len() < first + 2: usage()
         test_mode = true
-        cli_target = "native"         # tests run natively even for web games
         first += 1
+    if test_mode: cli_target = "native"  # tests run natively even for web games
     path = os_path(a[first])
     if not file_exists(path) and not ends_with(path, ".jo") and not ends_with(path, ".dewy") and find(path, "/") < 0:
         near = ""

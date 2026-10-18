@@ -1,5 +1,10 @@
 # Dewy on the compact core
 
+[`paddle_tests.dewy`](paddle_tests.dewy) tests the paddle game's simulation without
+opening a window. Run `./tools/dewy test examples/sloppy_core/paddle_tests.dewy`;
+append `bounce` to run only the wall-bounce test, or use `test --release` to test
+optimized code. Test failures are isolated so subsequent tests still run.
+
 [`charts.dewy`](charts.dewy) combines projectile trajectories with equal axis
 scales, annotations, dashed lines, grouped bars and a sampled wave. Integer and
 float32 series work directly. Run

@@ -23,6 +23,7 @@ and the native/web game workflow. From a checkout, the everyday commands are:
 ```sh
 python3 -m tools.core test --quick
 ./tools/dewy examples/sloppy_core/paddle.dewy
+./tools/dewy test examples/sloppy_core/paddle_tests.dewy
 ```
 
 The development launcher builds a local compiler when its sources change and

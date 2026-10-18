@@ -3828,6 +3828,9 @@ check_program = (main_path: str):
         pyt = ""
         loop nm, gs in modules[mainm].names:
             if starts_with(name_of(nm), "test_") and syms[gs].kind == .fns and len(pyt) == 0: pyt = name_of(nm)
+        if ends_with(main_path, ".dewy"):
+            if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: write `test \"{pyt[5..]}\" {{ assert(...) }}`")
+            fatal(-1, "no tests in {main_path}: write `test \"adds\" {{ assert(add(1 2) =? 3) }}`")
         if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: a test is written `test \"{pyt[5..]}\":` with its lines below it (`assert(...)` in them)")
         fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
     if test_mode:
@@ -3835,7 +3838,7 @@ check_program = (main_path: str):
         skip_main = true
         loop d in test_decls:
             nm = name_of(int(nodes[d].sval))
-            if len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
+            if not files[pos_file(nodes[d].pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
             # if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
             body = int(nodes[d].b)
             kids: int[]

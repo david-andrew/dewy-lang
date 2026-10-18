@@ -1671,3 +1671,11 @@ panics and early successful process exits are isolated. Healthy batches still
 compile once, and failures requiring the combined program remain failures.
 The 12 targeted native/web checks pass in 3.63 seconds; the quick suite still
 passes 157 checks in 3.17 seconds. This adds work only on the failure path.
+
+Dewy projects now run named `test "description" { assert(...) }` blocks through
+the standalone compiler's `test [--release] file.dewy [name filters...]` command.
+The inherited runtime isolates tests in child processes on Linux/macOS and keeps
+running after a failure. Normal builds omit test bodies; `check` includes them.
+A headless paddle-model example and the project testing guide show the workflow.
+The C-bootstrap compiler passes 141 focused checks in 8.91 seconds and all 4,707
+checks in 110.08 seconds with two workers. See `native-tests-*` audits.

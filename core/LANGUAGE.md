@@ -32,6 +32,41 @@ examples/sloppy_core/tour.dewy` runs the tour with the same cached toolchain.
 The explicit `/tmp/dewy-core/bin/dewy-core` commands below also work with a
 standalone build.
 
+## Test a project
+
+Declare tests at the top level alongside your code, or import the code into a
+separate test file:
+
+```dewy
+add = (a: int64 b: int64) => a+b
+
+test "adds numbers" {
+    assert(add(20 22) =? 42)
+}
+```
+
+```sh
+./tools/dewy test examples/sloppy_core/paddle_tests.dewy
+./tools/dewy test --release examples/sloppy_core/paddle_tests.dewy bounce
+```
+
+The standalone compiler accepts the same `test` command. It compiles the selected
+file once and runs its test blocks in declaration order. Optional words after the
+filename select test names containing any of those words. A failed test, no tests,
+or no matching names produces a nonzero exit status. Names must be constant strings.
+
+On Linux and macOS, each test runs in a separate child process: assertions and
+panics fail that test, later tests still run, and changes to globals stay local to
+that test. Top-level initialization runs once before the tests. Filesystem and
+other external effects remain shared. Tests run natively, skip `main` and game
+callbacks, and suppress windows opened through `window`. Only tests declared in
+the selected file run; imported files supply code, not additional tests.
+
+Normal runs and builds omit test bodies; `check` checks the selected file's tests
+as well as its program. Test blocks do not accept `return`; put reusable logic in
+ordinary functions. The compiler repository's Python validation gate remains
+`python3 -m tools.core test`.
+
 ## Run, check and build
 
 ```sh
