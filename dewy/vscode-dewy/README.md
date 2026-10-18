@@ -61,6 +61,11 @@ optimized code. Results appear in the task terminal; compilation errors also
 appear in Problems. Use **Tasks: Terminate Task** to stop a run, or **Tasks: Rerun
 Last Task** to repeat it. No `tasks.json` or Python test runner is needed. For name
 filtering, use `dewy-core test file.dewy words` in a terminal.
+**Dewy: Watch Tests in Current File (Core)** keeps that task running and reruns
+tests when saved source files, imports or embedded assets change. It recovers
+after failing tests and compiler errors. The equivalent terminal command is
+`dewy-core test --watch file.dewy words`; add `--release` before the filename to
+watch optimized tests. Enter `r` to rerun, `q` to quit, or terminate the editor task.
 
 Rename, signature help and semantic highlighting are not enabled by
 this client yet. The existing native-debugger configuration below still targets

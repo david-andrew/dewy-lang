@@ -14,6 +14,8 @@ Projects can use native `test "description" { assert(...) }` blocks and run them
 with `./tools/dewy test file.dewy [name filters...]`; see the
 [project testing guide](LANGUAGE.md#test-a-project). This command uses the compiler's
 test runner. The Python commands below validate development of the compiler itself.
+Use `./tools/dewy test --watch file.dewy` to rerun project tests after edits,
+including changes to imports and embedded assets.
 
 ## Work on this checkout
 

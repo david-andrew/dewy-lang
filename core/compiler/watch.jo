@@ -384,7 +384,7 @@ watch_record_image = ():
     if target_macos: wm_next = MACHO_WATCH_CODE + ((code.len() + 15) & ~15) + rodata.len()
     wm_data_next = align_up(img_data_addr + data_size + 8, 16)
     wm_data_end = img_data_addr + data_size + 8 + WATCH_DATA_RESERVE
-    wm_game = update_fn != 0 or draw_present()
+    wm_game = not test_mode and (update_fn != 0 or draw_present())
     wm_loop = wk_loop()
     wm_top = wk_top_hash()
     wm_files_collect()
@@ -888,6 +888,9 @@ w_cache = "/tmp/dewy-core-cache"
 w_dirs: {str: bool} = {}
 
 watch_main = (path: str, args: str[]):
+    # Diagnostic retries re-exec the original command; a watcher must not start
+    # another watcher inside its build child after a type error.
+    more_errors = false
     w_cache = os_path(temp_dir()) + "/dewy-core-cache"
     mkdir(w_cache)
     w_out = "{w_cache}/watch-{w_self_id()}.bin"
@@ -900,7 +903,8 @@ watch_main = (path: str, args: str[]):
         _ino = syscall(294, 0x800 | 0x80000)          # inotify_init1(IN_NONBLOCK | IN_CLOEXEC)
     w_dirs = {}
     keys = "{w_r} restarts, q{w_enter} quits"
-    eprint("dewy-core watch: {path} (saving a file reloads it; {keys})")
+    if test_mode: eprint("dewy-core test --watch: {path} (saving a file reruns tests; {keys})")
+    else: eprint("dewy-core watch: {path} (saving a file reloads it; {keys})")
     fresh = true
     loop true:
         start = false
@@ -1125,12 +1129,13 @@ watch_compile = (path: str, first: bool) -> bool:
         if pid == 0:
             syscall(33, int(ep[1]), 2)
             watch_first = first
-            watch_build = true
+            watch_build = not test_mode
             w_failed_path = failed_inputs
             if first: wm_clear()
-            bss_reserve = WATCH_DATA_RESERVE
+            if not test_mode: bss_reserve = WATCH_DATA_RESERVE
             out = compile(path, w_out)
             if len(out) == 0: syscall(60, 1)
+            if test_mode: wm_files_collect()
             watch_write_result(res)
             syscall(60, 0)
         syscall(3, int(ep[1]))
@@ -1538,7 +1543,11 @@ w32_compile = (path: str, first: bool) -> bool:
         exe = exe_path()
         f = "0"
         if first: f = "1"
-        wcmd = __wide(__w32_cmdline([exe, "watch", "--build", path, state, res, f, w_out]))
+        testing = "0"
+        release = "0"
+        if test_mode: testing = "1"
+        if cli_release: release = "1"
+        wcmd = __wide(__w32_cmdline([exe, "watch", "--build", path, state, res, f, w_out, testing, release]))
         wexe = __wide(exe)
         si = fill(0, 13)
         si[0] = 104
@@ -1579,13 +1588,14 @@ w32_compile = (path: str, first: bool) -> bool:
 # dewy-core watch --build (Windows): one build, from the link map in state; the result in res
 watch_build_child = (path: str, state: str, res: str, first: bool, out: str):
     watch_first = first
-    watch_build = true
+    watch_build = not test_mode
     w_failed_path = "{res}.inputs"
     if first: wm_clear()
     else: watch_read_result(state)
-    bss_reserve = WATCH_DATA_RESERVE
+    if not test_mode: bss_reserve = WATCH_DATA_RESERVE
     w_out = out
     if len(compile(path, w_out)) == 0: exit(1)
+    if test_mode: wm_files_collect()
     watch_write_result(res)
     exit(0)
 

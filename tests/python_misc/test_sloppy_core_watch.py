@@ -11,14 +11,15 @@ import pytest
 
 
 class Watch:
-    def __init__(self, compiler, source, *, game=False):
+    def __init__(self, compiler, source, *, game=False, options=None, filters=()):
         env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
         if frontend := os.environ.get('DEWY_CORE_FRONTEND'):
             env['DEWY_CORE_FRONTEND'] = frontend
         env.update(SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='1000000', SLOPPY_EMIT_WORKERS='1')
         if game:
             env['SLOPPY_SCREENSHOT'] = str(source.parent / 'unused.png')
-        self.process = subprocess.Popen([compiler, 'watch', source], cwd=source.parent, env=env,
+        command = [compiler, *(options or ['watch']), source, *filters]
+        self.process = subprocess.Popen(command, cwd=source.parent, env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, start_new_session=True)
         self.output = ''
@@ -74,6 +75,40 @@ def test_core_watch_program(compiler, tmp_path):
         watcher.expect('first version')
         save(source, 'main=():>void=>printl"second version"')
         watcher.expect('second version')
+    finally:
+        watcher.close()
+
+
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_core_watch_tests(compiler, tmp_path, flags):
+    source = tmp_path / 'tests.dewy'
+    helper = tmp_path / 'helper.dewy'
+    program = '''from p"helper.dewy" import answer
+let count=0
+main=()=>panic("must not run main")
+update=(dt:float64):>void=>panic("must not update")
+draw=():>void=>panic("must not draw")
+test "selected answer" { count+=1 assert(count =? 1) assert(answer() =? 42) }
+test "excluded" { panic("must not run excluded test") }
+'''
+    save(source, program)
+    save(helper, 'answer=()=>42')
+    watcher = Watch(compiler, source, options=['test', '--watch', *flags], filters=['selected'])
+    try:
+        watcher.expect('saving a file reruns tests')
+        watcher.expect(r'1 test passed \(1 not run')
+        save(helper, 'answer=()=>43')
+        watcher.expect('0 passed, 1 failed')
+        save(helper, 'answer=()=>missing_answer')
+        watcher.expect("unknown name 'missing_answer'")
+        watcher.expect('waiting for changes')
+        save(helper, 'answer=()=>42')
+        watcher.expect(r'1 test passed \(1 not run')
+        save(source, program + '\ntest "selected again" { assert(count =? 0) }\n')
+        watcher.expect(r'2 tests passed \(1 not run')
+        watcher.process.stdin.write(b'r\n')
+        watcher.process.stdin.flush()
+        watcher.expect(r'2 tests passed \(1 not run')
     finally:
         watcher.close()
 

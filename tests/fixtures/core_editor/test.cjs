@@ -50,7 +50,10 @@ const vscode = {
             if (taskError) throw new Error('task unavailable');
             tasks.push(task);
             const { process, args, options } = task.execution;
-            results.push(cp.spawnSync(process, args, { ...options, encoding: 'utf8', timeout: 15000 }));
+            // Watch process recovery is exercised by the native integration gate.
+            if (!args.includes('--watch')) {
+                results.push(cp.spawnSync(process, args, { ...options, encoding: 'utf8', timeout: 15000 }));
+            }
             return { task, terminate() {} };
         },
     },
@@ -83,6 +86,9 @@ const vscode = {
     await commands.get('dewy.core.testRelease')();
     assert.equal(results.at(-1).status, 0, results.at(-1).stderr);
     assert.deepEqual(tasks.at(-1).execution.args, ['test', '--release', source]);
+    await commands.get('dewy.core.testWatch')();
+    assert.deepEqual(tasks.at(-1).execution.args, ['test', '--watch', source]);
+    assert.match(tasks.at(-1).name, /Watch tests/);
     body = 'test "fails" { assert(false) }\ntest "still runs" { assert(true) }';
     await run();
     assert.notEqual(results.at(-1).status, 0);

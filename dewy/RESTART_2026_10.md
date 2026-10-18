@@ -134,6 +134,13 @@ immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
 
+Project tests also support `test --watch`, including name filters and release
+builds, with a matching VS Code command. Saving a source, import or embedded
+asset reruns the tests from fresh state; failed assertions and compile errors
+leave the watcher ready for the next edit. This uses ordinary test compilation
+and the existing dependency watcher. The focused watch/native-test gate passes
+47 checks plus the editor task check; execution is validated on Linux.
+
 The generated arcade, platformer and 3D starters now exercise menus, saved scores,
 text tilemaps, slopes and one-way platforms, character physics and ray-cast shots.
 Each includes project tests, with additional native/web simulation checks in the

@@ -48,6 +48,7 @@ test "adds numbers" {
 ```sh
 ./tools/dewy test examples/sloppy_core/paddle_tests.dewy
 ./tools/dewy test --release examples/sloppy_core/paddle_tests.dewy bounce
+./tools/dewy test --watch examples/sloppy_core/paddle_tests.dewy bounce
 ```
 
 The standalone compiler accepts the same `test` command. It compiles the selected
@@ -57,6 +58,13 @@ or no matching names produces a nonzero exit status. Names must be constant stri
 The VS Code extension also provides **Dewy: Test Current File (Core)** and a release
 variant, using `dewy.core.path`. These save open files and show results in a task
 terminal; the editor's task commands can stop or rerun them.
+
+`test --watch` reruns the selected tests when the source, an imported module or
+an embedded asset changes. It waits for another edit after failed tests or a
+compile error. Each run starts from fresh program state and uses the ordinary
+test build, including `--release` when requested. Enter `r` to rerun manually or
+`q` to quit. **Dewy: Watch Tests in Current File (Core)** starts this workflow in
+a VS Code task; save edits to trigger a rerun and terminate the task to stop it.
 
 On Linux and macOS, each test runs in a separate child process: assertions and
 panics fail that test, later tests still run, and changes to globals stay local to

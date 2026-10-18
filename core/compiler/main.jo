@@ -39,7 +39,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.1.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--release] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--watch] [--release] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -591,6 +591,8 @@ main = ():
     # (sloppy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
     when TARGET == "windows":
         if a.len() >= 8 and a[1] == "watch" and a[2] == "--build":
+            if a.len() > 8: test_mode = a[8] == "1"
+            if a.len() > 9: cli_release = a[9] == "1"
             watch_build_child(a[3], a[4], a[5], a[6] == "1", a[7])
             return
     # no file: the interactive prompt
@@ -676,6 +678,7 @@ main = ():
         if errors_only: exit(1)
         return
     first = 1
+    test_watch = false
     if a[1] == "run": first = 2          # (sloppy run game.jo is sloppy game.jo)
     if a[1] == "test":
         test_mode = true
@@ -685,6 +688,7 @@ main = ():
         x = a[first]
         if x == "--web": cli_target = "wasm"
         else if x == "--release": cli_release = true
+        else if x == "--watch" and test_mode: test_watch = true
         else if x == "--time": timing = true
         else if x == "--target" and first + 1 < a.len():
             cli_target = a[first + 1]
@@ -692,13 +696,14 @@ main = ():
         else: usage()
         first += 1
     if first >= a.len(): usage()
-    if a[first] == "watch":
-        if a.len() < first + 2: usage()
-        if cli_target == "wasm": fatal(0, "sloppy watch runs programs natively (for the web, use sloppy build --target wasm)")
+    if a[first] == "watch" or test_watch:
+        if not test_watch: first += 1
+        if a.len() <= first: usage()
+        if cli_target == "wasm" and not test_mode: fatal(0, "dewy-core watch runs programs natively (for the web, use dewy-core build --target wasm)")
         cli_target = "native"
         wargs: str[]
-        loop i in [first + 2..a.len()): wargs.push(a[i])
-        watch_main(os_path(a[first + 1]), wargs)
+        loop i in [first + 1..a.len()): wargs.push(a[i])
+        watch_main(os_path(a[first]), wargs)
         return
     if a[first] == "test":
         if a.len() < first + 2: usage()
