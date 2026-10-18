@@ -430,6 +430,70 @@ remained essentially flat: fixed 893-case corpus 831 → 826 ms CPU and compiler
 self-build 1804 → 1816 ms. These are code-quality/runtime improvements, not a
 claim of progress toward 250k lines/s on this sample.
 
+## Matched Sloppy comparison, October 18
+
+The previous self-build/corpus update did not establish the cost of the fork:
+self-builds request release optimization, while Sloppy's advertised 250k LOC/s
+is a default-build measurement. The new
+[`benchmark_sloppy.py`](../tools/sloppy_core/benchmark_sloppy.py) compares the
+same generated Sloppy source through both compilers, then an equivalent Dewy
+program. Every generated function is called. Compiler binaries and libraries
+are copied into scratch before measurement; the Sloppy checkout is read-only.
+Shared-library rows use the same Dewy library for both compilers, separating
+library growth from compiler costs. Dewy cannot use the unmodified Sloppy
+library because it requires additional runtime helpers.
+
+Five alternating fresh builds, one warmup, one emission worker, CPU affinity 2,
+i7-6700; CPU time is child user plus system, not wall time:
+
+| 2,000-function workload | Default CPU | Release CPU |
+| --- | ---: | ---: |
+| Sloppy compiler, Sloppy library, Jo source | 377 ms | 683 ms |
+| Sloppy compiler, Dewy library, same Jo source | 381 ms | 680 ms |
+| Dewy compiler, Dewy library, same Jo source | 558 ms | 605 ms |
+| Dewy compiler/library, equivalent Dewy source | 991 ms | 962 ms |
+
+The Jo program has 50,009 physical lines; the equivalent Dewy formatting has
+44,005. Thus this host measured about **133k Jo lines/s** for Sloppy default,
+not 250k. This does not invalidate a result on a different machine or compiler;
+it establishes the local comparison. Library contents have little effect on
+this workload. The same-source release path is faster in the fork, while its
+default path performs extra local optimization, tiny-leaf inlining and limited
+vectorization absent from Sloppy default. The separate Dewy frontend adds a
+large cost, not explained by backend regressions or required value copies alone.
+A check-only profile of the generated Dewy program had 1,378 samples, no losses:
+224 in string equality, 77 in lexing, and substantial allocation/free traffic.
+This supports replacing string-driven syntax processing with compact token/node
+representations before pursuing more isolated runtime micro-optimizations.
+
+A matched million-particle, 50-step kernel checks outputs at 0/1/17/1,000 and
+1,000,000 particles. Its five-run thread-CPU medians:
+
+| Generated program | Default | Release |
+| --- | ---: | ---: |
+| Sloppy / its library / Jo | 539 ms | 218 ms |
+| Sloppy / Dewy library / Jo | 505 ms | 215 ms |
+| Dewy / its library / same Jo | 188 ms | 174 ms |
+| Dewy / its library / equivalent Dewy | 184 ms | 180 ms |
+| C, `cc -O2` | 207 ms | 204 ms |
+
+This workload retains the inherited dense representation and surpasses the
+reference runtime; it is not general C parity. Dropping all default optimization
+would sacrifice useful performance. Optimize the frontend and measure a cheaper
+default pipeline against both compile latency and generated-code speed.
+[Raw samples, source/library/binary hashes and checkout identities](audits/2026-10-18/sloppy-matched-baseline.json).
+The recorded Sloppy checkout revision is metadata, not proof of the provenance
+of its existing binary; the binary hash identifies what was actually measured.
+
+Reproduce without modifying Sloppy:
+
+```sh
+taskset -c 2 python3 -m tools.sloppy_core.benchmark_sloppy \
+  --dewy /absolute/path/to/dewy-core \
+  --sloppy-root /var/home/david/dev/slop-lang \
+  --output /path/to/comparison.json
+```
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
