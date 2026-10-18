@@ -73,9 +73,9 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 4,700 checks; recent local full runs took
-78–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
-suite selects 159 checks and takes roughly 3–5 pytest seconds. Focused
+The development gate now has over 5,100 checks; recent local full runs took
+151–186 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
+suite selects a small cross-section of those checks. Focused
 selections also typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced
 compiler launches from 674 to 44 and test time from 73.49 to 7.93 seconds, while
@@ -83,6 +83,15 @@ retaining individual results and test selection. The local driver caches an
 immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
+
+Numeric array work now includes fused dotted expressions and updates, CPU/GPU
+broadcasting, matrix slices and eager comprehensions. Straight-line indexed and
+value comprehensions preallocate their result; short eligible float loops use
+SIMD in ordinary builds. Named allocation-inclusive float64 workloads now run
+close to their C reference in default builds. The [language guide](../core/LANGUAGE.md)
+links the paired measurements and documents the supported shapes, arithmetic
+and fallback behavior. Native project test blocks and the editor's test tasks
+support application development without using the compiler's Python gate.
 
 Default-build performance is now a separate measurement target, alongside
 release builds. Positive constant floor arithmetic lowers directly, and ordinary

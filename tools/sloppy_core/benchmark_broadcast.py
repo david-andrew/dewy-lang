@@ -38,6 +38,7 @@ main=(args:array<string>)=>{
 EXPRESSIONS = {
     'fused': 'a .* 2.0 .+ b .* 0.5 .+ phase',
     'loop': '[loop i in [0..a.length) a[i]*2.0+b[i]*0.5+phase]',
+    'values': '[loop i in 0.. and x in a x*2.0+b[i]*0.5+phase]',
 }
 C = '''#define _POSIX_C_SOURCE 200809L
 #include "harness.h"

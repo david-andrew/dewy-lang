@@ -4511,9 +4511,8 @@ bounded_open_for = (s: int) -> int:
     nodes[result].b = i32(block)
     result
 
-# Straight-line Dewy range comprehensions own an unnameable accumulator and
-# append one result per iteration. Reserve once; normal loop counters still
-# handle changes to the user-visible iteration binding.
+# Straight-line Dewy comprehensions own an unnameable accumulator and append
+# one result per iteration. Reserve once from a range bound or array snapshot.
 comprehension_value = (n: int) -> bool:
     if n == 0: return true
     k = nodes[n].kind
@@ -4527,29 +4526,58 @@ reserve_comprehension = (b: int):
     if not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return
     decl = kid(b, 0)
     loop_ = kid(b, 1)
-    if nodes[decl].kind != .vardecl or nodes[loop_].kind != .for_ or nodes[loop_].aux != 0: return
+    if nodes[decl].kind != .vardecl or nodes[loop_].kind != .for_: return
     init = int(nodes[decl].b)
     if nodes[init].kind != .array or nkids(init) != 0: return
     it = int(nodes[loop_].a)
-    if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE): return
-    start = int(nodes[it].a)
-    if nodes[start].kind != .int_lit or nodes[start].ival != 0 or prune(ntype(int(nodes[it].b))) != T_INT: return
+    idx = int(nodes[loop_].sym)
+    if nodes[loop_].aux == 0:
+        if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE): return
+        start = int(nodes[it].a)
+        if nodes[start].kind != .int_lit or nodes[start].ival != 0 or prune(ntype(int(nodes[it].b))) != T_INT: return
+    else if nodes[loop_].aux == 1:
+        k = tkind(ntype(it))
+        if k != .array and k != .fixed: return
+        idx = int(nodes[loop_].c)
+        # Unlike range loops, an array loop advances this actual index. It
+        # must stay unchanged even when the result uses incremental append.
+        if not stable_loop_index(idx): return
+    else: return
     body = int(nodes[loop_].b)
-    if nkids(body) != 1 or nodes[kid(body, 0)].kind != .exprstmt: return
-    push = int(nodes[kid(body, 0)].a)
+    nb = nkids(body)
+    if nb == 0 or nodes[kid(body, nb - 1)].kind != .exprstmt: return
+    # Combined index/value loops introduce local index bindings. Ordinary
+    # straight-line local declarations have the same one-result guarantee.
+    loop i in [0..nb - 1):
+        item = kid(body, i)
+        if nodes[item].kind != .vardecl or not comprehension_value(int(nodes[item].b)): return
+    push = int(nodes[kid(body, nb - 1)].a)
     if nodes[push].kind != .intrinsic or nodes[push].aux != i32(int(IN.push)) or nkids(push) != 2: return
     recv = kid(push, 0)
     if nodes[recv].kind != .ident or nodes[recv].sym != nodes[decl].sym or not comprehension_value(kid(push, 1)): return
-    nodes[loop_].d = nodes[decl].sym
+    # aux2 is unused by range/array loops; d already owns the array snapshot.
+    nodes[loop_].aux2 = nodes[decl].sym
     add_flag(loop_, NF_COMPREHENSION)
     add_flag(push, NF_INBOUNDS)
     # Plain elements need no partial-initialization cleanup. With an unchanged
     # index, set the result length once and write directly to that index.
     at = prune(int(locals[int(nodes[decl].sym)].type))
-    if not is_managed(int(types[at].elem)) and stable_loop_index(int(nodes[loop_].sym)):
+    if not is_managed(int(types[at].elem)) and stable_loop_index(idx):
         add_flag(loop_, NF_INBOUNDS)
         add_flag(push, NF_COMPREHENSION)
-        nodes[push].d = nodes[loop_].sym
+        nodes[push].d = i32(idx)
+
+gen_comprehension_reserve = (s: int, count: int):
+    if not has_flag(s, NF_COMPREHENSION): return
+    acc = int(nodes[s].aux2)
+    at = prune(int(locals[acc].type))
+    pl = local_place(acc, true)
+    iff(e_bin(.gts, VI, count, e_iconst(0)))
+    sa = place_addr(pl, at)
+    e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), count], -1)
+    if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    if has_flag(s, NF_INBOUNDS): hdr_store(read_place(pl, at), 8, count)
+    endc()
 
 gen_for = (s: int):
     bounded = bounded_open_for(s)
@@ -4589,16 +4617,7 @@ gen_for = (s: int):
             r = gen_expr(int(nodes[s].a)).v
             e_mov(ctr, e_load(VI, r, 0, 8))
             e_mov(endv, e_load(VI, r, 8, 8))
-        if has_flag(s, NF_COMPREHENSION):
-            acc = int(nodes[s].d)
-            at = prune(int(locals[acc].type))
-            pl = local_place(acc, true)
-            iff(e_bin(.gts, VI, endv, e_iconst(0)))
-            sa = place_addr(pl, at)
-            e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), endv], -1)
-            if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-            if has_flag(s, NF_INBOUNDS): hdr_store(read_place(pl, at), 8, endv)
-            endc()
+        gen_comprehension_reserve(s, endv)
         stmt_end()
         sg = types[prune(lt)].sign
         facts = range_facts_begin(s, l)
@@ -4692,6 +4711,7 @@ gen_for = (s: int):
             if slice_lo >= 0:
                 n_snap = e_bin(.sub, VI, slice_hi, slice_lo)
                 base_snap = e_bin(.add, VI, base_snap, e_bin(.mul, VI, slice_lo, e_iconst(tsize(int(types[ct].elem)))))
+        gen_comprehension_reserve(s, n_snap)
     else if aux == 3 and not has_flag(s, NF_MUT):
         # The dense entry snapshot is immutable for this loop. Hoist its array
         # bounds and data just as for an ordinary array snapshot.

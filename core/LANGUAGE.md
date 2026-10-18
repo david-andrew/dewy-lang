@@ -758,11 +758,14 @@ value. `key -> value` creates dictionary entries; duplicate keys take the last
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 
 Straight-line `[loop i in [0..n) expression]` comprehensions over an `int64`
-bound reserve their output once. Plain values with an unchanged iteration
-binding are written directly by index; managed values retain incremental
-initialization and cleanup. General loop bodies, filters and early exits keep
-the ordinary collection path. This needs no annotation or explicit allocation
-code in the program.
+bound and `[loop x in values expression]` over ordinary or fixed arrays reserve
+their output once. Combined index/value loops and simple local declarations in
+the body work too. Array loops use the input snapshot's length, including when
+callbacks replace the source. Plain values with an unchanged control index are
+written directly by index; managed values retain incremental initialization and
+cleanup. General loop bodies, filters and early exits keep the ordinary
+collection path. This needs no annotation or explicit allocation code in the
+program.
 
 Compare a numerical comprehension, its fused dotted equivalent and C with:
 
@@ -780,6 +783,13 @@ allocation included. The
 [measurement record](../dewy/audits/2026-10-17/source-core/comprehension-performance-validation.json)
 and [SIMD follow-up](../dewy/audits/2026-10-17/source-core/array-vector-validation.json)
 contain the sources, checksums, paired samples and limits.
+
+The benchmark also includes a value loop with a combined index binding. Removing
+its repeated append work improved the large workload about 8.7× in default
+builds and 7.6× in release builds; small-array gains were similar. Its resulting
+times are comparable to the indexed and dotted forms. See the
+[value-loop results](../dewy/audits/2026-10-17/source-core/value-comprehension-validation.json)
+for both sizes and the unchanged-form controls.
 
 `values.insert_if_absent(key value)` adds an entry only when the key is missing
 and returns whether it was added. An existing value and its iteration position

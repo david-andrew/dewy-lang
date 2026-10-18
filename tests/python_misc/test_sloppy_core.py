@@ -49,6 +49,64 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'comprehension-value-arrays': '''main=()=>{
+let empty:array<int64>=[]
+let a=[loop x in empty x*2]
+let b=[loop x in [10 20 30] {let y=x+1 y*2}]
+let fixed:array<int64 length=3>=[10 20 30]
+let c=[loop x in fixed x+1]
+let d=[loop i in 0.. and x in fixed i+x]
+return if a.length =? 0 and b =? [22 42 62] and c =? [11 21 31]
+and d =? [10 21 32] 42 else 1
+}''',
+    'comprehension-value-source-order': '''let values=[10 20 30] let trace=0
+source=():>array<int64>=>{trace=trace*10+1 return values}
+item=(x:int64)=>{trace=trace*10+2 values.clear() return x+1}
+main=()=>{let result=[loop x in source() item(x)]
+return if result =? [11 21 31] and values.length =? 0 and trace =? 1222 42 else 1}''',
+    'comprehension-value-slice-order': '''let values=[99 20 22 100] let trace=0
+source=():>array<int64>=>{trace=trace*10+1 return values}
+lower=():>int64=>{trace=trace*10+2 values=[99] return 1}
+upper=():>int64=>{trace=trace*10+3 return 3}
+item=(x:int64)=>{trace=trace*10+4 return x}
+main=()=>{let result=[loop x in source()[lower()..upper()) item(x)]
+let empty=[loop x in result[1..1) x+1]
+return if result =? [20 22] and empty.length =? 0 and trace =? 12344
+and values =? [99] 42 else 1}''',
+    'comprehension-value-managed': '''copy=(xs:array<int64>):>array<int64>=>xs
+work=()=>{
+let source=[[20] [22]] let saved=source
+let result=[loop xs in source copy(xs)]
+source[0][0]=99 result[1].push(100)
+assert(result =? [[20] [22 100]] and saved =? [[20] [22]])
+let fixed:array<array<int64> length=2>=[[20] [22]]
+let mapped=[loop xs in fixed {let local=copy(xs) copy(local)}]
+mapped[0].push(1) assert(fixed[0] =? [20] and mapped[1] =? [22])
+let pairs=[loop i in 0.. and xs in source i->xs] let old=pairs
+pairs[0].push(1) assert(old[0] =? [99])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'comprehension-value-bindings': '''bump=(@i:int64 x:int64)=>{i+=10 return i+x}
+change=(@x:int64)=>{x+=1 return x}
+main=()=>{
+let values=[10 20 30]
+let indexed=[loop i in 0.. and x in values bump(@i x)]
+let edited=[loop x in values {let local=x change(@local)}]
+return if indexed =? [20 31 42] and edited =? [11 21 31]
+and values =? [10 20 30] 42 else 1
+}''',
+    'comprehension-value-control-fallback': '''first=(xs:array<int64>):>array<int64>=>{
+let result=[loop x in xs {let y={if x >? 2 return [99] x+10} y}]
+return result
+}
+main=()=>{
+let a=[loop x in [1 2 3 4] {if x >? 2 break x}]
+let b=[loop x in [1 2 3 4] {if x%2 =? 0 continue x}]
+let c=[loop x in [1 2] {let y=if x =? 1 20 else 22 y}]
+return if a =? [1 2] and b =? [1 3] and c =? [20 22]
+and first([1 2 3]) =? [99] 42 else 1
+}''',
     'comprehension-reserved-records': '''Point:type=[x:int64 y:float64]
 main=()=>{
 let points=[loop i in [0..17) Point[i (i as float64)*0.5]] let saved=points
@@ -7235,6 +7293,8 @@ def test_core_numeric_array_vectors(compiler, tmp_path, release):
         pytest.skip('AVX2/SSE2 code generation targets native x86-64')
     source = tmp_path / 'vectors.dewy'
     source.write_text('''looped=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in [0..a.length) a[i]*2.0+b[i]*0.5+1.0]
+valued=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in 0.. and x in a x*2.0+b[i]*0.5+1.0]
+mapped=<T>(a:array<T>):>array<T>=>[loop x in a x*2.5+1.0]
 fused=<T>(a:array<T> b:array<T>):>array<T>=>a .* 2.0 .+ b .* 0.5 .+ 1.0
 main=(argv:array<string>)=>{
 loop n in [0..20) {
@@ -7242,13 +7302,19 @@ let a=[loop i in [0..n) (i as float64)*0.5]
 let b=[loop i in [0..n) (i as float64)*0.25]
 let expected=[loop i in [0..n) (i as float64)*1.125+1.0]
 assert(looped(a b) =? expected and fused(a b) =? expected)
+assert(valued(a b) =? expected)
 let same=[loop i in [0..n) (i as float64)*1.25+1.0]
 assert(looped(a a) =? same and fused(a a) =? same)
+assert(valued(a a) =? same and mapped(a) =? same)
 let single_a=float32.(a) let single_b=float32.(b)
 let single_expected=float32.(expected)
 assert(looped(single_a single_b) =? single_expected and fused(single_a single_b) =? single_expected)
+assert(valued(single_a single_b) =? single_expected and mapped(single_a) =? float32.(same))
 }
-if argv.length >? 1 {printl(looped(fill(1.0 20) fill(2.0 19)))}
+if argv.length >? 1 {
+if argv[1] =? "values" printl(valued(fill(1.0 20) fill(2.0 19)))
+else printl(looped(fill(1.0 20) fill(2.0 19)))
+}
 return 42
 }''')
     binary = tmp_path / 'vectors'
@@ -7257,8 +7323,8 @@ return 42
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     bodies = [body for body in re.split(r'(?=^fn )', built.stdout, flags=re.M)
-              if re.match(r'fn f_(?:looped|fused)_', body)]
-    assert len(bodies) == 4, built.stdout
+              if re.match(r'fn f_(?:looped|fused|valued|mapped)_', body)]
+    assert len(bodies) == 8, built.stdout
     assert all('vld ' in body and 'vst ' in body for body in bodies), '\n'.join(bodies)
     for sse2 in [False, True]:
         env = {key: value for key, value in os.environ.items()
@@ -7267,9 +7333,10 @@ return 42
             env['SLOPPY_NO_AVX'] = '1'
         ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
         assert ran.returncode == 42, ran.stdout + ran.stderr
-        short = subprocess.run([binary, 'short'], env=env, capture_output=True, text=True,
-                               timeout=10, check=False)
-        assert short.returncode != 0 and 'out of bounds' in short.stderr, short.stdout + short.stderr
+        for form in ['short', 'values']:
+            short = subprocess.run([binary, form], env=env, capture_output=True, text=True,
+                                   timeout=10, check=False)
+            assert short.returncode != 0 and 'out of bounds' in short.stderr, short.stdout + short.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
