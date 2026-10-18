@@ -208,7 +208,7 @@ behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream
 fixtures are included under `tests/upstream/`; the original checkout is not used.
 
-Ordinary value, membership and string-result checks compile groups of up to 16 source modules and execute one
+Ordinary value, membership and string-result checks compile groups of up to 64 source modules and execute one
 program per group. They retain separate pytest IDs and expected results: `-k`
 selects only the requested cases before grouping. A failure reports the generated
 source directory; rerun with `-k <case-name>` for a single-case reproducer. Each

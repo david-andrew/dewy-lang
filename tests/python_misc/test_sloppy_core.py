@@ -37,6 +37,7 @@ QUICK_CASES = {
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
 QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
+VALUE_BATCH_SIZE = 64
 
 
 def quick_parameters(names, selected):
@@ -4881,7 +4882,7 @@ def test_core_value_batch_combined_failure(compiler, tmp_path, target, monkeypat
 @pytest.fixture(scope='module')
 def value_batches(compiler, tmp_path_factory, request):
     # Collection has already applied -k / node selection. Compile only selected
-    # cases, in groups of at most 16, and cache each group for its individual IDs.
+    # cases in bounded groups and cache each group for its individual IDs.
     selected = {}
     sources = {}
     for item in request.session.items:
@@ -4909,8 +4910,8 @@ def value_batches(compiler, tmp_path_factory, request):
             selected.setdefault((target, params['release']), []).append(name)
     groups = {}
     for (target, release), names in selected.items():
-        for start in range(0, len(names), 16):
-            group = tuple(names[start:start + 16])
+        for start in range(0, len(names), VALUE_BATCH_SIZE):
+            group = tuple(names[start:start + VALUE_BATCH_SIZE])
             for name in group:
                 groups[target, release, name] = group
     cached = {}

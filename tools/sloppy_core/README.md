@@ -1706,3 +1706,12 @@ editor-owned process tasks for output, cancellation and reruns. Real compiler
 execution behind VS Code API doubles passes alongside the existing client/debug
 integration: 25 focused checks in 4.51 seconds. This is not a desktop extension-host
 certification; see `editor-test-tasks-*` audits.
+
+Healthy value-result batches now hold up to 64 source modules. A controlled
+comparison of all 2,946 native/web value checks, using two workers on two fixed
+CPUs, reduced compiler launches from 186 to 48. The 16/64/64/16 comparison gave
+about 21.5 versus 13.9 pytest seconds, with aggregate child CPU time falling from
+34.88 to 23.06 seconds. Individual IDs, selection and failure isolation remain.
+All 4,735 checks passed in the full gate in 141.38 seconds under different host
+conditions; this is a value-suite improvement, not a paired full-gate speed claim.
+See `value-batch-size-*` audits.

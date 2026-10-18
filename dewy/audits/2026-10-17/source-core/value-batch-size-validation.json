@@ -1,0 +1,38 @@
+{
+  "change": "Raise healthy value-result batches from 16 to 64; retain per-case IDs, selection and recursive failure isolation.",
+  "full": "4735 passed in 141.38s with two workers (uncontrolled host conditions; not a paired whole-gate timing claim).",
+  "complete_value_comparison": {
+    "checks_per_run": 2946,
+    "order": [
+      16,
+      64,
+      64,
+      16
+    ],
+    "workers": 2,
+    "affinity": [
+      2,
+      3
+    ],
+    "median_wall_seconds": {
+      "16": 22.21161837949876,
+      "64": 14.536951479500203
+    },
+    "median_cpu_seconds": {
+      "16": 34.876825,
+      "64": 23.0613565
+    },
+    "builds": {
+      "16": 186,
+      "64": 48
+    }
+  },
+  "smaller_sample": "512 checks per run across native/web and default/release; three rotating runs per size. Median 3.85s at 16, 2.69s at 32, 1.90s at 64.",
+  "limits": [
+    "The complete comparison uses actual collected pytest modules and counts compiler launches on each worker. An initial override imported a second copy of the module and did not change batch size; that invalid comparison is excluded.",
+    "The complete value suite is part of the full gate, not its entire workload.",
+    "Unexpected-exit cases retain fresh-process execution; their separate batching is unchanged.",
+    "Larger failing batches can require more diagnostic builds; successful batches build once."
+  ],
+  "quick": "159 passed, 4576 deselected in 5.51s"
+}
