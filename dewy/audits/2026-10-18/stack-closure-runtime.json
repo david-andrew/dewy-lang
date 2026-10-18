@@ -1,0 +1,156 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "75d3f368b87da9f7ca53614e925ddacfd81fc0c6",
+  "diff_sha256": "ba70eb6abc2f092b2b5faa2d1b63c533df4dd1b9f6c656255fef05342ef6f0ea",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792345934395068922/bin/dewy-core",
+      "sha256": "b4770e836ee751c16138f2d62070fbe88d0b33e6f13fabd7e4ee47cfab62d9f2"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792346977803912768/bin/dewy-core",
+      "sha256": "80f77bb6359805349ba20fd268ce1f3659f66d6b3cb4ecc2537feb9cc79d1793"
+    }
+  },
+  "samples": 5,
+  "warmups": 1,
+  "load_average_start": [
+    22.06103515625,
+    20.63818359375,
+    17.64892578125
+  ],
+  "cpu_time_definition": "User plus system CPU seconds of each fresh native process.",
+  "workloads": {
+    "local-counter": {
+      "source": "Counter:type=():>int64\nmake=()=>{let n=0 return ()=>{n+=1; n}}\nstep=(start:int64)=>{let n=start let next=()=>{n+=1; n}\nreturn next()+next()}\nmain=()=>{let sum=0\nloop i in [0..2000000) {sum+=step(i)}\nprintl(sum)}\n",
+      "expected": "4000004000000\n",
+      "modes": {
+        "default": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.12614793800457846,
+                "cpu_seconds": 0.10559400000000002
+              },
+              {
+                "wall_seconds": 0.12606537599640433,
+                "cpu_seconds": 0.10125299999999998
+              },
+              {
+                "wall_seconds": 0.23160279500007164,
+                "cpu_seconds": 0.082159
+              },
+              {
+                "wall_seconds": 0.19392576000245754,
+                "cpu_seconds": 0.08288499999999996
+              },
+              {
+                "wall_seconds": 0.2555236970001715,
+                "cpu_seconds": 0.09941599999999998
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.12640852999902563,
+                "cpu_seconds": 0.02490399999999998
+              },
+              {
+                "wall_seconds": 0.033155539000290446,
+                "cpu_seconds": 0.025462999999999958
+              },
+              {
+                "wall_seconds": 0.05162076499982504,
+                "cpu_seconds": 0.022849999999999995
+              },
+              {
+                "wall_seconds": 0.041726160001417156,
+                "cpu_seconds": 0.02287200000000001
+              },
+              {
+                "wall_seconds": 0.0900871650010231,
+                "cpu_seconds": 0.02493900000000005
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.19392576000245754,
+              "cpu_seconds": 0.09941599999999998
+            },
+            "candidate": {
+              "wall_seconds": 0.05162076499982504,
+              "cpu_seconds": 0.02490399999999998
+            }
+          }
+        },
+        "release": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.23109184199711308,
+                "cpu_seconds": 0.07767100000000011
+              },
+              {
+                "wall_seconds": 0.27376442599779693,
+                "cpu_seconds": 0.07982000000000007
+              },
+              {
+                "wall_seconds": 0.14661191099730786,
+                "cpu_seconds": 0.06433600000000002
+              },
+              {
+                "wall_seconds": 0.29378581299533835,
+                "cpu_seconds": 0.06364700000000005
+              },
+              {
+                "wall_seconds": 0.18341732300177682,
+                "cpu_seconds": 0.07720600000000004
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.042855237996263895,
+                "cpu_seconds": 0.019198000000000118
+              },
+              {
+                "wall_seconds": 0.04445204399962677,
+                "cpu_seconds": 0.020411000000000026
+              },
+              {
+                "wall_seconds": 0.04346805199747905,
+                "cpu_seconds": 0.020524000000000056
+              },
+              {
+                "wall_seconds": 0.03026962400326738,
+                "cpu_seconds": 0.020333000000000045
+              },
+              {
+                "wall_seconds": 0.05048475100193173,
+                "cpu_seconds": 0.019252999999999895
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.23109184199711308,
+              "cpu_seconds": 0.07720600000000004
+            },
+            "candidate": {
+              "wall_seconds": 0.04346805199747905,
+              "cpu_seconds": 0.020333000000000045
+            }
+          }
+        }
+      }
+    }
+  },
+  "load_average_end": [
+    22.13623046875,
+    20.677734375,
+    17.677734375
+  ],
+  "notes": [
+    "Candidate includes stack environment allocation and fixed-target direct calls. The final change also invalidates the per-function proof at begin_fn; that cache reset is not in this measured binary.",
+    "Measurements ran sequentially, but unrelated host activity made wall times noisy."
+  ]
+}

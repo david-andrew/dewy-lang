@@ -1,4 +1,4 @@
-"""Measure independent callback arguments with alternating fresh-process samples."""
+"""Measure callback value semantics with alternating fresh-process samples."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +19,12 @@ PRELUDE = '''Counter:type=():>int64
 make=()=>{let n=0 return ()=>{n+=1; n}}
 '''
 WORKLOADS = {
+    'local-counter': ('''step=(start:int64)=>{let n=start let next=()=>{n+=1; n}
+return next()+next()}
+main=()=>{let sum=0
+loop i in [0..2000000) {sum+=step(i)}
+printl(sum)}
+''', '4000004000000\n'),
     'counter': ('''twice=(f:Counter)=>f()+f()
 main=()=>{let a=make() let sum=0
 loop i in [0..2000000) {sum+=twice(a)}
@@ -38,7 +44,7 @@ printl(sum) printl(xs[0]()) printl(xs[3]())}
 }
 
 
-def measure(compilers: dict[str, Path], samples: int) -> dict:
+def measure(compilers: dict[str, Path], samples: int, workloads: list[str] | None = None) -> dict:
     import resource
 
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
@@ -58,7 +64,8 @@ def measure(compilers: dict[str, Path], samples: int) -> dict:
     }
     with tempfile.TemporaryDirectory(prefix='dewy-callback-benchmark-') as directory:
         work = Path(directory)
-        for name, (body, expected) in WORKLOADS.items():
+        for name in workloads or WORKLOADS:
+            body, expected = WORKLOADS[name]
             source = work / f'{name}.dewy'
             source.write_text(PRELUDE + body)
             result = {'source': source.read_text(), 'expected': expected, 'modes': {}}
@@ -103,7 +110,8 @@ if __name__ == '__main__':
     cli.add_argument('--baseline', type=Path, required=True)
     cli.add_argument('--samples', type=positive, default=5)
     cli.add_argument('--output', type=Path, required=True)
+    cli.add_argument('--workload', action='append', choices=WORKLOADS)
     options = cli.parse_args()
     result = measure({'baseline': options.baseline.resolve(strict=True),
-                      'candidate': options.compiler.resolve(strict=True)}, options.samples)
+                      'candidate': options.compiler.resolve(strict=True)}, options.samples, options.workload)
     options.output.write_text(json.dumps(result, indent=2) + '\n')

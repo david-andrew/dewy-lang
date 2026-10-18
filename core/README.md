@@ -43,6 +43,12 @@ the tour, Netpong, Dunes and compiler. The rough target is 250,000 Dewy lines pe
 second on representative programs; small examples measure latency, and high
 loaded-library throughput alone does not establish that target.
 
+Callback runtime comparisons are available with `python3 -m
+tools.sloppy_core.benchmark_callbacks CANDIDATE --baseline BASELINE --output
+callbacks.json`. Use `--workload local-counter` to isolate stack-local callbacks;
+other workloads exercise independent callback copies through arguments, records
+and arrays. Each default/release executable is checked before its timing is used.
+
 For a larger language workload, run `.venv/bin/python -m tools.sloppy_core.benchmark_corpus
 <compiler> --output <report.json>`. It builds 128, 512 and all distinct executable
 conformance cases, with fresh compiler processes and outputs. Each resulting

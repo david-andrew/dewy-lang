@@ -311,6 +311,24 @@ Source syntax and value semantics are unchanged. Validation includes an independ
 C bootstrap, 191 native/web smoke checks, 213 formatter-related checks, and all
 893 conformance cases executing successfully in both native build modes.
 
+Local Dewy closures now use stack environments when all uses are direct calls
+and the binding cannot be copied, returned, captured, addressed or reassigned.
+Those calls also have a fixed target, allowing the ordinary inliner to see them.
+Private snapshots and explicit shared cells keep their existing semantics;
+escaping closures retain heap environments. Cleanup still releases managed
+captures, including on early returns and loop exits.
+
+A two-million-iteration local-counter workload measured **99.4 → 24.9 ms CPU**
+in default builds and **77.2 → 20.3 ms** in release builds (about 74–75% less).
+This is a narrow allocation/call benchmark, not evidence of C/Rust parity.
+[Runtime samples](audits/2026-10-18/stack-closure-runtime.json) and
+[compilation samples](audits/2026-10-18/stack-closure-compile.json) preserve the
+sources and compiler hashes. Compilation CPU was essentially flat for Netpong
+and the compiler self-build; the fixed 893-case conformance bundle increased
+from 814 to 851 ms (4.5%). Wall times were noisy under unrelated host activity.
+Eight new lifetime cases cover zero allocation, temporary call pinning, escaped
+child callbacks, private/shared copies, fallback paths and loop cleanup.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

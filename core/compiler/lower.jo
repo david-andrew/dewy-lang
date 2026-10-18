@@ -23,7 +23,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy
+enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop
 
 struct LFunc:
     kind: int
@@ -1493,11 +1493,16 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
         e_copy(cv, cval.v, tsize(ft))
         retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
         reg_temp_slot(saved, ft)
-    fp = e_load(VI, cv, 0, ptr_size)
-    # (a field or variable of a function type never given one: none, said as that)
-    iff(e_bin(.eq, VI, fp, e_iconst(0)))
-    e_call_nr(rt("__panic_nofn"), [e_daddr(loc_data(nodes[callee].pos)), e_daddr(str_data(place_text(callee)))], -1)
-    endc()
+    target = -1
+    if stack_closure_fn == cur_fn and nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
+        target = stack_closure_targets.get(int(nodes[callee].sym)) ?? -1
+    fp = 0
+    if target < 0:
+        fp = e_load(VI, cv, 0, ptr_size)
+        # (a field or variable of a function type never given one: none, said as that)
+        iff(e_bin(.eq, VI, fp, e_iconst(0)))
+        e_call_nr(rt("__panic_nofn"), [e_daddr(loc_data(nodes[callee].pos)), e_daddr(str_data(place_text(callee)))], -1)
+        endc()
     env = e_load(VI, cv, ptr_size, ptr_size)
     rslot = -1
     argv: int[]
@@ -1509,7 +1514,7 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
     loop i in [0..int(types[ft].nargs)): pts.push(targ(ft, i))
     mark = copy_backs.len()
     call_args(args, pts, int(types[ft].mutmask), argv)
-    rv = e_calli(fp, argv, ret_vt(ret), false)
+    rv = if target >= 0: e_call(lf_of_inst(target), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
     finish_call(ret, rv, rslot)
 
@@ -1543,7 +1548,45 @@ env_layout = (f: int):
 
 closure_size = () -> int: 2 * ptr_size
 
-gen_lambda = (e: int) -> Val:
+# A direct local closure may keep its environment in this activation when every
+# reference is a direct invocation. Copies, returns, argument passing, captures,
+# rebinding and address-taking retain the ordinary heap representation.
+stack_closure_fn = -1
+stack_closure_locals: {int: bool} = {}
+stack_closure_targets: {int: int} = {}
+
+stack_closure_uses = (n: int, called: bool = false):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    if k == .ident:
+        if not called and nodes[n].aux == i32(int(SK.local)):
+            l = int(nodes[n].sym)
+            if stack_closure_locals.has(l): stack_closure_locals[l] = false
+        return
+    a = int(nodes[n].a)
+    direct = k == .call and nodes[n].aux == 1 and a != 0 and nodes[a].kind == .ident
+    stack_closure_uses(a, direct)
+    stack_closure_uses(int(nodes[n].b))
+    if k != .for_:
+        stack_closure_uses(int(nodes[n].c))
+        if k != .partial: stack_closure_uses(int(nodes[n].d))
+    loop i in [0..nkids(n)): stack_closure_uses(kid(n, i))
+    loop i in [0..nkids2(n)): stack_closure_uses(kid2(n, i))
+
+stack_closure_local = (l: int) -> bool:
+    if stack_closure_fn != cur_fn:
+        stack_closure_fn = cur_fn
+        stack_closure_locals.clear()
+        stack_closure_targets.clear()
+        skip = LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
+        loop candidate in fns[cur_fn].locals:
+            if int(locals[candidate].flags) & skip != 0: continue
+            if tkind(int(locals[candidate].type)) == .fn_: stack_closure_locals[candidate] = true
+        if stack_closure_locals.len() > 0: stack_closure_uses(int(fns[cur_fn].body))
+    stack_closure_locals.get(l) ?? false
+
+gen_lambda = (e: int, stack: bool = false) -> Val:
     f = int(nodes[e].sym)
     env_layout(f)
     s = new_slot(closure_size(), ptr_size)
@@ -1552,10 +1595,14 @@ gen_lambda = (e: int) -> Val:
     if fns[f].caps.len() == 0:
         e_store(a, ptr_size, e_iconst(0), ptr_size)
         return Val(a, true, s)
-    env = e_call(rt("__alloc"), [e_iconst(int(fns[f].env_size))], VI)
+    env = 0
+    if stack: env = e_slot(new_slot(int(fns[f].env_size), 8))
+    else: env = e_call(rt("__alloc"), [e_iconst(int(fns[f].env_size))], VI)
     e_store(a, ptr_size, env, ptr_size)
     hdr_store(env, 0, e_iconst(1))
-    hdr_store(env, 8, e_faddr(lf_helper(.envdrop, 0, f)))
+    drop_kind = if stack: HK.stackenvdrop else: HK.envdrop
+    hdr_store(env, 8, e_faddr(lf_helper(drop_kind, 0, f)))
+    # The stack proof excludes all value copies; only invocation may borrow it.
     hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, f)))
     loop cap in fns[f].caps:
         outer = int(cap.outer)
@@ -3879,7 +3926,9 @@ gen_vardecl = (s: int):
         if a >= 0 and int(locals[l].flags) & LF_ASSIGNED == 0: len_of_local[l] = a
         # A := [x; E]: A's length is E for as long as A is not resized
         if nodes[iv].kind == .array and nodes[iv].b != 0 and fixed_array_local(l): array_len_expr[l] = int(nodes[iv].b)
-        val = gen_owned(int(nodes[s].b))
+        stack = nodes[iv].kind == .lambda and files[pos_file(nodes[s].pos)].is_dewy and stack_closure_local(l)
+        if stack: stack_closure_targets[l] = int(nodes[iv].sym)
+        val = if stack: gen_lambda(iv, true) else: gen_owned(iv)
         write_place(pl, t, val.v)
     else:
         if pl.mem: e_zero(pl.v, tsize(t))
@@ -5371,6 +5420,7 @@ gen_block_stmts = (b: int):
 # ---------------- functions ----------------
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
+    stack_closure_fn = -1
     ctl = 0
     cond_depth = 0
     scope_locals = []
@@ -5978,7 +6028,7 @@ helper_partial = (th: int):
     if sret: e_ret(sv)
     else: e_ret(r)
 
-helper_envdrop = (f: int):
+helper_envdrop = (f: int, heap: bool = true):
     ps = helper_params(1)
     env = ps[0]
     if fns[f].kind == FK_PARTIAL:
@@ -5994,7 +6044,7 @@ helper_envdrop = (f: int):
             inn = int(cap.inner)
             t = store_type(inn)
             if is_managed(t): drop_at(e_addi(env, int(locals[inn].env_off)), t)
-    e_call(rt("__free"), [env], -1)
+    if heap: e_call(rt("__free"), [env], -1)
     e_ret(-1)
 
 helper_envcopy = (f: int):
@@ -6051,6 +6101,7 @@ lower_helper = (lf: int):
         thunk: helper_thunk(h.inst)
         partial: helper_partial(h.inst)
         envdrop: helper_envdrop(h.inst)
+        stackenvdrop: helper_envdrop(h.inst, false)
         envcopy: helper_envcopy(h.inst)
 
 # native FFI: a thunk that resolves the C function on first use and calls it

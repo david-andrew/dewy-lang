@@ -30,6 +30,7 @@ QUICK_CASES = {
     'closure-capture-parameters',
     'closure-argument-container-values',
     'closure-wide-call-live-values',
+    'closure-stack-local-noheap', 'closure-stack-shared-return',
     'sequence-closures', 'sequence-slice-loop-snapshots', 'sequence-mutable-snapshot-in-body',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
     'dictionary-value-equality', 'set-copy-and-removal', 'numeric-bounds',
@@ -53,6 +54,68 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'closure-stack-local-noheap': '''work=()=>{let before=alloc_count() let n=0
+let next=()=>{n+=1; n}
+if alloc_count() not=?before return 1
+return if next()=?1 and next()=?2 and n=?0 42 else 2}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-pinned-call': '''work=()=>{let before=alloc_count() let n=0 let total=0
+let add=(@value:int64)=>{n+=1 value+=n}
+if alloc_count() not=?before return 1
+add(@total) add(@total)
+return if total=?3 and n=?0 and alloc_count()=?before 42 else 2}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-managed-return': '''make=()=>{let xs=[40]
+let parent=()=>{xs[0]+=1 return ()=>{xs[0]+=1; xs[0]}}
+return parent()}
+work=()=>{let a=make() let b=a
+return if a()=?42 and b()=?42 and a()=?43 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-shared-return': '''make=()=>{let count=40
+let parent=()=>{count+=1 return ($capture @count)=>{count+=1; count}}
+return parent()}
+work=()=>{let a=make() let b=a
+return if a()=?42 and b()=?43 and a()=?44 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-copy-fallback': '''work=()=>{let n=0
+let a=()=>{n+=1; n} let b=a
+const frozen=()=>{n+=1; n}
+return if a()=?1 and b()=?1 and a()=?2 and frozen()=?1 and frozen()=?1 and n=?0 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-return-fallback': '''make=()=>{let n=0
+let next=()=>{n+=1; n}
+next() return next}
+work=()=>{let a=make() let b=a
+return if a()=?2 and b()=?2 and a()=?3 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-argument-fallback': '''Counter:type=():>int64
+save=(f:Counter)=>()=>f()
+work=()=>{let n=0 let a=()=>{n+=1; n} let b=save(a)
+return if a()=?1 and b()=?1 and a()=?2 and b()=?2 and n=?0 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-loop-cleanup': '''work=()=>{loop i in [0..8) {
+let xs=[i] let next=()=>{xs[0]+=1; xs[0]}
+if next() not=?i+1 return 1
+if i<?3 continue
+if i>?5 break
+} return 42}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
     'closure-wide-call-live-values': '''make=()=>{let n=0
 return (a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64 h:int64)=>{
 n+=1; a+2*b+3*c+4*d+5*e+6*f+7*g+8*h+n}}
