@@ -1550,3 +1550,22 @@ at the boundary inputs and full workload sizes. The independent three-generation
 C gate passes all 4,410 checks in 89.85 pytest seconds with two workers; the
 focused arithmetic selection passes 150 checks in 4.56 seconds. See
 `constant-floor-*` audits for final runtime/compilation samples and limits.
+
+Ordinary default builds now expand tiny leaf functions before their existing
+single local optimization pass. Candidates have at most 24 unoptimized IR
+instructions, no frame slots, loops or calls. The shared inliner preserves
+argument evaluation, mutation and early returns; `@noinline`, exports and C ABI
+boundaries remain calls. Debug, watch and REPL builds retain their existing
+paths. This avoids the release pipeline's callee ordering and repeated passes.
+
+The final C-bootstrapped compiler reduced byte-scanning kernel CPU by about 18%
+across seven alternating pairs (ratio 0.815; baseline/candidate medians
+261.43/212.99 ms). Graph traversal was unchanged by paired ratio (0.997), and
+remains slower than the differently represented C reference. The initial
+five-workload experiment gave ratios 0.991/0.956/0.998/0.807/1.010 for
+helpers/arrays/records/text/graph. Compilation ratios were
+1.020/0.930/1.017/0.955 for tour/default Netpong/web Netpong/compiler; no general
+compilation speedup is claimed. All 4,412 checks pass in 90.68 pytest seconds
+after three independent C bootstrap generations, with 197 focused checks in
+5.19 seconds. See `fast-inline-*` audits for sample timing, source identities
+and the distinction between initial and final measurements.

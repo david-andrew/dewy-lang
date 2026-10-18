@@ -5460,6 +5460,51 @@ main=()=>probe(-7)
     assert 'call' not in probe[0], 'literal floor arithmetic still calls a helper in default builds'
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_fast_inline(compiler, tmp_path, target):
+    source = tmp_path / 'leaf.jo'
+    source.write_text('''counter = 0
+next = () -> int:
+    counter += 1
+    counter
+small = (x: int) -> int:
+    if x < 0: return -x
+    x + 2
+@noinline
+kept = (x: int) -> int: x * 2
+bump = (value: mut int) -> int:
+    value += 2
+    value
+main = () -> int:
+    x = 10
+    a = small(next())
+    b = small(-3)
+    c = kept(4)
+    d = bump(x)
+    if a + b + c + d + x + counter == 39: return 42
+    1
+''')
+    binary = tmp_path / 'leaf'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    main = re.search(r'^fn f_main_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert main, 'main was not emitted'
+    assert main[0].count(' = call ') == 1, 'only the @noinline call should remain'
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web inlining checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'leaf.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
 def test_core_many_record_types(compiler, tmp_path):
     # Record instances bypass the ordinary type interner. Enough of them can
     # outgrow even its next doubled table before it is asked to intern again.

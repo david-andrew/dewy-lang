@@ -185,9 +185,10 @@ rel_finish = ():
 emit_now = (finish: bool):
     if finish: rel_finish()
     else if not opt_release and not dbg_on:
-        # One local pass keeps ordinary builds useful without whole-program
-        # inlining. Variable-debug builds retain the original local locations.
+        # Tiny leaves expand before the one local pass; there is no release
+        # optimization pipeline. Debug builds retain original local locations.
         kc_fn += 1
+        if not watch_build and not repl_image: fast_inline_into()
         optimize()
     if dump: dump_ir()
     if target_wasm: wasm_collect()
@@ -261,6 +262,7 @@ emit_queued = ():
     emit_queue = []
     emit_queue_rel = []
     queue_emit = false
+    if not opt_release and not dbg_on: fast_inline_prepare(q)
     if emit_parallel(q, fin): return
     t0 = time()
     loop k in 0.. and f in q:

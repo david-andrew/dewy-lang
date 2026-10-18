@@ -73,7 +73,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 3,900 checks; recent local full runs took
+The development gate now has over 4,400 checks; recent local full runs took
 78–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects 149 checks and takes roughly 3–4 pytest seconds. Focused
 selections also typically take seconds. Value
@@ -83,6 +83,17 @@ retaining individual results and test selection. The local driver caches an
 immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
+
+Default-build performance is now a separate measurement target, alongside
+release builds. Positive constant floor arithmetic lowers directly, and ordinary
+builds expand tiny leaf functions before their single local optimization pass.
+The recent fresh-build comparison measured about 35 ms for the tour, 236 ms for
+native Netpong, 121 ms for web Netpong and 1.15 seconds for the compiler itself
+(one emission worker, warm filesystem caches, no program cache). These are local
+workload measurements, not universal budgets. The `constant-floor-*` and
+`fast-inline-*` audits record runtime comparisons and their limits. The dictionary
+graph workload remains a substantial performance gap; its C reference also uses
+a different graph/table representation.
 
 Recent warmed measurements put the tour build near 50 ms, the physics release
 build near 300 ms and compiler self-build near 1.1–1.2 seconds. Sharing flat loop

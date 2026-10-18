@@ -115,7 +115,7 @@ struct FnInst:
     cabi: bool
     deterministic: bool # callback results should depend only on their state and inputs
     parallel: bool      # @parallel: the functions it is given run on many threads at once
-    noinline: bool      # @noinline: release builds call it, not copy it into its callers
+    noinline: bool      # @noinline: call it rather than copy it into its callers
     gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
     export_name: str
     aux_void: bool
@@ -1360,7 +1360,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                 else: fns[f].export_name = name_of(int(nodes[decl].name))
             else if an != "no_web":
                 why = ""
-                if an == "inline" or an == "always_inline" or an == "forceinline": why = " (release builds put small functions inline by themselves; @noinline keeps one out)"
+                if an == "inline" or an == "always_inline" or an == "forceinline": why = " (small functions are put inline automatically; @noinline keeps one out)"
                 fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), and for externs @lib, @symbol, @variadic")
     decl_infos[di].insts.push(f)
     if zt.len() > 0: fn_instances[FnInstanceKey(decl, zt)] = f

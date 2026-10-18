@@ -45,8 +45,10 @@ standalone build.
 `watch` reruns a terminal program after edits and retries failed builds when a
 missing imported file or embedded asset appears. `check` reports errors without
 emitting an executable. `build --time` reports compiler phase timings.
-Development builds are the default and apply one local optimization pass per
-function. `--release` adds cross-function inlining and further loop optimization.
+Development builds are the default. Ordinary builds expand tiny functions that
+call no other functions, then apply one local optimization pass per function.
+`watch` and the interactive prompt retain calls so definitions can be replaced.
+`--release` adds broader inlining and further loop optimization.
 Use `-g` without `--release` for native variable debugging; it preserves local
 variable locations instead of running the default local optimization pass.
 

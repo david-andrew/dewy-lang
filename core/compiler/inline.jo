@@ -15,6 +15,49 @@ inl_calls = 0               # calls (that return, not on rare paths) in the func
 rel_fns: IrFn[]             # lowered functions, in lowering order
 rel_by_index: int[]         # lfunc index -> position in rel_fns (-1: not collected)
 
+# Default builds expand only tiny leaf bodies, before their one local pass.
+# No callee optimization, call-graph ordering or repeated caller optimization.
+fast_fns: IrFn[]
+fast_by_index: int[]
+
+fast_inlinable = (f: IrFn) -> bool:
+    if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > 24 or f.slot_size.len() > 0: return false
+    loop ins in f.code:
+        if ins.op == .call or ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop: return false
+    true
+
+fast_inline_prepare = (fs: IrFn[]):
+    fast_fns = []
+    fast_by_index = []
+    loop f in fs:
+        if not fast_inlinable(f): continue
+        loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
+        fast_by_index[f.fn_index] = fast_fns.len()
+        fast_fns.push(f)
+
+fast_inline_target = (ins: Ins) -> int:
+    if ins.op != .call or ins.c != 0 or ins.imm >= fast_by_index.len(): return -1
+    j = fast_by_index[int(ins.imm)]
+    if j < 0 or fast_fns[j].fn_index == ir.fn_index or int(ins.b) != fast_fns[j].nparams: return -1
+    j
+
+fast_inline_into = ():
+    if fast_fns.len() == 0: return
+    found = false
+    loop ins in ir.code:
+        if fast_inline_target(ins) >= 0:
+            found = true
+            break
+    if not found: return
+    out: Ins[]
+    out.reserve(ir.code.len() * 2)
+    old = ir.code
+    loop ins in old:
+        j = fast_inline_target(ins)
+        if j >= 0: inline_call(ins, fast_fns[j], out)
+        else: out.push(ins)
+    ir.code = out
+
 rel_collect = ():
     loop rel_by_index.len() <= ir.fn_index: rel_by_index.push(-1)
     rel_by_index[ir.fn_index] = rel_fns.len()

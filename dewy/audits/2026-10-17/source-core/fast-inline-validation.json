@@ -1,0 +1,57 @@
+{
+  "change": "Default ordinary builds inline raw leaf bodies of at most 24 instructions with no frame slots or calls/loops, before the existing single local optimization pass. Honors noinline/exports/C ABI. Debug, watch and REPL paths retain calls.",
+  "compiler": "build-1792306852166808513/bin/dewy-core",
+  "source_identity": "549244c2df9c8304b561cfb783c3e608c7ce2ce73564303fe5de83d60af9a9b2",
+  "quick": "149 passed in 2.82s",
+  "focused": "197 passed in 5.19s; native/web early returns, once-only side effects, mutable parameters and noinline plus optimizer/debug coverage",
+  "independent_c_gate": "4412 passed in 90.68s; two workers; three C bootstrap generations",
+  "runtime": "CPU 2, Linux thread CPU kernel clock, alternating candidates/baseline/C with warmup, original input sizes. Checksums match boundary and measured sizes.",
+  "initial_paired_ratios": {
+    "helpers": 0.9913268786713091,
+    "arrays": 0.9560967367017125,
+    "records": 0.9976414176571881,
+    "text": 0.8073677158290546,
+    "graph": 1.0104432378629997
+  },
+  "final_paired_ratios": {
+    "text": 0.8151056304272952,
+    "graph": 0.9968417151464098
+  },
+  "final_medians_ms": {
+    "text": {
+      "baseline": 261.430638,
+      "candidate": 212.993833,
+      "c": 175.040326
+    },
+    "graph": {
+      "baseline": 667.002398,
+      "candidate": 644.618411,
+      "c": 343.947557
+    }
+  },
+  "compile_paired_ratios": {
+    "tour-default": 1.020281344582429,
+    "netpong-default": 0.9298362568485644,
+    "netpong-web-default": 1.0172515593408913,
+    "compiler": 0.9546502550404694
+  },
+  "compile_medians_ms": {
+    "tour-default": {
+      "baseline": 36.17087900056504,
+      "candidate": 36.49011800007429
+    },
+    "netpong-default": {
+      "baseline": 259.5896109996829,
+      "candidate": 233.5430980019737
+    },
+    "netpong-web-default": {
+      "baseline": 123.30262500108802,
+      "candidate": 133.24782000199775
+    },
+    "compiler": {
+      "baseline": 1205.5088469969633,
+      "candidate": 1142.9707720017177
+    }
+  },
+  "limits": "Five-sample all-workload comparison and seven-sample compile comparison precede the explicit watch/REPL guard and empty-candidate early exit. Final C-bootstrapped seven-sample text/graph comparison uses final compiler sources. This is a byte scanner, not Unicode grapheme processing. Graph C uses a different data representation; no general speed parity claim."
+}
