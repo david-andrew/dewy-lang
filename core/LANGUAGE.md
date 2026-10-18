@@ -964,6 +964,14 @@ The web build produces `/tmp/game.html`. Games use `main()` for setup,
 input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.
 
+`camera3d(position target up=direction)` rolls a 3D camera by changing its up
+vector. Rendering, `world_to_screen`, `screen_ray`, particles and positional audio
+use that orientation together; omitting `up` restores the usual world-up view.
+The up vector should be nonzero and not parallel to the viewing direction.
+The [camera-roll example](../examples/sloppy_core/camera_roll.dewy) combines this
+with cursor picking and a settings menu. Menu rows expand for long labels and
+choice values, sharing the widest row's width on the next frame.
+
 Dunes also defines vertex and fragment shaders as ordinary Dewy functions, with
 typed input/output records and texture uniforms. The compiler generates GPU
 shader code and the software renderer can execute the same shader functions.

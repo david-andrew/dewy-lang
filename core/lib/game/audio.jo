@@ -140,7 +140,7 @@ move_sound = (id: int, pos: vec3, volume: f64 = 1.0, reach: f64 = 40.0):
 __place_3d = (pos: vec3, reach: f64) -> (f64, f64):
     d = pos - __cam_pos
     fwd = __cam_target - __cam_pos
-    right = cross(fwd, vec3(0, 1, 0))
+    right = cross(fwd, __cam_up)
     pan = 0.0
     if length(right) > 0.0001 and length(d) > 0.0001: pan = f64(dot(normalize(d), normalize(right))) * 0.8
     (__reach_gain(f64(length(d)), reach), pan)

@@ -1,0 +1,50 @@
+# Camera roll, screen-space labels, picking, and menus that fit their labels.
+let roll:float64=0.58
+let automatic:bool=false
+let block:Mesh
+let marker:Mesh
+
+main=():>void=>{
+    window("Dewy / Camera roll" 1280 720)
+    block=cube_mesh(0.65)
+    marker=sphere_mesh(0.09 12 8)
+    ui_style.size=22.0
+    ui_style.spacing=44.0
+    ui_style.width=420.0
+}
+
+update=(dt:float64):>void=>{
+    if key_pressed(Key.escape) quit()
+    if key_pressed(Key.p) automatic=not automatic
+    if key_pressed(Key.r) {roll=0.5 automatic=false}
+    if automatic {roll+=dt*0.035 if roll>?1.0 roll-=1.0}
+}
+
+draw=():>void=>{
+    clear(rgb(0.025 0.035 0.06))
+    let angle=(roll-0.5)*TAU
+    camera3d(vec3(0 0 10) vec3(0 0 0) up=vec3(f32(sin(angle)) f32(cos(angle)) 0))
+    sun(vec3(0.3 0.7 1.0))
+    fog(rgb(0.025 0.035 0.06).xyz 0.0)
+    post_effects(0.0 0.7 0.0)
+    loop y in [-1..2) {loop x in [-2..3) {
+        let point=vec3(f32(x)*1.4 f32(y)*1.4 0)
+        let color=if x=?0 rgb(0.3 0.8 0.6) else rgb(0.3 0.55 0.9)
+        draw_mesh(block translation(point) color)
+        let label=world_to_screen(point)
+        if label isnt? none text_centered("{x}, {y}" label+vec2(0 38) 18 WHITE)
+    }}
+    # Intersect the cursor ray with the cubes' z=0 plane, even as the camera rolls.
+    let [origin direction]=screen_ray(mouse_pos())
+    if abs(direction.z)>?0.0001 {
+        let distance=-origin.z/direction.z
+        if distance>?0.0 draw_mesh(marker translation(origin+direction*distance) rgb(1.0 0.6 0.2) emissive=0.5)
+    }
+    text("DEWY / CAMERA ROLL" vec2(28 22) 30 WHITE)
+    text("Move the pointer: the orange marker stays under it as the scene rotates." vec2(28 62) 20 WHITE)
+    ui_begin("camera" vec2(640 566))
+    roll=ui_slider("Camera roll around the viewing direction" roll 0.01)
+    automatic=ui_switch("Keep rotating automatically" automatic)
+    ui_end()
+    text("P: auto-roll   R: reset   Escape: quit" vec2(28 682) 20 WHITE)
+}

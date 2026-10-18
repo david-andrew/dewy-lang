@@ -1,5 +1,12 @@
 # Dewy on the compact core
 
+[`camera_roll.dewy`](camera_roll.dewy) demonstrates a rolling 3D camera, labels
+projected from world positions, cursor-ray picking and menus with long labels.
+Use the slider to roll, **P** to rotate automatically, and **R** to reset. The orange
+marker remains under the cursor as the view rotates. Run it with
+`python3 -m tools.core run examples/sloppy_core/camera_roll.dewy`; build with
+`--target wasm` for the browser.
+
 [`settings.dewy`](settings.dewy) loads typed JSON with defaults, updates a record
 copy, and saves/loads a full-width player ID without rounding. Run it with
 `python3 -m tools.core run examples/sloppy_core/settings.dewy`.

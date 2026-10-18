@@ -118,7 +118,7 @@ The gate needs pytest and Node (for web/client tests). Shader compilation/linkin
 also uses EGL/GLES3 libraries; local runs skip those checks when unavailable,
 while CI ensures that the driver is installed. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The gate has over 2,000 checks and typically takes
+the earlier compiler suite. The gate has over 3,500 checks and typically takes
 one to two minutes locally, depending on host load. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream

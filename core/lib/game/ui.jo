@@ -22,7 +22,7 @@
 struct UiStyle:
     size: f64 = 34.0                        # text size of the items
     spacing: f64 = 58.0                     # from one item to the next
-    width: f64 = 440.0                      # of a slider or switch row
+    width: f64 = 440.0                      # of a slider or switch row (wider when a label needs it)
     color: vec4 = vec4(1, 1, 1, 0.72)
     focus_color: vec4 = vec4(1, 0.9, 0.55, 1)
     disabled_color: vec4 = vec4(1, 1, 1, 0.28)
@@ -54,7 +54,10 @@ struct __UiMenu:
     open_frame = -1
     drawn_frame = -10
     last_count = 0
+    row_w = 0.0                 # (the widest a row needed, last frame: every row is that wide)
 __ui_menus: {str: __UiMenu}
+__ui_row_w = 0.0                # (this menu's rows: as wide as the widest needed, last frame or now)
+__ui_row_need = 0.0
 __ui_in_frame = -1              # (this frame's input, read once for all its menus)
 __ui_in_nav = 0
 __ui_in_side = 0
@@ -85,6 +88,8 @@ ui_begin = (name: str, top_center: vec2):
     __ui_drawn_frame = f
     __ui_pos = top_center
     __ui_count = 0
+    __ui_row_w = st.row_w
+    __ui_row_need = 0.0
     # (what the player did this frame, read once for every menu drawn in it)
     if __ui_in_frame != f:
         __ui_in_frame = f
@@ -124,6 +129,7 @@ ui_end = ():
     st = __ui_menus.get(__ui_menu) ?? __UiMenu()
     st.focus = __ui_focus
     st.last_count = __ui_count
+    st.row_w = __ui_row_need
     __ui_menus[__ui_menu] = st
 
 # escape or the B button: go back (close the menu)
@@ -131,6 +137,14 @@ ui_back = () -> bool: ui_ready() and not rebinding() and (key_pressed(.escape) o
 
 # false in the frame the menu opened in: input then belongs to whatever opened it
 ui_ready = () -> bool: frame_number() != __ui_open_frame
+
+# (how wide a row with this label and a value this wide is: the label in its left half, the
+# value in its right; as wide as the menu's widest, so the values line up)
+__ui_row = (label: str, value_w: f64) -> f64:
+    need = max(ui_style.width, 2.0 * (max(text_width(label, ui_style.size), value_w) + 24.0))
+    __ui_row_need = max(__ui_row_need, need)
+    __ui_row_w = max(__ui_row_w, need)
+    __ui_row_w
 
 # (the next item: its row, whether it has the focus, whether the mouse is on it)
 __ui_item = (w: f64) -> (int, vec2, bool):
@@ -162,7 +176,7 @@ ui_button = (label: str, enabled: bool = true) -> bool:
 
 # a value from 0 to 1, changed in steps of `step` (left/right, or dragging with the mouse)
 ui_slider = (label: str, value: f64, step: f64 = 0.1) -> f64:
-    w = ui_style.width
+    w = __ui_row(label, 0.0)
     r = __ui_item(w)
     c = r.1
     v = value
@@ -186,7 +200,7 @@ ui_slider = (label: str, value: f64, step: f64 = 0.1) -> f64:
 
 # on or off (left/right, enter, or a click)
 ui_switch = (label: str, on: bool) -> bool:
-    w = ui_style.width
+    w = __ui_row(label, text_width("off", ui_style.size))
     r = __ui_item(w)
     c = r.1
     v = on
@@ -203,7 +217,9 @@ ui_switch = (label: str, on: bool) -> bool:
 # one of several (left/right, or a click on either side, goes to the one before or after):
 # `difficulty = ui_choice("Difficulty", ["easy", "normal", "hard"], difficulty)`
 ui_choice = (label: str, options: str[], index: int) -> int:
-    w = ui_style.width
+    widest = 0.0
+    loop o in options: widest = max(widest, text_width("< {o} >", ui_style.size))
+    w = __ui_row(label, widest)
     r = __ui_item(w)
     c = r.1
     n = max(options.len(), 1)
@@ -228,7 +244,7 @@ ui_choice = (label: str, options: str[], index: int) -> int:
 # added, backspace takes the last character away, enter (like down) goes on to the next item;
 # `name = ui_text_field("Name", name)`
 ui_text_field = (label: str, value: str, max_chars: int = 24) -> str:
-    w = ui_style.width
+    w = __ui_row(label, 0.0)
     r = __ui_item(w)
     c = r.1
     v = value

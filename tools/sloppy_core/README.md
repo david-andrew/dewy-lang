@@ -1034,3 +1034,13 @@ integers, floats, booleans, full-width unsigned values, nested conditionals and
 early exits. All 2,910 checks pass from the independent C seed. Five fresh-build
 CPU pairs give ratios of tour 1.011, Dunes 1.012 and compiler 1.008, so this is a
 lowering simplification with no compile-speed claim. See `conditional-init-*`.
+
+
+The camera-roll and menu-width changes from Sloppy commits `0f4d68e` and
+`d113c79` are incorporated into the bundled game libraries. `camera3d` accepts
+an optional `up` vector, shared by rendering, world/screen conversion, particle
+billboards and positional audio. Menu rows accommodate long labels/choice values
+and share their width across frames. `camera_roll.dewy` exercises camera roll,
+projected labels, cursor-ray picking and a long-label settings menu. Native/web
+checks cover projection, inverse picking, audio orientation and restoring the
+default camera orientation. The original Sloppy checkout is not modified.

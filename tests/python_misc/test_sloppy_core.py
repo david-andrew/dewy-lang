@@ -46,6 +46,34 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'game-camera-roll': '''import p"@lib/game/draw2d.jo" as surface
+main=()=>{
+surface.__target_w=1280 surface.__target_h=720
+let eye=vec3(0 0 5) let target=vec3(0 0 0) let point=vec3(1 0 0)
+camera3d(eye target)
+let center=world_to_screen(target) let normal=world_to_screen(point)
+if center is? none or normal is? none return 1
+if normal.x<=?center.x or abs(normal.y-center.y)>?0.01 return 2
+camera3d(eye target up=vec3(1 0 0))
+let rolled=world_to_screen(point)
+if rolled is? none return 3
+if abs(rolled.x-center.x)>?0.01 or rolled.y>=?center.y return 4
+let [origin direction]=screen_ray(rolled)
+if dot(normalize(point-origin) direction)<?0.9999 return 5
+if world_to_screen(vec3(0 0 6)) isnt? none return 6
+camera3d(eye target)
+let restored=world_to_screen(point)
+return if restored isnt? none and length(restored-normal)<?0.01 42 else 7}''',
+    'game-camera-audio': '''from p"@lib/game/audio.jo" import __place_3d
+main=()=>{
+let eye=vec3(0 0 5) let point=vec3(1 0 5)
+camera3d(eye vec3(0 0 0))
+let [gain normal]=__place_3d(point 40.0)
+camera3d(eye vec3(0 0 0) up=vec3(0 -1 0))
+let [rolledGain rolled]=__place_3d(point 40.0)
+camera3d(eye vec3(0 0 0))
+return if normal>?0.79 and rolled<?-0.79 and abs(gain-rolledGain)<?0.0001 42 else 1}''',
+
     'generic-constructor-collections': '''Box:type=<T>[value:T]
 main=()=>{
 let numbers=Box([20 22]) let words=Box(["hello" "world"])
@@ -5794,7 +5822,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -5817,7 +5845,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
@@ -5913,7 +5941,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
