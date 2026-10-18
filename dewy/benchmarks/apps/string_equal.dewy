@@ -1,0 +1,41 @@
+# Repeated comparison of separately constructed strings, including empty text,
+# embedded zero bytes, short tails, and differences throughout the payload.
+from p"harness.dewy" import size_argument, clock
+
+Pair:type=[left:string right:string]
+
+generate=():>array<Pair>=>{
+    let pairs:array<Pair>=[]
+    loop i in [0..128) {
+        let size=(i*17)%65
+        let bytes:array<uint8>=[]
+        loop j in [0..size) {bytes.push(((i+j*7)%128) as uint8)}
+        let left=str_from_bytes(bytes)
+        if size>?0 and i%3=?0 {
+            let at=(i*13)%size
+            bytes[at]=(((bytes[at] as int64)+1)%128) as uint8
+        }
+        let right=str_from_bytes(bytes)
+        pairs.push(Pair[left right])
+    }
+    return pairs
+}
+
+kernel=(pairs:array<Pair> count:int64):>int64=>{
+    let result=0
+    loop i in [0..count) {
+        let index=i%128
+        result+=if pairs[index].left=?pairs[index].right i else -i
+    }
+    return result
+}
+
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 10000000)
+    let pairs=generate()
+    let started=clock()
+    let result=kernel(pairs count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

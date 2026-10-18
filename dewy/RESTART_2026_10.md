@@ -369,6 +369,20 @@ and flat neighbor storage. Host contention can still affect CPU frequency and
 caches. These five workloads do not establish general C/Rust parity. Default
 graph code and text scanning remain useful optimization targets.
 
+Short byte comparisons now use bounded overlapping head/tail words, avoiding
+a byte-at-a-time tail. String equality checks object identity first and reads
+lengths directly after checking for nil. Nil and allocated empty strings still
+compare equally. A new [string-equality workload](audits/2026-10-18/string-equal-runtime.json)
+compares separately allocated payloads of varied short lengths, with embedded
+zero bytes and differences throughout the payload. Five-pair CPU medians fell
+from 211.5 to 166.6 ms in default builds and 204.3 to 166.8 ms in release builds
+(18–21% less). C's pointer/length strings and libc `memcmp` took 52.5 ms, so
+this workload still exposes a roughly threefold gap. The 414 focused checks
+include native/web boundary cases, unaligned ranges and nil/empty equality.
+The [compilation comparison](audits/2026-10-18/string-equal-compile.json) measured
+850.9 → 837.2 ms CPU for the fixed conformance bundle and 1839.7 → 1803.4 ms
+for self-build; small-app differences were mixed and wall times remained noisy.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

@@ -19,9 +19,9 @@ from tools.sloppy_core.benchmark_compile import positive
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ROOT / 'dewy/benchmarks/apps'
 COUNTS = {'helpers': 2000000, 'arrays': 10000000, 'records': 1000000,
-          'text': 10000000, 'graph': 1000000}
+          'text': 10000000, 'graph': 1000000, 'string_equal': 10000000}
 CHECKSUMS_1000 = {'helpers': 985290002, 'arrays': 876830114, 'records': 649125068,
-                  'text': 681360428, 'graph': 740553269}
+                  'text': 681360428, 'graph': 740553269, 'string_equal': 171284}
 
 
 def digest(path: Path) -> str:
@@ -128,6 +128,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'limits': [('WebAssembly under Node, compared with native C.' if target == 'wasm'
                     else 'Native 64-bit host.') + ' Warm filesystem caches; one build per binary.',
                    'C graph uses flat edges and a handwritten map; Dewy uses per-node arrays and an insertion-ordered map.',
+                   'String equality uses separately allocated payloads; C uses pointer/length pairs and libc memcmp, Dewy uses runtime strings.',
                    'Kernel times exclude input generation; wall times include the complete process.',
                    ('Web kernel times include JIT work during the measured kernel; these are not browser rendering timings.'
                     if target == 'wasm' else

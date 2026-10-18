@@ -399,14 +399,20 @@ __mem_move = (dst: *u8, src: *u8, n: int):
         dst[i] = src[i]
         i -= 1
 
+# Word comparisons stay within the requested range, including unaligned slices.
+# Overlapping head/tail words avoid a byte loop for short names and partial tails.
 __mem_eq = (a: *u8, b: *u8, n: int) -> bool:
-    i = 0
-    loop i + 8 <= n:
-        if ((a + i) as *int)[0] != ((b + i) as *int)[0]: return false
-        i += 8
-    loop i < n:
-        if a[i] != b[i]: return false
-        i += 1
+    if n >= 8:
+        i = 0
+        loop i + 8 < n:
+            if ((a + i) as *int)[0] != ((b + i) as *int)[0]: return false
+            i += 8
+        return ((a + n - 8) as *int)[0] == ((b + n - 8) as *int)[0]
+    if n >= 4:
+        return (a as *u32)[0] == (b as *u32)[0] and ((a + n - 4) as *u32)[0] == ((b + n - 4) as *u32)[0]
+    if n >= 2:
+        return (a as *u16)[0] == (b as *u16)[0] and ((a + n - 2) as *u16)[0] == ((b + n - 2) as *u16)[0]
+    if n > 0: return a[0] == b[0]
     true
 
 # ---------------- process ----------------
@@ -766,13 +772,16 @@ __str_concat = (a: str, b: str) -> str:
     p as str
 
 __str_eq = (a: str, b: str) -> bool:
-    n = len(a)
-    if n != len(b): return false
-    if n == 0: return true
-    pa = data(a)
-    pb = data(b)
+    pa = a as *u8
+    pb = b as *u8
     if pa == pb: return true
-    __mem_eq(pa, pb, n)
+    # Nil and an allocated empty string compare equally. Once both pointers are
+    # nonnull, read the runtime header directly instead of repeating nil checks.
+    if pa == null: return len(b) == 0
+    if pb == null: return len(a) == 0
+    n = (pa as *int)[1]
+    if n != (pb as *int)[1]: return false
+    __mem_eq(pa + 24, pb + 24, n)
 
 __str_cmp = (a: str, b: str) -> int:
     la = len(a)

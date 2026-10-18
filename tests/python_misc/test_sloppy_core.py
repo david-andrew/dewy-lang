@@ -54,6 +54,8 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'array-comparison-memory-tails': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/memory_equal.jo').as_posix()+'"\n'
+                              + 'main=()=>memory_equal.probe()'),
     'closure-stack-local-noheap': '''work=()=>{let before=alloc_count() let n=0
 let next=()=>{n+=1; n}
 if alloc_count() not=?before return 1

@@ -1,0 +1,20 @@
+# Exercise all short tails and unaligned ranges, with unequal surrounding bytes.
+probe = () -> int:
+    empty = __str_new(0) as str
+    nil_: str
+    if empty != nil_ or nil_ != empty or empty != "": return 3
+    if nil_ == "x" or "x" == nil_ or empty == "x" or "x" == empty: return 4
+    a = fill(u8(0), 80)
+    b = fill(u8(255), 80)
+    loop i in [0..80): a[i] = u8(i % 7)
+    loop left in [0..8):
+        loop right in [0..8):
+            loop n in [0..66):
+                loop i in [0..80): b[i] = 255
+                loop i in [0..n): b[right + i] = a[left + i]
+                if not __mem_eq(data(a) + left, data(b) + right, n): return 1
+                loop changed in [0..n):
+                    b[right + changed] = 254
+                    if __mem_eq(data(a) + left, data(b) + right, n): return 2
+                    b[right + changed] = a[left + changed]
+    42
