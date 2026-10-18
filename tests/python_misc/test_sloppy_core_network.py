@@ -4,6 +4,7 @@ import os
 import selectors
 import shutil
 import socket
+import struct
 import subprocess
 from pathlib import Path
 
@@ -202,3 +203,21 @@ peer.onclose = () => {assert.ok(won, 'host closed without the winning state'); c
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         stop(server)
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_network_shared_read_buffer(compiler, tmp_path, release):
+    binary = tmp_path / 'buffers'
+    build(compiler, ROOT / 'core/tests/net_buffer.dewy', binary, release)
+    first, first_writer = socket.socketpair()
+    second, second_writer = socket.socketpair()
+    with first, first_writer, second, second_writer:
+        first.setblocking(False)
+        second.setblocking(False)
+        for i, writer in enumerate([first_writer, second_writer]):
+            payload = bytes([40 + i]) * (65536 + i)
+            writer.sendall(b'\x82\x7f' + struct.pack('>Q', len(payload)) + payload)
+        fds = [first.fileno(), second.fileno()]
+        ran = subprocess.run([binary, *map(str, fds)], pass_fds=fds, env=environment(),
+                             capture_output=True, text=True, timeout=10, check=False)
+        assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)

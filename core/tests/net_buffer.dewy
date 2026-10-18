@@ -1,0 +1,17 @@
+import net
+
+main=(args:array<string>):>int64=>{
+    loop i in [0..2) {
+        let fd=to_int(args[i+1]) ?? -1
+        net.__net_peers.push(net.__NetPeer[id=i fd=fd state=2 client=true])
+    }
+    let events=net.receive()
+    if events.length not=?2 return 1
+    # The second peer overwrites the scratch buffer before either event is read.
+    loop i in [0..2) {
+        if events[i].peer not=?i or events[i].kind not=?net.NetKind.message return 2
+        if events[i].data.length not=?65536+i return 3
+        loop byte in events[i].data {if byte not=?uint8(40+i) return 4}
+    }
+    return 42
+}

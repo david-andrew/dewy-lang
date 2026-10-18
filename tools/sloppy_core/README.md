@@ -1460,3 +1460,15 @@ pytest seconds; 111 focused checks pass in 14.49 seconds. Seven alternating
 compilation samples show similar latency: tour 44.41/44.41 ms, native Netpong
 347.58/353.28 ms and compiler 1153.33/1142.68 ms (baseline/candidate). These are
 local warmed-process observations, not a speedup claim. See `netplay-warning-*`.
+
+
+Native WebSocket polling reuses Sloppy `b0796e3`'s 64 KiB scratch buffer instead
+of allocating and zeroing one for every peer on each poll. Message storage
+remains independent. Eleven networking/Netpong checks pass in 4.02 seconds,
+including two large messages whose receives overwrite the scratch buffer.
+
+The reusable `benchmark_network.py` driver compares library sources with the
+same compiler over inherited local sockets. Across seven paired 10,000-poll runs,
+median CPU ratios are 0.423/0.425/0.428 at 1/8/32 idle peers: about 57% less CPU
+in this polling workload. This is not a game FPS or network-throughput claim.
+See `network-buffer-*` audits and `python3 -m tools.sloppy_core.benchmark_network --help`.

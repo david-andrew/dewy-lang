@@ -49,6 +49,7 @@ __net_events: NetEvent[]
 __net_accepted: {int: bool}     # the peers that connected to this program's server
 __net_key = ""              # (a client's handshake key)
 const __NET_MAX = 16 << 20  # the biggest message taken (bigger: the connection ends)
+__net_rbuf: u8[]            # native socket reads share scratch storage; peer input buffers own their bytes
 
 # ---------------- straight to another player, with no server (WebRTC) ----------------
 # (the peers made by invite and join_invite: opened, their messages, gone)
@@ -507,6 +508,7 @@ __net_poll = ():
                 __net_peers.push(__NetPeer(id = __net_next, fd = fd, state = 1, client = false, since = time()))
                 __net_accepted[__net_next] = true
                 __net_next += 1
+        if __net_rbuf.len() == 0: __net_rbuf = fill(u8(0), 1 << 16)
         loop i in [0..__net_peers.len()):
             st = __net_peers[i].state
             if st == 3 or __net_peers[i].rtc >= 0: continue
@@ -528,15 +530,14 @@ __net_poll = ():
             __net_flush(i)
             if __net_peers[i].state == 3: continue
             # what has come in
-            buf = fill(u8(0), 1 << 16)
             loop true:
-                n = __n_recv(fd, data(buf), buf.len())
+                n = __n_recv(fd, data(__net_rbuf), __net_rbuf.len())
                 if n == -1: break
                 if n <= 0:
                     __n_close(fd)
                     __net_gone(i)
                     break
-                __net_peers[i].inbuf.extend(buf[..n))
+                __net_peers[i].inbuf.extend(__net_rbuf[..n))
             if __net_peers[i].state == 3: continue
             __net_parse(i)
         # (gone peers: dropped once their left event is out)
