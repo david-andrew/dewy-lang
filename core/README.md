@@ -195,9 +195,10 @@ it preserves physical line breaks, literal contents, comments and meaningful
 adjacency. Ordinary operator spacing stays as written. The editor uses the same
 formatter on unsaved text. `.jo` files retain their own formatter.
 
-Package editing, an interactive prompt and automatic updates
-are not yet exposed; their inherited versions would produce or install the
-wrong language.
+`repl` opens a persistent Dewy prompt with completion, history, type queries and
+recovery from failed inputs. See the [interactive guide](LANGUAGE.md#interactive-prompt)
+for session behavior. Package editing and automatic updates are not yet exposed;
+their inherited versions would produce or install the wrong language.
 
 ## Measure compilation
 
