@@ -19,74 +19,8 @@ o_da: i32[]
 o_db: i32[]
 o_dva: i32[]        # operand versions when the defining op was emitted
 o_dvb: i32[]
-o_buf: int[]
 o_fact_scope: i32[]      # two entries per vreg: known false, known true
 o_fact_nbr: int[]        # branch count when each fact was established
-
-# fills o_buf with the vregs used by ins; returns the defined vreg or -1
-o_operands = (ins: Ins) -> int:
-    o_buf.clear()
-    a = int(ins.a)
-    bb = int(ins.b)
-    d = int(ins.dst)
-    match ins.op:
-        nop, block, loop, end, else_, br, trap, zeroslots: return -1
-        iconst, fconst, slot, gaddr, daddr, faddr: return d
-        intr, call, syscall:
-            loop k in [0..bb): o_buf.push(int(ir.args[a + k]))
-            return d
-        calli, callc:
-            loop k in [0..bb): o_buf.push(int(ir.args[a + k]))
-            o_buf.push(int(ins.c))
-            return d
-        if_, brif, brtable, assume:
-            o_buf.push(a)
-            return -1
-        ret:
-            if a >= 0: o_buf.push(a)
-            return -1
-        store:
-            o_buf.push(a)
-            o_buf.push(bb)
-            if int(ins.c) & M_INDEX != 0: o_buf.push(d)
-            return -1
-        vst:
-            o_buf.push(a)
-            o_buf.push(bb)
-            o_buf.push(d)
-            return -1
-        vsplat:
-            o_buf.push(a)
-            return d
-        vzu: return -1
-        copy:
-            o_buf.push(a)
-            o_buf.push(bb)
-            return -1
-        zero:
-            o_buf.push(a)
-            return -1
-        memcpy, memset, vop:
-            o_buf.push(a)
-            o_buf.push(bb)
-            o_buf.push(int(ins.c))
-            return -1
-        select:
-            o_buf.push(a)
-            o_buf.push(bb)
-            o_buf.push(int(ins.c))
-            return d
-        load:
-            o_buf.push(a)
-            if int(ins.c) & M_INDEX != 0: o_buf.push(bb)
-            return d
-        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
-            o_buf.push(a)
-            return d
-        _:
-            o_buf.push(a)
-            o_buf.push(bb)
-            return d
 
 # rewrite the used vregs of ins through o_repl
 o_rewrite = (ins: mut Ins):
@@ -953,8 +887,9 @@ o_sra = ():
         if (op == .add or op == .mov) and int(ins.dst) >= 0 and sl[int(ins.dst)] >= 0: continue
         if op == .slot: continue
         if op == .zeroslots: continue
-        o_operands(ins)
-        loop u in o_buf:
+        ir_operands(ins)
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if sl[u] >= 0: ok[sl[u]] = false
     # a register per lane
     lane = fill(-1, ns * 4)
@@ -1152,8 +1087,9 @@ optimize = ():
         if ins.op == .end: depth -= 1
         o_depth[pos] = i32(depth)
         if ins.op == .block or ins.op == .loop or ins.op == .if_: depth += 1
-        d = o_operands(ins)
-        loop u in o_buf:
+        d = ir_operands(ins)
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if o_first[u] > pos: o_first[u] = i32(pos)
             o_lastuse[u] = i32(pos)
         if d >= 0:
@@ -1272,8 +1208,10 @@ optimize = ():
     nv = ir.vtypes.len()
     loop v in [0..nv): o_nuse[v] = 0
     loop ins in o_out:
-        o_operands(ins)
-        loop u in o_buf: o_nuse[u] += 1
+        ir_operands(ins)
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
+            o_nuse[u] += 1
     i = o_out.len() - 1
     loop i >= 0:
         ins = o_out[i]
@@ -1281,8 +1219,10 @@ optimize = ():
             d = int(ins.dst)
             if o_nuse[d] == 0:
                 o_out[i].op = .nop
-                o_operands(ins)
-                loop u in o_buf: o_nuse[u] -= 1
+                ir_operands(ins)
+                loop operand_index in [0..ir_use_count):
+                    let u = ir_use(operand_index)
+                    o_nuse[u] -= 1
         i -= 1
     ir.code = o_cleanup(o_out)
 
@@ -1363,12 +1303,13 @@ o_licm = (code: Ins[]) -> Ins[]:
         if loops_open.len() == 0 or not licm_op(op): continue
         d = int(ins.dst)
         if d < 0 or first[d + 1] - first[d] != 1: continue
-        o_operands(ins)
+        ir_operands(ins)
         # the outermost enclosing loop that defines none of the operands
         target = -1
         loop L in loops_open:
             ok = true
-            loop u in o_buf:
+            loop operand_index in [0..ir_use_count):
+                let u = ir_use(operand_index)
                 if o_def_within(dpos, first[u], first[u + 1], 2 * L, 2 * lp_end[L]):
                     ok = false
                     break
@@ -1467,8 +1408,8 @@ o_if_select = (out: mut Ins[], start: int) -> bool:
         if d == cond: return false
         if j != yes and j != no:
             if d == dst or d < 0 or o_ndef[d] != 1: return false
-        o_operands(ins)
-        if o_buf.contains(dst): return false
+        ir_operands(ins)
+        if ir_has_use(dst): return false
     y = o_tmp()
     z = o_tmp()
     replacement: Ins[]
@@ -1601,8 +1542,8 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                             done = true
                         break
                     if eo == .block or eo == .loop or eo == .if_ or eo == .else_ or eo == .end or eo == .br or eo == .brif or eo == .brtable or eo == .zeroslots: break
-                    ed = o_operands(e)
-                    if ed == d or o_buf.contains(d) or ed == t: break
+                    ed = ir_operands(e)
+                    if ed == d or ir_has_use(d) or ed == t: break
                     j -= 1
                 if done: continue
         if op == .copy and out.len() > 0:

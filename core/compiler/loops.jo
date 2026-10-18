@@ -344,11 +344,12 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
 lx_appears = (code: Ins[], v: int, lo: int, hi: int) -> int:
     n = 0
     loop p in [lo..hi + 1):
-        d = o_operands(code[p])
+        d = ir_operands(code[p])
         if d == v:
             n += 1
             continue
-        loop u in o_buf:
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if u == v:
                 n += 1
                 break
@@ -556,11 +557,12 @@ loop_versioning = (vector_only: bool = false):
     first = fill(code.len(), nv)
     last = fill(-1, nv)
     loop p in 0.. and ins in code:
-        d = o_operands(ins)
+        d = ir_operands(ins)
         if d >= 0:
             if p < first[d]: first[d] = p
             if p > last[d]: last[d] = p
-        loop u in o_buf:
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if p < first[u]: first[u] = p
             if p > last[u]: last[u] = p
     out: Ins[]
@@ -642,8 +644,10 @@ loop_versioning = (vector_only: bool = false):
 lx_dce = (code: Ins[]) -> Ins[]:
     nuse = fill(0, ir.vtypes.len())
     loop ins in code:
-        o_operands(ins)
-        loop u in o_buf: nuse[u] += 1
+        ir_operands(ins)
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
+            nuse[u] += 1
     keep = fill(true, code.len())
     i = code.len() - 1
     loop i >= 0:
@@ -651,8 +655,10 @@ lx_dce = (code: Ins[]) -> Ins[]:
         d = int(ins.dst)
         if o_pure(ins.op) and d >= 0 and nuse[d] == 0:
             keep[i] = false
-            o_operands(ins)
-            loop u in o_buf: nuse[u] -= 1
+            ir_operands(ins)
+            loop operand_index in [0..ir_use_count):
+                let u = ir_use(operand_index)
+                nuse[u] -= 1
         i -= 1
     out: Ins[]
     out.reserve(code.len())

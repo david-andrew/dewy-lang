@@ -275,6 +275,18 @@ lines, many in unused lazy bodies. The compiler is still implementation-language
 source. These workloads measure latency and existing implementation throughput;
 they do not yet establish large-program Dewy throughput against the target.
 
+
+A shared IR operand view now reads call arguments from their existing span and
+keeps at most three ordinary operands inline. Optimizer passes and native/web
+liveness analysis no longer refill temporary operand arrays, and their operand
+classification is defined in one place. Five alternating fresh-build samples
+([raw results](audits/2026-10-18/operand-view-compile.json)) measured CPU medians
+of 59.21 → 57.99 ms for the tour, 393.34 → 376.74 ms for Netpong, and
+1882.77 → 1839.07 ms for the compiler self-build (about 2–4% less CPU).
+Wall times were noisy under other host activity and did not consistently improve.
+The compiler bootstrapped independently from C; 321 focused native/web checks
+passed, including indirect closures with stack arguments and live values.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

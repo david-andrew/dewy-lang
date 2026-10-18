@@ -349,7 +349,6 @@ call_pos: int[]
 call_w: int[]              # per call: its weight by loop depth
 loop_s: int[]
 loop_e: int[]
-use_buf: int[]
 
 # struct copies/clears up to this size are emitted inline
 const INLINE_COPY = 256
@@ -362,74 +361,6 @@ call_like = (ins: Ins) -> bool:
     if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset: return true
     if op == .copy or op == .zero: return ins.imm > INLINE_COPY
     false
-
-# fills use_buf with used vregs; returns the defined vreg or -1
-operands = (ins: Ins) -> int:
-    use_buf.clear()
-    op = ins.op
-    a = int(ins.a)
-    bb = int(ins.b)
-    d = int(ins.dst)
-    match op:
-        nop, block, loop, end, else_, br, trap: return -1
-        iconst, fconst, slot, gaddr, daddr, faddr: return d
-        intr:
-            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
-            return d
-        if_, brif, brtable, assume:
-            use_buf.push(a)
-            return -1
-        ret:
-            if a >= 0: use_buf.push(a)
-            return -1
-        store, copy:
-            use_buf.push(a)
-            use_buf.push(bb)
-            if op == .store and int(ins.c) & M_INDEX != 0: use_buf.push(d)
-            return -1
-        vst:
-            use_buf.push(a)
-            use_buf.push(bb)
-            use_buf.push(d)
-            return -1
-        vsplat:
-            use_buf.push(a)
-            return d
-        vzu: return -1
-        zero:
-            use_buf.push(a)
-            return -1
-        memcpy, memset, vop:
-            use_buf.push(a)
-            use_buf.push(bb)
-            use_buf.push(int(ins.c))
-            return -1
-        select:
-            use_buf.push(a)
-            use_buf.push(bb)
-            use_buf.push(int(ins.c))
-            return d
-        zeroslots:
-            # defines vreg items (handled by caller via args)
-            return -1
-        call, syscall:
-            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
-            return d
-        calli, callc:
-            loop k in [0..bb): use_buf.push(int(ir.args[a + k]))
-            use_buf.push(int(ins.c))
-            return d
-        load:
-            use_buf.push(a)
-            if int(ins.c) & M_INDEX != 0: use_buf.push(bb)
-            return d
-        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
-            use_buf.push(a)
-            return d
-        _:
-            use_buf.push(a)
-            use_buf.push(bb)
-            return d
 
 fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
 
@@ -479,9 +410,10 @@ analyze = ():
             vcval[v] = ir.kval[v]
     depth = 0
     loop pos in 0.. and ins in ir.code:
-        d = operands(ins)
+        d = ir_operands(ins)
         w = 1 << (3 * min(depth, 6))
-        loop u in use_buf:
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if pos < v_first[u]: v_first[u] = pos
             if pos > v_last[u]: v_last[u] = pos
             v_nuse[u] += 1

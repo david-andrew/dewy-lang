@@ -680,8 +680,9 @@ wasm_live = (f: IrFn) -> (int[], int[]):
     kinds: int[]
     starts: int[]
     loop pos in 0.. and ins in f.code:
-        d = operands(ins)
-        loop u in use_buf:
+        d = ir_operands(ins)
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
             if pos < first[u]: first[u] = pos
             if pos > last[u]: last[u] = pos
         if d >= 0:

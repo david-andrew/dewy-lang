@@ -304,3 +304,91 @@ dump_ir = ():
             line += " args:{al}"
         print(line)
         if ins.op == .block or ins.op == .loop or ins.op == .if_ or ins.op == .else_: ind += 1
+
+ir_use_count = 0
+ir_use_values: (int, int, int)
+ir_use_span = -1
+ir_use_span_count = 0
+
+# A transient view of an instruction's uses: up to three inline operands, or
+# an existing call-argument span plus its indirect target. No temporary array
+# needs filling on each visit. Consume the view before another ir_operands call.
+ir_use = (i: int) -> int:
+    if ir_use_span >= 0:
+        if i < ir_use_span_count: return int(ir.args[ir_use_span + i])
+        return ir_use_values.2
+    # The three integer fields are contiguous. Every caller bounds i by the
+    # descriptor's count (at most three on this inline path).
+    (&ir_use_values as *int)[i]
+
+ir_has_use = (v: int) -> bool:
+    loop i in [0..ir_use_count):
+        if ir_use(i) == v: return true
+    false
+
+# Sets the operand view; returns the defined vreg or -1. zeroslots definitions
+# are carried in ir.args and handled separately by the consumers.
+ir_operands = (ins: Ins) -> int:
+    ir_use_count = 0
+    ir_use_span = -1
+    a = int(ins.a)
+    bb = int(ins.b)
+    d = int(ins.dst)
+    ir_use_values.0 = a
+    ir_use_values.1 = bb
+    ir_use_values.2 = int(ins.c)
+    match ins.op:
+        nop, block, loop, end, else_, br, trap, zeroslots: return -1
+        iconst, fconst, slot, gaddr, daddr, faddr: return d
+        intr, call, syscall:
+            ir_use_span = a
+            ir_use_span_count = bb
+            ir_use_count = bb
+            return d
+        calli, callc:
+            ir_use_span = a
+            ir_use_span_count = bb
+            ir_use_count = bb + 1
+            return d
+        if_, brif, brtable, assume:
+            ir_use_count = 1
+            return -1
+        ret:
+            if a >= 0: ir_use_count = 1
+            return -1
+        store:
+            ir_use_count = 2
+            if int(ins.c) & M_INDEX != 0:
+                ir_use_values.2 = d
+                ir_use_count = 3
+            return -1
+        vst:
+            ir_use_values.2 = d
+            ir_use_count = 3
+            return -1
+        vsplat:
+            ir_use_count = 1
+            return d
+        vzu: return -1
+        copy:
+            ir_use_count = 2
+            return -1
+        zero:
+            ir_use_count = 1
+            return -1
+        memcpy, memset, vop:
+            ir_use_count = 3
+            return -1
+        select:
+            ir_use_count = 3
+            return d
+        load:
+            ir_use_count = 1
+            if int(ins.c) & M_INDEX != 0: ir_use_count = 2
+            return d
+        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
+            ir_use_count = 1
+            return d
+        _:
+            ir_use_count = 2
+            return d
