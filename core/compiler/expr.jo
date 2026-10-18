@@ -570,7 +570,7 @@ check_place = (n: int, for_mut: bool):
             r = l
             via_closure = false
             loop true:
-                if int(locals[r].flags) & LF_CAPTURE != 0:
+                if int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0:
                     r = int(locals[r].outer)
                     via_closure = true
                 else if narrowed_var(r) != 0: r = narrowed_var(r)

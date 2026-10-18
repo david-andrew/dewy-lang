@@ -521,7 +521,6 @@ def test_dewy_mutable_loop_quickfix(tmp_path, marked):
     'items=()=>[20 22]\nmain=()=>{loop x in items() {x+=1} return 42}',
     'main=()=>{let xs=[[20 22]] loop x in xs[0] {x+=1} return 42}',
     'main=()=>{let xs=[20 22] loop x in xs[..] {x+=1} return 42}',
-    'main=()=>{let xs=[20 22] loop x in xs {let later=()=>{x+=1} later()} return 42}',
 ])
 def test_dewy_mutable_loop_quickfix_unsupported(tmp_path, text):
     compiler = os.environ.get('DEWY_CORE_COMPILER')

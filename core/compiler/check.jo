@@ -48,6 +48,7 @@ const LF_SOAMUT = 8192      # ... and the loop is `loop mut`
 const LF_ELEMALIAS = 16384  # `mut x in xs` in a combined loop: x stands for xs[k] (writes to x write xs)
 const LF_READ = 32768       # its value is read somewhere (not only the base of a write: v.f = 1)
 const LF_QUIET = 65536      # a loop counter or part of `a, b = f()`: not warned about when unused
+const LF_VALUECAP = 262144  # Dewy capture owns a snapshot; outer links stop here
 const LF_CONST = 131072     # Dewy const: one initialized value, no writes through the binding
 assign_root = 0                 # (the variable an assignment being checked writes through)
 copy_writes: {int: int} = {}    # local -> where its fields or elements are first written
@@ -1413,14 +1414,35 @@ ctx_for_inst = (inst: int) -> int:
         c = int(ctxs[c].parent)
     -1
 
+# Explicit capture lists contain local names prefixed with @. Unlisted Dewy
+# captures own values; implementation-language closures keep lexical sharing.
+value_capture = (inst: int, name: int) -> bool:
+    d = int(fns[inst].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: return false
+    loop i in [0..nkids2(d)):
+        if nodes[kid2(d, i)].name == i32(name): return false
+    true
+
 capture_in = (c: int, l: int) -> int:
     inst = int(ctxs[c].inst)
     if int(locals[l].owner) == inst or ctxs[c].parent < 0: return l
     outer = capture_in(int(ctxs[c].parent), l)
     loop cap in fns[inst].caps:
         if int(cap.outer) == outer: return int(cap.inner)
-    locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(LF_CAPTURE), pos = locals[l].pos, outer = i32(outer)))
-    capture_root(l)
+    flags = LF_CAPTURE
+    if value_capture(inst, int(locals[l].name)):
+        flags |= LF_VALUECAP | LF_DECL
+        flags |= int(locals[outer].flags) & LF_CONST
+        locals[outer].flags = locals[outer].flags | i32(LF_CAPTURED)
+    else:
+        r = outer
+        loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
+        d = int(fns[inst].decl)
+        if d != 0 and files[pos_file(nodes[d].pos)].is_dewy:
+            check_shareable(r, nodes[d].pos)
+            locals[r].flags = locals[r].flags | i32(LF_SHARED)
+        capture_root(r)
+    locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(flags), pos = locals[l].pos, outer = i32(outer)))
     inner = locals.len() - 1
     fns[inst].caps.push(Capture(i32(outer), i32(inner)))
     fns[inst].locals.push(inner)
@@ -1428,8 +1450,8 @@ capture_in = (c: int, l: int) -> int:
 
 capture_local = (l: int) -> int: capture_in(cx, l)
 
-# Closures capture variables by reference. A variable that is never modified once captured
-# behaves the same when copied, so only the others are shared (LF_SHARED). A modification that
+# Implementation-language closures capture variables by reference. A variable never modified
+# once captured behaves the same when copied, so only the others need LF_SHARED. A modification that
 # comes before the capture in the source still counts when a loop around both repeats it.
 loop_serials: int[]     # the loops being checked (innermost last)
 loop_serial_next = 0
@@ -1442,12 +1464,13 @@ capture_root = (l: int):
     f = int(locals[l].flags) | LF_CAPTURED
     w = int(locals[l].wloop)
     d = int(locals[l].dloops)
-    if w != 0 and loop_serials.len() > d and loop_serials[d] == w: f |= LF_SHARED
+    if not files[pos_file(locals[l].pos)].is_dewy and w != 0 and loop_serials.len() > d and loop_serials[d] == w: f |= LF_SHARED
     locals[l].flags = i32(f)
     if f & LF_SHARED != 0: check_shareable(l, locals[l].pos)
 
 # root variable r is modified (inside a closure if via_closure)
 note_write = (r: int, via_closure: bool, pos: int):
+    if files[pos_file(locals[r].pos)].is_dewy: return
     f = int(locals[r].flags)
     if via_closure or f & LF_CAPTURED != 0:
         locals[r].flags = i32(f | LF_SHARED)
@@ -3251,6 +3274,15 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     ctxs.push(FnCtx(i32(f), i32(parent), 0, false, 0, ctxs[parent].mod, ctxs[parent].floor))
     cx = ctxs.len() - 1
     mark = scope_mark()
+    loop i in [0..nkids2(lam)):
+        cap = kid2(lam, i)
+        check_expr(cap, 0)
+        local = 0
+        if nodes[cap].kind == .ident and nodes[cap].aux == i32(int(SK.local)):
+            local = int(nodes[cap].sym)
+            loop narrowed_var(local) != 0: local = narrowed_var(local)
+        if local == 0 or int(locals[local].flags) & LF_CAPTURE == 0:
+            fatal(nodes[cap].pos, "a shared capture must name an enclosing local variable")
     loop i in [0..fns[f].ptypes.len()):
         p = kid(lam, i)
         l = new_local(int(nodes[p].name), fns[f].ptypes[i], nodes[p].pos)

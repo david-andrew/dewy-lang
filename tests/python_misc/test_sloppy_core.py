@@ -26,6 +26,7 @@ from tools.sloppy_core.benchmark_types import record_source
 QUICK_CASES = {
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
+    'closure-copy-private', 'closure-explicit-shared', 'closure-copy-cleanup',
     'sequence-closures', 'sequence-slice-loop-snapshots', 'sequence-mutable-snapshot-in-body',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
     'dictionary-value-equality', 'set-copy-and-removal', 'numeric-bounds',
@@ -49,6 +50,91 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'closure-copy-cleanup': '''make=()=>{let n=0 let values=[1 2 3]
+return ()=>{n+=1 values.push(n); n+values.length}}
+work=()=>{let a=make() let b=a let xs=[a b] let ys=xs
+let record=[run=a rows=[xs]] let other=record
+let shared=0 let c=[@shared]()=>{shared+=1; shared} let d=c
+loop i in [0..10) {xs[0]() ys[1]() other.run() c() d()}
+}
+main=()=>{let before=alloc_count() loop i in [0..20) work()
+return if alloc_count()=?before 42 else 1}''',
+    'closure-recursive-container-copies': '''Counter:type=():>int64
+A:type=[children:array<B> next:Counter]
+B:type=[parents:array<A>]
+make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let a=A[[] make()] let keep=a let bs=[B[[a]]] let other=bs
+if bs[0].parents[0].next() not=?1 or other[0].parents[0].next() not=?1 return 1
+return if a.next()=?1 and keep.next()=?1 42 else 2}''',
+    'closure-loop-capture-value': '''main=()=>{let values=[20 22] let total=0
+loop value in values {let later=()=>{value+=1; value} total+=later()}
+return if total=?44 and values[0]=?20 and values[1]=?22 42 else 1}''',
+    'closure-mutable-loop-snapshot': '''main=()=>{let xs=[20 22] let readers:array<():>int64>=[]
+loop @x in xs {readers.push(()=>{x+=1; x}) x+=10}
+return if readers[0]()=?21 and readers[1]()=?23 and xs=?[30 32] 42 else 1}''',
+    'closure-narrowed-shared': '''main=()=>{let n:int64|string=40
+if n is? int64 {let next=[@n]()=>{n+=1; n} next() return next()}
+return 1}''',
+    'closure-copy-private': '''make=()=>{let count=0 return ()=>{count+=1; count}}
+main=()=>{let a=make() let b=a
+if a() not=?1 or b() not=?1 or a() not=?2 return 1
+let c=a
+return if c()=?3 and a()=?3 and b()=?2 42 else 2}''',
+    'closure-capture-snapshots': '''main=()=>{let n=10 let xs=[20]
+let a=()=>{n+=1 xs[0]+=1 return n+xs[0]}
+let b=()=>n+xs[0]
+n=100 xs[0]=200
+if a() not=?32 or a() not=?34 or b() not=?30 return 1
+return if n=?100 and xs[0]=?200 42 else 2}''',
+    'closure-explicit-shared': '''make=()=>{let n=0 return [@n]()=>{n+=1; n}}
+main=()=>{let a=make() let b=a
+if a() not=?1 or b() not=?2 return 1
+let n=10 let read=[@n]()=>n let inc=[@n]()=>{n+=1}
+inc() n+=1
+return if read()=?12 and a()=?3 42 else 2}''',
+    'closure-mixed-captures': '''main=()=>{let shared=0 let private=0
+let a=[@shared]()=>{shared+=1 private+=1 return private}
+let b=a
+return if a()=?1 and b()=?1 and a()=?2 and shared=?3 and private=?0 42 else 1}''',
+    'closure-nested-values': '''make=()=>{let n=0 return ()=>{n+=1 return ()=>{n+=10; n}}}
+main=()=>{let outer=make() let other=outer let a=outer() let b=outer() let c=other()
+return if a()=?11 and b()=?12 and c()=?11 and a()=?21 42 else 1}''',
+    'closure-private-cell-copy': '''main=()=>{let n=0
+let outer=()=>{let inner=[@n]()=>{n+=1; n} return inner()}
+let other=outer
+return if outer()=?1 and other()=?1 and outer()=?2 and n=?0 42 else 1}''',
+    'closure-container-copies': '''make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let a=[make()] let b=a let r=[call=make() rows=[a]] let q=r
+if a[0]() not=?1 or b[0]() not=?1 or a[0]() not=?2 return 1
+if r.call() not=?1 or q.call() not=?1 return 2
+if r.rows[0][0]() not=?1 or q.rows[0][0]() not=?1 return 3
+let m=["counter"->make()] let k=m
+return if m["counter"]()=?1 and k["counter"]()=?1 42 else 4}''',
+    'closure-argument-values': '''Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+twice=(f:Counter)=>f()+f()
+advance=(@f:Counter)=>f()
+main=()=>{let a=make()
+if twice(a) not=?3 or twice(a) not=?3 or a() not=?1 return 1
+return if advance(@a)=?2 and a()=?3 42 else 2}''',
+    'closure-const-snapshot': '''make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let a=make() const saved=a let b=saved
+if a() not=?1 or a() not=?2 or saved() not=?1 or saved() not=?1 return 1
+return if b()=?1 and b()=?2 42 else 2}''',
+    'closure-wrapper-copy': '''make=()=>{let n=0 return (step:int64)=>{n+=step; n}}
+main=()=>{let a=make() let p=(step:int64)=>a(step) let q=p
+return if p(1)=?1 and q(2)=?2 and p(3)=?4 and a(1)=?1 42 else 1}''',
+    'closure-self-replacement': '''Counter:type=(x:int64):>int64
+let current:Counter
+make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
+replace=()=>{current=make(100); 2}
+main=()=>{current=make(40)
+return if current(replace())=?42 and current(1)=?101 42 else 1}''',
+    'closure-loop-values': '''make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let values=[make()] let total=0
+loop f in values {total+=f()+f()}
+return if total=?3 and values[0]()=?1 42 else 1}''',
+
     'numeric-scaled-magnitudes': '''main=()=>{
 if abs(hypot(3e200 4e200)/5e200-1.0)>?1e-15 return 1
 if abs(hypot(3e-200 4e-200)/5e-200-1.0)>?1e-15 return 2
@@ -496,8 +582,8 @@ and saved.data =? [1 2 3 4 5 6] 42 else 2
 main=()=>{
 let rows=[Box[[1 2]] Box[[3 4]]] let saved=rows
 let which=0 let calls=0
-index=()=>{calls+=1 return which}
-amount=()=>{which=1 rows.push(Box[[5 6]]) return 10}
+index=[@calls @which]()=>{calls+=1 return which}
+amount=[@which @rows]()=>{which=1 rows.push(Box[[5 6]]) return 10}
 rows[index()].values .+= amount()
 if calls not=? 1 or rows[0].values not=? [11 12] or rows[1].values not=? [3 4] return 1
 if rows.length not=? 3 or saved[0].values not=? [1 2] return 2
@@ -657,7 +743,7 @@ main=()=>{
 let result=values(1) .+ values(2) .* scalar()
 if trace not=? 123 or result not=? [3 6 9] return 1
 let seen:array<int64>=[]
-visit=(x:int64)=>{seen.push(x) return x+1}
+visit=[@seen](x:int64)=>{seen.push(x) return x+1}
 let visited=visit.([1 2 3])
 return if visited =? [2 3 4] and seen =? [1 2 3] 42 else 2
 }''',
@@ -777,7 +863,7 @@ surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_cou
 let seen:int64=0 let batches:int64=0
 let baseline:int64=0
 surface.__fx_on=true
-surface.__fx_draw=():>void=>{
+surface.__fx_draw=[@seen @batches @baseline @points]():>void=>{
 if surface.__b_count >? surface.__BATCH_MAX panic("polyline exceeded its vertex batch")
 if batches =? 0 and alloc_count() not=? baseline panic("polyline allocated scratch buffers")
 seen+=surface.__b_count batches+=1
@@ -901,7 +987,7 @@ main=()=>{let source=[20 22] return if take(@source)=?20 and source[0]=?99 42 el
     'constant-callable-once': '''let calls=0
 make=()=>{calls+=1 let n=40 return ()=>{n+=1 return n}}
 main=()=>{const next=make() let a=next() let b=next()
-return if calls=?1 and a=?41 and b=?42 42 else 1}''',
+return if calls=?1 and a=?41 and b=?41 42 else 1}''',
     'constant-loop-initialization': '''let calls=0
 next=()=>{calls+=1 return calls}
 main=()=>{let total=0 loop i in [0..3) {const value=next() total+=value+value}
@@ -1191,7 +1277,7 @@ reference=():>int64=>{
 let word:int64=0 change(@word)
 word=(word*131+255)%1000000007 return word}
 closure=():>int64=>{
-let word:int64=0 let mutate=()=>{word=-5} mutate()
+let word:int64=0 let mutate=[@word]()=>{word=-5} mutate()
 word=(word*131+255)%1000000007 return word}
 main=()=>if reference()=?999999607 and closure()=?999999607 42 else 1''',
     'numeric-bounded-remainder-once': '''let calls:int64=0
@@ -1995,7 +2081,7 @@ return choose(flag 99 x)
 }
 main=()=>{
 let calls:int64=0
-let next=():>int64=>{calls+=1 return calls}
+let next=[@calls]():>int64=>{calls+=1 return calls}
 if choose(true next() next()) not=? 1 or calls not=? 2 return 1
 if choose(false next() next()) not=? 4 or calls not=? 4 return 2
 let value:int64=20 let saved=choose(true value 99) value=22
@@ -2035,11 +2121,11 @@ loop i in 0.. and i <? values.length {count+=1 values.pop()}
 return if count =? 4 and values.length =? 4 42 else 2}''',
     'unit-range-guarded-header-effects': '''main=()=>{
 let calls:int64=0 let count:int64=0
-let limit=():>int64=>{calls+=1 return 3}
+let limit=[@calls]():>int64=>{calls+=1 return 3}
 loop i in 0.. and i <? limit() {count+=1}
 if count not=? 3 or calls not=? 4 return 1
 calls=0 count=0
-let allowed=():>bool=>{calls+=1 return calls <? 3}
+let allowed=[@calls]():>bool=>{calls+=1 return calls <? 3}
 loop i in 0.. and i <? 3 and allowed() {count+=1}
 return if count =? 2 and calls =? 3 42 else 2}''',
     'unit-range-guarded-index-write': '''main=()=>{
@@ -2048,7 +2134,7 @@ loop i in 0.. and i <? 3 {i=99 count+=1 if count >? 4 panic("index changed contr
 return if count =? 3 42 else 1}''',
     'unit-range-guarded-captured-stop': '''main=()=>{
 let stop:int64=4 let count:int64=0
-let shrink=()=>{stop=1}
+let shrink=[@stop]()=>{stop=1}
 loop i in 0.. and i <? stop {count+=1 shrink()}
 return if count =? 1 42 else 1}''',
     'unit-range-guarded-global-alias': '''let shared=[0 1 2]
@@ -2098,7 +2184,7 @@ main=()=>{let empty:array<int64>=[]
 if inside(false empty) or not outside(true empty) return 1
 if not inside(true [42]) or outside(false [42]) return 2
 let xs=[20] let calls:int64=0
-index=()=>{calls+=1 return 0}
+index=[@calls]()=>{calls+=1 return 0}
 let ok=xs[index()] >=? 0 and xs[index()] <=? 42
 if not ok or calls not=? 2 return 3
 calls=0
@@ -2126,7 +2212,7 @@ let values=[loop i in [0..65) Item[(i*17)%13 i [i]]]
 let snapshot=values
 let comparisons:int64=0
 let descending=true
-let less=(a:Item b:Item):>bool=>{
+let less=[@comparisons @descending](a:Item b:Item):>bool=>{
     comparisons+=1
     return if descending a.score >? b.score else a.score <? b.score
 }
@@ -2165,7 +2251,7 @@ return 42}''',
     'sort-key-once': '''Item:type=[score:int64 id:int64]
 main=()=>{
 let calls:array<int64>=[]
-let key=(item:Item):>int64=>{calls.push(item.id) return item.score}
+let key=[@calls](item:Item):>int64=>{calls.push(item.id) return item.score}
 let items=[loop i in [0..65) Item[65-i i]]
 items.sort_by(key)
 if calls.length not=? 65 return 1
@@ -2403,8 +2489,8 @@ edit(@xs) return if xs =? [42 42] 42 else 2}''',
 Box:type=[row:Row]
 main=()=>{let rows:array<Box>=[Box[[10 20 30]] Box[[40 50 60]]] let saved=rows
 let which:int64=0 let calls:int64=0
-select=()=>{calls+=1 return which}
-replace=()=>{which=1 return [7 8]}
+select=[@calls @which]()=>{calls+=1 return which}
+replace=[@which]()=>{which=1 return [7 8]}
 rows[select()].row[1..end]=replace()
 if calls not=? 1 or rows[0].row not=? [10 7 8] or rows[1].row not=? [40 50 60] return 1
 let m:dict<string Row>=['a'->[10 20 30]] let old=m
@@ -2444,7 +2530,7 @@ return if values =? [2 42 30 42] and inline =? [6 8 30 9] and inline[indexes] =?
 values[values]=[20 22]
 if values not=? [22 20] return 1
 let indexes:array<int64 length=2>=[1 0]
-replacement=()=>{indexes[0]=0 return [40 42]}
+replacement=[@indexes]()=>{indexes[0]=0 return [40 42]}
 values[indexes]=replacement()
 return if values =? [42 40] and indexes =? [0 0] 42 else 2}''',
     'fixed-array-mask-managed': '''work=():>void=>{let rows:array<array<string> length=3>=[["a"] ["b"] ["c"]]
@@ -2573,7 +2659,7 @@ return if value =? 22 and source.values[1] =? 99 42 else 1}''',
 xs[end]+=1 xs[end-1]=20
 return if xs[end]+xs[end-1] =? 42 and saved =? [1 20 21] 42 else 1}''',
     'end-index-update-nested': '''let calls=0
-index=()=>{calls+=1 return 0}
+index=[@calls]()=>{calls+=1 return 0}
 main=()=>{let xs=[[1 20 21]] xs.push([0]) let saved=xs
 xs[index()][end]+=1
 return if calls =? 1 and xs[0][end] =? 22 and saved[0][end] =? 21 42 else 1}''',
@@ -4186,7 +4272,7 @@ let index:int64=0
 keep=()=>{if index =? 1 {xs.push(22)} return index <? xs.length}
 main=()=>{let sum:int64=0 loop keep() {sum+=xs[index] index+=1} return sum}''',
     'captured-array': '''main=()=>{let xs:array<int64>=[40] let original=xs
-let bump=()=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}''',
+let bump=[@xs]()=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}''',
     'type-alias': 'Count:type=int64\nmain=()=>{let x:Count=42 return x}',
     'union': '''Choice:type=int64|string
 value=(x:Choice):>int64=>if x is? int64 x else 0
@@ -5157,6 +5243,13 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'closure-shared-duplicate': ('main=()=>{let n=0 let f=[@n @n]()=>n return f()}', 'duplicate shared capture'),
+    'closure-shared-unmarked': ('main=()=>{let n=0 let f=[n]()=>n return f()}', 'capture list entry without @'),
+    'closure-shared-field': ('main=()=>{let r=[n=0] let f=[@r.n]()=>r.n return f()}', 'a shared capture other than a local name'),
+    'closure-shared-global': ('let n=0\nmain=()=>{let f=[@n]()=>n return f()}', 'a shared capture must name an enclosing local'),
+    'closure-shared-parameter': ('make=(@n:int64)=>[@n]()=>n\nmain=()=>{let n=0 let f=make(@n) return f()}', 'only variables declared with'),
+    'closure-private-function-cycle': ('Counter:type=():>int64\nmain=()=>{let f:Counter=()=>0 let outer=()=>{let g=[@f]()=>f() f=g return f()} return outer()}', 'keep it alive forever'),
+    'closure-shared-function-cycle': ('Counter:type=():>int64\nmain=()=>{let f:Counter=()=>0 let g=[@f]()=>f() f=g return 42}', 'keep it alive forever'),
     'sequence-mutable-value-write': ('main=()=>{let xs=[1] loop x in xs x+=1}', '`loop @item`'),
     'sequence-mutable-const': ('main=()=>{const xs=[1] loop @x in xs x+=1}', 'cannot modify const'),
     'sequence-mutable-range': ('main=()=>{let xs=[0..2) loop @x in xs x+=1}', 'needs stored array elements'),
@@ -5172,7 +5265,7 @@ ERRORS = {
     'sequence-mutable-replace': ('main=()=>{let xs=[1] loop @x in xs {xs=[2] x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-parent': ('Box:type=[xs:array<int64>]\nmain=()=>{let box=Box[[1]] loop @x in box.xs {box=Box[[2]] x+=1}}', '`loop @item` changes the elements'),
     'sequence-mutable-global-call': ('let xs=[1]\ngrow=()=>xs.push(2)\nmain=()=>{loop @x in xs {grow() x+=1}}', '`loop @item` changes the elements'),
-    'sequence-mutable-escape': ('main=()=>{let xs=[1] loop @x in xs {let later=()=>{x+=1} later()}}', 'stands for an element only while the loop is there'),
+    'sequence-mutable-escape': ('main=()=>{let xs=[1] loop @x in xs {let later=[@x]()=>{x+=1} later()}}', 'stands for an element only while the loop is there'),
     'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-constant': ('main=()=>{const xs=[1 2] xs[..] .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-mask-constant': ('main=()=>{const xs=[1 2] xs[[true false]] .+= 1 return 0}', 'constant'),
@@ -7691,12 +7784,12 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
     ('let xs=[1 2] xs[[true false]] .+= [10 20]', 'values for the 1 elements in the mask'),
     ('let xs=[1 2] xs[[0]] .+= [10 20]', 'values for 1 indexes'),
     ('let xs=[1 2] xs[0,0..1] .+= 10', 'range step must be nonzero'),
-    ('let xs=[1 2] right=()=>{xs.pop() return 10} xs[..] .+= right()', 'out of bounds'),
+    ('let xs=[1 2] right=[@xs]()=>{xs.pop() return 10} xs[..] .+= right()', 'out of bounds'),
     ('let xs=[1 2] right=()=>{panic("RHS evaluated") return 10} xs[[2]] .+= right()', 'out of bounds'),
     ('let xs=[1 2] xs[[true]] .+= 10', 'a mask of 1 for 2 elements'),
     ('let m=zeros(2 3) m[[..] 1] .+= [1.0 2.0 3.0]', 'do not match for an elementwise operation'),
     ('let m=zeros(2 3) m[[0..0] 1] .+= [1.0 2.0]', 'assigning 2 elements to a part of 1'),
-    ('let m=zeros(2 3) right=()=>{m=zeros(1 1) return 1.0} m[[..] [..]] .+= right()', 'out of bounds'),
+    ('let m=zeros(2 3) right=[@m]()=>{m=zeros(1 1) return 1.0} m[[..] [..]] .+= right()', 'out of bounds'),
     ('let m=zeros(2 3) right=()=>{panic("RHS evaluated") return 1.0} m[[..] 3] .+= right()', 'out of bounds'),
     ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),
     ('printl(zeros(0 3) .+ zeros(2 3))', 'do not match for an elementwise operation'),
@@ -7708,7 +7801,7 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
     ('let m=zeros(2 3) let r=[2,1..-1] printl(m[[..] r])', 'out of bounds'),
     ('let m=zeros(2 3) let r=IntRange[0 9223372036854775808 3 true false] printl(m[[..] r])', 'out of bounds'),
     ('let m=zeros(2 3) let r=IntRange[0 1 0 true false] printl(m[[..] r])', 'out of bounds'),
-    ('let m=zeros(2 3) right=()=>{m=zeros(2 2) return 1.0} m[[..] [2,0..0]] .+= right()', 'out of bounds'),
+    ('let m=zeros(2 3) right=[@m]()=>{m=zeros(2 2) return 1.0} m[[..] [2,0..0]] .+= right()', 'out of bounds'),
     ('let m=zeros(2 3) m[[..] 1]=[1.0]', 'assigning 1 elements to a part of 2'),
     ('let m=zeros(2 3) printl(m[[..] [..] 0])', '3 indexes for an array'),
     ('printl(fill(0 (1<<61)+1).length)', 'array is too large'),
@@ -8110,8 +8203,8 @@ def test_core_format_errors(error_batches, body, diagnostic, target, release):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('body', [
-    'let xs=[1 2] let shrink=()=>xs.clear() loop @x in xs {shrink() x+=1}',
-    'let xs=[[1] [2]] let shrink=()=>xs.clear() loop @x in xs {shrink() x.push(3)}',
+    'let xs=[1 2] let shrink=[@xs]()=>xs.clear() loop @x in xs {shrink() x+=1}',
+    'let xs=[[1] [2]] let shrink=[@xs]()=>xs.clear() loop @x in xs {shrink() x.push(3)}',
 ])
 def test_core_mutable_loop_errors(error_batches, body, target, release):
     ran = error_batches('bounds', body, release, target)
@@ -9359,7 +9452,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

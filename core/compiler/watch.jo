@@ -172,7 +172,10 @@ wk_lambda_keys = ():
         loop j in 0.. and g in insts:
             if encl[j] == encl[k] and nodes[int(fns[g].decl)].pos < p: rank += 1
         caps = ""
-        loop c in fns[f].caps: caps = "{caps},{name_of(int(locals[int(c.inner)].name))}:{type_str(int(locals[int(c.inner)].type))}"
+        loop c in fns[f].caps:
+            inn = int(c.inner)
+            mode = int(locals[inn].flags) & LF_VALUECAP
+            caps = "{caps},{name_of(int(locals[inn].name))}:{type_str(store_type(inn))}:{mode}"
         en = "?"
         if encl[k] != 0 and nodes[encl[k]].name != 0: en = name_of(int(nodes[encl[k]].name))
         t = ""
@@ -203,7 +206,7 @@ wk_fn_keys = () -> str[]:
         if w_mig_lfs.get(i) != none: k = "watch-mig|{lfuncs[i].name}"
         else if lfuncs[i].kind == LK_HELPER:
             k = "h|{lfuncs[i].hkind}|{type_str(lfuncs[i].htype)}"
-            if lfuncs[i].inst >= 0 and lfuncs[i].inst < fns.len() and (lfuncs[i].hkind == .thunk or lfuncs[i].hkind == .partial or lfuncs[i].hkind == .envdrop): k = "{k}|{wk_inst(lfuncs[i].inst)}"
+            if lfuncs[i].inst >= 0 and lfuncs[i].inst < fns.len() and (lfuncs[i].hkind == .thunk or lfuncs[i].hkind == .partial or lfuncs[i].hkind == .envdrop or lfuncs[i].hkind == .envcopy): k = "{k}|{wk_inst(lfuncs[i].inst)}"
         else if lfuncs[i].inst == w_init_inst: k = "watch-init"
         else if wk_lam.get(lfuncs[i].inst) != none: k = wk_lam[lfuncs[i].inst]
         else: k = wk_inst(lfuncs[i].inst)

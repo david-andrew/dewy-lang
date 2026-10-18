@@ -397,36 +397,43 @@ is_lib_texture = (si: int) -> bool:
 
 # can a value of this type hold a function value (a closure)? (through arrays, optionals, tuples,
 # struct and enum fields, and union members)
-has_fn_memo: {int: int} = {}          # 1: being worked out (a recursive type), 2: yes, 3: no
+has_fn_memo: {int: int} = {}          # 2: yes, 3: no; only completed graph searches
 
 type_has_fn = (t0: int) -> bool:
-    t = prune(t0)
-    k = types[t].kind
-    if k == .fn_: return true
-    if k == .array or k == .opt or k == .fixed: return type_has_fn(int(types[t].elem))
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if type_has_fn(targ(t, i)): return true
-        return false
-    if k != .struct_ and k != .enum_: return false
-    if let c = has_fn_memo.get(t): return c == 2
-    has_fn_memo[t] = 1
-    si = int(types[t].st)
-    check_struct_fields(si)
-    r = false
-    # (a union's members are its type arguments; other structs hold only what their fields do)
-    if structs[si].union_:
-        loop i in [0..int(structs[si].ntargs)):
-            if type_has_fn(struct_targ(si, i)): r = true
-    loop i in [0..int(structs[si].nfields)):
-        if type_has_fn(int(fields[int(structs[si].fields) + i].type)): r = true
-    loop v in [0..int(structs[si].nvariants)):
-        vi = int(structs[si].variants) + v
-        loop i in [0..int(variants[vi].nfields)):
-            if type_has_fn(int(fields[int(variants[vi].fields) + i].type)): r = true
-    has_fn_memo[t] = 3
-    if r: has_fn_memo[t] = 2
-    r
+    root = prune(t0)
+    if let cached = has_fn_memo.get(root): return cached == 2
+    pending = [root]
+    seen: {int: bool} = {}
+    found = false
+    loop pending.len() > 0:
+        t = prune(pending.pop())
+        if seen.has(t): continue
+        seen[t] = true
+        k = types[t].kind
+        if k == .fn_:
+            found = true
+            break
+        if let cached = has_fn_memo.get(t):
+            if cached == 2:
+                found = true
+                break
+            continue
+        if k == .array or k == .opt or k == .fixed: pending.push(int(types[t].elem))
+        else if k == .tuple:
+            loop i in [0..int(types[t].nargs)): pending.push(targ(t, i))
+        else if k == .struct_ or k == .enum_:
+            si = int(types[t].st)
+            check_struct_fields(si)
+            if structs[si].union_:
+                loop i in [0..int(structs[si].ntargs)): pending.push(struct_targ(si, i))
+            loop i in [0..int(structs[si].nfields)): pending.push(int(fields[int(structs[si].fields) + i].type))
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): pending.push(int(fields[int(variants[vi].fields) + i].type))
+    # A back edge alone does not prove a subtree has no functions. Cache the
+    # completed root result, never a provisional answer inside a recursive type.
+    has_fn_memo[root] = if found: 2 else: 3
+    found
 
 is_aggregate = (t0: int) -> bool:
     t = prune(t0)

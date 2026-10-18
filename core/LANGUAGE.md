@@ -289,6 +289,51 @@ References can name a field or array element: `bump(@point.x)`,
 `bump(@values[i])` or `bump(@points[i].x)`. An index expression evaluates once;
 other copies of the record or array retain their independent values.
 
+Closures capture snapshots of enclosing locals. Each closure can change its own
+private captures; later changes to the enclosing locals do not change those
+snapshots. Copying a closure copies its current private state:
+
+```dewy
+make_counter = () => {
+    let count = 0
+    return () => { count += 1; count }
+}
+main = () => {
+    let a = make_counter()
+    let b = a
+    printl(a()) # 1
+    printl(b()) # 1
+    printl(a()) # 2
+}
+```
+
+Use an explicit capture list to share an enclosing local binding:
+
+```dewy
+main = () => {
+    let count = 0
+    let next = [@count]() => { count += 1; count }
+    let other = next
+    printl(next()) # 1
+    printl(other()) # 2
+    printl(count) # 2
+}
+```
+
+Keep `](` adjacent. A list contains `@name` entries; other referenced locals
+still become private snapshots. Shared locals remain alive after the enclosing
+call returns, and copies retain that deliberate sharing. A mutable parameter
+or loop element place cannot escape through a shared capture; copy its value
+into a local first. Shared cells that could hold functions are rejected to
+avoid reference cycles. Module globals retain their module-wide identity.
+
+Ordinary callback parameters receive independent values. To advance a caller's
+counter, accept `@counter` and pass `@counter`, just as for other mutable values.
+Records and collections containing closures also preserve independent copies.
+Calling a callable saved under `const` uses a temporary copy of its private
+state; explicit shared captures still refer to their shared bindings. Captured
+`const` locals remain read-only inside the closure.
+
 Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
 types are `float32` and `float64`. Ordinary integer literals default to `int64`
 when they fit. Use `as` or a type call such as `uint8(value)` for numeric value
@@ -1366,9 +1411,9 @@ arms. A fallback runs only when the body never ran, as for ordinary loops.
 Keep the source array's length and storage intact during iteration: collect
 removals/additions separately and apply them afterwards. The compiler rejects
 visible resizing or replacement; indirect changes through callbacks still have
-runtime bounds checks. For an escaping callback, explicitly copy the element
-first (`let captured = item`, then `() => captured`); the mutable place itself
-cannot be kept for later changes.
+runtime bounds checks. An escaping callback captures an independent snapshot
+of the element. The mutable place itself cannot be kept through an explicit
+shared capture for later changes.
 
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:

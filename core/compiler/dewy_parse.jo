@@ -358,6 +358,18 @@ dw_function = (id: int, name: str) -> int:
     if dw_op(signature) == ":>":
         params = dw_child(signature, 1)
         result = dw_child(signature, 2)
+    captures: int[]
+    if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "[]:":
+        if name != "": return dw_fail(params, "a capture list on a module function")
+        seen: {str: bool} = {}
+        loop cap in dewy_syntax[dw_child(params, 1)].children:
+            if dw_op(cap) != "@": return dw_fail(cap, "a capture list entry without @")
+            nm = dw_name(dw_child(cap, 1))
+            if nm == "": return dw_fail(cap, "a shared capture other than a local name")
+            if seen.has(nm): fatal(dewy_syntax[cap].pos, "duplicate shared capture '{nm}'")
+            seen[nm] = true
+            captures.push(dw_expr(dw_child(cap, 1)))
+        params = dw_child(params, 2)
     type_params: int[]
     if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "<>:":
         if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
@@ -366,6 +378,7 @@ dw_function = (id: int, name: str) -> int:
     if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
+    if captures.len() > 0: set_list2(n, captures)
     if type_params.len() > 0:
         if name == "main": return dw_fail(id, "a generic entry point")
         set_list2(n, type_params)

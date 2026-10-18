@@ -23,7 +23,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial
+enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy
 
 struct LFunc:
     kind: int
@@ -294,9 +294,18 @@ copy_at = (addr: int, t0: int):
     t = prune(t0)
     if not is_managed(t): return
     if vc(t) == VC_INT:
-        retain(e_load(VI, addr, 0, ptr_size), t)
+        e_store(addr, 0, copy_ref(e_load(VI, addr, 0, ptr_size), t), ptr_size)
         return
     e_call(lf_helper(.copy, t, 0), [addr], -1)
+
+# Arrays containing callable values must copy their environments too. Ordinary
+# data arrays retain the normal COW path. This eager path is deliberately small:
+# it also works when a callback is invoked by a borrowed implementation-library API.
+copy_ref = (v: int, t: int) -> int:
+    retain(v, t)
+    if types[prune(t)].kind == .array and type_has_fn(t):
+        return e_call(lf_helper(.arruniq, t, 0), [v], VI)
+    v
 
 # ---------------- temps ----------------
 new_temp = (t: int) -> int: new_slot(tsize(t), talign(t))
@@ -332,7 +341,7 @@ own = (val: Val, t: int) -> Val:
         e_copy(a, val.v, tsize(t))
         if is_managed(t): copy_at(a, t)
         return Val(a, true, s)
-    if is_managed(t): retain(val.v, t)
+    if is_managed(t): return Val(copy_ref(val.v, t), true, -1)
     Val(val.v, true, -1)
 
 gen_owned = (e: int) -> Val: own(gen_expr(e), ntype(e))
@@ -474,7 +483,7 @@ place_addr = (p: Place, t: int) -> int:
 # element, without copy-on-write, so all holders see the same value.
 share_root = (l: int) -> int:
     r = l
-    loop int(locals[r].flags) & LF_CAPTURE != 0: r = int(locals[r].outer)
+    loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
     r
 
 is_shared = (l: int) -> bool: int(locals[share_root(l)].flags) & LF_SHARED != 0
@@ -490,12 +499,14 @@ cell_place = (l: int) -> Place:
     if locals[l].offset >= 0: return Place(true, e_slot(int(locals[l].offset)))
     Place(false, int(locals[l].vreg))
 
-new_cell = (l: int):
+check_cell_type = (l: int):
     # (a cell holding a closure that holds the cell would never be freed: values that can hold
     # functions are not shared like this)
     if type_has_fn(int(locals[l].type)):
         nm = name_of(int(locals[l].name))
         fatal(int(locals[l].pos), "'{nm}' is changed after a closure captured it, and it can hold functions ({type_str(int(locals[l].type))}): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as a `mut` parameter")
+new_cell = (l: int):
+    check_cell_type(l)
     sz = tsize(int(locals[l].type))
     if sz < 1: sz = 1
     write_place(cell_place(l), store_type(l), e_call(rt("__arr_repeat"), [e_iconst(1), e_iconst(sz)], VI))
@@ -815,6 +826,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
+        if not val.owned and type_has_fn(pt) and files[pos_file(nodes[a].pos)].is_dewy: val = own(val, pt)
         if not val.owned and is_managed(pt) and (any_mut or borrow_may_change(a, args, i, callee)): val = own(val, pt)
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
@@ -1452,12 +1464,23 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
 gen_closure_call = (callee: int, args: int[]) -> Val:
     ft = prune(ntype(callee))
     ret = int(types[ft].elem)
-    # (a closure kept where it may be replaced while it runs, by itself or an argument)
-    cval = gen_borrowed(callee)
-    if not cval.owned and borrow_may_change(callee, [], 0, 0):
-        cval = own(cval, ft)
-        borrow(cval, ft)
-    cv = cval.v
+    cval = gen_expr(callee)
+    # A const callable is a saved value: call a temporary copy so its private
+    # state cannot change through the const binding. Explicit shared cells stay shared.
+    root = place_var(callee)
+    frozen_value = false
+    if root != 0:
+        if nodes[root].aux == i32(int(SK.local)): frozen_value = int(locals[int(nodes[root].sym)].flags) & LF_CONST != 0
+        else if nodes[root].aux == i32(int(SK.global)): frozen_value = readonly_global(int(nodes[root].sym))
+    if frozen_value: cval = own(cval, ft)
+    borrow(cval, ft)
+    # Pin the exact environment being invoked, without making a semantic copy.
+    # Arguments or the callback itself can replace the original function value.
+    saved = new_temp(ft)
+    cv = e_slot(saved)
+    e_copy(cv, cval.v, tsize(ft))
+    retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
+    reg_temp_slot(saved, ft)
     fp = e_load(VI, cv, 0, ptr_size)
     # (a field or variable of a function type never given one: none, said as that)
     iff(e_bin(.eq, VI, fp, e_iconst(0)))
@@ -1494,9 +1517,10 @@ gen_cfn_call = (callee: int, args: int[]) -> Val:
 # ---------------- closures ----------------
 env_layout = (f: int):
     if fns[f].env_size != 0: return
-    off = 16
+    off = 24
     loop cap in fns[f].caps:
         inn = int(cap.inner)
+        if is_shared(inn): check_cell_type(inn)
         t = store_type(inn)
         al = talign(t)
         if al < 8: al = 8
@@ -1520,11 +1544,12 @@ gen_lambda = (e: int) -> Val:
     e_store(a, ptr_size, env, ptr_size)
     hdr_store(env, 0, e_iconst(1))
     hdr_store(env, 8, e_faddr(lf_helper(.envdrop, 0, f)))
+    hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, f)))
     loop cap in fns[f].caps:
         outer = int(cap.outer)
         inn = int(cap.inner)
-        if is_shared(outer):
-            # the closure holds the cell
+        if is_shared(inn) and int(locals[inn].flags) & LF_VALUECAP == 0:
+            # An explicit shared capture holds the original cell.
             st = store_type(outer)
             c = read_place(cell_place(outer), st)
             retain(c, st)
@@ -1533,7 +1558,13 @@ gen_lambda = (e: int) -> Val:
         t = int(locals[outer].type)
         id = mk_ident_local(outer, nodes[e].pos)
         val = own(gen_expr(id), t)
-        store_val(t, env, int(locals[inn].env_off), val.v)
+        if is_shared(inn):
+            # A nested explicit capture may share this private snapshot. Give
+            # it a fresh cell, never the enclosing variable's cell.
+            cell = e_call(rt("__arr_repeat"), [e_iconst(1), e_iconst(max(1, tsize(t)))], VI)
+            store_val(t, cell, 24, val.v)
+            store_val(store_type(inn), env, int(locals[inn].env_off), cell)
+        else: store_val(t, env, int(locals[inn].env_off), val.v)
     Val(e_slot(s), true, s)
 
 gen_fnref = (e: int) -> Val:
@@ -1550,8 +1581,8 @@ gen_fnref = (e: int) -> Val:
 
 partial_layout = (e: int) -> int[]:
     offs: int[]
-    off = 16
-    if nodes[e].aux == 1: off += 16
+    off = 24
+    if nodes[e].aux == 1: off += closure_size()
     loop i in [0..nkids(e)):
         a = kid(e, i)
         if nodes[a].kind == .hole:
@@ -1578,11 +1609,12 @@ gen_partial = (e: int) -> Val:
     e_store(a, ptr_size, env, ptr_size)
     hdr_store(env, 0, e_iconst(1))
     hdr_store(env, 8, e_faddr(lf_helper(.envdrop, 0, th)))
+    hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, th)))
     target = int(nodes[e].sym)
     if target != 0: parallel_direct(target, nodes[e].pos)
     if nodes[e].aux == 1:
         cv = gen_owned(int(nodes[e].a))
-        e_copy(e_addi(env, 16), cv.v, closure_size())
+        e_copy(e_addi(env, 24), cv.v, closure_size())
     loop i in [0..nkids(e)):
         arg = kid(e, i)
         if nodes[arg].kind == .hole: continue
@@ -3851,6 +3883,7 @@ param_view_decl = (s: int, l: int) -> bool:
     fl = int(locals[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
     t = prune(int(locals[l].type))
+    if type_has_fn(t): return false
     if not is_managed(t) and vc(t) != VC_AGG: return false
     iv = int(nodes[s].b)
     if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)): return false
@@ -3883,6 +3916,7 @@ view_decl = (s: int, l: int) -> bool:
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
     t = prune(int(locals[l].type))
     if types[t].kind != .struct_ and types[t].kind != .tuple: return false
+    if type_has_fn(t): return false
     iv = int(nodes[s].b)
     if iv == 0: return false
     # the element of an array reached by a path (xs[i], w.xs[i], xs[i].part)
@@ -4710,7 +4744,7 @@ gen_for = (s: int):
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not sliced and not is_slice(it) and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
+        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.
@@ -5476,7 +5510,11 @@ helper_drop = (t: int, copy: bool):
     k = types[t].kind
     if k == .fn_:
         env = e_load(VI, a, ptr_size, ptr_size)
-        if copy: retain(env, T_STR)
+        if copy:
+            iff(e_bin(.ne, VI, env, e_iconst(0)))
+            cf = e_load(VI, env, 16, ptr_size)
+            e_store(a, ptr_size, e_calli(cf, [env], VI, false), ptr_size)
+            endc()
         else:
             iff(e_call(rt("__rc_dec_test"), [env], VI))
             df = e_load(VI, env, 8, ptr_size)
@@ -5909,7 +5947,7 @@ helper_partial = (th: int):
     ir.ret = ret_vt(ret)
     argv: int[]
     if sret: argv.push(sv)
-    if nodes[e].aux == 1: argv.push(e_load(VI, env, 16 + ptr_size, ptr_size))
+    if nodes[e].aux == 1: argv.push(e_load(VI, env, 24 + ptr_size, ptr_size))
     hk = 0
     loop i in [0..nkids(e)):
         a = kid(e, i)
@@ -5923,7 +5961,7 @@ helper_partial = (th: int):
     r = 0
     if target != 0: r = e_call(lf_of_inst(target), argv, ret_vt(ret))
     else:
-        fp = e_load(VI, env, 16, ptr_size)
+        fp = e_load(VI, env, 24, ptr_size)
         r = e_calli(fp, argv, ret_vt(ret), false)
     if sret: e_ret(sv)
     else: e_ret(r)
@@ -5934,7 +5972,7 @@ helper_envdrop = (f: int):
     if fns[f].kind == FK_PARTIAL:
         e = int(fns[f].partial)
         offs = partial_layout(e)
-        if nodes[e].aux == 1: drop_at(e_addi(env, 16), ntype(int(nodes[e].a)))
+        if nodes[e].aux == 1: drop_at(e_addi(env, 24), ntype(int(nodes[e].a)))
         loop i in [0..nkids(e)):
             if offs[i] < 0: continue
             drop_at(e_addi(env, offs[i]), ntype(kid(e, i)))
@@ -5946,6 +5984,46 @@ helper_envdrop = (f: int):
             if is_managed(t): drop_at(e_addi(env, int(locals[inn].env_off)), t)
     e_call(rt("__free"), [env], -1)
     e_ret(-1)
+
+helper_envcopy = (f: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    src = ps[0]
+    d = int(fns[f].decl)
+    if fns[f].kind == FK_PARTIAL: d = int(fns[f].partial)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy:
+        retain(src, T_STR)
+        return e_ret(src)
+    if fns[f].kind != FK_PARTIAL:
+        env_layout(f)
+        mutable = false
+        loop cap in fns[f].caps:
+            inn = int(cap.inner)
+            flags = int(locals[inn].flags)
+            if flags & LF_VALUECAP != 0 and (flags & LF_ASSIGNED != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type))): mutable = true
+        if not mutable:
+            retain(src, T_STR)
+            return e_ret(src)
+    env = e_call(rt("__alloc"), [e_iconst(int(fns[f].env_size))], VI)
+    e_copy(env, src, int(fns[f].env_size))
+    hdr_store(env, 0, e_iconst(1))
+    if fns[f].kind == FK_PARTIAL:
+        offs = partial_layout(d)
+        if nodes[d].aux == 1: copy_at(e_addi(env, 24), ntype(int(nodes[d].a)))
+        loop i in [0..nkids(d)):
+            if offs[i] >= 0: copy_at(e_addi(env, offs[i]), ntype(kid(d, i)))
+    else:
+        loop cap in fns[f].caps:
+            inn = int(cap.inner)
+            t = store_type(inn)
+            addr = e_addi(env, int(locals[inn].env_off))
+            if is_shared(inn):
+                cell = e_load(VI, addr, 0, ptr_size)
+                retain(cell, t)
+                if int(locals[inn].flags) & LF_VALUECAP != 0:
+                    e_store(addr, 0, e_call(lf_helper(.arruniq, t, 0), [cell], VI), ptr_size)
+            else: copy_at(addr, t)
+    e_ret(env)
 
 lower_helper = (lf: int):
     h = lfuncs[lf]
@@ -5961,6 +6039,7 @@ lower_helper = (lf: int):
         thunk: helper_thunk(h.inst)
         partial: helper_partial(h.inst)
         envdrop: helper_envdrop(h.inst)
+        envcopy: helper_envcopy(h.inst)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the

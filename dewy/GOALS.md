@@ -12,6 +12,10 @@ A binding names a value. Assignment, argument passing, and return give the
 receiver its own value. Sharing is either unobservable or written in the source:
 `@` at the parameter and at the call names a place.
 
+Closures follow the same rule. An ordinary capture takes a snapshot, and copying
+a stateful closure gives the copy independent private state. Shared captures are
+explicit. Copying a callback must not silently introduce shared mutable state.
+
 Ordinary programs should be comfortable to write. Common code should run well
 without pervasive annotations. A whole program, including the compiler, should
 compile from source quickly enough to stay in the edit loop: a compiler build

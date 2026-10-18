@@ -36,7 +36,8 @@ physics-game checks of 119 ms versus 192 ms and release builds of 350 ms versus
 process times with warm filesystem caches and one emission worker.
 
 The current slice supports typed and inferred functions, generic calls, default
-arguments, closures with captured state, higher-order calls, mutable `@` arguments,
+arguments, closures with independent private state and explicit shared captures,
+higher-order calls, mutable `@` arguments,
 independent value parameters, fixed-width arithmetic, based integer and decimal
 scientific literals, floating-point records,
 arrays and dictionaries with value copies, array slices, grapheme string operations, optional values, type aliases, callable types, union
@@ -46,6 +47,20 @@ array/range iteration (including single stepped integer loops), import aliases, 
 combined `and` loop headers, and `in?`/`not in?` membership for arrays,
 dictionaries, strings and integer range literals. Combined loops reuse
 the core's lowering, including correct advancement on `continue`.
+
+Dewy closure literals snapshot enclosing locals; `[@name]()` opts specific
+locals into lexical sharing. Copying a closure duplicates mutable private
+captures and retains explicit shared cells. Immutable private environments can
+be retained without an allocation. Calls pin the environment being invoked so
+replacing the callable during argument evaluation does not free it prematurely.
+The implementation-language `.jo` closures retain their existing lexical
+sharing behavior. See [closure examples and limits](../../core/LANGUAGE.md).
+
+For now, value copies of arrays that can contain functions eagerly duplicate
+their elements' private environments, including through recursive record types.
+Other arrays keep their usual copy-on-write storage. This makes callback copies
+independent even across borrowed implementation-library APIs; it is a focused
+correctness path, with further copy-on-write optimization still possible.
 Diagnostics retain UTF-8 source locations. A semicolon explicitly discards a result.
 
 This is an opt-in compiler experiment, not a full language implementation or a
