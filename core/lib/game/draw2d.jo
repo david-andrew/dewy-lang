@@ -1204,7 +1204,10 @@ text_wrapped = (s: str, pos: vec2, width: f64, size: f64 = 20.0, color: vec4 = v
         y += size * 1.25
     f64(lines.len()) * size * 1.25
 
-# draw text with its top-left corner at `pos` (characters the font does not have show as ?);
+# draw text with its top-left corner at `pos`. The built-in font has ASCII, Latin-1's accented
+# letters and symbols (° ² ½ ± × ÷), Greek (θ ω π Δ λ μ), − √ ≈ ≠ ≤ ≥ ∞ ∑ ∫ ∂ ∝ ⋅ ∇ ∈, arrows
+# (→ ← ↑ ↓ ↔), sub- and superscript digits (v₀, x⁴, 10⁻⁹), ′ ″ and ✓ ✗; characters a font
+# does not have show as ? (load_font: others);
 # shadow: a color drawn under it, a little down and right, to read over a busy scene
 # (`shadow = rgba(0, 0, 0, 0.7)`). mono: each character in a cell of the same width, so
 # columns made with "{name:<12} {score:>5}" line up (a scoreboard, a table, a roguelike's map).

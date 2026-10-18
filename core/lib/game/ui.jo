@@ -30,6 +30,11 @@ struct UiStyle:
 
 ui_style = UiStyle()
 
+# the look for menus over a light background (dark text, a dark orange for the chosen item):
+# `ui_style = ui_light_style()`
+ui_light_style = () -> UiStyle:
+    UiStyle(color = vec4(0.08, 0.09, 0.11, 0.88), focus_color = vec4(0.78, 0.33, 0.0, 1), disabled_color = vec4(0, 0, 0, 0.3), bar_color = vec4(0, 0, 0, 0.12))
+
 __ui_menu = ""
 __ui_open_frame = -1            # the frame the menu opened in
 __ui_drawn_frame = -10          # the last frame a menu was drawn in
@@ -142,6 +147,10 @@ ui_ready = () -> bool: frame_number() != __ui_open_frame
 # value in its right; as wide as the menu's widest, so the values line up)
 __ui_row = (label: str, value_w: f64) -> f64:
     need = max(ui_style.width, 2.0 * (max(text_width(label, ui_style.size), value_w) + 24.0))
+    # (no wider than the screen leaves on both sides of the column's middle)
+    v = visible_rect()
+    room = 2.0 * min(f64(__ui_pos.x - v.x), f64(v.x + v.w - __ui_pos.x)) - 16.0
+    if room > 0.0: need = min(need, max(room, ui_style.width * 0.5))
     __ui_row_need = max(__ui_row_need, need)
     __ui_row_w = max(__ui_row_w, need)
     __ui_row_w
@@ -157,12 +166,15 @@ __ui_item = (w: f64) -> (int, vec2, bool):
     if over and __ui_mouse_moved: __ui_focus = i
     (i, c, __ui_focus == i)
 
+# (the item chosen with keys or a pad looks chosen; with a finger, nothing is until it is tapped)
+__ui_lit = (focused: bool) -> bool: focused and not touch_input()
+
 __ui_label = (s: str, c: vec2, focused: bool, enabled: bool):
     col = ui_style.color
-    if focused: col = ui_style.focus_color
+    if __ui_lit(focused): col = ui_style.focus_color
     if not enabled: col = ui_style.disabled_color
     shown = s
-    if focused and enabled: shown = "> {s} <"
+    if __ui_lit(focused) and enabled: shown = "> {s} <"
     text_centered(shown, c, ui_style.size, col)
 
 # a button: true in the frame it is chosen
@@ -174,29 +186,56 @@ ui_button = (label: str, enabled: bool = true) -> bool:
     if not enabled: return false
     (r.2 and __ui_ok) or (over and mouse_pressed(.left) and ui_ready())
 
-# a value from 0 to 1, changed in steps of `step` (left/right, or dragging with the mouse)
-ui_slider = (label: str, value: f64, step: f64 = 0.1) -> f64:
+# a value from low to high (0 to 1 unless given), changed in steps of `step` (left/right, or
+# dragging with the mouse or a finger): `angle = ui_slider("Angle {int(angle)}°", angle, 1, 5, 90)`
+ui_slider = (label: str, value: f64, step: f64 = 0.1, low: f64 = 0.0, high: f64 = 1.0) -> f64:
     w = __ui_row(label, 0.0)
     r = __ui_item(w)
     c = r.1
-    v = value
-    # (to the nearest step: 0.8 - 0.1 - 0.1 is 0.6, not 0.6000000000000001)
-    if r.2 and __ui_side != 0: v = clamp(round((v + f64(__ui_side) * step) / step) * step, 0.0, 1.0)
-    if abs(v - round(v * 1e9) / 1e9) < 1e-12: v = round(v * 1e9) / 1e9
+    v = clamp(value, min(low, high), max(low, high))
+    if r.2 and __ui_side != 0: v = __step_to(v + f64(__ui_side) * step, step, low, high)
     # the bar: right half of the row
     bx = f64(c.x) + 10.0
     bw = w / 2.0 - 10.0
     by = f64(c.y) - 4.0
     m = mouse_pos()
-    if mouse_down(.left) and ui_ready() and f64(m.x) >= bx - 10.0 and f64(m.x) <= bx + bw + 10.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0:
-        v = clamp((f64(m.x) - bx) / bw, 0.0, 1.0)
+    # (pressed on its bar, it keeps the drag until let go, wherever the pointer goes meanwhile)
+    key = "{__ui_menu}/{r.0}"
+    if mouse_pressed(.left) and ui_ready() and f64(m.x) >= bx - 10.0 and f64(m.x) <= bx + bw + 10.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0:
+        __slider_drag = key
+    if __slider_drag == key:
+        if mouse_down(.left):
+            __ui_focus = r.0
+            v = __step_to(low + (high - low) * clamp((f64(m.x) - bx) / bw, 0.0, 1.0), step, low, high)
+        else: __slider_drag = ""
     col = ui_style.color
-    if r.2: col = ui_style.focus_color
+    if __ui_lit(r.2) or __slider_drag == key: col = ui_style.focus_color
     text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
-    rect(bx, by, bw, 8, ui_style.bar_color)
-    rect(bx, by, bw * v, 8, col)
-    circle(vec2(f32(bx + bw * v), f32(by + 4.0)), 10, col)
+    __slider_bar(bx, by, bw, __slider_amount(v, low, high), col)
     v
+
+# (the slider being dragged: its menu and item, or its hud rectangle; "" for none)
+__slider_drag = ""
+
+__slider_amount = (value: f64, low: f64, high: f64) -> f64:
+    if low == high: return 0.0
+    clamp((value - low) / (high - low), 0.0, 1.0)
+
+# (v to the nearest step from low, within low..high: 0.8 - 0.1 - 0.1 is 0.6, not 0.6000000000000001)
+__step_to = (v: f64, step: f64, low: f64, high: f64) -> f64:
+    r = v
+    if step > 0.0: r = low + round((v - low) / step) * step
+    r = clamp(r, min(low, high), max(low, high))
+    if abs(r - round(r * 1e9) / 1e9) < 1e-12: r = round(r * 1e9) / 1e9
+    r
+
+# (a slider's bar: the track, edged so it shows on a light background too, filled to `amount`)
+__slider_bar = (x: f64, y: f64, w: f64, amount: f64, col: vec4):
+    a = clamp(amount, 0.0, 1.0)
+    rect(x, y, w, 8, ui_style.bar_color)
+    rect_outline(x, y, w, 8, 1.0, with_alpha(col, col.w * 0.45))
+    rect(x, y, w * a, 8, col)
+    circle(vec2(f32(x + w * a), f32(y + 4.0)), 10, col)
 
 # on or off (left/right, enter, or a click)
 ui_switch = (label: str, on: bool) -> bool:
@@ -207,7 +246,7 @@ ui_switch = (label: str, on: bool) -> bool:
     over = abs(f64(mouse_pos().x - c.x)) < w / 2.0 and abs(f64(mouse_pos().y - c.y)) < ui_style.spacing / 2.0
     if (r.2 and (__ui_ok or __ui_side != 0)) or (over and mouse_pressed(.left) and ui_ready()): v = not v
     col = ui_style.color
-    if r.2: col = ui_style.focus_color
+    if __ui_lit(r.2): col = ui_style.focus_color
     text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
     state = "off"
     if v: state = "on"
@@ -233,7 +272,7 @@ ui_choice = (label: str, options: str[], index: int) -> int:
         else: v += 1
     v = ((v % n) + n) % n
     col = ui_style.color
-    if r.2: col = ui_style.focus_color
+    if __ui_lit(r.2): col = ui_style.focus_color
     text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
     shown = ""
     if v < options.len(): shown = options[v]
@@ -258,7 +297,7 @@ ui_text_field = (label: str, value: str, max_chars: int = 24) -> str:
             if key_typed(.backspace): v = without_last_char(v)
             if key_pressed(.enter): __ui_focus = r.0 + 1
     col = ui_style.color
-    if r.2: col = ui_style.focus_color
+    if __ui_lit(r.2): col = ui_style.focus_color
     text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
     # the box: right half of the row, the text in it, and where typing goes when it has the focus
     bx = f64(c.x) + 10.0
@@ -522,8 +561,35 @@ hud_tooltip = (s: str):
     rect_outline(x, y, w, h, 1.0, hud_style.border)
     loop i in 0.. and l in ls: text(l, vec2(f32(x + pad), f32(y + pad + f64(i) * size * 1.25)), size, hud_style.text)
 
-# a box ticked or not, with its label to the right: the new state (flipped in the frame it is
-# clicked)
+# a value from low to high, set by dragging along the box (a finger too: the slider pressed on
+# keeps the drag until let go), in steps of `step` (0: any value); the label, if any, is drawn
+# over the box's left part, so give it room: `g = hud_slider(Rect(20, 80, 300, 36), g, 1, 20, 0.1, "g {g:.1f} m/s²")`
+hud_slider = (r: Rect, value: f64, low: f64, high: f64, step: f64 = 0.0, label: str = "") -> f64:
+    over = __hud_touch(r)
+    key = "hud {r.x},{r.y},{r.w},{r.h}"
+    v = clamp(value, min(low, high), max(low, high))
+    if over and mouse_pressed(.left): __slider_drag = key
+    lw = 0.0
+    size = min(hud_style.text_size, f64(r.h) * 0.6)
+    if len(label) > 0: lw = text_width(label, size) + 12.0
+    tx = f64(r.x) + lw + 10.0
+    tw = max(f64(r.w) - lw - 20.0, 1.0)
+    if __slider_drag == key:
+        if mouse_down(.left): v = __step_to(low + (high - low) * clamp((f64(mouse_pos().x) - tx) / tw, 0.0, 1.0), step, low, high)
+        else: __slider_drag = ""
+    c = hud_style.button
+    if __hud_lit(over) or __slider_drag == key: c = hud_style.hover
+    rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
+    rect_outline(f64(r.x), f64(r.y), f64(r.w), f64(r.h), 1.0, hud_style.border)
+    if lw > 0.0: text(label, vec2(f32(f64(r.x) + 8.0), f32(f64(r.y) + (f64(r.h) - size) / 2.0)), size, hud_style.text)
+    a = __slider_amount(v, low, high)
+    cy = f64(r.y) + f64(r.h) / 2.0
+    rect(tx, cy - 3.0, tw, 6, hud_style.pressed)
+    rect(tx, cy - 3.0, tw * a, 6, hud_style.accent)
+    circle(vec2(f32(tx + tw * a), f32(cy)), min(f64(r.h) * 0.3, 10.0), hud_style.accent)
+    v
+
+# a box ticked or not, with its label to the right: the new state (flipped when clicked)
 hud_checkbox = (r: Rect, label: str, on: bool) -> bool:
     over = __hud_touch(r)
     v = on

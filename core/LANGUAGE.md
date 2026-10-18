@@ -1078,6 +1078,16 @@ The [camera-roll example](../examples/sloppy_core/camera_roll.dewy) combines thi
 with cursor picking and a settings menu. Menu rows expand for long labels and
 choice values, sharing the widest row's width on the next frame.
 
+`ui_slider(label value step=0.1 low=0.0 high=1.0)` supports ranges, keyboard
+steps, and mouse/touch dragging. Once pressed, a slider keeps its drag until
+release even outside its bounds; crossing another control does not transfer it.
+`hud_slider(rect value low high step=0.0 label="")` places the same kind of
+control directly in a HUD. A zero step gives continuous dragging, and descending
+ranges work too. `ui_style=ui_light_style()` supplies a light-background theme.
+The [pendulum example](../examples/sloppy_core/controls.dewy) combines these
+controls with Greek letters, superscripts and mathematical symbols from the
+bundled font, including `θ`, `π`, `√`, `≈`, `≤`, `∞`, `x₀` and `m/s²`.
+
 `polyline(points thickness color closed=true)` joins the segments into one band,
 including the closing edge. Consecutive repeated points are ignored and sharp
 joins are capped to prevent long spikes. Open paths leave their ends flat.

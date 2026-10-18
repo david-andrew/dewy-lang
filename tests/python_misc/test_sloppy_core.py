@@ -47,6 +47,16 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'game-font-math': '''import p"@lib/game/draw2d.jo" as surface
+main=()=>{
+surface.__font_init()
+loop code in [0x03B8 0x03C0 0x0394 0x2212 0x221A 0x2248 0x2260 0x2264 0x2265 0x221E
+              0x2211 0x222B 0x2202 0x221D 0x22C5 0x2207 0x2208 0x2192 0x2080 0x2074 0x2713 0x2717] {
+    if surface.__glyph(surface.__default_font code) <? 0 return 1
+}
+if text_width("θ π Δ − √ ≈ ≠ ≤ ≥ ∞ ∑ ∫ ∂ ∝ ⋅ ∇ ∈ → x₀ x⁴ ✓ ✗") <=? 0 return 2
+return 42
+}''',
     'game-shadow-defaults': '''main=()=>{
 let params=LitParams[]
 if params.shadow_texel not=? f32(1.0/2048.0) or params.shadow_taps not=? 9.0 return 1
@@ -6480,7 +6490,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -6503,7 +6513,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
@@ -6535,6 +6545,46 @@ def test_core_software_raster_chunks(compiler, tmp_path, release):
         ran = subprocess.run([binary], env=env, capture_output=True, text=True,
                              timeout=10, check=False)
         assert ran.returncode == 42, (threads, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_slider_controls(compiler, tmp_path, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/slider_controls.dewy'
+    binary = tmp_path / 'sliders'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    scripts = {
+        'drag': ('1:mouse=405x80,1:mouse_left+,2:mouse=600x350,3:mouse=200x210,4:mouse_left-,'
+                 '5:mouse=40x220,5:mouse_left+,6:mouse=600x80,7:mouse_left-,'
+                 '8:mouse=180x220,8:mouse_left+,9:mouse=210x450,10:mouse_left-'),
+        'keys': '1:right+,2:right-,3:right+,4:right-',
+        'touch': '1:touch1=405x80,2:touch1=600x350,3:touch1-',
+        'descending': '1:mouse=360x220,1:mouse_left+,2:mouse=700x450,3:mouse_left-',
+    }
+    for scenario, script in scripts.items():
+        env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
+        env.update(SLOPPY_SOFTWARE='1', SLOPPY_SCREENSHOT=str(tmp_path / f'{scenario}.png'),
+                   SLOPPY_FRAMES='10', SLOPPY_WINDOW='640x480', SLOPPY_INPUT=script)
+        ran = subprocess.run([binary], env=env, capture_output=True, text=True,
+                             timeout=15, check=False)
+        assert ran.returncode == 0, (scenario, ran.stdout, ran.stderr)
+        values = [list(map(float, line.split())) for line in ran.stdout.splitlines()]
+        assert [row[0] for row in values] == list(range(11)), ran.stdout
+        if scenario == 'drag':
+            assert [row[1] for row in values] == [10, 20, 30, 10, 10, 10, 10, 10, 10, 10, 10]
+            assert [row[2] for row in values] == [0, 0, 0, 0, 0, -5, 5, 5, 0, 1, 1]
+            assert all(row[3] == 0 for row in values)
+        elif scenario == 'keys':
+            assert [row[1] for row in values] == [10, 12.5, 12.5, 15, 15, 15, 15, 15, 15, 15, 15]
+            assert all(row[2:] == [0, 0] for row in values)
+        elif scenario == 'touch':
+            assert [row[1] for row in values] == [10, 20, 30, 30, 30, 30, 30, 30, 30, 30, 30]
+            assert all(row[2:] == [0, 0] for row in values)
+        else:
+            assert [row[3] for row in values] == [0, 10, -10, -10, -10, -10, -10, -10, -10, -10, -10]
+            assert all(row[1:3] == [10, 0] for row in values)
 
 
 @pytest.mark.core_quick
@@ -6742,7 +6792,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

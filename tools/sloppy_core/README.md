@@ -1357,3 +1357,19 @@ content was visually checked; shadow edges are softer. Ten focused checks cover
 Dunes' headless model, software frame, native/web builds and real GLES shader
 compilation. See `dunes-shadow-*`; `benchmark_render --baseline-sources` compares
 example changes while keeping the compiler fixed.
+
+
+The UI/font portions of Sloppy `1529a25` are incorporated: menu sliders accept
+low/high ranges, snapping applies while dragging, and the pressed slider keeps
+its pointer until release. HUD sliders can be placed directly in a game panel;
+descending ranges have correctly oriented tracks. A light menu style, bounded
+row sizing and touch-specific highlights support different game interfaces.
+The bundled SDF font adds Greek, common mathematical symbols, arrows and
+sub/superscripts, with Noto Sans Math/Symbols 2 notices retained.
+
+`controls.dewy` demonstrates these controls in a pendulum with ordinary Dewy
+state and native/web rendering. Its final software frame was visually inspected.
+The broader game/font selection passes 57 checks in 11.26 seconds; the final
+9-check controls selection passes in 3.70 seconds, including mouse/touch drag
+capture, crossing another control, release, keyboard steps and descending HUD
+ranges. Font lookup checks run on native and web. See `controls-*` audits.

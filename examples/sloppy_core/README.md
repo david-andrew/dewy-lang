@@ -1,5 +1,12 @@
 # Dewy on the compact core
 
+[`controls.dewy`](controls.dewy) is a pendulum with ranged sliders for gravity,
+length, release angle, damping and playback speed. Sliders keep a mouse or touch
+drag outside their bounds. It also shows the light menu theme and the bundled
+Greek/mathematical glyphs. **Space** pauses and **R** releases the pendulum again.
+Run `python3 -m tools.core run examples/sloppy_core/controls.dewy`, or build with
+`--target wasm` for the browser.
+
 [`outlines.dewy`](outlines.dewy) shows joined open/closed paths, rounded outlines,
 repeated points and a 6,000-point plot that crosses drawing batches. Run it with
 `python3 -m tools.core run examples/sloppy_core/outlines.dewy`, or build with

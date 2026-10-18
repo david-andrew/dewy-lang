@@ -1,0 +1,16 @@
+let menu=10.0
+let hud=0.0
+let descending=0.0
+main=():>void=>{
+    window("Slider controls" 640 480)
+    ui_style.width=320.0 ui_style.size=14.0 ui_style.spacing=60.0
+}
+draw=():>void=>{
+    clear(BLACK)
+    ui_begin("drag" vec2(320 80))
+    menu=ui_slider("Menu" menu step=2.5 low=10.0 high=30.0)
+    ui_end()
+    hud=hud_slider(Rect(30 200 300 40) hud -5.0 5.0 step=1.0)
+    descending=hud_slider(Rect(350 200 250 40) descending 10.0 -10.0 step=2.0)
+    printl("{frame_number()} {menu} {hud} {descending}")
+}
