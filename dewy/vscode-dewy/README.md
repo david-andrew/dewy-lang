@@ -57,6 +57,12 @@ name also highlights its occurrences in the current file. References do not yet
 search unopened programs that import the declaration; workspace-wide rename
 remains disabled until those callers can be found reliably.
 
+**Outline** and **Go to Symbol in Editor** list top-level Dewy functions,
+records, type aliases, variables and constants. They read the current buffer
+without requiring a successful type check, so navigation stays available while
+editing an unfinished function. Nested record fields and local declarations
+are not included yet.
+
 Format Document uses the core's Dewy formatter on the unsaved buffer, with fixed
 four-space indentation. It preserves strings, comments, line breaks and
 spacing-sensitive expressions. Results for an older document version are discarded.

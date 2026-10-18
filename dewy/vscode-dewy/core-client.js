@@ -105,6 +105,12 @@ function activate(context, vscode) {
     const position = (p) => new vscode.Position(p.line, p.character);
     const range = (r) => new vscode.Range(position(r.start), position(r.end));
     const location = (l) => new vscode.Location(vscode.Uri.parse(l.uri), range(l.range));
+    const symbol = (item) => {
+        const value = new vscode.DocumentSymbol(item.name, item.detail || '', item.kind - 1,
+            range(item.range), range(item.selectionRange));
+        value.children = (item.children || []).map(symbol);
+        return value;
+    };
     const at = (doc, pos) => ({ textDocument: document(doc), position: { line: pos.line, character: pos.character } });
     const ready = () => client && client.ready ? client : null;
     const open = (doc) => {
@@ -204,6 +210,13 @@ function activate(context, vscode) {
             async provideReferences(doc, pos, context, token) {
                 const result = await ask('textDocument/references', { ...at(doc, pos), context }, token);
                 return result?.map(location) ?? null;
+            },
+        }),
+        vscode.languages.registerDocumentSymbolProvider(selector, {
+            async provideDocumentSymbols(doc, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/documentSymbol', { textDocument: document(doc) }, token);
+                return result && doc.version === version ? result.map(symbol) : null;
             },
         }),
         vscode.languages.registerDocumentHighlightProvider(selector, {

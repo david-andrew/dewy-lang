@@ -241,6 +241,57 @@ main=()=>{
         client.close()
 
 
+def test_dewy_document_symbols(tmp_path):
+    value = os.environ.get('DEWY_CORE_COMPILER')
+    if not value:
+        pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
+    source = tmp_path / 'outline.dewy'
+    source.write_text('main=()=>0\n')
+    text = '''const answer=42
+let\tstate:int64=0
+Point:type=[x:int64 y:int64]
+Alias:type=int64
+Box:type=<T>[value:T]
+identity=<T>(x:T)=>x
+main=()=>{
+let hidden=1
+return hidden
+}
+const text=r"""
+fake=()=>0
+"""
+# missing=()=>0
+éclair=()=>42
+unfinished=()=>{
+'''
+    expected = [('answer', 14), ('state', 13), ('Point', 23), ('Alias', 5),
+                ('Box', 23), ('identity', 12), ('main', 12), ('text', 14),
+                ('éclair', 12), ('unfinished', 12)]
+    client = Client(Path(value).resolve(strict=True), tmp_path)
+    try:
+        # Outline navigation remains available while the final function is unfinished.
+        assert client.set_text(source.as_uri(), text, 1)
+        symbols = client.request('textDocument/documentSymbol', {'textDocument': {'uri': source.as_uri()}})
+        assert [(item['name'], item['kind']) for item in symbols] == expected
+        for item in symbols:
+            selection = item['selectionRange']
+            row = text.splitlines()[selection['start']['line']]
+            assert row[selection['start']['character']:selection['end']['character']] == item['name']
+        assert symbols[6]['range']['end'] == {'line': 9, 'character': 1}
+        complete = text + 'return answer\n}\n'
+        assert client.set_text(source.as_uri(), complete, 2) == []
+        symbols = client.request('textDocument/documentSymbol', {'textDocument': {'uri': source.as_uri()}})
+        assert [(item['name'], item['kind']) for item in symbols] == expected
+        # The shared server still scans Sloppy compiler sources with indentation syntax.
+        legacy = tmp_path / 'legacy.jo'
+        assert client.set_text(legacy.as_uri(), 'const answer = 42\nmain = () -> int:\n    answer\n', 1) == []
+        symbols = client.request('textDocument/documentSymbol', {'textDocument': {'uri': legacy.as_uri()}})
+        assert [(item['name'], item['kind']) for item in symbols] == [('answer', 14), ('main', 12)]
+        assert source.read_text() == 'main=()=>0\n'
+    finally:
+        client.close()
+
+
 def test_vscode_core_client(tmp_path):
     """Run the actual extension transport with VS Code API doubles and a native server."""
     import shutil

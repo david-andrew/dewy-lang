@@ -1652,6 +1652,7 @@ sy_text = ""
 sy_lines: str[]
 sy_ls: int[]
 sy_ok: bool[]       # by line: it starts a statement (is not inside brackets or a string)
+sy_dewy = false
 
 # (workspace symbols: the same scan, flat)
 struct WsSym:
@@ -1670,14 +1671,15 @@ on_symbols = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "null")
     sy_text = docs[d].text
+    sy_dewy = ends_with(docs[d].path, ".dewy")
     sy_lines = split(sy_text, "\n")
     sy_ls = line_starts_of(sy_text)
     sy_ok = stmt_lines(sy_text, sy_ls)
     out = symbols_in(sy_lines, 0, sy_lines.len(), 0)
     lsp_reply(id, "[{join(out, ",")}]")
 
-# which lines start a statement: not inside brackets or a string, the text read from its start as
-# the lexer reads it (a bracket left open is given up at a line indented no further than its own)
+# Which lines start a statement, outside brackets or strings. Sloppy recovers
+# an unclosed bracket at its original indentation; Dewy braces ignore indentation.
 stmt_lines = (text: str, ls: int[]) -> bool[]:
     ok: bool[]
     loop _ in ls: ok.push(true)
@@ -1692,7 +1694,7 @@ stmt_lines = (text: str, ls: int[]) -> bool[]:
             else:
                 ind = indent_of(text[i..min(i + 200, len(text))))
                 k = i + ind
-                if depth > 0 and k < len(text) and text[k] != '\n' and ind <= oind and text[k] != ')' and text[k] != ']' and text[k] != '}}': depth = 0
+                if not sy_dewy and depth > 0 and k < len(text) and text[k] != '\n' and ind <= oind and text[k] != ')' and text[k] != ']' and text[k] != '}}': depth = 0
                 ok[l] = depth == 0
             l += 1
         if i >= len(text): break
@@ -1701,7 +1703,8 @@ stmt_lines = (text: str, ls: int[]) -> bool[]:
             loop i < len(text) and text[i] != '\n': i += 1
             continue
         if ide_str_start(text, i):
-            i = ide_skip_str(text, i)
+            marks: u8[]
+            i = ide_str_end(text, i, marks, 0, sy_dewy)
             continue
         if c == '(' or c == '[' or c == '{{':
             if depth == 0: oind = ind
@@ -1747,11 +1750,15 @@ fn_decl_at = (i: int, c: int) -> bool:
     k = skip_blanks(t, k)
     if k >= len(t) or t[k] != '=' or k + 1 < len(t) and t[k + 1] == '=': return false
     k = skip_blanks(t, k + 1)
+    # Dewy places generic parameters after '=' and uses '=>' for the body.
+    if sy_dewy and k < len(t) and t[k] == '<':
+        loop k < len(t) and t[k] != '>' and t[k] != '\n': k += 1
+        k = skip_blanks(t, min(k + 1, len(t)))
     if k >= len(t) or t[k] != '(': return false
     e = ide_params_end(t, k)
     if e < 0: return false
     k = skip_blanks(t, e)
-    k < len(t) and (t[k] == ':' or t[k] == '-' and k + 1 < len(t) and t[k + 1] == '>')
+    k < len(t) and (t[k] == ':' or (t[k] == '-' or sy_dewy and t[k] == '=') and k + 1 < len(t) and t[k + 1] == '>')
 
 # (columns are bytes of sy_lines, sent as UTF-16 units; the range ends with line endl)
 sym_json = (name: str, kind: int, line: int, col: int, endl: int, kids: str[]) -> str:
@@ -1777,6 +1784,32 @@ symbols_in = (lines_: str[], from: int, to: int, ind: int) -> str[]:
             continue
         col = indent_of(raw)
         e = block_end(lines_, i, ind)
+        if sy_dewy:
+            word = ident_prefix(t)
+            constant = word == "const" or word == "local_const"
+            if constant or word == "let":
+                prefix = skip_blanks(t, len(word))
+                col += prefix
+                t = t[prefix..]
+            nm = ident_prefix(t)
+            rest = trim(t[len(nm)..])
+            if len(nm) > 0 and keywords.get(nm) == none:
+                kind = if constant: 14 else: 13
+                declared = starts_with(rest, "=") and not starts_with(rest, "==") or starts_with(rest, ":")
+                if fn_decl_at(i, col + len(nm)):
+                    kind = 12
+                else if starts_with(rest, ":") and ident_prefix(trim(rest[1..])) == "type":
+                    kind = 5
+                    equal = find_byte(rest, '=')
+                    if equal >= 0:
+                        value = trim(rest[equal + 1..])
+                        if starts_with(value, "<"):
+                            close = find_byte(value, '>')
+                            if close >= 0: value = trim(value[close + 1..])
+                        if starts_with(value, "["): kind = 23
+                if declared: out.push(sym_json(nm, kind, i, col, e, []))
+            i = e + 1
+            continue
         if starts_with(t, "@"):
             i += 1
             continue
@@ -1866,6 +1899,7 @@ ws_symbols_of = (path: str, text: str) -> WsSym[]:
     sy_flat = true
     sy_container = ""
     sy_text = text
+    sy_dewy = ends_with(path, ".dewy")
     sy_lines = split(text, "\n")
     sy_ls = line_starts_of(text)
     sy_ok = stmt_lines(text, sy_ls)
