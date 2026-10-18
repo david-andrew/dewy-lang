@@ -206,7 +206,7 @@ lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut I
 # ---------------- vectorization ----------------
 # A counting loop whose body (without its checks) is straight-line code doing the same thing
 # to element i of arrays (loads and stores at [base + i * size], elements of one size) and
-# arithmetic of + - * / min max on floats or + - and or xor on integers, with values from
+# arithmetic of + - * / min max and negation on floats or + - and or xor on integers, with values from
 # outside the loop used in every lane, runs 8 (or 4) elements at a time with AVX2 where the
 # processor has it, else 4 (or 2) with SSE2, then the rest one at a time. Each element gets
 # exactly the operations it got before (no reordering across elements: float sums over the loop
@@ -286,6 +286,14 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
             if let uk = kinds.get(int(ins.a)):
                 if uk == 2 and last[d] <= L.pe and first[d] >= L.pl:
                     kinds[d] = 2
+                    continue
+            return no
+        if op == .fneg:
+            if last[d] > L.pe or first[d] < L.pl: return no
+            fk = if int(ins.ty) == VS: 0 else: 1
+            if let uk = kinds.get(int(ins.a)):
+                if uk == fk or uk == -1:
+                    kinds[d] = fk
                     continue
             return no
         # (s = s + x: an integer sum over the loop, s used nowhere else in it)
@@ -410,6 +418,19 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, ty: int, out: 
             vmap[d] = vmap[int(ins.a)]
             kind[d] = 2
             continue
+        if op == .fneg:
+            k = if int(ins.ty) == VS: 0 else: 1
+            xa = lx_splat(pre, vmap, int(ins.a), k, ty)
+            # Flip only the sign bit, preserving signed zero and NaN payloads.
+            # Broadcast the mask as integer bits, not a numeric conversion.
+            signbit = -9223372036854775807 - 1
+            if k == 0: signbit = 2147483648
+            mask = lx_splat(pre, vmap, k_vreg(signbit), k + 2, ty)
+            v = vreg(ty)
+            body.push(Ins(.vbin, i32(ty), i32(v), i32(xa), i32(mask), 8, k))
+            vmap[d] = v
+            kind[d] = k
+            continue
         ri = lx_reds.index_of(d)
         if ri >= 0 and int(ins.ty) == VI:
             # (an integer sum: partial sums in a vector, which starts at the identity)
@@ -512,7 +533,7 @@ fast_vectorize = ():
     floats = false
     has_loop = false
     loop ins in ir.code:
-        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv: floats = true
+        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: floats = true
         if ins.op == .loop: has_loop = true
     if floats and has_loop: loop_versioning(true)
 

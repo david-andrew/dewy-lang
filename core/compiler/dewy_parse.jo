@@ -576,6 +576,12 @@ dw_expr = (id: int) -> int:
         if op == "@":
             add_flag(e, NF_MUT)
             return e
+        if op == ".-" or op == ".+":
+            n = mk(.unary, pos)
+            nodes[n].op = i32(int(if op == ".-": Tok.minus else: Tok.plus))
+            nodes[n].a = i32(e)
+            add_flag(n, NF_BROADCAST)
+            return n
         if op == "-" and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
             if has_flag(e, NF_U64) and nodes[e].ival != -9223372036854775807 - 1:
                 value = u64(nodes[e].ival)

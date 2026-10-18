@@ -5432,6 +5432,7 @@ check_expr = (n: int, expected: int) -> int:
                 if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
                 fatal(nodes[n].pos, "cannot index a value of type {type_str(bt)}")
     else if k == .unary:
+        if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
         hint = 0
         if ex != 0 and (is_numeric(ex) or is_vec(ex)): hint = ex
         at = prune(check_expr(int(nodes[n].a), hint))
@@ -6475,7 +6476,7 @@ bc_step = (x: int, pos: int) -> int: bc_call("int", [bc_bin(.ne, x, bc_int(1, po
 
 is_dotted = (n: int) -> bool:
     k = nodes[n].kind
-    (k == .binary and nodes[n].op == i32(int(Tok.dotop))) or (k == .call and has_flag(n, NF_BROADCAST))
+    (k == .binary and nodes[n].op == i32(int(Tok.dotop))) or ((k == .call or k == .unary) and has_flag(n, NF_BROADCAST))
 
 # the operator a dotted operator applies to each element (.+ is +, .<= is <=, ...)
 dot_base_op = (n: int) -> Tok:
@@ -6501,6 +6502,12 @@ dot_base_op = (n: int) -> Tok:
 dot_template = (n: int, leaves: mut int[], tag: str) -> int:
     pos = nodes[n].pos
     k = nodes[n].kind
+    if k == .unary and has_flag(n, NF_BROADCAST):
+        a = dot_template(int(nodes[n].a), leaves, tag)
+        result = mk(.unary, pos)
+        nodes[result].op = nodes[n].op
+        nodes[result].a = i32(a)
+        return result
     if k == .binary and nodes[n].op == i32(int(Tok.dotop)):
         a = dot_template(int(nodes[n].a), leaves, tag)
         b = dot_template(int(nodes[n].b), leaves, tag)

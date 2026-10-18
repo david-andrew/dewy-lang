@@ -1038,7 +1038,13 @@ winning. Saved copies remain independent. These operations allocate the selected
 values and result; an otherwise unique destination does not need a full-array
 copy merely to keep the temporary input snapshot alive.
 
-Dotted prefix operators remain unsupported.
+`.-values` negates each element; `.+values` applies unary plus. These forms
+accept ordinary arrays, fixed arrays, matrices and GPU arrays, and fuse with
+surrounding dotted expressions and calls: `.-(positions .+ offset) .* scale`.
+They use the scalar operators' precedence and behavior, including custom
+negation and floating-point signed zero. Results are independent values;
+fixed arrays produce dynamic arrays. Other dotted prefix operators remain
+unsupported.
 
 Put a range in its own brackets when selecting axes:
 

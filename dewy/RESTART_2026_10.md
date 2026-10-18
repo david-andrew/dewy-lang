@@ -141,6 +141,15 @@ links the paired measurements and documents the supported shapes, arithmetic
 and fallback behavior. Native project test blocks and the editor's test tasks
 support application development without using the compiler's Python gate.
 
+Dotted unary `.-values` and `.+values` also fuse with array expressions and
+calls. Floating negation now vectorizes through a sign-bit flip, preserving
+signed zero and NaN payloads in native SSE2/AVX2 code. A 262,144-element,
+64-iteration allocation-inclusive kernel improved from about 35 to 17 ms in
+both default and release builds, alongside a 20 ms C reference. This also
+fixes unary plus in GLSL and SPIR-V shader output. The
+[unary broadcast validation](audits/2026-10-17/source-core/broadcast-unary-validation.json)
+records CPU/GPU tests, raw timings and compilation costs.
+
 Default-build performance is now a separate measurement target, alongside
 release builds. Positive constant floor arithmetic lowers directly, and ordinary
 builds expand tiny leaf functions before their single local optimization pass.

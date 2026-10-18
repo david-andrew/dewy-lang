@@ -368,6 +368,7 @@ gl_expr = (e: int) -> str:
             return "({x} - {y} * trunc({x} / {y}))"
         return gl_arith(op, gl_expr(a), gl_expr(b), ntype(a), t, ntype(b))
     if k == .unary:
+        if nodes[e].op == i32(int(Tok.plus)): return gl_expr(int(nodes[e].a))
         # (a space: `- -1.5`, not the decrement `--1.5`)
         if nodes[e].op == i32(int(Tok.minus)):
             # (integers through unsigned ones, which wrap: see gl_arith)

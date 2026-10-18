@@ -525,6 +525,55 @@ if (xs .+ 1) .* (xs .- 1) not=? [0 3 8] return 4
 if (20 .+ 22) not=? 42 return 5
 return 42
 }''',
+    'numeric-broadcast-unary': '''main=()=>{
+let xs=[1 -2 3] let saved=xs
+let negated=.-xs let positive=.+xs
+if negated not=?[-1 2 -3] or positive not=?xs return 1
+negated[0]=99 positive[1]=99
+if xs not=?saved return 2
+if (.-(xs .+ 1) .* 2) not=?[-4 2 -8] return 3
+if (.-xs .^ 2) not=?[-1 -4 -9] return 4
+if (.- .-xs) not=?xs or (.+42) not=?42 or (.-42) not=? -42 return 5
+return 42}''',
+    'numeric-broadcast-unary-shapes': '''main=()=>{
+let fixed:array<int64 length=3>=[1 -2 3]
+let result:array<int64>=.-fixed
+if result not=?[-1 2 -3] return 1
+let matrix=reshape([1 2 3 4 5 6] 2 3)
+let changed=.-(matrix .+ [10 20 30])
+if changed.shape not=?[2 3] or changed.data not=?[-11 -22 -33 -14 -25 -36] return 2
+let empty:array<int64>=[]
+if (.-empty).length not=?0 or (.+empty).length not=?0 return 3
+let empty_matrix=.-zeros<int64>(0 3)
+if empty_matrix.shape not=?[0 3] or empty_matrix.data.length not=?0 return 4
+return 42}''',
+    'numeric-broadcast-unary-floats': '''main=()=>{
+let values:array<float64>=[0.0 -0.0 1.5 -2.0 0.0/0.0]
+let negated=.-values let positive=.+values
+if not (1.0/negated[0] <? 0.0) or not (1.0/negated[1] >? 0.0) return 1
+if not (1.0/positive[0] >? 0.0) or not (1.0/positive[1] <? 0.0) return 2
+if negated[2] not=? -1.5 or negated[3] not=?2.0 return 3
+if negated[4]=?negated[4] or positive[4]=?positive[4] return 4
+let small:array<float32>=[0.0 -0.0 1.5]
+let flipped=.-small
+return if 1.0/flipped[0] <? 0.0 and 1.0/flipped[1] >? 0.0 and flipped[2]=? -1.5 42 else 5}''',
+    'numeric-broadcast-unary-custom-order': '''Number:type=[value:int64 label:string]
+let trace=0
+source=()=>{trace=trace*10+1 return [Number[2 "a"] Number[3 "b"]]}
+offset=()=>{trace=trace*10+4 return 10}
+extract=(value:Number):>int64=>value.value
+__unary_sub__=(value:Number):>Number=>{
+trace=trace*10+value.value
+return Number[-value.value value.label]
+}
+main=()=>{
+let values=.-source()
+if trace not=?123 or values not=?[Number[-2 "a"] Number[-3 "b"]] return 1
+trace=0
+let fused=extract.(.-source()) .+ offset()
+if trace not=?1423 or fused not=?[8 7] return 3
+let saved=values values[0].label="changed"
+return if saved[0].label=?"a" 42 else 2}''',
     'numeric-broadcast-division': '''main=()=>{
 let xs=[-7 7 -7 7] let ys=[2 2 -2 -2]
 if (xs .// ys) not=? [-4 3 3 -4] return 1
@@ -5229,6 +5278,8 @@ ERRORS = {
     'narrow-literal-overflow': ('main=()=>{let x:uint8=256 return x}', 'does not fit'),
     'float-literal-overflow': ('main=()=>1e309', 'exceeds float64'),
     'unary-plus-text': ('main=()=>+"text"', "needs a number"),
+    'numeric-broadcast-unary-plus-text': ('main=()=>.+["text"]', 'needs a number'),
+    'numeric-broadcast-unary-minus-text': ('main=()=>.-["text"]', 'cannot negate'),
     'reserved-binary-base': ('main=()=>0d"123"', 'based-string packing'),
     'binary-padding': ('main=()=>0g"=a"', 'padding'),
     'missing-asset': ('main=()=>{$include_bytes(p"missing.bin") as bytes return bytes.length}', 'cannot read'),
@@ -7618,6 +7669,10 @@ let original=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
 original[0]=99.0
 let h=half.(g) .* 2.0 .+ 1.0
 assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
+assert(cpu(.-(half.(g) .* 2.0 .+ 1.0)).data =? [-2.5 -3.5 -4.5 -5.5])
+assert(cpu(.+g).data =? [1.0 2.0 3.0 4.0])
+let zeros=cpu(.-gpu([0.0 -0.0])).data
+assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
 assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
 assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
 let m=gpu(reshape([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))
@@ -7627,6 +7682,8 @@ assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 2
 assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
 let ints=gpu([-7 0 9])
 assert(cpu(ints .* 2 .+ 1).data =? [-13 1 19])
+assert(cpu(.-ints).data =? [7 0 -9])
+assert(cpu(.+ints).data =? [-7 0 9])
 assert(sum(ints) =? 2 and min(ints) =? -7 and max(ints) =? 9)
 let empty=gpu(zeros(0 3)) .+ row
 assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
@@ -7731,7 +7788,11 @@ def test_core_numeric_array_vectors(compiler, tmp_path, release):
 valued=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in 0.. and x in a x*2.0+b[i]*0.5+1.0]
 mapped=<T>(a:array<T>):>array<T>=>[loop x in a x*2.5+1.0]
 fused=<T>(a:array<T> b:array<T>):>array<T>=>a .* 2.0 .+ b .* 0.5 .+ 1.0
+negated=<T>(a:array<T>):>array<T>=>.-a
+negloop=<T>(a:array<T>):>array<T>=>[loop x in a -x]
 main=(argv:array<string>)=>{
+let words64:array<uint64>=[0 0x8000000000000000 0x7ff0000000000000 0xfff0000000000000 0x7ff8000000000042 0xfff8000000000017 1 0x3ff4000000000000]
+let words32:array<uint32>=[0 0x80000000 0x7f800000 0xff800000 0x7fc00042 0xffc00017 1 0x3fa00000]
 loop n in [0..20) {
 let a=[loop i in [0..n) (i as float64)*0.5]
 let b=[loop i in [0..n) (i as float64)*0.25]
@@ -7745,6 +7806,16 @@ let single_a=float32.(a) let single_b=float32.(b)
 let single_expected=float32.(expected)
 assert(looped(single_a single_b) =? single_expected and fused(single_a single_b) =? single_expected)
 assert(valued(single_a single_b) =? single_expected and mapped(single_a) =? float32.(same))
+let special64=[loop i in [0..n) f64_from_bits(words64[i%8])]
+let special32=[loop i in [0..n) f32_from_bits(words32[i%8])]
+let negative64=negated(special64) let loop64=negloop(special64)
+let negative32=negated(special32) let loop32=negloop(special32)
+loop i in [0..n) {
+assert(f64_bits(negative64[i]) =? (words64[i%8] xor 0x8000000000000000))
+assert(f64_bits(loop64[i]) =? f64_bits(negative64[i]))
+assert(f32_bits(negative32[i]) =? (words32[i%8] xor 0x80000000))
+assert(f32_bits(loop32[i]) =? f32_bits(negative32[i]))
+}
 }
 if argv.length >? 1 {
 if argv[1] =? "values" printl(valued(fill(1.0 20) fill(2.0 19)))
@@ -7758,8 +7829,8 @@ return 42
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     bodies = [body for body in re.split(r'(?=^fn )', built.stdout, flags=re.M)
-              if re.match(r'fn f_(?:looped|fused|valued|mapped)_', body)]
-    assert len(bodies) == 8, built.stdout
+              if re.match(r'fn f_(?:looped|fused|valued|mapped|negated|negloop)_', body)]
+    assert len(bodies) == 12, built.stdout
     assert all('vld ' in body and 'vst ' in body for body in bodies), '\n'.join(bodies)
     for sse2 in [False, True]:
         env = {key: value for key, value in os.environ.items()

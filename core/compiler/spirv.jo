@@ -1020,6 +1020,7 @@ sv_expr = (e: int) -> int:
             if op == .caret: return sv_val(165, sv_bool(), [x, y])
         return sv_arith(op, ta, x, tb, y, t, pos)
     if k == .unary:
+        if nodes[e].op == i32(int(Tok.plus)): return sv_expr(int(nodes[e].a))
         v = sv_expr(int(nodes[e].a))
         ty = sv_type(t, pos)
         if nodes[e].op == i32(int(Tok.minus)):

@@ -399,7 +399,7 @@ dn_atom = () -> int:
     if text in ["let", "const", "return", "break", "continue", "import", "from"]: return dn_stmt()
     dn_at += 1
     if token.kind == "quoted" or token.kind == "rawquoted": return dn_string(token)
-    if text == "+" or text == "-" or text == "@" or text == "not":
+    if text in ["+", "-", ".+", ".-", "@", "not"]:
         power = 125
         # A reference covers the full postfix place: @point.x, @items[i].x.
         if text == "@": power = 160
