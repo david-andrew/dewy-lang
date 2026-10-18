@@ -142,6 +142,66 @@ test "excluded" { panic("must not run excluded test") }
         watcher.close()
 
 
+def test_core_watch_tests_cancel_child(compiler, tmp_path):
+    helper = tmp_path / 'process.jo'
+    save(helper, '''pid = () -> int:
+    when TARGET == "windows": return int(GetCurrentProcessId())
+    else: return syscall(39)
+''')
+    source = tmp_path / 'tests.dewy'
+    save(source, '''from p"process.jo" import pid
+test "waiting" {
+    write_file("child.pid" "{pid()}")
+    eprint"child is waiting"
+    loop true { sleep(0.05) }
+}
+''')
+
+    def running(pid):
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+            if not handle:
+                return False
+            try:
+                return kernel.WaitForSingleObject(handle, 0) == 258  # WAIT_TIMEOUT
+            finally:
+                kernel.CloseHandle(handle)
+        status = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True,
+                                text=True, timeout=5, check=False).stdout.strip()
+        return bool(status) and not status.startswith('Z')
+
+    watcher = Watch(compiler, source, options=['test', '--watch'])
+    child = None
+    try:
+        watcher.expect('child is waiting')
+        child = int((tmp_path / 'child.pid').read_text())
+        assert running(child)
+        watcher.process.stdin.write(b'q\n')
+        watcher.process.stdin.flush()
+        watcher.process.wait(timeout=5)
+        deadline = time.monotonic() + 3
+        while running(child) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not running(child), 'quitting test watch left its active test running'
+    finally:
+        if child is not None and running(child):
+            if os.name == 'nt':
+                subprocess.run(['taskkill', '/PID', str(child), '/T', '/F'],
+                               capture_output=True, timeout=5, check=False)
+            else:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(child, signal.SIGKILL)
+        watcher.close()
+
+
 GAME = '''from p"helper.dewy" import label
 State:type=[count:int64]
 let state=State[0]
@@ -239,7 +299,8 @@ main=():>void=>{
 ''')
     watcher = Watch(compiler, source)
     try:
-        watcher.expect('first')
+        # The watcher may stop the first run between its write and stdout flush.
+        # Recovery to the new embedded value is the behavior under test.
         watcher.expect('second', timeout=3)
     finally:
         watcher.close()

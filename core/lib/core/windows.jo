@@ -122,6 +122,14 @@ when TARGET == "windows":
     @lib("kernel32.dll")
     extern GetCurrentProcessId = () -> u32
     @lib("kernel32.dll")
+    extern GetCurrentProcess = () -> *u8
+    @lib("kernel32.dll")
+    extern CreateJobObjectW = (sec: *u8, name: *u16) -> *u8
+    @lib("kernel32.dll")
+    extern SetInformationJobObject = (job: *u8, kind: i32, info: *u8, size: u32) -> i32
+    @lib("kernel32.dll")
+    extern AssignProcessToJobObject = (job: *u8, process: *u8) -> i32
+    @lib("kernel32.dll")
     extern GetFileAttributesExW = (name: *u16, level: i32, info: *u8) -> i32
     @lib("kernel32.dll")
     extern GetConsoleMode = (h: *u8, mode: *u32) -> i32

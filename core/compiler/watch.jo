@@ -1237,6 +1237,9 @@ watch_run = ():
         syscall(293, data(c), 0x80000)
         pid = syscall(57)
         if pid == 0:
+            # Test runners fork their active test. Give the whole run its own
+            # process group so restart/quit also stops a test that has not ended.
+            if test_mode and syscall(112) < 0: syscall(60, 127)  # setsid
             syscall(33, int(a[0]), 3)
             syscall(33, int(b[1]), 4)
             # (dup2 onto the descriptor itself leaves it closed by exec: where nothing else took
@@ -1265,7 +1268,8 @@ watch_stop = ():
     when TARGET == "windows":
         TerminateProcess(w_pid as *u8, 1)
     else:
-        syscall(62, w_pid, 15)                        # SIGTERM
+        target = if test_mode: -w_pid else: w_pid
+        syscall(62, target, 15)                       # SIGTERM (the test process group)
     watch_reap()
 
 # the program ended: its status (-1: none was running)
