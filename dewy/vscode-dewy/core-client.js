@@ -200,6 +200,20 @@ function activate(context, vscode) {
                 return Array.isArray(result) ? result.map(location) : location(result);
             },
         }),
+        vscode.languages.registerReferenceProvider(selector, {
+            async provideReferences(doc, pos, context, token) {
+                const result = await ask('textDocument/references', { ...at(doc, pos), context }, token);
+                return result?.map(location) ?? null;
+            },
+        }),
+        vscode.languages.registerDocumentHighlightProvider(selector, {
+            async provideDocumentHighlights(doc, pos, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/documentHighlight', at(doc, pos), token);
+                if (!result || doc.version !== version) return null;
+                return result.map((item) => new vscode.DocumentHighlight(range(item.range), (item.kind || 1) - 1));
+            },
+        }),
         vscode.languages.registerDocumentFormattingEditProvider(selector, {
             async provideDocumentFormattingEdits(doc, options, token) {
                 const version = doc.version;

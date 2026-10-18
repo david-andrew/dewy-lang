@@ -38,8 +38,9 @@ class Hover { constructor(contents) { this.contents = contents; } }
 class CompletionItem { constructor(label, kind) { Object.assign(this, { label, kind }); } }
 class CompletionList { constructor(items, isIncomplete) { Object.assign(this, { items, isIncomplete }); } }
 class TextEdit { constructor(range, newText) { Object.assign(this, { range, newText }); } }
+class DocumentHighlight { constructor(range, kind) { Object.assign(this, { range, kind }); } }
 const vscode = {
-    Position, Range, Location, Diagnostic, MarkdownString, Hover, CompletionItem, CompletionList, TextEdit, Uri: { parse: uri },
+    Position, Range, Location, Diagnostic, MarkdownString, Hover, CompletionItem, CompletionList, TextEdit, DocumentHighlight, Uri: { parse: uri },
     window: { createOutputChannel: () => ({ ...disposable, append: (s) => log.push(s), appendLine: (s) => log.push(s) }) },
     languages: {
         createDiagnosticCollection: () => ({
@@ -49,6 +50,8 @@ const vscode = {
         }),
         registerHoverProvider: (_selector, p) => { providers.hover = p; return disposable; },
         registerDefinitionProvider: (_selector, p) => { providers.definition = p; return disposable; },
+        registerReferenceProvider: (_selector, p) => { providers.references = p; return disposable; },
+        registerDocumentHighlightProvider: (_selector, p) => { providers.highlights = p; return disposable; },
         registerDocumentFormattingEditProvider: (_selector, p) => { providers.formatting = p; return disposable; },
         registerCompletionItemProvider: (_selector, p, trigger) => {
             assert.equal(trigger, '.'); providers.completion = p; return disposable;
@@ -95,6 +98,20 @@ async function change(text, predicate) {
         assert.match(hover.contents.value, /int|i64/);
         const definitions = await providers.definition.provideDefinition(document, new Position(2, 9));
         assert.equal((Array.isArray(definitions) ? definitions[0] : definitions).range.start.line, 1);
+        const references = (includeDeclaration, token) => providers.references.provideReferences(
+            document, new Position(2, 9), { includeDeclaration }, token);
+        const refs = await references(true);
+        assert.deepEqual(refs.map((item) => item.range.start.line), [1, 2]);
+        assert(refs.every((item) => item.uri.toString() === document.uri.toString()));
+        assert.deepEqual((await references(false)).map((item) => item.range.start.line), [2]);
+        assert.equal(await references(true, { isCancellationRequested: true }), null);
+        const highlights = () => providers.highlights.provideDocumentHighlights(document, new Position(2, 9));
+        const occurrences = await highlights();
+        assert.deepEqual(occurrences.map((item) => item.range), refs.map((item) => item.range));
+        assert(occurrences.every((item) => item.kind === 0)); // VS Code Text
+        const staleHighlights = highlights();
+        document.version++;
+        assert.equal(await staleHighlights, null);
         const names = await providers.completion.provideCompletionItems(document, new Position(2, 15));
         const answer = names.items.find((item) => item.label === 'answer');
         assert.equal(answer.detail, 'int64');
@@ -132,6 +149,8 @@ async function change(text, predicate) {
         assert.equal(await providers.hover.provideHover(document, new Position(0, 0)), null);
         assert.equal(await providers.completion.provideCompletionItems(document, new Position(0, 0)), null);
         assert.equal(await format(), null);
+        assert.equal(await references(true), null);
+        assert.equal(await highlights(), null);
         assert.equal(fs.readFileSync(source, 'utf8'), disk, 'editor integration modified the file');
         console.log('core editor: opt-in, trust, snapshots, diagnostics, hover, definition, completion, restart and close passed');
     } finally {

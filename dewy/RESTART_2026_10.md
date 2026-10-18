@@ -134,6 +134,17 @@ immutable current toolchain and stops at the first failure by default. Hosted CI
 always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
 
+CI also cross-builds standalone compiler bundles and executes 133 language smoke
+checks and 11 project-test checks on Windows x64, macOS ARM64 and Linux ARM64.
+All three native-host gates pass. This exposed and fixed Windows source-path
+escaping, diagnostic path comparisons and formatter directory detection; it is
+smoke coverage rather than the full Linux suite on every platform.
+
+VS Code now exposes resolved references and occurrence highlighting, including
+shadowed locals, closures, interpolation and named arguments in unsaved files.
+References cover the current program and other open programs; unopened reverse
+dependents are not indexed yet, so project-wide rename remains disabled.
+
 Project tests also support `test --watch`, including name filters and release
 builds, with a matching VS Code command. Saving a source, import or embedded
 asset reruns the tests from fresh state; failed assertions and compile errors

@@ -179,6 +179,68 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         client.close()
 
 
+def test_references_follow_bindings_and_unsaved_imports(tmp_path):
+    value = os.environ.get('DEWY_CORE_COMPILER')
+    if not value:
+        pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
+    helper = tmp_path / 'helper.dewy'
+    helper_text = 'add=(a:int64 b:int64)=>a+b\n'
+    helper.write_text(helper_text)
+    source = tmp_path / 'main.dewy'
+    source.write_text('main=()=>0\n')
+    text = '''from p"helper.dewy" import add
+main=()=>{
+    let value=20
+    let read=()=>value
+    {let value=99 printl(value)}
+    printl"🙂{read()} {value}"
+    return add(a=read() b=value)
+}
+'''
+
+    def location(path, body, line, name, start=0):
+        row = body.splitlines()[line]
+        offset = row.index(name, start)
+        column = len(row[:offset].encode('utf-16-le')) // 2
+        return {'uri': path.as_uri(), 'range': {
+            'start': {'line': line, 'character': column},
+            'end': {'line': line, 'character': column + len(name)}}}
+
+    def references(loc, include=True):
+        return client.request('textDocument/references', {
+            'textDocument': {'uri': loc['uri']}, 'position': loc['range']['start'],
+            'context': {'includeDeclaration': include}})
+
+    def same_locations(actual, expected):
+        assert sorted(map(json.dumps, actual)) == sorted(map(json.dumps, expected))
+
+    client = Client(Path(value).resolve(strict=True), tmp_path)
+    try:
+        assert client.set_text(helper.as_uri(), helper_text, 1) == []
+        assert client.set_text(source.as_uri(), text, 1) == []
+        outer = [location(source, text, line, 'value') for line in (2, 3, 5, 6)]
+        same_locations(references(outer[0]), outer)
+        same_locations(references(outer[-1], False), outer[1:])
+        highlights = client.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': source.as_uri()}, 'position': outer[-1]['range']['start']})
+        assert [item['range'] for item in highlights] == [item['range'] for item in outer]
+        inner = [location(source, text, 4, 'value', start) for start in (0, 14)]
+        same_locations(references(inner[0]), inner)
+        parameter = location(helper, helper_text, 0, 'b:')
+        parameter['range']['end']['character'] -= 1
+        parameter_body = location(helper, helper_text, 0, 'b', 20)
+        named_argument = location(source, text, 6, 'b=')
+        named_argument['range']['end']['character'] -= 1
+        same_locations(references(parameter), [parameter, parameter_body, named_argument])
+        # A new unsaved snapshot must invalidate references cached by the other document.
+        changed = text.replace('b=value', 'b=1')
+        assert client.set_text(source.as_uri(), changed, 2) == []
+        same_locations(references(outer[0]), outer[:-1])
+        assert source.read_text() == 'main=()=>0\n'
+    finally:
+        client.close()
+
+
 def test_vscode_core_client(tmp_path):
     """Run the actual extension transport with VS Code API doubles and a native server."""
     import shutil

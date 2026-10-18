@@ -50,6 +50,13 @@ can complete normally. Signatures are described without checking every library
 function's body. Generic signatures and instantiated types use Dewy `<T>` notation, including
 user declarations and imported containers such as `Pool<Enemy>`.
 
+**Find All References** follows resolved bindings through the current program's
+imports and other open files, including unsaved text. It distinguishes shadowed
+locals and includes named arguments when looking up a parameter. Selecting a
+name also highlights its occurrences in the current file. References do not yet
+search unopened programs that import the declaration; workspace-wide rename
+remains disabled until those callers can be found reliably.
+
 Format Document uses the core's Dewy formatter on the unsaved buffer, with fixed
 four-space indentation. It preserves strings, comments, line breaks and
 spacing-sensitive expressions. Results for an older document version are discarded.
