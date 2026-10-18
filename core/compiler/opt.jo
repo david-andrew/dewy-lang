@@ -20,6 +20,8 @@ o_db: i32[]
 o_dva: i32[]        # operand versions when the defining op was emitted
 o_dvb: i32[]
 o_buf: int[]
+o_fact_scope: i32[]      # two entries per vreg: known false, known true
+o_fact_nbr: int[]        # branch count when each fact was established
 
 # fills o_buf with the vregs used by ins; returns the defined vreg or -1
 o_operands = (ins: Ins) -> int:
@@ -151,7 +153,11 @@ o_resize = (n: int):
         o_ver.resize(n)
         o_dva.resize(n)
         o_dvb.resize(n)
+        o_fact_scope.resize(n * 2)
+        o_fact_nbr.resize(n * 2)
     loop v in [0..n):
+        o_fact_scope[v * 2] = -1
+        o_fact_scope[v * 2 + 1] = -1
         o_dop[v] = -1
         o_ver[v] = 0
         o_ndef[v] = 0
@@ -269,8 +275,14 @@ o_resize_one = (d: int):
         o_ver.push(0)
         o_dva.push(0)
         o_dvb.push(0)
+        o_fact_scope.push(-1)
+        o_fact_scope.push(-1)
+        o_fact_nbr.push(0)
+        o_fact_nbr.push(0)
     # (a slot an earlier, larger function used: nothing of it is kept, as o_resize does for the
     # function's own)
+    o_fact_scope[d * 2] = -1
+    o_fact_scope[d * 2 + 1] = -1
     o_repl[d] = i32(d)
     o_dop[d] = -1
     o_ver[d] = 0
@@ -363,9 +375,6 @@ o_parent: int[]
 o_export: bool[]
 o_scope_nbr: int[]
 
-const FACT_FALSE = 255  # pseudo-op key: "this condition is known to be false"
-const FACT_TRUE = 254   # ... "known to be true" (inside an if on it)
-
 ht_setup = (n: int):
     size = 64
     loop size < n * 4: size *= 2
@@ -412,10 +421,6 @@ ht_slot = (k1: int, k2: int, k3: int) -> int:
         i = (i + 1) & ht_mask
     i
 
-# gen: memory generation the entry depends on (-1: none); va, vb: operand versions
-ht_find = (k1: int, k2: int, k3: int, gen: int, va: int, vb: int) -> int:
-    ht_available(ht_slot(k1, k2, k3), gen, va, vb)
-
 ht_available = (i: int, gen: int, va: int, vb: int) -> int:
     if ht_epoch[i] != o_epoch: return -1
     scope = int(ht_scope[i])
@@ -450,9 +455,6 @@ ht_put_gen = (k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
     ht_insert(ht_slot(k1, k2, k3), k1, k2, k3, v, gen, va, vb)
 
 load_key1 = (ty: int, mode: int, addr: int) -> int: int(Op.load) | (ty << 8) | ((mode & 4095) << 12) | (addr << 24)
-
-ht_put = (k1: int, k2: int, k3: int, v: int):
-    ht_put_gen(k1, k2, k3, v, o_gen, 0, 0)
 
 ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
     ht_va[i] = i32(va)
@@ -587,19 +589,30 @@ o_emit = (ins0: Ins):
         else if kills_memory(op) and not (op == .call and ins.c == 1): kill_all()
     o_push(ins)
 
-fact_false = (c: int) -> bool:
+# Only single-definition values have facts. Direct indexing avoids hashing the
+# same condition at every branch; both truth values keep their own scope, just
+# as separate available-expression keys did.
+fact_known = (c: int, truth: int) -> bool:
     if not o_cse or not stable(c): return false
-    ht_find(FACT_FALSE, c, 0, -1, 0, 0) >= 0
+    index = c * 2 + truth
+    scope = int(o_fact_scope[index])
+    if scope < 0: return false
+    loop not o_open[scope]:
+        if not o_export[scope] or o_fact_nbr[index] != o_scope_nbr[scope]: return false
+        scope = o_parent[scope]
+        if scope < 0: return false
+    true
 
-add_fact_false = (c: int):
-    if o_cse and stable(c): ht_put(FACT_FALSE, c, 0, c)
+add_fact = (c: int, truth: int):
+    if not o_cse or not stable(c): return
+    index = c * 2 + truth
+    o_fact_scope[index] = i32(o_scopes[o_scopes.len() - 1])
+    o_fact_nbr[index] = o_nbr
 
-fact_true = (c: int) -> bool:
-    if not o_cse or not stable(c): return false
-    ht_find(FACT_TRUE, c, 0, -1, 0, 0) >= 0
-
-add_fact_true = (c: int):
-    if o_cse and stable(c): ht_put(FACT_TRUE, c, 0, c)
+fact_false = (c: int) -> bool: fact_known(c, 0)
+add_fact_false = (c: int): add_fact(c, 0)
+fact_true = (c: int) -> bool: fact_known(c, 1)
+add_fact_true = (c: int): add_fact(c, 1)
 
 # simplify one instruction, appending the result to o_out
 o_simplify = (ins0: Ins, pos: int):

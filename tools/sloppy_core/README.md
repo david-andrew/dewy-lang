@@ -1282,3 +1282,14 @@ seconds with two workers. Sixteen focused cases cover nested branches, spaces,
 tabs, multiline strings, local closures and original source locations for a
 body first parsed when called. See `lazy-when-*` and `check-profile*.json` audits
 for measurements, commands and toolchain identities.
+
+
+The local optimizer now indexes known branch conditions directly by virtual
+register, with separate entries for true and false. Scope and branch-count
+checks remain the same, and new registers plus each optimization pass reset
+fact state. Ordinary expression/load CSE keeps its existing hash table. Seven
+alternating fresh-build pairs give modest median compiler-CPU ratios of 0.993
+for the tour, 0.987 for Dunes and 0.975 for self-compilation. The focused
+optimizer/bounds/loop selection passes 600 checks; the independent C-bootstrap
+suite passes 3,916 in 82.39 pytest seconds with two workers. See `direct-fact-*`
+audits. No generated-program speedup is claimed for this lookup change.
