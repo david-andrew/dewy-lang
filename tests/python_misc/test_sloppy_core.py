@@ -51,6 +51,27 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'closure-argument-container-values': '''Counter:type=():>int64
+Box:type=[next:Counter]
+make=()=>{let n=0 return ()=>{n+=1; n}}
+from_array=(xs:array<Counter>)=>xs[0]()+xs[0]()
+from_box=(box:Box)=>box.next()+box.next()
+main=()=>{let xs=[make()] let box=Box[make()]
+if from_array(xs) not=?3 or from_array(xs) not=?3 or xs[0]() not=?1 return 1
+return if from_box(box)=?3 and from_box(box)=?3 and box.next()=?1 42 else 2}''',
+    'closure-argument-evaluation-order': '''Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+read=(f:Counter ignored:int64)=>f()
+main=()=>{let f=make()
+if read(f f()) not=?1 return 1
+if read(ignored=f() f=f) not=?3 return 2
+return if f()=?3 42 else 3}''',
+    'closure-argument-indirect-forwarding': '''Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+twice=(f:Counter)=>f()+f()
+forward=(f:Counter)=>{let run=twice return run(f)+f()}
+main=()=>{let f=make()
+return if forward(f)=?4 and forward(f)=?4 and f()=?1 42 else 1}''',
     'closure-capture-constants': '''main=()=>{const n=20 const word="hello" const xs=[22]
 let a=($capture n $capture word $capture xs)=>if word=?"hello" n+xs[0] else 1
 let b=($capture @n $capture @word $capture @xs)=>if word=?"hello" n+xs[0] else 1

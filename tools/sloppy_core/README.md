@@ -55,6 +55,13 @@ parameters and consume no call arguments. Copying a closure duplicates mutable p
 captures and retains explicit shared cells. Immutable private environments can
 be retained without an allocation. Calls pin the environment being invoked so
 replacing the callable during argument evaluation does not free it prematurely.
+Known Dewy callees copy value parameters on entry, so their last evaluated
+argument needs no extra caller-side callback copy. Earlier arguments and borrowed
+implementation-library calls retain their snapshots. In five paired native
+samples, callback/record/array argument workloads use 45–49% less CPU in default
+and release builds; compiler self-build CPU time is unchanged within this pilot.
+See the [runtime samples](../../dewy/audits/2026-10-18/callback-argument-runtime.json)
+and [compilation samples](../../dewy/audits/2026-10-18/callback-argument-compile.json).
 The implementation-language `.jo` closures retain their existing lexical
 sharing behavior. See [closure examples and limits](../../core/LANGUAGE.md).
 
