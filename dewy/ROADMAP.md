@@ -98,6 +98,13 @@ what it buys and when it stops being worth paying.
 
 ## Performance goals across the roadmap (accepted 2026-09-29)
 
+**Target clarification, 2026-10-18:** aim for roughly 250,000 lines per second
+when compiling Dewy programs from source, and generated programs as efficient
+as equivalent C/Rust (or better where possible). These are engineering targets,
+not claims of achieved throughput or parity. Record representative workloads,
+hardware, build mode, source-counting rules and included library work; keep
+small-program latency separate from large-program throughput.
+
 **Compiler speed:** the final target is compilation on the order of Jai's
 compiler, allowing Dewy to be somewhat slower for its richer semantics, but
 not by a large factor. Under 30 seconds for a full native compiler build is

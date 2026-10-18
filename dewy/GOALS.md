@@ -24,9 +24,17 @@ compile from source quickly enough to stay in the edit loop: a compiler build
 in seconds, not minutes. Fresh compilation is the model. A persistent cache is
 not the way the language stays fast.
 
+The rough compilation target is 250,000 lines per second for Dewy programs
+(clarified 2026-10-18). Measure fresh whole-program builds on representative
+sources, with hardware, build mode, source-counting method and included library
+work recorded. Report small-program latency separately from large-program
+throughput; generated padding and repeated trivial declarations do not establish
+useful application throughput.
+
 Games are a primary customer. Dense data, a game loop, and interactive native
 and web programs should be natural to write. A straightforward program should
-be able to approach the speed of the same algorithm in C. Reaching that ordinary
+be able to match the speed of the same algorithm in C or Rust, or improve on it
+where Dewy's semantics enable better optimization. Reaching that ordinary
 performance should not require expert annotations.
 
 ## Storage
