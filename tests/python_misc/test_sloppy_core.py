@@ -323,6 +323,31 @@ main=()=>choose([20 22])''',
 choose=<T>(tag:T values:array<T>)=>42
 main=()=>{let tag:uint8=0
 return if choose(tag [1 2 3 4])=?42 and choose<uint8>(0 [5 6 7 8])=?42 42 else 1}''',
+    'generic-array-literal-length-independent': '''choose=<T>(value:T)=>1
+choose=<T>(value:array<T>)=>42
+main=()=>if choose([1])=?42 and choose([1 2])=?42 and choose([1 2 3])=?42
+and choose([1 2 3 4])=?42 and choose([1 2 3 4 5 6 7 8])=?42 42 else 1''',
+    'generic-array-literal-length-nested': '''choose=<T>(value:T)=>1
+choose=<T>(value:array<array<T>>)=>42
+main=()=>choose([[1 2 3 4] [5 6 7 8] [9 10 11 12]])''',
+    'generic-array-literal-length-typed': '''choose=<T>(value:T)=>1
+choose=<T>(value:array<T>)=>42
+main=()=>{let x=1
+return if choose([x 2 3 4])=?42 and choose([1 2 3 x])=?42 42 else 1}''',
+    'generic-array-literal-length-narrow': '''choose=<T>(value:T)=>1
+choose=(value:array<uint8>)=>42
+main=()=>choose([1 2 3 4 5 6])''',
+    'generic-array-literal-length-floating': '''choose=<T>(value:T)=>1
+choose=(value:array<float64>)=>42
+main=()=>choose([1 2 3 4 5 6])''',
+    'generic-array-literal-deferred-float': '''choose=<T>(value:array<T>)=>1
+choose=(value:array<float64>)=>42
+main=()=>{let values=[1.0 2.0 3.0]
+return if choose([20 values...])=?42 and choose([values... 20])=?42 42 else 1}''',
+    'generic-array-literal-deferred-overflow': '''choose=<T>(value:array<T>)=>1
+choose=(value:array<int64>)=>42
+main=()=>{let narrow:int32=1
+return if choose([2147483648 narrow])=?42 and choose([narrow 2147483648])=?42 42 else 1}''',
     'generic-array-literal-float-specific': '''choose=<T>(values:array<T>)=>1
 choose=(values:array<float64>)=>42
 main=()=>choose([20.0 22.0])''',

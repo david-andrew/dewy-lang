@@ -611,7 +611,10 @@ passing an `array<int64>` variable does not convert it to `array<uint64>`.
 Generic integer-array inference takes precedence over converting integer
 elements to float: `sum([20 22])` returns an integer, just as summing a named
 integer array does. This also applies when literals mix with integer variables
-or function results, in either order. Concrete narrow overloads still accept
+or function results, in either order. Adding more elements does not by itself
+make an array-specific overload lose to a generic catch-all. Typed elements
+supply context for earlier literals too,
+including range checks. Concrete narrow overloads still accept
 fitting literals, and floating arrays still select floating overloads. An
 unconstrained array made solely of machine-integer literals infers `uint64` if
 any literal exceeds `int64.max`; the remaining literals must fit that type.

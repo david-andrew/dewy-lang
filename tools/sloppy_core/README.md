@@ -1637,3 +1637,13 @@ after three independent C bootstrap generations; the final source adds a guard
 keeping the new assignment diagnostic specific to Dewy. Native/web execution,
 both build modes, tuple interop and formatter round trips are covered. Hosted CI
 runs the final full gate. See `unpack-leaf-types-*` audits.
+
+Array overload ranking no longer counts the same conversion once per element.
+With `choose<T>(T)` and `choose<T>(array<T>)`, `[1 2]` and `[1 2 3 4]` now both
+choose the array overload; the latter previously chose the catch-all. Typed
+elements and spreads determine a generic element type before scoring earlier
+literals, so their range/conversion checks are independent of source order.
+Existing context-dependent generic-element and standard-library priority rules
+remain in place. The focused selection passes 1,391 native/web, default/release
+checks in 20.35 seconds; hosted CI runs the full C-bootstrap gate. See
+`array-overload-length-*` audits.

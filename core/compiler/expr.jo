@@ -996,6 +996,19 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             tk = types[target].kind
             if tk == .array or (tk == .fixed and (fixed_literal_ok(a, target) or array_has_spread(a))):
                 et = int(types[target].elem)
+                # Settle a generic element from the first typed value before
+                # scoring literals, including literals written before it.
+                if types[prune(et)].kind == .param and binds[int(types[prune(et)].id)] == 0:
+                    loop element in kids(a):
+                        if ctx_dependent(element) or is_lit(element): continue
+                        inferred = prune(ntype(element))
+                        if has_flag(element, NF_SPREAD):
+                            if is_dewy_set_type(inferred): inferred = struct_targ(int(types[inferred].st), 0)
+                            else if types[inferred].kind == .array or types[inferred].kind == .fixed: inferred = int(types[inferred].elem)
+                            else: continue
+                        if match_type(et, inferred, binds, 1) < 0: return -1
+                        break
+                element_cost = 0
                 loop element in kids(a):
                     ep = et
                     if has_flag(element, NF_SPREAD): ep = mk_array(et)
@@ -1019,8 +1032,10 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                             if r >= 0: r += 1
                     else: r = arg_cost(element, ep, binds)
                     if r < 0: return -1
-                    cost += r
-                return cost
+                    # One array is one argument. Adding more elements must not
+                    # make a typed-array overload lose to a catch-all T.
+                    element_cost = max(element_cost, r)
+                return cost + element_cost
             # A bound scalar parameter cannot accept an array literal. Do not
             # let its generic fallback compete with the matching T[] overload.
             if pk == .param and has_var(target): return 3
