@@ -528,6 +528,30 @@ host. This covers native/web, default/release, editor, formatter, reload,
 networking and compiler tooling. The next allocation target is the temporary
 syntax tree's separately managed child arrays.
 
+## Reclaim temporary syntax per declaration
+
+After projection, the compact AST and interned names own every retained part of
+a declaration. The in-process parser now truncates the temporary syntax tree to
+its sentinel before parsing the next top-level declaration, reusing capacity.
+Previously every temporary node and its child array stayed alive until the
+whole file was projected. No syntax IDs escape this frontend boundary.
+
+Against the numeric-token compiler, five alternating single-worker CPU pairs
+showed **848 → 815 ms** for the generated Dewy program (median paired ratio
+0.967), and **833 → 781 ms** for the conformance corpus (ratio 0.937).
+Peak RSS on the generated program fell from **162,964 to 132,244 KiB**, about
+**19%**, with the same computed result. A larger experiment replacing child
+arrays with one shared index buffer plus per-declaration reclamation measured
+essentially the same memory and speed; it was discarded in favor of the smaller
+lifetime fix. The report retains that experiment as the `arena` variant.
+[Measurements](audits/2026-10-18/syntax-lifetime-compile.json).
+
+The final compiler passed an independent C bootstrap and **3,965 syntax/value,
+rejection, string, membership and frontend-selection checks** in 54.26 seconds
+with two workers, covering native/web and default/release. The preceding numeric
+token commit also passed the full Linux CI and Windows/macOS ARM64/Linux ARM64
+host jobs.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

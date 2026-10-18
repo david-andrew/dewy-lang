@@ -539,6 +539,9 @@ dewy_fast_file = (file: int) -> int[]:
         before = dn_at
         syntax = dn_stmt()
         loop declaration in dw_top_declarations(syntax): declarations.push(declaration)
+        # Projection owns the retained data in the compact AST. Discard each
+        # declaration's temporary syntax before parsing the next declaration.
+        dewy_syntax.truncate(1)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     dn_tokens = []
     dewy_syntax = []
