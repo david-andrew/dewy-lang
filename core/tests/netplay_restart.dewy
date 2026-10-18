@@ -1,0 +1,31 @@
+import netplay
+
+step=(state:int64 inputs:array<int64>):>int64=>state+inputs[0]+inputs[1]
+
+main=(args:array<string>):>void=>{
+    let inject=args.length>?1 and args[1]=?"late"
+    let left=netplay.session(0 step players=2 me=0)
+    let right=netplay.session(0 step players=2 me=1)
+    let late:array<uint8>=[]
+    loop round in [0..3) {
+        left=netplay.session(0 step players=2 me=0)
+        right=netplay.session(0 step players=2 me=1)
+        # Transport may still have a packet from the previous round queued.
+        if inject and round>?0 {left.receive(late)}
+        loop frame in [0..240) {
+            left.play(1)
+            right.play(2)
+            loop packet in left.outgoing() {right.receive(packet[1])}
+            loop packet in right.outgoing() {
+                late=packet[1]
+                left.receive(packet[1])
+            }
+        }
+        printl(left.tick)
+        printl(right.tick)
+        printl(left.state)
+        printl(right.state)
+        printl(left.desync)
+        printl(right.desync)
+    }
+}

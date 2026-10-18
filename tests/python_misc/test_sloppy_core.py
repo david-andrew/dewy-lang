@@ -6249,6 +6249,40 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_netplay_restart(compiler, tmp_path, target, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/netplay_restart.dewy'
+    binary = tmp_path / 'restart'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web rollback checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'restart.cjs'
+        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [node, runner]
+    for scenario in ['clean', 'late']:
+        ran = subprocess.run([*command, scenario], capture_output=True, text=True,
+                             timeout=15, check=False)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert not ran.stderr, ran.stderr
+        values = list(map(int, ran.stdout.splitlines()))
+        assert len(values) == 18, ran.stdout
+        for start in range(0, 18, 6):
+            left, right, left_state, right_state, left_desync, right_desync = values[start:start+6]
+            assert 220 < left <= 240 and 220 < right <= 240, (scenario, start, values)
+            assert left_state == 3 * (left - 2)
+            assert right_state == 3 * (right - 2)
+            assert left_desync == right_desync == -1
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.core_quick
 def test_core_game_model(compiler, tmp_path, target, release):
     node = shutil.which('node')

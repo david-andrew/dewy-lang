@@ -1,0 +1,45 @@
+F
+=================================== FAILURES ===================================
+___________________ test_core_netplay_restart[debug-native] ____________________
+
+compiler = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792297871004045213/bin/dewy-core')
+tmp_path = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/pytest-of-david/pytest-187/test_core_netplay_restart_debu0')
+target = 'native', release = False
+
+    @pytest.mark.parametrize('target', ['native', 'wasm'])
+    @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+    def test_core_netplay_restart(compiler, tmp_path, target, release):
+        source = Path(__file__).resolve().parents[2] / 'core/tests/netplay_restart.dewy'
+        binary = tmp_path / 'restart'
+        flags = ['--release'] if release else []
+        built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                               capture_output=True, text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        command = [binary]
+        if target == 'wasm':
+            node = shutil.which('node')
+            if not node:
+                pytest.skip('Node is needed for web rollback checks')
+            scripts = Scripts()
+            scripts.feed(binary.with_suffix('.html').read_text())
+            runner = tmp_path / 'restart.cjs'
+            runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+            command = [node, runner]
+        for scenario in ['clean', 'late']:
+            ran = subprocess.run([*command, scenario], capture_output=True, text=True,
+                                 timeout=15, check=False)
+            assert ran.returncode == 0, ran.stdout + ran.stderr
+            assert not ran.stderr, ran.stderr
+            values = list(map(int, ran.stdout.splitlines()))
+            assert len(values) == 18, ran.stdout
+            for start in range(0, 18, 6):
+                left, right, left_state, right_state, left_desync, right_desync = values[start:start+6]
+>               assert 220 < left <= 240 and 220 < right <= 240, (scenario, start, values)
+E               AssertionError: ('late', 6, [240, 240, 714, 714, -1, -1, ...])
+E               assert (220 < 25)
+
+tests/python_misc/test_sloppy_core.py:6278: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_netplay_restart[debug-native]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 3746 deselected in 0.87s

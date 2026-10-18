@@ -1314,3 +1314,14 @@ value was 45.37 ms and median subsequent input latency 6.09 ms. These are simple
 interactive inputs in a retained session, not general fresh-build timings.
 See `repl-*` audits and the [language guide](../../core/LANGUAGE.md#interactive-prompt)
 for behavior, commands and limits.
+
+
+Rollback sessions now reject packets acknowledging local inputs the session has
+never produced, before updating acknowledgment, timing or remote input state.
+This carries Sloppy fix `f0d1ce9`: a late packet from a previous round on the same
+peers could otherwise stop the new round from sending its inputs. A reproduced
+second-round stall at tick 25 now passes three 240-frame rounds, with and without
+late packets, on native/web in both build modes. Python checks each peer's state
+against an independent arithmetic result. The rollback, restart and local
+network selection passes 17 checks in 6.91 seconds. This is a bounded stale-packet
+check, not a new session-ID protocol. See `netplay-restart-*` audits.

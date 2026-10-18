@@ -209,6 +209,9 @@ receive[S, I] = (s: mut Session[S, I], data: u8[]):
         net.send(s.__peers[pk.to], b)
         return
     if p < 0 or p >= s.players or p == s.me or pk.to != s.me: return
+    # A previous round can still send on these peers while this round starts.
+    # It cannot acknowledge local inputs that this session has never made.
+    if pk.ack > s.__recv[s.me]: return
     s.__heard[p] = elapsed()
     # (a player gone quiet is back: that problem is over)
     if starts_with(s.problem, "player {p} has not been heard from"): s.problem = ""
