@@ -3058,7 +3058,7 @@ copy_write_warnings = (f: int):
     loop l in fns[f].locals:
         if not copy_writes.has(l) or int(locals[l].flags) & skip != 0: continue
         nm = name_of(int(locals[l].name))
-        if starts_with(nm, "#") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
+        if starts_with(nm, "#") or starts_with(nm, "$") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
         warn(copy_writes[l], "'{nm}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `loop mut e in xs`)")
 
 # how many times w appears in src as a whole word
@@ -3090,7 +3090,9 @@ unused_local_warnings = (f: int):
         fl = int(locals[l].flags)
         if fl & LF_DECL == 0 or fl & skip != 0 or copy_writes.has(l): continue
         nm = name_of(int(locals[l].name))
-        if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or pos_in_lib(locals[l].pos): continue
+        # Dewy desugaring uses reserved $ names for evaluation-order captures.
+        # Their values may be overridden; they are not bindings the user can fix.
+        if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or starts_with(nm, "$") or pos_in_lib(locals[l].pos): continue
         near = ""
         loop gi in [0..globals.len()):
             gn = name_of(int(globals[gi].name))

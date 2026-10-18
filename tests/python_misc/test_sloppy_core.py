@@ -4223,6 +4223,24 @@ def compiler():
     return Path(value).resolve(strict=True)
 
 
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('unused', [False, True], ids=['generated-only', 'user-binding'])
+def test_core_generated_binding_warnings(compiler, tmp_path, release, unused):
+    source = tmp_path / 'warnings.dewy'
+    binding = 'let forgotten=23' if unused else ''
+    source.write_text('Point:type=[x:int64 y:int64]\nmain=()=>{\n'
+                      'let base=Point[1 2]\nlet result=[base... x=20 x=40 y=2]\n'
+                      + binding + '\nreturn result.x+result.y}\n')
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'program', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    warnings = [line for line in built.stderr.splitlines() if 'warning:' in line]
+    assert len(warnings) == int(unused), built.stderr
+    if unused:
+        assert "'forgotten' is given a value here but never used" in warnings[0]
+
+
 @pytest.mark.parametrize('mode', [None, 'invalid'])
 def test_core_frontend_selection(compiler, tmp_path, mode):
     source = tmp_path / 'main.dewy'
