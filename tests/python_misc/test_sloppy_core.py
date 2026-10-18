@@ -25,7 +25,7 @@ from tools.sloppy_core.benchmark_types import record_source
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
-    'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
+    'array-comparison-word-boundaries', 'array-comparison-string-blocks', 'sequence-value-protocol-nesting',
     'sequence-slice-bound-loop-local',
     'closure-copy-private', 'closure-explicit-shared', 'closure-copy-cleanup',
     'closure-capture-parameters',
@@ -41,6 +41,7 @@ QUICK_CASES = {
     'unpack-dictionary-nested', 'loop-else-conditions', 'json-typed-nested',
     'optional-managed-copy', 'grapheme-loop', 'optimizer-nested-exits',
     'optimizer-return-facts-rejoin', 'optimizer-return-facts-float',
+    'optimizer-boolean-value-effects',
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
 QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
@@ -87,6 +88,23 @@ if value>=?0.0 return 13
 return 14}
 main=()=>{if probe(-1.0) not=?11 or probe(0.0) not=?13 or probe(1.0) not=?13 return 1
 return if probe(NAN)=?14 42 else 2}""",
+    'array-comparison-string-blocks': '''main=()=>{
+loop size in [0..130) {
+    let bytes:array<uint8>=[]
+    loop i in [0..size) {bytes.push(((i*17)%128) as uint8)}
+    let left=str_from_bytes(bytes)
+    let right=str_from_bytes(bytes)
+    if left not=?right or left not=?left return 1
+    loop i in [0..size) {
+        let old=bytes[i]
+        bytes[i]=((old as int64) xor 64) as uint8
+        if left=?str_from_bytes(bytes) return 2
+        bytes[i]=old
+    }
+    bytes.push(0 as uint8)
+    if left=?str_from_bytes(bytes) return 3
+}
+return 42}''',
     'array-comparison-string-effectful-right': '''let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
 change=()=>{values=[] let noise=str_from_bytes([120 121 122] as array<uint8>)
 return if noise.length=?3 "abc" else "wrong"}
@@ -3735,6 +3753,32 @@ matrix=mat4()
 let point=matrix*{matrix=mat4(2); vec4(1 2 3 1)}
 return if point =? vec4(1 2 3 1) 42 else 2
 }''',
+    'optimizer-boolean-value-effects': '''let trace=0
+mark=(tag:int64 value:bool):>bool=>{trace=trace*10+tag return value}
+identity=(value:bool):>bool=>value
+main=()=>{
+loop a in [false true] {loop b in [false true] {loop c in [false true] {
+    trace=0
+    let first=(mark(1 a) and mark(2 b)) or mark(3 c)
+    let expected=if a (if b true else c) else c
+    let steps=if a (if b 12 else 123) else 13
+    if first not=?expected or trace not=?steps return 1
+    trace=0
+    let second=identity(not (mark(1 a) or (mark(2 b) and mark(3 c))))
+    expected=if a false else (if b (not c) else true)
+    steps=if a 1 else (if b 123 else 12)
+    if second not=?expected or trace not=?steps return 2
+}}}
+let empty:array<int64>=[]
+let skipped=empty.length>?0 and empty[0]=?1
+if skipped return 3
+return 42}''',
+    'optimizer-boolean-value-float': '''probe=(value:float64):>bool=>{
+let ordered=value<?0.0 or value>=?0.0
+return ordered}
+main=()=>{
+if not probe(-1.0) or not probe(0.0) or not probe(1.0) or probe(NAN) return 1
+return 42}''',
     'optimizer-short-circuit-scan': '''scan=(text:array<uint8>):>int64=>{
 let i:int64=0 let total:int64=0
 loop i <? text.length {
@@ -9880,6 +9924,23 @@ def test_core_value_web(value_batches, name, release):
 
 
 
+def assert_x64_compare_branch_layout(objdump, binary, symbol):
+    dumped = subprocess.run([objdump, '-d', f'--disassemble={symbol}', binary],
+                            capture_output=True, text=True, timeout=10, check=True)
+    instructions = []
+    for line in dumped.stdout.splitlines():
+        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
+        if match:
+            instructions.append((int(match[1], 16), len(match[2].split()), match[3]))
+    pairs = [(left, right) for left, right in zip(instructions, instructions[1:])
+             if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
+    assert len(pairs) >= 8, dumped.stdout
+    for compare, branch in pairs:
+        # The fused pair must neither cross nor end on the 32-byte boundary.
+        assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
+    return dumped.stdout
+
+
 def test_core_x64_compare_branch_layout(compiler, tmp_path):
     objdump = shutil.which('objdump')
     if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64') or not objdump:
@@ -9897,19 +9958,7 @@ def test_core_x64_compare_branch_layout(compiler, tmp_path):
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['777', *[str(i) for i, cutoff in enumerate(cutoffs) if 100 < cutoff]]
-    dumped = subprocess.run([objdump, '-d', '--disassemble=branch_probe', binary],
-                            capture_output=True, text=True, timeout=10, check=True)
-    instructions = []
-    for line in dumped.stdout.splitlines():
-        match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
-        if match:
-            instructions.append((int(match[1], 16), len(match[2].split()), match[3]))
-    pairs = [(left, right) for left, right in zip(instructions, instructions[1:])
-             if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
-    assert len(pairs) >= 8, dumped.stdout
-    for compare, branch in pairs:
-        # The fused pair must neither cross nor end on the 32-byte boundary.
-        assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
+    assert_x64_compare_branch_layout(objdump, binary, 'branch_probe')
 
 
 @pytest.mark.parametrize('body', [
@@ -10461,3 +10510,72 @@ def test_core_web_pointer_lock_events():
     script = Path(__file__).with_name('core_web_input.cjs')
     result = subprocess.run([node, script], capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_memory_equality_guard_pages(compiler, tmp_path, release):
+    if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64'):
+        pytest.skip('guard-page syscalls require x86-64 Linux')
+    source = tmp_path / 'guard.jo'
+    # Each source ends at an inaccessible page; test every mismatch position,
+    # vector boundary, and relative alignment, including zero readable bytes.
+    source.write_text('''main = () -> int:
+    aa = syscall(9, 0, 8192, 3, 0x22, -1, 0)
+    bb = syscall(9, 0, 8192, 3, 0x22, -1, 0)
+    if aa < 0 or bb < 0: return 3
+    if syscall(10, aa + 4096, 4096, 0) != 0: return 4
+    if syscall(10, bb + 4096, 4096, 0) != 0: return 5
+    loop n in [0..257):
+        loop offset in [0..16):
+            a = (aa + 4096 - n) as *u8
+            b = (bb + 4096 - n - offset) as *u8
+            loop i in [0..n):
+                a[i] = u8((i * 13 + n) % 256)
+                b[i] = a[i]
+            if not __mem_eq(a, b, n): return 6
+            loop i in [0..n):
+                b[i] = b[i] xor u8(128)
+                if __mem_eq(a, b, n): return 7
+                b[i] = b[i] xor u8(128)
+    if syscall(11, aa, 8192) != 0: return 8
+    if syscall(11, bb, 8192) != 0: return 9
+    42
+''')
+    binary = tmp_path / 'guard'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_memory_equality_live_results(compiler, tmp_path, release):
+    # More live comparison results than available integer registers: retaining
+    # earlier results must work when a later comparison spills its destination.
+    statements = '\n'.join(f'        r{i} = __mem_eq(a, b, n + {i})' for i in range(24))
+    combine = '\n'.join(f'        if r{i}: result += {1 << i}' for i in range(24))
+    source = tmp_path / 'live.jo'
+    source.write_text('probe = (a: *u8, b: *u8, n: int, rounds: int) -> int:\n'
+                      '    total = 0\n    loop _ in [0..rounds):\n' + statements +
+                      '\n        result = 0\n' + combine + '\n        total += result\n    total\n' +
+                      'main = () -> int:\n    a = fill(u8(7), 64)\n    b = fill(u8(7), 64)\n'
+                      '    if probe(data(a), data(b), 1, 2) != 33554430: return 1\n'
+                      '    b[17] = 8\n    if probe(data(a), data(b), 1, 2) != 262142: return 2\n'
+                      '    b[17] = 7\n    if probe(data(a), data(b), 1, 2) != 33554430: return 3\n'
+                      '    42\n')
+    binary = tmp_path / 'live'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    objdump = shutil.which('objdump')
+    if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
+        assembly = assert_x64_compare_branch_layout(objdump, binary, 'probe')
+        assert 'pcmpeqb' in assembly, assembly
+        assert any('push' in line and '%r11' in line for line in assembly.splitlines()), assembly

@@ -71,8 +71,15 @@ inlinable = (f: IrFn) -> int:
     if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > INLINE_LOOP_MAX: return 0
     leaf = true
     has_loop = false
+    size = f.code.len()
     loop ins in f.code:
         if ins.op == .loop: has_loop = true
+        if ins.op == .memeq:
+            # A variable-length comparison expands to several size cases and
+            # a vector loop. Charge it as a substantial body, not one scalar
+            # instruction, while still allowing its small callers to inline.
+            size += 47
+            has_loop = true
         if ins.op == .call and ins.imm == f.fn_index: return 0         # recursive
         if ins.op == .intr and ins.imm >= 2: return 0                 # setjmp-like intrinsics
         # (calls on rarely taken paths, like the out-of-line refcounting during a parallel job,
@@ -82,7 +89,8 @@ inlinable = (f: IrFn) -> int:
     # runtime tier it up; embedding it in a one-shot outer loop can keep the
     # entire workload in baseline machine code for that invocation.
     if target_wasm and has_loop: return 0
-    if f.code.len() <= INLINE_MAX: return 1
+    if size > INLINE_LOOP_MAX: return 0
+    if size <= INLINE_MAX: return 1
     if leaf and has_loop: return 3
     if leaf: return 2
     0
@@ -122,7 +130,7 @@ remap = (c0: Ins, callee: IrFn, vm: int[], sm: int[]) -> Ins:
             c.a = i32(vm[a])
             c.b = i32(vm[bb])
             if c.op == .store and int(c.c) & M_INDEX != 0: c.dst = i32(vm[int(c.dst)])
-        memcpy, memset, select, vop:
+        memcpy, memset, select, vop, memeq:
             c.a = i32(vm[a])
             c.b = i32(vm[bb])
             c.c = i32(vm[int(c.c)])

@@ -37,7 +37,7 @@ o_rewrite = (ins: mut Ins):
             ins.a = o_repl[a]
         ret:
             if a >= 0: ins.a = o_repl[a]
-        memcpy, memset, select, vop:
+        memcpy, memset, select, vop, memeq:
             ins.a = o_repl[a]
             ins.b = o_repl[bb]
             ins.c = o_repl[int(ins.c)]
@@ -69,7 +69,7 @@ o_pure = (op: Op) -> bool:
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         feq, fne, flt, fle, fgt, fge: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: true
-        vld, vbin, vsplat: true
+        vld, vbin, vsplat, memeq: true
         _: false
 
 o_resize = (n: int):
@@ -521,6 +521,9 @@ o_emit = (ins0: Ins):
                 ht_put_gen(load_key1(VI, 8 | M_HDR, a), 0, 0, k, mem_gen(8 | M_HDR), int(o_ver[a]), 0)
             return
         else if kills_memory(op) and not (op == .call and ins.c == 1): kill_all()
+    # Record the boolean result without making raw-memory reads available
+    # expressions: subsequent stores must still perform a new comparison.
+    if op == .memeq and stable(int(ins.dst)): o_dop[int(ins.dst)] = i32(int(op))
     o_push(ins)
 
 # Only single-definition values have facts. Direct indexing avoids hashing the
@@ -587,6 +590,11 @@ o_simplify = (ins0: Ins, pos: int):
             o_simplify(Ins(.mov, VI, i32(d), i32(value), 0, 0, 0), pos)
             return
         o_emit(ins)
+        return
+    # The bounded memory comparison already produces a canonical boolean.
+    # Inlined bool returns otherwise carry an unnecessary ABI byte extension.
+    if op == .zext8 and stable(a) and o_dop[a] == i32(int(Op.memeq)):
+        o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)
         return
     # unary integer ops
     if op == .neg or op == .not_ or op == .sext8 or op == .sext16 or op == .sext32 or op == .zext8 or op == .zext16 or op == .zext32:
@@ -1600,7 +1608,7 @@ o_negate = (op: Op) -> Op:
 # instructions whose result register may be renamed
 o_retargetable = (op: Op) -> bool:
     match op:
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true

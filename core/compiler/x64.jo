@@ -1515,6 +1515,93 @@ x_unary = (prefix: int, opc: int, ins: Ins, src_ty: int, dst_ty: int):
     sse_rr(prefix, opc, x, xa)
     sts(d, x, dst_ty)
 
+# A bounded memory comparison, using only reserved scratch registers plus its
+# destination. Keeping this operation in IR avoids lowering a runtime loop and
+# its control-flow joins at every call site. No read crosses either byte span.
+emit_memeq = (d: int, a: int, bb: int, count: int):
+    if vloc[d] == LOC_NONE: return
+    mask = dreg(d, R11)
+    saved = vloc[d] < 0
+    if saved:
+        b(0x41); b(0x53)                       # push r11 (spilled destination)
+    ld(RAX, a)
+    ld(RCX, bb)
+    ld(RDX, count)
+    cmp_branch_pad(10)
+    b(0x48); b(0x83); b(0xFA); b(0)            # cmp rdx, 0
+    empty = jcc32(14)                          # jle: portable n <= 0 behavior
+    cmp_branch_pad(10)
+    b(0x48); b(0x83); b(0xFA); b(16)
+    short = jcc32(12)                          # jl: fewer than 16 bytes
+    unequal: int[]
+    results: int[]
+    nop_pad((16 - code.len() % 16) % 16)
+    vector_loop = code.len()
+    sse_rm(0xF3, 0x6F, 0, RAX, 0)             # movdqu xmm0, [a]
+    sse_rm(0xF3, 0x6F, 1, RCX, 0)
+    sse_rr(0x66, 0x74, 0, 1)                   # pcmpeqb
+    sse_rr(0x66, 0xD7, mask, 0)                # pmovmskb mask32, xmm0
+    cmp_branch_pad(13)
+    rex(false, 0, 0, mask, false)
+    b(0x81); modrr(7, mask); b32(65535)
+    unequal.push(jcc32(5))
+    cmp_branch_pad(10)
+    b(0x48); b(0x83); b(0xFA); b(32)
+    tail = jcc32(14)
+    lea(RAX, RAX, 16)
+    lea(RCX, RCX, 16)
+    lea(RDX, RDX, -16)
+    jmp_back(vector_loop)
+    patch_here(tail)
+    use_index(RDX, 0)
+    lea(RAX, RAX, -16)
+    lea(RCX, RCX, -16)
+    cur_index = -1
+    sse_rm(0xF3, 0x6F, 0, RAX, 0)
+    sse_rm(0xF3, 0x6F, 1, RCX, 0)
+    sse_rr(0x66, 0x74, 0, 1)
+    sse_rr(0x66, 0xD7, mask, 0)
+    rex(false, 0, 0, mask, false)
+    b(0x81); modrr(7, mask); b32(65535)
+    results.push(jmp32())
+    patch_here(short)
+    # Head/tail words cover every short size without reading padding. The
+    # overlapping bytes are harmless, including equal head and tail addresses.
+    loop width in [8, 4, 2]:
+        cmp_branch_pad(10)
+        b(0x48); b(0x83); b(0xFA); b(width)
+        smaller = jcc32(12)
+        load_sized(mask, RAX, 0, width, false)
+        cmp_branch_pad(10)
+        if width == 2: b(0x66)
+        op_rm(0x3B, width == 8, mask, RCX, 0)
+        unequal.push(jcc32(5))
+        use_index(RDX, 0)
+        lea(RAX, RAX, -width)
+        lea(RCX, RCX, -width)
+        cur_index = -1
+        load_sized(mask, RAX, 0, width, false)
+        load_sized(RAX, RCX, 0, width, false)
+        op_rr(0x39, true, mask, RAX)
+        results.push(jmp32())
+        patch_here(smaller)
+    load_sized(RDX, RAX, 0, 1, false)
+    load_sized(RAX, RCX, 0, 1, false)
+    op_rr(0x39, true, RDX, RAX)
+    loop fix in results: patch_here(fix)
+    setcc(4)
+    done_result = jmp32()
+    loop fix in unequal: patch_here(fix)
+    mov_imm(RAX, 0)
+    done_false = jmp32()
+    patch_here(empty)
+    mov_imm(RAX, 1)
+    patch_here(done_result)
+    patch_here(done_false)
+    if saved:
+        b(0x41); b(0x5B)                       # pop r11
+    st(d, RAX)
+
 # fused compare + branch: next instruction consumes the flag
 fused_cc = -1
 fuse_skip = -1             # an instruction folded into the branch after it
@@ -1892,6 +1979,8 @@ emit_ins = (pos: int, ins: Ins):
             if target_windows and lf_is_cabi(int(ins.imm)): cabi_fix.push((code.len() - 4, int(ins.imm)))
             else: call_fix.push((code.len() - 4, int(ins.imm)))
             st(d, r)
+        memeq:
+            emit_memeq(d, a, bb, int(ins.c))
         copy:
             size = int(ins.imm)
             if size <= INLINE_COPY:

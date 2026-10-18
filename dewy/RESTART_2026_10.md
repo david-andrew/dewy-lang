@@ -883,6 +883,56 @@ The small-count artifact-grouping check is not used to claim runtime speed or
 absolute target attainment.
 [Validation and performance evidence](audits/2026-10-18/loop-slice-snapshots.json).
 
+## Bounded native memory equality
+
+The x86-64 backend now represents byte-range equality as one memory-reading
+operation. It uses SSE2 for complete 16-byte blocks and overlapping 8/4/2-byte
+head/tail reads for short spans. Every load remains inside the requested range,
+including unaligned inputs and empty ranges ending at an inaccessible page.
+The existing source implementation serves the C bootstrap, ARM64, web and debug
+builds. Lowering selects the private runtime instance, so similarly named user
+functions retain their own behavior.
+
+This removes an extra helper call and a large intermediate loop body. The
+inliner accounts for the operation's expanded size and loop behavior; general
+inlining limits are unchanged. The optimizer recognizes its canonical boolean
+result, while retaining separate reads across mutations. Backend checks cover
+all three operands, spilled destinations and compare/branch alignment.
+
+The earlier 16-byte-helper experiment crossed the release inlining limit.
+Adapting Sloppy's newer boolean-value lowering gave only a small incremental
+benefit here and did not restore inlining, so that adaptation was not retained.
+The final operation leaves the portable library source unchanged.
+[Independent experiment measurements](audits/2026-10-18/bounded-equality-experiments.json)
+record those alternatives; their gains are not multiplied together.
+
+The initial native-operation implementation passed **5,855 checks in 175.58 seconds**.
+Subsequent branch-padding and inlining-cost changes each passed an independent
+C bootstrap and all 246 quick checks. The cost adjustment produces the same
+twelve benchmark executables as the padded implementation, apart from the
+recorded equal-width compiler-bundle path strings. The matched 13-sample run
+measured string-equality ratios of **0.813 default and 0.647 release** against
+the previous stage. Release string equality remains **1.69 times C** on this
+workload. The initial fresh-build rate was roughly **85k root lines/CPU-second**
+on the busy host; the 250k target remains unmet.
+
+A Linux child-process instruction counter gives an additional diagnostic for
+host contention. Three rotating samples of the final compiler use about 1%
+fewer instructions for the large default build and 0.2% more for the fixed
+compiler self-build than the preceding stage. These counts describe compiler
+work; timing comparisons still decide stage acceptance.
+
+The final candidate passes the compilation and runtime comparisons against both
+references. The 23-pair compilation recheck resolved all but Netpong versus the
+previous stage; a separate 23-pair run on the original CPU resolved that result
+at a median ratio of 1.0005 (approximate interval 0.9959–1.0036). The array-release
+recheck also passes. All samples and intermediate inconclusive assessments are
+retained. Rebuilding in the original benchmark source directory verifies exact
+artifact equivalence to the full runtime run, masking only the toolchain prefix.
+The final busy-host compilation recheck measured roughly 67k root lines/CPU-second;
+absolute rates across these load conditions should not be treated as speedups.
+[Final validation, raw measurements and assessment](audits/2026-10-18/bounded-native-equality.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

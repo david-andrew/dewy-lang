@@ -27,6 +27,7 @@ enum Op:
     vzu,              # leave 256-bit code (vzeroupper)
     mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
     mulhu             # ... unsigned
+    memeq           # compare c bytes at a and b (bounded reads, x86-64 only)
 
 const VI = 0
 const VF = 1
@@ -379,7 +380,7 @@ ir_operands = (ins: Ins) -> int:
         memcpy, memset, vop:
             ir_use_count = 3
             return -1
-        select:
+        select, memeq:
             ir_use_count = 3
             return d
         load:

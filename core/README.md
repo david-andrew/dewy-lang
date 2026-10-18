@@ -91,6 +91,16 @@ completeness. The graph reference has a different storage layout; individual
 workloads still need interpretation. New features need their own representative
 checks as well as this existing-program gate.
 
+For instruction-level comparisons on a contended Linux host, build the small
+`tools/sloppy_core/count_instructions.c` driver with `cc -O2 -Wall -Wextra`.
+Pass the absolute compiler path followed by its normal arguments; the final
+stderr line reports user-space retired instructions and counter running/enabled
+times. It measures only the command it launches and its children. Keep inputs,
+libraries, emission workers and CPU affinity matched, and require equal running
+and enabled times for raw-count comparisons. Use these counts to locate extra
+compiler work; elapsed CPU time and application timings remain the acceptance
+checks.
+
 Callback runtime comparisons are available with `python3 -m
 tools.sloppy_core.benchmark_callbacks CANDIDATE --baseline BASELINE --output
 callbacks.json`. Use `--workload local-counter` to isolate stack-local callbacks;
