@@ -15,6 +15,7 @@ exit = (code: int):
 
 # command line arguments (args()[0] is the program as it was started: `sloppy tool.jo` gives "tool.jo")
 args = () -> str[]:
+    if __test_args.len() > 0: return __test_args
     out: str[]
     when TARGET == "wasm":
         b = __wasm_bytes((p: *u8, cap: int): __wasm_args(p, cap))
@@ -865,18 +866,29 @@ temp_dir = () -> str:
         "/tmp"
 
 # ---------------- `sloppy test` support ----------------
-# Each test runs in a process of its own where there is fork (Linux, macOS): one that fails (a
-# failed assert, a panic) is reported, and the rest still run; elsewhere they run here in turn
+# Each native test runs in its own process. POSIX forks the initialized program;
+# Windows starts this executable again, selecting one test by declaration index.
 __tests_run = 0
 __tests_failed = 0
 __test_t0 = 0.0
 __test_child = false
 __testing = false                   # (a sloppy test run: window() opens nothing)
-__test_run_begin = (): __testing = true
+__test_args: str[]                  # original user arguments in a re-executed test
+__test_selected = ""
+__test_index = 0
+__test_run_begin = ():
+    __testing = true
+    a = args()
+    if a.len() >= 4 and a[1] == "--dewy-internal-test":
+        __test_selected = a[2]
+        __test_args = a[3..]
+        __test_child = true
 
 # true where the test's code is to run (the child; or here). `sloppy test file.jo words`:
 # only the tests whose names have one of the words in them
 __test_begin = (name: str) -> bool:
+    __test_index += 1
+    if __test_child: return __test_selected == str(__test_index)
     a = args()
     if a.len() > 1:
         found = false
@@ -901,6 +913,18 @@ __test_begin = (name: str) -> bool:
                 if st[0] & 0xFFFF != 101 << 8: print("FAILED")
                 __tests_failed += 1
             return false
+    else when TARGET == "windows":
+        exe = exe_path()
+        argv = [exe, "--dewy-internal-test", str(__test_index)] + a
+        __out_flush()
+        code = __w32_run_output(exe, argv, true, "").0
+        __tests_run += 1
+        if code == 0: print("ok ({(time() - __test_t0) * 1000:.1} ms)")
+        else:
+            if code != 101: print("FAILED")
+            if code < 0: eprint("    could not start the test process")
+            __tests_failed += 1
+        return false
     true
 
 __test_end = ():
@@ -911,6 +935,7 @@ __test_end = ():
     print("ok ({(time() - __test_t0) * 1000:.1} ms)")
 
 __test_done = (n: int):
+    if __test_child: panic("selected test was not reached")
     a = args()
     if a.len() > 1 and __tests_run == 0:
         words = ""

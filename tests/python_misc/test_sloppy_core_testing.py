@@ -45,7 +45,7 @@ test "\"quoted\" 🙂" { assert(true) }
 
 
 @pytest.mark.parametrize('flags', [[], ['--release']])
-@pytest.mark.parametrize('failure', ['assert(false)', 'panic("intentional")', 'exit(7)'])
+@pytest.mark.parametrize('failure', ['assert(false)', 'panic("intentional")', 'exit(0)', 'exit(7)'])
 def test_core_native_test_failure_isolation(compiler, tmp_path, flags, failure):
     source = tmp_path / 'tests.dewy'
     source.write_text(f'''test "before" {{ assert(true) }}
@@ -57,6 +57,36 @@ test "after" {{ assert(true) }}
     assert 'test before ... ok' in result.stdout
     assert 'test after ... ok' in result.stdout
     assert '2 passed, 1 failed' in result.stdout
+
+
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_core_native_test_child_selection(compiler, tmp_path, flags):
+    """Exercise the re-execution protocol locally as well as on Windows hosts."""
+    source = tmp_path / 'child.dewy'
+    helper = tmp_path / 'helper.dewy'
+    helper.write_text('let original_args=args()\n')
+    source.write_text('''from p"helper.dewy" import original_args
+let values=[20 22]
+test "first" { values[0]=0 panic("wrong test selected") }
+test "chosen" {
+    assert(values[0] =? 20)
+    let arguments=args()
+    assert(arguments.length =? 2)
+    assert(arguments[0] =? "original program name")
+    assert(arguments[1] =? "original filter")
+    assert(original_args =? arguments)
+    printl"child ran"
+}
+test "last" { panic("child continued after its test") }
+''')
+    result = command(compiler, 'test', *flags, source, '--dewy-internal-test', '2',
+                     'original program name', 'original filter')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == 'child ran\n'
+    missing = command(compiler, 'test', *flags, source, '--dewy-internal-test', '9',
+                      'original program name')
+    assert missing.returncode != 0
+    assert 'selected test was not reached' in missing.stderr
 
 
 def test_core_native_tests_check_and_build(compiler, tmp_path):
@@ -139,10 +169,12 @@ def test_core_native_tests_help(compiler):
 
 def test_core_native_tests_game(compiler, tmp_path):
     source = tmp_path / 'game.dewy'
-    source.write_text('''window("headless tests" 320 240)
+    (tmp_path / 'setup.dewy').write_text('window("imported setup" 320 240)\nready=()=>true\n')
+    source.write_text('''from p"setup.dewy" import ready
+window("headless tests" 320 240)
 update=(dt:float64):>void=>panic("must not update")
 draw=():>void=>panic("must not draw")
-test "game logic" { assert(20+22 =? 42) }
+test "game logic" { assert(ready()) assert(20+22 =? 42) }
 ''')
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': ''}
     result = subprocess.run([compiler, 'test', source], env=env, capture_output=True,

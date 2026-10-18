@@ -3932,8 +3932,6 @@ check_program = (main_path: str):
         cnt = mk(.int_lit, 0)
         nodes[cnt].ival = test_decls.len()
         modules[mainm].inits.push(synth_call("__test_done", [cnt], 0))
-        # (first of all: a test run, where window(...) at the top opens no window)
-        modules[mainm].inits.insert(0, synth_call("__test_run_begin", [], 0))
     # (sloppy check: the tests, and the game loop's update and draw too)
     if (not test_mode or check_all) and (has_upd or has_drw):
         user_main = false
@@ -4006,10 +4004,15 @@ check_program = (main_path: str):
     module_ctx = []
     module_frames = []
     setup_module_contexts(prelude_init)
+    # Set up testing after runtime globals, before any user module initializer.
+    # Imported initializers must see the original arguments and headless mode too.
+    test_start = 0
+    if test_mode: test_start = runtime_fn("__test_run_begin")
     dfs_state = fill(false, modules.len())
     order: int[]
     order_modules(mainm, order)
     init_fns = [prelude_init]
+    if test_start != 0: init_fns.push(test_start)
     loop m in order:
         if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
     cx = -1
@@ -4109,6 +4112,7 @@ check_program = (main_path: str):
         order.clear()
         order_modules(mainm, order)
         init_fns = [prelude_init]
+        if test_start != 0: init_fns.push(test_start)
         loop m in order:
             if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
     loop ci, at in draw_to_at:

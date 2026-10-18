@@ -66,9 +66,11 @@ test build, including `--release` when requested. Enter `r` to rerun manually or
 `q` to quit. **Dewy: Watch Tests in Current File (Core)** starts this workflow in
 a VS Code task; save edits to trigger a rerun and terminate the task to stop it.
 
-On Linux and macOS, each test runs in a separate child process: assertions and
+On native hosts, each test runs in a separate child process: assertions and
 panics fail that test, later tests still run, and changes to globals stay local to
-that test. Top-level initialization runs once before the tests. Filesystem and
+that test. Linux and macOS fork after top-level initialization. Windows starts
+the executable again for each test, so top-level initialization repeats in each
+child. Filesystem and
 other external effects remain shared. Tests run natively, skip `main` and game
 callbacks, and suppress windows opened through `window`. Only tests declared in
 the selected file run; imported files supply code, not additional tests.
