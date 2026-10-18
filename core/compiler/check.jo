@@ -1908,7 +1908,7 @@ dewy_sequence_loop = (s: int) -> bool:
     it = int(nodes[s].a)
     if nodes[it].kind == .range: return false
     t = prune(ntype(it))
-    if types[t].kind != .struct_ or is_map_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
+    if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
     pos = nodes[s].pos
     if has_flag(s, NF_MUT): fatal(pos, "custom sequence iteration yields values; update the container through its indices")
     tag = "__sequence{bc_count}"
@@ -2011,11 +2011,11 @@ check_for = (s: int):
         # copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
         if is_map_type(t) and not is_mut:
             add_flag(it, NF_CHECKED)
-            lv = int(nodes[synth_call("__map_live", [it], pos)].a)
-            check_expr(lv, 0)
+            lv = int(nodes[synth_call("__map_entries", [it], pos)].a)
+            t = prune(check_expr(lv, 0))
             it = last_checked
             nodes[s].a = i32(it)
-        if is_map_type(t) and nodes[s].ival == 1:
+        if (is_map_type(t) or is_map_entries_type(t)) and nodes[s].ival == 1:
             # `i in 0.. and key in map` counts keys. The native two-binding
             # map loop otherwise means key/value, so iterate its key snapshot.
             add_flag(it, NF_CHECKED)
@@ -2061,7 +2061,7 @@ check_for = (s: int):
             nodes[s].sym = i32(el)
             nodes[s].c = i32(idx)
             nodes[s].d = i32(snap)
-        else if k == .struct_ and structs[int(types[t].st)].name == "Map":
+        else if is_map_type(t) or is_map_entries_type(t):
             si = int(types[t].st)
             check_struct_fields(si)
             kt = int(fields[int(structs[si].fields)].type)
@@ -3488,11 +3488,12 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
     if is_tuple and int(types[t].nargs) != bindings.len():
         fatal(pos, "expected a tuple with {bindings.len()} elements, found {type_str(t)}")
     input = e
+    input_type = t
     if is_map:
         add_flag(input, NF_CHECKED)
-        check_expr(bc_call("__map_live", [input], pos), 0)
+        input_type = prune(check_expr(bc_call("__map_entries", [input], pos), 0))
         input = last_checked
-    source = capture_value(input, t, statements)
+    source = capture_value(input, input_type, statements)
     if is_array or is_map:
         length = mk(.call, pos)
         length_source = source

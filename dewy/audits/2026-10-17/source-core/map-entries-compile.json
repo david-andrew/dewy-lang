@@ -1,0 +1,178 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "revision": "b7c9e7fc58cfcc8be830dabef1a75cbaed165e1d",
+  "working_tree": " M core/LANGUAGE.md\n M core/compiler/check.jo\n M core/compiler/expr.jo\n M core/compiler/lower.jo\n M core/lib/core/map.jo\n M tests/python_misc/test_sloppy_core.py\n?? tools/sloppy_core/benchmark_iteration.py\n",
+  "diff_sha256": "ddef3630d8a488c044ba18c36bea5e32ae6352d434746965ce3019c05748b13d",
+  "load_average_start": [
+    9.39013671875,
+    10.568359375,
+    6.91796875
+  ],
+  "workers": 1,
+  "samples": 5,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792287041845511334/bin/dewy-core",
+      "sha256": "302fe169f50dd4ef89458264b2fb6d114dd76b75e9dce4bd4c2b67784dd4953e"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792289495298071954/bin/dewy-core",
+      "sha256": "fb9ee0e81506dda412804fa221102d4808c68d0be964eb997ea44cd182da022f"
+    }
+  },
+  "workloads": {
+    "tour": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/tour.dewy",
+        "--release"
+      ],
+      "source_sha256": "6d4145bc4b24dab2a507d67f38632273aa0b8ac6dd649cb4849c1ad9386c523f",
+      "seconds": {
+        "baseline": [
+          0.08283461600012743,
+          0.08284031099992717,
+          0.08027199599996493,
+          0.07964517400000659,
+          0.08184259700010443
+        ],
+        "candidate": [
+          0.08336151200001041,
+          0.0830737600001612,
+          0.08236611200004518,
+          0.07988881700021011,
+          0.08076768300020376
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.08184259700010443,
+        "candidate": 0.08236611200004518
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.080011,
+          0.08001200000000006,
+          0.07713599999999994,
+          0.076651,
+          0.078933
+        ],
+        "candidate": [
+          0.080541,
+          0.0803099999999999,
+          0.07946700000000002,
+          0.07699700000000002,
+          0.07777199999999998
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.078933,
+        "candidate": 0.07946700000000002
+      }
+    },
+    "dunes": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/dunes.dewy",
+        "--release"
+      ],
+      "source_sha256": "a09ce6947513cafd55f0da6a502bf9585335c22161bc9a7e3dcb0225fe5360cd",
+      "seconds": {
+        "baseline": [
+          0.428111367999918,
+          0.3524329800000032,
+          0.3151196199999049,
+          0.2786115069998232,
+          0.4352790679999998
+        ],
+        "candidate": [
+          0.43186718700007987,
+          0.2841627289999451,
+          0.2824874919999729,
+          0.34494754900015323,
+          0.5398717499999748
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.3524329800000032,
+        "candidate": 0.34494754900015323
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.42039099999999996,
+          0.34212999999999977,
+          0.29779800000000034,
+          0.2733909999999999,
+          0.376041
+        ],
+        "candidate": [
+          0.42421500000000006,
+          0.27837800000000024,
+          0.2768019999999999,
+          0.337941,
+          0.4464510000000004
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.34212999999999977,
+        "candidate": 0.337941
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "a07380764e96e712bdc615640576f61266a1bef2feb638f3932f6c34d588642f",
+      "seconds": {
+        "baseline": [
+          1.4893218489999072,
+          1.369110598999896,
+          1.4616220750001503,
+          1.7300795699998162,
+          1.7577260919999844
+        ],
+        "candidate": [
+          1.3413492749998568,
+          1.5549447000000782,
+          1.4969496149999486,
+          1.1719139459999042,
+          1.380047870999988
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.4893218489999072,
+        "candidate": 1.380047870999988
+      },
+      "cpu_seconds": {
+        "baseline": [
+          1.4448330000000005,
+          1.3284920000000007,
+          1.3968170000000004,
+          1.6212840000000002,
+          1.6879599999999988
+        ],
+        "candidate": [
+          1.3122059999999995,
+          1.4878689999999997,
+          1.4465419999999996,
+          1.1530269999999998,
+          1.3560939999999981
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 1.4448330000000005,
+        "candidate": 1.3560939999999981
+      }
+    }
+  },
+  "load_average_end": [
+    7.79541015625,
+    10.1025390625,
+    6.86083984375
+  ]
+}

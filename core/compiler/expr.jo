@@ -543,6 +543,14 @@ map_elem_place = (n: int):
 
 is_map_type = (t: int) -> bool: types[prune(t)].kind == .struct_ and structs[int(types[prune(t)].st)].name == "Map"
 
+is_map_entries_type = (t: int) -> bool:
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != "__MapEntries": return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
+
 check_place = (n: int, for_mut: bool):
     if is_map_get(n): map_elem_place(n)
     k = nodes[n].kind
@@ -3385,7 +3393,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         else if is_map_type(t):
             # Combined loops index a retained dense entry list. Compact deleted
             # entries once, just as ordinary dictionary iteration does.
-            nodes[n] = nodes[bc_call("__map_live", args, nodes[n].pos)]
+            nodes[n] = nodes[bc_call("__map_entries", args, nodes[n].pos)]
         else: nodes[n] = nodes[args[0]]
         return check_expr(n, expected)
     else if id == .dewy_iter_done or id == .dewy_iter_value or id == .dewy_iter_pair:
@@ -3403,11 +3411,11 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         else if id == .dewy_iter_done:
             length = if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
             nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
-        else if is_map_type(t) and id == .dewy_iter_pair:
+        else if (is_map_type(t) or is_map_entries_type(t)) and id == .dewy_iter_pair:
             nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
         else:
             ix = mk(.index, pos)
-            nodes[ix].a = i32(if is_map_type(t): bc_field(args[0], "keys", pos) else: args[0])
+            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_field(args[0], "keys", pos) else: args[0])
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]
         return check_expr(n, expected)

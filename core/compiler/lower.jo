@@ -4352,6 +4352,7 @@ gen_for = (s: int):
     # the snapshot of an array cannot change while iterating: hoist its length and data
     n_snap = 0
     base_snap = 0
+    map_values = 0
     is_fixed = types[ct].kind == .fixed
     if aux == 1:
         sv = read_place(local_place(snap, false), ct)
@@ -4365,6 +4366,16 @@ gen_for = (s: int):
             if slice_lo >= 0:
                 n_snap = e_bin(.sub, VI, slice_hi, slice_lo)
                 base_snap = e_bin(.add, VI, base_snap, e_bin(.mul, VI, slice_lo, e_iconst(tsize(int(types[ct].elem)))))
+    else if aux == 3 and not has_flag(s, NF_MUT):
+        # The dense entry snapshot is immutable for this loop. Hoist its array
+        # bounds and data just as for an ordinary array snapshot.
+        layout(ct)
+        f0 = int(structs[int(types[ct].st)].fields)
+        sa = place_addr(local_place(snap, false), ct)
+        keys = e_load(VI, sa, int(fields[f0].offset), ptr_size)
+        n_snap = arr_len(keys)
+        base_snap = e_addi(keys, 24)
+        map_values = e_addi(e_load(VI, sa, int(fields[f0 + 1].offset), ptr_size), 24)
     if aux == 2 and types[ct].kind == .array:
         key = lpath_key(int(nodes[s].a))
         if len(key) > 0:
@@ -4420,12 +4431,14 @@ gen_for = (s: int):
         kt = telem(int(fields[f0].type))
         vt = telem(int(fields[f0 + 1].type))
         sa = place_addr(local_place(snap, false), ct)
-        keys = e_load(VI, sa, int(fields[f0].offset), ptr_size)
-        e_mov(int(locals[el].vreg), e_bin(.add, VI, e_addi(keys, 24), e_bin(.mul, VI, i, e_iconst(tsize(kt)))))
+        keys = base_snap
+        if keys == 0: keys = e_addi(e_load(VI, sa, int(fields[f0].offset), ptr_size), 24)
+        e_mov(int(locals[el].vreg), e_bin(.add, VI, keys, e_bin(.mul, VI, i, e_iconst(tsize(kt)))))
         vl = int(nodes[s].aux2)
         if vl != 0 and int(locals[vl].flags) & LF_BYREF != 0:
-            vals = e_load(VI, sa, int(fields[f0 + 1].offset), ptr_size)
-            e_mov(int(locals[vl].vreg), e_bin(.add, VI, e_addi(vals, 24), e_bin(.mul, VI, i, e_iconst(tsize(vt)))))
+            vals = map_values
+            if vals == 0: vals = e_addi(e_load(VI, sa, int(fields[f0 + 1].offset), ptr_size), 24)
+            e_mov(int(locals[vl].vreg), e_bin(.add, VI, vals, e_bin(.mul, VI, i, e_iconst(tsize(vt)))))
     blk()
     cont = ctl
     loops.push(LoopInfo(brk, cont, scope_locals.len()))
@@ -4447,7 +4460,7 @@ each_done = (s: int, ct: int, i: int, n_snap: int, n_fixed: int, more: bool) -> 
     if aux == 2:
         n = n_fixed
         if n == 0: n = arr_len(read_place(gen_place(int(nodes[s].a), false), ct))
-    else if aux == 3:
+    else if aux == 3 and n == 0:
         si = int(types[ct].st)
         layout(ct)
         f0 = int(structs[si].fields)

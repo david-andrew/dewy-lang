@@ -580,6 +580,12 @@ removed entries. The arrays retain independent values: editing a returned array
 or one of its nested elements does not change the dictionary, and later dictionary
 edits do not change an earlier result.
 
+Dictionary loops and unpacking retain an insertion-ordered snapshot of the live
+keys and values. Changing the source dictionary while iterating does not change
+that input. With no removed entries, the snapshot shares the existing arrays;
+after removals it collects only live keys and values, without copying or rebuilding
+the dictionary's hash table. Combined and counted loops use the same ordering.
+
 Dictionaries compare by their key/value associations, ignoring insertion order,
 capacity and removed entries. This also holds when they are nested inside other
 values. Their hashes follow the same rule, so dictionaries can be set members

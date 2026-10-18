@@ -1,0 +1,654 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "b7c9e7fc58cfcc8be830dabef1a75cbaed165e1d",
+  "working_tree": " M core/LANGUAGE.md\n M core/compiler/check.jo\n M core/compiler/expr.jo\n M core/compiler/lower.jo\n M core/lib/core/map.jo\n M tests/python_misc/test_sloppy_core.py\n?? tools/sloppy_core/benchmark_iteration.py\n",
+  "cpu_affinity": [
+    2
+  ],
+  "load_average_start": [
+    9.84765625,
+    10.69140625,
+    6.91748046875
+  ],
+  "count": 1000,
+  "samples": 7,
+  "warmups": 1,
+  "clock": "thread-cpu",
+  "flags": [
+    "--release"
+  ],
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792287041845511334/bin/dewy-core",
+      "sha256": "302fe169f50dd4ef89458264b2fb6d114dd76b75e9dce4bd4c2b67784dd4953e"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792289495298071954/bin/dewy-core",
+      "sha256": "fb9ee0e81506dda412804fa221102d4808c68d0be964eb997ea44cd182da022f"
+    }
+  },
+  "workloads": {
+    "pairs-dense": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    \n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values {checksum+=key+value[0]}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "1a5152fc79af0457fbfa940538222229d4f21624890a51fe173eb0c3a27c87e3",
+      "binary_sha256": {
+        "baseline": "b6627a9c16e08ab5621fca14b139cc41b6eebd30ccd0fe858cef58baecc8ef16",
+        "candidate": "0257146e1ad13ffea722bc66139b2124fa04fc9c0318429858c2afc84002ae16"
+      },
+      "checksum": 134209536000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 20154044,
+            "wall_seconds": 0.023315843000091263
+          },
+          {
+            "kernel_ns": 20310018,
+            "wall_seconds": 0.023365781000165953
+          },
+          {
+            "kernel_ns": 20418509,
+            "wall_seconds": 0.023546585000076448
+          },
+          {
+            "kernel_ns": 20123502,
+            "wall_seconds": 0.02319991000013033
+          },
+          {
+            "kernel_ns": 20364137,
+            "wall_seconds": 0.023411624000118536
+          },
+          {
+            "kernel_ns": 20156366,
+            "wall_seconds": 0.023231035999970118
+          },
+          {
+            "kernel_ns": 20151799,
+            "wall_seconds": 0.023209415999872363
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 17680664,
+            "wall_seconds": 0.021013857999832908
+          },
+          {
+            "kernel_ns": 17437378,
+            "wall_seconds": 0.020486881999886464
+          },
+          {
+            "kernel_ns": 17459596,
+            "wall_seconds": 0.020510978999936924
+          },
+          {
+            "kernel_ns": 17622666,
+            "wall_seconds": 0.020623278000130085
+          },
+          {
+            "kernel_ns": 17470253,
+            "wall_seconds": 0.020463682000126937
+          },
+          {
+            "kernel_ns": 17679448,
+            "wall_seconds": 0.02071673099999316
+          },
+          {
+            "kernel_ns": 17427817,
+            "wall_seconds": 0.020480329999827518
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 20.156366,
+        "candidate": 17.470253
+      },
+      "paired_kernel_ratio": 0.8648268573937244
+    },
+    "counted-dense": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    \n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop i in 0.. and key in values {checksum+=i+key}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "b9ddee3e49eb4135a5f792fe2dea082e4259adaf2db8f9e264815bfd4bc699c9",
+      "binary_sha256": {
+        "baseline": "f49d9e6b9e24e55e957fbd3e7606ab35c87c05641f8501e1f0ce677a6b1dae60",
+        "candidate": "bd19df5be7c8869db485aaa346d6355678927dab8fa8b5c207105d0238044947"
+      },
+      "checksum": 67100672000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 5320480,
+            "wall_seconds": 0.008261146999984703
+          },
+          {
+            "kernel_ns": 5231489,
+            "wall_seconds": 0.008123058000137462
+          },
+          {
+            "kernel_ns": 5221167,
+            "wall_seconds": 0.008080227000164086
+          },
+          {
+            "kernel_ns": 5243119,
+            "wall_seconds": 0.008291030999998839
+          },
+          {
+            "kernel_ns": 5206942,
+            "wall_seconds": 0.008071855000025607
+          },
+          {
+            "kernel_ns": 5194343,
+            "wall_seconds": 0.008065119000093546
+          },
+          {
+            "kernel_ns": 5255971,
+            "wall_seconds": 0.008169149999957881
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 5151706,
+            "wall_seconds": 0.008026456000152393
+          },
+          {
+            "kernel_ns": 5122802,
+            "wall_seconds": 0.008002943000064988
+          },
+          {
+            "kernel_ns": 5183345,
+            "wall_seconds": 0.008111474999850543
+          },
+          {
+            "kernel_ns": 5137919,
+            "wall_seconds": 0.007988134000015634
+          },
+          {
+            "kernel_ns": 5162710,
+            "wall_seconds": 0.008035260000042399
+          },
+          {
+            "kernel_ns": 5161748,
+            "wall_seconds": 0.00803469699985726
+          },
+          {
+            "kernel_ns": 5177922,
+            "wall_seconds": 0.008129177000000709
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 5.231489,
+        "candidate": 5.161748
+      },
+      "paired_kernel_ratio": 0.9851504127401007
+    },
+    "zip-dense": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    \n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values and i in [0..8192) {checksum+=key+value[0]+i}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "f4e9264985921f564208c1bdb3fb00c315220654c1fcfe34bb39581860105a0a",
+      "binary_sha256": {
+        "baseline": "dbade1de79debccbb0754de485a190f18fcfc6c68c5b89670de196d1b7163fcc",
+        "candidate": "c01372daadc43267344d0b0aab7cd4582cd6a377901f4fae951e0af1287fc018"
+      },
+      "checksum": 167759872000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 97785822,
+            "wall_seconds": 0.10968264400003136
+          },
+          {
+            "kernel_ns": 97186285,
+            "wall_seconds": 0.10251780199996574
+          },
+          {
+            "kernel_ns": 96619929,
+            "wall_seconds": 0.10088133499994001
+          },
+          {
+            "kernel_ns": 96584975,
+            "wall_seconds": 0.10079246200007219
+          },
+          {
+            "kernel_ns": 98295936,
+            "wall_seconds": 0.22970270999985587
+          },
+          {
+            "kernel_ns": 98328827,
+            "wall_seconds": 0.1062187840000206
+          },
+          {
+            "kernel_ns": 96499647,
+            "wall_seconds": 0.10076050799989389
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 96457838,
+            "wall_seconds": 0.10085256700017453
+          },
+          {
+            "kernel_ns": 97032919,
+            "wall_seconds": 0.1077704229999199
+          },
+          {
+            "kernel_ns": 96112600,
+            "wall_seconds": 0.10017423299996153
+          },
+          {
+            "kernel_ns": 98293239,
+            "wall_seconds": 0.10716438100007508
+          },
+          {
+            "kernel_ns": 98392726,
+            "wall_seconds": 0.11618200600014461
+          },
+          {
+            "kernel_ns": 97036868,
+            "wall_seconds": 0.1035753339999701
+          },
+          {
+            "kernel_ns": 96305548,
+            "wall_seconds": 0.10069820699982301
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 97.186285,
+        "candidate": 97.032919
+      },
+      "paired_kernel_ratio": 0.9979886040412148
+    },
+    "first-dense": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    \n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values {checksum+=key+value[0] break}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "15213a9867a5b5945916066dc09edbe80ca72373a9f13112a3b574ee49c5762e",
+      "binary_sha256": {
+        "baseline": "b67382bb6beb5aa732177dd78395ef9d96b4c94a7da9ec0d99cb616c3056a8d6",
+        "candidate": "95f78cca4ebf1c3ec32b4484d1ff6f3741a3f0d083389d6cb07c61b9cabb2c0b"
+      },
+      "checksum": 1000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 52157,
+            "wall_seconds": 0.016132478999907107
+          },
+          {
+            "kernel_ns": 51387,
+            "wall_seconds": 0.002954830000135189
+          },
+          {
+            "kernel_ns": 49512,
+            "wall_seconds": 0.0029396600000382023
+          },
+          {
+            "kernel_ns": 53200,
+            "wall_seconds": 0.0028000649999739835
+          },
+          {
+            "kernel_ns": 50499,
+            "wall_seconds": 0.002878118000126051
+          },
+          {
+            "kernel_ns": 71345,
+            "wall_seconds": 0.002862431000039578
+          },
+          {
+            "kernel_ns": 61916,
+            "wall_seconds": 0.0029826489999322803
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 18945,
+            "wall_seconds": 0.005906320000121923
+          },
+          {
+            "kernel_ns": 20028,
+            "wall_seconds": 0.0028661630001352023
+          },
+          {
+            "kernel_ns": 17887,
+            "wall_seconds": 0.002847410999947897
+          },
+          {
+            "kernel_ns": 18964,
+            "wall_seconds": 0.0029402059999483754
+          },
+          {
+            "kernel_ns": 28291,
+            "wall_seconds": 0.0029619490001095983
+          },
+          {
+            "kernel_ns": 19299,
+            "wall_seconds": 0.00287757900014185
+          },
+          {
+            "kernel_ns": 19757,
+            "wall_seconds": 0.00300144600009844
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 0.052157,
+        "candidate": 0.019299
+      },
+      "paired_kernel_ratio": 0.3612659557279043
+    },
+    "pairs-sparse": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values {checksum+=key+value[0]}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "5a2e63c5b85ecbdabcf8cceaf206cce4a9447d52deadcf5b5d56e98f9880d098",
+      "binary_sha256": {
+        "baseline": "9dc2f2805972d5c6d2df62c13a9ffde698fdd0cb0b2eb432601178f11ec15a48",
+        "candidate": "1841f52a059762292d2584a115cfaa163b88bcbf7f2a79b5c952de2f07277233"
+      },
+      "checksum": 100669440000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 165699065,
+            "wall_seconds": 0.20444309000004068
+          },
+          {
+            "kernel_ns": 166887933,
+            "wall_seconds": 0.17695996300017214
+          },
+          {
+            "kernel_ns": 164484623,
+            "wall_seconds": 0.18448010299994166
+          },
+          {
+            "kernel_ns": 164920648,
+            "wall_seconds": 0.1727727339998637
+          },
+          {
+            "kernel_ns": 166600263,
+            "wall_seconds": 0.1856771379998463
+          },
+          {
+            "kernel_ns": 170065713,
+            "wall_seconds": 0.17680746299993189
+          },
+          {
+            "kernel_ns": 164569571,
+            "wall_seconds": 0.18244765100007498
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 82686177,
+            "wall_seconds": 0.09500241600017034
+          },
+          {
+            "kernel_ns": 84946320,
+            "wall_seconds": 0.08957914999996319
+          },
+          {
+            "kernel_ns": 83005604,
+            "wall_seconds": 0.08793451300016386
+          },
+          {
+            "kernel_ns": 82918763,
+            "wall_seconds": 0.10162427299997034
+          },
+          {
+            "kernel_ns": 82992112,
+            "wall_seconds": 0.10061969200000931
+          },
+          {
+            "kernel_ns": 87993842,
+            "wall_seconds": 0.09235448599997653
+          },
+          {
+            "kernel_ns": 82993212,
+            "wall_seconds": 0.08747629699996651
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 165.699065,
+        "candidate": 82.993212
+      },
+      "paired_kernel_ratio": 0.5043047235020136
+    },
+    "counted-sparse": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop i in 0.. and key in values {checksum+=i+key}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "92e094261d96d994f5d4c9e2f6fba468bfcd8830725ec85d419aa081d3f4c3b5",
+      "binary_sha256": {
+        "baseline": "2cc57db70a0af1e1ea37a109f4953bca80e4c31294bd7068914a0af35d6b4944",
+        "candidate": "d446def67cc762c8fa130be10780493b37acefdd485d950a3613b0988376fe6e"
+      },
+      "checksum": 44037120000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 109507326,
+            "wall_seconds": 0.11295459400002983
+          },
+          {
+            "kernel_ns": 113620312,
+            "wall_seconds": 0.11712899899998774
+          },
+          {
+            "kernel_ns": 135858702,
+            "wall_seconds": 0.17892730100015797
+          },
+          {
+            "kernel_ns": 122789625,
+            "wall_seconds": 0.12686864300007983
+          },
+          {
+            "kernel_ns": 122864875,
+            "wall_seconds": 0.13009293699997215
+          },
+          {
+            "kernel_ns": 136120899,
+            "wall_seconds": 0.14036400800000592
+          },
+          {
+            "kernel_ns": 142690518,
+            "wall_seconds": 0.14953522299992983
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 42547166,
+            "wall_seconds": 0.045379701999991084
+          },
+          {
+            "kernel_ns": 70750597,
+            "wall_seconds": 0.09072663299980377
+          },
+          {
+            "kernel_ns": 63213444,
+            "wall_seconds": 0.06677913200019248
+          },
+          {
+            "kernel_ns": 41766729,
+            "wall_seconds": 0.04449152600000161
+          },
+          {
+            "kernel_ns": 54110386,
+            "wall_seconds": 0.05746245199998157
+          },
+          {
+            "kernel_ns": 70812949,
+            "wall_seconds": 0.07471830700001192
+          },
+          {
+            "kernel_ns": 67677561,
+            "wall_seconds": 0.07182358000000022
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 122.864875,
+        "candidate": 63.213444
+      },
+      "paired_kernel_ratio": 0.46528814915366995
+    },
+    "zip-sparse": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values and i in [0..8192) {checksum+=key+value[0]+i}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "17b8abe1a3058b49fc06dc9b92f6f0088b40d3c406df07616236d1f492e16a3e",
+      "binary_sha256": {
+        "baseline": "830cb922579361d1fa18f7d91c96e8456ed7b0d4a77066d70c98d208ae4f8b5a",
+        "candidate": "fc6c4ca5f3fc1f32c06d70b337ecd92bcbb5159f2739108c5ec5356f43f264f1"
+      },
+      "checksum": 119540736000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 157991705,
+            "wall_seconds": 0.1622188650001135
+          },
+          {
+            "kernel_ns": 158852771,
+            "wall_seconds": 0.16315424399999756
+          },
+          {
+            "kernel_ns": 159076434,
+            "wall_seconds": 0.1631912430000284
+          },
+          {
+            "kernel_ns": 157426076,
+            "wall_seconds": 0.16161735699984092
+          },
+          {
+            "kernel_ns": 200132290,
+            "wall_seconds": 0.23734082999999373
+          },
+          {
+            "kernel_ns": 185946161,
+            "wall_seconds": 0.20054066800003056
+          },
+          {
+            "kernel_ns": 158281728,
+            "wall_seconds": 0.16222036700014542
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 92231687,
+            "wall_seconds": 0.09556817399993633
+          },
+          {
+            "kernel_ns": 92698566,
+            "wall_seconds": 0.09610367999994196
+          },
+          {
+            "kernel_ns": 92946281,
+            "wall_seconds": 0.09634341899982246
+          },
+          {
+            "kernel_ns": 97128115,
+            "wall_seconds": 0.10088675199995123
+          },
+          {
+            "kernel_ns": 131020124,
+            "wall_seconds": 0.13553615400019225
+          },
+          {
+            "kernel_ns": 116176970,
+            "wall_seconds": 0.1213690229999429
+          },
+          {
+            "kernel_ns": 102944332,
+            "wall_seconds": 0.10708473699992282
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 158.852771,
+        "candidate": 97.128115
+      },
+      "paired_kernel_ratio": 0.616976027529264
+    },
+    "first-sparse": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 1000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {loop [key value] in values {checksum+=key+value[0] break}}\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "e6a4842a521ee5788469c80133148a75bd92492f92bc5ec7c125f6cccfac43c4",
+      "binary_sha256": {
+        "baseline": "a31fa17e1ac22124f652bd5cfbe4bf2c8e628b9569fcd3f7f2c6c04a383fc4df",
+        "candidate": "4e7518ab8fc2ac18e07efbcc31478816192b4e74bb476a761aa5384104cea99a"
+      },
+      "checksum": 5000,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 148366299,
+            "wall_seconds": 0.15359754299993256
+          },
+          {
+            "kernel_ns": 149299889,
+            "wall_seconds": 0.15450457799988726
+          },
+          {
+            "kernel_ns": 152712304,
+            "wall_seconds": 0.15778378400000292
+          },
+          {
+            "kernel_ns": 151937621,
+            "wall_seconds": 0.15685290299984445
+          },
+          {
+            "kernel_ns": 152751947,
+            "wall_seconds": 0.15869422399987343
+          },
+          {
+            "kernel_ns": 154339813,
+            "wall_seconds": 0.16012205399988488
+          },
+          {
+            "kernel_ns": 147983846,
+            "wall_seconds": 0.1528313320000052
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 63814279,
+            "wall_seconds": 0.06758480300004521
+          },
+          {
+            "kernel_ns": 64166546,
+            "wall_seconds": 0.06797758200013959
+          },
+          {
+            "kernel_ns": 64756319,
+            "wall_seconds": 0.06852047799998218
+          },
+          {
+            "kernel_ns": 65169704,
+            "wall_seconds": 0.06896232300005067
+          },
+          {
+            "kernel_ns": 64751805,
+            "wall_seconds": 0.06844955300016409
+          },
+          {
+            "kernel_ns": 65402945,
+            "wall_seconds": 0.0694998819999455
+          },
+          {
+            "kernel_ns": 65662105,
+            "wall_seconds": 0.06950192500016783
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 151.937621,
+        "candidate": 64.756319
+      },
+      "paired_kernel_ratio": 0.42892407799382354
+    }
+  },
+  "limits": [
+    "Map construction/removal is outside the timed kernel.",
+    "Sparse maps retain 25% tombstones; values are two-element integer arrays.",
+    "Repeated full traversals and early exits; not overall application performance."
+  ],
+  "harness": {
+    "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+    "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+  },
+  "load_average_end": [
+    9.39013671875,
+    10.568359375,
+    6.91796875
+  ]
+}

@@ -1,6 +1,5 @@
 # Hash map {K: V}: insertion ordered, open addressing over a dense entry list.
-# The first two fields must stay `keys` and `vals` (the compiler iterates them in for loops, of
-# a map with nothing gone: __map_live, __map_tidy).
+# The first two fields must stay `keys` and `vals` (the compiler iterates them in mutable loops).
 # A removed entry stays in place, marked gone (so the others keep theirs), its slot a tombstone
 # (1 << 32: probes go on past it); when half of them are gone, they are taken out at once.
 
@@ -12,6 +11,29 @@ struct Map[K, V]:
     gone: bool[]      # (entries removed since the last compaction: true; shorter than keys when
                       # entries were added after the last removal)
     ngone: int
+
+# A dense iteration snapshot needs no hash table, hashes or removal bitmap.
+# Its first two fields share the Map loop layout used by the compiler.
+struct __MapEntries[K, V]:
+    keys: K[]
+    vals: V[]
+
+__map_entries[K, V] = (m: Map[K, V]) -> __MapEntries[K, V]:
+    if m.ngone == 0: return __MapEntries(m.keys, m.vals)
+    keys: K[]
+    vals: V[]
+    keys.reserve(m.len())
+    vals.reserve(m.len())
+    ng = m.gone.len()
+    loop i in 0.. and key in m.keys:
+        if i < ng and __at(m.gone, i): continue
+        keys.push(key)
+        vals.push(__at(m.vals, i))
+    __MapEntries(keys, vals)
+
+len[K, V] = (entries: __MapEntries[K, V]) -> int: entries.keys.len()
+__map_pair_at[K, V] = (entries: __MapEntries[K, V], i: int) -> (K, V):
+    (entries.keys[i], entries.vals[i])
 
 # full 64-bit avalanche (murmur3 finalizer): every key bit affects the low bits used for slots,
 # so keys like multiples of 4096 or float bit patterns spread out
@@ -316,7 +338,8 @@ when not BOOTSTRAP:
             if e < 0 or not (__at(b.vals, e) == __at(a.vals, i)): return false
         true
 
-# (a loop over a map goes over one with nothing gone: this one, or a copy without them)
+# Older development compilers call this while building the next compiler from
+# its new library snapshot. Current checking uses __map_entries instead.
 __map_live[K, V] = (m: Map[K, V]) -> Map[K, V]:
     if m.ngone == 0: return m
     c = m

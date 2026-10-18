@@ -1090,3 +1090,26 @@ entries. This is an isolated collection workload, not an application-wide claim.
 `python3 -m tools.sloppy_core.benchmark_projection --help` documents the rerun.
 The independent C-bootstrap gate passes 3,552 checks in 102.46 pytest seconds;
 see the `map-projection-*` source-core audits.
+
+Dictionary loops and unpacking now use a separate dense snapshot containing only
+keys and values. Dictionaries with no removals share those arrays; sparse inputs
+collect live entries without copying hashes or rebuilding the probe table.
+The compiler hoists the snapshot's array bounds and addresses outside ordinary
+key/value loops. Mutation, insertion order, counted/zipped loops and early exits
+retain their existing language behavior.
+
+Seven alternating thread-CPU pairs on 8,192-entry dictionaries (1,000 traversals,
+managed array values, construction/removal outside the kernel) measured sparse
+ordinary/counting/zipped/early-exit ratios of 0.504/0.465/0.617/0.429 against the
+preceding compiler. Dense ordinary traversal measured 0.865, while counted and
+zipped traversal were effectively unchanged at 0.985/0.998. These are isolated
+iteration workloads, not application-wide gains. A streaming cursor experiment
+was rejected because it slowed dense traversal; the retained dense snapshot is
+the implemented approach. `python3 -m tools.sloppy_core.benchmark_iteration --help`
+documents the benchmark and independent Python checksum checks.
+
+The independent C-bootstrap gate passes 3,580 checks in 83.30 pytest seconds
+with two workers. Added checks cover sparse snapshots under source mutation,
+ordering, a two-array allocation budget, combined exhaustion and cleanup through
+continue/break/return. See the `map-entries-*` source-core audits for the toolchain,
+runtime measurements and separate fresh-compilation comparison.

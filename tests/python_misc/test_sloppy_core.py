@@ -2927,6 +2927,68 @@ let total:int64=0
 loop key in values and value in [99] {return 1} else {total=20}
 loop key in values or value in [22] {if key isnt? none return 2 total+=value??0}
 return total}''',
+    'dictionary-iterator-sparse-snapshot': '''main=()=>{
+let values=[0->[0] 1->[99] 2->[20] 3->[22] 4->[99]]
+values.remove(1) values.remove(4)
+let total:int64=0 let seen:array<int64>=[]
+loop [key value] in values {
+seen.push(key) total+=value[0]
+values.remove(0) values.remove(2) values[3]=[999] values[5]=[999]
+let copy=value copy[0]=100
+}
+return if seen =? [0 2 3] and total =? 42 and values[3] =? [999] 42 else 1}''',
+    'dictionary-iterator-counted-order': '''main=()=>{
+let values=[0->1 1->1 2->1 3->1 4->1 5->1]
+values.remove(0) values.remove(2) values.remove(5) values[6]=1
+let expected=[1 3 4 6] let count:int64=0
+loop i in 0.. and key in values {
+if key not=? expected[i] return 1
+count+=1 if i =? 1 continue
+values[7]=1 values.remove(3)
+}
+return if count =? 4 42 else 2}''',
+    'dictionary-iterator-allocation-budget': '''main=()=>{
+let values=[0->[0] 1->[99] 2->[20] 3->[22] 4->[99]]
+values.remove(1) values.remove(4)
+let before=alloc_count() let total:int64=0
+loop [key value] in values {if alloc_count() >? before+2 return 1 total+=value[0]}
+loop i in 0.. and key in values {if alloc_count() >? before+2 return 2}
+loop [key value] in values and i in [0..3) {if alloc_count() >? before+2 return 3}
+return total}''',
+    'dictionary-iterator-zip-exhaustion': '''main=()=>{
+let values=[0->0 1->99 2->20 3->22 4->99]
+values.remove(1) values.remove(4)
+let count:int64=0 let total:int64=0
+loop [key value] in values and i in [0..10) {
+count+=1 if key =? 0 continue total+=value
+values.clear()
+}
+if count not=? 3 or total not=? 42 return 1
+values=[1->99 2->20 3->99] values.remove(1) values.remove(3)
+count=0 total=0
+loop key in values or value in [20 22 0] {
+if key isnt? none {if key not=? 2 return 2 count+=1}
+total+=value??0
+}
+return if count =? 1 total else 3}''',
+    'dictionary-iterator-exit-cleanup': '''work=()=>{
+let values=["first"->[20] "gone"->[99] "last"->[22]] values.remove("gone")
+let result:int64=0
+$outer loop [key value] in values {
+loop i in 0.. and inner in values {
+if i =? 0 continue
+result+=value[0] break $outer
+}
+}
+loop [key value] in values and i in [0..2) {
+if i =? 0 continue
+return result+value[0]
+}
+return 1
+}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}''',
     'dictionary-length': 'main=()=>{let a=["a"->1 "b"->2] return a.length+40}',
     'dictionary-insert-absent': '''main=()=>{let values:dict<string int64>=[]
 if not values.insert_if_absent("first" 20) return 1
