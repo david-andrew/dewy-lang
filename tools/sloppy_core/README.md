@@ -1409,3 +1409,16 @@ web recheck gives 0.964 after a noisy first run, while compiler self-builds regr
 (1.039 initially, 1.079 on recheck). This is a code-size improvement, not a blanket
 compile-speed claim. `benchmark_compile.py` now records final output bytes outside
 the timed interval. See `dead-functions-*` audits for measurements and limits.
+
+
+The chart portion of Sloppy `1529a25` adds integer/float32 series, dashed lines,
+annotations, legend corners and equal-axis scaling. Explicit colors and notes
+leave the automatic palette unchanged. Dewy's port bounds the carried dash
+phase and explicitly crosses fractional boundaries, fixing a loop that could
+stop advancing after accumulated floating-point rounding. Positive subpixel
+dashes use a one-pixel minimum.
+
+`charts.dewy` demonstrates these features; both native software output and browser
+rendering were visually reviewed. Nine focused checks pass in 2.92 seconds,
+covering native/web series, native headless PNG export, dash continuity and the
+fractional stall regression. See `charts-*` audits and the language guide.

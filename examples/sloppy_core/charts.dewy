@@ -1,0 +1,39 @@
+# The same chart data can be drawn live or saved with chart_image + save_png.
+let flight=Chart[title="Projectile paths" x_label="Distance / m" y_label="Height / m"
+    equal_axes=true legend_at=LegendAt.bottom_left text_size=18.0]
+let counts=Chart[title="Collected samples" y_label="Count" text_size=18.0]
+let signal=Chart[title="A sampled wave" x_label="Sample" text_size=18.0
+    legend_at=LegendAt.bottom_right]
+
+main=():>void=>{
+    window("Dewy / Charts" 1280 800)
+    let speed=20.0 let gravity=9.8
+    loop degrees in [30 45 60] {
+        let angle=degrees*PI/180.0
+        let duration=2.0*speed*sin(angle)/gravity
+        let times=[loop i in [0..81) (i as float64)*duration/80.0]
+        let xs=[loop t in times speed*cos(angle)*t]
+        let ys=[loop t in times speed*sin(angle)*t-gravity*t*t/2.0]
+        flight.line(xs ys "{degrees}°" dash=if degrees=?45 7.0 else 0.0 width=3.0)
+        if degrees=?45 {
+            let t=duration/2.0
+            flight.annotate(speed*cos(angle)*t speed*sin(angle)*t-gravity*t*t/2.0 "apex")
+        }
+    }
+    # Integer and float32 arrays work directly; a custom color leaves the palette alone.
+    counts.bars(["Mon" "Tue" "Wed" "Thu"] [12 19 15 24] "observed")
+    let target:array<float32>=[16.0 16.0 16.0 16.0]
+    counts.bars(["Mon" "Tue" "Wed" "Thu"] target "target" color=rgb(0.62 0.66 0.70))
+    let samples=[loop i in [0..81) f32(sin((i as float64)*TAU/40.0))]
+    signal.line(samples "sin(t)" dash=5.0 width=2.5)
+}
+
+update=(_dt:float64):>void=>{if key_pressed(Key.escape) quit()}
+draw=():>void=>{
+    clear(rgb(0.94 0.95 0.96))
+    text("DEWY / CHARTS" vec2(28 20) 30 rgb(0.13 0.17 0.20))
+    text("Equal axes · numeric arrays · dashed lines · annotations" vec2(28 61) 19 rgb(0.4 0.45 0.48))
+    draw_chart(flight Rect(24 105 750 670))
+    draw_chart(counts Rect(798 105 458 320))
+    draw_chart(signal Rect(798 449 458 326))
+}

@@ -1,5 +1,12 @@
 # Dewy on the compact core
 
+[`charts.dewy`](charts.dewy) combines projectile trajectories with equal axis
+scales, annotations, dashed lines, grouped bars and a sampled wave. Integer and
+float32 series work directly. Run
+`python3 -m tools.core run examples/sloppy_core/charts.dewy`, or build with
+`--target wasm` for the browser. `chart_image` also renders charts without a
+window for saving with `save_png`.
+
 [`controls.dewy`](controls.dewy) is a pendulum with ranged sliders for gravity,
 length, release angle, damping and playback speed. Sliders keep a mouse or touch
 drag outside their bounds. It also shows the light menu theme and the bundled

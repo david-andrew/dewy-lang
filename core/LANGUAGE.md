@@ -1119,6 +1119,30 @@ The [pendulum example](../examples/sloppy_core/controls.dewy) combines these
 controls with Greek letters, superscripts and mathematical symbols from the
 bundled font, including `θ`, `π`, `√`, `≈`, `≤`, `∞`, `x₀` and `m/s²`.
 
+`Chart` holds line, scatter, bar and histogram series. `draw_chart(chart rect)`
+draws a live panel; `chart_image(chart width height)` makes an image without a
+window, ready for `save_png(image path)`. Lines, points and bars accept arrays of
+`int64`, `float32` or `float64`; both coordinate arrays use the same numeric type.
+A line can omit its x array to use sample indices. For example:
+
+```dewy
+let chart=Chart[title="Measurements" equal_axes=true
+    legend_at=LegendAt.bottom_left]
+chart.line([0 1 2] [0 2 0] "trial" dash=6.0)
+chart.annotate(1.0 2.0 "peak")
+let picture=chart_image(chart 800 500)
+save_png(picture "measurements.png")
+```
+
+`dash` measures pixels per dash and gap; zero draws a solid line, and positive
+values below one use one pixel. The pattern continues through segment boundaries.
+Annotations do not affect automatic bounds or appear in the legend. Series with
+explicit colors and annotations leave the automatic color palette unchanged.
+`LegendAt` selects any of the four plot corners. `equal_axes` expands automatic
+upper bounds to give x and y units the same screen length; explicit upper bounds
+can prevent that adjustment, and categorical bar charts ignore it. See the
+[charts example](../examples/sloppy_core/charts.dewy).
+
 `polyline(points thickness color closed=true)` joins the segments into one band,
 including the closing edge. Consecutive repeated points are ignored and sharp
 joins are capped to prevent long spikes. Open paths leave their ends flat.

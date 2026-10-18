@@ -56,6 +56,29 @@ let pattern=".2f"
 if format(1.125 pattern) not=? "1.12" return 2
 return 42
 }''',
+    'game-chart-series': '''main=()=>{
+let c=Chart[equal_axes=true legend_at=LegendAt.bottom_left]
+let xs=[0 1 2] let ys=[3 4 5]
+c.line(xs ys "integer" dash=2.1)
+xs[0]=99 ys[1]=99
+let floats:array<float32>=[0.5 1.5 2.5]
+c.points(floats floats "custom" color=RED)
+c.annotate(100.0 100.0 "note")
+c.bars(["a" "b" "c"] floats "float32")
+c.line([1.0 2.0] "float64")
+c.line(floats "float32 line")
+c.points([0 1] [2 3] "integer points")
+c.bars(["a" "b"] [10 20] "integer bars")
+if c.series[0].xs[0] not=?0.0 or c.series[0].ys[1] not=?4.0 return 1
+if c.series[0].dash not=?2.1 return 2
+if c.series[1].ys[0] not=?0.5 or c.series[1].color not=?RED return 3
+if c.series[0].color not=?CHART_COLORS[0] return 4
+if c.series[3].color not=?CHART_COLORS[1] return 5
+if c.series[4].color not=?CHART_COLORS[2] return 6
+if c.series[5].xs not=?[0.0 1.0 2.0] return 7
+if c.series[2].name not=?"note" return 8
+return 42
+}''',
     'game-font-math': '''import p"@lib/game/draw2d.jo" as surface
 main=()=>{
 surface.__font_init()
@@ -6584,7 +6607,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -6607,7 +6630,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
@@ -6639,6 +6662,24 @@ def test_core_software_raster_chunks(compiler, tmp_path, release):
         ran = subprocess.run([binary], env=env, capture_output=True, text=True,
                              timeout=10, check=False)
         assert ran.returncode == 42, (threads, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_chart_render(compiler, tmp_path, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/chart_render.dewy'
+    binary = tmp_path / 'chart'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
+    env['SLOPPY_SOFTWARE'] = '1'
+    ran = subprocess.run([binary], cwd=tmp_path, env=env, capture_output=True,
+                         text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    data = (tmp_path / 'chart.png').read_bytes()
+    assert data[:8] == b'\x89PNG\r\n\x1a\n'
+    assert struct.unpack('>II', data[16:24]) == (320, 240)
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
@@ -6893,7 +6934,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

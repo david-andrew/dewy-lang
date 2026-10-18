@@ -13,8 +13,10 @@
 #   c3 = Chart(title = "Prices")
 #   c3.histogram(prices, 30)
 #
-# Each series takes the next color of a palette unless it is given one. The axes fit what is
-# shown (from 0 for bars and histograms) unless x_min, x_max, y_min or y_max say otherwise.
+# Each series given no color takes the next of a palette. The axes fit what is shown (from 0 for
+# bars and histograms) unless x_min, x_max, y_min or y_max say otherwise; equal_axes keeps a unit
+# as long across as up (a trajectory's true shape). Whole numbers and f32s (a vec2's parts) may
+# be given as well as f64s. c.annotate(x, y, "apex") writes a word at a point.
 
 struct Chart:
     title = ""
@@ -27,44 +29,78 @@ struct Chart:
     y_min: f64? = none
     y_max: f64? = none
     legend = true
+    legend_at = LegendAt.top_right      # (the corner of the plot it is in)
     grid = true
+    equal_axes = false                  # a unit as long along x as along y
     background = vec4(1, 1, 1, 1)
     ink = vec4(0.15, 0.15, 0.17, 1)     # text and axes
     text_size = 14.0
     log_y = false                       # y on a log scale: each tick ten times the one below
     __exp_ticks = false                 # (drawn as log_y: the ys are already log10 of the values)
+    __auto = 0                          # (series that took a color of the palette)
+
+enum LegendAt: top_right, top_left, bottom_right, bottom_left
 
 struct ChartSeries:
-    kind: int                   # 0 line, 1 points, 2 bars, 3 histogram
+    kind: int                   # 0 line, 1 points, 2 bars, 3 histogram, 4 a note (its name)
     xs: f64[]
     ys: f64[]
     name: str
     color: vec4
     size: f64                   # a line's width, a point's radius
     bin_width = 0.0             # (a histogram's)
+    dash = 0.0                  # (a line's dashes' length, in pixels; 0: solid)
 
 # (the colors series take in turn: matplotlib's)
 CHART_COLORS = [rgb(0.12, 0.47, 0.71), rgb(1.0, 0.5, 0.05), rgb(0.17, 0.63, 0.17), rgb(0.84, 0.15, 0.16),
     rgb(0.58, 0.4, 0.74), rgb(0.55, 0.34, 0.29), rgb(0.89, 0.47, 0.76), rgb(0.5, 0.5, 0.5), rgb(0.74, 0.74, 0.13), rgb(0.09, 0.75, 0.81)]
 
-__chart_color = (c: Chart, color: vec4?) -> vec4: color ?? CHART_COLORS[c.series.len() % CHART_COLORS.len()]
+# (a series' color: the one given, or the palette's next, counting only those that took one)
+__chart_color = (c: mut Chart, color: vec4?) -> vec4:
+    if let given = color: return given
+    k = c.__auto
+    c.__auto += 1
+    CHART_COLORS[k % CHART_COLORS.len()]
 
-# a line through the points (x, y), in order
-line = (c: mut Chart, xs: f64[], ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0):
-    c.series.push(ChartSeries(0, xs, ys, name, __chart_color(c, color), width))
+# a line through the points (x, y), in order; dash: pixels per dash (0: solid, minimum 1)
+line = (c: mut Chart, xs: f64[], ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    s = ChartSeries(0, xs, ys, name, __chart_color(c, color), width)
+    s.dash = dash
+    c.series.push(s)
+line = (c: mut Chart, xs: f32[], ys: f32[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(xs), __f64s(ys), name, color, width, dash)
+line = (c: mut Chart, xs: int[], ys: int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(xs), __f64s(ys), name, color, width, dash)
 
 # a line through ys, at x = 0, 1, 2...
-line = (c: mut Chart, ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0):
-    line(c, [loop i in [0..ys.len()): f64(i)], ys, name, color, width)
+line = (c: mut Chart, ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, [loop i in [0..ys.len()): f64(i)], ys, name, color, width, dash)
+line = (c: mut Chart, ys: f32[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(ys), name, color, width, dash)
+line = (c: mut Chart, ys: int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(ys), name, color, width, dash)
 
 # a dot at each point (a scatter plot)
 points = (c: mut Chart, xs: f64[], ys: f64[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
     c.series.push(ChartSeries(1, xs, ys, name, __chart_color(c, color), radius))
+points = (c: mut Chart, xs: f32[], ys: f32[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
+    points(c, __f64s(xs), __f64s(ys), name, color, radius)
+points = (c: mut Chart, xs: int[], ys: int[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
+    points(c, __f64s(xs), __f64s(ys), name, color, radius)
 
 # a bar for each category (more bars series stand side by side)
 bars = (c: mut Chart, labels: str[], values: f64[], name: str = "", color: vec4? = none):
     if c.categories.len() < labels.len(): c.categories = labels
     c.series.push(ChartSeries(2, [loop i in [0..values.len()): f64(i)], values, name, __chart_color(c, color), 0.0))
+bars = (c: mut Chart, labels: str[], values: int[], name: str = "", color: vec4? = none): bars(c, labels, __f64s(values), name, color)
+bars = (c: mut Chart, labels: str[], values: f32[], name: str = "", color: vec4? = none): bars(c, labels, __f64s(values), name, color)
+
+# words written at the point (x, y), in the ink's color unless given one (not in the legend)
+annotate = (c: mut Chart, x: f64, y: f64, words: str, color: vec4? = none):
+    c.series.push(ChartSeries(4, [x], [y], words, color ?? c.ink, 0.0))
+
+__f64s = (xs: f32[]) -> f64[]: [loop x in xs: f64(x)]
+__f64s = (xs: int[]) -> f64[]: [loop x in xs: f64(x)]
 
 # how the values spread: how many fall in each of `bins` equal ranges (NaN left out)
 histogram = (c: mut Chart, values: f64[], bins: int = 20, name: str = "", color: vec4? = none):
@@ -103,6 +139,7 @@ draw_chart = (c: Chart, r: Rect):
     y0 = INF
     y1 = -INF
     loop s in c.series:
+        if s.kind == 4: continue
         loop i in [0..min(s.xs.len(), s.ys.len())):
             x = s.xs[i]
             y = s.ys[i]
@@ -152,6 +189,19 @@ draw_chart = (c: Chart, r: Rect):
         # (no room for a plot: the title, so it is not a blank)
         if len(c.title) > 0: text_centered(c.title, vec2(f32(f64(r.x) + f64(r.w) / 2.0), f32(f64(r.y) + ts * 1.3)), ts * 1.3, c.ink)
         return
+    # (equal axes: the range with fewer pixels to a unit made longer, from its start)
+    if c.equal_axes and not cat:
+        ux = (right - left) / (x1 - x0)
+        uy = (bottom - top) / (y1 - y0)
+        if ux > uy and c.x_max == none: x1 = x0 + (right - left) / uy
+        else if uy > ux and c.y_max == none:
+            y1 = y0 + (bottom - top) / ux
+            yticks = []
+            v = ceil(y0 / ystep - 1e-9) * ystep
+            loop v <= y1 + ystep * 1e-9:
+                yticks.push(v)
+                v += ystep
+        xstep = __chart_step(x1 - x0, max(2, int(f64(r.w) / (ts * 7.0))))
     px = (x: f64) -> f64: left + (x - x0) / (x1 - x0) * (right - left)
     py = (y: f64) -> f64: bottom - (y - y0) / (y1 - y0) * (bottom - top)
     grid_c = vec4(c.ink.x, c.ink.y, c.ink.z, 0.12)
@@ -181,17 +231,27 @@ draw_chart = (c: Chart, r: Rect):
             text_centered(__chart_num(t, xstep), vec2(f32(x), f32(bottom + ts * 0.9)), ts, c.ink)
             t += xstep
     # the series, inside the plot area
-    clip(vec2(f32(left), f32(top)), vec2(f32(right - left), f32(bottom - top)))
+    # (a little past the frame: a point or a thick line at the edge is not cut in half)
+    pad = 2.0
+    loop s in c.series:
+        if s.kind <= 1: pad = max(pad, s.size + 1.0)
+    clip(vec2(f32(left - pad), f32(top - pad)), vec2(f32(right - left + 2.0 * pad), f32(bottom - top + 2.0 * pad)))
     bar_k = 0
     loop s in c.series:
         n = min(s.xs.len(), s.ys.len())
         if s.kind == 0:
+            gone = 0.0              # (how far along the line, for its dashes)
             loop i in [1..n):
                 a = vec2(f32(px(s.xs[i - 1])), f32(py(s.ys[i - 1])))
                 b = vec2(f32(px(s.xs[i])), f32(py(s.ys[i])))
                 if is_nan(s.ys[i - 1]) or is_nan(s.ys[i]): continue
+                if s.dash > 0.0:
+                    gone = __chart_dashes(a, b, s.dash, gone, s.size, s.color)
+                    continue
                 line(a, b, s.size, s.color)
                 if s.size > 2.5: circle(b, s.size / 2.0, s.color)
+        else if s.kind == 4:
+            if not is_nan(s.xs[0]) and not is_nan(s.ys[0]): text(s.name, vec2(f32(px(s.xs[0]) + 6.0), f32(py(s.ys[0]) - ts * 1.3)), ts, s.color)
         else if s.kind == 1:
             loop i in [0..n):
                 if is_nan(s.ys[i]) or is_nan(s.xs[i]): continue
@@ -220,7 +280,7 @@ draw_chart = (c: Chart, r: Rect):
     if len(c.x_label) > 0: text_centered(c.x_label, vec2(f32((left + right) / 2.0), f32(bottom + ts * 2.4)), ts, c.ink)
     # the legend: the series that have names
     if c.legend:
-        named = [loop s in c.series: if len(s.name) > 0: s]
+        named = [loop s in c.series: if len(s.name) > 0 and s.kind != 4: s]
         if named.len() > 0:
             lw = 0.0
             loop s in named: lw = max(lw, text_width(s.name, ts))
@@ -228,14 +288,40 @@ draw_chart = (c: Chart, r: Rect):
             bh = f64(named.len()) * ts * 1.4 + ts * 0.5
             bx = right - bw - ts * 0.5
             by = top + ts * 0.5
+            if c.legend_at == .top_left or c.legend_at == .bottom_left: bx = left + ts * 0.5
+            if c.legend_at == .bottom_left or c.legend_at == .bottom_right: by = bottom - bh - ts * 0.5
             rect(bx, by, bw, bh, vec4(c.background.x, c.background.y, c.background.z, 0.85))
             rect_outline(bx, by, bw, bh, 1.0, grid_c)
             loop i in 0.. and s in named:
                 y = by + ts * 0.25 + f64(i) * ts * 1.4 + ts * 0.7
-                if s.kind == 0: line(vec2(f32(bx + ts * 0.4), f32(y)), vec2(f32(bx + ts * 1.6), f32(y)), max(s.size, 2.0), s.color)
+                if s.kind == 0 and s.dash > 0.0: __chart_dashes(vec2(f32(bx + ts * 0.4), f32(y)), vec2(f32(bx + ts * 1.6), f32(y)), min(s.dash, ts * 0.5), 0.0, max(s.size, 2.0), s.color)
+                else if s.kind == 0: line(vec2(f32(bx + ts * 0.4), f32(y)), vec2(f32(bx + ts * 1.6), f32(y)), max(s.size, 2.0), s.color)
                 else if s.kind == 1: circle(vec2(f32(bx + ts), f32(y)), max(s.size, 3.0), s.color)
                 else: rect(bx + ts * 0.5, y - ts * 0.4, ts * 1.0, ts * 0.8, s.color)
                 text(s.name, vec2(f32(bx + ts * 2.0), f32(y - ts * 0.6)), ts, c.ink)
+
+# Return a bounded pattern phase, so long paths do not lose subpixel precision.
+__chart_dashes = (a: vec2, b: vec2, dash: f64, gone: f64, width: f64, col: vec4) -> f64:
+    l = f64(length(b - a))
+    if l <= 0.0 or not is_finite(l): return gone
+    if dash <= 0.0 or not is_finite(dash):
+        line(a, b, width, col)
+        return 0.0
+    dash_len = max(dash, 1.0)
+    period = 2.0 * dash_len
+    d = (b - a) / f32(l)
+    t = 0.0
+    phase = gone % period
+    loop t < l:
+        edge = if phase < dash_len: dash_len else: period
+        take = min(l - t, edge - phase)
+        if phase < dash_len and t + take > t: line(a + d * f32(t), a + d * f32(t + take), width, col)
+        t += take
+        # Explicitly cross a boundary even when its tiny remainder cannot
+        # advance t. Repeatedly adding it to an accumulated distance can stall.
+        if take >= edge - phase: phase = if edge == period: 0.0 else: dash_len
+        else: phase += take
+    phase
 
 # a round step for about n ticks over a span: 1, 2 or 5 times a power of ten
 __chart_step = (span: f64, n: int) -> f64:
