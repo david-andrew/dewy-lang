@@ -1615,3 +1615,10 @@ runs the final full gate. Fresh compilation is similar across seven alternating
 pairs (tour 56.62/56.18 ms, default Netpong 370.26/366.13 ms, web Netpong
 197.73/197.55 ms, compiler 1820.50/1830.19 ms). These measurements include
 unrelated system load. See `literal-array-overloads-*` audits.
+
+Follow-up: hosted CI caught a fixed-array slice-update regression from that
+change. An array literal could still compete for a generic scalar parameter
+already bound to `uint8`. Rejecting that incompatible candidate restores the
+array overload. The corrected source passes all 4,569 checks in 93.33 seconds
+after three independent C bootstrap generations, including explicit and inferred
+generic bindings. The earlier focused selection had missed this interaction.

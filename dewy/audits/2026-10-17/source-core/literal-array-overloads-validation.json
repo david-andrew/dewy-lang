@@ -8,5 +8,14 @@
   "quick": "157 passed in 3.25s",
   "earlier_full_gate": "4557 passed in 90.95s before the final mixed-element ordering refinement; this is not the final-source full gate.",
   "coverage": "Native/web default/release: exact signed/unsigned/bigint sums, typed/literal element ordering and evaluation counts, nested arrays, concrete floating and narrow overload preference, negative unsigned rejection.",
-  "limits": "Final full gate runs in hosted CI. Compilation timings are paired observations under concurrent unrelated system load; no speedup claim."
+  "limits": "Original final focused selection missed a fixed-array update regression. The followup full C-bootstrap gate covers the corrected source; compilation samples above predate the narrow followup.",
+  "followup": {
+    "cause": "Hosted CI exposed the generic scalar fallback accepting an array literal even after its type parameter was bound to uint8. This competed with the correct array overload during fixed-array slice assignment.",
+    "fix": "Reject incompatible known scalar targets for array literals; regression covers inferred and explicit type bindings.",
+    "compiler": "build-1792309125005619062/bin/dewy-core",
+    "source_identity": "71b884cf5bd08463c479be0100a09619be01965a6d9741bd9c6abd25d1073d36",
+    "focused": "632 passed in 7.59s before the additional direct regression case",
+    "independent_c_full": "4569 passed in 93.33s with two workers and three independent C bootstrap generations",
+    "original_ci": "https://github.com/david-andrew/dewy-lang/actions/runs/39108187262"
+  }
 }

@@ -1021,7 +1021,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                     if r < 0: return -1
                     cost += r
                 return cost
-            if pk == .param: return 3
+            # A bound scalar parameter cannot accept an array literal. Do not
+            # let its generic fallback compete with the matching T[] overload.
+            if pk == .param and has_var(target): return 3
             return -1
         if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
             if pk == .array: return 0

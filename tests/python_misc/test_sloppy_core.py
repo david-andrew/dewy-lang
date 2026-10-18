@@ -319,6 +319,10 @@ main=()=>choose([[20 22]])''',
     'generic-array-literal-concrete-overload': '''choose=<T>(values:array<T>)=>1
 choose=(values:array<uint8>)=>42
 main=()=>choose([20 22])''',
+    'generic-array-literal-bound-scalar-overload': '''choose=<T>(tag:T values:T)=>1
+choose=<T>(tag:T values:array<T>)=>42
+main=()=>{let tag:uint8=0
+return if choose(tag [1 2 3 4])=?42 and choose<uint8>(0 [5 6 7 8])=?42 42 else 1}''',
     'generic-array-literal-float-specific': '''choose=<T>(values:array<T>)=>1
 choose=(values:array<float64>)=>42
 main=()=>choose([20.0 22.0])''',
