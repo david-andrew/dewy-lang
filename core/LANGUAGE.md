@@ -1041,6 +1041,13 @@ quadratic to sampled heights, predicts another height, and includes native test
 blocks. Its normal-equation example uses small, well-scaled times; it is not a
 general numerical fitting package.
 
+[`reaction_field.dewy`](../examples/sloppy_core/reaction_field.dewy) combines
+matrix slices, fused dotted arithmetic and slice updates in a paintable
+reaction/diffusion simulation. Its separate
+[model](../examples/sloppy_core/reaction_model.dewy) keeps the previous field
+values while computing both updates, preserves a fixed outer boundary, and
+includes tests that run without opening a window.
+
 Matrix multiplication uses contiguous rows and shares large products among the
 native worker pool. Native x86-64 default builds vectorize short float kernels,
 including array comprehensions and fused dotted expressions; release builds

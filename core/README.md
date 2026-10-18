@@ -45,7 +45,7 @@ The cache and build logs live in `__dewycache__/compact-core/`; removing that
 generated directory resets it. No installed compiler is changed.
 
 `test` uses the checkout's `.venv/bin/python` when available, otherwise the current
-Python. Install pytest and pytest-xdist in that environment and have Node available
+Python. Install pytest, pytest-xdist and Pillow in that environment and have Node available
 for the web checks. A full `test` uses up to four workers when pytest-xdist is
 available, grouping compilation batches by test function and build mode. Without
 pytest-xdist it runs serially. Commands with additional pytest arguments, such as

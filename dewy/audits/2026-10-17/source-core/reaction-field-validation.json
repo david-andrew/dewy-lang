@@ -1,0 +1,17 @@
+{
+  "change": "Add an interactive reaction/diffusion example using ordinary float32 matrices, slice updates, fused dotted arithmetic and one updated texture per frame.",
+  "compiler": "build-1792320951776913510/bin/dewy-core",
+  "validation": "9 focused checks passed in 5.49s; Ruff and git diff --check passed.",
+  "coverage": [
+    "Every cell after eight steps compared with an independent scalar Python reference on native/web and default/release targets.",
+    "Saved field independence, out-of-field paint and repeated simulation allocation cleanup.",
+    "Two native model test blocks in default/release builds.",
+    "Game web builds in default/release modes; native software render verifies dimensions and visible warm pattern pixels.",
+    "Manual browser smoke test: pause freezes at 128 steps after reseeding, paint adds a visible patch, all three sliders change values, resume advances to 700 steps with changed patterns. No console or network errors."
+  ],
+  "limits": [
+    "The model uses a fixed outer boundary and an explicit unit-time stencil, not a general numerical solver.",
+    "Simulation speed is steps per rendered frame, not elapsed time.",
+    "Browser interaction was a manual smoke test. No general performance claim."
+  ]
+}

@@ -7835,6 +7835,69 @@ main=():>int64=>{
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_reaction_model(compiler, tmp_path, target, release):
+    node = shutil.which('node')
+    if target == 'wasm' and node is None:
+        pytest.skip('Node is needed to execute the web simulation')
+    model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/reaction_model.dewy'
+    shutil.copy2(model, tmp_path)
+    source = tmp_path / 'reaction_test.dewy'
+    source.write_text('''from p"reaction_model.dewy" import fresh, paint, advance
+simulate=()=>{
+let field=fresh(8 6) let saved=field
+paint(@field 4 3 1)
+loop i in [0..8) advance(@field 0.035 0.062)
+assert(saved.a.data =? fill(1.0 as float32 48) and saved.b.data =? fill(0.0 as float32 48))
+assert(saved.steps =? 0)
+let before=field paint(@field -100 -100 2) assert(field =? before)
+return field
+}
+main=()=>{
+let result=simulate() let before=alloc_count()
+loop i in [0..20) {let trial=simulate() assert(trial.steps =? 8)}
+assert(alloc_count() =? before)
+printl(to_json(result))
+return 42
+}''')
+    binary = tmp_path / 'reaction_test'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    actual = json.loads(ran.stdout)
+    width, height = 8, 6
+    a, b = [1.0] * (width * height), [0.0] * (width * height)
+    for y in range(2, 5):
+        for x in range(3, 6):
+            a[y * width + x], b[y * width + x] = 0.5, 0.25
+    for _ in range(8):
+        next_a, next_b = a.copy(), b.copy()
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                i = y * width + x
+                reaction = a[i] * b[i] * b[i]
+                lap_a = a[i - width] + a[i + width] + a[i - 1] + a[i + 1] - 4 * a[i]
+                lap_b = b[i - width] + b[i + width] + b[i - 1] + b[i + 1] - 4 * b[i]
+                next_a[i] += 0.16 * lap_a - reaction + (1 - a[i]) * 0.035
+                next_b[i] += 0.08 * lap_b + reaction - b[i] * (0.035 + 0.062)
+        a, b = next_a, next_b
+    assert actual['steps'] == 8
+    assert actual['a']['shape'] == actual['b']['shape'] == [height, width]
+    assert actual['a']['data'] == pytest.approx(a, rel=2e-6, abs=2e-6)
+    assert actual['b']['data'] == pytest.approx(b, rel=2e-6, abs=2e-6)
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_forest_model(compiler, tmp_path, target, release):
     model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/forest_model.dewy'
     shutil.copy2(model, tmp_path)
@@ -7980,7 +8043,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts', 'reaction_field'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -8003,7 +8066,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab', 'outlines', 'controls', 'charts', 'reaction_field'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game
@@ -8019,6 +8082,13 @@ def test_core_game_renderer(compiler, tmp_path, game):
     data = screenshot.read_bytes()
     assert data[:8] == b'\x89PNG\r\n\x1a\n'
     assert struct.unpack('>II', data[16:24]) == (1280, 720)
+    if game == 'reaction_field':
+        from PIL import Image
+        with Image.open(screenshot) as frame:
+            pixels = frame.crop((40, 152, 790, 646)).convert('RGB').tobytes()
+        warm = sum(red > 100 and red > green > blue
+                   for red, green, blue in zip(pixels[0::3], pixels[1::3], pixels[2::3]))
+        assert warm > 1000, 'the field must contain visible reaction patterns'
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])

@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install the test runner
-        run: python -m pip install pytest==9.0.2 pytest-xdist==3.8.0
+        run: python -m pip install pytest==9.0.2 pytest-xdist==3.8.0 pillow==12.3.0
       - name: Ensure offscreen GLES shader validation
         run: |
           if ! python -c 'from tests.python_misc.core_glsl_driver import ShaderDriver; ShaderDriver().close()'; then

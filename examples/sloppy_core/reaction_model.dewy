@@ -1,0 +1,48 @@
+# A two-field reaction/diffusion simulation. All fields are ordinary values;
+# matrix slices and dotted arithmetic express the interior stencil directly.
+Field:type=[a:NDArray<float32> b:NDArray<float32> steps:int64]
+
+fresh=(width:int64 height:int64):>Field=>{
+    assert(width >=? 3 and height >=? 3)
+    return Field[reshape(fill(1.0 as float32 width*height) height width)
+                 zeros<float32>(height width) 0]
+}
+
+paint=(@field:Field x:int64 y:int64 radius:int64):>void=>{
+    let left=max(1 x-radius) let right=min(cols(field.a)-2 x+radius)
+    let top=max(1 y-radius) let bottom=min(rows(field.a)-2 y+radius)
+    if left >? right or top >? bottom return
+    field.a[[top..bottom] [left..right]]=0.5
+    field.b[[top..bottom] [left..right]]=0.25
+}
+
+advance=(@field:Field feed:float32 remove:float32):>void=>{
+    let h=rows(field.a)-1 let w=cols(field.a)-1
+    # Keep both old interiors until both updates are computed. The outer ring
+    # remains at A=1, B=0, supplying a fixed boundary for the simulation.
+    let a=field.a[[1..h) [1..w)]
+    let b=field.b[[1..h) [1..w)]
+    let reaction=a .* b .* b
+    let lap_a=field.a[[0..h-1) [1..w)] .+ field.a[[2..h] [1..w)]
+             .+ field.a[[1..h) [0..w-1)] .+ field.a[[1..h) [2..w]] .- a .* 4.0
+    let lap_b=field.b[[0..h-1) [1..w)] .+ field.b[[2..h] [1..w)]
+             .+ field.b[[1..h) [0..w-1)] .+ field.b[[1..h) [2..w]] .- b .* 4.0
+    field.a[[1..h) [1..w)] .+= lap_a .* 0.16 .- reaction .+ (1.0 .- a) .* feed
+    field.b[[1..h) [1..w)] .+= lap_b .* 0.08 .+ reaction .- b .* (feed+remove)
+    field.steps+=1
+}
+
+test "unseeded field stays uniform" {
+    let field=fresh(8 6)
+    advance(@field 0.035 0.062)
+    assert(field.a.data =? fill(1.0 as float32 48))
+    assert(field.b.data =? fill(0.0 as float32 48) and field.steps =? 1)
+}
+
+test "painting and evolution preserve a saved field" {
+    let field=fresh(8 6) let saved=field
+    paint(@field 4 3 1)
+    advance(@field 0.035 0.062)
+    assert(field.b[3 4] >? 0.25 and field.b[0 0] =? 0.0)
+    assert(saved.b.data =? fill(0.0 as float32 48) and saved.steps =? 0)
+}

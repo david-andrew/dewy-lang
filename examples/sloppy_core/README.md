@@ -1,5 +1,14 @@
 # Dewy on the compact core
 
+[`reaction_field.dewy`](reaction_field.dewy) is an interactive reaction/diffusion
+field built with matrix slices and dotted arithmetic. Drag to paint, adjust the
+feed/removal rates and simulation speed, press **Space** to pause, or **R** to
+seed again. Run `./tools/dewy examples/sloppy_core/reaction_field.dewy`, or build
+with `--target wasm` for the browser. Its [model](reaction_model.dewy) has native
+test blocks: `./tools/dewy test examples/sloppy_core/reaction_model.dewy`.
+The regression harness also compares every cell with an independent scalar
+simulation on native and web targets, in default and release builds.
+
 [`terrain_array.dewy`](terrain_array.dewy) generates a height field with one fused
 GPU expression and checks it against the same Dewy function on the CPU. Run
 `./tools/dewy examples/sloppy_core/terrain_array.dewy`, or build with `--target wasm`

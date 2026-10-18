@@ -1,0 +1,101 @@
+# Run: tools/dewy examples/sloppy_core/reaction_field.dewy
+# Browser: tools/dewy build examples/sloppy_core/reaction_field.dewy --target wasm -o field
+from p"reaction_model.dewy" import fresh, paint, advance
+
+const WIDTH:int64=96
+const HEIGHT:int64=64
+let field=fresh(WIDTH HEIGHT)
+let pixels=image(WIDTH HEIGHT)
+let field_texture=Texture[0 WIDTH HEIGHT]
+let running=true
+let feed=0.035
+let remove=0.062
+let speed=6.0
+let ink=rgb(0.094 0.235 0.290)
+let muted=rgb(0.28 0.43 0.47)
+let mist=rgb(0.863 0.910 0.910)
+let sea=rgb(0.235 0.533 0.569)
+let shell=rgb(0.941 0.725 0.631)
+let paper=rgb(0.965 0.973 0.961)
+
+seed=():>void=>{
+    field=fresh(WIDTH HEIGHT)
+    paint(@field 48 32 7)
+    paint(@field 24 20 3)
+    paint(@field 71 43 4)
+    loop i in [0..128) advance(@field feed as float32 remove as float32)
+}
+
+main=():>void=>{
+    window("Dewy / Pattern field" 1280 720)
+    field_texture=texture(pixels smooth=false)
+    hud_style.text=ink
+    hud_style.button=paper
+    hud_style.hover=rgb(0.77 0.86 0.86)
+    hud_style.pressed=rgb(0.67 0.80 0.81)
+    hud_style.border=rgb(0.58 0.72 0.74)
+    hud_style.accent=sea
+    hud_style.text_size=20.0
+    seed()
+}
+
+update=(_dt:float64):>void=>{
+    if key_pressed(Key.escape) quit()
+    if key_pressed(Key.space) running=not running
+    if key_pressed(Key.r) seed()
+    let mouse=mouse_pos()
+    if mouse_down(Mouse.left) and mouse.x >=? 32 and mouse.x <? 800
+       and mouse.y >=? 144 and mouse.y <? 656 {
+        paint(@field ((mouse.x-32.0)/8.0) as int64 ((mouse.y-144.0)/8.0) as int64 2)
+    }
+    if running {
+        loop i in [0..(speed as int64)) advance(@field feed as float32 remove as float32)
+    }
+}
+
+shade=(amount:float32):>vec4=>{
+    let t=clamp(amount*2.5 0.0 1.0)
+    if t <? 0.3 return lerp(ink sea t/0.3)
+    if t <? 0.75 return lerp(sea shell (t-0.3)/0.45)
+    return lerp(shell paper (t-0.75)/0.25)
+}
+
+draw=():>void=>{
+    loop i in 0.. and value in field.b.data {
+        pixels.set(i%WIDTH i//WIDTH shade(value))
+    }
+    update_texture(field_texture pixels)
+    clear(mist)
+    text("DEWY / ARRAY LAB" vec2(32 22) 16 muted mono=true)
+    text("Pattern field" vec2(30 48) 50 ink)
+    text("Paint a seed. Let it spread." vec2(34 111) 20 muted)
+    text("{field.steps} steps" vec2(606 113) 18 muted mono=true)
+    sprite(field_texture vec2(32 144) vec2(768 512))
+    rect_outline(31 143 770 514 1 sea)
+    let mouse=mouse_pos()
+    if mouse.x >=? 32 and mouse.x <? 800 and mouse.y >=? 144 and mouse.y <? 656 {
+        ring(mouse 20 1.5 paper)
+    }
+    text("Drag on the field to add B" vec2(34 678) 18 muted)
+
+    text("Two fields. One reaction." vec2(846 56) 27 ink)
+    text("A feeds the field. B forms the pattern." vec2(846 99) 18 muted)
+    text("Feed A" vec2(846 155) 22 ink)
+    feed=hud_slider(Rect(846 186 388 42) feed 0.015 0.060 step=0.001
+                    label=format(feed ".3f"))
+    text("Remove B" vec2(846 257) 22 ink)
+    remove=hud_slider(Rect(846 288 388 42) remove 0.045 0.070 step=0.001
+                      label=format(remove ".3f"))
+    text("Steps per frame" vec2(846 359) 22 ink)
+    speed=hud_slider(Rect(846 390 388 42) speed 1.0 12.0 step=1.0
+                     label=format(speed ".0f"))
+    if hud_button(Rect(846 466 182 48) (if running "Pause" else "Resume")) running=not running
+    if hud_button(Rect(1052 466 182 48) "Seed again") seed()
+    text("B concentration" vec2(846 558) 18 muted)
+    loop i in [0..194) {
+        rect(846.0+(i as float64)*2.0 588 2 16 shade((i as float32)/193.0*0.4))
+    }
+    text("0" vec2(846 614) 16 muted mono=true)
+    text("0.4+" vec2(1184 614) 16 muted mono=true)
+    text("Space: pause   R: seed again" vec2(846 678) 17 muted)
+}
