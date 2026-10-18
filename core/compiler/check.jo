@@ -160,6 +160,7 @@ struct FnCtx:
 
 syms: Sym[] = [Sym()]
 modules: Module[]
+module_by_path: {str: int} = {}
 universe: {int: int} = {}
 prelude: {int: int} = {}
 locals: Local[] = [Local()]
@@ -658,10 +659,7 @@ module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: boo
         if watch_candidates: watch_missing_input(path)
     ""
 
-find_module = (path: str) -> int:
-    loop i in 0.. and m in modules:
-        if files[int(m.file)].path == path: return i
-    -1
+find_module = (path: str) -> int: module_by_path.get(path) ?? -1
 
 load_module = (path: str, is_prelude: bool, from: int) -> int:
     ex = find_module(path)
@@ -679,6 +677,7 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     m = Module(name = i32(intern(base)), file = i32(fi), dir = d, is_prelude = is_prelude)
     modules.push(m)
     mi = modules.len() - 1
+    module_by_path[path] = mi
     p_lazy = is_prelude and not ide_on
     decls = source_declarations(fi)
     p_lazy = false

@@ -343,6 +343,14 @@ as well as the previous lifetime and fallback cases. The
 essentially unchanged (1838 → 1843 ms). The preceding stack-allocation commit
 also passed the complete CI gate and all three additional native host checks.
 
+Loaded modules now have a path-to-module index, replacing a linear scan on
+every import lookup. This removes quadratic lookup work as module counts grow.
+The [five-pair comparison](audits/2026-10-18/module-index-compile.json) was near
+flat on existing workloads: tour 58.1 → 57.7 ms CPU, Netpong 378.1 → 376.4 ms,
+893-case conformance 858.7 → 849.9 ms, self-build 1849.5 → 1863.7 ms. This is a
+scaling fix, not a demonstrated broad throughput improvement. The 291 focused
+import/module/smoke checks passed.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
