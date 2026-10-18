@@ -1272,6 +1272,55 @@ gen_positive_mod = (n: int) -> int:
     # The divisor is a pure literal; the dividend is evaluated exactly once.
     e_bin(.remu, VI, gen_expr(a).v, e_iconst(modulus))
 
+# Keep ordinary integer arithmetic cheap without requiring whole-program
+# inlining. Only bundled helpers and literal positive divisors are eligible;
+# zero, negative divisors and user overloads keep their ordinary call paths.
+gen_constant_floor = (n: int) -> int:
+    # Release inlining exposes the helpers' branches to broader optimization.
+    # Direct selects help the fast path but regress some optimized array loops.
+    if opt_release: return -1
+    if nkids(n) != 2: return -1
+    f = int(nodes[n].sym)
+    t = prune(int(fns[f].ret))
+    if t != T_INT and t != T_U64: return -1
+    d = int(fns[f].decl)
+    if d == 0: return -1
+    name = name_of(int(nodes[d].name))
+    if name != "__floor_mod" and name != "__floor_div" and name != "__floor_mod_pow2" and name != "__floor_div_pow2": return -1
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo": return -1
+    b = kid(n, 1)
+    if nodes[b].kind != .int_lit or has_flag(b, NF_U64): return -1
+    divisor = nodes[b].ival
+    if name == "__floor_div_pow2":
+        if divisor < 0 or divisor >= 64: return -1
+    else if name == "__floor_mod_pow2":
+        if divisor < 0: return -1
+    else if divisor <= 0: return -1
+    # The other operand is a pure literal, so source order still evaluates the
+    # dividend exactly once, even when the result simplifies to zero or itself.
+    a = gen_expr(kid(n, 0)).v
+    constant = e_iconst(divisor)
+    if name == "__floor_div_pow2":
+        shift_op = if t == T_U64: Op.shru else: Op.shrs
+        return e_bin(shift_op, VI, a, constant)
+    if name == "__floor_mod_pow2": return e_bin(.and_, VI, a, constant)
+    modulo = name == "__floor_mod"
+    op = if modulo: (if t == T_U64: Op.remu else: Op.rems) else: (if t == T_U64: Op.divu else: Op.divs)
+    value = e_bin(op, VI, a, constant)
+    if t == T_U64: return value
+    sign_input = if modulo: value else: a
+    negative = e_bin(.lts, VI, sign_input, e_iconst(0))
+    adjust = negative
+    corrected = 0
+    if modulo: corrected = e_bin(.add, VI, value, constant)
+    else:
+        remainder = e_bin(.ne, VI, a, e_bin(.mul, VI, value, constant))
+        adjust = e_bin(.and_, VI, negative, remainder)
+        corrected = e_addi(value, -1)
+    result = vreg(VI)
+    emit(.select, VI, result, adjust, corrected, value, 0)
+    result
+
 # ---------------- ticks that must agree ----------------
 # A function given to a @deterministic function (netplay.session's tick) must give the same game
 # on every machine from the same game and inputs: no random numbers but from a seed in the game,
@@ -2961,6 +3010,8 @@ gen_expr = (e: int) -> Val:
         if aux == 0:
             remainder = gen_positive_mod(e)
             if remainder >= 0: return V(remainder, false)
+            arithmetic = gen_constant_floor(e)
+            if arithmetic >= 0: return V(arithmetic, false)
             if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             if fns[int(nodes[e].sym)].deterministic: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             order: int[]

@@ -1533,3 +1533,20 @@ remains release. `benchmark_compile` has `tour-default`, `netpong-default`,
 `netpong-web-default` and `dunes-default` workloads. The earlier five-workload
 mode comparison is retained in `default-modes-baseline.*` as a baseline before
 this change, not a current scorecard.
+
+Default builds now lower bundled integer floor division and modulo by positive
+literals directly to arithmetic. Powers of two use shifts/masks; other signed
+divisors retain the negative-result correction. Dividends evaluate once, and
+zero/negative divisors and user overloads retain ordinary calls. Release builds
+keep their existing inlining path: applying the new selection form there
+regressed the array workload in an initial experiment.
+
+Seven alternating thread-CPU pairs with the final C-bootstrapped compiler give
+default candidate/baseline ratios of 0.528 for helper loops, 0.623 for arrays and
+0.818 for byte scanning. Absolute timing shifted between runs; these are local
+paired observations, not general speed guarantees. Release ratios were
+0.998/1.052/1.001 respectively, with no release speedup claim. Checksums matched
+at the boundary inputs and full workload sizes. The independent three-generation
+C gate passes all 4,410 checks in 89.85 pytest seconds with two workers; the
+focused arithmetic selection passes 150 checks in 4.56 seconds. See
+`constant-floor-*` audits for final runtime/compilation samples and limits.

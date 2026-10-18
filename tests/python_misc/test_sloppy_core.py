@@ -294,6 +294,13 @@ byte=():>uint8=>{calls+=1 return 255}
 main=()=>{
 let word:int64=0 loop i in [0..20) {word=(word*131+(byte() as int64))%1000000007}
 return if calls=?20 and word>=?0 42 else 1}''',
+    'numeric-constant-floor-once': '''let calls:int64=0
+next=():>int64=>{calls+=1 return -7}
+main=()=>{
+let values=[next()%3 next()//3 next()%1 next()//1 next()%2 next()//2 next()%8 next()//8]
+return if calls=?8 and values=?[2 -3 0 -7 1 -4 1 -1] 42 else 1}''',
+    'numeric-floor-helper-overloads': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/floor_helpers.jo')+'"\n'
+                                       'main=()=>floor_helpers.check()'),
     'array-comparison-word-boundaries': '''verify=<T>(values:array<T> different:T):>bool=>{
 loop count in [0..values.length] {
 let a=values[0..count) let b=values[0..count) let shared=a
@@ -5436,6 +5443,21 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     assert probe, 'bounded recurrence was not emitted'
     assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
     assert ' = mulhs ' not in probe[0]
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_constant_floor_ir(compiler, tmp_path, target):
+    source = tmp_path / 'constant.dewy'
+    source.write_text('''probe=(a:int64):>int64=>a%3+a//3+a%8+a//8
+main=()=>probe(-7)
+''')
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target,
+                            '-o', tmp_path / 'constant'],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'constant arithmetic probe was not emitted'
+    assert 'call' not in probe[0], 'literal floor arithmetic still calls a helper in default builds'
 
 
 def test_core_many_record_types(compiler, tmp_path):

@@ -1,0 +1,14 @@
+# Arithmetic shortcuts must identify the bundled declaration, not just its name.
+struct Box:
+    value: int
+
+__floor_mod = (a: Box, b: int) -> int: a.value + b
+__floor_div = (a: Box, b: int) -> int: a.value - b
+__floor_mod_pow2 = (a: Box, b: int) -> int: a.value * b
+__floor_div_pow2 = (a: Box, b: int) -> int: a.value + 2 * b
+
+check = () -> int:
+    box = Box(40)
+    if __floor_mod(box, 3) != 43 or __floor_div(box, 3) != 37: return 1
+    if __floor_mod_pow2(box, 3) != 120 or __floor_div_pow2(box, 3) != 46: return 2
+    42
