@@ -330,6 +330,10 @@ avoid reference cycles. Module globals retain their module-wide identity.
 Ordinary callback parameters receive independent values. To advance a caller's
 counter, accept `@counter` and pass `@counter`, just as for other mutable values.
 Records and collections containing closures also preserve independent copies.
+Value-returning getters, including dictionary lookups, return independent
+closures too. Calling `counters[key]()` advances that returned copy. To advance
+the stored value, pass `@counters[key]` to a function with an `@` callback
+parameter. Explicit shared captures retain their sharing through either path.
 Calling a callable saved under `const` uses a temporary copy of its private
 state; explicit shared captures still refer to their shared bindings. Captured
 `const` locals remain read-only inside the closure.

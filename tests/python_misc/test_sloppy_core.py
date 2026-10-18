@@ -110,6 +110,19 @@ if r.call() not=?1 or q.call() not=?1 return 2
 if r.rows[0][0]() not=?1 or q.rows[0][0]() not=?1 return 3
 let m=["counter"->make()] let k=m
 return if m["counter"]()=?1 and k["counter"]()=?1 42 else 4}''',
+    'closure-dictionary-place': '''Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+advance=(@next:Counter)=>next()
+main=()=>{let counters=["next"->make()]
+if counters["next"]() not=?1 or counters["next"]() not=?1 return 1
+if advance(@counters["next"]) not=?1 or advance(@counters["next"]) not=?2 return 2
+let copy=counters
+return if advance(@counters["next"])=?3 and advance(@copy["next"])=?3 42 else 3}''',
+    'dictionary-reference-index-once': '''bump=(@n:int64)=>{n+=2}
+main=()=>{let counts=["key"->40] let saved=counts let hits=0
+let key=[@hits]()=>{hits+=1; "key"}
+bump(@counts[key()])
+return if counts["key"]=?42 and saved["key"]=?40 and hits=?1 42 else 1}''',
     'closure-argument-values': '''Counter:type=():>int64
 make=()=>{let n=0 return ()=>{n+=1; n}}
 twice=(f:Counter)=>f()+f()

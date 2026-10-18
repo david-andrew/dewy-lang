@@ -5386,6 +5386,7 @@ check_expr = (n: int, expected: int) -> int:
             nodes[call].a = i32(callee)
             add_flag(int(nodes[n].a), NF_CHECKED)
             set_list(call, [int(nodes[n].a)] + kids(n))
+            if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
             nodes[n] = nodes[call]
             t = check_expr(n, expected)
             last_checked = n
@@ -5424,6 +5425,7 @@ check_expr = (n: int, expected: int) -> int:
                 nodes[call].a = i32(callee)
                 add_flag(int(nodes[n].a), NF_CHECKED)
                 set_list(call, [int(nodes[n].a), b])
+                if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
                 nodes[n] = nodes[call]
                 t = check_expr(n, expected)
                 last_checked = n
