@@ -47,6 +47,11 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'game-shadow-defaults': '''main=()=>{
+let params=LitParams[]
+if params.shadow_texel not=? f32(1.0/2048.0) or params.shadow_taps not=? 9.0 return 1
+return 42
+}''',
     'record-top-level-updates': '''Pair:type=[left:int64 right:int64]
 let pair=Pair[1 2]
 let values=[10 20]
@@ -6389,13 +6394,16 @@ def shader_driver():
         driver.close()
 
 
-@pytest.mark.parametrize('case', ['dunes', 'parameter-copies'])
+@pytest.mark.parametrize('case', ['dunes', 'lit', 'parameter-copies'])
 def test_core_shader_driver(compiler, shader_driver, tmp_path, case):
     if case == 'dunes':
         model = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/dunes_model.dewy'
         shutil.copy2(model, tmp_path / model.name)
         body = 'from p"dunes_model.dewy" import sand_vs, sand_fs\n'
         pair = 'sand_vs sand_fs'
+    elif case == 'lit':
+        body = ''
+        pair = 'lit_vs lit_fs'
     else:
         body = """Vertex:type=[pos:vec4 uv:vec2]
 Surface:type=[tex:Texture tint:vec4]
@@ -6511,6 +6519,22 @@ def test_core_game_renderer(compiler, tmp_path, game):
     data = screenshot.read_bytes()
     assert data[:8] == b'\x89PNG\r\n\x1a\n'
     assert struct.unpack('>II', data[16:24]) == (1280, 720)
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_software_raster_chunks(compiler, tmp_path, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/software_raster.jo'
+    binary = tmp_path / 'raster'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    for threads in [1, 2]:
+        env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
+        env.update(SLOPPY_THREADS=str(threads), SLOPPY_SOFT_SCALE='0.5')
+        ran = subprocess.run([binary], env=env, capture_output=True, text=True,
+                             timeout=10, check=False)
+        assert ran.returncode == 42, (threads, ran.stdout, ran.stderr)
 
 
 @pytest.mark.core_quick
@@ -6718,7 +6742,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

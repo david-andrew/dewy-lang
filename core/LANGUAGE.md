@@ -1088,6 +1088,9 @@ dense plot that spans several drawing batches.
 Dunes also defines vertex and fragment shaders as ordinary Dewy functions, with
 typed input/output records and texture uniforms. The compiler generates GPU
 shader code and the software renderer can execute the same shader functions.
+The CPU fallback uses a smaller shadow map and four samples for built-in 3D
+lighting; GPU lighting keeps nine samples. Custom shadow shaders should derive
+texel spacing from the actual shadow texture size rather than a fixed resolution.
 See [its model module](../examples/sloppy_core/dunes_model.dewy) for terrain,
 animated meshes and custom sand/shadow and beacon shaders.
 Native `watch` refreshes shaders after edits, including imported shader functions,

@@ -1,0 +1,24 @@
+# Exercise triangle setup across multiple work chunks without a window or driver.
+# The two halves of a rectangle have opposite winding; every third triangle is
+# degenerate. Repeated overlapping triangles must retain submission order.
+main = () -> int:
+    __sw_init_window(64, 32)
+    __s_vp = (0, 0, 32, 16)
+    vertices: f32[] = [0, 0, 32, 0, 0, 16, 32, 16]
+    indices: i32[]
+    loop t in [0..4097):
+        if t % 3 == 0: indices.extend([i32(0), i32(0), i32(0)])
+        else if t % 3 == 1: indices.extend([i32(0), i32(1), i32(2)])
+        else: indices.extend([i32(1), i32(2), i32(3)])
+    pixels = fill(0, 32 * 16)
+    p = data(pixels)
+    __sw_raster(data(vertices), 2, data(indices), 4097,
+        (band: int, y: int, x0: int, x1: int, tri: int, l0: f32, l1: f32, l2: f32, d0: f32, d1: f32, d2: f32):
+            loop x in [x0..x1 + 1): p[y * 32 + x] = tri + 1
+    )
+    loop y in [0..16):
+        loop x in [0..32):
+            # Pixel centers cannot lie on this diagonal: x + 2*y + 1.5 != 32.
+            expected = if x + 2 * y < 31: 4097 else: 4095
+            if pixels[y * 32 + x] != expected: return 1
+    42

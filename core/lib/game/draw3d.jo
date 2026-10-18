@@ -45,6 +45,8 @@ struct LitParams:
     specular: f32
     use_tex: f32
     shadow_strength: f32
+    shadow_texel: f32 = 1.0 / 2048.0  # (one texel of the shadow map, across)
+    shadow_taps: f32 = 9.0            # (9 on a GPU; 4 in the software renderer)
     time: f32
     wind: f32
     tex: Texture
@@ -100,12 +102,19 @@ shadow_factor = (u: LitParams, sp: vec4, ndl: f32) -> f32:
     if p.x < 0.0 or p.x > 1.0 or p.y < 0.0 or p.y > 1.0 or p.z > 1.0: return 1.0
     bias = 0.0015 + 0.004 * (1.0 - ndl)
     lit: f32 = 0.0
-    texel: f32 = 1.0 / 2048.0
-    loop x in [-1..2):
-        loop y in [-1..2):
-            d = sample(u.shadow_map, p.xy + vec2(f32(x), f32(y)) * texel).x
+    texel = u.shadow_texel
+    if u.shadow_taps < 5.0:
+        # (four, half a texel apart: the software renderer's)
+        loop k in [0..4):
+            d = sample(u.shadow_map, p.xy + vec2(f32(k % 2) - 0.5, f32(k / 2) - 0.5) * texel).x
             if p.z - bias <= d: lit += 1.0
-    lit = lit / 9.0
+        lit = lit / 4.0
+    else:
+        loop x in [-1..2):
+            loop y in [-1..2):
+                d = sample(u.shadow_map, p.xy + vec2(f32(x), f32(y)) * texel).x
+                if p.z - bias <= d: lit += 1.0
+        lit = lit / 9.0
     1.0 - u.shadow_strength * (1.0 - lit)
 
 aces = (c: vec3) -> vec3:
@@ -624,7 +633,8 @@ __params = (d: Draw3D, vp: mat4) -> LitParams:
         sun_dir = __sun_dir, sun_color = __sun_color, sky_color = __sky_top * 0.6 + __sky_horizon * 0.4,
         ground_color = __ground_color, fog_color = __fog_color, fog_density = __fog_density, fog_height = __fog_height,
         emissive = d.emissive, specular = d.specular, use_tex = f32(int(d.tex != 0)),
-        shadow_strength = f32(__shadow_strength) * f32(int(__shadows)), time = f32(elapsed()), wind = d.wind,
+        shadow_strength = f32(__shadow_strength) * f32(int(__shadows)), shadow_texel = f32(1.0 / f64(max(__shadow_rt.texture.width, 1))),
+        shadow_taps = if __soft: 4.0 else: 9.0, time = f32(elapsed()), wind = d.wind,
         tex = Texture(d.tex, 1, 1), shadow_map = __shadow_rt.texture, lights = __light_pos,
         light_colors = __light_col, light_count = __light_n, bones = __no_bones)
 
@@ -676,7 +686,7 @@ __render3d = ():
         zone("shadows")
         if __shadow_rt.fbo == 0:
             res = 2048
-            if __soft: res = 1024
+            if __soft: res = 512
             __shadow_rt = __depth_target(res)
         center = __cam_target
         lpos = center + __sun_dir * f32(__shadow_size * 2.0)

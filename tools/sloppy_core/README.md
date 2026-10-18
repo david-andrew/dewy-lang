@@ -1325,3 +1325,23 @@ late packets, on native/web in both build modes. Python checks each peer's state
 against an independent arithmetic result. The rollback, restart and local
 network selection passes 17 checks in 6.91 seconds. This is a bounded stale-packet
 check, not a new session-ID protocol. See `netplay-restart-*` audits.
+
+
+The software renderer incorporates Sloppy `5a1e0b9`: triangle setup runs in
+independent chunks before stable band binning, and built-in 3D lighting uses a
+512-square shadow map with four samples in CPU fallback mode. GPU rendering
+retains 2048-square maps and nine samples. New `LitParams` fields have defaults
+matching the previous GPU settings; custom parameters can choose their own
+texel spacing and sample count. The CPU fallback's shadows are softer.
+
+Seven paired release runs at 1280×720, two software-rendering threads on CPUs
+2/3 and 31 fixed-step frames give median candidate/baseline frame-time ratios
+of 0.767 for forest, 1.024 for Paddle and 0.991 for Dunes. Whole-process CPU
+ratios are 0.784, 1.011 and 1.012 respectively. Forest improves; the other two
+are approximately neutral. These are software-rendering results, not GPU frame
+rates. Dunes has its own shader and still uses its existing shadow sampling in
+this comparison. Saved forest/Dunes frames were visually inspected. The 33-case
+focused gate includes game renders/web builds, real GLES lighting shader
+compilation, default parameters and overlapping triangles crossing worker chunks
+with one/two threads. See `software-render-*` audits and reproduce with
+`python3 -m tools.sloppy_core.benchmark_render --help`.

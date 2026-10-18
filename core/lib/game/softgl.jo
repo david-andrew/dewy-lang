@@ -495,51 +495,64 @@ __sw_raster = (sv: *f32, stride: int, idx: *i32, ntri: int, shade: (int, int, in
     bounds = fill(0, ntri * 4)
     bp = data(bounds)
     counts = fill(0, bands + 1)
+    # (each triangle's setup on its own: in parallel, in chunks)
+    chunk = 2048
+    __par_serial = ntri < chunk
+    sums = parallel_range((ntri + chunk - 1) / chunk, (k: int) -> int:
+        px = 0
+        loop t in [k * chunk..min((k + 1) * chunk, ntri)):
+            a = sv + int(idx[t * 3]) * stride
+            b = sv + int(idx[t * 3 + 1]) * stride
+            c = sv + int(idx[t * 3 + 2]) * stride
+            ax = f64(a[0])
+            ay = f64(a[1])
+            bx = f64(b[0])
+            by = f64(b[1])
+            cx = f64(c[0])
+            cy = f64(c[1])
+            area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            bp[t * 4 + 2] = 1
+            bp[t * 4 + 3] = 0                  # empty unless set below
+            if not (area > 0.0 or area < 0.0): continue      # degenerate (or NaN)
+            if cull and ((area < 0.0) == cull_back): continue
+            flip = 0.0
+            if area < 0.0:
+                flip = 1.0
+                tx = bx
+                ty = by
+                bx = cx
+                by = cy
+                cx = tx
+                cy = ty
+                area = -area
+            minx = int(max(min(ax, min(bx, cx)), f64(x0c)))
+            maxx = int(min(max(ax, max(bx, cx)), f64(x1c - 1)))
+            miny = int(max(min(ay, min(by, cy)), f64(y0c)))
+            maxy = int(min(max(ay, max(by, cy)), f64(y1c - 1)))
+            if minx > maxx or miny > maxy: continue
+            s = sp + t * 8
+            s[0] = ax
+            s[1] = ay
+            s[2] = bx
+            s[3] = by
+            s[4] = cx
+            s[5] = cy
+            s[6] = 1.0 / area
+            s[7] = flip
+            bp[t * 4] = minx
+            bp[t * 4 + 1] = maxx
+            bp[t * 4 + 2] = miny
+            bp[t * 4 + 3] = maxy
+            px += (maxx - minx + 1) * (maxy - miny + 1)
+        px
+    )
+    __par_serial = false
     pixels = 0                      # (how many the triangles' boxes cover: few, and one thread does them)
+    loop n in sums: pixels += n
     loop t in [0..ntri):
-        a = sv + int(idx[t * 3]) * stride
-        b = sv + int(idx[t * 3 + 1]) * stride
-        c = sv + int(idx[t * 3 + 2]) * stride
-        ax = f64(a[0])
-        ay = f64(a[1])
-        bx = f64(b[0])
-        by = f64(b[1])
-        cx = f64(c[0])
-        cy = f64(c[1])
-        area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
-        bp[t * 4 + 2] = 1
-        bp[t * 4 + 3] = 0                  # empty unless set below
-        if not (area > 0.0 or area < 0.0): continue      # degenerate (or NaN)
-        if cull and ((area < 0.0) == cull_back): continue
-        flip = 0.0
-        if area < 0.0:
-            flip = 1.0
-            tx = bx
-            ty = by
-            bx = cx
-            by = cy
-            cx = tx
-            cy = ty
-            area = -area
-        minx = int(max(min(ax, min(bx, cx)), f64(x0c)))
-        maxx = int(min(max(ax, max(bx, cx)), f64(x1c - 1)))
-        miny = int(max(min(ay, min(by, cy)), f64(y0c)))
-        maxy = int(min(max(ay, max(by, cy)), f64(y1c - 1)))
-        if minx > maxx or miny > maxy: continue
-        s = sp + t * 8
-        s[0] = ax
-        s[1] = ay
-        s[2] = bx
-        s[3] = by
-        s[4] = cx
-        s[5] = cy
-        s[6] = 1.0 / area
-        s[7] = flip
-        bp[t * 4] = minx
-        bp[t * 4 + 1] = maxx
-        bp[t * 4 + 2] = miny
-        bp[t * 4 + 3] = maxy
-        pixels += (maxx - minx + 1) * (maxy - miny + 1)
+        miny = bp[t * 4 + 2]
+        maxy = bp[t * 4 + 3]
+        if miny > maxy: continue
         loop k in [(miny - y0c) / band_h..(maxy - y0c) / band_h + 1): counts[k + 1] += 1
     loop k in [0..bands): counts[k + 1] += counts[k]
     # bin the triangles by band (a counting sort keeps submission order)
