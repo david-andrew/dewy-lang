@@ -28,6 +28,7 @@ QUICK_CASES = {
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
     'closure-copy-private', 'closure-explicit-shared', 'closure-copy-cleanup',
     'closure-capture-parameters',
+    'closure-argument-container-values',
     'sequence-closures', 'sequence-slice-loop-snapshots', 'sequence-mutable-snapshot-in-body',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
     'dictionary-value-equality', 'set-copy-and-removal', 'numeric-bounds',
@@ -9120,6 +9121,21 @@ def test_core_cli_identity(compiler):
     result = subprocess.run([compiler, '--help'], capture_output=True, text=True,
                             timeout=5, check=False)
     assert result.returncode == 0 and 'file.dewy' in result.stderr
+
+
+def test_core_build_source_counts(compiler, tmp_path):
+    source = tmp_path / 'main.dewy'
+    helper = tmp_path / 'helper.dewy'
+    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=()=>h.answer()'
+    imported = 'answer=()=>42\n'
+    source.write_text(body)
+    helper.write_text(imported)
+    built = subprocess.run([compiler, 'build', source, '--time', '-o', tmp_path / 'program'],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    expected_bytes = len((body + imported).encode())
+    assert f'5 Dewy lines ({expected_bytes} bytes)' in built.stderr, built.stderr
+    assert 'implementation lines' in built.stderr and 'lower+codegen' in built.stderr
 
 
 @pytest.mark.parametrize('kind', ['game', 'arcade', 'platformer', '3d', 'story', 'online', 'program'])

@@ -307,6 +307,26 @@ callee_order = (fs: IrFn[]) -> int[]:
                 next_ins.pop()
     order
 
+# Count physical source lines, including comments and blank lines. Loaded
+# library bodies may remain lazy, so this is input volume, not checked LOC.
+source_counts = ():
+    dewy_lines = 0
+    dewy_bytes = 0
+    impl_lines = 0
+    impl_bytes = 0
+    loop file in files:
+        lines = 0
+        loop byte in file.src:
+            if byte == '\n': lines += 1
+        if len(file.src) > 0 and file.src[len(file.src) - 1] != '\n': lines += 1
+        if file.is_dewy:
+            dewy_lines += lines
+            dewy_bytes += len(file.src)
+        else:
+            impl_lines += lines
+            impl_bytes += len(file.src)
+    eprint("sources: {files.len()} files, {dewy_lines} Dewy lines ({dewy_bytes} bytes), {impl_lines} implementation lines ({impl_bytes} bytes)")
+
 compile = (path: str, out0: str) -> str:
     if watch_build and not watch_first: late_binding = true
     t0 = time()
@@ -535,6 +555,7 @@ compile = (path: str, out0: str) -> str:
     if ra_stat: eprint("regalloc: spill cost {ra_spill_cost}, save cost {ra_save_cost} (int) {ra_save_x} (float), of {ra_total} weighted accesses\n")
     if timing:
         eprint("check {(t1 - t0) * 1000.0:.1} ms, lower+codegen {(t2 - t1) * 1000.0:.1} ms, write {(t3 - t2) * 1000.0:.1} ms; {lfuncs.len()} functions, {nodes.len()} nodes, {size} bytes of code")
+        source_counts()
     if not ok:
         # (a patch for sloppy watch tells its own trouble)
         if not watch_build or watch_first: eprint("error: cannot write {out} (a directory there, or no permission?)")

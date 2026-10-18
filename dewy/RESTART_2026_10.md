@@ -265,6 +265,16 @@ core while filling useful language gaps and improving measured bottlenecks. It
 is still experimental, with explicit unsupported-feature diagnostics rather than
 full old-compiler compatibility or release certification.
 
+The 2026-10-18 target is roughly 250,000 Dewy lines/second for fresh builds and
+generated code competitive with C/Rust. A new [throughput baseline](audits/2026-10-18/compile-throughput-baseline.json)
+records source volume separately from phases and end-to-end wall/CPU time.
+On the i7-6700, five samples put default tour/Netpong/Dunes builds at about
+59/390/301 ms CPU, and the release compiler self-build at 1.93 s CPU. Those
+applications contain only 34/348/484 loaded Dewy lines alongside 36–41k library
+lines, many in unused lazy bodies. The compiler is still implementation-language
+source. These workloads measure latency and existing implementation throughput;
+they do not yet establish large-program Dewy throughput against the target.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

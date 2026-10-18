@@ -34,6 +34,15 @@ python3 -m tools.core path                       # immutable executable for scri
 python3 -m tools.core --bootstrap test           # also verify the independent C seed
 ```
 
+`build --time` reports compiler phases and loaded physical source lines/bytes,
+separating Dewy from implementation/library sources. Counts include comments,
+blank lines and unused lazy library bodies: they describe input volume, not
+fully checked or emitted code. Use `python3 -m tools.sloppy_core.benchmark_throughput
+<compiler> --output <report.json>` for fresh-process wall/CPU measurements on
+the tour, Netpong, Dunes and compiler. The rough target is 250,000 Dewy lines per
+second on representative programs; small examples measure latency, and high
+loaded-library throughput alone does not establish that target.
+
 The first command builds from C. Later commands reuse the compiler when its
 sources/libraries/build inputs are unchanged, or rebuild with the previous core.
 Failed builds stop the command and leave the previous toolchain intact; tests
