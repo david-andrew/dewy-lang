@@ -382,6 +382,91 @@ __fixed_digits = (buf: mut u8[], neg: bool, d: u64, prec: int):
         __fmt_u64(buf, fp, false, prec, '0')
 
 # ---------------- format specs ----------------
+# Public formatting stays a library operation, including dynamic format strings.
+# Integer floating-point formats explicitly convert the value to f64; decimal
+# and radix integer formats keep all bits, including the full u64 range.
+format = (value: int, spec: str) -> str:
+    sp = __format_checked(spec, "dxXbofeEgG%", true)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+format = (value: u64, spec: str) -> str:
+    sp = __format_checked(spec, "dxXbofeEgG%", true)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+format = (value: f64, spec: str) -> str:
+    __format_checked(spec, "feEgG%", true)
+    buf: u8[]
+    __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+format = (value: f32, spec: str) -> str:
+    sp = __format_checked(spec, "feEgG%", true)
+    buf: u8[]
+    if sp.prec < 0 and sp.kind == 0:
+        __fmt(buf, value)
+        __spec_finish(buf, 0, sp, true)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+format = (value: str, spec: str) -> str:
+    sp = __format_checked(spec, "s", false)
+    if sp.prec >= 0 or sp.plus or sp.alt or sp.zero or sp.group != 0:
+        panic("text formatting takes alignment, fill and width; numeric flags and precision need a number")
+    if sp.width == 0: return value
+    extra = sp.width - __dewy_string_length(value)
+    if extra <= 0: return value
+    buf: u8[]
+    __buf_append_str(buf, value)
+    before = 0
+    if sp.align == '>': before = extra
+    else if sp.align == '^': before = extra / 2
+    __insert_fill(buf, 0, before, sp.fill)
+    __insert_fill(buf, len(buf), extra - before, sp.fill)
+    str_from_bytes(buf)
+
+format = (value: i8, spec: str) -> str: format(int(value), spec)
+format = (value: i16, spec: str) -> str: format(int(value), spec)
+format = (value: i32, spec: str) -> str: format(int(value), spec)
+format = (value: u8, spec: str) -> str: format(u64(value), spec)
+format = (value: u16, spec: str) -> str: format(u64(value), spec)
+format = (value: u32, spec: str) -> str: format(u64(value), spec)
+
+__format_checked = (spec: str, kinds: str, numeric: bool) -> __Spec:
+    i = 0
+    n = len(spec)
+    if n >= 2 and __is_align(spec[1]): i = 2
+    else if n >= 1 and __is_align(spec[0]): i = 1
+    if i < n and spec[i] == '+': i += 1
+    if i < n and spec[i] == '#': i += 1
+    first = i
+    loop i < n and is_digit(spec[i]): i += 1
+    if i > first and to_int(spec[first..i)) == none: panic("format width is too large")
+    if i < n and (spec[i] == ',' or spec[i] == '_'): i += 1
+    if i < n and spec[i] == '.':
+        i += 1
+        first = i
+        loop i < n and is_digit(spec[i]): i += 1
+        if i == first: panic("format precision needs digits after '.'")
+        if to_int(spec[first..i)) == none: panic("format precision is too large")
+    if i < n:
+        if find_byte(kinds, spec[i]) < 0: panic("format type '{spec[i..i + 1)}' does not apply to this value")
+        i += 1
+    if i != n: panic("unexpected text after format specification")
+    sp = __spec_parse(spec)
+    if sp.alt and find_byte("xXbo", u8(sp.kind)) < 0:
+        panic("alternate prefix needs an integer base")
+    if sp.group != 0 and find_byte("xXbo", u8(sp.kind)) >= 0:
+        panic("digit grouping needs a decimal format")
+    if numeric and sp.prec >= 0 and find_byte("dxXbo", u8(sp.kind)) >= 0:
+        panic("precision needs a floating-point format, not an integer base")
+    sp
+
 # [[fill]align][+][0][width][,|_][.precision][type] as in Python: align is < > ^, type one of
 # x X b o (integers), f (fixed), e E (exponent), g G (fixed or exponent, whichever is shorter),
 # % (percent); {x:.2} {x:>8} {n:,} {x:08.3} {p:.1%} {s:^20} {tiny:.3e}

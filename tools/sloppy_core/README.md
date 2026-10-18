@@ -1373,3 +1373,16 @@ The broader game/font selection passes 57 checks in 11.26 seconds; the final
 9-check controls selection passes in 3.70 seconds, including mouse/touch drag
 capture, crossing another control, release, keyboard steps and descending HUD
 ranges. Font lookup checks run on native and web. See `controls-*` audits.
+
+
+`format(value spec)` exposes numeric/text formatting through ordinary library
+overloads, including computed specs and calls inside Dewy interpolation. It
+supports precision, decimal grouping, radix prefixes, padding and alignment;
+invalid/incompatible specs panic. Narrow integers keep their signedness, full
+`uint64` decimal/radix output remains exact, and floating formats on integer
+values explicitly use `float64`. Text width counts graphemes, preserves existing
+content and accepts ASCII fill. The pendulum now uses this API for display
+precision. There are no parser/compiler changes or new performance claims.
+After an independent three-generation C bootstrap, 263 formatting, string and
+controls checks pass in 9.99 pytest seconds. The final example frame was visually
+reviewed. See `value-format-*` audits and the language guide for supported specs.

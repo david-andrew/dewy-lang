@@ -47,6 +47,15 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'format-argument-order': '''let word="first"
+spec=():>string=>{word="later" return ">8"}
+main=()=>{
+let result=format(word spec())
+if result not=? "   first" or word not=? "later" return 1
+let pattern=".2f"
+if format(1.125 pattern) not=? "1.12" return 2
+return 42
+}''',
     'game-font-math': '''import p"@lib/game/draw2d.jo" as surface
 main=()=>{
 surface.__font_init()
@@ -4423,15 +4432,16 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unpack_errors': 'unpack',
                   'test_core_fixed_array_errors': 'bounds',
                   'test_core_set_errors': 'set',
+                  'test_core_format_errors': 'format',
                   'test_core_combined_range_errors': 'range',
                   'test_core_compound_errors': 'compound',
                   'test_core_optimizer_bounds': 'bounds'}.get(item.originalname)
         if family is None:
             continue
         params = item.callspec.params
-        expression = params['body'] if family in ('range', 'bounds', 'compound', 'unpack', 'set') else params['expression']
+        expression = params['body'] if family in ('range', 'bounds', 'compound', 'unpack', 'set', 'format') else params['expression']
         case = family, expression
-        if family in ('range', 'bounds', 'compound', 'unpack', 'set'):
+        if family in ('range', 'bounds', 'compound', 'unpack', 'set', 'format'):
             sources[case] = f'main=():>void=>{{{expression}}}'
         else:
             sources[case] = f'from {family} import {family}\nmain=():>void=>{{printl"{{{expression}}}"}}'
@@ -5552,6 +5562,31 @@ main=():>void=>{
 
 
 @pytest.mark.parametrize(('name', 'expression', 'expected'), [
+    ('format-fixed-even', 'format(1.125 ".2f")', '1.12'),
+    ('format-fixed-up', 'format(1.375 ".2f")', '1.38'),
+    ('format-negative-zero', 'format(-0.0 ".1f")', '-0.0'),
+    ('format-f32-short', 'format(float32(0.1) ">8")', '     0.1'),
+    ('format-radix-padding', 'format(255 "#06x")', '0x00ff'),
+    ('format-narrow-signed', 'format(int8(-1) "#x")', '-0x1'),
+    ('format-narrow-unsigned', 'format(uint8(255) "#06x")', '0x00ff'),
+    ('format-u32', 'format(uint32.max "x")', 'ffffffff'),
+    ('format-i32', 'format(int32.min "d")', '-2147483648'),
+    ('format-i64', 'format(int64.min "d")', '-9223372036854775808'),
+    ('format-u64', 'format(uint64.max "d")', '18446744073709551615'),
+    ('format-grouping', 'format(uint64.max ",")', '18,446,744,073,709,551,615'),
+    ('format-integer-fixed', 'format(42 "08.2f")', '00042.00'),
+    ('format-unsigned-fixed', 'format(uint64(42) ".2f")', '42.00'),
+    ('format-signed-group', 'format(1234.5 "+,.2f")', '+1,234.50'),
+    ('format-percent', 'format(0.125 ".1%")', '12.5%'),
+    ('format-exponent', 'format(12500 ".2e")', '1.25e+04'),
+    ('format-general', 'format(12345 ".3g")', '1.23e+04'),
+    ('format-center', 'format("θ" "^5")', '  θ  '),
+    ('format-unicode', 'format("é🙂" ">5")', '   é🙂'),
+    ('format-graphemes', 'format("é👩🏽‍💻" ">5")', '   é👩🏽‍💻'),
+    ('format-no-truncation', 'format("é👩🏽‍💻" "<1")', 'é👩🏽‍💻'),
+    ('format-fill', 'format("ok" "-<5s")', 'ok---'),
+    ('format-zero', 'format(0 "b")', '0'),
+    ('format-interpolation', '"θ = {format(1.25 ".1f")}°"', 'θ = 1.2°'),
     ('constant-interpolation', '"answer {42}"', 'answer 42'),
     ('unicode', '"\\u0065\\u0301 \\u{1F642} \\U00E9"', 'é 🙂 é'),
     ('unicode-boundaries', '"\\u0000\\u007F\\u0080\\u07FF\\u0800\\uD7FF\\uE000\\u{10FFFF}"', '\x00\x7f\x80߿ࠀ\ud7ff\ue000\U0010ffff'),
@@ -6102,6 +6137,26 @@ def test_core_set_errors(error_batches, body, diagnostic, target, release):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_compound_errors(error_batches, body, diagnostic, target, release):
     ran = error_batches('compound', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body, diagnostic', [
+    ('printl(format(1.25 "."))', 'precision needs digits'),
+    ('printl(format(1.25 "x"))', 'does not apply'),
+    ('printl(format(42 ".2x"))', 'precision needs a floating-point format'),
+    ('printl(format(42 "dextra"))', 'unexpected text after format'),
+    ('printl(format(42 "99999999999999999999999"))', 'format width is too large'),
+    ('printl(format(1.25 ".99999999999999999999999f"))', 'format precision is too large'),
+    ('printl(format("hello" ".2s"))', 'numeric flags and precision need a number'),
+    ('printl(format("hello" "+5"))', 'numeric flags and precision need a number'),
+    ('printl(format("hello" "x"))', 'does not apply'),
+    ('printl(format(1.25 "#.2f"))', 'alternate prefix needs an integer base'),
+    ('printl(format(12345 "_x"))', 'digit grouping needs a decimal format'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_format_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('format', body, release, target)
     assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
@@ -6792,7 +6847,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

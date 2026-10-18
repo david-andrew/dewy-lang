@@ -979,6 +979,31 @@ backslash, quotes and braces. A backslash immediately followed by a newline
 continues the string without that newline. Interpolations can contain nested
 strings, blocks and line comments.
 
+`format(value spec)` formats machine numbers or text, including inside an
+interpolation. The specification is an ordinary string and may be computed:
+
+```dewy
+printl(format(3.14159 ".2f"))        # 3.14
+printl(format(255 "#06x"))          # 0x00ff
+printl(format(1234567 ","))         # 1,234,567
+printl(format("θ" "^5"))           # two spaces on each side
+let angle=12.25
+printl("θ = {format(angle ".1f")}°")
+```
+
+The shape is `[[fill]align][+][#][0][width][,|_][.precision][type]`.
+Alignment is `<`, `>` or `^`, with an optional ASCII fill character. Floating
+formats are `f`, `e`/`E`, `g`/`G` and `%`; integer bases are `d`, `x`/`X`, `b`
+and `o`. `#` adds a radix prefix; grouping applies to decimal formats. An omitted
+type keeps ordinary value formatting, or fixed decimals when precision is given.
+Decimal/radix integer formats retain every bit. Floating formats on integers
+convert to `float64`; exact library numbers require an explicit `.to_float64()`
+for this kind of formatting. Fixed decimal rounding uses ties to even.
+
+Text takes alignment, fill and minimum width, optionally ending in `s`. Its
+width counts grapheme clusters; it does not truncate. Use a string slice to
+truncate explicitly. Invalid specs or options for the wrong value type panic.
+
 Use `bytes(text)` for explicit UTF-8 bytes; binary literals such as `0x"ff00"`
 also produce bytes. `$include_bytes(p"asset.png") as image` embeds an asset at
 compile time, including for web builds.

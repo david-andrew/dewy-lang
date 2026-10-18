@@ -1,0 +1,20 @@
+{
+  "compiler": "build-1792300209066707405/bin/dewy-core",
+  "source_identity": "46a48574e2e45b1a2ef81488bc75849969fa271e9bc36992b652f3657b6480a3",
+  "bootstrap_generations": 3,
+  "command": "TMPDIR=/var/home/david/dev/dewy-lang/__dewycache__/task-tmp python3 -m tools.core --bootstrap test -k \"format or string_literals or controls\"",
+  "result": "263 passed, 3838 deselected in 9.99s",
+  "scope": "Ordinary library overloads for fixed-width integers, float32/float64 and strings. No parser/compiler changes. Dynamic specifications are validated at runtime. Decimal/radix integer formats retain full width; floating formats convert integer values to float64. Text padding counts graphemes.",
+  "coverage": [
+    "Fixed decimal rounding including ties to even and negative zero",
+    "Narrow signed/unsigned and full-width uint64 values",
+    "float32 shortest formatting with padding",
+    "Integer bases, prefixes, grouping, floating precision, percentages, scientific/general notation",
+    "Grapheme-aware text padding without truncation",
+    "Dynamic format strings, source argument evaluation order and nested interpolation",
+    "Invalid syntax, overflowing width/precision and incompatible options",
+    "Pendulum native/web builds and software frame, scripted controls"
+  ],
+  "visual_review": "Reviewed the final formatted pendulum frame: release angle has no unnecessary decimals, playback speed has two, other values retain their intended precision.",
+  "performance_claim": "None for this library/API addition."
+}
