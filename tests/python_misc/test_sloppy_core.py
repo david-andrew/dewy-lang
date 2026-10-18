@@ -7709,6 +7709,34 @@ return 0
     assert ran.stdout.splitlines()[2].startswith('Maximum CPU difference: '), ran.stdout
 
 
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_metal_unary_plus(compiler, tmp_path, release):
+    # Cross-compilation checks generated source; executing Metal needs macOS.
+    source = tmp_path / 'plus.dewy'
+    source.write_text('''main=()=>{
+let floats=.+gpu([1.0 2.0]) let ints=.+gpu([1 -2])
+printl(cpu(floats).data) printl(cpu(ints).data)
+return 0
+}''')
+    shaders = tmp_path / 'shaders'
+    shaders.mkdir()
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env['SLOPPY_MSL_DUMP'] = str(shaders)
+    built = subprocess.run([compiler, 'build', source, '--target', 'macos', '-o', tmp_path / 'plus',
+                            *(['--release'] if release else [])], env=env,
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    kernels = sorted(shaders.glob('*.kernel.metal'))
+    assert len(kernels) == 2
+    for kernel in kernels:
+        text = kernel.read_text()
+        bodies = re.findall(r'(?:float|int) f_\w+\([^)]*\)\s*\{([^}]+)\}', text)
+        assert len(bodies) == 1, text
+        assert '~' not in bodies[0], text
+        assert re.search(r'\breturn l_\w+;', bodies[0]), text
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_numeric_pointer_loop_aliases(compiler, tmp_path, target, release):

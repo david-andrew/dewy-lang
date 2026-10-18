@@ -484,6 +484,7 @@ ml_expr = (e: int) -> str:
         return ml_arith(op, x, y, ta, t, tb)
     if k == .unary:
         x = ml_expr(int(nodes[e].a))
+        if nodes[e].op == i32(int(Tok.plus)): return x
         if nodes[e].op == i32(int(Tok.minus)):
             # (integers through unsigned ones, which wrap)
             if types[t].kind == .int_: return gl_narrow("as_type<int>(-as_type<uint>(int({x})))", t)
