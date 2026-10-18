@@ -2167,9 +2167,14 @@ compound_op = (op: int) -> int:
 # Keep the update as an assignment until its place and indices are resolved.
 compound_value = (s: int, left: int, right: int) -> int:
     if nodes[s].sval != 0:
-        return bc_call(name_of(int(nodes[s].sval)), [left, right], nodes[s].pos)
+        n = bc_call(name_of(int(nodes[s].sval)), [left, right], nodes[s].pos)
+        if has_flag(s, NF_BROADCAST): add_flag(n, NF_BROADCAST)
+        return n
     n = mk(.binary, nodes[s].pos)
     nodes[n].op = i32(compound_op(int(nodes[s].op)))
+    if has_flag(s, NF_BROADCAST):
+        nodes[n].aux = i32(tok_text(nodes[n].op as Tok)[0])
+        nodes[n].op = i32(int(Tok.dotop))
     nodes[n].a = i32(left)
     nodes[n].b = i32(right)
     n
@@ -2595,7 +2600,7 @@ check_assign = (s: int) -> int:
                     cl: int[]
                     loop x in ixs: cl.push(clone(x))
                     set_list(get, cl)
-                if nodes[s].sval != 0:
+                if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST):
                     gt = check_expr(get, 0)
                     get = last_checked
                     add_flag(get, NF_CHECKED)
@@ -2646,19 +2651,19 @@ check_assign = (s: int) -> int:
         else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
         return s
     l = prune(lt)
-    if types[l].kind == .str_ and op == int(Tok.pluseq):
+    if types[l].kind == .str_ and op == int(Tok.pluseq) and not has_flag(s, NF_BROADCAST):
         srt = prune(check_expr(int(nodes[s].b), T_STR))
         if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
         nodes[s].b = i32(coerce(last_checked, T_STR))
         nodes[s].aux = 2
         return s
     bop = compound_op(op)
-    if types[l].kind == .ptr and nodes[s].sval == 0:
+    if types[l].kind == .ptr and nodes[s].sval == 0 and not has_flag(s, NF_BROADCAST):
         check_expr(int(nodes[s].b), T_INT)
         nodes[s].b = i32(coerce(last_checked, T_INT))
         nodes[s].aux = 3
         return s
-    if nodes[s].sval != 0 or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
+    if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
         # Helper calls, overloads and vectors: x = operation(x, y). Capture
         # indices before reading x, including names the right side may change.
         # Reacquire indexed/field storage after the RHS: it can resize an array.

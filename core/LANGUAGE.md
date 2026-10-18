@@ -933,8 +933,22 @@ one. A one-dimensional array therefore acts as a row when combined with a
 matrix. Empty dimensions produce empty results when the other dimension is
 zero or one; incompatible shapes raise an error. Fixed-size array operands are
 accepted and produce ordinary dynamic arrays. Results are independent values.
-Use `xs = xs .+ amount` for updates; dotted compound assignments and dotted
-prefix operators are not yet supported by this frontend.
+`xs .+= amount` is the update form of `xs = xs .+ amount`; `.-=`, `.*=`, `./=`,
+`.//=`, `.%=` and `.^=` work the same way. Indexed destinations are evaluated
+once, before the right side, and saved copies keep their previous values:
+
+```dewy
+let positions = [1.0 2.0 3.0]
+let saved = positions
+positions .+= [0.5 1.0 1.5] .* 0.25
+assert(saved =? [1.0 2.0 3.0])
+```
+
+Updates retain the destination's type; their result must fit it. Broadcasting
+may change a dynamic matrix's shape, while fixed-size arrays check the resulting
+length. Array slices and selections currently require an explicit read and
+assignment (`xs[range] = xs[range] .+ amount`). Dotted prefix operators remain
+unsupported.
 
 Put a range in its own brackets when selecting axes:
 

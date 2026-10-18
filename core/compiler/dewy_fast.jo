@@ -172,7 +172,7 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             value = source[start..i)
         else:
             if c == '.':
-                loop op in [".not>=?", ".not<=?", ".not=?", ".not>?", ".not<?", ".>=?", ".<=?", ".//", ".=?", ".>?", ".<?", ".+", ".-", ".*", "./", ".%", ".^"]:
+                loop op in [".not>=?", ".not<=?", ".not=?", ".not>?", ".not<?", ".>=?", ".<=?", ".//=", ".+=", ".-=", ".*=", "./=", ".%=", ".^=", ".//", ".=?", ".>?", ".<?", ".+", ".-", ".*", "./", ".%", ".^"]:
                     if dn_matches(source, start, stop, op):
                         value = op
                         i += len(op)

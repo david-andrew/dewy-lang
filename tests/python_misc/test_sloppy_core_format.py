@@ -62,6 +62,7 @@ PROGRAMS = {
     'broadcast': '''square=(x:float64)=>x*x
 main=()=>{
 let xs=[1.0 4.0 9.0]
+xs .+=1.0 xs .*=2.0
 printl(square.(sqrt.(xs) .+ 1.0))
 printl(reshape([1 2 3 4] 2 2) .* [10 20])
 printl([1 2 3] .not<=? 2)

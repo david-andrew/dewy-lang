@@ -49,6 +49,72 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-broadcast-update-custom-index': '''Box:type=[values:array<array<int64>>]
+let trace="" let index=0
+__index__=(box:Box i:int64):>array<int64>=>{trace+="g" return box.values[i]}
+__setindex__=(@box:Box i:int64 value:array<int64>)=>{trace+="s" box.values[i]=value}
+at=()=>{trace+="i" return index}
+right=()=>{trace+="r" index=1 return [10]}
+main=()=>{let box=Box[[[1 2] [3 4]]] let saved=box
+box[at()] .+= right()
+return if box.values =? [[11 12] [3 4]] and saved.values =? [[1 2] [3 4]]
+and trace =? "igrs" 42 else 1}''',
+    'numeric-broadcast-update-reference': '''edit=(@xs:array<int64> amount:int64)=>{xs .+= amount}
+main=()=>{
+let xs=[1 2] let saved=xs edit(@xs 40)
+if xs not=? [41 42] or saved not=? [1 2] return 1
+let m=reshape([10 20] 2 1) let old=m
+m .+= [1 2 3]
+return if m.shape =? [2 3] and m.data =? [11 12 13 21 22 23]
+and old.shape =? [2 1] and old.data =? [10 20] 42 else 2
+}''',
+    'numeric-broadcast-update': '''main=()=>{
+let xs=[1 2 3] let saved=xs
+xs .+= [10] xs .*= 2 xs .-= 1 xs .^= 2
+if xs not=? [441 529 625] or saved not=? [1 2 3] return 1
+xs .//= 20 xs .%= 7
+if xs not=? [1 5 3] return 2
+let floats=[1.0 2.0 3.0] floats ./= 2.0
+if floats not=? [0.5 1.0 1.5] return 3
+let fractions=[1/2 3/2] fractions ./= 2
+if fractions not=? [1/4 3/4] return 4
+let scalar=20 scalar .+= 22
+return if scalar =? 42 42 else 5
+}''',
+    'numeric-broadcast-update-matrix': '''main=()=>{
+let m=reshape([1 2 3 4 5 6] 2 3) let saved=m
+m .*= [10 20 30] m .+= reshape([100 200] 2 1)
+if m.data not=? [110 140 190 240 300 380] return 1
+let row:array<float32 length=3>=[1 2 3] let old=row
+let one:array<float32>=[1.0]
+row .*= 2.0 row .+= one
+return if row =? [3.0 5.0 7.0] and old =? [1.0 2.0 3.0]
+and saved.data =? [1 2 3 4 5 6] 42 else 2
+}''',
+    'numeric-broadcast-update-place': '''Box:type=[values:array<int64>]
+main=()=>{
+let rows=[Box[[1 2]] Box[[3 4]]] let saved=rows
+let which=0 let calls=0
+index=()=>{calls+=1 return which}
+amount=()=>{which=1 rows.push(Box[[5 6]]) return 10}
+rows[index()].values .+= amount()
+if calls not=? 1 or rows[0].values not=? [11 12] or rows[1].values not=? [3 4] return 1
+if rows.length not=? 3 or saved[0].values not=? [1 2] return 2
+let m:dict<string array<int64>>=["a"->[1 2]] let old=m
+m["a"] .*= [10 20]
+return if m["a"] =? [10 40] and old["a"] =? [1 2] 42 else 3
+}''',
+    'numeric-broadcast-update-self': '''main=()=>{
+let xs=[1 2 3] let saved=xs
+xs .+= xs .* 2
+if xs not=? [3 6 9] or saved not=? [1 2 3] return 1
+let rows=[[1 2] [3 4]] let old=rows
+rows[end] .*= rows[0]
+let strings=["a" "b"] let words=strings
+strings .+= "!"
+return if rows =? [[1 2] [3 8]] and old =? [[1 2] [3 4]]
+and strings =? ["a!" "b!"] and words =? ["a" "b"] 42 else 2
+}''',
     'numeric-broadcast-unordered': '''main=()=>{
 let zero:float64=0.0 let nan=zero/zero let xs=[nan 1.0]
 if (xs .not<? 2.0) not=? [true false] return 1
@@ -4520,6 +4586,7 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
     'gpu-array-cpu-input': ('main=()=>{printl(cpu(gpu([1.0 2.0]) .+ [3.0 4.0]))}',
                             'this array is in CPU memory'),
     'gpu-array-exact-division': ('main=()=>{printl(cpu(gpu([1 2]) ./ 2))}',
@@ -6913,6 +6980,8 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 @pytest.mark.parametrize('body, diagnostic', [
     ('printl([1 2] .+ [1 2 3])', 'shapes do not match'),
+    ('let xs=[1 2] xs .+= [1 2 3]', 'shapes do not match'),
+    ('let xs:array<int64 length=1>=[1] xs .+= [1 2]', 'fixed-size array needs 1 elements'),
     ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),
     ('printl(zeros(0 3) .+ zeros(2 3))', 'do not match for an elementwise operation'),
     ('let m=zeros(0 3) printl(m[end 0])', 'out of bounds'),
@@ -7020,7 +7089,7 @@ let empty=gpu(zeros(0 3)) .+ row
 assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
 let many=gpu(fill(1.0 4097)) .* 3.0
 assert(sum(many) =? 12291.0 and min(many) =? 3.0 and max(many) =? 3.0)
-loop i in [0..24) {g=g .+ 0.5}
+loop i in [0..24) {g .+= 0.5}
 assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
 assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
 let downloaded=cpu(saved) downloaded[0]=123.0
