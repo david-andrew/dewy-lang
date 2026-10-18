@@ -1,0 +1,27 @@
+# Release emission keeps initialization, callbacks, recursion and external exports,
+# while dropping functions whose final caller disappears after inlining.
+initial_value = () -> int: 2
+started = initial_value()
+
+@export
+api_step = (n: int) -> int: n + 2
+
+tiny_step = (n: int) -> int: n + 1
+
+@noinline
+obsolete_branch = () -> int:
+    print("unreachable")
+    0
+
+make_callback = (base: int) -> (int) -> int:
+    (n: int) -> int: base + n
+
+recursive_sum = (n: int) -> int:
+    if n == 0: return 0
+    n + recursive_sum(n - 1)
+
+main = () -> int:
+    if tiny_step(0) == 0: return obsolete_branch()
+    callback = make_callback(40)
+    if callback(2) != 42 or started != 2 or recursive_sum(6) != 21: return 1
+    42

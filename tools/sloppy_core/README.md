@@ -1394,3 +1394,18 @@ responsive layouts; native windows and fine-pointer displays are unaffected.
 The game continues under the hint. The 33 focused game checks pass, and Chromium
 viewport/pointer simulation verifies portrait, landscape and opt-out behavior.
 See `orientation-*` audits; this is not a physical-phone compatibility claim.
+
+
+Release emission now removes functions whose last caller disappeared during
+inlining or constant folding. Initializers, main, exit/flush, exports, callbacks
+and stored function addresses remain reachable roots/edges. Watch and REPL keep
+their existing function availability. After an independent three-generation C
+bootstrap, all 4,103 checks pass in 71.40 pytest seconds.
+
+Output sizes fall from 192,592 to 181,128 bytes for the tour, 1,779,880 to 1,713,568
+for native Dunes, and 1,076,474 to 1,043,514 for its HTML build. Timing is mixed:
+seven paired runs give native Dunes a 0.973 candidate/baseline latency ratio; a
+web recheck gives 0.964 after a noisy first run, while compiler self-builds regress
+(1.039 initially, 1.079 on recheck). This is a code-size improvement, not a blanket
+compile-speed claim. `benchmark_compile.py` now records final output bytes outside
+the timed interval. See `dead-functions-*` audits for measurements and limits.

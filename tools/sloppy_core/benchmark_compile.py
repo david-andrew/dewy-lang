@@ -62,8 +62,13 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             source = ROOT / args[1]
             measured = {label: [] for label in compilers}
             cpu_measured = {label: [] for label in compilers}
+            output_bytes = {}
+            artifact = None
             if args[0] == 'build':
                 args.extend(['-o', str(Path(directory) / name)])
+                artifact = Path(directory) / name
+                if 'wasm' in args:
+                    artifact = artifact.with_suffix('.html')
             labels = list(compilers)
             for sample in range(samples + 1):
                 order = labels if sample % 2 == 0 else labels[::-1]
@@ -81,6 +86,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                     if sample:
                         measured[label].append(elapsed)
                         cpu_measured[label].append(cpu_elapsed)
+                    if sample == samples and artifact is not None:
+                        output_bytes[label] = artifact.stat().st_size
             medians = {label: statistics.median(values) for label, values in measured.items()}
             cpu_medians = {label: statistics.median(values) for label, values in cpu_measured.items()}
             result['workloads'][name] = {
@@ -90,6 +97,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'median_seconds': medians,
                 'cpu_seconds': cpu_measured,
                 'median_cpu_seconds': cpu_medians,
+                'output_bytes': output_bytes,
             }
             print(name + ': ' + ', '.join(f'{label} {elapsed * 1000:.2f} ms wall / '
                                          f'{cpu_medians[label] * 1000:.2f} ms CPU'

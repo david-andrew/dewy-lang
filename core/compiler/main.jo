@@ -228,6 +228,32 @@ release_pipeline = ():
     rel_fns = []
     if env("SLOPPY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
 
+# Inlining and constant folding can remove a lowered function's last caller.
+# Keep entry points, exports, and functions reached by calls or stored addresses.
+prune_emit_queue = (roots: int[]):
+    by_index = fill(-1, lfuncs.len())
+    loop k in 0.. and f in emit_queue: by_index[f.fn_index] = k
+    live = fill(false, emit_queue.len())
+    todo = roots
+    loop f in emit_queue:
+        if len(f.export_name) > 0: todo.push(f.fn_index)
+    loop todo.len() > 0:
+        lf = todo.pop()
+        if lf < 0: continue
+        k = by_index[lf]
+        if k < 0 or live[k]: continue
+        live[k] = true
+        loop ins in emit_queue[k].code:
+            if ins.op == .call or ins.op == .faddr: todo.push(int(ins.imm))
+    n = 0
+    loop k in [0..emit_queue.len()):
+        if not live[k]: continue
+        emit_queue[n] = emit_queue[k]
+        emit_queue_rel[n] = emit_queue_rel[k]
+        n += 1
+    emit_queue.truncate(n)
+    emit_queue_rel.truncate(n)
+
 # the machine code of the queued functions, in order
 emit_queued = ():
     q = emit_queue
@@ -388,7 +414,10 @@ compile = (path: str, out0: str) -> str:
         watch_lower_inits()
         watch_lower_migrate()
     if opt_release: release_pipeline()
-    if queue_emit: emit_queued()
+    if queue_emit:
+        if opt_release and not watch_build and not repl_image:
+            prune_emit_queue(roots + [main_lf, main_exit_lf, entry_end_lf])
+        emit_queued()
     t2 = time()
     ok = false
     size = 0

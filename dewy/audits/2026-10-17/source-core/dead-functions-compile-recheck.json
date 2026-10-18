@@ -1,0 +1,156 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    2
+  ],
+  "revision": "c8a6ff89ff07c3f259051e7b6a74b52d2d6163b3",
+  "working_tree": " M core/compiler/main.jo\n M tests/python_misc/test_sloppy_core.py\n M tools/sloppy_core/benchmark_compile.py\n?? core/tests/function_reachability.jo\n?? dewy/audits/2026-10-17/source-core/dead-functions-compile-recheck.log\n?? dewy/audits/2026-10-17/source-core/dead-functions-compile.json\n?? dewy/audits/2026-10-17/source-core/dead-functions-compile.log\n?? dewy/audits/2026-10-17/source-core/dead-functions-full-c.log\n",
+  "diff_sha256": "30a54d7430bf4843f2dae0b282e08b8b55c994cd798f850ad4335b39cae6b175",
+  "load_average_start": [
+    3.66015625,
+    4.60107421875,
+    4.5029296875
+  ],
+  "workers": 1,
+  "samples": 7,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792300734636555682/bin/dewy-core",
+      "sha256": "e070899e5dd267d5c510fd1c4137b4c90ac5bd8b3769e32ee177162449eff62b"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792301173751188272/bin/dewy-core",
+      "sha256": "54d0efe1995a6ef10f94e0d36415c1003bcb5530782b98935f221b98b6831293"
+    }
+  },
+  "workloads": {
+    "dunes-web": {
+      "arguments": [
+        "build",
+        "examples/sloppy_core/dunes.dewy",
+        "--release",
+        "--target",
+        "wasm"
+      ],
+      "source_sha256": "eccb8bc150b8711a9b340b42efb3fb951e2069b547e8609d2718a89994d37ba1",
+      "seconds": {
+        "baseline": [
+          0.14065072300036263,
+          0.1349079770006938,
+          0.1424639600008959,
+          0.14141475500036904,
+          0.17754119700111914,
+          0.17681809299938323,
+          0.13662742400083516
+        ],
+        "candidate": [
+          0.1343010979999235,
+          0.1342125480005052,
+          0.1373790130000998,
+          0.13795275899974513,
+          0.1587210910001886,
+          0.1573880489995645,
+          0.13747336600135895
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.14141475500036904,
+        "candidate": 0.13747336600135895
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.137994,
+          0.13246799999999997,
+          0.13956799999999983,
+          0.13865300000000005,
+          0.17413600000000026,
+          0.17356699999999992,
+          0.13372700000000023
+        ],
+        "candidate": [
+          0.131324,
+          0.13158200000000003,
+          0.13467600000000005,
+          0.13451300000000008,
+          0.15577699999999983,
+          0.15410699999999966,
+          0.13447099999999992
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.13865300000000005,
+        "candidate": 0.13451300000000008
+      },
+      "output_bytes": {
+        "candidate": 1043514,
+        "baseline": 1076474
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "a66afe34848a0e0bcb1e6b56004af2631e21f374fd149afe0ba61125743a2381",
+      "seconds": {
+        "baseline": [
+          1.1290591329998279,
+          1.1185455819995695,
+          1.1229840660016635,
+          1.1205187880004814,
+          1.1096383210006024,
+          1.2166167719988152,
+          1.1310019869997632
+        ],
+        "candidate": [
+          1.2037388249991636,
+          1.2064597940006934,
+          1.2200906679991022,
+          1.2684182729990425,
+          1.2396992960002535,
+          1.126132625999162,
+          1.1943669249994855
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.1229840660016635,
+        "candidate": 1.2064597940006934
+      },
+      "cpu_seconds": {
+        "baseline": [
+          1.118071,
+          1.1075729999999995,
+          1.112249999999998,
+          1.1077059999999994,
+          1.0993540000000015,
+          1.2037469999999977,
+          1.1173699999999973
+        ],
+        "candidate": [
+          1.190797,
+          1.1938519999999997,
+          1.2078490000000008,
+          1.252559000000001,
+          1.2261180000000005,
+          1.1148870000000026,
+          1.1772039999999993
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 1.112249999999998,
+        "candidate": 1.1938519999999997
+      },
+      "output_bytes": {
+        "candidate": 7140632,
+        "baseline": 7227656
+      }
+    }
+  },
+  "load_average_end": [
+    3.53466796875,
+    4.51171875,
+    4.47509765625
+  ]
+}

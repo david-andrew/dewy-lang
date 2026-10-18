@@ -5312,7 +5312,8 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target):
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bounded', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)',
+    # The recurrence may now live entirely in main after inlining.
+    probe = re.search(r'^fn f_(?:probe|main)_.*?(?=^fn |\Z)',
                       built.stdout + built.stderr, re.M | re.S)
     assert probe, 'bounded recurrence was not emitted'
     assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
@@ -5343,6 +5344,33 @@ def test_core_type_instance_inference(compiler, tmp_path, release):
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_function_reachability(compiler, tmp_path, target):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/function_reachability.jo'
+    binary = tmp_path / 'reachable'
+    built = subprocess.run([compiler, 'build', source, '--target', target,
+                            '--release', '--ir', '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    functions = re.findall(r'^fn (\S+)', built.stdout + built.stderr, re.M)
+    assert any(name.startswith('f_api_step_') for name in functions), functions
+    assert any(name.startswith('f_recursive_sum_') for name in functions), functions
+    assert not any(name.startswith(('f_tiny_step_', 'f_obsolete_branch_')) for name in functions), functions
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web reachability checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'reachable.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    assert not ran.stdout
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_dictionary_presence_ir(compiler, tmp_path, target):
     source = tmp_path / 'presence.dewy'
     source.write_text('''probe=(values:dict<int64 array<int64>> key:int64):>bool=>values.get(key) is? none
@@ -5361,8 +5389,19 @@ main=()=>if probe([1->[42]] 1) 1 else 42
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_nested_exit_cleanup(compiler, tmp_path, target, release):
-    source = tmp_path / 'nested_exit.dewy'
-    source.write_text(CASES['optimizer-nested-exits'])
+    # Keep a separate body for the IR assertion. Dewy execution of the same
+    # control flow is covered by optimizer-nested-exits in the value batches.
+    source = tmp_path / 'nested_exit.jo'
+    source.write_text('''@noinline
+reachability_probe = (first: bool, second: bool) -> int:
+    if first:
+        if second: return 20
+        else: return 21
+    else: return 22
+    print("unreachable tail")
+    return 99
+main = () -> int: reachability_probe(true, false)
+''')
     flags = ['--ir', *(['--release'] if release else [])]
     if target == 'wasm':
         flags += ['--target', 'wasm']
@@ -5391,7 +5430,7 @@ main=():>void=>{{
 let values:array<int64>=[{' '.join(map(str, values))}]
 loop i in [0..values.length) {{
 let x=values[i] let y=values[values.length-1-i]
-printl(pick(x y true)) printl(pick(x y false))
+loop flag in [true false] {{printl(pick(x y flag))}}
 }}
 }}
 """)
@@ -5406,7 +5445,7 @@ printl(pick(x y true)) printl(pick(x y false))
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    pick_ir = re.search(r'^fn f_pick_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    pick_ir = re.search(r'^fn f_(?:pick|main)_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
     if release:
         assert pick_ir and ' = select ' in pick_ir[0], 'conditional selection was not emitted'
     command = [binary]
