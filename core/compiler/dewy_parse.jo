@@ -1156,7 +1156,7 @@ dw_collection_kind = (id: int) -> int:
         if children.len() == 0: return 0
         candidates.push(children[children.len() - 1])
     else:
-        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>="]: return 0
+        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return 0
         return if dw_op(id) == "->": 2 else: 1
     result = 0
     loop candidate in candidates:
@@ -1174,7 +1174,7 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
     if kind == "Block" and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
-    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>="]: return dw_stmt(id)
+    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return dw_stmt(id)
     pos = dewy_syntax[id].pos
     value = 0
     if map:

@@ -2266,8 +2266,12 @@ gen_intrinsic = (e: int) -> Val:
         slotp = vreg(VI)
         if has_flag(e, NF_INBOUNDS):
             # (generated code that reserved room in an array of its own: no checks)
-            n0 = hdr_load(p, 8)
-            hdr_store(p, 8, e_addi(n0, 1))
+            n0 = 0
+            if has_flag(e, NF_COMPREHENSION):
+                n0 = read_place(local_place(int(nodes[e].d), false), T_INT)
+            else:
+                n0 = hdr_load(p, 8)
+                hdr_store(p, 8, e_addi(n0, 1))
             e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n0, e_iconst(esz))))
         else:
             # fast path: a unique array with spare capacity; anything else branches to the slow path
@@ -3190,6 +3194,7 @@ gen_expr = (e: int) -> Val:
     if k == .iflet: return gen_iflet(e, t)
     if k == .match_: return gen_match(e, not has_flag(e, NF_STMT))
     if k == .block:
+        reserve_comprehension(e)
         rs = -1
         if vc(t) != VC_VOID:
             rs = new_temp(t)
@@ -4506,6 +4511,46 @@ bounded_open_for = (s: int) -> int:
     nodes[result].b = i32(block)
     result
 
+# Straight-line Dewy range comprehensions own an unnameable accumulator and
+# append one result per iteration. Reserve once; normal loop counters still
+# handle changes to the user-visible iteration binding.
+comprehension_value = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .block or k == .lambda or k == .if_ or k == .iflet or k == .match_ or k == .for_ or k == .while_ or k == .return_ or k == .break_ or k == .continue_: return false
+    if not comprehension_value(int(nodes[n].a)) or not comprehension_value(int(nodes[n].b)) or not comprehension_value(int(nodes[n].c)): return false
+    loop child in kids(n):
+        if not comprehension_value(child): return false
+    true
+
+reserve_comprehension = (b: int):
+    if not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return
+    decl = kid(b, 0)
+    loop_ = kid(b, 1)
+    if nodes[decl].kind != .vardecl or nodes[loop_].kind != .for_ or nodes[loop_].aux != 0: return
+    init = int(nodes[decl].b)
+    if nodes[init].kind != .array or nkids(init) != 0: return
+    it = int(nodes[loop_].a)
+    if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE): return
+    start = int(nodes[it].a)
+    if nodes[start].kind != .int_lit or nodes[start].ival != 0 or prune(ntype(int(nodes[it].b))) != T_INT: return
+    body = int(nodes[loop_].b)
+    if nkids(body) != 1 or nodes[kid(body, 0)].kind != .exprstmt: return
+    push = int(nodes[kid(body, 0)].a)
+    if nodes[push].kind != .intrinsic or nodes[push].aux != i32(int(IN.push)) or nkids(push) != 2: return
+    recv = kid(push, 0)
+    if nodes[recv].kind != .ident or nodes[recv].sym != nodes[decl].sym or not comprehension_value(kid(push, 1)): return
+    nodes[loop_].d = nodes[decl].sym
+    add_flag(loop_, NF_COMPREHENSION)
+    add_flag(push, NF_INBOUNDS)
+    # Plain elements need no partial-initialization cleanup. With an unchanged
+    # index, set the result length once and write directly to that index.
+    at = prune(int(locals[int(nodes[decl].sym)].type))
+    if not is_managed(int(types[at].elem)) and stable_loop_index(int(nodes[loop_].sym)):
+        add_flag(loop_, NF_INBOUNDS)
+        add_flag(push, NF_COMPREHENSION)
+        nodes[push].d = nodes[loop_].sym
+
 gen_for = (s: int):
     bounded = bounded_open_for(s)
     if bounded != 0:
@@ -4544,6 +4589,16 @@ gen_for = (s: int):
             r = gen_expr(int(nodes[s].a)).v
             e_mov(ctr, e_load(VI, r, 0, 8))
             e_mov(endv, e_load(VI, r, 8, 8))
+        if has_flag(s, NF_COMPREHENSION):
+            acc = int(nodes[s].d)
+            at = prune(int(locals[acc].type))
+            pl = local_place(acc, true)
+            iff(e_bin(.gts, VI, endv, e_iconst(0)))
+            sa = place_addr(pl, at)
+            e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), endv], -1)
+            if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+            if has_flag(s, NF_INBOUNDS): hdr_store(read_place(pl, at), 8, endv)
+            endc()
         stmt_end()
         sg = types[prune(lt)].sign
         facts = range_facts_begin(s, l)

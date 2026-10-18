@@ -49,6 +49,55 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'comprehension-reserved-records': '''Point:type=[x:int64 y:float64]
+main=()=>{
+let points=[loop i in [0..17) Point[i (i as float64)*0.5]] let saved=points
+points[0].x=99
+if saved[0].x not=? 0 or points[1].x not=? 1 return 1
+loop i in [0..17) {if saved[i].x not=? i or saved[i].y not=? (i as float64)*0.5 return 2}
+return 42
+}''',
+    'comprehension-reserved-bounds': '''let calls=0
+value=(i:int64)=>{calls+=1 return i}
+main=()=>{
+let bound:int64=-3
+let negative=[loop i in [0..bound) value(i)]
+let empty=[loop i in [0..0) value(i)]
+if calls not=? 0 or negative.length not=? 0 or empty.length not=? 0 return 1
+let small:uint8=3 let unsigned:uint64=3
+let a=[loop i in [0..small) i] let b=[loop i in [0..unsigned) i]
+return if a =? [0 1 2] and b =? [0 1 2] 42 else 2
+}''',
+    'comprehension-reserved-order': '''let bound=3 let reads=0 let visited:array<int64>=[]
+limit=()=>{reads+=1 return bound}
+value=(i:int64)=>{bound=0 visited.push(i) return i*7}
+main=()=>{let result=[loop i in [0..limit()) value(i)]
+return if result =? [0 7 14] and visited =? [0 1 2] and reads =? 1 and bound =? 0 42 else 1}''',
+    'comprehension-reserved-counter': '''bump=(@i:int64)=>{i+=10 return i}
+main=()=>{let result=[loop i in [0..3) bump(@i)]
+return if result =? [10 11 12] 42 else 1}''',
+    'comprehension-reserved-managed': '''make=(i:int64)=>["left" "right"]
+work=()=>{
+let rows=[loop i in [0..17) make(i)] let saved=rows
+rows[0].push("new")
+assert(rows[1] =? ["left" "right"] and saved[0] =? ["left" "right"])
+let pairs=[loop i in [0..17) i->[i i+1]] let old=pairs
+pairs[0][0]=99 assert(old[0] =? [0 1])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'comprehension-reserved-control-fallback': '''main=()=>{
+let result=[loop i in [0..int64.max) {if i >=? 3 break i}]
+let skipped=[loop i in [0..7) {if i%2 =? 0 continue i}]
+let nested=[loop i in [0..3) [loop j in [0..2) i*10+j]]
+return if result =? [0 1 2] and skipped =? [1 3 5]
+and nested =? [[0 1] [10 11] [20 21]] 42 else 1
+}''',
+    'comprehension-broadcast-statement': '''main=()=>{
+let xs=[1 2]
+let empty:array<int64>=[loop i in [0..3) {xs .+= i}]
+return if empty.length =? 0 and xs =? [4 5] 42 else 1
+}''',
     'numeric-broadcast-update-custom-index': '''Box:type=[values:array<array<int64>>]
 let trace="" let index=0
 __index__=(box:Box i:int64):>array<int64>=>{trace+="g" return box.values[i]}
@@ -6980,6 +7029,7 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 @pytest.mark.parametrize('body, diagnostic', [
     ('printl([1 2] .+ [1 2 3])', 'shapes do not match'),
+    ('let a=[1 2 3] let b=[4 5] printl([loop i in [0..a.length) a[i]+b[i]])', 'out of bounds'),
     ('let xs=[1 2] xs .+= [1 2 3]', 'shapes do not match'),
     ('let xs:array<int64 length=1>=[1] xs .+= [1 2]', 'fixed-size array needs 1 elements'),
     ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),

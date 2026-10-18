@@ -757,6 +757,28 @@ is collected, while `break`, `continue` and assignment statements do not emit a
 value. `key -> value` creates dictionary entries; duplicate keys take the last
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 
+Straight-line `[loop i in [0..n) expression]` comprehensions over an `int64`
+bound reserve their output once. Plain values with an unchanged iteration
+binding are written directly by index; managed values retain incremental
+initialization and cleanup. General loop bodies, filters and early exits keep
+the ordinary collection path. This needs no annotation or explicit allocation
+code in the program.
+
+Compare a numerical comprehension, its fused dotted equivalent and C with:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_broadcast "$(python3 -m tools.core path)" \
+    --count 262144 --steps 64 --samples 7 --output /tmp/broadcast.json
+```
+
+The recorded large-array comprehension improved about 5× in default builds and
+7.6× in release builds. Release kernel time was roughly C's time on both the
+large workload and a separate 4,096-element run. Default builds remain slower,
+especially for the smaller arrays. These are named, single-thread workloads
+with result allocation included; the
+[measurement record](../dewy/audits/2026-10-17/source-core/comprehension-performance-validation.json)
+contains the sources, checksums, paired samples and limits.
+
 `values.insert_if_absent(key value)` adds an entry only when the key is missing
 and returns whether it was added. An existing value and its iteration position
 stay unchanged. This combines the lookup and insertion, useful for graph visits,
