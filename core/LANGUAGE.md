@@ -1095,6 +1095,12 @@ The web build produces `/tmp/game.html`. Games use `main()` for setup,
 input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.
 
+Landscape games show a turn-sideways hint on portrait browser displays whose
+primary pointer is touch. The game continues underneath; rotating to landscape
+removes the hint. Call `sideways_hint(false)` for a layout that supports either
+orientation, using `visible_rect()` to position content in the available space.
+Native windows and browser displays with a fine primary pointer show no hint.
+
 `camera3d(position target up=direction)` rolls a 3D camera by changing its up
 vector. Rendering, `world_to_screen`, `screen_ray`, particles and positional audio
 use that orientation together; omitting `up` restores the usual world-up view.

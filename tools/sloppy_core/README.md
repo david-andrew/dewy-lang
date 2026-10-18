@@ -1386,3 +1386,11 @@ precision. There are no parser/compiler changes or new performance claims.
 After an independent three-generation C bootstrap, 263 formatting, string and
 controls checks pass in 9.99 pytest seconds. The final example frame was visually
 reviewed. See `value-format-*` audits and the language guide for supported specs.
+
+
+Landscape browser games now show Sloppy `64b6646`'s orientation hint on portrait
+displays with a coarse primary pointer. `sideways_hint(false)` opts out for
+responsive layouts; native windows and fine-pointer displays are unaffected.
+The game continues under the hint. The 33 focused game checks pass, and Chromium
+viewport/pointer simulation verifies portrait, landscape and opt-out behavior.
+See `orientation-*` audits; this is not a physical-phone compatibility claim.

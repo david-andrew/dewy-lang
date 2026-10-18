@@ -228,6 +228,12 @@ set_clipboard = (s: str): __platform_set_clipboard(s)
 can_share = () -> bool: __platform_can_share()
 share = (text: str): __platform_share(text)
 
+# a phone held upright, playing a game made for a screen wider than tall: a note over the game
+# to turn the phone sideways (on to start with; the game goes on under it). Off for a game laid
+# out for a phone either way up (visible_rect says what shows).
+sideways_hint = (on: bool): __sideways_on = on
+__sideways_on = true
+
 # lock the mouse pointer to the window and hide it, for mouse look: the pointer stays put and
 # its motion keeps arriving through mouse_delta(). false where the platform cannot. (A web
 # page gets the lock at the next click into it, as browsers require; Escape releases it there.)
@@ -391,6 +397,7 @@ when TARGET == "wasm":
     extern __web_keyboard = (on: i32)
     extern __web_paste = ()
     extern __web_can_share = () -> i32
+    extern __web_finger = () -> i32
     extern __web_share = (p: *u8, n: i32)
 
     __platform_fullscreen = (on: bool): __web_fullscreen(i32(int(on)))
@@ -409,6 +416,7 @@ when TARGET == "wasm":
     __platform_paste = (): __web_paste()
     __platform_pasted = () -> bool: __web_pasted_frame == frame_number()
     __platform_can_share = () -> bool: __web_can_share() != 0
+    __platform_finger = () -> bool: __web_finger() != 0
     __platform_share = (s: str): __web_share(data(s), i32(len(s)))
     __web_pasted_frame = -10
     __web_keyboard_on = false
@@ -949,6 +957,7 @@ else when TARGET == "windows":
     __platform_pasted = () -> bool: (key_down(.ctrl) or key_down(.super)) and key_pressed(.v)
     __platform_can_share = () -> bool: false
     __platform_share = (s: str): pass
+    __platform_finger = () -> bool: false
 
     __game_run = (update: (f64) -> void, draw: () -> void):
         window(__win_title, __win_w, __win_h)
@@ -1532,6 +1541,7 @@ else when TARGET == "linux":
     __platform_pasted = () -> bool: (key_down(.ctrl) or key_down(.super)) and key_pressed(.v)
     __platform_can_share = () -> bool: false
     __platform_share = (s: str): pass
+    __platform_finger = () -> bool: false
 
     # (Vulkan surfaces for the window: the libX11 window, or the libwayland surface)
     __vk_xlib_surface = () -> int:
@@ -1847,6 +1857,7 @@ __run_frame = (dt: f64, update: (f64) -> void, draw: () -> void):
         zone("draw")
         draw()
         zone_end()
+    __sideways_draw()
     __gfx_end_frame()
     __audio_update()
     __frame_cpu += time() - t0
@@ -1855,6 +1866,28 @@ __run_frame = (dt: f64, update: (f64) -> void, draw: () -> void):
     __maybe_screenshot()
     __input_end_frame()
     __frame_count += 1
+
+# (sideways_hint's note: a phone upright on the left, an arrow, the phone sideways, and words,
+# sized by the screen's width)
+__sideways_draw = ():
+    if not __sideways_on or __win_h <= __win_w or __design_w <= __design_h or not __platform_finger(): return
+    reset_transform()
+    r = visible_rect()
+    rect(r, rgba(0.03, 0.04, 0.06, 0.85))
+    w = f64(r.w)
+    cx = f64(r.x) + w / 2.0
+    cy = f64(r.y + r.h / 2.0)
+    col = rgba(1, 1, 1, 0.9)
+    t = w * 0.012
+    ph = w * 0.2
+    pw = ph * 0.52
+    rect_rounded_outline(cx - w * 0.22 - pw / 2.0, cy - ph / 2.0, pw, ph, pw * 0.15, t, col)
+    rect_rounded_outline(cx + w * 0.22 - ph / 2.0, cy - pw / 2.0, ph, pw, pw * 0.15, t, col)
+    a = vec2(f32(cx - w * 0.07), f32(cy))
+    b = vec2(f32(cx + w * 0.05), f32(cy))
+    line(a, b, t, col)
+    triangle(b + vec2(f32(w * 0.04), 0), b + vec2(0, f32(-w * 0.03)), b + vec2(0, f32(w * 0.03)), col)
+    text_centered("Turn your phone sideways", vec2(f32(cx), f32(cy + ph * 0.5 + w * 0.12)), w * 0.06, col)
 
 __frame_cpu = 0.0
 __frame_present = 0.0         # time spent handing frames to the screen (and waiting for vsync)

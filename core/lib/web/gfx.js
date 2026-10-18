@@ -113,6 +113,8 @@ sloppy.extra.push({
       // (read at the end of the touch or click that asked: Safari allows it only then)
       __web_paste() { pasteWanted = true; },
       __web_can_share: () => (typeof navigator !== "undefined" && navigator.share) ? 1 : 0,
+      // (a finger is the main pointer: a phone or a tablet)
+      __web_finger: () => (typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches) ? 1 : 0,
       __web_share(p, n) { shareWanted = text(p, n); },
       // (refused, as phones' browsers do outside a touch: tried again at the end of the next one)
       __web_clipboard_set(p, n) {

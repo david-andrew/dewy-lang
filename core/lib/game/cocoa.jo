@@ -453,6 +453,7 @@ when TARGET == "macos":
     __platform_pasted = () -> bool: (key_down(.ctrl) or key_down(.super)) and key_pressed(.v)
     __platform_can_share = () -> bool: false
     __platform_share = (s: str): pass
+    __platform_finger = () -> bool: false
 
     __game_run = (update: (f64) -> void, draw: () -> void):
         window(__win_title, __win_w, __win_h)
