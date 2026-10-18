@@ -1,0 +1,20 @@
+{
+  "experiment": "Use a raw slots pointer after resize during map rehash, eliminating per-probe checks and per-store uniqueness work.",
+  "decision": "Rejected and reverted: no graph improvement; compiler self-build also slightly worse.",
+  "focused": "293 passed in 7.22s",
+  "graph_samples": 7,
+  "graph_median_kernel_ms": {
+    "baseline-default": 640.71144,
+    "baseline-release": 534.713091,
+    "candidate-default": 648.891053,
+    "candidate-release": 545.001986,
+    "c": 354.607837
+  },
+  "graph_paired_ratios": {
+    "default": 1.0063713412295343,
+    "release": 1.0428061582386634
+  },
+  "baseline": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792311298770821997/bin/dewy-core",
+  "candidate": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792311560866272301/bin/dewy-core",
+  "limits": "Single graph workload, alternate pinned thread-CPU measurements. C uses a different storage layout. See raw sample files."
+}

@@ -1,0 +1,36 @@
+{
+  "change": "Exercise and document inherited worker-pool APIs with ordinary Dewy callbacks and independent value copies; add serial-versus-parallel particle example and reproducible benchmark.",
+  "compiler": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792311942096452923/bin/dewy-core",
+  "source_identity": "45be5e9596dae911fbb5df390fa480c8921e5b5d2711c827b67381ac8a52cefc",
+  "focused": "21 passed in 3.22s (20 parallel API checks plus example formatting)",
+  "quick": "159 passed in 4.63s",
+  "coverage": [
+    "Native default/release with one and two threads",
+    "Web default/release serial fallback",
+    "Full particle-value comparison against serial simulation",
+    "Managed arrays, strings, local mutation and retained snapshots",
+    "Empty/single-element calls, nested parallel operations and repeated jobs",
+    "Managed-value lifetime accounting across repeated jobs",
+    "Rejected global/captured/transitive writes including collection mutation"
+  ],
+  "benchmark": {
+    "count": 2048,
+    "steps": 16,
+    "samples": 7,
+    "threads": 2,
+    "cpu_affinity": [
+      2,
+      3
+    ],
+    "median_serial_ms": 329.872375,
+    "median_parallel_ms": 173.308752,
+    "median_paired_parallel_serial_ratio": 0.525142376013624
+  },
+  "limits": [
+    "Uses existing runtime/compiler support; this is coverage, documentation and an application example, not a new thread scheduler.",
+    "The kernel includes each next-frame allocation, excluding initialization and worker-pool warmup.",
+    "One independent all-pairs numerical workload; tiny jobs may lose to scheduling/refcount costs.",
+    "Other system work caused several slow parallel samples; all samples are retained.",
+    "Hosted CI runs the full C-bootstrap gate."
+  ]
+}

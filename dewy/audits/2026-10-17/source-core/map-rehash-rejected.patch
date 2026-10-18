@@ -1,0 +1,23 @@
+diff --git a/core/lib/core/map.jo b/core/lib/core/map.jo
+index 9e1b757c..5f7ceb65 100644
+--- a/core/lib/core/map.jo
++++ b/core/lib/core/map.jo
+@@ -92,13 +92,16 @@ __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
+ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
+     m.slots.clear()
+     m.slots.resize(ns)
++    # resize/data give this map unique storage. The table cannot move or become
++    # shared in this loop; masking keeps every probe within its power-of-two size.
++    slots = data(m.slots)
+     mask = ns - 1
+     ng = m.gone.len()
+     loop e in 0.. and h in m.hashes:
+         if e < ng and __at(m.gone, e): continue
+         i = int(h) & mask
+-        loop m.slots[i] != 0: i = (i + 1) & mask
+-        m.slots[i] = (h & 0xFFFFFFFF00000000) | u64(e + 1)
++        loop slots[i] != 0: i = (i + 1) & mask
++        slots[i] = (h & 0xFFFFFFFF00000000) | u64(e + 1)
+ 
+ # Method lookup also finds hash in the key's defining module, just as equality
+ # finds its operator there. A lexical hash(k) can miss that overload in a caller.

@@ -1685,3 +1685,17 @@ blocks. The inherited test-mode flag had suppressed it, hiding errors in `main`
 and helpers reachable only from it. Running tests still skips `main`; checking
 never executes it. The C-bootstrap compiler passes 94 focused entry-point, test
 runner and editor checks in 13.06 seconds; hosted CI runs the full gate.
+
+The inherited CPU worker-pool APIs now have Dewy-native coverage and a particle
+simulation example: `parallel_map`, `parallel_range` and `parallel_update` retain
+ordinary value copies with named/literal callbacks. Native one/two-thread and web
+fallback execution, nested/repeated work, managed lifetimes and rejected shared
+writes pass 20 checks; example formatting brings the focused selection to 21 in
+3.22 seconds. The quick suite passes 159 checks in 4.63 seconds.
+
+For 2,048 particles over 16 all-pairs force steps, seven alternating release
+samples measured 329.87 ms serial versus 173.31 ms with two threads. The median
+paired ratio is 0.525 (about 47% less kernel wall time). Next-frame allocation is
+included; initialization and pool warmup are excluded. This is one substantial
+numerical workload, not a claim for tiny callbacks or all games. Several parallel
+samples were affected by other system work. See `parallel-dewy-*` audits.

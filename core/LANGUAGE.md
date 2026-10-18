@@ -874,6 +874,44 @@ They evaluate the key once per element and choose the first of equal keys.
 The scan does not allocate a copy of the array tail, and the returned value
 remains independent of the source. An empty input raises an error.
 
+## Parallel CPU work
+
+The bundled worker pool provides `parallel_map`, `parallel_range` and
+`parallel_update`. They wait for completion and keep results in input order:
+
+```dewy
+let squares = parallel_range(1000 (i:int64) => i*i)
+let shifted = parallel_map(squares (x) => x+1)
+let saved = shifted
+parallel_update(@shifted (x) => x*2)
+assert(saved[0] =? 1 and shifted[0] =? 2)
+```
+
+Callbacks may read captured values and change their own local values. They return
+results instead of writing shared globals or captured variables; the compiler
+checks direct callbacks and functions they call for those writes. Pass a named
+function or a function literal so it can inspect the code. Arrays, strings and
+records retain ordinary independent value semantics, including snapshots held
+across `parallel_update`. No explicit memory management is needed.
+
+Native programs use a persistent worker pool. `SLOPPY_THREADS=2` limits it to two
+threads including the caller; `SLOPPY_THREADS=1` runs on the caller. Nested parallel
+operations run on the current thread. Web builds currently run these operations
+serially with the same result order and copy semantics.
+
+Use parallel work for substantial independent calculations; scheduling and atomic
+reference counts can cost more than a small callback saves. Keep drawing and
+window/input operations on the main thread. The
+[particle example](../examples/sloppy_core/parallel_particles.dewy) computes each
+particle's forces from a shared previous-frame snapshot and checks the result
+against the serial calculation. The repeatable benchmark is:
+
+```sh
+SLOPPY_THREADS=2 ./tools/dewy --release examples/sloppy_core/parallel_particles.dewy
+python3 -m tools.sloppy_core.benchmark_parallel "$(python3 -m tools.core path)" \
+    --threads 2 --count 2048 --steps 16 --samples 7 --output /tmp/parallel.json
+```
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`

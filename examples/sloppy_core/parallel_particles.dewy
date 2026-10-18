@@ -1,0 +1,33 @@
+# Pure per-particle work reads the previous frame and returns the next value.
+# Run: SLOPPY_THREADS=2 tools/dewy --release examples/sloppy_core/parallel_particles.dewy
+# The same program builds for the web, where parallel_map runs serially.
+Particle:type=[x:float64 y:float64 vx:float64 vy:float64]
+make=(count:int64):>array<Particle>=>[loop i in [0..count) Particle[(i%32) as float64 (i//32) as float64 0.0 0.0]]
+step=(p:Particle others:array<Particle> dt:float64):>Particle=>{
+    let ax=0.0 let ay=0.0
+    loop q in others {
+        let dx=q.x-p.x let dy=q.y-p.y
+        let r2=dx*dx+dy*dy+0.25
+        let scale=0.001/(r2*sqrt(r2))
+        ax+=dx*scale ay+=dy*scale
+    }
+    p.vx+=ax*dt p.vy+=ay*dt
+    p.x+=p.vx*dt p.y+=p.vy*dt
+    return p
+}
+advance=(particles:array<Particle> dt:float64 parallel:bool):>array<Particle>=>{
+    if parallel return parallel_map(particles (p)=>step(p particles dt))
+    return [loop p in particles step(p particles dt)]
+}
+main=()=>{
+    let original=make(128)
+    let serial=original let threaded=original
+    loop i in [0..4) {
+        serial=advance(serial 0.01 false)
+        threaded=advance(threaded 0.01 true)
+    }
+    assert(serial =? threaded)
+    assert(original =? make(128))
+    printl"Simulated {threaded.length} particles; serial and parallel results agree."
+    return 0
+}

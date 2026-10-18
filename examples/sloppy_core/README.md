@@ -1,5 +1,11 @@
 # Dewy on the compact core
 
+[`parallel_particles.dewy`](parallel_particles.dewy) computes particle forces
+through the worker pool and checks every resulting value against the serial
+simulation. Run `SLOPPY_THREADS=2 ./tools/dewy --release examples/sloppy_core/parallel_particles.dewy`.
+The same source builds for the web using the serial fallback. See the
+[parallel CPU guide](../../core/LANGUAGE.md#parallel-cpu-work) for the APIs and benchmark.
+
 [`paddle_tests.dewy`](paddle_tests.dewy) tests the paddle game's simulation without
 opening a window. Run `./tools/dewy test examples/sloppy_core/paddle_tests.dewy`;
 append `bounce` to run only the wall-bounce test, or use `test --release` to test
