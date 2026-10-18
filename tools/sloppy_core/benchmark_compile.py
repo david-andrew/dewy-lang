@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import platform
-import resource
 import statistics
 import subprocess
 import tempfile
@@ -41,6 +40,10 @@ WORKLOADS = {
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             workers: int) -> dict:
+    # Source generators and CLI validators are also imported by Windows tests;
+    # only this POSIX CPU-time benchmark needs resource.getrusage.
+    import resource
+
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = str(workers)
     result = {
