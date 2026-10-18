@@ -11,7 +11,9 @@
   "activationEvents": [
     "onDebugResolve:lldb",
     "onDebugResolve:cppdbg",
-    "onLanguage:dewy"
+    "onLanguage:dewy",
+    "onDebugResolve:dewy-core",
+    "onDebugInitialConfigurations"
   ],
   "categories": [
     "Programming Languages"
@@ -26,7 +28,8 @@
     "README.md",
     "LICENSE",
     "core-client.js",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "core-debug.js"
   ],
   "contributes": {
     "languages": [
@@ -106,6 +109,71 @@
             }
           }
         ]
+      },
+      {
+        "type": "dewy-core",
+        "label": "Dewy compact core",
+        "languages": [
+          "dewy"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Dewy source file to compile with variable information.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": [
+                  "array",
+                  "string"
+                ],
+                "description": "Program arguments as an array or a shell-style string.",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Program working directory; defaults to the source directory."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "stopOnPanic": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "dewy-core",
+            "request": "launch",
+            "name": "Dewy core: current file",
+            "program": "${file}",
+            "args": []
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Dewy core: debug current file",
+            "description": "Build with the configured compact core and launch CodeLLDB.",
+            "body": {
+              "type": "dewy-core",
+              "request": "launch",
+              "name": "Dewy core: current file",
+              "program": "^\"\\${file}\"",
+              "args": []
+            }
+          }
+        ]
       }
     ],
     "commands": [
@@ -116,6 +184,10 @@
       {
         "command": "dewy.core.restartServer",
         "title": "Dewy: Restart Core Language Server"
+      },
+      {
+        "command": "dewy.core.debug",
+        "title": "Dewy: Debug Current File (Core)"
       }
     ],
     "menus": {
@@ -123,6 +195,10 @@
         {
           "command": "dewy.programArguments",
           "when": "false"
+        },
+        {
+          "command": "dewy.core.debug",
+          "when": "editorLangId == dewy"
         }
       ]
     },

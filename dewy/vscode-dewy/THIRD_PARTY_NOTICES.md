@@ -1,7 +1,9 @@
-# Sloppy language client
+# Sloppy editor integration
 
 `core-client.js` adapts the dependency-free JSON-RPC/client integration from
 Sloppy's VS Code extension at `235e19a271bccad3fe72e36d03264807a632dc1b`.
+`core-debug.js` adapts its debug-provider workflow at
+`d113c792253597ad05c769c511176d367a8229cd`.
 
 MIT License
 

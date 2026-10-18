@@ -39,7 +39,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.1.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|program]\n       dewy-core lsp\n       dewy-core --version\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see core/README.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -551,6 +551,10 @@ main = ():
     if a.len() >= 2 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "run" or ends_with(a[1], ".jo") or ends_with(a[1], ".dewy")): more_errors = true
     lib_dir = find_lib_dir()
     lib_root = lib_dir
+    if a[1] == "--print-lib":
+        if a.len() != 2: usage(2)
+        print(lib_dir)
+        return
     # (sloppy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
     when TARGET == "windows":
         if a.len() >= 8 and a[1] == "watch" and a[2] == "--build":

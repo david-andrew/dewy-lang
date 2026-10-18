@@ -82,7 +82,40 @@ The grammar aims to highlight the following (non-exhaustive) constructs:
 
 The identifier character classes in the grammar are generated from the compiler's own tokenizer tables (`dewy/parser/t0.py`), and `tests/python_misc/test_dewy_highlighting.py` checks that the keyword and operator lists stay in step with the parser.
 
-## Debugging
+## Debugging with the compact core
+
+Set `dewy.core.path` as above and install
+[CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb). Open a `.dewy`
+file and run **Dewy: Debug Current File (Core)** from the command palette.
+The extension saves modified files, builds with `-g`, and starts the debugger.
+Breakpoints, local variables and record fields use the compiler's DWARF data;
+the active toolchain supplies formatters for strings, arrays and other values.
+Panics stop in `__panic` by default. Build errors appear in **Dewy Core Debug**
+output and prevent launch.
+
+For F5 and program arguments, add a **Dewy compact core** configuration:
+
+```json
+{
+    "type": "dewy-core",
+    "request": "launch",
+    "name": "Dewy core: current file",
+    "program": "${file}",
+    "args": ["--level", "practice"],
+    "cwd": "${workspaceFolder}"
+}
+```
+
+`program` names source, not an executable. `args` can also be a shell-style
+string, including `${command:dewy.programArguments}` to use the argument prompt.
+`env` sets the program's environment, and `stopOnPanic: false` disables the panic
+breakpoint. Without `cwd`, execution starts in the source file's directory.
+Each launch gets its own executable, removed when its debug session ends.
+No build task or formatter path needs to be maintained in the project.
+This workflow targets the compact core's native programs; it does not debug
+browser/WebAssembly builds.
+
+### Original compiler configurations
 
 The extension lets you set breakpoints in `.dewy` files (click the gutter). The debugging itself is done by the stock [CodeLLDB](https://open-vsx.org/extension/vadimcn/vscode-lldb) extension (`lldb`; also on Open VSX for Cursor and VSCodium) — the Dewy compiler emits DWARF for its source, and its `tools/dewy_lldb.py` script shows values the Dewy way in the Variables pane, hovers, and the Debug Console. "Add Configuration…" in `launch.json` offers **Dewy: debug current file** and **Dewy: debug current file with arguments** (the latter asks for the program's command line each run, offering the last one again, and splits it like a shell). Both build the active file with `dewy debug --build` (a `tasks.json` task named `dewy: build debug`) and launch `__dewycache__/<path>/<name>.debug`. Fill in where the script lives: `tools/` of a checkout, or `~/.dewy/runtime/tools` of an installation. The task:
 

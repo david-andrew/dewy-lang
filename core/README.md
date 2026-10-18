@@ -83,6 +83,12 @@ Server** starts the current implementation without changing the setting. The
 `path` command still prints a particular immutable compiler binary for benchmarks
 or other callers that deliberately want that toolchain version.
 
+The extension's **Dewy: Debug Current File (Core)** command builds with `-g` and
+launches CodeLLDB with this toolchain's value formatters. See the
+[debugger setup](../dewy/vscode-dewy/README.md#debugging-with-the-compact-core).
+`dewy-core --print-lib` reports the active library directory for tooling,
+including `DEWY_CORE_LIB` overrides and development-launcher snapshots.
+
 ## Build a standalone toolchain
 
 From the repository root, using Python, a C compiler and `make`:

@@ -195,6 +195,24 @@ def test_vscode_core_client(tmp_path):
     assert 'restart and close passed' in result.stdout
 
 
+def test_vscode_core_debug(tmp_path):
+    import shutil
+    node = shutil.which('node')
+    compiler = os.environ.get('DEWY_CORE_COMPILER')
+    if node is None or not compiler:
+        pytest.skip('Node and DEWY_CORE_COMPILER are needed for the debug provider')
+    root = Path(__file__).resolve().parents[2]
+    temporary = tmp_path / 'debug output with spaces'
+    temporary.mkdir()
+    result = subprocess.run([node, root / 'tests/fixtures/core_editor/debug.cjs',
+                             root / 'dewy/vscode-dewy/core-debug.js',
+                             Path(compiler).resolve(), tmp_path],
+                            env={**os.environ, 'TMPDIR': str(temporary)}, capture_output=True,
+                            text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'debug builds, arguments, failures and cleanup passed' in result.stdout
+
+
 @pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
     ('', 'let xs=[42] return xs[end]', 'end', 'int64'),
     ('', 'let value=uint8.max return if value >? 0 42 else 1', 'max', 'uint8'),

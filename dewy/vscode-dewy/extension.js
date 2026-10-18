@@ -1,9 +1,4 @@
-// The part of the extension that runs, all in service of the "with
-// arguments" launch configuration: the prompt behind
-// `${command:dewy.programArguments}`, which asks for the program's command
-// line each run and offers the last one again, and a resolver that splits
-// that line like a shell into the argument array the native debuggers want
-// (a `${command:…}` substitution can only produce a string).
+// Dewy editor integration and shared shell-style debugger argument parsing.
 
 let lastArguments = '';
 
@@ -41,6 +36,7 @@ function splitArguments(line) {
 function activate(context) {
     const vscode = require('vscode');
     require('./core-client').activate(context, vscode);
+    require('./core-debug').activate(context, vscode, splitArguments);
     context.subscriptions.push(vscode.commands.registerCommand('dewy.programArguments', async () => {
         const typed = await vscode.window.showInputBox({
             prompt: 'Command-line arguments for the program (split like a shell)',
