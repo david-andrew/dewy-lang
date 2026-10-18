@@ -2748,6 +2748,30 @@ if b is? Item b.values[0]=99
 return if a is? Item a.values[0]+a.values[1] else 1}''',
     'optional-array': '''main=()=>{let xs:array<int64?>=[20 none 22] let sum:int64=0
 loop x in xs {if x is? int64 sum+=x} return sum}''',
+    'match-union-literals': '''pick=(v:int64|string):>int64=>match v {
+<0>=>1 s:"yes"=>s.length+v.length <"no">=>0 n:42=>n _=>2}
+main=()=>pick(0)+pick("yes")+pick("no")+pick(42)-pick(8)-pick("other")-3''',
+    'match-union-bool-exhaustive': '''pick=(v:bool|string):>int64=>match v {
+<true>=>20 <false>=>19 _=>v.length}
+main=()=>pick(true)+pick(false)+pick("abc")''',
+    'match-union-partial-fallback': '''pick=(v:int64|string):>int64=>match v {
+<0>=>0 <"yes">=>1 _=>if v is? int64 v else v.length}
+main=()=>pick(0)+pick("yes")+pick(38)+pick("abc")''',
+    'match-union-literal-path': '''Envelope:type=[value:int64|string]
+pick=(box:Envelope):>int64=>match box.value {
+<"yes">=>box.value.length <0>=>box.value n:int64=>n _=>box.value.length}
+main=()=>pick(Envelope["yes"])+pick(Envelope[0])+pick(Envelope[36])+pick(Envelope["abc"])''',
+    'match-union-literal-snapshot': '''let calls:int64=0
+let source:int64|string="answer"
+next=():>int64|string=>{calls+=1 return source}
+main=()=>{let result=match next() {s:"answer"=>{source=99 s.length} _=>0}
+return if calls=?1 and source is? int64 result*7 else 1}''',
+    'match-union-literal-widths': '''pick=(v:uint8|string):>int64=>match v {<255>=>20 <0>=>1 _=>0}
+wide=(v:uint64|string):>int64=>match v {<18446744073709551615>=>21 _=>0}
+main=()=>pick(255)+pick(0)+pick("x")+wide(18446744073709551615)+wide("x")''',
+    'match-union-literal-member': '''pick=(v:int64|uint8|string):>int64=>match v {
+<42>=>40 <uint8>=>2 _=>0}
+main=()=>{let small:uint8=42 return pick(42)+pick(small)+pick("42")}''',
     'match-union': '''Count:type=int64
 classify=(v:bool|Count|string):>int64=>match v {
 <bool>=>10 n:Count=>n s:string=>s.length}
@@ -3393,6 +3417,11 @@ ERRORS = {
     'main-float-result': ('main=()=>42.5', 'main must return void or an integer exit code'),
     'operator-comparison-result': ('Box:type=[value:int64]\n__lt__=(a:Box b:Box)=>a.value-b.value\nmain=()=>Box[1] <? Box[2]', 'must return bool'),
     'named-duplicate': ('add=(x:int64 y:int64)=>x+y\nmain=()=>add(40 x=2)', 'given twice'),
+    'match-union-literal-incomplete': ('pick=(v:int64|string)=>match v {<0>=>42 <string>=>0}\nmain=()=>pick(0)', 'no arm for'),
+    'match-union-bool-incomplete': ('pick=(v:bool|string)=>match v {<true>=>42 <string>=>0}\nmain=()=>pick(true)', 'no arm for'),
+    'match-union-literal-wrong-type': ('pick=(v:int64|bool)=>match v {<"no">=>0 _=>42}\nmain=()=>pick(42)', 'not a member'),
+    'match-union-literal-overflow': ('pick=(v:uint8|string)=>match v {<256>=>0 _=>42}\nmain=()=>pick(42)', 'does not fit'),
+    'match-union-partial-not-narrowed': ('pick=(v:int64|string)=>match v {<0>=>0 _=>v.length}\nmain=()=>pick(42)', 'length'),
     'match-incomplete': ('main=()=>match 42 {<42>=>42}', 'not exhaustive'),
     'match-incomplete-statement': ('main=()=>{match true {<true>=>42} return 42}', 'not exhaustive'),
     'match-wrong-type': ('main=()=>match 42 {n:string=>n.length _=>42}', 'not a member'),

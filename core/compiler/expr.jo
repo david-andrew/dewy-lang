@@ -4508,6 +4508,7 @@ check_match = (m: int, expected: int) -> int:
     first_val = 0
     has_wild = false
     finite_seen = 0
+    union_bool_seen = 0
     dewy = files[pos_file(nodes[m].pos)].is_dewy
     seen: bool[]
     if types[st].kind == .enum_:
@@ -4561,6 +4562,29 @@ check_match = (m: int, expected: int) -> int:
                         value = e
                 else: fatal(nodes[p].pos, "type pattern {type_str(pt, true)} is not a member of {type_str(st, true)}")
                 pk = nodes[p].kind
+            if dewy and pk == .plit and is_union(st):
+                e = int(nodes[p].a)
+                check_expr(e, 0)
+                vi = union_target(e, ntype(e), st)
+                if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
+                pt = union_members(st)[vi]
+                if not is_int(pt) and pt != T_BOOL and tkind(pt) != .str_:
+                    fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
+                coerce(e, pt)
+                nodes[p].aux2 = i32(vi)
+                arm_members.push(pt)
+                # A value pattern only covers part of a member. Both boolean
+                # literals together cover bool, allowing an exhaustive match.
+                if pt == T_BOOL:
+                    union_bool_seen |= if nodes[e].ival != 0: 1 else: 2
+                    if union_bool_seen == 3: seen[vi] = true
+                if binding != 0:
+                    narrowed = mk(.narrow, nodes[p].pos)
+                    nodes[narrowed].a = i32(value)
+                    nodes[narrowed].aux = i32(vi)
+                    nodes[narrowed].type = i32(pt)
+                    add_flag(narrowed, NF_CHECKED)
+                    value = narrowed
             if binding != 0:
                 d = mk(.vardecl, nodes[p].pos)
                 nodes[d].name = i32(binding)
@@ -4614,7 +4638,7 @@ check_match = (m: int, expected: int) -> int:
                 nodes[p].a = i32(d)
             if pk == .plit:
                 e = int(nodes[p].a)
-                if dewy and is_union(st): fatal(nodes[p].pos, "literal patterns on unions are not yet supported; use a type arm first")
+                if dewy and is_union(st): continue
                 if types[st].kind == .opt and nodes[e].kind == .none_lit: finite_seen |= 2
                 if st == T_BOOL and nodes[e].kind == .bool_lit:
                     finite_seen |= if nodes[e].ival != 0: 1 else: 2

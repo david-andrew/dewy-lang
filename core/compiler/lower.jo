@@ -1491,6 +1491,20 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
         if structs[si].simple_enum: want = variants[int(structs[si].variants) + int(nodes[p].aux2)].value
         return e_bin(.eq, VI, tag, e_iconst(want))
     if k == .plit:
+        if is_union(st):
+            # Inspect the payload only after its tag matches: another member
+            # can hold arbitrary bits where a string pointer would be stored.
+            layout(st)
+            vi = int(nodes[p].aux2)
+            variant = int(structs[int(types[st].st)].variants) + vi
+            field = int(variants[variant].fields)
+            result = vreg(VI)
+            e_mov(result, e_iconst(0))
+            iff(e_bin(.eq, VI, e_load(VI, hidden_addr, 0, 4), e_iconst(vi)))
+            payload = e_addi(hidden_addr, int(fields[field].offset))
+            e_mov(result, gen_match_test(p, int(fields[field].type), payload))
+            endc()
+            return result
         a = int(nodes[p].a)
         if types[st].kind == .str_:
             v = gen_borrowed(a).v

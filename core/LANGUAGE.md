@@ -888,6 +888,22 @@ printl"Length: {size}"
 
 `match` supports typed bindings, literals and `_` as a fallback. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
+Literal arms also work directly on unions:
+
+```dewy
+classify=(value:int64|string):>string=>match value {
+    <0>=>"zero"
+    <"quit">=>"exit"
+    n:int64=>"number {n}"
+    text:string=>text
+}
+```
+
+An arm such as `text:"quit"=>text` binds the matched member's value; the original
+variable or field is also narrowed inside that arm. Literals use the same member
+type selection as assignment: with `int64|uint8`, `<42>` selects `int64`, while a
+`uint8` value needs a `uint8` arm. A literal covers only its value, so other values
+of that type still need an arm. `<true>` and `<false>` together cover `bool`.
 
 Membership uses `in?`; negate it with `not in?` or `notin?`:
 
