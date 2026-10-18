@@ -43,6 +43,14 @@ the tour, Netpong, Dunes and compiler. The rough target is 250,000 Dewy lines pe
 second on representative programs; small examples measure latency, and high
 loaded-library throughput alone does not establish that target.
 
+For a larger language workload, run `.venv/bin/python -m tools.sloppy_core.benchmark_corpus
+<compiler> --output <report.json>`. It builds 128, 512 and all distinct executable
+conformance cases, with fresh compiler processes and outputs. Each resulting
+program checks every case's result outside timed compilation. `--count N` selects
+sizes and `--release` enables optimization. This stresses language features and
+module scaling; it is not a representative game or a claim of 250k lines/second.
+The report separates case source, generated driver and loaded library volume.
+
 The first command builds from C. Later commands reuse the compiler when its
 sources/libraries/build inputs are unchanged, or rebuild with the previous core.
 Failed builds stop the command and leave the previous toolchain intact; tests

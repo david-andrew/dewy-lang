@@ -11,6 +11,7 @@ import statistics
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from tools.sloppy_core.benchmark_compile import ROOT, WORKLOADS, positive
@@ -22,7 +23,8 @@ PHASES = re.compile(r'check ([\d.]+) ms, lower\+codegen ([\d.]+) ms, write ([\d.
 BUILD_WORKLOADS = {key: value for key, value in WORKLOADS.items() if value[0] == 'build'}
 
 
-def measure(compiler: Path, workloads: list[str], samples: int) -> dict:
+def measure(compiler: Path, workloads: list[str], samples: int,
+            validate: Callable[[str, Path], None] | None = None) -> dict:
     import resource
 
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
@@ -82,6 +84,9 @@ def measure(compiler: Path, workloads: list[str], samples: int) -> dict:
                 'loaded_lines_per_cpu_second': lines / medians['cpu_seconds'],
                 'functions': int(phases[4]), 'nodes': int(phases[5]), 'code_bytes': int(phases[6]),
             }
+            if validate is not None:
+                validate(name, Path(directory) / name)
+                report['workloads'][name]['output_validated'] = True
             print(f'{name}: {medians["wall_seconds"] * 1000:.1f} ms wall, '
                   f'{medians["cpu_seconds"] * 1000:.1f} ms CPU; {volumes}; '
                   f'phases {medians["check_ms"]:.1f}/{medians["lower_codegen_ms"]:.1f}/'

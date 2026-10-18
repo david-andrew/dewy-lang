@@ -287,6 +287,19 @@ Wall times were noisy under other host activity and did not consistently improve
 The compiler bootstrapped independently from C; 321 focused native/web checks
 passed, including indirect closures with stack arguments and live values.
 
+
+The [conformance compilation baseline](audits/2026-10-18/conformance-throughput-baseline.json)
+adds larger Dewy inputs without repeated padding: 128, 512 and all 893 existing
+executable language cases, each in its own module. Their programs verify every
+case's return value outside the compilation timer. Five-sample default-build
+CPU medians were 330/614/918 ms, with 1,862/4,925/8,006 loaded Dewy lines
+(including generated drivers and imported fixtures), plus about 36k implementation
+lines. The all-case bundle contains 5,367 physical case-source lines and a
+1,832-line driver. This is a conformance stress workload, not a game; it exposes
+substantial distance from the throughput target, and keeps runtime correctness
+attached to the measured build. Reproduce with `benchmark_corpus` in the
+[development guide](../core/README.md).
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
