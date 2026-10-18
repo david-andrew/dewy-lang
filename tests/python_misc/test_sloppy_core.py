@@ -6932,6 +6932,44 @@ loop flag in [true false] {{printl(pick(x y flag))}}
     assert ran.stdout.splitlines() == expected
 
 
+@pytest.mark.parametrize('host', ['windows', 'macos', 'linux-arm64'])
+def test_core_compiler_hosts(compiler, tmp_path, host):
+    root = Path(__file__).resolve().parents[2]
+    binary = tmp_path / ('compiler.exe' if host == 'windows' else 'compiler')
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), SLOPPY_EMIT_WORKERS='1')
+    built = subprocess.run([compiler, 'build', root / 'core/compiler/main.jo', '--target', host,
+                            '-o', binary], env=env, capture_output=True, text=True,
+                           timeout=60, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    header = binary.read_bytes()[:20]
+    if host == 'windows':
+        assert header[:2] == b'MZ'
+    elif host == 'macos':
+        assert header[:8] == bytes.fromhex('cffaedfe0c000001')
+    else:
+        assert header[:4] == b'\x7fELF' and int.from_bytes(header[18:20], 'little') == 183
+        if runner := shutil.which('qemu-aarch64'):
+            source = tmp_path / 'values.dewy'
+            source.write_text('''main=()=>{
+let original=[20 21] let changed=original
+loop @item in changed {item+=1}
+assert(original =? [20 21] and changed =? [21 22])
+printl"{changed[1]} {1/3+1/6} {18446744073709551616+1}"
+return 0
+}''')
+            for flags in [[], ['--release']]:
+                program = tmp_path / 'values'
+                built = subprocess.run([runner, binary, 'build', source, '-o', program, *flags],
+                                       env=env, capture_output=True, text=True, timeout=30, check=False)
+                assert built.returncode == 0, built.stdout + built.stderr
+                ran = subprocess.run([runner, program], env=env, capture_output=True, text=True,
+                                     timeout=10, check=False)
+                assert ran.returncode == 0, ran.stdout + ran.stderr
+                assert ran.stdout == '22 1/2 18446744073709551617\n'
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_unsigned_floor_arithmetic(compiler, tmp_path, target, release):

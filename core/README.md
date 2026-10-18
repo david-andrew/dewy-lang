@@ -105,6 +105,14 @@ launches CodeLLDB with this toolchain's value formatters. See the
 `dewy-core --print-lib` reports the active library directory for tooling,
 including `DEWY_CORE_LIB` overrides and development-launcher snapshots.
 
+The compiler itself also cross-builds for Windows x64, macOS ARM64 and Linux
+ARM64. The default in-process frontend is independent of the optional legacy
+parser's Linux-only source transport. The `compiler_hosts` check builds those
+three compilers; when QEMU is available, it uses the Linux ARM64 compiler to
+build and execute Dewy programs in default and release modes. This is initial
+host-port coverage, not a full Windows/macOS execution gate. CI downloads below
+remain Linux x86-64 toolchains.
+
 ## Download a CI build
 
 Successful [Compact core runs](https://github.com/david-andrew/dewy-lang/actions/workflows/core.yml)
