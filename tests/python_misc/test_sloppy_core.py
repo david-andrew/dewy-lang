@@ -20,6 +20,7 @@ import pytest
 
 from tests.python_misc.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tools.sloppy_core.benchmark_apps import CHECKSUMS_1000, prepare_source
+from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
@@ -4601,6 +4602,16 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target):
     assert probe, 'bounded recurrence was not emitted'
     assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
     assert ' = mulhs ' not in probe[0]
+
+
+def test_core_many_record_types(compiler, tmp_path):
+    # Record instances bypass the ordinary type interner. Enough of them can
+    # outgrow even its next doubled table before it is asked to intern again.
+    source = tmp_path / 'records.jo'
+    source.write_text(record_source(5000))
+    checked = subprocess.run([compiler, 'check', source], capture_output=True,
+                             text=True, timeout=10, check=False)
+    assert checked.returncode == 0, checked.stdout + checked.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

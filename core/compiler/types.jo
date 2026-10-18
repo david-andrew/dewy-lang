@@ -119,6 +119,9 @@ __type_same = (id: int, t: TypeInfo, args: int[]) -> bool:
 __type_rehash = ():
     n = type_ht.len() * 2
     if n < 4096: n = 4096
+    # Records, unions and type values can append types without using mk_type.
+    # One doubling may no longer fit them when interning resumes.
+    loop n < types.len() * 2: n *= 2
     type_ht = fill(0 as i32, n)
     loop id in [1..types.len()):
         if int(types[id].flags) & TF_HAS_VAR != 0: continue

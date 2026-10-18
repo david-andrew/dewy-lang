@@ -302,6 +302,14 @@ application build speedup; the reproducible generator is
 `python3 -m tools.sloppy_core.benchmark_types`. See `struct-index-*` in the same
 audit directory.
 
+The ordinary type interner also sizes a rebuild for all accumulated types.
+Record, union and type-value creation can grow the type arena between interner
+calls; doubling the old table just once could leave it too small and make
+rehashing loop forever. A generated program with 5,000 generic record instances
+exposed this hang and is now a timeout-bounded regression check. The independent
+C-bootstrap gate passes 3,421 checks in 49.29 seconds. See `type-capacity-*`;
+this is a completion fix, not a claimed finite baseline speed ratio.
+
 Generic functions now look up concrete specializations by declaration and
 interned type arguments. Arguments still carrying inference variables retain
 the existing structural comparison path. Seven alternating fresh type-check
