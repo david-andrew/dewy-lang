@@ -438,12 +438,13 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
-Array literals can spread other arrays: `[head... item tail...]`. Operands run
+Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before
 the next operand runs. The result has independent value semantics, including
 nested arrays and record fields. Expected array types flow into the literal,
-so `let values:array<uint16>=[[]... 42]` works. Set spreading and spread call
-arguments are not supported.
+so `let values:array<uint16>=[[]... set[]... 42]` works. Sets contribute their
+members in insertion order, skipping removed members. Arrays also accept sets
+in `.extend(values)`. Spread call arguments are not supported.
 
 Records compose similarly: `let tuned:Settings=[defaults... speed=12]`.
 Later fields or record spreads replace earlier fields with the same name.
@@ -606,7 +607,10 @@ if visited.add(7) {printl"first visit"}
 
 `set<T>` supplies the element type for an empty literal or narrower numeric
 members. Function parameters provide the same context. `set[loop ...]` and
-`set[values...]` also work. `push` adds a member; `add` returns whether it was
+`set[values...]` also work, with arrays or sets as spread operands. For example,
+`set[existing... "new"]` preserves the first occurrence of each member, and
+`[existing...]` collects a set's members into an array. `push` adds a member;
+`add` returns whether it was
 new. Adding an existing member leaves its position unchanged. `remove(value)`
 returns whether it removed a member, while `clear()` and `reserve(count)` work
 like their dictionary counterparts. `.length`, `has`, `contains` and `is_empty`
@@ -770,7 +774,8 @@ building an intermediate array. Bounded integer loops terminate safely at the in
 an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
 integer type; `break` and `continue` work normally.
 Bounded signed-word stepped ranges also work in combined headers. Open-ended
-stepped ranges currently require a single header; stepped slicing is not implemented.
+stepped ranges currently require a single header. Arrays support stepped slicing
+as described above; strings support contiguous grapheme slices.
 
 Store a bounded range to reuse it, pass it to functions or return it:
 

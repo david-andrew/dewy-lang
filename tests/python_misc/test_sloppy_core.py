@@ -656,6 +656,61 @@ source[0]=99
 let records=set[[value=42] [value=0] [value=42]]
 let [[value] _]=records
 return if values=?set[20 22] and records.length=?2 value else 1}''',
+    'set-spread-insertion-order': '''main=()=>{
+let source=set[10 99 20 22] source.remove(99) source.add(10)
+let values=[source... 42 source...]
+source.remove(10) source.add(10)
+return if values =? [10 20 22 42 10 20 22] and [source...] =? [20 22 10] 42 else 1}''',
+    'set-spread-set-result': '''main=()=>{
+let first=set[20 99 22] first.remove(99)
+let second=set[first... 22 42 [20 1]...]
+first.clear()
+return if [second...] =? [20 22 42 1] and second.length =? 4 42 else 1}''',
+    'set-spread-literal-context': '''sum=(items:array<uint16>)=>items[0]+items[1]
+main=()=>{
+let values:array<uint8>=[set[]... set[20 22]...]
+let unique:set<uint8>=set[set[]... set[20 22]... 20]
+let inferred=[set[]... 42]
+return if values =? [20 22] and unique =? set[20 22] and inferred =? [42]
+sum([set[20 22]...]) as int64 else 1}''',
+    'set-spread-generic-overload': '''append=<T>(source:set<T> item:T):>array<T>=>[source... item]
+choose=(values:array<uint8>)=>1
+choose=(values:array<int64>)=>42
+main=()=>{
+let small:set<uint8>=set[20]
+let words=append(set["first"] "last")
+if append(small 22) not=? [20 as uint8 22 as uint8] return 1
+if words not=? ["first" "last"] return 2
+return choose([set[20 22]...])}''',
+    'set-spread-order-snapshot': '''let source=set[20 21] let calls:int64=0
+read=()=>{calls=calls*10+1 return source}
+change=()=>{calls=calls*10+2 source.remove(20) source.add(22) return 42}
+main=()=>{let values=[read()... change() source...]
+return if calls =? 12 and values =? [20 21 42 21 22] 42 else 1}''',
+    'set-spread-managed-copies': '''Item:type=[values:array<int64>]
+main=()=>{
+let source=set[Item[[20]] Item[[22]]]
+let values=[source...]
+values[0].values[0]=99
+let unique=set[source... Item[[42]]]
+source.clear()
+return if [unique...] =? [Item[[20]] Item[[22]] Item[[42]]]
+and values =? [Item[[99]] Item[[22]]] 42 else 1}''',
+    'set-spread-extend': '''main=()=>{
+let source:set<uint8>=set[20 22]
+let values:array<uint8>=[]
+values.extend(source) values.extend(set[]) values.extend(set[42])
+source.clear()
+return if values =? [20 22 42] values[end] as int64 else 1}''',
+    'set-spread-cleanup': '''work=()=>{
+let source=set[[20] [99] [22]] source.remove([99])
+let values=[source...] let copied=set[source... [42]]
+values[0][0]=0
+return if [copied...] =? [[20] [22] [42]] 42 else 1
+}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}''',
     'set-nested-value-equality': '''main=()=>{
 let first=[tags=set[20 22] count=7]
 let second=[tags=set[22 20] count=7]
@@ -3509,6 +3564,8 @@ ERRORS = {
     'generic-constructor-conflicting-elements': ('Pair:type=<T>[left:array<T> right:array<T>]\nmain=()=>{let p=Pair([20] ["bad"]) return 42}', 'expected int, found str'),
     'generic-constructor-unresolved-empty': ('Box:type=<T>[value:T]\nmain=()=>{let box=Box([]) return box.value.length}', "cannot infer the type of 'box'"),
     'generic-constructor-conflicting-callback': ('Runner:type=<T>[value:T step:((x:T):>T)]\nmain=()=>{let r=Runner(42 (x:string)=>x) return 42}', 'parameter type str does not match expected int'),
+    'record-spread-set': ('main=()=>{let values=set[1] let record=[values... answer=42] return 42}', 'only records can be spread into a record'),
+    'set-spread-wrong-type': ('main=()=>{let values:array<uint8>=[set["wrong"]...] return 42}', 'u8'),
     'record-spread-array': ('main=()=>{let xs=[1] let record=[xs... answer=42] return 42}', 'only records can be spread into a record'),
     'record-spread-unnamed': ('main=()=>{let base=[answer=42] let record=[base... 1] return 42}', 'a record literal needs named fields or record spreads'),
     'generic-value-ambiguous': ('choose=<T>(x:T):>T=>x\nchoose=<T>(x:T y:T):>T=>y\nmain=()=>{let f=choose<int64> return 42}', 'multiple versions of'),

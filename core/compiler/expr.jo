@@ -990,7 +990,12 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 loop element in kids(a):
                     ep = et
                     if has_flag(element, NF_SPREAD): ep = mk_array(et)
-                    r = arg_cost(element, ep, binds)
+                    r = 0
+                    if has_flag(element, NF_SPREAD) and dewy_set_literal(element):
+                        r = arg_cost(kid(element, 0), ep, binds)
+                    else if has_flag(element, NF_SPREAD) and is_dewy_set_type(ntype(element)):
+                        r = match_type(et, struct_targ(int(types[prune(ntype(element))].st), 0), binds, 0)
+                    else: r = arg_cost(element, ep, binds)
                     if r < 0: return -1
                     cost += r
                 return cost
@@ -1729,8 +1734,11 @@ dewy_classify_spread = (n: int):
     if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
     first = kid(n, 0)
     if not has_flag(first, NF_SPREAD) or not files[pos_file(nodes[n].pos)].is_dewy: return
+    # Leave set literals contextual, including an empty set whose member type
+    # comes from the surrounding array/set or a selected overload.
+    if dewy_set_literal(first): return
     t = dewy_spread_source_type(first)
-    if types[t].kind == .struct_ and not is_map_type(t): nodes[n].kind = .record_lit
+    if types[t].kind == .struct_ and not is_map_type(t) and not is_dewy_set_type(t): nodes[n].kind = .record_lit
 
 # Expand record fields for overload scoring, or capture operands in source
 # order for construction. Later entries replace earlier fields; even overwritten
@@ -1750,7 +1758,7 @@ dewy_record_spread_entries = (n: int, expected: int, stmts: mut int[], capture: 
         if has_flag(entry, NF_SPREAD):
             source = entry
             st = dewy_spread_source_type(entry)
-            if types[st].kind != .struct_ or is_map_type(st): fatal(pos, "only records can be spread into a record (found {type_str(st)})")
+            if types[st].kind != .struct_ or is_map_type(st) or is_dewy_set_type(st): fatal(pos, "only records can be spread into a record (found {type_str(st)})")
             si = int(types[st].st)
             check_struct_fields(si)
             if capture:
@@ -3472,7 +3480,23 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "extend() needs an array")
         check_place(args[0], false)
-        arg_type(args, 1, t)
+        source = args[1]
+        if dewy_set_literal(source) and nodes[kid(source, 0)].kind == .array and nkids(kid(source, 0)) == 0:
+            # Empty-set spreading contributes no elements or effects. Avoid
+            # instantiating Set[T] before a later element can infer T.
+            source = kid(source, 0)
+        hint = t
+        if dewy_set_literal(source):
+            set_sym = prelude.get(intern("Set")) ?? 0
+            if set_sym == 0: fatal(nodes[source].pos, "Set type is not available")
+            hint = get_struct_inst(int(syms[set_sym].ref), [int(types[t].elem)])
+        source_type = prune(check_expr(source, hint))
+        source = last_checked
+        add_flag(source, NF_CHECKED)
+        if is_dewy_set_type(source_type): source = bc_call("__dewy_set_values", [source], nodes[source].pos)
+        expanded = [args[0], source]
+        arg_type(expanded, 1, t)
+        set_list(n, expanded)
     else if id == .reserve or id == .resize or id == .truncate or id == .setlen:
         nargs_check(n, nargs, 2, 2, "reserve/resize/truncate")
         t = arg_type(args, 0, 0)
