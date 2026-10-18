@@ -1659,3 +1659,15 @@ spaces, empties `PATH`, executes native/web sample programs and builds a generat
 game for both targets. Compiler/library discovery, executable permissions and
 payload hashes are checked. The package and driver selection passes 31 checks in
 2.53 seconds. The download workflow is documented in `core/README.md`.
+
+The first published archive passed the hosted C-bootstrap gate with 4,678
+checks passing and three platform-dependent skips in 76.18 seconds. Downloading
+that exact artifact and running a native typed-unpacking/exact-integer example
+with an empty `PATH` also passed; see `package-core-ci-download.json`.
+
+Failed value-test batches now bisect into smaller batches, so one invalid case
+does not report failures under fifteen unrelated case names. Compile failures,
+panics and early successful process exits are isolated. Healthy batches still
+compile once, and failures requiring the combined program remain failures.
+The 12 targeted native/web checks pass in 3.63 seconds; the quick suite still
+passes 157 checks in 3.17 seconds. This adds work only on the failure path.

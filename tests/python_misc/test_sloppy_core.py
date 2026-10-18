@@ -4688,6 +4688,26 @@ def build_case_batch(compiler, directory, cases, body, release, target, *, argum
     return command, None
 
 
+def isolate_value_batch_failure(compiler, directory, cases, release, target, failure):
+    """Split only failed batches; retain failures that require a combined program."""
+    names = list(cases)
+    original = {name: (None, failure) for name in names}
+    if len(names) <= 1:
+        return original
+    middle = len(names) // 2
+    outcomes = {}
+    for index, subset in enumerate((names[:middle], names[middle:])):
+        part = directory / f'part-{index}'
+        part.mkdir()
+        outcomes.update(run_value_batch(compiler, part, {name: cases[name] for name in subset},
+                                        release, target))
+    # An optimizer or module-interaction bug may disappear when split. A
+    # failing combined program must never become a passing validation gate.
+    if all(code is not None for code, _ in outcomes.values()):
+        return original
+    return outcomes
+
+
 def run_value_batch(compiler, directory, cases, release, target):
     """Keep source modules independent while amortizing compiler/runtime startup."""
     names = list(cases)
@@ -4698,7 +4718,7 @@ def run_value_batch(compiler, directory, cases, release, target):
                      f'printl"__DEWY_CASE_END__:{name}:{{result_{i}}}"'])
     command, failure = build_case_batch(compiler, directory, cases, body, release, target)
     if failure:
-        return {name: (None, failure) for name in names}
+        return isolate_value_batch_failure(compiler, directory, cases, release, target, failure)
     if target == 'native':
         command = [*command, 'extra']
     ran = subprocess.run(command, capture_output=True, timeout=10, check=False)
@@ -4708,7 +4728,7 @@ def run_value_batch(compiler, directory, cases, release, target):
     stderr = ran.stderr.decode('utf-8', errors='replace')
     if ran.returncode:
         message = f'Batch exited {ran.returncode}; sources in {directory}\n{stdout}{stderr}'
-        return {name: (None, message) for name in names}
+        return isolate_value_batch_failure(compiler, directory, cases, release, target, message)
     outcomes = {}
     active, output = None, []
     for line in stdout.splitlines(keepends=True):
@@ -4724,7 +4744,8 @@ def run_value_batch(compiler, directory, cases, release, target):
             output.append(line)
     for name in names:
         if name not in outcomes:
-            outcomes[name] = (None, f'Missing result for {name}; sources in {directory}\n{stdout}{stderr}')
+            message = f'Missing result for {name}; sources in {directory}\n{stdout}{stderr}'
+            return isolate_value_batch_failure(compiler, directory, cases, release, target, message)
     return outcomes
 
 
@@ -4806,7 +4827,15 @@ def error_batches(compiler, tmp_path_factory, request):
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
-def test_core_value_batch_results(compiler, tmp_path, target):
+def test_core_value_batch_results(compiler, tmp_path, target, monkeypatch):
+    calls = []
+    original = build_case_batch
+
+    def counted(*args, **kwargs):
+        calls.append(tuple(args[2]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(f'{__name__}.build_case_batch', counted)
     cases = {
         'first': 'value=1\nmain=()=>{value+=1 printl"first 🙂" return 42}',
         'wrong': 'value=40\nmain=()=>{printl"wrong result" return 17}',
@@ -4815,19 +4844,38 @@ def test_core_value_batch_results(compiler, tmp_path, target):
     outcomes = run_value_batch(compiler, tmp_path, cases, False, target)
     assert outcomes == {'first': ('42', 'first 🙂\n'), 'wrong': ('17', 'wrong result\n'),
                         'last': ('42', '')}
+    assert calls == [('first', 'wrong', 'last')], 'successful batches should compile once'
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
-@pytest.mark.parametrize('failure', ['compile', 'runtime'])
+@pytest.mark.parametrize('failure', ['compile', 'runtime', 'exit-zero'])
 def test_core_value_batch_failures(compiler, tmp_path, target, failure):
-    bad = ('main=()=>missing_batch_name' if failure == 'compile'
-           else 'main=()=>{panic("intentional batch stop") return 42}')
+    bad = {'compile': 'main=()=>missing_batch_name',
+           'runtime': 'main=()=>{panic("intentional batch stop") return 42}',
+           'exit-zero': 'main=()=>{exit(0) return 42}'}[failure]
     outcomes = run_value_batch(compiler, tmp_path,
                                {'first': 'main=()=>42', 'bad': bad, 'last': 'main=()=>42'}, False, target)
-    assert all(code is None for code, _ in outcomes.values())
-    for _, diagnostic in outcomes.values():
-        assert str(tmp_path) in diagnostic
-        assert ('bad.dewy' if failure == 'compile' else 'intentional batch stop') in diagnostic
+    assert outcomes['first'] == outcomes['last'] == ('42', '')
+    code, diagnostic = outcomes['bad']
+    assert code is None and str(tmp_path) in diagnostic
+    assert {'compile': 'bad.dewy', 'runtime': 'intentional batch stop',
+            'exit-zero': 'Missing result for bad'}[failure] in diagnostic
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_value_batch_combined_failure(compiler, tmp_path, target, monkeypatch):
+    original = build_case_batch
+
+    def combined_only(*args, **kwargs):
+        if len(args[2]) > 1:
+            return None, 'injected failure requiring the combined program'
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(f'{__name__}.build_case_batch', combined_only)
+    outcomes = run_value_batch(compiler, tmp_path,
+                               {'first': 'main=()=>42', 'last': 'main=()=>42'}, False, target)
+    assert outcomes == {name: (None, 'injected failure requiring the combined program')
+                        for name in ('first', 'last')}
 
 
 @pytest.fixture(scope='module')

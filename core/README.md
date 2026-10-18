@@ -56,6 +56,10 @@ to avoid worker startup, and `-k` can narrow it further. The compiler is still
 rebuilt when its inputs change, and the test programs compile afresh. The full
 gate adds the broader regression corpus, rendering, networking, watch and editor
 coverage; CI continues to run that full gate.
+Value checks share small compilation batches. If a batch fails to compile,
+panics, or exits before returning all results, the runner splits it to identify
+the responsible cases. Healthy batches still compile once. A failure that only
+appears in the combined program remains a failure, even if split cases pass.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
 independently from C, regardless of the local cache.
 
