@@ -603,6 +603,13 @@ unpacking skips removed entries and requires exactly as many live entries as
 targets. `_` can discard an entry or either member of a pair. The source evaluates
 once, nested lengths are checked before destinations are written, and extracted
 values keep ordinary value semantics.
+A one-element loop pattern still unpacks: `loop [x] in [[20] [22]]` visits
+20 and 22, while `loop x in [[20] [22]]` visits the two arrays. Every bracket
+level is significant: `loop [[x y]] in [[[20 22]]]` unpacks a nested array.
+This corrects the earlier behavior that discarded the outer brackets of a
+one-element loop pattern. The same rule applies in comprehensions and combined
+loop headers.
+
 Annotated targets and `const` unpacking are not implemented yet.
 
 ```dewy

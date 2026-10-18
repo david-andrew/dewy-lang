@@ -1437,3 +1437,12 @@ mistaken for an earlier outer parameter, including when that outer parameter is
 mutable. See `parameter-unpack-*` audits for the native/web checks and C gate.
 The final independent three-generation C bootstrap passes all 4,216 tests in
 72.73 pytest seconds; 462 focused and adjacent checks pass in 8.66 seconds.
+
+
+One-element loop patterns now retain their brackets: `[x]` extracts an element
+or named field, and `[[x]]` traverses two levels. This fixes a frontend collapse
+that made them behave differently from declaration and parameter patterns.
+Older fixtures that used a redundant bracket level now supply genuinely nested
+inputs. The 571 unpacking, sequence and comprehension checks pass in 8.62 seconds;
+see `single-loop-*` audits. No additional full local gate was needed after the
+preceding 4,216-test C gate; hosted CI covers the final parser adjustment.

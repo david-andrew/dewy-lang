@@ -1,0 +1,11 @@
+{
+  "change": "Preserve a one-element loop pattern as a pattern, rather than collapsing it to the name or nested pattern it contains.",
+  "compiler": "build-1792302963374448815/bin/dewy-core",
+  "source_identity": "93a49a85ffbaccff002b29e12c2197a7c579fda9bd7850347f836f7d8c549e5e",
+  "command": "python3 -m tools.core test -k 'unpack or sequence or comprehension'",
+  "result": "571 passed, 3682 deselected in 8.62s",
+  "regression": "Before the change, [x] binds the whole array or record, and [[x]] drops a nesting level. New value cases fail against b06183e9.",
+  "coverage": "Native/web default/release single/nested arrays, record fields, custom sequences, comprehensions, combined headers and length failures; adjacent unpacking, sequence and comprehension checks.",
+  "compatibility": "Every bracket level now has meaning, consistent with declaration/parameter patterns. Three older positive loop fixtures and one negative fixture now provide genuinely nested inputs. Plain-name loop bindings are unchanged.",
+  "notes": "Focused gate on a compiler derived from the preceding independent C bootstrap. Hosted CI runs the full C gate. No performance claim."
+}

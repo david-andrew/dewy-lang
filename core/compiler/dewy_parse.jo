@@ -931,6 +931,12 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
         binders: int[]
         if dewy_syntax[binder].kind == "Block" and dewy_syntax[binder].text == "[]:":
             binders = dw_bindings(binder)
+            # A one-element pattern still unpacks the iteration value. Keep
+            # its brackets instead of collapsing it to an ordinary name.
+            if binders.len() == 1:
+                pattern = mk(.tuple, dewy_syntax[binder].pos)
+                set_list(pattern, binders)
+                binders = [pattern]
         else:
             if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
             binders.push(dw_expr(binder))

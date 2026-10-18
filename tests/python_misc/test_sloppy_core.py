@@ -3626,6 +3626,15 @@ main=()=>sum(["hi"->20 "there"->20])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
     'unpack-nested-array': 'main=()=>{let [[a b] [c d]]=[[20 1] [2 19]] return a+b+c+d}',
     'unpack-nested-single': 'main=()=>{let [[answer]]=[[42]] return answer}',
+    'unpack-loop-single-array': 'main=()=>{let total=0 loop [x] in [[20] [22]] {total+=x} return total}',
+    'unpack-loop-single-record': 'main=()=>{let total=0 loop [x] in [[x=20 y=1] [x=22 y=2]] {total+=x} return total}',
+    'unpack-loop-single-nested': 'main=()=>{let total=0 loop [[x]] in [[[20]] [[22]]] {total+=x} return total}',
+    'unpack-loop-single-combined': 'main=()=>{let total=0 loop i in [0..2) and [x] in [[20] [21]] {total+=i+x} return total}',
+    'unpack-loop-single-comprehension': 'main=()=>{let values=[loop [x] in [[20] [22]] x] return values[0]+values[1]}',
+    'unpack-loop-single-sequence': '''Rows:type=[values:array<array<int64>>]
+len=(rows:Rows)=>rows.values.length
+__index__=(rows:Rows i:int64)=>rows.values[i]
+main=()=>{let total=0 loop [x] in Rows[[[20] [22]]] {total+=x} return total}''',
     'unpack-loop-array': '''main=()=>{let total:int64=0
 loop [a b c] in [[1 2 3] [10 12 14]] {total+=a+b+c} return total}''',
     'unpack-loop-record': '''main=()=>{let total:int64=0
@@ -3635,13 +3644,13 @@ let entries=["a"->[20 1] "b"->[2 19]]
 loop [key [x y]] in entries {if key =? "a" or key =? "b" total+=x+y}
 return total}''',
     'unpack-loop-nested-array': '''main=()=>{let total:int64=0
-loop [[x y]] in [[20 1] [2 19]] {total+=x+y} return total}''',
+loop [[x y]] in [[[20 1]] [[2 19]]] {total+=x+y} return total}''',
     'unpack-loop-nested-copy': '''main=()=>{let entries=["a"->[[20 22] [99]]]
 loop [key [first _]] in entries {first[0]=0 if first[1] not=? 22 return 1}
 let value=entries.get("a") if value is? none return 2
 return value[0][0]+value[0][1]}''',
     'unpack-loop-nested-combined': '''main=()=>{let total:int64=0
-loop i in [0..3) and [[x y]] in [[20 1] [2 19] [99 99]] and i <? 2 {
+loop i in [0..3) and [[x y]] in [[[20 1]] [[2 19]] [[99 99]]] and i <? 2 {
 total+=x+y if i =? 0 continue
 }
 return total}''',
@@ -3658,11 +3667,11 @@ let entries=["a"->1 "b"->2]
 loop [key value] in entries and value <? 1 {total+=value} else {total=42}
 loop key in entries and key =? "a" {total+=1}
 return total-1}''',
-    'unpack-loop-nested-sequence': '''Rows:type=[values:array<array<int64>>]
+    'unpack-loop-nested-sequence': '''Rows:type=[values:array<array<array<int64>>>]
 len=(rows:Rows)=>rows.values.length
 __index__=(rows:Rows i:int64)=>rows.values[i]
 main=()=>{let total:int64=0
-loop [[x y]] in Rows[[[20 1] [2 19]]] {total+=x+y} return total}''',
+loop [[x y]] in Rows[[[[20 1]] [[2 19]]]] {total+=x+y} return total}''',
     'unpack-nested-implicit': 'main=()=>{[[x _] [y]]=[[20 99] [22]] return x+y}',
     'unpack-nested-swap': '''main=()=>{let x:int64=20 let y:int64=22
 [[x] [y]]=[[y] [x]] return if x =? 22 and y =? 20 42 else 1}''',
@@ -4106,6 +4115,7 @@ ERRORS = {
     'unpack-param-nested-duplicate': ('sum=([[x] [x]])=>x\nmain=()=>sum([[20] [22]])', 'duplicate unpacking name'),
     'unpack-param-mutable': ('sum=(@[x y]:array<int64>)=>x+y\nmain=()=>{let xs=[20 22] return sum(@xs)}', 'unpacking a mutable parameter'),
     'unpack-param-missing-field': ('sum=([missing])=>missing\nmain=()=>sum([x=42])', 'no field'),
+    'unpack-loop-single-scalar': ('main=()=>{loop [x] in [42] {printl(x)} return 0}', 'found int'),
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
     'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
@@ -4498,6 +4508,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unit_range_errors': 'range',
                   'test_core_range_index_errors': 'range',
                   'test_core_unpack_errors': 'unpack',
+                  'test_core_unpack_single_errors': 'unpack',
                   'test_core_fixed_array_errors': 'bounds',
                   'test_core_set_errors': 'set',
                   'test_core_format_errors': 'format',
@@ -6183,7 +6194,7 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
     'let sum=([[x y]]:array<array<int64>>)=>x+y printl(sum([[42]]))',
     'loop [x y] in [[1] [2 3]] {printl(x+y)}',
     'loop [key [x y]] in ["a"->[1]] {printl(x+y)}',
-    'loop i in [0..1) and [[x y]] in [[1]] {printl(x+y)}',
+    'loop i in [0..1) and [[x y]] in [[[1]]] {printl(x+y)}',
     'let values:dict<string int64>=[] let [[_ x] [_ y]]=values printl(x+y)',
     'let [[_ x] [_ y]]=["one"->42] printl(x+y)',
     'let [[_ x] [_ y]]=["one"->20 "two"->22 "three"->99] printl(x+y)',
@@ -6196,6 +6207,18 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
 def test_core_unpack_errors(error_batches, body, target, release):
     ran = error_batches('unpack', body, release, target)
     assert ran.returncode != 0 and 'unpacking requires exactly 2 elements' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body', [
+    'loop [x] in [[1 2]] {printl(x)}',
+    'loop i in [0..1) and [x] in [[1 2]] {printl(x)}',
+    'let values=[loop [x] in [[1 2]] x] printl(values)',
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_unpack_single_errors(error_batches, body, target, release):
+    ran = error_batches('unpack', body, release, target)
+    assert ran.returncode != 0 and 'unpacking requires exactly 1 elements' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('body, diagnostic', [
