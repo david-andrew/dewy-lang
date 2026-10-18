@@ -1,9 +1,12 @@
 """Exercise Dewy edit/reload behavior through the inherited native watch loop."""
+import codecs
+import contextlib
 import os
+import queue
 import re
-import select
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -21,9 +24,24 @@ class Watch:
         command = [compiler, *(options or ['watch']), source, *filters]
         self.process = subprocess.Popen(command, cwd=source.parent, env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, start_new_session=True)
+                                        stderr=subprocess.STDOUT, start_new_session=os.name != 'nt')
         self.output = ''
         self.position = 0
+        self.chunks = queue.Queue()
+        self.decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+        self.reader = threading.Thread(target=self.read_output, daemon=True)
+        self.reader.start()
+
+    def read_output(self):
+        # Windows select() cannot wait for subprocess pipes. One reader works
+        # on all native hosts and keeps draining while tests save source files.
+        try:
+            while data := self.process.stdout.read1(16384):
+                self.chunks.put(data)
+        except OSError as error:
+            self.chunks.put(error)
+        finally:
+            self.chunks.put(b'')
 
     def expect(self, pattern, timeout=10):
         end = time.monotonic() + timeout
@@ -34,11 +52,14 @@ class Watch:
                 return found
             remaining = end - time.monotonic()
             assert remaining > 0, f'Expected {pattern!r}:\n{self.output}'
-            ready, _, _ = select.select([self.process.stdout], [], [], remaining)
-            assert ready, f'Expected {pattern!r}:\n{self.output}'
-            data = os.read(self.process.stdout.fileno(), 16384)
+            try:
+                data = self.chunks.get(timeout=remaining)
+            except queue.Empty:
+                pytest.fail(f'Expected {pattern!r}:\n{self.output}')
+            if isinstance(data, OSError):
+                pytest.fail(f'Cannot read watcher output: {data}\n{self.output}')
             assert data, f'Watcher ended while waiting for {pattern!r}:\n{self.output}'
-            self.output += data.decode(errors='replace')
+            self.output += self.decoder.decode(data)
 
     def close(self):
         try:
@@ -46,10 +67,18 @@ class Watch:
             self.process.stdin.flush()
             self.process.wait(timeout=5)
         except (BrokenPipeError, subprocess.TimeoutExpired):
-            os.killpg(self.process.pid, signal.SIGKILL)
+            if self.process.poll() is None:
+                if os.name == 'nt':
+                    subprocess.run(['taskkill', '/PID', str(self.process.pid), '/T', '/F'],
+                                   capture_output=True, timeout=5, check=False)
+                else:
+                    os.killpg(self.process.pid, signal.SIGKILL)
             self.process.wait(timeout=5)
         finally:
-            self.process.stdin.close()
+            with contextlib.suppress(BrokenPipeError):
+                self.process.stdin.close()
+            self.reader.join(timeout=5)
+            assert not self.reader.is_alive(), 'watcher left an output pipe open after shutdown'
             self.process.stdout.close()
 
 

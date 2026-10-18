@@ -190,3 +190,9 @@ jobs:
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
         run: python -m pytest -q -o addopts='' tests/python_misc/test_sloppy_core_editor.py -k vscode_core_client
+      - name: Exercise saved-file and project-test watch loops
+        env:
+          DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
+        run: |
+          python -m pytest -q -o addopts='' tests/python_misc/test_sloppy_core_watch.py \
+            -k 'watch_program or watch_tests or watch_function_asset'
