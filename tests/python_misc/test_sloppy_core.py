@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'constant-local-once',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
     'sequence-closures', 'sequence-slice-loop-snapshots',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
@@ -252,6 +253,46 @@ let tree=Node<int64>[20 [Node<int64>[10] Node<int64>[12]]]
 let strings=Node<string>["a" [Node<string>["b"]]]
 let saved=tree tree.children[0].value=99
 return if sum(strings)=?"ab" and sum(saved)=?42 and sum(tree)=?131 42 else 1}''',
+    'constant-local-once': '''let calls=0
+next=()=>{calls+=1 return calls}
+main=()=>{const first=next() let a=first let b=first const unused=next()
+return if a=?1 and b=?1 and calls=?2 42 else 1}''',
+    'constant-global-once': '''let calls=0
+next=()=>{calls+=1 return calls}
+const first=next()
+const unused=next()
+main=()=>if first=?1 and first=?1 and calls=?2 42 else 1''',
+    'constant-scalar-snapshot': '''main=()=>{let source=20 const saved=source source=99
+return saved+saved+2}''',
+    'constant-managed-snapshot': '''main=()=>{
+let source=[items=[20 22] names=["a"->"before"]]
+const saved=source
+source.items[0]=99 source.names["a"]="after"
+let copy=saved copy.items[0]=0
+return if saved.items=?[20 22] and saved.names["a"]=?"before" and copy.items[0]=?0 42 else 1}''',
+    'constant-closure-snapshot': '''make=()=>{let source=[20 22] const saved=source
+let read=()=>saved source[0]=99 return read}
+main=()=>{let read=make() let copy=read() copy[0]=0
+return if read()=?[20 22] 42 else 1}''',
+    'constant-parameter-snapshot': '''take=(@source:array<int64>)=>{const saved=source source[0]=99 return saved[0]}
+main=()=>{let source=[20 22] return if take(@source)=?20 and source[0]=?99 42 else 1}''',
+    'constant-callable-once': '''let calls=0
+make=()=>{calls+=1 let n=40 return ()=>{n+=1 return n}}
+main=()=>{const next=make() let a=next() let b=next()
+return if calls=?1 and a=?41 and b=?42 42 else 1}''',
+    'constant-loop-initialization': '''let calls=0
+next=()=>{calls+=1 return calls}
+main=()=>{let total=0 loop i in [0..3) {const value=next() total+=value+value}
+return if total=?12 and calls=?3 42 else 1}''',
+    'constant-array-length': '''const BASE=1
+const WIDTH=BASE+1
+Pair:type=array<int64 length=WIDTH>
+main=()=>{const width=WIDTH const width2=width let values:array<int64 length=width2>=[20 22]
+let other:Pair=values return other[0]+other[1]}''',
+    'constant-array-length-shadow': '''main=()=>{
+const base=1 const width=base+1
+let base=7 let values:array<int64 length=width>=[20 22]
+return values[0]+values[1]}''',
     'numeric-bounded-remainder': '''probe=(bytes:array<uint8>):>int64=>{
 let word:int64=0
 loop round in [0..50) {loop byte in bytes {word=(word*131+(byte as int64))%1000000007}}
@@ -4097,6 +4138,19 @@ ERRORS = {
     'array-comparison-overflow': ('main=()=>{let values:array<uint8>=[1] return [256] =? values}', 'does not fit in u8'),
     'array-comparison-narrow-variable': ('main=()=>{let values:array<uint8>=[1] let other:int64=1 return values =? [other]}', 'cannot implicitly convert'),
     'array-comparison-different-arrays': ('main=()=>{let values:array<uint8>=[1] let other=[1] return values =? other}', 'cannot compare'),
+    'constant-assign': ('value=()=>40\nmain=()=>{const x=value() x=42 return x}', 'cannot modify const'),
+    'constant-literal-assign': ('main=()=>{const x=40 x=42 return x}', 'cannot modify const'),
+    'constant-array-write': ('main=()=>{const xs=[20 22] xs[0]=99 return 42}', 'cannot modify const'),
+    'constant-map-write': ('main=()=>{const xs=["a"->20] xs["b"]=22 return 42}', 'cannot modify const'),
+    'constant-field-write': ('main=()=>{const x=[value=20] x.value=42 return 42}', 'cannot modify const'),
+    'constant-mutable-argument': ('bump=(@x:int64)=>{x+=2}\nvalue=()=>40\nmain=()=>{const x=value() bump(@x) return x}', 'cannot modify const'),
+    'constant-captured-write': ('main=()=>{const xs=[20 22] let change=()=>{xs[0]=99} change() return 42}', 'cannot modify const'),
+    'constant-global-write': ('const xs=[20 22]\nmain=()=>{xs.push(99) return 42}', 'cannot modify const'),
+    'constant-narrowed-write': ('make=():>array<int64>|none=>[20 22]\nmain=()=>{const xs=make() if xs is? none return 1 xs[0]=99 return 42}', 'cannot modify const'),
+    'constant-global-narrowed-write': ('make=():>array<int64>|none=>[20 22]\nconst xs=make()\nmain=()=>{if xs is? none return 1 xs[0]=99 return 42}', 'cannot modify const'),
+    'constant-callable-write': ('main=()=>{const next=()=>40 next=()=>42 return next()}', 'cannot modify const'),
+    'constant-no-initializer': ('main=()=>{const x:int64 return 42}', 'const declaration without an initializer'),
+    'constant-runtime-length': ('width=()=>2\nmain=()=>{const n=width() let values:array<int64 length=n>=[20 22] return 42}', 'not a compile-time constant'),
     'combined-or-condition': ('main=()=>{loop i in [0..3) or true {printl(i)}}', 'only loop variables'),
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
     'stored-range-open': ('main=()=>{let r=[0..] return 0}', 'stored range needs both endpoints'),
@@ -6979,7 +7033,10 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
                          'panic: restore declarations', "unknown name 'transient_repl'"]),
     ('let calls=0\nnext=()=>{calls+=1 return 42}\n:type next()\ncalls\nnext()\ncalls\n',
      ['int64', '0', '42', '1'], []),
-], ids=['values', 'bindings', 'types', 'multiline', 'recovery', 'query-effects'])
+    (('let calls=0\nnext=()=>{calls+=1 return [20 22]}\nconst saved=next()\n'
+     'saved\nsaved\ncalls\nsaved[0]=99\nsaved\nlet saved=[42]\nsaved\n'),
+     ['[20, 22]', '[20, 22]', '1', '[20, 22]', '[42]'], ['cannot modify const']),
+], ids=['values', 'bindings', 'types', 'multiline', 'recovery', 'query-effects', 'constant-values'])
 def test_core_repl_inputs(compiler, tmp_path, text, expected, errors):
     env = {**os.environ, 'TMPDIR': str(tmp_path)}
     ran = subprocess.run([compiler, 'repl'], input=text + ':quit\n', cwd=tmp_path,
@@ -7198,7 +7255,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

@@ -75,7 +75,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 
 The development gate now has over 4,400 checks; recent local full runs took
 78–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
-suite selects 149 checks and takes roughly 3–4 pytest seconds. Focused
+suite selects 153 checks and takes roughly 3–4 pytest seconds. Focused
 selections also typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced
 compiler launches from 674 to 44 and test time from 73.49 to 7.93 seconds, while

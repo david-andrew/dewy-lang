@@ -576,6 +576,9 @@ check_place = (n: int, for_mut: bool):
                 else if narrowed_var(r) != 0: r = narrowed_var(r)
                 else: break
             rf = int(locals[r].flags)
+            if rf & LF_CONST != 0: fatal(nodes[n].pos, "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")
+            ag = alias_global(r)
+            if ag >= 0 and readonly_global(ag): fatal(nodes[n].pos, "cannot modify const '{nm}'")
             if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; mark it `mut` or copy it with `let {nm} = {nm}`)")
             if rf & LF_BYREF != 0 and via_closure: fatal(nodes[n].pos, "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")
             if rf & LF_BYREF != 0: fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `loop mut` to modify elements)")
@@ -588,10 +591,10 @@ check_place = (n: int, for_mut: bool):
                 if cp_inner == 0: rf |= LF_RESIZED
                 locals[r].flags = i32(rf)
             note_write(r, via_closure, nodes[n].pos)
-            ag = alias_global(r)
             if ag >= 0: note_global_write(ag)
             return
         if nodes[n].aux == i32(int(SK.global)):
+            if readonly_global(int(nodes[n].sym)): fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
             note_global_write(int(nodes[n].sym))
             return
         fatal(nodes[n].pos, "cannot assign to '{name_of(int(nodes[n].name))}'")

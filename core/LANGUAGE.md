@@ -168,7 +168,30 @@ or local closures is not yet supported; group members must be function literals
 at module level. `main` must have one entry-point definition.
 
 Use `let` to declare a local or deliberately shadow a name. Assignment updates a
-visible variable; otherwise it can introduce a new variable. Parameters have
+visible variable; otherwise it can introduce a new variable.
+
+`const` initializes a binding once each time its declaration runs. Its initializer
+may call ordinary runtime code. Reading it again retains that value, including
+independent array/record snapshots; an unused initializer still runs. You cannot
+reassign the binding, change its fields or elements, or pass it as an `@` argument.
+Make a mutable copy with `let` when needed:
+
+```dewy
+let values=[20 22]
+const saved=values
+values[0]=99
+let editable=saved
+editable[0]=0
+printl(saved) # [20, 22]
+```
+
+Literal constants can be folded. Integer constant expressions can also supply
+fixed-array lengths; a runtime call does not become a compile-time expression
+just because its result is bound with `const`. Explicit `let` shadowing remains
+available. This corrects the earlier inherited behavior that expanded arbitrary
+constant initializers on every use.
+
+Parameters have
 value semantics. Release builds can avoid a redundant entry copy when a
 parameter is only read; this needs no annotation and preserves independent
 values. Use `@` in both a parameter and its call to change the caller:

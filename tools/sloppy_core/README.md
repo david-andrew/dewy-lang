@@ -1569,3 +1569,20 @@ compilation speedup is claimed. All 4,412 checks pass in 90.68 pytest seconds
 after three independent C bootstrap generations, with 197 focused checks in
 5.19 seconds. See `fast-inline-*` audits for sample timing, source identities
 and the distinction between initial and final measurements.
+
+Dewy `const` now retains one initialized value. The inherited expansion behavior
+called `next()` twice when reading `const first=next()` twice, and a saved const
+array followed changes to its source. Both regressions were reproduced before
+the fix. Runtime initializers now run once per declaration execution, including
+unused constants; copied values preserve COW snapshots. Fields, elements, mutable
+arguments and captured/narrowed bindings enforce the same write barrier. A
+`let` copy is mutable. Literal constants can still fold, and constant integer
+expressions remain usable as fixed-array lengths. Jo's own const behavior is
+unchanged.
+
+The 301 focused checks pass in 7.43 seconds, and the independent three-generation
+C gate passes all 4,466 checks in 90.51 seconds with two workers. The quick suite
+now includes the once-only initializer case: 153 checks in 3.21 seconds.
+Seven fresh-build pairs gave ratios 0.986/1.070/0.994/1.001 for tour/default
+Netpong/web Netpong/compiler: Netpong was about 7% slower in this run, with no
+general compilation-speed claim. See `constant-values-*` audits.

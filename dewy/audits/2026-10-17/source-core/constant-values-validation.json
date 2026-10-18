@@ -1,0 +1,34 @@
+{
+  "change": "Dewy const retains one initialized value, including unused initializers and COW snapshots. Writes through bindings, captures and narrowed globals are rejected. Pure scalar literal expressions retain compile-time folding. Jo const expansion is retained.",
+  "compiler": "build-1792307585252127424/bin/dewy-core",
+  "source_identity": "f729cb3c004581752f01b4400dc670742e9f30829206a7e599ca65605c988e0e",
+  "reproduction": "Baseline prints 1 2 2 and [99, 22]; fixed prints 1 1 1 and [20, 22]. See probe/before/after artifacts.",
+  "focused": "301 passed in 7.43s",
+  "independent_c_gate": "4466 passed in 90.51s, two workers, three C bootstrap generations",
+  "quick": "153 passed in 3.21s after adding constant-local-once to the smoke selection",
+  "compile_paired_ratios": {
+    "tour-default": 0.9861121985771564,
+    "netpong-default": 1.069885762870625,
+    "netpong-web-default": 0.9937830706537756,
+    "compiler": 1.0013318077134168
+  },
+  "compile_medians_ms": {
+    "tour-default": {
+      "baseline": 35.82796599948779,
+      "candidate": 35.53998200004571
+    },
+    "netpong-default": {
+      "baseline": 231.56475100040552,
+      "candidate": 245.11400499977753
+    },
+    "netpong-web-default": {
+      "baseline": 124.02572499922826,
+      "candidate": 121.65398000070127
+    },
+    "compiler": {
+      "baseline": 1136.1397280015808,
+      "candidate": 1209.6376510016853
+    }
+  },
+  "limits": "Seven alternating fresh builds pinned to CPU 2, one emission worker. Default Netpong was about 7% slower in this run; other paired medians were near unchanged. No compilation-speed improvement is claimed. Const does not make runtime calls compile-time evaluable; const unpacking is still a separate follow-up."
+}

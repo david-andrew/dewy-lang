@@ -755,6 +755,16 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
     if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]
     bindings
 
+# Pure scalar syntax can stay a compile-time expression. Anything that reads a
+# name, calls code or constructs a collection must retain one initialized value.
+dw_const_number = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .int_lit or k == .float_lit or k == .bool_lit: return true
+    if k == .unary or k == .not_: return dw_const_number(int(nodes[n].a))
+    if k == .binary or k == .and_ or k == .or_:
+        return dw_const_number(int(nodes[n].a)) and dw_const_number(int(nodes[n].b))
+    false
+
 dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
     initial = 0
@@ -762,6 +772,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if dw_op(id) == "=":
         lhs = dw_child(id, 1)
         initial = dw_child(id, 2)
+    if constant and initial == 0: return dw_fail(lhs, "a const declaration without an initializer")
     annotation = 0
     if dw_op(lhs) == ":":
         annotation = dw_child(lhs, 2)
@@ -782,6 +793,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         nodes[n].name = i32(intern(name))
         nodes[n].b = i32(dw_function(initial, ""))
         if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+        if constant: add_flag(n, NF_RDONLY)
         return n
     if annotation != 0 and dw_name(annotation) == "type":
         if initial == 0: return dw_fail(id, "a type declaration without a definition")
@@ -806,10 +818,14 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         loop field in dewy_syntax[initial].children: fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
         return n
-    n = mk(if constant: NK.const_ else: NK.vardecl, dewy_syntax[id].pos)
+    n = mk(.vardecl, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
     if annotation != 0: nodes[n].a = i32(dw_type(annotation))
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
+    if constant:
+        value = int(nodes[n].b)
+        if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
+        else: add_flag(n, NF_RDONLY)
     return n
 
 dw_import = (id: int) -> int:

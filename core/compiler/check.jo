@@ -48,6 +48,7 @@ const LF_SOAMUT = 8192      # ... and the loop is `loop mut`
 const LF_ELEMALIAS = 16384  # `mut x in xs` in a combined loop: x stands for xs[k] (writes to x write xs)
 const LF_READ = 32768       # its value is read somewhere (not only the base of a write: v.f = 1)
 const LF_QUIET = 65536      # a loop counter or part of `a, b = f()`: not warned about when unused
+const LF_CONST = 131072     # Dewy const: one initialized value, no writes through the binding
 assign_root = 0                 # (the variable an assignment being checked writes through)
 copy_writes: {int: int} = {}    # local -> where its fields or elements are first written
 gcopy_writes: {int: int} = {}   # the same for globals
@@ -61,6 +62,7 @@ struct Local:
     name: i32
     type: i32
     flags: i32
+    const_init: i32         # checked initializer for constant-expression contexts
     alias: i32
     owner: i32
     pos: int
@@ -763,6 +765,10 @@ name_assignable = (nm: int, m: int) -> bool:
 
 assign_to_decl = (s: int):
     lhs = int(nodes[s].a)
+    if nodes[lhs].kind == .ident and files[pos_file(nodes[s].pos)].is_dewy:
+        cs = lookup(int(nodes[lhs].name))
+        if cs != 0 and syms[cs].kind == .const_:
+            fatal(nodes[lhs].pos, "cannot modify const '{name_of(int(nodes[lhs].name))}'; use let to declare a new binding")
     if nodes[lhs].kind == .ident and cx >= 0 and int(nodes[lhs].name) < own_consts.len() and own_consts[int(nodes[lhs].name)]:
         # (MAX = 4 would make a variable hiding the program's constant MAX)
         cs = lookup(int(nodes[lhs].name))
@@ -1021,6 +1027,23 @@ resolve_type = (tn: int) -> int:
     fatal(nodes[tn].pos, "invalid type")
     0
 
+readonly_global = (g: int) -> bool:
+    d = int(globals[g].decl)
+    d != 0 and has_flag(d, NF_RDONLY)
+
+binding_const_init = (kind: SK, ref: int, pos: int) -> int:
+    if kind == .const_:
+        if globals[ref].init != 0: return int(globals[ref].init)
+        if globals[ref].decl != 0: return int(nodes[int(globals[ref].decl)].b)
+    else if kind == .global and readonly_global(ref):
+        ensure_global(ref, pos)
+        return int(nodes[int(globals[ref].decl)].b)
+    else if kind == .local:
+        let ref = ref
+        loop int(locals[ref].flags) & LF_CAPTURE != 0: ref = int(locals[ref].outer)
+        if int(locals[ref].flags) & LF_CONST != 0: return int(locals[ref].const_init)
+    0
+
 # T[N] written as a type name with one argument (the parser cannot tell `int[N]` from a generic
 # type's argument): the argument is a constant's name
 fixed_size_arg = (tn: int) -> bool:
@@ -1028,7 +1051,7 @@ fixed_size_arg = (tn: int) -> bool:
     a = kid(tn, 0)
     if nodes[a].kind != .tname or nodes[a].nlist > 0 or nodes[a].sval != 0: return false
     s = lookup(int(nodes[a].name))
-    s != 0 and syms[s].kind == .const_
+    s != 0 and binding_const_init(syms[s].kind, int(syms[s].ref), nodes[tn].pos) != 0
 
 # the size of a fixed-size array type: a number or a compile-time constant
 fixed_size = (n: int) -> int:
@@ -1340,10 +1363,8 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                 # (or a constant naming it: const SQLITE = "libsqlite3.so.0", then @lib(SQLITE))
                 if la != 0 and nodes[la].kind == .ident:
                     cs = lookup(int(nodes[la].name))
-                    if cs != 0 and syms[cs].kind == .const_:
-                        g = int(syms[cs].ref)
-                        ci = int(globals[g].init)
-                        if ci == 0 and globals[g].decl != 0: ci = int(nodes[int(globals[g].decl)].b)
+                    if cs != 0:
+                        ci = binding_const_init(syms[cs].kind, int(syms[cs].ref), nodes[la].pos)
                         if ci != 0 and nodes[ci].kind == .str_lit: la = ci
                 if la == 0 or nodes[la].kind != .str_lit: fatal(nodes[at].pos, "@lib needs a library name, e.g. @lib(\"libGL.so.1\") or a constant holding one")
                 fns[f].clib = name_of(int(nodes[la].sval))
@@ -2779,6 +2800,9 @@ check_vardecl = (s: int):
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)
+    if has_flag(s, NF_RDONLY):
+        locals[l].flags = i32(LF_DECL | LF_CONST | LF_QUIET)
+        locals[l].const_init = nodes[s].b
     if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
     nodes[s].sym = i32(l)
     if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
@@ -3260,11 +3284,14 @@ ceval = (e: int) -> CVal:
     if k == .bool_lit or k == .int_lit: return CVal(false, nodes[e].ival, "")
     if k == .str_lit: return CVal(true, 0, name_of(int(nodes[e].sval)))
     if k == .ident:
-        s = lookup(int(nodes[e].name))
-        if s == 0 or syms[s].kind != .const_: fatal(nodes[e].pos, "'{name_of(int(nodes[e].name))}' is not a compile-time constant")
-        g = int(syms[s].ref)
-        if globals[g].init != 0 and globals[g].decl == 0: return ceval(int(globals[g].init))
-        return ceval(int(nodes[int(globals[g].decl)].b))
+        initial = 0
+        if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
+            initial = binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
+        else:
+            s = lookup(int(nodes[e].name))
+            if s != 0: initial = binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+        if initial == 0: fatal(nodes[e].pos, "'{name_of(int(nodes[e].name))}' is not a compile-time constant")
+        return ceval(initial)
     if k == .not_:
         v = ceval(int(nodes[e].a))
         r = 0
