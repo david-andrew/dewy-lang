@@ -771,13 +771,15 @@ python3 -m tools.sloppy_core.benchmark_broadcast "$(python3 -m tools.core path)"
     --count 262144 --steps 64 --samples 7 --output /tmp/broadcast.json
 ```
 
-The recorded large-array comprehension improved about 5× in default builds and
-7.6× in release builds. Release kernel time was roughly C's time on both the
-large workload and a separate 4,096-element run. Default builds remain slower,
-especially for the smaller arrays. These are named, single-thread workloads
-with result allocation included; the
+Preallocation improved the recorded large-array comprehension about 5× in default
+builds and 7.6× in release builds. A subsequent default-build SIMD change reduced
+comprehension time another 39% on large arrays and 65% on a separate 4,096-element
+run. Fused dotted expressions improved 25% and 60%, respectively. Default kernel
+times are now close to C on these named, single-thread workloads with result
+allocation included. The
 [measurement record](../dewy/audits/2026-10-17/source-core/comprehension-performance-validation.json)
-contains the sources, checksums, paired samples and limits.
+and [SIMD follow-up](../dewy/audits/2026-10-17/source-core/array-vector-validation.json)
+contain the sources, checksums, paired samples and limits.
 
 `values.insert_if_absent(key value)` adds an entry only when the key is missing
 and returns whether it was added. An existing value and its iteration position
@@ -1005,9 +1007,11 @@ blocks. Its normal-equation example uses small, well-scaled times; it is not a
 general numerical fitting package.
 
 Matrix multiplication uses contiguous rows and shares large products among the
-native worker pool. Native x86-64 default builds vectorize short raw-memory float
-kernels; release builds apply broader optimization. Both retain scalar fallbacks
-for overlapping memory and tail elements. Web builds use the same scalar
+native worker pool. Native x86-64 default builds vectorize short float kernels,
+including array comprehensions and fused dotted expressions; release builds
+apply broader optimization. Bounds and overlap guards select a scalar fallback
+when a whole loop cannot safely use SIMD; tail elements also use scalar code.
+Web builds use the same scalar
 operations. `SLOPPY_THREADS=1` restricts native execution to the
 calling thread. To compare default/release builds, one/two threads and the same
 flat-buffer algorithm in C:

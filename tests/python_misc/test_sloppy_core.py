@@ -7229,6 +7229,49 @@ def test_core_numeric_cpu_feature_initializer(compiler, tmp_path, flags):
     assert ran.returncode == 8, ran.stdout + ran.stderr
 
 
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_array_vectors(compiler, tmp_path, release):
+    if platform.machine().lower() not in ('x86_64', 'amd64'):
+        pytest.skip('AVX2/SSE2 code generation targets native x86-64')
+    source = tmp_path / 'vectors.dewy'
+    source.write_text('''looped=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in [0..a.length) a[i]*2.0+b[i]*0.5+1.0]
+fused=<T>(a:array<T> b:array<T>):>array<T>=>a .* 2.0 .+ b .* 0.5 .+ 1.0
+main=(argv:array<string>)=>{
+loop n in [0..20) {
+let a=[loop i in [0..n) (i as float64)*0.5]
+let b=[loop i in [0..n) (i as float64)*0.25]
+let expected=[loop i in [0..n) (i as float64)*1.125+1.0]
+assert(looped(a b) =? expected and fused(a b) =? expected)
+let same=[loop i in [0..n) (i as float64)*1.25+1.0]
+assert(looped(a a) =? same and fused(a a) =? same)
+let single_a=float32.(a) let single_b=float32.(b)
+let single_expected=float32.(expected)
+assert(looped(single_a single_b) =? single_expected and fused(single_a single_b) =? single_expected)
+}
+if argv.length >? 1 {printl(looped(fill(1.0 20) fill(2.0 19)))}
+return 42
+}''')
+    binary = tmp_path / 'vectors'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    bodies = [body for body in re.split(r'(?=^fn )', built.stdout, flags=re.M)
+              if re.match(r'fn f_(?:looped|fused)_', body)]
+    assert len(bodies) == 4, built.stdout
+    assert all('vld ' in body and 'vst ' in body for body in bodies), '\n'.join(bodies)
+    for sse2 in [False, True]:
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(('DEWY_', 'SLOPPY_'))}
+        if sse2:
+            env['SLOPPY_NO_AVX'] = '1'
+        ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
+        assert ran.returncode == 42, ran.stdout + ran.stderr
+        short = subprocess.run([binary, 'short'], env=env, capture_output=True, text=True,
+                               timeout=10, check=False)
+        assert short.returncode != 0 and 'out of bounds' in short.stderr, short.stdout + short.stderr
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_numeric_ranges_custom_index(compiler, tmp_path, target, release):

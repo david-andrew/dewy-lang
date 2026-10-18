@@ -505,14 +505,16 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
     if not plan.avx_only: lx_vloop(code, L, checks, plan, VX, out)
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
 
-# Default builds only consider short raw-memory float kernels, where no bounds
-# checks need versioning. The existing overlap guard and scalar tail remain.
+# Default builds only consider short float loops with a vector plan. Bounds
+# and overlap guards retain the scalar path when a whole loop is not safe.
 fast_vectorize = ():
-    if not lx_vec_on or not ir.raw_mem or ir.code.len() > 400: return
+    if not lx_vec_on or ir.code.len() > 400: return
     floats = false
+    has_loop = false
     loop ins in ir.code:
         if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv: floats = true
-    if floats: loop_versioning(true)
+        if ins.op == .loop: has_loop = true
+    if floats and has_loop: loop_versioning(true)
 
 # version the counting loops of the current function that have checks to drop
 lx_dbg_read = false
@@ -546,9 +548,9 @@ loop_versioning = (vector_only: bool = false):
     loop L in cl:
         if L.pe - L.pl > 400: continue
         checks = lx_checks(code, ends, L)
-        if vector_only and checks.len() > 0: continue
         plan = VPlan(false, 0, false, [], [], [])
         if lx_vec_on: plan = lx_vec_plan(code, L, checks, first, last)
+        if vector_only and not plan.ok: continue
         # (one check costs about as much as testing for it in front: not worth a copy)
         if not plan.ok and checks.len() < 2: continue
         loop p in [at..L.pl): out.push(code[p])
