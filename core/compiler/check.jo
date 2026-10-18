@@ -3835,7 +3835,7 @@ check_program = (main_path: str):
         fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
     if test_mode:
         # top-level code runs first (it may set up globals), then each test in order
-        skip_main = true
+        if not check_all: skip_main = true
         loop d in test_decls:
             nm = name_of(int(nodes[d].sval))
             if not files[pos_file(nodes[d].pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)

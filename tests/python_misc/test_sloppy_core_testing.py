@@ -68,6 +68,26 @@ def test_core_native_tests_check_and_build(compiler, tmp_path):
     assert result.returncode == 42, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('tests', ['', 'test "also checked" { assert(true) }\n'])
+@pytest.mark.parametrize(('main', 'error'), [
+    ('main=()=>missing_main_value', 'missing_main_value'),
+    ('main=()=>[1 2]', 'main must return'),
+    ('helper=()=>missing_helper_value\nmain=()=>helper()', 'missing_helper_value'),
+])
+def test_core_check_main_with_tests(compiler, tmp_path, tests, main, error):
+    source = tmp_path / 'program.dewy'
+    source.write_text(tests + main)
+    result = command(compiler, 'check', source)
+    assert result.returncode != 0 and error in result.stderr, result.stdout + result.stderr
+
+
+def test_core_check_does_not_execute_main(compiler, tmp_path):
+    source = tmp_path / 'program.dewy'
+    source.write_text('main=()=>panic("must only check")')
+    result = command(compiler, 'check', source)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_core_native_tests_imports(compiler, tmp_path):
     (tmp_path / 'helper.dewy').write_text('answer=()=>42\ntest "helper only" { assert(false) }')
     source = tmp_path / 'tests.dewy'

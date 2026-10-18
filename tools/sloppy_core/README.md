@@ -1679,3 +1679,9 @@ running after a failure. Normal builds omit test bodies; `check` includes them.
 A headless paddle-model example and the project testing guide show the workflow.
 The C-bootstrap compiler passes 141 focused checks in 8.91 seconds and all 4,707
 checks in 110.08 seconds with two workers. See `native-tests-*` audits.
+
+`check` now retains the ordinary `main` entry point while also validating test
+blocks. The inherited test-mode flag had suppressed it, hiding errors in `main`
+and helpers reachable only from it. Running tests still skips `main`; checking
+never executes it. The C-bootstrap compiler passes 94 focused entry-point, test
+runner and editor checks in 13.06 seconds; hosted CI runs the full gate.
