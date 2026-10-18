@@ -1072,3 +1072,21 @@ an unchanged original snapshot. The interactive example also has software-render
 and web-build checks. Seven focused checks pass in 10.00 seconds using the same
 C-built compiler as the preceding full 3,525-check gate. No compiler or library
 inputs changed for this example; see `rollback-validation.json` for scope.
+
+
+Dictionary `keys()` and `values()` now collect only the requested live field
+after removals. They retain the existing shared-storage fast path when no entries
+are gone. Previously a projection copied and compacted the whole dictionary,
+including its other field, cached hashes and probe table. Set operations that
+request member arrays use the improved key projection too.
+
+Seven alternating thread-CPU pairs pinned to CPU 2 on an 8,192-entry dictionary
+with one quarter removed measured keys at 305.53/48.41 ms and values at
+305.15/93.19 ms (baseline/candidate). Median paired ratios are
+0.157/0.303. The 2,000 projections retain insertion order;
+values are two-element integer arrays. Setup/removal is outside the kernel,
+and Python independently checks checksums, including wraparound through the live
+entries. This is an isolated collection workload, not an application-wide claim.
+`python3 -m tools.sloppy_core.benchmark_projection --help` documents the rerun.
+The independent C-bootstrap gate passes 3,552 checks in 102.46 pytest seconds;
+see the `map-projection-*` source-core audits.

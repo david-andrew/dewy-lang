@@ -1,0 +1,196 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "1ded92a453120c246ff67da4b7c9b0d72d979ecc",
+  "working_tree": " M core/LANGUAGE.md\n M core/lib/core/map.jo\n M tests/python_misc/test_sloppy_core.py\n?? tools/sloppy_core/benchmark_projection.py\n",
+  "cpu_affinity": [
+    2
+  ],
+  "load_average_start": [
+    15.49951171875,
+    13.20166015625,
+    12.7578125
+  ],
+  "count": 2000,
+  "samples": 7,
+  "warmups": 1,
+  "clock": "thread-cpu",
+  "flags": [
+    "--release"
+  ],
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792284537594217113/bin/dewy-core",
+      "sha256": "3b487295f19fe7199e9cc80d8c4c862d032a2f45e60b46c2be3bfb011f45a484"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792286387292670836/bin/dewy-core",
+      "sha256": "602fd9f876dd471b8cf39197a5df07108f150314829aeab52fa9f7c251617b42"
+    }
+  },
+  "workloads": {
+    "keys": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 2000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {\n        let items=values.keys()\n        checksum+=items[iteration%items.length]\n    }\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "8da2ec3bc17a0f6e416a0817ba3a041be2c71a24d16b511ec185773550ccc6fb",
+      "binary_sha256": {
+        "baseline": "2bcda653636d92d7c5cc5d9ef24efa53328c6592e58a6e51f51aca6db7a15ebf",
+        "candidate": "a8388753fe05c89d1ae8aca16300d29b4cbe529ebd8c4243750183aefd07f10b"
+      },
+      "checksum": 2666667,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 305306238,
+            "wall_seconds": 0.3204064460005611
+          },
+          {
+            "kernel_ns": 306289488,
+            "wall_seconds": 0.3206571879563853
+          },
+          {
+            "kernel_ns": 308945839,
+            "wall_seconds": 0.33739578002132475
+          },
+          {
+            "kernel_ns": 305525510,
+            "wall_seconds": 0.3249324250500649
+          },
+          {
+            "kernel_ns": 301233357,
+            "wall_seconds": 0.3778624680126086
+          },
+          {
+            "kernel_ns": 309249011,
+            "wall_seconds": 0.49536902201361954
+          },
+          {
+            "kernel_ns": 304854101,
+            "wall_seconds": 0.3972453939495608
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 48836459,
+            "wall_seconds": 0.06615582399535924
+          },
+          {
+            "kernel_ns": 48429451,
+            "wall_seconds": 0.05417100596241653
+          },
+          {
+            "kernel_ns": 48020781,
+            "wall_seconds": 0.06323175097350031
+          },
+          {
+            "kernel_ns": 48802089,
+            "wall_seconds": 0.06744540494401008
+          },
+          {
+            "kernel_ns": 47150907,
+            "wall_seconds": 0.07611694501247257
+          },
+          {
+            "kernel_ns": 48406430,
+            "wall_seconds": 0.09899290604516864
+          },
+          {
+            "kernel_ns": 47518047,
+            "wall_seconds": 0.10153226205147803
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 305.52551,
+        "candidate": 48.40643
+      }
+    },
+    "values": {
+      "source": "from p\"benchmark_harness.jo\" import size_argument, clock\nmain=()=>{\n    let count=size_argument(args() 2000)\n    let values:dict<int64 array<int64>>=[]\n    values.reserve(8192)\n    loop i in [0..8192) {values[i]=[i*3+1 i]}\n    loop i in [0,4..8192) {values.remove(i)}\n    let checksum:int64=0\n    let start=clock()\n    loop iteration in [0..count) {\n        let items=values.values()\n        checksum+=items[iteration%items.length][0]\n    }\n    let elapsed=clock()-start\n    printl(\"{checksum} {elapsed}\")\n}",
+      "source_sha256": "588341929b39a05da0c63e492d8007bf8b1a20a836e3ccc93d748c2fe570778d",
+      "binary_sha256": {
+        "baseline": "099aab813faf84c6d1b2b192623b659e5432032dde4a51cb89e16b8058fc109a",
+        "candidate": "2199b1fda611f8499b7865e3e64ab6712c53ab4f1785f0a224d3bcd1a42c71b5"
+      },
+      "checksum": 8002001,
+      "timings": {
+        "baseline": [
+          {
+            "kernel_ns": 304968317,
+            "wall_seconds": 0.37745599797926843
+          },
+          {
+            "kernel_ns": 298630218,
+            "wall_seconds": 0.31903548596892506
+          },
+          {
+            "kernel_ns": 308752217,
+            "wall_seconds": 0.42113472998607904
+          },
+          {
+            "kernel_ns": 305154940,
+            "wall_seconds": 0.40241980901919305
+          },
+          {
+            "kernel_ns": 307582225,
+            "wall_seconds": 0.5477086739847437
+          },
+          {
+            "kernel_ns": 304161670,
+            "wall_seconds": 0.3496492200065404
+          },
+          {
+            "kernel_ns": 310183716,
+            "wall_seconds": 0.43820825405418873
+          }
+        ],
+        "candidate": [
+          {
+            "kernel_ns": 92319167,
+            "wall_seconds": 0.09920859907288104
+          },
+          {
+            "kernel_ns": 93219697,
+            "wall_seconds": 0.12461394804995507
+          },
+          {
+            "kernel_ns": 93187185,
+            "wall_seconds": 0.11944757704623044
+          },
+          {
+            "kernel_ns": 93197676,
+            "wall_seconds": 0.13537741999607533
+          },
+          {
+            "kernel_ns": 93134357,
+            "wall_seconds": 0.1359523810679093
+          },
+          {
+            "kernel_ns": 95829098,
+            "wall_seconds": 0.2057870380813256
+          },
+          {
+            "kernel_ns": 92205119,
+            "wall_seconds": 0.10478610498830676
+          }
+        ]
+      },
+      "median_ms": {
+        "baseline": 305.15494,
+        "candidate": 93.187185
+      }
+    }
+  },
+  "limits": [
+    "Map construction/removal is outside the timed kernel.",
+    "The map retains 25% tombstones; its values are two-element integer arrays.",
+    "This measures repeated projections, not overall application performance."
+  ],
+  "harness": {
+    "dewy": "b215c8c6e138a99ecbe32d1e86ccc4b92b8238587f6f7c05ebfb8c27b41b0eeb",
+    "c": "f16c857c76861319ca8107c6c8b0e683e9a1acb86c71b3c4a393c909c1ea9500"
+  },
+  "load_average_end": [
+    14.64111328125,
+    13.09521484375,
+    12.7275390625
+  ]
+}

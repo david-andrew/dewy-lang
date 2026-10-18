@@ -575,6 +575,11 @@ This also works for generic functions returning `T?` when `T` is optional.
 A bare `none` means the outer optional is absent; wrapping an already-typed
 optional value preserves it as a present payload.
 
+`values.keys()` and `values.values()` return arrays in insertion order, skipping
+removed entries. The arrays retain independent values: editing a returned array
+or one of its nested elements does not change the dictionary, and later dictionary
+edits do not change an earlier result.
+
 Dictionaries compare by their key/value associations, ignoring insertion order,
 capacity and removed entries. This also holds when they are nested inside other
 values. Their hashes follow the same rule, so dictionaries can be set members

@@ -2951,6 +2951,34 @@ if not values.insert_if_absent(key() value()) or calls not=? 12 return 1
 calls=0
 if values.insert_if_absent(key() value()) or calls not=? 12 return 2
 return values["key"]}''',
+    'dictionary-projection-sparse': '''main=()=>{
+let values=[10->1 20->2 30->3 40->4 50->5]
+values.remove(20) values.remove(40) values[60]=6
+if values.keys() not=? [10 30 50 60] or values.values() not=? [1 3 5 6] return 1
+values[20]=22
+return if values.keys() =? [10 30 50 60 20] and values.values() =? [1 3 5 6 22] 42 else 2}''',
+    'dictionary-projection-managed-snapshots': '''main=()=>{
+let values=[[1]->[10] [2]->[20] [3]->[30] [4]->[40]]
+values.remove([2])
+let saved=values let keys=values.keys() let items=values.values()
+keys[0][0]=99 items[0][0]=999
+if values[[1]] not=? [10] or saved[[1]] not=? [10] return 1
+values[[3]][0]=300 values.remove([4]) values[[5]]=[50]
+return if keys =? [[99] [3] [4]] and items =? [[999] [30] [40]]
+and saved.keys() =? [[1] [3] [4]] and saved.values() =? [[10] [30] [40]] 42 else 2}''',
+    'dictionary-projection-zero-values': '''main=()=>{
+let values:dict<int64 int64?>=[1->none 2->22 3->0 4->none]
+values.remove(2)
+if values.keys() not=? [1 3 4] or values.values() not=? [none 0 none] return 1
+values.remove(1) values.remove(3) values.remove(4)
+return if values.keys() =? [] and values.values() =? [] 42 else 2}''',
+    'dictionary-projection-release': '''work=():>void=>{
+let values=["first"->[20] "gone"->[99] "last"->[22]] values.remove("gone")
+let keys=values.keys() let items=values.values()
+if keys not=? ["first" "last"] or items not=? [[20] [22]] panic("projection")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..30) work()
+return if alloc_count() =? before 42 else 1}''',
     'dictionary-insert-growth': '''main=()=>{let values:dict<int64 int64>=[]
 loop i in [0..300) {if not values.insert_if_absent(i i+1) return 1}
 let snapshot=values

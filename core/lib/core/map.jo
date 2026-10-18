@@ -217,10 +217,24 @@ __map_pair_at[K, V] = (m: Map[K, V], i: int) -> (K, V): (m.keys[i], m.vals[i])
 is_empty[K, V] = (m: Map[K, V]) -> bool: m.keys.len() == m.ngone
 keys[K, V] = (m: Map[K, V]) -> K[]:
     if m.ngone == 0: return m.keys
-    __map_live(m).keys
+    # Project only the requested field. Compacting a snapshot would also copy
+    # values, hashes and slots, then rebuild a hash table we never use.
+    result: K[]
+    result.reserve(m.len())
+    ng = m.gone.len()
+    loop i in 0.. and key in m.keys:
+        if i < ng and __at(m.gone, i): continue
+        result.push(key)
+    result
 values[K, V] = (m: Map[K, V]) -> V[]:
     if m.ngone == 0: return m.vals
-    __map_live(m).vals
+    result: V[]
+    result.reserve(m.len())
+    ng = m.gone.len()
+    loop i in 0.. and value in m.vals:
+        if i < ng and __at(m.gone, i): continue
+        result.push(value)
+    result
 
 clear[K, V] = (m: mut Map[K, V]):
     m.keys.clear()
