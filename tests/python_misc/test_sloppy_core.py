@@ -24,7 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
-    'constant-local-once',
+    'constant-local-once', 'numeric-sum-literal-exact',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
     'sequence-closures', 'sequence-slice-loop-snapshots',
     'dictionary-presence-argument-order', 'dictionary-optional-managed-payload',
@@ -293,6 +293,45 @@ let other:Pair=values return other[0]+other[1]}''',
 const base=1 const width=base+1
 let base=7 let values:array<int64 length=width>=[20 22]
 return values[0]+values[1]}''',
+    'numeric-sum-literal-integer': 'main=()=>sum([20 22])',
+    'numeric-sum-literal-exact': '''main=()=>{
+let result=sum([9007199254740993 1])
+let wide=sum([18446744073709551614 1])
+return if result=?9007199254740994 and wide=?18446744073709551615 42 else 1}''',
+    'numeric-array-unsigned-inference': '''first=<T>(values:array<T>)=>values[0]
+main=()=>{
+let a=[18446744073709551615 1] let b=[1 18446744073709551615]
+return if a[0]=?b[1] and first([18446744073709551615 0])=?18446744073709551615 42 else 1}''',
+    'numeric-sum-literal-bigint': '''main=()=>if sum([18446744073709551616 1])=?18446744073709551617 42 else 1''',
+    'numeric-sum-mixed-integer-elements': '''let calls=0
+next=():>int64=>{calls+=1 return 9007199254740993}
+main=()=>{
+let value=next()
+let a=sum([value 1]) let b=sum([1 value])
+let c=sum([next() 1]) let d=sum([1 next()])
+return if a=?9007199254740994 and b=?a and c=?a and d=?a and calls=?3 42 else 1}''',
+    'generic-array-literal-float-overload': '''choose=<T>(values:array<T>)=>42
+choose=(values:array<float64>)=>1
+main=()=>choose([20 22])''',
+    'generic-array-literal-nested-overload': '''choose=<T>(values:array<array<T>>)=>42
+choose=(values:array<array<float64>>)=>1
+main=()=>choose([[20 22]])''',
+    'generic-array-literal-concrete-overload': '''choose=<T>(values:array<T>)=>1
+choose=(values:array<uint8>)=>42
+main=()=>choose([20 22])''',
+    'generic-array-literal-float-specific': '''choose=<T>(values:array<T>)=>1
+choose=(values:array<float64>)=>42
+main=()=>choose([20.0 22.0])''',
+    'generic-array-mixed-float-specific': '''choose=<T>(values:array<T>)=>1
+choose=(values:array<float64>)=>42
+main=()=>{let floating=20.0 let integer=22
+return if choose([floating 22])=?42 and choose([22 floating])=?42
+and choose([integer 20.0])=?42 and choose([20.0 integer])=?42 42 else 1}''',
+    'generic-array-literal-empty-specific': '''choose=<T>(values:array<T>)=>1
+choose=(values:array<int64>)=>42
+main=()=>choose([])''',
+    'generic-array-literal-user-sum': '''sum=<T>(values:array<T>)=>17
+main=()=>sum([20 22])+25''',
     'numeric-bounded-remainder': '''probe=(bytes:array<uint8>):>int64=>{
 let word:int64=0
 loop round in [0..50) {loop byte in bytes {word=(word*131+(byte as int64))%1000000007}}
@@ -4191,6 +4230,7 @@ ERRORS = {
     'stored-range-no-start': ('main=()=>{let r=[..4] return 0}', 'stored range needs both endpoints'),
     'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
     'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
+    'numeric-array-unsigned-negative': ('main=()=>{let values=[-1 18446744073709551615] return 42}', 'does not fit in u64'),
     'array-context-variable-container': ('accept=(xs:array<uint64>)=>0\nmain=()=>{let xs=[42] return accept(xs)}', 'expects u64[]'),
     'array-context-variable-element': ('accept=(xs:array<uint8>)=>0\nmain=()=>{let x:int64=42 return accept([x])}', 'expects u8[]'),
     'bigint-literal-user-record': ('BigInt:type=[value:int64]\nmain=()=>{let value:BigInt=42 0}', 'type mismatch'),

@@ -999,11 +999,24 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 loop element in kids(a):
                     ep = et
                     if has_flag(element, NF_SPREAD): ep = mk_array(et)
+                    if types[prune(ep)].kind == .param:
+                        bound = binds[int(types[prune(ep)].id)]
+                        # Once another element determines T, charge its actual
+                        # conversion cost rather than a generic-parameter cost.
+                        if bound != 0 and not has_var(prune(bound)): ep = bound
                     r = 0
                     if has_flag(element, NF_SPREAD) and dewy_set_literal(element):
                         r = arg_cost(kid(element, 0), ep, binds)
                     else if has_flag(element, NF_SPREAD) and is_dewy_set_type(ntype(element)):
                         r = match_type(et, struct_targ(int(types[prune(ntype(element))].st), 0), binds, 0)
+                    else if types[prune(ep)].kind == .param and binds[int(types[prune(ep)].id)] == 0 and not ctx_dependent(element):
+                        # Inferring an array element is cheaper than changing
+                        # an integer to float. Literals wait for the whole array;
+                        # a typed element can supply T, in either source order.
+                        if is_lit(element): r = 1
+                        else:
+                            r = match_type(ep, ntype(element), binds, 1)
+                            if r >= 0: r += 1
                     else: r = arg_cost(element, ep, binds)
                     if r < 0: return -1
                     cost += r
@@ -5613,6 +5626,7 @@ check_expr = (n: int, expected: int) -> int:
             # (a generic parameter's T, not known yet: the elements say what it is)
             if elt != 0 and tkind(prune(elt)) == .var: elt = 0
             anyfloat = false
+            anyunsigned = false
             allchar = true
             spread = false
             loop i in [0..nkids(n)):
@@ -5630,12 +5644,14 @@ check_expr = (n: int, expected: int) -> int:
                 if not charlike(c): allchar = false
                 if is_lit(c):
                     if nodes[c].kind == .float_lit: anyfloat = true
+                    if lit_default(c) == T_U64: anyunsigned = true
                     # ([Kind.a, .b]: the first names the enum for the rest)
                     if elt == 0 and it != 0 and tkind(it) == .enum_: elt = it
                 else if elt == 0 and not charlike(c): elt = it
             if elt == 0:
                 if allchar: elt = T_STR
                 else if anyfloat: elt = T_FLOAT
+                else if anyunsigned: elt = T_U64
                 else: elt = T_INT
             # ([1, "two", 3]: an array holds one kind of value)
             coerce_hint = " (an array holds one kind of value, here {type_str(elt)}; for values of several kinds, make a struct or a union)"

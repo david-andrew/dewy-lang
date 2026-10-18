@@ -1598,3 +1598,20 @@ snapshot and exact-length checks. Individual leaf annotations remain unsupported
 The 769 focused checks pass in 12.73 seconds and again in 12.60 seconds after
 three independent C bootstrap generations. This focused increment relies on
 hosted CI for the full gate. See `const-unpack-*` audits.
+
+Integer array literals now prefer generic integer arithmetic over implicit
+floating conversion: `sum([9007199254740993 1])` returns the exact integer
+9007199254740994. Previously it returned 9007199254740992.0, while the same
+array stored in a variable summed correctly. Mixed literals, variables and
+function results behave consistently in either order. Concrete narrow overloads
+still accept fitting literals, and floating inputs retain floating overloads.
+Unconstrained machine-integer literal arrays can also infer `uint64` when a
+literal exceeds `int64.max`.
+
+The final focused gate passes 509 checks in 6.64 seconds after three independent
+C bootstrap generations; the quick suite passes 157 in 3.25 seconds. An earlier
+version passed 4,557 full checks before the mixed-element refinement; hosted CI
+runs the final full gate. Fresh compilation is similar across seven alternating
+pairs (tour 56.62/56.18 ms, default Netpong 370.26/366.13 ms, web Netpong
+197.73/197.55 ms, compiler 1820.50/1830.19 ms). These measurements include
+unrelated system load. See `literal-array-overloads-*` audits.
