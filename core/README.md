@@ -70,7 +70,11 @@ samples by default and paired CPU-time ratios. Approximate bootstrap intervals
 distinguish passing results, regressions and inconclusive noise; the latter two
 exit unsuccessfully. The 2% timing resolution is not a slowdown allowance to
 spend on successive features. Identical generated artifacts provide conclusive
-no-regression evidence without requiring their noisy timings to match.
+no-regression evidence without requiring their noisy timings to match. Native
+artifact comparison can mask the exact, equal-width compiler-bundle path prefix
+embedded in panic locations; all code, layout and remaining bytes must still
+match. The report retains raw hashes and masking details. This is evidence for
+unchanged workloads, not a requirement that language changes preserve binaries.
 
 The report keeps absolute throughput and each runtime/C ratio separate from
 the regression decision. `--require-targets` additionally requires 250k physical

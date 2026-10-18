@@ -687,7 +687,7 @@ gen_place = (e: int, write: bool) -> Place:
             idx = 0
             if write:
                 base = gen_place(a, true)
-                if not is_uniq_local(a): arr_unique(base, bt)
+                if not is_uniq_array(a): arr_unique(base, bt)
                 idx = gen_index(int(nodes[e].b))
                 arr = read_place(base, bt)
                 # re-read: evaluating the index cannot change the array place
@@ -5229,7 +5229,7 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
         if fp_calls and nodes[s].kind == .while_ and not calls_leave(int(nodes[s].a), rn, written): ok = false
         if not ok: continue
         at = prune(ntype(base))
-        if written and not is_uniq_local(base): arr_unique(gen_place(base, true), at)
+        if written and not is_uniq_array(base): arr_unique(gen_place(base, true), at)
         arr = vreg(VI)
         e_mov(arr, read_place(gen_place(base, false), at))
         n = arr_len(arr)
@@ -5349,8 +5349,88 @@ declared_in_scope = (l: int) -> bool:
 uq_end = (n: int):
     loop _ in [0..n): uniq_locals.pop()
 
-is_uniq_local = (e: int) -> bool:
-    nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and uniq_locals.contains(int(nodes[e].sym))
+# Closed-program array ownership. A global whose storage is always fresh and
+# never copied or exposed cannot require detaching at an element write. Keep
+# this separate from loop-local uniqueness: it holds across calls as well.
+uniq_globals: bool[]
+
+ug_fresh = (n: int, t: int) -> bool:
+    if n == 0: return true   # a typed, uninitialized array starts empty
+    if nodes[n].kind != .array: return false
+    nodes[n].b != 0 or nkids(n) == 0 or not all_const(n, int(types[prune(t)].elem))
+
+ug_scan = (n: int, ctx: int):
+    # 0: value can escape, 1: only its storage is inspected/changed,
+    # -1: an address or mutable argument can expose the containing storage.
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda: return  # checked bodies are scanned through fns
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)):
+            g = int(nodes[n].sym)
+            if ctx != 1 and g < uniq_globals.len(): uniq_globals[g] = false
+        else if nodes[n].aux == i32(int(SK.local)):
+            g = alias_global(int(nodes[n].sym))
+            if g >= 0 and g < uniq_globals.len(): uniq_globals[g] = false
+        return
+    if k == .index:
+        ug_scan(int(nodes[n].a), if ctx == -1: -1 else: if nodes[n].aux == 1: 0 else: 1)
+        ug_scan(int(nodes[n].b), 0)
+        return
+    if k == .addr:
+        ug_scan(int(nodes[n].a), -1)
+        return
+    if k == .assign:
+        a = int(nodes[n].a)
+        b = int(nodes[n].b)
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global)) and tkind(ntype(a)) == .array and ug_fresh(b, ntype(a)):
+            ug_scan(a, 1)
+        else: ug_scan(a, 0)
+        ug_scan(b, 0)
+        return
+    if k == .vardecl and has_flag(n, NF_ALIASDECL):
+        ug_scan(int(nodes[n].b), -1)
+        return
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if nkids(n) > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
+            ug_scan(kid(n, 0), if ctx == -1: -1 else: 1)
+            loop i in [1..nkids(n)): ug_scan(kid(n, i), 0)
+            return
+    ug_scan(int(nodes[n].a), if ctx == -1: -1 else: 0)
+    ug_scan(int(nodes[n].b), if ctx == -1: -1 else: 0)
+    if k != .for_:
+        ug_scan(int(nodes[n].c), if ctx == -1: -1 else: 0)
+        if k != .partial: ug_scan(int(nodes[n].d), if ctx == -1: -1 else: 0)
+    loop i in [0..nkids(n)):
+        arg = kid(n, i)
+        ug_scan(arg, if ctx == -1 or k == .call and has_flag(arg, NF_MUT): -1 else: 0)
+    loop i in [0..nkids2(n)): ug_scan(kid2(n, i), 0)
+
+find_unique_globals = (closed: bool):
+    uniq_globals.clear()
+    # Future interactive code can introduce copies. Late runtime helpers may
+    # reference prelude globals, so those are excluded from this closed world.
+    if not closed: return
+    uniq_globals.resize(globals.len())
+    any = false
+    loop g in global_ids:
+        if globals[g].state != 2 or globals[g].is_const or modules[int(globals[g].mod)].is_prelude: continue
+        t = prune(int(globals[g].type))
+        d = int(globals[g].decl)
+        if types[t].kind != .array or nkids(d) != 0: continue
+        if ug_fresh(int(nodes[d].b), t):
+            uniq_globals[g] = true
+            any = true
+    if not any: return
+    loop f in fns:
+        if f.state == 2: ug_scan(int(f.body), 0)
+
+is_uniq_array = (e: int) -> bool:
+    if nodes[e].kind != .ident: return false
+    r = int(nodes[e].sym)
+    if nodes[e].aux == i32(int(SK.local)): return uniq_locals.contains(r)
+    nodes[e].aux == i32(int(SK.global)) and r < uniq_globals.len() and uniq_globals[r]
 
 # a loop condition that is cheap to test twice and computes nothing the body could reuse:
 # comparisons of variables and literals (i < j, k != 0, done), and/or/not of those

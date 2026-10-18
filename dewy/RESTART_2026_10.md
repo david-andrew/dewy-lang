@@ -802,6 +802,45 @@ explicit throughput-program checksum check.
 [Samples and assessment](audits/2026-10-18/call-dispatch-rejected.json),
 [discarded compiler patch](audits/2026-10-18/call-dispatch-rejected.patch).
 
+## Unshared global array storage
+
+A closed-program scan now identifies global arrays initialized and subsequently
+rebound only to fresh writable storage, with no whole-array copies or exposure.
+Their indexed writes omit copy-on-write checks across calls. Element values can
+still be copied independently, including nested managed fields. Ordinary shared
+arrays retain detachment. Read-only constant arrays, destructured initializers,
+unknown assignments, mutable arguments, raw addresses, aliases, slices and whole
+array iteration conservatively disqualify the candidate. Watch/editor/REPL paths
+and prelude globals are excluded from this closed-world proof.
+
+The compiler benefits from its own analysis: its AST nodes and other private
+metadata arrays do not need repeated uniqueness checks. An independent C
+bootstrap produced the measured second-generation compiler. Nine alternating
+pairs against the fixed reference measured **0.9818** CPU ratio on the large
+Dewy default build, **0.9812** on Netpong, **0.9814** on Dunes and **0.9595** on
+the fixed compiler self-build. Tour passed a 23-pair recheck at **0.9798**.
+The large release build remained noisy on CPU 2, whose sibling also had heavy
+background work; a separate 23-pair comparison on CPU 1 passed at **0.9621**,
+with an approximate interval of 0.925–1.009. Both compilers ran on the same CPU
+within each comparison. The initial and follow-up samples are retained.
+
+All twelve native runtime artifact pairs are byte-identical after masking only
+equal-width compiler bundle paths embedded in panic locations. Raw hashes,
+masked hashes, path lengths and occurrence counts are recorded. This establishes
+unchanged generated code for those kernels despite noisy timings; it is neither
+a runtime speedup claim nor a requirement to preserve binaries on later changes.
+The stage gate now recognizes this evidence. The initial run still measured
+only about **66k physical root Dewy lines/s** under that host load, well short of
+the 250k goal. Absolute results are not compared across host-load conditions.
+[Stage samples, artifact evidence and final assessment](audits/2026-10-18/unique-global-arrays.json).
+
+Validation includes fresh-storage writes, callback copies, constant rebinding,
+slice-bound and iteration snapshots, mutable rebinding, destructuring and nested
+managed element copies. The C-bootstrapped compiler passed 3,808 selected value,
+rejection and upstream tests in 22.04 seconds, followed by 224 smoke checks in
+5.13 seconds. The complete suite then passed **5,817 tests in 163.44 seconds**
+with two workers, including the new native/web cases in default and release modes.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

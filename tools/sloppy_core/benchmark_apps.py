@@ -28,6 +28,21 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def artifact_identity(path: Path, compiler: Path) -> dict:
+    """Keep the raw hash and isolate embedded toolchain paths without moving bytes.
+
+    Native benchmark inputs are identical between variants. Their panic locations
+    embed the compiler bundle's absolute path; masking only that exact prefix
+    permits byte-for-byte comparison of all code, layout and other data.
+    """
+    data = path.read_bytes()
+    prefix = str(compiler.resolve().parent.parent).encode()
+    return {'binary_sha256': hashlib.sha256(data).hexdigest(),
+            'bundle_path': prefix.decode(), 'bundle_path_bytes': len(prefix),
+            'occurrences': data.count(prefix),
+            'masked_sha256': hashlib.sha256(data.replace(prefix, b'\0' * len(prefix))).hexdigest()}
+
+
 def prepare_source(name: str, directory: Path) -> Path:
     """Adapt only the platform harness and the old pointer-sized index spelling."""
     source = directory / f'{name}.dewy'
@@ -196,6 +211,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'build_seconds': builds,
                 'binary_sha256': {label: digest(binary) for label, binary in binaries.items()},
                 'binary_bytes': {label: binary.stat().st_size for label, binary in binaries.items()},
+                'artifact_identity': {label: artifact_identity(binaries[label], compilers[compiler])
+                                      for label, (compiler, _) in variants.items()} if target == 'native' else {},
                 'runner_sha256': {label: digest(runner) for label, runner in runners.items()},
                 'artifact_kind': {label: 'html' if label in runners else 'native' for label in binaries},
                 'samples': measured, 'median_kernel_ms': medians,

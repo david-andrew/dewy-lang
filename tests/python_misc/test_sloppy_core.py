@@ -5365,6 +5365,68 @@ loop i in [0,3..empty.length) {return empty[i]}
 return if sum =? 42 and saved =? [0 1 2 3 4 5 6 7 8 9]
 and record.values =? [10 22 30 42] and record_saved.values =? [10 20 30 40] 42 else 1
 }''',
+    'global-array-fresh-storage': """Cell:type=[value:int64]
+let cells=[Cell(10)]
+let counts:array<int64>=[]
+mutate=()=>{cells[0].value+=1 counts[0]+=2}
+main=()=>{
+counts.push(3)
+mutate() mutate()
+if cells[0].value not=?12 or counts[0] not=?7 return 1
+cells=[Cell(20)] counts=[] counts.push(4)
+mutate()
+return if cells[0].value=?21 and counts[0]=?6 42 else 1
+}""",
+    'global-array-callback-snapshot': """Cell:type=[value:int64]
+let cells=[Cell(10)]
+mutate=()=>{cells[0].value=99}
+main=()=>{
+let saved=cells
+let callback=()=>{mutate()}
+callback()
+return if saved[0].value=?10 and cells[0].value=?99 42 else 1
+}""",
+    'global-array-static-rebinding': """let values:array<int64>=[]
+replace=()=>{values=[10 20]}
+main=()=>{
+values.push(1) replace() values[0]+=1
+return if values[0]=?11 and values[1]=?20 42 else 1
+}""",
+    'global-array-slice-snapshot': """Cell:type=[value:int64]
+let cells=[Cell(10) Cell(20)]
+change=()=>{cells[0].value=99 return 1}
+main=()=>{
+let saved=cells[0..change())
+return if saved[0].value=?10 and cells[0].value=?99 42 else 1
+}""",
+    'global-array-iteration-snapshot': """Cell:type=[value:int64]
+let cells=[Cell(10) Cell(20)]
+change=()=>{cells[1].value=99}
+main=()=>{
+let sum:int64=0
+loop cell in cells {sum+=cell.value change()}
+return if sum=?30 and cells[1].value=?99 42 else 1
+}""",
+    'global-array-mutable-rebinding': """Cell:type=[value:int64]
+let cells=[Cell(10)]
+let other=[Cell(20)]
+replace=(@target:array<Cell>)=>{target=other}
+main=()=>{
+replace(@cells) cells[0].value=99
+return if cells[0].value=?99 and other[0].value=?20 42 else 1
+}""",
+    'global-array-destructured-storage': """let [values other]=[[10 20] [30 40]]
+main=()=>{
+values[0]+=1 other[0]+=2
+return if values[0]=?11 and other[0]=?32 42 else 1
+}""",
+    'global-array-nested-element-copy': """Cell:type=[values:array<int64>]
+let cells=[Cell([10 20])]
+main=()=>{
+let saved=cells[0]
+cells[0].values[0]+=1
+return if saved.values[0]=?10 and cells[0].values[0]=?11 42 else 1
+}""",
     'sequence-nested-field-paths': '''Inner:type=[values:array<int64>]
 Outer:type=[left:Inner right:Inner]
 main=()=>{
@@ -9768,7 +9830,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('global-array-', 'closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

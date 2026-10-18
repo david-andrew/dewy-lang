@@ -366,6 +366,18 @@ def test_core_performance_gate_does_not_ratchet_or_claim_absolute_target():
         f'{label}-{mode}': 'same-artifact' for label in ('reference', 'previous', 'candidate')
         for mode in ('default', 'release')}
     assert assess(compilation, runtime, ['reference', 'previous'], 44005)['no_regression']
+    workload = runtime['workloads']['kernel']
+    workload['binary_sha256'] = {}
+    workload['artifact_identity'] = {
+        f'{label}-{mode}': {'masked_sha256': 'same-code', 'bundle_path_bytes': 80, 'occurrences': 9}
+        for label in ('reference', 'previous', 'candidate') for mode in ('default', 'release')}
+    assert assess(compilation, runtime, ['reference', 'previous'], 44005)['no_regression']
+    candidate = workload['artifact_identity']['candidate-default']
+    for field, value in [('masked_sha256', 'different-code'), ('bundle_path_bytes', 81), ('occurrences', 8)]:
+        saved = candidate[field]
+        candidate[field] = value
+        assert not assess(compilation, runtime, ['reference', 'previous'], 44005)['no_regression']
+        candidate[field] = saved
 
 
 @pytest.mark.parametrize('change', ['binary', 'modified', 'missing', 'extra'])
@@ -395,3 +407,25 @@ def test_core_performance_gate_rejects_changed_toolchain(tmp_path, change):
         (tmp_path / 'lib/extra.jo').write_bytes(b'extra')
     with pytest.raises(ValueError):
         toolchain_identity(binary)
+
+
+def test_core_performance_artifact_masks_only_bundle_path(tmp_path):
+    from tools.sloppy_core.benchmark_apps import artifact_identity
+
+    binaries = []
+    for name in ('first', 'other'):
+        compiler = tmp_path / name / 'bin/core'
+        artifact = tmp_path / name / 'program'
+        artifact.parent.mkdir()
+        prefix = str(compiler.parent.parent).encode()
+        artifact.write_bytes(b'code\0' + prefix + b'/lib/rt.jo:42\0data')
+        binaries.append((artifact, compiler))
+    before, after = [artifact_identity(*pair) for pair in binaries]
+    assert before['binary_sha256'] != after['binary_sha256']
+    assert before['masked_sha256'] == after['masked_sha256']
+    assert before['occurrences'] == after['occurrences'] == 1
+    artifact, compiler = binaries[1]
+    artifact.write_bytes(artifact.read_bytes().replace(b'data', b'else'))
+    assert artifact_identity(artifact, compiler)['masked_sha256'] != before['masked_sha256']
+    artifact.write_bytes(artifact.read_bytes().replace(b'code', b'longer code'))
+    assert artifact_identity(artifact, compiler)['masked_sha256'] != before['masked_sha256']

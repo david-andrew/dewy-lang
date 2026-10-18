@@ -88,6 +88,16 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                 if hashes.get(f'candidate-{mode}') and hashes.get(f'candidate-{mode}') == hashes.get(f'{reference}-{mode}'):
                     comparison['status'] = 'pass'
                     comparison['evidence'] = 'identical generated artifact; timing variation cannot be a code regression'
+                else:
+                    artifacts = workload.get('artifact_identity', {})
+                    left = artifacts.get(f'{reference}-{mode}', {})
+                    right = artifacts.get(f'candidate-{mode}', {})
+                    if (left.get('masked_sha256') and left['masked_sha256'] == right.get('masked_sha256')
+                            and left.get('bundle_path_bytes') == right.get('bundle_path_bytes')
+                            and left.get('occurrences', 0) > 0 and left['occurrences'] == right.get('occurrences')):
+                        comparison['status'] = 'pass'
+                        comparison['evidence'] = ('identical generated artifact except equal-width compiler bundle '
+                                                  'paths; all code, layout and other data are byte-identical')
                 comparisons[f'runtime/{name}/{mode}/{reference}'] = comparison
     throughput = lines / statistics.median(compilation['workloads']['throughput-default']['cpu_seconds']['candidate'])
     c_ratios = {name: statistics.median(row['kernel_ns'] for row in workload['samples']['candidate-release']) /
