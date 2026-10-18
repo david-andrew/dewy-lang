@@ -429,3 +429,78 @@ def test_core_performance_artifact_masks_only_bundle_path(tmp_path):
     assert artifact_identity(artifact, compiler)['masked_sha256'] != before['masked_sha256']
     artifact.write_bytes(artifact.read_bytes().replace(b'code', b'longer code'))
     assert artifact_identity(artifact, compiler)['masked_sha256'] != before['masked_sha256']
+
+
+@pytest.mark.parametrize('count', [2, 3, 7])
+def test_core_benchmark_balances_variant_positions(count):
+    from collections import Counter
+
+    from tools.sloppy_core.benchmark_compile import sample_order
+    labels = [str(i) for i in range(count)]
+    orders = [sample_order(labels, sample) for sample in range(2 * count)]
+    assert all(sorted(order) == labels for order in orders)
+    for position in range(count):
+        assert Counter(order[position] for order in orders) == Counter({label: 2 for label in labels})
+
+
+def test_core_benchmark_reuses_only_equivalent_artifacts():
+    from tools.sloppy_core.benchmark_apps import artifact_representatives
+    base = {'binary_sha256': 'raw', 'masked_sha256': 'code', 'bundle_path_bytes': 80, 'occurrences': 3}
+    artifacts = {'reference': base, 'same_raw': {**base, 'binary_sha256': 'raw'},
+                 'same_code': {**base, 'binary_sha256': 'different'},
+                 'changed_code': {**base, 'binary_sha256': 'other', 'masked_sha256': 'new'},
+                 'changed_width': {**base, 'binary_sha256': 'other2', 'bundle_path_bytes': 81},
+                 'missing_identity': {}}
+    assert artifact_representatives(artifacts) == {'same_raw': 'reference', 'same_code': 'reference'}
+
+
+@pytest.mark.parametrize('bad_duplicate', [False, True])
+def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, bad_duplicate):
+    from collections import Counter
+
+    from tools.sloppy_core import benchmark_apps as apps
+
+    compilers = {}
+    for label in ('first', 'other'):
+        compiler = tmp_path / label / 'bin/core'
+        compiler.parent.mkdir(parents=True)
+        compiler.write_bytes(b'compiler')
+        compilers[label] = compiler
+
+    def fake_run(command, _env):
+        if '--version' in command:
+            return 'test C compiler', 0.0
+        binary = Path(command[command.index('-o') + 1])
+        if 'build' in command:
+            prefix = str(Path(command[0]).parent.parent).encode()
+            binary.write_bytes(b'code\0' + prefix + b'/lib/rt.jo\0data')
+        else:
+            binary.write_bytes(b'C code')
+        return '', 0.0
+
+    executed = Counter()
+
+    def fake_execute(command, count, _env):
+        label = Path(command[0]).name.removeprefix('arrays-')
+        executed[label, count] += 1
+        checksum = count
+        if bad_duplicate and label == 'other' and count == 99:
+            checksum += 1
+        return checksum, {'kernel_ns': 100, 'wall_seconds': 0.001}
+
+    monkeypatch.setattr(apps, 'run', fake_run)
+    monkeypatch.setattr(apps, 'execute', fake_execute)
+    if bad_duplicate:
+        with pytest.raises(RuntimeError, match='checksum|expected'):
+            apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True)
+        assert executed['other', 99] == 1
+        return
+    report = apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True)
+    workload = report['workloads']['arrays']
+    assert workload['timing_reused_from'] == {'other': 'first'}
+    assert workload['samples']['other'] == workload['samples']['first']
+    for label in ('first', 'other', 'c'):
+        for count in (0, 1, 17, 1000):
+            assert executed[label, count] == 1
+    assert executed['first', 99] == executed['c', 99] == 8
+    assert executed['other', 99] == 1

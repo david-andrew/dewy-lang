@@ -26,6 +26,7 @@ from tools.sloppy_core.benchmark_types import record_source
 QUICK_CASES = {
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'sequence-value-protocol-nesting',
+    'sequence-slice-bound-loop-local',
     'closure-copy-private', 'closure-explicit-shared', 'closure-copy-cleanup',
     'closure-capture-parameters',
     'closure-argument-container-values',
@@ -5365,6 +5366,47 @@ loop i in [0,3..empty.length) {return empty[i]}
 return if sum =? 42 and saved =? [0 1 2 3 4 5 6 7 8 9]
 and record.values =? [10 22 30 42] and record_saved.values =? [10 20 30 40] 42 else 1
 }''',
+    'sequence-slice-bound-loop-local': """main=()=>{
+let xs=[10 20]
+loop step in [0..2) {
+    let snapshot=xs[0..({xs[0]+=1; 1}))
+    if snapshot[0] not=?10+step return 1
+}
+return 42
+}""",
+    'sequence-slice-bound-loop-global': """let xs:array<int64>=[]
+main=()=>{
+xs.push(10) xs.push(20)
+loop step in [0..2) {
+    let snapshot=xs[0..({xs[0]+=1; 1}))
+    if snapshot[0] not=?10+step return 1
+}
+return 42
+}""",
+    'sequence-slice-bound-loop-field': """main=()=>{
+let record=[xs=[10 20]]
+let step=0
+loop step<?2 {
+    let snapshot=record.xs[0..({record.xs[0]+=1; 1}))
+    if snapshot[0] not=?10+step return 1
+    step+=1
+}
+return 42
+}""",
+    'global-array-growth-operations': """let values:array<int64>=[]
+main=()=>{
+values.reserve(16)
+loop i in [0..8) {values.push(i) values[0]+=1}
+values.insert(1 99)
+if values.remove(1) not=?99 return 1
+if values.pop() not=?7 return 2
+values.extend([20 22])
+if values[7]+values[8] not=?42 return 3
+values.truncate(4) values.resize(6)
+if values.length not=?6 or values[4] not=?0 or values[5] not=?0 return 4
+values.clear() values.push(42)
+return values[0]
+}""",
     'global-array-fresh-storage': """Cell:type=[value:int64]
 let cells=[Cell(10)]
 let counts:array<int64>=[]

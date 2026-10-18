@@ -92,9 +92,7 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                     artifacts = workload.get('artifact_identity', {})
                     left = artifacts.get(f'{reference}-{mode}', {})
                     right = artifacts.get(f'candidate-{mode}', {})
-                    if (left.get('masked_sha256') and left['masked_sha256'] == right.get('masked_sha256')
-                            and left.get('bundle_path_bytes') == right.get('bundle_path_bytes')
-                            and left.get('occurrences', 0) > 0 and left['occurrences'] == right.get('occurrences')):
+                    if benchmark_apps.equivalent_artifact(left, right):
                         comparison['status'] = 'pass'
                         comparison['evidence'] = ('identical generated artifact except equal-width compiler bundle '
                                                   'paths; all code, layout and other data are byte-identical')
@@ -169,7 +167,8 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int) -> d
                 'netpong-default', 'dunes-default', 'compiler-reference'], samples, 1, validate)
             report['compilation']['validated_outputs'] = checked_outputs
             report['runtime'] = benchmark_apps.measure(compilers, list(benchmark_apps.COUNTS),
-                                                       samples, 'cc', clock='thread-cpu', mode='both')
+                                                       samples, 'cc', clock='thread-cpu', mode='both',
+                                                       reuse_identical_artifacts=True)
             report['assessment'] = assess(report['compilation'], report['runtime'], references,
                                            len(source.read_text().splitlines()))
     finally:

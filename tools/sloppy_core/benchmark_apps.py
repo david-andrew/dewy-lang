@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from tools.sloppy_core.benchmark_compile import positive
+from tools.sloppy_core.benchmark_compile import positive, sample_order
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ROOT / 'dewy/benchmarks/apps'
@@ -41,6 +41,27 @@ def artifact_identity(path: Path, compiler: Path) -> dict:
             'bundle_path': prefix.decode(), 'bundle_path_bytes': len(prefix),
             'occurrences': data.count(prefix),
             'masked_sha256': hashlib.sha256(data.replace(prefix, b'\0' * len(prefix))).hexdigest()}
+
+
+def equivalent_artifact(left: dict, right: dict) -> bool:
+    if left.get('binary_sha256') and left['binary_sha256'] == right.get('binary_sha256'):
+        return True
+    return bool(left.get('masked_sha256') and left['masked_sha256'] == right.get('masked_sha256')
+                and left.get('bundle_path_bytes') == right.get('bundle_path_bytes')
+                and left.get('occurrences', 0) > 0 and left['occurrences'] == right.get('occurrences'))
+
+
+def artifact_representatives(identities: dict[str, dict]) -> dict[str, str]:
+    representatives = []
+    reused = {}
+    for label, identity in identities.items():
+        representative = next((other for other in representatives
+                               if equivalent_artifact(identity, identities[other])), None)
+        if representative is None:
+            representatives.append(label)
+        else:
+            reused[label] = representative
+    return reused
 
 
 def prepare_source(name: str, directory: Path) -> Path:
@@ -96,7 +117,7 @@ def execute(binary: Path | list[str | Path], count: int, env: dict) -> tuple[int
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release',
-            target: str = 'native', node: str = 'node') -> dict:
+            target: str = 'native', node: str = 'node', reuse_identical_artifacts: bool = False) -> dict:
     if target == 'wasm' and clock != 'wall':
         raise ValueError('WebAssembly benchmarks require --clock wall; the thread CPU clock uses native syscalls')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
@@ -126,6 +147,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'samples': samples,
         'kernel_clock': clock,
         'warmups_per_binary': 1,
+        'reuse_identical_artifacts': reuse_identical_artifacts,
+        'sample_order': 'Rotating positions and direction; identical artifacts share explicitly labeled samples when enabled.',
         'mode': mode,
         'core_flags': [*target_flags, *([] if mode == 'default' else ['--release'])] if mode != 'both' else None,
         'target': target,
@@ -181,6 +204,9 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                     commands[label] = [node, runner]
                     binaries[label] = artifact
             _, builds['c'] = run([cc, '-O2', c_source, '-o', binaries['c']], env)
+            identities = {label: artifact_identity(binaries[label], compilers[compiler])
+                          for label, (compiler, _) in variants.items()} if target == 'native' else {}
+            reused = artifact_representatives(identities) if reuse_identical_artifacts else {}
             checksums = {}
             # Fast boundary/small-input comparison before the expensive measurements.
             for size in [0, 1, 17, 1000]:
@@ -193,7 +219,10 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             labels = list(binaries)
             checksum = None
             for sample in range(samples + 1):
-                order = labels if sample % 2 == 0 else labels[::-1]
+                # Every binary runs at full size once, even when its later timings
+                # can be shared with a byte-equivalent representative.
+                timed = [label for label in labels if sample == 0 or label not in reused]
+                order = sample_order(timed, sample)
                 for label in order:
                     actual, timing = execute(commands[label], size, env)
                     if checksum is None:
@@ -202,6 +231,9 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                         raise RuntimeError(f'{name} {label} count={size}: expected {checksum}, got {actual}')
                     if sample:
                         measured[label].append(timing)
+                if sample:
+                    for label, representative in reused.items():
+                        measured[label].append(measured[representative][-1].copy())
             medians = {label: statistics.median(row['kernel_ns'] for row in rows) / 1e6
                        for label, rows in measured.items()}
             result['workloads'][name] = {
@@ -211,8 +243,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'build_seconds': builds,
                 'binary_sha256': {label: digest(binary) for label, binary in binaries.items()},
                 'binary_bytes': {label: binary.stat().st_size for label, binary in binaries.items()},
-                'artifact_identity': {label: artifact_identity(binaries[label], compilers[compiler])
-                                      for label, (compiler, _) in variants.items()} if target == 'native' else {},
+                'artifact_identity': identities,
+                'timing_reused_from': reused,
                 'runner_sha256': {label: digest(runner) for label, runner in runners.items()},
                 'artifact_kind': {label: 'html' if label in runners else 'native' for label in binaries},
                 'samples': measured, 'median_kernel_ms': medians,
@@ -220,7 +252,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                                         for label, rows in measured.items()},
             }
             print(name + f' ({clock} kernel): ' + ', '.join(
-                f'{label} {ms:.2f} ms' for label, ms in medians.items()), flush=True)
+                f'{label} {ms:.2f} ms' + (f' (same artifact as {reused[label]})' if label in reused else '')
+                for label, ms in medians.items()), flush=True)
     result['load_average_end'] = os.getloadavg()
     return result
 

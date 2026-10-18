@@ -841,6 +841,48 @@ rejection and upstream tests in 22.04 seconds, followed by 224 smoke checks in
 5.13 seconds. The complete suite then passed **5,817 tests in 163.44 seconds**
 with two workers, including the new native/web cases in default and release modes.
 
+## Slice snapshots inside loops and shorter performance validation
+
+A slice retains its source before evaluating its bounds. The older loop analyses
+incorrectly treated that source as an ordinary indexed read. For example,
+`xs[0..({xs[0]+=1; 1}))` inside a loop could change the retained source instead
+of detaching, so the slice contained the new first element. The fixed reference
+and preceding compiler both reproduced this error in default and release modes.
+Both loop analyses now count a slice source as an escaping value. New tests cover
+locals, globals and nested record fields, on native and web backends.
+
+A separate experiment used existing uniqueness proofs to remove checks from
+push, pop, insert, remove, clear, reserve, resize and extend. Its incremental
+compilation benefit was small (roughly 1%), with several inconclusive comparisons
+on the busy host. That optimization was discarded; the independent correctness
+fix and mutation tests remain. The patch below contains only the discarded
+intrinsic changes, relative to the retained slice fix.
+[Rejected measurements](audits/2026-10-18/array-growth-rejected.json),
+[discarded patch](audits/2026-10-18/array-growth-rejected.patch).
+
+Performance validation now groups identical native artifacts before timing.
+Every binary still receives boundary checks and one full-size checksum check;
+only repeated timing samples are shared, explicitly labeled by
+`timing_reused_from`. The six-kernel live check reduced the timing representatives
+from seven to three per kernel, without sharing samples across separate runs.
+Three-or-more-variant comparisons also rotate sampling positions, so one
+compiler does not always occupy the middle of a round. Unit checks verify both
+position balancing and that a bad full-size result in an otherwise identical
+binary still fails validation.
+
+The retained slice fix passed **3,840 selected value/rejection/upstream checks**
+in 40.53 seconds; an independent C bootstrap passed **232 smoke checks** in
+12.66 seconds. The performance-tool tests passed **55 checks** in 1.78 seconds.
+A Linux guard-page pilot for the next string-comparison work also passes with
+the current scalar implementation in default and release modes.
+Thirteen rotating compilation samples passed against the fixed reference and
+preceding stage, with one release/previous comparison resolved by a 23-pair
+recheck (median ratio 0.997, approximate interval 0.979–1.008). All twelve
+candidate runtime artifacts match both references apart from bundle paths.
+The small-count artifact-grouping check is not used to claim runtime speed or
+absolute target attainment.
+[Validation and performance evidence](audits/2026-10-18/loop-slice-snapshots.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

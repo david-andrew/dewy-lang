@@ -5078,7 +5078,9 @@ fp_scan = (n: int, ctx: int):
     if k == .index:
         base = int(nodes[n].a)
         if lpath_key(base) != 0 and tkind(ntype(base)) == .array: fp_bases.push(base)
-        fp_scan(base, 1)
+        # A slice retains its source while its bounds run; writes in those
+        # bounds must still detach, including when the slice is inside a loop.
+        fp_scan(base, if nodes[n].aux == 1: 0 else: 1)
         fp_scan(int(nodes[n].b), 0)
         loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
         return
@@ -5281,7 +5283,7 @@ uq_scan = (n: int, ctx: int):
             else if ctx == 0: uq_escaped.push(int(nodes[n].sym))
         return
     if k == .index:
-        uq_scan(int(nodes[n].a), 1)
+        uq_scan(int(nodes[n].a), if nodes[n].aux == 1: 0 else: 1)
         uq_scan(int(nodes[n].b), 0)
         return
     if k == .field:

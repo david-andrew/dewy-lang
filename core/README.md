@@ -75,6 +75,13 @@ artifact comparison can mask the exact, equal-width compiler-bundle path prefix
 embedded in panic locations; all code, layout and remaining bytes must still
 match. The report retains raw hashes and masking details. This is evidence for
 unchanged workloads, not a requirement that language changes preserve binaries.
+The stage gate measures one representative of each identical native artifact
+class. Every binary still runs the boundary checks and one full-size checksum
+check; `timing_reused_from` identifies samples supplied by the representative.
+Different code always receives its own measurements. No timings are reused from
+an earlier run. With three or more measured variants, sampling rotates their
+positions as well as reversing direction, so one compiler is not always in the
+middle of each round.
 
 The report keeps absolute throughput and each runtime/C ratio separate from
 the regression decision. `--require-targets` additionally requires 250k physical

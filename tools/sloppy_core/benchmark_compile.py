@@ -39,6 +39,15 @@ WORKLOADS = {
 }
 
 
+def sample_order(labels: list[str], sample: int) -> list[str]:
+    """Balance positions as well as direction when comparing three or more variants."""
+    if len(labels) <= 2:
+        return labels[:] if sample % 2 == 0 else labels[::-1]
+    offset = sample % len(labels)
+    order = labels[offset:] + labels[:offset]
+    return order if sample // len(labels) % 2 == 0 else order[::-1]
+
+
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             workers: int, validate: Callable[[str, str, Path], bool] | None = None) -> dict:
     # Source generators and CLI validators are also imported by Windows tests;
@@ -58,6 +67,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'workers': workers,
         'samples': samples,
         'warmups_per_compiler': 1,
+        'sample_order': 'Alternating for two variants; rotating positions and direction for three or more.',
         'cpu_time_definition': 'User + system CPU seconds for the compiler and its waited-for children; '
                                'may exceed wall time with multiple emission workers.',
         'compilers': {label: {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -80,7 +90,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                     artifact = artifact.with_suffix('.html')
             labels = list(compilers)
             for sample in range(samples + 1):
-                order = labels if sample % 2 == 0 else labels[::-1]
+                order = sample_order(labels, sample)
                 for label in order:
                     cpu_before = resource.getrusage(resource.RUSAGE_CHILDREN)
                     started = time.perf_counter()

@@ -1,0 +1,109 @@
+--- a/core/compiler/lower.jo
++++ b/core/compiler/lower.jo
+@@ -2396,7 +2396,7 @@
+             blk()
+             slow = ctl
+             brif_to(e_bin(.eq, VI, p, e_iconst(0)), slow)
+-            brif_to(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)), slow)
++            if not is_uniq_array(args[0]): brif_to(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)), slow)
+             n = hdr_load(p, 8)
+             brif_to(e_bin(.ges, VI, n, hdr_load(p, 16)), slow)
+             hdr_store(p, 8, e_addi(n, 1))
+@@ -2406,7 +2406,7 @@
+             # slow path: copy if shared, then grow
+             was = ir_cold
+             ir_cold = true
+-            write_place(pl, at, e_call(lf_helper(.arruniq, at, 0), [read_place(pl, at)], VI))
++            if not is_uniq_array(args[0]): write_place(pl, at, e_call(lf_helper(.arruniq, at, 0), [read_place(pl, at)], VI))
+             sa = place_addr(pl, at)
+             e_mov(slotp, e_call(rt("__arr_push_slot"), [sa, e_iconst(esz)], VI))
+             ir_cold = was
+@@ -2431,7 +2431,7 @@
+         at = prune(ntype(args[0]))
+         et = int(types[at].elem)
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         p = read_place(pl, at)
+         n = arr_len(p)
+         iff(e_bin(.eq, VI, n, e_iconst(0)))
+@@ -2456,7 +2456,7 @@
+         val = gen_owned(args[2])
+         idx = gen_expr(args[1]).v
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         sa = place_addr(pl, at)
+         slotp = e_call(rt("__arr_insert_slot"), [sa, e_iconst(tsize(et)), idx], VI)
+         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+@@ -2468,7 +2468,7 @@
+         sz = tsize(et)
+         idx = gen_expr(args[1]).v
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         p = read_place(pl, at)
+         bounds_check(p, idx, nodes[e].pos)
+         ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, idx, e_iconst(sz)))
+@@ -2485,7 +2485,8 @@
+         pl = gen_place(args[0], true)
+         p = read_place(pl, at)
+         iff(e_bin(.ne, VI, p, e_iconst(0)))
+-        iff(e_bin(.eq, VI, hdr_load(p, 0), e_iconst(1)))
++        unique = is_uniq_array(args[0])
++        if not unique: iff(e_bin(.eq, VI, hdr_load(p, 0), e_iconst(1)))
+         # unique: drop the elements but keep the storage
+         if is_managed(et):
+             n = hdr_load(p, 8)
+@@ -2502,10 +2503,11 @@
+             endc()
+             endc()
+         hdr_store(p, 8, e_iconst(0))
+-        els()
+-        release(p, at)
+-        write_place(pl, at, e_iconst(0))
+-        endc()
++        if not unique:
++            els()
++            release(p, at)
++            write_place(pl, at, e_iconst(0))
++            endc()
+         endc()
+         return V(-1, false)
+     if id == .extend:
+@@ -2550,7 +2552,7 @@
+             if is_managed(et): cnt = arr_len(ys.v)
+             if is_slice(args[1]): stmt_end()
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         sa = place_addr(pl, at)
+         first = 0
+         if sliced: first = e_call(rt("__arr_extend_raw"), [sa, data, cnt, e_iconst(esz)], VI)
+@@ -2573,7 +2575,7 @@
+         at = prune(ntype(args[0]))
+         n = gen_expr(args[1]).v
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         sa = place_addr(pl, at)
+         e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), n], -1)
+         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+@@ -2583,7 +2585,7 @@
+         et = int(types[at].elem)
+         n = gen_expr(args[1]).v
+         pl = gen_place(args[0], true)
+-        arr_unique(pl, at)
++        if not is_uniq_array(args[0]): arr_unique(pl, at)
+         # (elements past an array's length are not zeroed: for elements that hold references
+         # the new ones are zeroed, as the stores that write them drop what they replace)
+         if id == .setlen and not is_managed(et):
+@@ -2627,7 +2629,7 @@
+         at = prune(ntype(a0))
+         if types[at].kind == .array and nodes[a0].kind == .ident and data_writable(a0):
+             pl = gen_place(a0, true)
+-            arr_unique(pl, at)
++            if not is_uniq_array(args[0]): arr_unique(pl, at)
+         p = gen_borrowed(args[0]).v
+         r = vreg(VI)
+         e_mov(r, e_iconst(0))
