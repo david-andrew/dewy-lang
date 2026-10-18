@@ -636,7 +636,7 @@ type_str_in = (t0: int, dewy: bool) -> str:
             if structs[si].union_ or structs[si].soa_: return nm
             if dewy and nm == "Map" and int(structs[si].ntargs) == 2:
                 return "dict<{type_str(struct_targ(si, 0), true)} {type_str(struct_targ(si, 1), true)}>"
-            if nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0), dewy)}[,]"
+            if not dewy and nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0), false)}[,]"
             if nm == "Map" and int(structs[si].ntargs) == 2: return "\{{type_str(struct_targ(si, 0), dewy)}: {type_str(struct_targ(si, 1), dewy)}}"
             s = nm
             if int(structs[si].ntargs) > 0:

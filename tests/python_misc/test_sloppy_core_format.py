@@ -59,6 +59,13 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'matrix-slices': '''main=()=>{
+let m=reshape([1 2 3 4 5 6] 2 3)
+let part:NDArray<int64>=m[[0..end] [1..end]]
+m[[..] end]=[20 22]
+printl(part.data) printl(m.data) printl(m[0 [0..end+1)].data)
+return 0
+}''',
     'unpack-leaf-types': 'main=()=>{const [x:int64 y:float64]=[20 22] printl(x+y) return 0}',
     'record-spread': 'main=()=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y) return 0}',
     'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64> printl(f(42)) return 0}',

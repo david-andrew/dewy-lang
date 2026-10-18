@@ -294,6 +294,15 @@ let other:Pair=values return other[0]+other[1]}''',
 const base=1 const width=base+1
 let base=7 let values:array<int64 length=width>=[20 22]
 return values[0]+values[1]}''',
+    'numeric-matrix-annotations': '''identity=(m:NDArray<float64>):>NDArray<float64>=>m
+main=()=>{
+let original=zeros(2 3) let copied=identity(original)
+copied[1 2]=42.0
+assert(sum(original) =? 0.0 and sum(copied) =? 42.0)
+let boxed:array<NDArray<float64>>=[original copied]
+let maybe:NDArray<float64>?=boxed[1]
+if maybe is? none return 1
+return maybe[1 2] as int64}''',
     'numeric-matrix-end': '''main=()=>{
 let m=reshape([1 2 3 4 5 6] 2 3)
 assert(m[end end] =? 6 and m[0 end] =? 3 and m[end 0] =? 4)
