@@ -665,6 +665,11 @@ __arr_push_slot = (slot: **u8, es: int) -> *u8:
 __arr_extend = (slot: **u8, src: *u8, es: int) -> *u8:
     n = 0
     if src != null: n = (src as *int)[1]
+    __arr_extend_raw(slot, src + 24, n, es)
+
+# The caller retains the source and checks its bounds before obtaining the
+# destination. This also accepts inline array storage and avoids a slice copy.
+__arr_extend_raw = (slot: **u8, data: *u8, n: int, es: int) -> *u8:
     old = 0
     if slot[0] != null: old = (slot[0] as *int)[1]
     if n == 0:
@@ -672,7 +677,7 @@ __arr_extend = (slot: **u8, src: *u8, es: int) -> *u8:
         return slot[0] + 24 + old * es
     __arr_grow(slot, es, old + n)
     p = slot[0]
-    mem_copy(p + 24 + old * es, src + 24, n * es)
+    mem_copy(p + 24 + old * es, data, n * es)
     (p as *int)[1] = old + n
     p + 24 + old * es
 

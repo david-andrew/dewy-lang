@@ -2397,14 +2397,50 @@ gen_intrinsic = (e: int) -> Val:
         at = prune(ntype(args[0]))
         et = int(types[at].elem)
         esz = tsize(et)
-        ys = gen_owned(args[1])
+        sliced = is_slice(args[1])
+        if sliced:
+            src_root = write_root(int(nodes[args[1]].a))
+            dst_root = write_root(args[0])
+            # A small self-append should copy the selected range rather than
+            # retaining the entire source and forcing a full COW detach.
+            if src_root != 0 and dst_root != 0 and same_var(src_root, dst_root): sliced = false
+        ys = V(-1, false)
+        data = -1
+        cnt = -1
+        if sliced:
+            source_node = int(nodes[args[1]].a)
+            bt = prune(ntype(source_node))
+            source = gen_owned(source_node)
+            borrow(source, bt)
+            p = vreg(VI)
+            e_mov(p, source.v)
+            lo, hi = gen_slice_bounds(args[1], p)
+            n = if types[bt].kind == .fixed: e_iconst(fixed_len(bt)) else: arr_len(p)
+            bad = e_bin(.or_, VI, e_bin(.lts, VI, lo, e_iconst(0)), e_bin(.gts, VI, hi, n))
+            bad = e_bin(.or_, VI, bad, e_bin(.gts, VI, lo, hi))
+            iff(bad)
+            e_call_nr(rt("__panic_slice"), [e_daddr(str_data("slice")), lo, hi, n], -1)
+            endc()
+            # Freeze both bounds before destination evaluation, which may run
+            # user code or replace the source (including a self-append).
+            cnt = e_bin(.sub, VI, hi, lo)
+            base = if types[bt].kind == .fixed: p else: e_addi(p, 24)
+            data = e_bin(.add, VI, base, e_bin(.mul, VI, lo, e_iconst(esz)))
+        else:
+            # Finish a materialized slice's source snapshot before mutating
+            # the destination. The owned slice itself survives this scope.
+            if is_slice(args[1]): stmt_begin()
+            ys = gen_owned(args[1])
+            if is_managed(et): cnt = arr_len(ys.v)
+            if is_slice(args[1]): stmt_end()
         pl = gen_place(args[0], true)
         arr_unique(pl, at)
         sa = place_addr(pl, at)
-        first = e_call(rt("__arr_extend"), [sa, ys.v, e_iconst(esz)], VI)
+        first = 0
+        if sliced: first = e_call(rt("__arr_extend_raw"), [sa, data, cnt, e_iconst(esz)], VI)
+        else: first = e_call(rt("__arr_extend"), [sa, ys.v, e_iconst(esz)], VI)
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
         if is_managed(et):
-            cnt = arr_len(ys.v)
             i = vreg(VI)
             e_mov(i, e_iconst(0))
             blk()
@@ -2415,7 +2451,7 @@ gen_intrinsic = (e: int) -> Val:
             br_to(ctl)
             endc()
             endc()
-        release(ys.v, at)
+        if not sliced: release(ys.v, at)
         return V(-1, false)
     if id == .reserve:
         at = prune(ntype(args[0]))

@@ -176,7 +176,7 @@ __nd_slice[T] = (m: T[,], spec: int[]) -> T[,]:
     if n > 0:
         run = hi[hi.len() - 1] - lo[lo.len() - 1] + 1
         loop o in __nd_runs(m.shape, lo, hi):
-            loop i in [o..o + run): out.push(m.data[i])
+            out.extend(m.data[o..o + run))
     NDArray(out, shape)
 
 # m[part] = x: every element of the part

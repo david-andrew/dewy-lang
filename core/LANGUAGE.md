@@ -623,6 +623,13 @@ so `let values:array<uint16>=[[]... set[]... 42]` works. Sets contribute their
 members in insertion order, skipping removed members. Arrays also accept sets
 in `.extend(values)`. Spread call arguments are not supported.
 
+`out.extend(source[lo..hi))` appends a contiguous slice directly from the
+captured source, avoiding a temporary slice allocation when the source and
+destination have different roots. Bounds are checked before evaluating the
+destination; both arrays retain independent value semantics. Self-appends keep
+the slice-copy path so appending a small selection does not force a copy of the
+entire source. Matrix slice reads use the same bulk append path for each row.
+
 Records compose similarly: `let tuned:Settings=[defaults... speed=12]`.
 Later fields or record spreads replace earlier fields with the same name.
 Every operand still runs once in source order, including overwritten values;
@@ -1047,6 +1054,12 @@ reaction/diffusion simulation. Its separate
 [model](../examples/sloppy_core/reaction_model.dewy) keeps the previous field
 values while computing both updates, preserves a fixed outer boundary, and
 includes tests that run without opening a window.
+
+Bulk row copies made the recorded matrix-slicing workload about 12× faster in
+default builds and 9× in release builds. The reaction/diffusion model's compute
+time fell about 47% and 36%, respectively. These are paired single-thread native
+measurements of specific inputs, with allocation included; see the
+[slice-copy results](../dewy/audits/2026-10-17/source-core/slice-copy-validation.json).
 
 Matrix multiplication uses contiguous rows and shares large products among the
 native worker pool. Native x86-64 default builds vectorize short float kernels,

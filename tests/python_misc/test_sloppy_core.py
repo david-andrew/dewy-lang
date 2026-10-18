@@ -49,6 +49,62 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'sequence-extend-slices': '''main=()=>{
+let source=[10 20 22 90] let out:array<int64>=[]
+out.extend(source[1..3)) out.extend(source[4..]) out.extend(source[..0))
+if out not=? [20 22] return 1
+out.extend(source[2..end]) out.extend(source[..0])
+return if out =? [20 22 22 90 10] and source =? [10 20 22 90] 42 else 2}''',
+    'sequence-extend-self-slices': '''main=()=>{
+let values=[10 20 22 90] values.reserve(64) let saved=values
+values.extend(values[1..3))
+if values not=? [10 20 22 90 20 22] or saved not=? [10 20 22 90] return 1
+let small=[20 22] small.extend(small[..])
+return if small =? [20 22 20 22] 42 else 2}''',
+    'sequence-extend-self-slice-replaced': '''let values:array<array<int64>>=[]
+lower=()=>{values=[[100]] return 1}
+work=():>void=>{values=[[10] [20] [22] [90]] values.push([0])
+values.extend(values[lower()..3))
+assert(values =? [[100] [20] [22]]) values[1].push(42)
+assert(values =? [[100] [20 42] [22]])}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'sequence-extend-slice-order': '''let source=[10 20 22 90]
+let boxes:array<array<int64>>=[[]] let trace=0 let upper=3
+get=()=>{trace=trace*10+1 return source}
+lower=()=>{trace=trace*10+2 source=[100] return 1}
+end_at=()=>{trace=trace*10+3 return upper}
+choose=()=>{trace=trace*10+4 upper=0 boxes.push([99]) return 0}
+main=()=>{boxes[choose()].extend(get()[lower()..end_at()))
+return if trace =? 1234 and boxes =? [[20 22] [99]] and source =? [100] 42 else 1}''',
+    'sequence-extend-slice-no-temporary': '''let source=[10 20 22 90]
+let boxes:array<array<int64>>=[[]] let before=0
+choose=()=>{assert(alloc_count() =? before) return 0}
+main=()=>{boxes[0].reserve(4) before=alloc_count()
+boxes[choose()].extend(source[1..3))
+return if boxes[0] =? [20 22] and alloc_count() =? before 42 else 1}''',
+    'sequence-extend-slice-managed': '''Item:type=[name:string values:array<int64>]
+work=():>void=>{
+let a=[Item["first" [20]] Item["second" [22]] Item["last" [99]]]
+let saved=a let out:array<Item>=[] out.extend(a[..2))
+a.extend(a[1..]) out[0].values.push(42) a[3].name="new"
+assert(saved[0].values =? [20] and saved[1].name =? "second")
+assert(out[0].values =? [20 42] and out[1].values =? [22])
+assert(a[1].name =? "second" and a[3].values =? [22] and a.length =? 5)
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
+    'fixed-array-extend-slice-snapshot': '''let source:array<array<int64> length=4>=[[10] [20] [22] [90]]
+lower=()=>{source[1]=[99] return 1}
+work=():>void=>{source=[[10] [20] [22] [90]]
+let out:array<array<int64>>=[] out.extend(source[lower()..3))
+out[0].push(42)
+assert(out =? [[20 42] [22]] and source[1] =? [99])
+let fixed:array<int64 length=1>=[99] let ints:array<int64>=[]
+ints.extend(fixed[1..1)) assert(ints.length =? 0)
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'numeric-broadcast-matrix-selection': '''main=()=>{
 let m=reshape([1 2 3 4 5 6 7 8 9 10 11 12] 3 4) let saved=m
 m[[..] 1] .*= 2
@@ -5379,6 +5435,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unpack_errors': 'unpack',
                   'test_core_unpack_single_errors': 'unpack',
                   'test_core_fixed_array_errors': 'bounds',
+                  'test_core_extend_slice_errors': 'bounds',
                   'test_core_numeric_array_errors': 'bounds',
                   'test_core_web_array_size_errors': 'bounds',
                   'test_core_set_errors': 'set',
@@ -8466,6 +8523,23 @@ def test_core_x64_compare_branch_layout(compiler, tmp_path):
     for compare, branch in pairs:
         # The fused pair must neither cross nor end on the 32-byte boundary.
         assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
+
+
+@pytest.mark.parametrize('body', [
+    'let xs=[20 22] let out:array<int64>=[] let start=0-args().length out.extend(xs[start..1))',
+    'let xs=[20 22] let out:array<int64>=[] out.extend(xs[0..3))',
+    'let xs=[20 22] let out:array<int64>=[] out.extend(xs[2..1))',
+    ('let xs:array<int64 length=2>=[20 22] let out:array<array<int64>>=[[]] '
+     'choose=():>int64=>{panic("destination evaluated before invalid slice") return 0} '
+     'out[choose()].extend(xs[0..3))'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_extend_slice_errors(error_batches, body, target, release):
+    ran = error_batches('bounds', body, release, target)
+    output = ran.stdout + ran.stderr
+    assert ran.returncode != 0 and 'slice' in output, output
+    assert 'destination evaluated before invalid slice' not in output, output
 
 
 def test_core_slice_bounds_panic(compiler, tmp_path):
