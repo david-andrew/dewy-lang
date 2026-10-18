@@ -51,6 +51,22 @@ __dewy_range_value = (it: mut __DewyRangeIter) -> int:
     it.cursor += it.delta
     value
 
+# Open counters can accompany a finite sequence or a condition. Keep exhaustion
+# separate from ordinary iterator completion: requesting another value must
+# diagnose overflow, while stopping the combined loop needs no extra value.
+struct __DewyOpenRangeIter:
+    range: __DewyRangeIter
+
+__dewy_open_range_iter = (first: int, second: int) -> __DewyOpenRangeIter:
+    last = if second > first: 9223372036854775807 else: -9223372036854775807 - 1
+    __DewyOpenRangeIter(__dewy_range_iter(__dewy_range(first, second, last, true, true)))
+
+__dewy_open_range_done = (it: __DewyOpenRangeIter) -> bool: false
+
+__dewy_open_range_value = (it: mut __DewyOpenRangeIter) -> int:
+    if it.range.done: panic("range exhausted its integer type")
+    __dewy_range_value(it.range)
+
 # Validate every selected index without constructing an index array. Dividing
 # the available distance avoids overflow in (count - 1) * stride, even for a
 # full-width interval or an explicitly constructed IntRange value.

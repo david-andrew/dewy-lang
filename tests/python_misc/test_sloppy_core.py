@@ -3973,6 +3973,41 @@ let replacement:int64=0
 loop i in [0,2..values.length) {i=1 replacement+=values[i]}
 return if sum =? 200 and replacement =? 40 42 else 1
 }''',
+    'stepped-range-open-combined': """main=()=>{
+let a:array<int64>=[] let b:array<int64>=[]
+loop i in [0,2..] and x in [10 20 30] {a.push(i+x)}
+loop x in [10 20 30] and i in [6,3..] {b.push(i+x)}
+return if a=?[10 22 34] and b=?[16 23 30] 42 else 1
+}""",
+    'stepped-range-open-control': """main=()=>{
+let a:array<int64>=[]
+loop i in [1,3..] and i<?10 {if i=?5 continue a.push(i) if i=?7 break}
+let b=[loop i in [2,4..] and x in [10 20 30] i+x]
+return if a=?[1 3 7] and b=?[12 24 36] 42 else 1
+}""",
+    'stepped-range-open-order': """let trace:int64=0
+bound=(tag:int64 value:int64)=>{trace=trace*10+tag return value}
+main=()=>{
+let a:array<int64>=[]
+loop i in [bound(1 8),bound(2 5)..] and x in [bound(3 10) bound(4 20)] {a.push(i+x)}
+let entered=false
+loop i in [1,3..] and x in ([] as array<int64>) {return 1} else {entered=true}
+return if trace=?1234 and a=?[18 25] and entered 42 else 1
+}""",
+    'stepped-range-open-or': """main=()=>{
+let a:array<int64>=[] let b:array<int64>=[]
+loop i in [0,2..] or x in [10 20] {
+    a.push(i??-1) b.push(x??-1)
+    if a.length=?4 break
+}
+return if a=?[0 2 4 6] and b=?[10 20 -1 -1] 42 else 1
+}""",
+    'stepped-range-open-extremes': """main=()=>{
+let a:array<int64>=[] let b:array<int64>=[]
+loop i in [int64.min,int64.max..] and n in [0 1] {a.push(i) if n=?1 break}
+loop i in [int64.max,int64.min..] and n in [0 1] {b.push(i) if n=?1 break}
+return if a=?[int64.min int64.max] and b=?[int64.max int64.min] 42 else 1
+}""",
     'stepped-range-order': '''let order:int64=0
 bound=(tag:int64 value:int64):>int64=>{order=order*10+tag return value}
 main=()=>{let values:array<int64>=[]
@@ -4059,7 +4094,6 @@ ERRORS = {
     'stepped-range-arity': ('main=()=>{loop i in [0,1,2..5] {printl(i)}}', 'exactly two starting values'),
     'stored-range-open': ('main=()=>{let r=[0..] return 0}', 'stored range needs both endpoints'),
     'stored-range-no-start': ('main=()=>{let r=[..4] return 0}', 'stored range needs both endpoints'),
-    'stepped-range-combined': ('main=()=>{loop i in [0,2..] and j in [0..3] {printl(i+j)}}', 'stepped ranges are only supported in single loops'),
     'array-context-narrow-overflow': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects u8[]'),
     'array-context-negative-unsigned': ('accept=(xs:array<uint64>)=>0\nmain=()=>accept([-1])', 'expects u64[]'),
     'array-context-variable-container': ('accept=(xs:array<uint64>)=>0\nmain=()=>{let xs=[42] return accept(xs)}', 'expects u64[]'),
@@ -5176,6 +5210,9 @@ def test_core_combined_range_errors(error_batches, body, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('loop i in [2,2..] and x in [1 2] {printl(i+x)}', 'range step must be nonzero'),
+    ('loop i in [int64.max-1,int64.max..] and x in [1 2 3] {printl(i)}', 'range exhausted its integer type'),
+    ('loop i in [int64.min+1,int64.min..] or x in [1 2 3] {printl(i)}', 'range exhausted its integer type'),
     ('let r=[2,2..10] printl(3 in? r)', 'range step must be nonzero'),
     ('printl(3 in? [2,2..10])', 'range step must be nonzero'),
     ('loop i in [2,2..10] {printl(i)}', 'range step must be nonzero'),

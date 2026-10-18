@@ -888,9 +888,14 @@ the endpoint evaluate once in source order. Iteration uses counters without
 building an intermediate array. Bounded integer loops terminate safely at the integer type's limits, including
 an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
 integer type; `break` and `continue` work normally.
-Bounded signed-word stepped ranges also work in combined headers. Open-ended
-stepped ranges currently require a single header. Arrays support stepped slicing
-as described above; strings support contiguous grapheme slices.
+Signed-word stepped ranges, including open-ended counters, also work in combined
+headers: `loop i in [0,2..] and item in items { ... }`. A condition can bound the
+counter, and comprehensions use the same forms. `or` headers expose optional
+values as usual; the open counter continues after a finite partner ends, until
+the body exits or another requested counter value would overflow. Combined
+stepped counters use `int64`, as stored ranges do; single-header loops retain
+their inferred integer width. Arrays support stepped slicing as described above;
+strings support contiguous grapheme slices.
 
 Store a bounded range to reuse it, pass it to functions or return it:
 

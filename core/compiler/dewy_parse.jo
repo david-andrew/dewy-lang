@@ -942,8 +942,10 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             binders.push(dw_expr(binder))
         set_list(n, binders)
         it = dw_iterable(dw_child(id, 2))
-        if combined and nodes[it].kind == .range and has_flag(it, NF_STEP) and nodes[it].b != 0:
-            it = bc_call("__dewy_iter", [dw_range_value(it)], nodes[it].pos)
+        if combined and nodes[it].kind == .range and has_flag(it, NF_STEP):
+            if nodes[it].b == 0:
+                it = bc_call("__dewy_open_range_iter", [int(nodes[it].a), int(nodes[it].c)], nodes[it].pos)
+            else: it = bc_call("__dewy_iter", [dw_range_value(it)], nodes[it].pos)
         nodes[n].a = i32(it)
     else if op == "and" or op == "or":
         nodes[n].op = if op == "and": 2 else: 3

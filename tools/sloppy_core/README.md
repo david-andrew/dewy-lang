@@ -1487,3 +1487,12 @@ after storing incomplete messages per peer; total message limits now span polls.
 The actual browser Netpong also connected through a room to a native host and
 played with no console errors. See `rooms-*` audits; public TURN/cross-router
 behavior was not tested and no public service was deployed.
+
+
+Open-ended stepped counters now compose with finite iterables and conditions:
+`loop i in [0,2..] and item in items { ... }`. Combined `or` headers and
+comprehensions use the same cursor. Bounds evaluate once in source order, zero
+steps are rejected, and requesting a value beyond the signed-word domain panics.
+Existing standalone integer-width inference is unchanged. The 586 focused checks
+pass in 12.11 seconds; the independent C bootstrap/full gate passes all 4,388
+checks in 85.18 seconds. See `open-step-*` audits.

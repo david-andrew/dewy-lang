@@ -3331,7 +3331,7 @@ is_dewy_range_type = (t: int, name: str) -> bool:
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_ranges.jo"
 
 is_dewy_cursor_iter = (t: int) -> bool:
-    is_dewy_grapheme_iter(t) or is_dewy_range_type(t, "__DewyRangeIter")
+    is_dewy_grapheme_iter(t) or is_dewy_range_type(t, "__DewyRangeIter") or is_dewy_range_type(t, "__DewyOpenRangeIter")
 
 is_dewy_set_type = (t: int) -> bool:
     p = prune(t)
@@ -3390,7 +3390,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         add_flag(args[0], NF_CHECKED)
         pos = nodes[n].pos
         if is_dewy_cursor_iter(t):
-            prefix = if is_dewy_grapheme_iter(t): "__dewy_grapheme" else: "__dewy_range"
+            prefix = if is_dewy_grapheme_iter(t): "__dewy_grapheme" else if is_dewy_range_type(t, "__DewyOpenRangeIter"): "__dewy_open_range" else: "__dewy_range"
             name = prefix + "_done"
             if id != .dewy_iter_done:
                 name = prefix + "_value"
