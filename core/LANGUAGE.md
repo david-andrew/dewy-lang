@@ -56,7 +56,10 @@ Closures keep their captured state when assets used by their bodies change.
 Dependency discovery cannot follow arbitrary calls through function values yet.
 
 The [VS Code extension](../dewy/vscode-dewy/README.md) supports unsaved diagnostics,
-completions, hover, definitions and Format Document. Set `dewy.core.path` to the compiler executable.
+completions, hover, definitions and Format Document. Set `dewy.core.path` to a
+standalone compiler executable, or to the checkout's absolute `tools/dewy` path.
+With the development launcher, restarting the language server picks up compiler
+source changes without changing the editor setting.
 
 `python3 -m tools.core fmt file.dewy` formats declarations and indentation in
 place. Add `--check` to report needed changes without writing, or pass a directory

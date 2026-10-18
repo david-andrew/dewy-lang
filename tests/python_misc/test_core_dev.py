@@ -1,5 +1,8 @@
 """The local driver must never silently validate a stale or failed compiler build."""
 import json
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -206,3 +209,51 @@ def test_core_driver_rejects_cache_path_outside_owned_directory(tmp_path):
         'binary': '../unrelated', 'binary_sha256': core.digest(binary),
     }))
     assert core.cached_state(cache) == ({}, None)
+
+
+@pytest.mark.parametrize('arguments, linked', [
+    (['lsp'], False),
+    (['program with spaces.dewy', 'one', 'second value'], False),
+    (['--version'], True),
+])
+def test_core_checkout_launcher(tmp_path, arguments, linked):
+    checkout = tmp_path / 'checkout with spaces'
+    tool_dir = checkout / 'tools'
+    tool_dir.mkdir(parents=True)
+    launcher = tool_dir / 'dewy'
+    shutil.copy2(Path(__file__).resolve().parents[2] / 'tools/dewy', launcher)
+    (tool_dir / 'core.py').write_text(
+        'import sys\nfrom pathlib import Path\n'
+        'def toolchain():\n'
+        '    print("building current compiler", file=sys.stderr)\n'
+        '    return Path(__file__).resolve().parents[1] / "native compiler"\n')
+    native = checkout / 'native compiler'
+    native.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                      'print(json.dumps([sys.argv[1:], os.getcwd(), sys.stdin.read(), os.getpid()]))\n')
+    native.chmod(0o755)
+    caller = tmp_path / 'another project'
+    caller.mkdir()
+    if linked:
+        entry = caller / 'dewy'
+        entry.symlink_to(launcher)
+    else:
+        entry = launcher
+    with subprocess.Popen([entry, *arguments], cwd=caller, stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+        output, errors = process.communicate('editor protocol bytes', timeout=10)
+        assert process.returncode == 0, errors
+        assert json.loads(output) == [arguments, str(caller), 'editor protocol bytes', process.pid]
+        assert errors == 'building current compiler\n'
+
+
+def test_core_checkout_launcher_stops_on_build_failure(tmp_path):
+    tool_dir = tmp_path / 'tools'
+    tool_dir.mkdir()
+    launcher = tool_dir / 'dewy'
+    shutil.copy2(Path(__file__).resolve().parents[2] / 'tools/dewy', launcher)
+    (tool_dir / 'core.py').write_text('def toolchain():\n    raise RuntimeError("rebuild failed")\n')
+    ran = subprocess.run([launcher, 'lsp'], cwd=tmp_path, capture_output=True,
+                         text=True, timeout=10, check=False)
+    assert ran.returncode == 1
+    assert ran.stdout == ''
+    assert ran.stderr == 'dewy development: rebuild failed\n'

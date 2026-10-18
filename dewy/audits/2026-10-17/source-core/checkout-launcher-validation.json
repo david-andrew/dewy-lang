@@ -1,0 +1,25 @@
+{
+  "source_identity": "f77ce39ce651a0e7ba1740819719c2afa3bae2265d6f5beb16de7417c81a67d9",
+  "binary": "build-1792284537594217113/bin/dewy-core",
+  "binary_sha256": "3b487295f19fe7199e9cc80d8c4c862d032a2f45e60b46c2be3bfb011f45a484",
+  "validation": {
+    "command": "TMPDIR=<workspace>/__dewycache__/task-tmp python3 -m tools.core test -k \"checkout_launcher or core_driver or vscode_core_client\"",
+    "passed": 26,
+    "seconds": 5.08,
+    "coverage": [
+      "launch from a different project directory",
+      "symlink entry point and paths with spaces",
+      "native argument/stdin/stdout/stderr forwarding",
+      "exec preserves process ID for watch/LSP signals",
+      "build failure stops without launching a fallback",
+      "existing driver freshness and editor restart checks"
+    ],
+    "manual": "Real tools/dewy LSP startup and unsaved diagnostics passed while invoked from another project directory.",
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "limits": [
+    "The stable launcher uses Python to select/build the current native compiler; standalone binaries remain independent of Python.",
+    "An already running language server retains its compiler until restarted."
+  ]
+}

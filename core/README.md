@@ -54,6 +54,28 @@ coverage; CI continues to run that full gate.
 The initial build needs Python, a C compiler and `make`. CI always bootstraps
 independently from C, regardless of the local cache.
 
+## Use the current compiler from another project
+
+`tools/dewy` is an executable development launcher with the same arguments as
+the native compiler:
+
+```sh
+/path/to/dewy-lang/tools/dewy main.dewy
+/path/to/dewy-lang/tools/dewy build main.dewy --release -o game
+/path/to/dewy-lang/tools/dewy --version
+```
+
+It preserves the caller's working directory and replaces itself with the current
+compiler, so relative paths, terminal input and signals work normally. It checks
+compiler inputs and rebuilds only when needed; program compilation remains fresh.
+The launcher needs Python, while a built standalone toolchain runs without it.
+
+Set VS Code's `dewy.core.path` to the absolute path of `tools/dewy` for checkout
+development. After changing compiler sources, **Dewy: Restart Core Language
+Server** starts the current implementation without changing the setting. The
+`path` command still prints a particular immutable compiler binary for benchmarks
+or other callers that deliberately want that toolchain version.
+
 ## Build a standalone toolchain
 
 From the repository root, using Python, a C compiler and `make`:

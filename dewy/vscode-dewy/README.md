@@ -27,9 +27,13 @@ On the `restart/sloppy-frontend` branch, build the experimental compiler followi
 ```
 
 The toolchain needs its sibling `../lib/`; the frontend runs in-process.
-`python3 -m tools.core path` builds/reuses the current checkout compiler and prints
-an executable path suitable for this setting. The setting is empty
-by default: highlighting and the existing debugger integration continue to work
+For checkout development, set `dewy.core.path` to the absolute path of
+`tools/dewy` instead. That launcher selects/rebuilds the current compiler on each
+server start and works even when the editor has opened another project. After
+editing compiler sources, use **Dewy: Restart Core Language Server** to pick them
+up. `python3 -m tools.core path` instead prints a particular immutable toolchain's
+executable; that path continues to select that version after later rebuilds.
+The setting is empty by default: highlighting and the existing debugger integration continue to work
 without selecting the experimental compiler. With it configured, the extension
 starts `dewy-core lsp` in a trusted workspace and sends the current editor text,
 including unsaved changes. Save a new buffer to a `.dewy` path before using these

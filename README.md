@@ -20,12 +20,15 @@ The [compact-core language guide](core/LANGUAGE.md) includes an executable tour
 and the native/web game workflow. From a checkout, the everyday commands are:
 
 ```sh
-python3 -m tools.core test
-python3 -m tools.core run examples/sloppy_core/paddle.dewy
+python3 -m tools.core test --quick
+./tools/dewy examples/sloppy_core/paddle.dewy
 ```
 
-The driver builds a local compiler when its sources change and reuses it otherwise.
-It runs the focused core gate; the published installer below still installs the
+The development launcher builds a local compiler when its sources change and
+reuses it otherwise. `tools/dewy` forwards the native compiler's commands and
+works from other project directories too. Use its absolute path for the editor;
+it remains stable across compiler rebuilds. `python3 -m tools.core test` runs the
+full compact-core gate. The published installer below still installs the
 previous implementation.
 
 ### dewy
