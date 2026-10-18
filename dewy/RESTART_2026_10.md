@@ -135,22 +135,32 @@ always starts from C and exercises language behavior, native/web programs,
 editor integration, live reload and shared-core regressions.
 
 CI also cross-builds standalone compiler bundles and executes 133 language smoke
-checks and 11 project-test checks on Windows x64, macOS ARM64 and Linux ARM64.
-All three native-host gates pass. This exposed and fixed Windows source-path
+checks, all 37 project-test checks, the editor transport check and a saved-file/
+test-watch selection on Windows x64, macOS ARM64 and Linux ARM64. All three
+native-host gates pass. This exposed and fixed Windows source-path
 escaping, diagnostic path comparisons and formatter directory detection; it is
 smoke coverage rather than the full Linux suite on every platform.
+Windows tests now isolate failures and mutable globals by starting a fresh
+process per test; Linux and macOS retain their fork path. Windows initialization
+therefore repeats for each test. Test mode is established before imported
+initializers, including headless window behavior and the original user arguments.
 
 VS Code now exposes resolved references and occurrence highlighting, including
 shadowed locals, closures, interpolation and named arguments in unsaved files.
 References cover the current program and other open programs; unopened reverse
 dependents are not indexed yet, so project-wide rename remains disabled.
+The outline recognizes top-level Dewy functions, generics, records, aliases and
+bindings without requiring a successful check, including unfinished buffers.
 
 Project tests also support `test --watch`, including name filters and release
 builds, with a matching VS Code command. Saving a source, import or embedded
 asset reruns the tests from fresh state; failed assertions and compile errors
 leave the watcher ready for the next edit. This uses ordinary test compilation
 and the existing dependency watcher. The focused watch/native-test gate passes
-47 checks plus the editor task check; execution is validated on Linux.
+47 checks plus the editor task check; the core rerun workflow is now also
+executed on the three additional native CI hosts. A later regression check
+found and fixed missing-import tracking in test-watch mode, so creating a
+missing import or its parent directories can recover without touching the tests.
 
 The generated arcade, platformer and 3D starters now exercise menus, saved scores,
 text tilemaps, slopes and one-way platforms, character physics and ray-cast shots.

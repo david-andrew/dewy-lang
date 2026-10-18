@@ -1100,7 +1100,9 @@ w_errors = ""
 w_failed_path = ""
 w_missing_inputs: str[]
 watch_missing_input = (path: str):
-    if watch_build: w_missing_inputs.push(path)
+    # Test watching uses ordinary code generation, but still needs failed
+    # import candidates so creating the missing file can recover the build.
+    if watch_build or len(w_failed_path) > 0: w_missing_inputs.push(path)
 
 watch_save_failed_inputs = ():
     if len(w_failed_path) == 0: return

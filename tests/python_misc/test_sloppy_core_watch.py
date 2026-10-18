@@ -247,7 +247,8 @@ main=():>void=>{
 
 @pytest.mark.parametrize('kind', ['asset', 'import'])
 @pytest.mark.parametrize('directory_exists', [False, True], ids=['missing-directory', 'existing-directory'])
-def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists):
+@pytest.mark.parametrize('testing', [False, True], ids=['program-watch', 'test-watch'])
+def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists, testing):
     directory = tmp_path / 'inputs' / 'nested'
     if directory_exists:
         directory.mkdir(parents=True)
@@ -260,7 +261,9 @@ def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists):
         save(source, 'from p"inputs/nested/helper.dewy" import label\nmain=()=>printl(label())')
         dependency = directory / 'helper.dewy'
         contents = 'label=()=>"recovered input"'
-    watcher = Watch(compiler, source)
+    if testing:
+        save(source, source.read_text().replace('main=()=>', 'test "dependency" {') + '}')
+    watcher = Watch(compiler, source, options=['test', '--watch'] if testing else ['watch'])
     try:
         watcher.expect('waiting for changes')
         directory.mkdir(parents=True, exist_ok=True)
