@@ -43,6 +43,43 @@ the tour, Netpong, Dunes and compiler. The rough target is 250,000 Dewy lines pe
 second on representative programs; small examples measure latency, and high
 loaded-library throughput alone does not establish that target.
 
+Implementation stages also have a performance gate:
+
+```sh
+python3 -m tools.sloppy_core.performance_gate \
+  --reference /path/to/pinned-toolchain/bin/dewy-core \
+  --previous /path/to/previous-toolchain/bin/dewy-core \
+  --candidate /path/to/candidate-toolchain/bin/dewy-core \
+  --cpu 2 --output /path/to/stage-performance.json
+```
+
+Run this sequentially on a quiet Linux host; select an available CPU. The pinned
+reference is `ea1cba0e`, identified by compiler-source and library hashes in
+`tools/sloppy_core/performance_reference.json`. Keep its immutable toolchain;
+it can also be rebuilt from that commit in a separate checkout using the C
+bootstrap. Its binary hash may differ across builds, while the pinned sources
+must match. The previous toolchain is the immediately preceding implementation
+stage. Measuring both prevents repeated small regressions from becoming the new
+baseline. Compiler binaries and bundled libraries are checked against their
+build manifests before and after the run.
+
+The gate measures default/release compilation of a nontrivial generated Dewy
+program, three application builds and a fixed compiler self-build, then six
+checked runtime kernels in both modes against C. It uses nine alternating
+samples by default and paired CPU-time ratios. Approximate bootstrap intervals
+distinguish passing results, regressions and inconclusive noise; the latter two
+exit unsuccessfully. The 2% timing resolution is not a slowdown allowance to
+spend on successive features. Identical generated artifacts provide conclusive
+no-regression evidence without requiring their noisy timings to match.
+
+The report keeps absolute throughput and each runtime/C ratio separate from
+the regression decision. `--require-targets` additionally requires 250k physical
+root lines/s and C-or-better release medians on every measured kernel. That is
+a conservative measured checkpoint, not proof of general performance or language
+completeness. The graph reference has a different storage layout; individual
+workloads still need interpretation. New features need their own representative
+checks as well as this existing-program gate.
+
 Callback runtime comparisons are available with `python3 -m
 tools.sloppy_core.benchmark_callbacks CANDIDATE --baseline BASELINE --output
 callbacks.json`. Use `--workload local-counter` to isolate stack-local callbacks;

@@ -10,6 +10,7 @@ import statistics
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +40,7 @@ WORKLOADS = {
 
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
-            workers: int) -> dict:
+            workers: int, validate: Callable[[str, str, Path], bool] | None = None) -> dict:
     # Source generators and CLI validators are also imported by Windows tests;
     # only this POSIX CPU-time benchmark needs resource.getrusage.
     import resource
@@ -70,6 +71,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             measured = {label: [] for label in compilers}
             cpu_measured = {label: [] for label in compilers}
             output_bytes = {}
+            validated = {}
             artifact = None
             if args[0] == 'build':
                 args.extend(['-o', str(Path(directory) / name)])
@@ -95,6 +97,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                         cpu_measured[label].append(cpu_elapsed)
                     if sample == samples and artifact is not None:
                         output_bytes[label] = artifact.stat().st_size
+                        if validate is not None:
+                            validated[label] = validate(name, label, artifact)
             medians = {label: statistics.median(values) for label, values in measured.items()}
             cpu_medians = {label: statistics.median(values) for label, values in cpu_measured.items()}
             result['workloads'][name] = {
@@ -105,6 +109,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'cpu_seconds': cpu_measured,
                 'median_cpu_seconds': cpu_medians,
                 'output_bytes': output_bytes,
+                'output_validated': validated,
             }
             print(name + ': ' + ', '.join(f'{label} {elapsed * 1000:.2f} ms wall / '
                                          f'{cpu_medians[label] * 1000:.2f} ms CPU'

@@ -7,6 +7,23 @@ existing binary identify that binary separately from its source revision.
 
 ## Recommendation
 
+The user's October 18 continuation criteria are explicit: keep working until
+Dewy has its key intended language features, roughly 250k source lines/second
+fresh compilation, and generated code competitive with C/Rust. A serious
+unresolved user-facing design question blocks that area, not independent work.
+Performance must be maintained at each stage, rather than recovered after
+feature accumulation. The current implementation has not met the throughput
+target. Closing that gap takes priority over expanding the language surface.
+
+Every implementation stage needs a matched compilation/runtime comparison
+against both the preceding stage and a fixed reference. A noisy result calls
+for an isolated recheck, not silently accepting slower code. Retain measurements
+and workload identities; do not reset the reference to a regression, inflate
+line counts with unused imports, or trade away generated-code speed merely to
+make compilation numbers look better. A no-regression result is distinct from
+meeting the absolute targets. Feature additions must demonstrate that they keep
+the attained performance, including ordinary programs that do not use them.
+
 User clarification during implementation: preserve the useful user-facing
 language experience, not byte-identical executables, internal ABIs, existing
 data structures, or every historical compiler behavior. Breaking internal
@@ -760,6 +777,30 @@ checksums in default and release builds. Candidate/baseline medians were
 803/818 and 613/618 ms for graphs. These are effectively unchanged runtime
 results, not a generated-code speedup claim.
 [Runtime samples](audits/2026-10-18/numeric-paths-runtime.json).
+
+## Performance gates between stages
+
+`tools.sloppy_core.performance_gate` pins the compiler/library sources at
+`ea1cba0e`, compares each candidate with that reference and the preceding stage,
+and reports fresh compilation and runtime separately. Its default nine paired
+samples use approximate bootstrap intervals around median CPU ratios; uncertain
+results fail the gate alongside detected regressions. Compiler/library manifests
+are checked, generated throughput programs must return the expected result, and
+all runtime kernels check boundary and full-size results against C. Absolute
+targets remain separate from the no-regression decision. See the
+[stage-gate instructions](../core/README.md#work-on-this-checkout).
+
+The first full run rejected a small experiment caching operator name IDs and
+deferring angle-warning formatting. Compilation changes were below 1%; four
+runtime comparisons remained inconclusive despite approximately flat medians.
+The compiler patch was reverted rather than spending more validation time on
+that marginal experiment. The run measured about **84k root Dewy lines/s**;
+release C ratios were 1.12 helpers, 1.01 arrays, 0.88 records, 1.24 text,
+1.22 graph and 2.50 string equality. These identify outstanding work, not a
+completed performance milestone. The rejected run predates adding the gate's
+explicit throughput-program checksum check.
+[Samples and assessment](audits/2026-10-18/call-dispatch-rejected.json),
+[discarded compiler patch](audits/2026-10-18/call-dispatch-rejected.patch).
 
 ## Default optimization is a measured tradeoff
 

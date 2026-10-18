@@ -317,3 +317,81 @@ def test_core_checkout_launcher_stops_on_build_failure(tmp_path):
     assert ran.returncode == 1
     assert ran.stdout == ''
     assert ran.stderr == 'dewy development: rebuild failed\n'
+
+
+@pytest.mark.parametrize(('ratios', 'expected'), [
+    ([1.0] * 9, 'pass'),
+    ([0.8] * 9, 'pass'),
+    ([1.04] * 9, 'regression'),
+    ([0.95, 1.08, 1.0, 1.05, 0.96, 1.06, 0.99, 1.04, 1.0], 'inconclusive'),
+])
+def test_core_performance_gate_distinguishes_noise(ratios, expected):
+    from tools.sloppy_core.performance_gate import compare_samples
+    # Host speed changes between pairs: compare each pair before aggregating.
+    before = [float(2**i) for i in range(len(ratios))]
+    after = [value * ratio for value, ratio in zip(before, ratios, strict=True)]
+    result = compare_samples(before, after)
+    assert result['status'] == expected
+
+
+@pytest.mark.parametrize('bad', [[], [1.0] * 6, [0.0] * 9, [-1.0] * 9,
+                               [float('nan')] * 9, [float('inf')] * 9, [1.0] * 10])
+def test_core_performance_gate_rejects_missing_or_invalid_samples(bad):
+    from tools.sloppy_core.performance_gate import compare_samples
+    with pytest.raises(ValueError):
+        compare_samples([1.0] * 9, bad)
+
+
+def test_core_performance_gate_does_not_ratchet_or_claim_absolute_target():
+    from tools.sloppy_core.performance_gate import assess
+    compilation = {'workloads': {'throughput-default': {'cpu_seconds': {
+        'reference': [1.0] * 9, 'previous': [1.05] * 9, 'candidate': [1.05] * 9}}}}
+    runtime = {'workloads': {'kernel': {'samples': {
+        **{f'{label}-{mode}': [{'kernel_ns': 100}] * 9
+           for label in ('reference', 'previous', 'candidate') for mode in ('default', 'release')},
+        'c': [{'kernel_ns': 100}] * 9}}}}
+    result = assess(compilation, runtime, ['reference', 'previous'], 44005)
+    assert result['comparisons']['compile/throughput-default/previous']['status'] == 'pass'
+    assert result['comparisons']['compile/throughput-default/reference']['status'] == 'regression'
+    assert not result['no_regression']
+    assert not result['targets']['met_on_these_workloads']
+    compilation['workloads']['throughput-default']['cpu_seconds']['candidate'] = [1.0] * 9
+    result = assess(compilation, runtime, ['reference', 'previous'], 44005)
+    assert result['no_regression']
+    assert not result['targets']['met_on_these_workloads']
+    for mode in ('default', 'release'):
+        runtime['workloads']['kernel']['samples'][f'candidate-{mode}'] = [{'kernel_ns': 130}] * 9
+    assert not assess(compilation, runtime, ['reference', 'previous'], 44005)['no_regression']
+    runtime['workloads']['kernel']['binary_sha256'] = {
+        f'{label}-{mode}': 'same-artifact' for label in ('reference', 'previous', 'candidate')
+        for mode in ('default', 'release')}
+    assert assess(compilation, runtime, ['reference', 'previous'], 44005)['no_regression']
+
+
+@pytest.mark.parametrize('change', ['binary', 'modified', 'missing', 'extra'])
+def test_core_performance_gate_rejects_changed_toolchain(tmp_path, change):
+    import hashlib
+
+    from tools.sloppy_core.performance_gate import toolchain_identity
+    binary = tmp_path / 'bin/dewy-core'
+    binary.parent.mkdir()
+    binary.write_bytes(b'compiler')
+    sources = {}
+    for name in ('compiler/main.jo', 'lib/rt.jo'):
+        path = tmp_path / name
+        path.parent.mkdir()
+        path.write_bytes(b'source')
+        sources[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (tmp_path / 'build.json').write_text(json.dumps({
+        'core_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'sources_sha256': sources}))
+    toolchain_identity(binary)
+    if change == 'binary':
+        binary.write_bytes(b'changed')
+    elif change == 'modified':
+        (tmp_path / 'lib/rt.jo').write_bytes(b'changed')
+    elif change == 'missing':
+        (tmp_path / 'lib/rt.jo').unlink()
+    else:
+        (tmp_path / 'lib/extra.jo').write_bytes(b'extra')
+    with pytest.raises(ValueError):
+        toolchain_identity(binary)
