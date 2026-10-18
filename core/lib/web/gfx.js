@@ -196,10 +196,26 @@ sloppy.extra.push({
           else { focus(document.hasFocus()); sloppy.pauseAudio && sloppy.pauseAudio(false); }
         });
         const pos = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * canvas.width / r.width, (e.clientY - r.top) * canvas.height / r.height]; };
+        // Chromium may send a warp-sized relative move before pointerlockchange.
+        // Detect transitions in either event; keep ordinary motion after the transition.
+        let pointerLocked = false;
+        const pointerTransition = () => {
+          const locked = document.pointerLockElement === canvas;
+          if (locked === pointerLocked) return false;
+          pointerLocked = locked;
+          ex.__mouse(5, 0, 0, 0);
+          return true;
+        };
+        document.addEventListener("pointerlockchange", pointerTransition);
         canvas.addEventListener("mousemove", (e) => {
+          const changed = pointerTransition();
           // locked: only how far it moved (in canvas pixels)
-          if (document.pointerLockElement === canvas) { const r = canvas.getBoundingClientRect(); ex.__mouse(4, e.movementX * canvas.width / r.width, e.movementY * canvas.height / r.height, 0); return; }
+          if (pointerLocked) {
+            if (!changed) { const r = canvas.getBoundingClientRect(); ex.__mouse(4, e.movementX * canvas.width / r.width, e.movementY * canvas.height / r.height, 0); }
+            return;
+          }
           const p = pos(e); ex.__mouse(0, p[0], p[1], 0);
+          if (changed) ex.__mouse(5, 0, 0, 0);
           if (ex.__touch) ex.__touch(-1, 3, 0, 0);
         });
         const btn = (b) => b === 0 ? 0 : b === 1 ? 1 : 2;

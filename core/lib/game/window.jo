@@ -237,7 +237,12 @@ __sideways_on = true
 # lock the mouse pointer to the window and hide it, for mouse look: the pointer stays put and
 # its motion keeps arriving through mouse_delta(). false where the platform cannot. (A web
 # page gets the lock at the next click into it, as browsers require; Escape releases it there.)
+__mouse_motion_reset = ():
+    __mouse_dx = 0.0
+    __mouse_dy = 0.0
+
 mouse_lock = (on: bool = true) -> bool:
+    if on != __mouse_lock_want: __mouse_motion_reset()
     __mouse_lock_want = on
     if not __win_open: return true
     __platform_mouse_lock(on)
@@ -472,6 +477,9 @@ when TARGET == "wasm":
             # motion while the pointer is locked: only how far it moved
             __mouse_dx += f64(x)
             __mouse_dy += f64(y)
+        else if kind == 5:
+            # Pointer capture changed: absolute/relative deltas cannot be mixed.
+            __mouse_motion_reset()
 
     @export("__char")
     __web_char = (c: i32): __text_input += chr(int(c))

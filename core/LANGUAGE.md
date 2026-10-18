@@ -106,6 +106,12 @@ so movement can be checked without live input. Run `dewy-core test
 hillside/main.dewy` for its two starter tests. Edit `LEVEL` to change the terrain
 and `RUN`, `JUMP` or `GRAVITY` to tune its feel.
 
+`dewy-core new orb-yard 3d` creates a first-person game with a character controller,
+movable crates, ray-cast shots, glowing targets, shadows and fog. Click to capture
+the mouse, use WASD/Space to walk/jump, and click to shoot; Escape releases the
+mouse. It also supports gamepad sticks, A and RB/right trigger. Its included test
+checks shot selection. The yard, meshes and sounds are generated in the source.
+
 Native game reload keeps unrelated live state. Changed assets refresh globals
 initialized from them, including through direct helper calls across modules.
 Closures keep their captured state when assets used by their bodies change.

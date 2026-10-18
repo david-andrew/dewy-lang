@@ -1,0 +1,185 @@
+# A first-person yard: find the glowing orbs and knock the crates around.
+# Adapted from Sloppy's MIT-licensed lib/new/3d.jo; see the toolchain LICENSE.
+# Click to capture the mouse, WASD to walk, Space to jump, left click to shoot.
+# Escape releases the mouse. Gamepad: sticks, A to jump, RB/right trigger to shoot.
+import physics3d
+
+const WALK = 6.0
+const JUMP = 6.5
+const GRAVITY = 18.0
+const EYE = 1.6
+const LOOK = 0.0025
+const ORBS = 8
+
+Orb: type = [pos: vec3 phase: float64 = 0.0 pop: float64 = 0.0]
+view_direction = (yaw: float64 pitch: float64) :> vec3 => vec3(-sin(yaw)*cos(pitch) sin(pitch) -cos(yaw)*cos(pitch))
+orb_at = (orb: Orb time: float64) :> vec3 => orb.pos+vec3(0 0.25*sin(time*2.0+orb.phase) 0)
+
+# The nearest uncollected orb along a unit direction, before a wall/crate hit.
+# Test the sphere surface, so an orb partly in front of a wall is still hittable.
+shot_target = (targets: array<Orb> origin: vec3 direction: vec3 time: float64 blocked_at: float64) :> int64 => {
+    let best = -1
+    let nearest = blocked_at
+    loop i in [0..targets.length) {
+        let orb = targets[i]
+        if orb.pop>?0.0 continue
+        let offset = orb_at(orb time)-origin
+        let along = dot(offset direction)
+        let side_sq = max(0.0 float64(dot(offset offset)-along*along))
+        if side_sq>?0.25 continue
+        let half = sqrt(0.25-side_sq)
+        if along+half<?0.0 continue
+        let distance = max(0.0 along-half)
+        if distance<?nearest { best = i; nearest = distance }
+    }
+    return best
+}
+
+test "shots choose the nearest visible orb" {
+    let targets = [Orb[pos = vec3(0 0 -8)] Orb[pos = vec3(0 0 -4)] Orb[pos = vec3(0 0 4)]]
+    let forward = view_direction(0.0 0.0)
+    assert(shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?1)
+    assert(shot_target(targets vec3(0 0 0) forward 0.0 3.0)=?-1)
+    targets[1].pop = 0.1
+    assert(shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?0)
+}
+
+# Presentation and live game state.
+window("Dewy / Orb Yard" 1280 720)
+let world = physics3d.World[gravity = vec3(0 -GRAVITY 0)]
+let player = world.character(vec3(0 0 8) radius = 0.35)
+let yaw = 0.0
+let pitch = 0.0
+let crates: array<physics3d.Body> = []
+let orbs: array<Orb> = []
+let flash = 0.0
+let hits = 0
+let run_time = 0.0
+let done = false
+let snd_shot = sfx_laser()
+let snd_pop = sfx_chime()
+let snd_jump = sfx_jump()
+
+let walls: array<Vertex3D> = []
+add_wall = (center: vec3 size: vec3 color: vec4) :> void => {
+    world.add_box(center size kind = physics3d.BodyKind.fixed)
+    add_box(@walls center size color)
+}
+world.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind = physics3d.BodyKind.fixed)
+add_wall(vec3(0 1.5 -20) vec3(40 3 1) rgb(0.55 0.55 0.6))
+add_wall(vec3(0 1.5 20) vec3(40 3 1) rgb(0.55 0.55 0.6))
+add_wall(vec3(-20 1.5 0) vec3(1 3 40) rgb(0.55 0.55 0.6))
+add_wall(vec3(20 1.5 0) vec3(1 3 40) rgb(0.55 0.55 0.6))
+let walls_mesh = custom_mesh(walls)
+let ground = plane_mesh(40.0)
+let crate = cube_mesh(1.0)
+let ball = sphere_mesh(0.4)
+let gun = cube_mesh(1.0)
+
+start = () :> void => {
+    player = world.character(vec3(0 0 8) radius = 0.35)
+    yaw = 0.0
+    pitch = 0.0
+    seed_random(3)
+    loop body in crates world.remove(body)
+    crates.clear()
+    loop i in [0..18) {
+        let size = random(1.2 2.8)
+        let center = vec3(random(-16.0 16.0) size/2.0 random(-16.0 16.0))
+        if length(vec2(center.x center.z)-vec2(0 8))<?3.0 continue
+        crates.push(world.add_box(center vec3(size size size) density = 150))
+    }
+    orbs.clear()
+    loop i in [0..ORBS) {
+        let angle = float64(i)/float64(ORBS)*TAU
+        orbs.push(Orb[pos = vec3(sin(angle)*random(6.0 15.0) random(1.5 4.0) cos(angle)*random(6.0 15.0)) phase = random(0.0 TAU)])
+    }
+    hits = 0
+    run_time = 0.0
+    done = false
+    flash = 0.0
+}
+start()
+
+forward = () :> vec3 => view_direction(yaw pitch)
+eye = () :> vec3 => player.feet+vec3(0 EYE 0)
+
+shoot = () :> void => {
+    play(snd_shot 0.4)
+    flash = 1.0
+    let origin = eye()
+    let direction = forward()
+    let hit = world.raycast(origin origin+direction*1000.0)
+    let blocked_at = match hit { h: physics3d.Hit => h.fraction*1000.0 <none> => 1000.0 }
+    let best = shot_target(orbs origin direction run_time blocked_at)
+    if best>=?0 {
+        orbs[best].pop = 0.001
+        hits += 1
+        play(snd_pop 0.6 pitch = 1.0+0.1*hits)
+        if hits=?ORBS done = true
+    } else {
+        match hit {
+            h: physics3d.Hit => {
+                if world.kind(h.body)=?physics3d.BodyKind.dynamic world.push(h.body direction*400.0 h.point)
+            }
+            <none> => {}
+        }
+    }
+}
+
+update = (dt: float64) :> void => {
+    if not done run_time += dt
+    flash = max(flash-dt*8.0 0.0)
+    loop i in [0..orbs.length) { if orbs[i].pop>?0.0 orbs[i].pop += dt }
+    if mouse_pressed(Mouse.left) and not is_mouse_locked() mouse_lock()
+    else if mouse_pressed(Mouse.left) or gamepad_pressed(PadButton.rb) or (gamepad_axis(5)>?0.5 and frame_number()%8=?0) shoot()
+    if key_pressed(Key.escape) mouse_lock(false)
+    if done and (key_pressed(Key.r) or gamepad_pressed(PadButton.start)) start()
+    let look = right_stick()*3.0*dt
+    if is_mouse_locked() look += mouse_delta()*LOOK
+    yaw -= look.x
+    pitch = clamp(pitch-look.y -1.5 1.5)
+    let axis = input_axis()
+    let ahead = vec3(-sin(yaw) 0 -cos(yaw))
+    let side = vec3(cos(yaw) 0 -sin(yaw))
+    let move = ahead*(-axis.y)+side*axis.x
+    if length(move)>?1.0 move = normalize(move)
+    let jump = 0.0
+    if player.on_ground and (key_pressed(Key.space) or gamepad_pressed(PadButton.a)) {
+        jump = JUMP
+        play(snd_jump 0.3)
+    }
+    world.walk(@player move*WALK dt jump = jump)
+    world.step(dt)
+}
+
+draw = () :> void => {
+    sky(vec3(0.3 0.5 0.85) vec3(0.8 0.85 0.9))
+    sun(vec3(-0.5 0.9 0.6))
+    shadows(true)
+    fog(vec3(0.8 0.85 0.9) 0.004)
+    let eye_pos = eye()
+    camera3d(eye_pos eye_pos+forward() 70.0)
+    draw_mesh(ground mat4() rgb(0.42 0.5 0.36))
+    draw_mesh(walls_mesh)
+    loop body in crates draw_mesh(crate world.transform(body)*scaling(world.size(body)) rgb(0.62 0.45 0.3))
+    loop orb in orbs {
+        if orb.pop>?0.4 continue
+        let size = 1.0+orb.pop*4.0
+        draw_mesh(ball translation(orb_at(orb run_time))*scaling(vec3(size size size))
+            hsv(orb.phase/TAU 0.8 1.0) emissive = 0.8*(1.0-orb.pop/0.4))
+    }
+    let view = inverse(look_at(eye_pos eye_pos+forward() vec3(0 1 0)))
+    let kick = 0.06*flash
+    draw_mesh(gun view*translation(vec3(0.18 -0.16 -0.4+kick))*scaling(vec3(0.04 0.05 0.24))
+        rgb(0.45 0.46 0.5) in_front = true)
+    if flash>?0.0 point_light(eye_pos+forward()*0.8 vec3(1.0 0.8 0.5) 6.0 flash*2.0)
+    circle(vec2(640 360) 3 rgba(1 1 1 0.8))
+    text("ORBS {hits} / {ORBS}    {format(run_time ".1f")} s" vec2(24 20) 28)
+    text("WASD: walk    Space: jump    Click: shoot    Escape: release mouse" vec2(24 60) 20)
+    if not is_mouse_locked() text_centered("Click to look around" vec2(640 420) 28 rgba(1 1 1 0.7))
+    if done {
+        text_centered("All {ORBS} in {format(run_time ".1f")} s" vec2(640 300) 56 rgb(1.0 0.85 0.3))
+        text_centered("R (or Start) to play again" vec2(640 470) 28)
+    }
+}

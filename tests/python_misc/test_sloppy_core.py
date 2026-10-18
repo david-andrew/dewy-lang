@@ -49,6 +49,21 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'game-camera-pointer-lock': '''import p"@lib/game/window.jo" as input
+main=()=>{
+input.__mouse_x=72.0 input.__mouse_y=48.0
+input.__mouse_dx=640.0 input.__mouse_dy=400.0
+mouse_lock(true)
+if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 1
+input.__mouse_dx=4.0 input.__mouse_dy=-3.0
+mouse_lock(true)
+if input.__mouse_dx not=?4.0 or input.__mouse_dy not=?-3.0 return 2
+mouse_lock(false)
+if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 3
+input.__mouse_dx=-640.0 input.__mouse_dy=-400.0
+input.__mouse_motion_reset()
+return if input.__mouse_dx=?0.0 and input.__mouse_dy=?0.0
+and input.__mouse_x=?72.0 and input.__mouse_y=?48.0 42 else 4}''',
     'numeric-grapheme-packed-words': '''main=()=>{
 let words:array<uint8>=[99 120 86 52 18 128 255 255 255]
 return if __grapheme_word(words 1) =? 305419896
@@ -8529,7 +8544,7 @@ def test_core_cli_identity(compiler):
     assert result.returncode == 0 and 'file.dewy' in result.stderr
 
 
-@pytest.mark.parametrize('kind', ['game', 'platformer', 'online', 'program'])
+@pytest.mark.parametrize('kind', ['game', 'platformer', '3d', 'online', 'program'])
 def test_core_new_project(compiler, tmp_path, kind):
     project = tmp_path / 'project with spaces'
     made = subprocess.run([compiler, 'new', project, kind], capture_output=True,
@@ -8635,14 +8650,70 @@ main=()=>{
     assert result == '42', output
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_3d_starter_model(compiler, tmp_path, target, release):
+    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/3d.dewy'
+    model = template.read_text().split('# Presentation and live game state.', 1)[0]
+    body = model + r'''
+main=()=>{
+    let forward=view_direction(0.0 0.0)
+    if length(forward-vec3(0 0 -1))>?0.00001 return 1
+    if length(view_direction(PI/2.0 0.0)-vec3(-1 0 0))>?0.00001 return 2
+    if abs(length(view_direction(0.7 0.4))-1.0)>?0.00001 return 3
+    let origin=vec3(0 0 0)
+    let targets=[Orb[pos=vec3(0 0 -8)] Orb[pos=vec3(0 0 -4)] Orb[pos=vec3(0 0 4)]]
+    let saved=targets
+    if shot_target(targets origin forward 0.0 100.0) not=?1 return 4
+    if shot_target(targets origin forward 0.0 3.0) not=?-1 return 5
+    if shot_target(targets origin forward 0.0 3.75) not=?1 return 6
+    targets[1].pop=0.1
+    if shot_target(targets origin forward 0.0 100.0) not=?0 or saved[1].pop not=?0.0 return 7
+    if shot_target([Orb[pos=vec3(1 0 -4)]] origin forward 0.0 100.0) not=?-1 return 8
+    if shot_target([Orb[pos=vec3(0 0 4)]] origin forward 0.0 100.0) not=?-1 return 9
+    if shot_target([Orb[pos=origin]] origin forward 0.0 100.0) not=?0 return 10
+    if shot_target([] origin forward 0.0 100.0) not=?-1 return 11
+    if abs(orb_at(Orb[pos=origin] PI/4.0).y-0.25)>?0.00001 return 12
+
+    # The same World/Character calls used by the game, with an independent saved world.
+    let w=physics3d.World[gravity=vec3(0 -GRAVITY 0)]
+    w.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind=physics3d.BodyKind.fixed)
+    let wall=w.add_box(vec3(0 2 -4) vec3(10 4 1) kind=physics3d.BodyKind.fixed)
+    let body=w.add_box(vec3(5 1 0) vec3(2 2 2) density=150)
+    let before=w
+    let actor=w.character(vec3(0 0 0) radius=0.35)
+    loop i in [0..10) w.walk(@actor vec3(0 0 0) 1.0/120.0)
+    if not actor.on_ground or abs(actor.feet.y)>?0.01 return 13
+    w.walk(@actor vec3(0 0 0) 1.0/120.0 jump=JUMP)
+    if actor.feet.y<=?0.0 or actor.on_ground return 14
+    loop i in [0..180) w.walk(@actor vec3(0 0 -WALK) 1.0/120.0)
+    if actor.feet.z<?-3.2 or actor.feet.z>?-3.0 or not actor.on_ground return 15
+    let hit=w.raycast(vec3(0 1 0) vec3(0 1 -10))
+    let distance=match hit {h:physics3d.Hit=>float64(h.fraction)*10.0 <none>=>100.0}
+    if abs(distance-3.5)>?0.001 return 16
+    if shot_target(targets vec3(0 1 0) forward 0.0 distance) not=?-1 return 17
+    w.push(body vec3(400 0 0) vec3(5 1 0))
+    w.step(1.0/60.0)
+    if w.pos(body).x<=?5.0 or before.pos(body).x not=?5.0 or before.velocity(body) not=?vec3(0 0 0) return 18
+    w.remove(body)
+    if w.alive(body) or not before.alive(body) return 19
+    if not w.alive(wall) return 20
+    return 42
+}
+'''
+    result, output = run_value_batch(compiler, tmp_path, {'3d-model': body}, release, target)['3d-model']
+    assert result == '42', output
+
+
 @pytest.mark.parametrize('flags', [[], ['--release']])
-def test_core_platformer_starter_tests(compiler, flags):
-    template = Path(__file__).resolve().parents[2] / 'core/lib/new/dewy/platformer.dewy'
+@pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1)])
+def test_core_game_starter_tests(compiler, flags, kind, count):
+    template = Path(__file__).resolve().parents[2] / f'core/lib/new/dewy/{kind}.dewy'
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2'}
     result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert '2 tests passed' in result.stdout
+    assert f'{count} test' in result.stdout
 
 
 
@@ -9288,3 +9359,12 @@ return count+text.length+extra}''' if nested else
         assert ran.returncode != 0 and 'unpacking requires exactly 2 elements' in ran.stderr, ran.stdout + ran.stderr
     else:
         assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+def test_core_web_pointer_lock_events():
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node is required for the web input event check')
+    script = Path(__file__).with_name('core_web_input.cjs')
+    result = subprocess.run([node, script], capture_output=True, text=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
