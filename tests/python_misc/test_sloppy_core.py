@@ -4763,7 +4763,7 @@ def test_core_many_record_types(compiler, tmp_path):
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_record_instance_inference(compiler, tmp_path, release):
+def test_core_type_instance_inference(compiler, tmp_path, release):
     source = Path(__file__).resolve().parents[2] / 'core/tests/type_instances.jo'
     binary = tmp_path / 'type_instances'
     built = subprocess.run([compiler, 'build', source, '-o', binary,

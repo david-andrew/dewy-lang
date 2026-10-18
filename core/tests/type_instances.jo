@@ -1,4 +1,4 @@
-# Exercise stable record lookup across later inference-variable bindings.
+# Exercise type canonicalization across later inference-variable bindings.
 use '../compiler/types.jo'
 use '../compiler/ast.jo'
 use '../compiler/util.jo'
@@ -37,5 +37,31 @@ main = () -> int:
     probe_resolved = zonk(probe_bound)
     if has_var(probe_resolved) or probe_resolved != get_struct_inst(probe_bound_decl, [T_STR]): return 12
     if not type_eq(probe_bound, probe_resolved): return 13
+    # Unions of different cardinality are unequal even while a member is open.
+    union_var = mk_var()
+    union_array = mk_array(union_var)
+    union_small = mk_union([T_BOOL, union_array])
+    union_extra = get_struct_inst(probe_decl, [T_BOOL])
+    union_large = mk_union([T_BOOL, union_array, union_extra])
+    if type_eq(union_small, union_large) or type_eq(union_large, union_small): return 14
+    union_fixed = mk_union([T_BOOL, mk_array(T_INT)])
+    if not unify(union_var, T_INT): return 15
+    union_resolved = zonk(union_small)
+    if has_var(union_resolved) or union_resolved != union_fixed: return 16
+    if mk_union([mk_array(T_INT), T_BOOL, T_BOOL]) != union_fixed: return 17
+    if not type_eq(union_small, union_resolved): return 18
+    # A raw bound variable nested in an array still needs canonicalization.
+    union_later_var = mk_var()
+    if not unify(union_later_var, T_STR): return 19
+    union_later = mk_union([T_BOOL, mk_array(union_later_var)])
+    if zonk(union_later) != mk_union([T_BOOL, mk_array(T_STR)]): return 20
+    # Concrete subsets cannot unify with a larger union. An open type member
+    # can still infer several remaining alternatives through unify_unions.
+    union_pair = mk_union([T_BOOL, T_INT])
+    union_triple = mk_union([T_BOOL, T_INT, T_STR])
+    if unify(union_pair, union_triple) or unify(union_triple, union_pair): return 21
+    union_rest = mk_var()
+    if not unify(mk_union([T_BOOL, union_rest]), union_triple): return 22
+    if prune(union_rest) != mk_union([T_INT, T_STR]): return 23
     print("ok")
     0

@@ -1,0 +1,32 @@
+{
+  "source_identity": "f77ce39ce651a0e7ba1740819719c2afa3bae2265d6f5beb16de7417c81a67d9",
+  "binary": "build-1792284537594217113/bin/dewy-core",
+  "binary_sha256": "3b487295f19fe7199e9cc80d8c4c862d032a2f45e60b46c2be3bfb011f45a484",
+  "validation": {
+    "command": "TMPDIR=<workspace>/__dewycache__/task-tmp python3 -m tools.core --bootstrap test -n 4 --durations=10",
+    "passed": 3525,
+    "seconds": 97.26,
+    "focused": {
+      "passed": 159,
+      "seconds": 13.83
+    },
+    "coverage": [
+      "native/web default/release match and generic constructor cases",
+      "symmetric union cardinality comparison",
+      "canonical concrete unions after late inference",
+      "normalized duplicate/reordered members",
+      "concrete subset unification rejected",
+      "an open member infers a union of remaining alternatives"
+    ],
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "regressions_before": [
+    "A two-member inference-bearing union compared equal to a larger union in one direction (true/false).",
+    "After binding an array element variable, zonk could return an inference-bearing union instead of the concrete instance."
+  ],
+  "limits": [
+    "Scaling benchmarks measure synthetic fresh type checking, not program execution.",
+    "The small tour build varied across runs on a heavily loaded shared host; no general build improvement is claimed."
+  ]
+}

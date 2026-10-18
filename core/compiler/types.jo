@@ -283,7 +283,7 @@ type_eq = (a0: int, b0: int) -> bool:
         if ta.st == tb.st: return true
         sa = int(ta.st)
         sb = int(tb.st)
-        if structs[sa].decl != structs[sb].decl: return false
+        if structs[sa].decl != structs[sb].decl or structs[sa].ntargs != structs[sb].ntargs: return false
         loop i in [0..int(structs[sa].ntargs)):
             if not type_eq(struct_targ(sa, i), struct_targ(sb, i)): return false
         return true
@@ -313,7 +313,7 @@ unify = (a0: int, b0: int) -> bool:
         if ta.st == tb.st: return true
         sa = int(ta.st)
         sb = int(tb.st)
-        if structs[sa].decl != structs[sb].decl: return false
+        if structs[sa].decl != structs[sb].decl or structs[sa].ntargs != structs[sb].ntargs: return false
         loop i in [0..int(structs[sa].ntargs)):
             if not unify(struct_targ(sa, i), struct_targ(sb, i)): return false
         return true
@@ -341,7 +341,9 @@ unify_unions = (a: int, b: int) -> bool:
         if has_var(am): vars.push(am)
     if vars.len() != 1 or types[prune(vars[0])].kind != .var or rest.len() == 0: return false
     if not unify(vars[0], mk_union(rest)): return false
-    type_eq(a, b)
+    # The variable may now hold a union itself. Flatten and canonicalize the
+    # resolved alternatives before comparing their shapes.
+    type_eq(zonk(a), zonk(b))
 
 simple_enum = (t: int) -> bool:
     layout(t)
@@ -700,15 +702,27 @@ mk_union = (ms0: int[]) -> int:
     if has_none and ms.len() > 0: r = mk_opt(r)
     r
 
+# mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
+# unresolved members still need structural matching until inference finishes.
+union_instances: {int[]: int} = {}
+union_candidates: int[]
+
 union_inst = (ms: int[]) -> int:
-    loop i in 0.. and si in structs:
-        if not si.union_ or int(si.ntargs) != ms.len(): continue
-        same = true
-        loop k in [0..ms.len()):
-            if not type_eq(struct_targ(i, k), ms[k]):
-                same = false
-                break
-        if same: return int(si.type)
+    stable = true
+    loop m in ms:
+        if has_var(m): stable = false
+    if stable:
+        if let found = union_instances.get(ms): return found
+    else:
+        loop i in union_candidates:
+            si = structs[i]
+            if int(si.ntargs) != ms.len(): continue
+            same = true
+            loop k in [0..ms.len()):
+                if not type_eq(struct_targ(i, k), ms[k]):
+                    same = false
+                    break
+            if same: return int(si.type)
     name = ""
     hv = false
     loop i in 0.. and m in ms:
@@ -729,6 +743,8 @@ union_inst = (ms: int[]) -> int:
     if hv: flags = TF_HAS_VAR
     types.push(TypeInfo(kind = .enum_, st = i32(idx), flags = i32(flags)))
     structs[idx].type = i32(types.len() - 1)
+    union_candidates.push(idx)
+    if stable: union_instances[ms] = types.len() - 1
     types.len() - 1
 
 # ---------- struct-of-arrays ----------

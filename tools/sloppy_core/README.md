@@ -327,6 +327,22 @@ All 3,431 checks pass on the independently C-built compiler in 45.19 seconds,
 including late inference bindings, ordered type arguments and recursive managed
 records. See `record-index-*` for the sources, samples and toolchain identities.
 
+Concrete union member lists now have a canonical index instead of scanning all
+records and unions. Inference-bearing unions retain structural matching; resolving
+an inference variable rebuilds a flattened concrete union. Structural comparison
+also checks member counts, fixing asymmetric equality and invalid unification of
+a concrete union with a larger one. An open type variable can still infer several
+remaining alternatives.
+
+Seven alternating CPU-2 type-check pairs give candidate/baseline CPU ratios of
+0.951, 0.752 and 0.531 for 500, 2,000 and 5,000 distinct record/string unions.
+Reproduce with `python3 -m tools.sloppy_core.benchmark_types --kind unions`.
+Five fresh-build pairs give tour 0.755, Dunes 0.995 and compiler 0.991. The small
+tour result varied substantially from an earlier exploratory run on the busy
+shared host, so no general build-speed gain is claimed. The independent C gate
+passes 3,525 checks in 97.26 seconds. See `union-index-*` for samples, toolchain
+identities and inference regressions; these measurements exclude program runtime.
+
 Generic record constructors now infer contextual arguments using the same partial
 type binding as function calls. `Box([20 22])`, record/set literals, callbacks,
 and imported constructors work without spelling their type arguments. Known
