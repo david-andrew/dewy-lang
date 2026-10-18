@@ -1534,6 +1534,26 @@ remains release. `benchmark_compile` has `tour-default`, `netpong-default`,
 mode comparison is retained in `default-modes-baseline.*` as a baseline before
 this change, not a current scorecard.
 
+The same application runner accepts `--target wasm` to run generated web code
+under Node, including `--baseline` and `--mode both` comparisons:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_apps "$(python3 -m tools.core path)" \
+  --target wasm --mode both --workload helpers --count 1000000 --samples 3 \
+  --output __dewycache__/apps-web.json
+```
+
+It compares checksums with the native C reference at sizes 0, 1, 17 and 1000
+before timing the requested size. Every sample starts a fresh process; the
+discarded warmup warms host/filesystem caches, not persistent web JIT state.
+Kernel timers exclude process startup and input construction, but include JIT
+work during the measured kernel. Reports record Node version/options, compiler
+flags, artifact and runner hashes, kernel time and whole-process time. Web
+artifact sizes describe the complete generated HTML; C remains a native binary.
+Use `--node` to select another Node executable. Web runs require `--clock wall`;
+`thread-cpu` uses native syscalls and is rejected for WebAssembly. These are CPU
+workload comparisons, not browser rendering or general cross-platform parity.
+
 Default builds now lower bundled integer floor division and modulo by positive
 literals directly to arithmetic. Powers of two use shifts/masks; other signed
 divisors retain the negative-result correction. Dividends evaluate once, and

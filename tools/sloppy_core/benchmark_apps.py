@@ -1,4 +1,4 @@
-"""Measure the five original Dewy application workloads against C and an optional core baseline."""
+"""Measure native or WebAssembly Dewy application workloads against C and an optional core baseline."""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -69,8 +70,9 @@ def run(command: list, env: dict) -> tuple[str, float]:
     return result.stdout, elapsed
 
 
-def execute(binary: Path, count: int, env: dict) -> tuple[int, dict]:
-    output, elapsed = run([binary, str(count)], env)
+def execute(binary: Path | list[str | Path], count: int, env: dict) -> tuple[int, dict]:
+    command = binary if isinstance(binary, list) else [binary]
+    output, elapsed = run([*command, str(count)], env)
     checksum, ns = map(int, output.split())
     if ns < 0:
         raise RuntimeError(f'{binary}: negative kernel time')
@@ -78,12 +80,25 @@ def execute(binary: Path, count: int, env: dict) -> tuple[int, dict]:
 
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
-            cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release') -> dict:
+            cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release',
+            target: str = 'native', node: str = 'node') -> dict:
+    if target == 'wasm' and clock != 'wall':
+        raise ValueError('WebAssembly benchmarks require --clock wall; the thread CPU clock uses native syscalls')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = '1'
     modes = ['default', 'release'] if mode == 'both' else [mode]
+    target_flags = ['--target', 'wasm'] if target == 'wasm' else []
+    runtime = None
+    if target == 'wasm':
+        node = shutil.which(node)
+        if node is None:
+            raise RuntimeError('Node is needed to benchmark WebAssembly; use --node /path/to/node')
+        runtime = {'path': node, 'version': run([node, '--version'], env)[0].strip(),
+                   'node_options': env.get('NODE_OPTIONS', ''),
+                   'sampling': 'Every sample starts a fresh Node process. The discarded warmup warms '
+                               'filesystem/host caches; JIT state does not persist between samples.'}
     variants = {label if mode != 'both' else f'{label}-{build_mode}':
-                (label, [] if build_mode == 'default' else ['--release'])
+                (label, [*target_flags, *([] if build_mode == 'default' else ['--release'])])
                 for label in compilers for build_mode in modes}
     result = {
         'platform': platform.platform(),
@@ -97,7 +112,9 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'kernel_clock': clock,
         'warmups_per_binary': 1,
         'mode': mode,
-        'core_flags': [] if mode == 'default' else ['--release'] if mode == 'release' else None,
+        'core_flags': [*target_flags, *([] if mode == 'default' else ['--release'])] if mode != 'both' else None,
+        'target': target,
+        'web_runtime': runtime,
         'variants': {label: {'compiler': compiler, 'flags': flags}
                      for label, (compiler, flags) in variants.items()},
         'emission_workers': 1,
@@ -108,10 +125,13 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'harness_sha256': digest(ROOT / 'tools/sloppy_core/benchmark_harness.jo'),
         'c_harness_sha256': digest(APPS / 'harness.h'),
         'workloads': {},
-        'limits': ['Native 64-bit host; warm filesystem caches; one build per binary.',
+        'limits': [('WebAssembly under Node, compared with native C.' if target == 'wasm'
+                    else 'Native 64-bit host.') + ' Warm filesystem caches; one build per binary.',
                    'C graph uses flat edges and a handwritten map; Dewy uses per-node arrays and an insertion-ordered map.',
                    'Kernel times exclude input generation; wall times include the complete process.',
-                   'Thread CPU timing excludes descheduling, but CPU frequency and cache contention still matter.'],
+                   ('Web kernel times include JIT work during the measured kernel; these are not browser rendering timings.'
+                    if target == 'wasm' else
+                    'Thread CPU timing excludes descheduling, but CPU frequency and cache contention still matter.')],
     }
     for label, compiler in compilers.items():
         identity = {'path': str(compiler), 'sha256': digest(compiler)}
@@ -128,14 +148,27 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             shutil.copy2(APPS / c_source.name, c_source)
             binaries = {label: work / f'{name}-{label}' for label in [*variants, 'c']}
             builds = {}
+            commands = {label: [binary] for label, binary in binaries.items()}
+            runners = {}
             for label, (compiler, flags) in variants.items():
                 _, elapsed = run([compilers[compiler], 'build', source, *flags, '-o', binaries[label]], env)
                 builds[label] = elapsed
+                if target == 'wasm':
+                    artifact = binaries[label].with_suffix('.html')
+                    scripts = re.findall(r'<script(?:\s[^>]*)?>(.*?)</script\s*>',
+                                         artifact.read_text(), flags=re.DOTALL | re.IGNORECASE)
+                    if not scripts or not any('const SLOPPY_WASM =' in script for script in scripts):
+                        raise RuntimeError(f'{artifact}: generated WebAssembly script missing')
+                    runner = binaries[label].with_suffix('.cjs')
+                    runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts))
+                    runners[label] = runner
+                    commands[label] = [node, runner]
+                    binaries[label] = artifact
             _, builds['c'] = run([cc, '-O2', c_source, '-o', binaries['c']], env)
             checksums = {}
             # Fast boundary/small-input comparison before the expensive measurements.
             for size in [0, 1, 17, 1000]:
-                checks = {label: execute(binary, size, env)[0] for label, binary in binaries.items()}
+                checks = {label: execute(command, size, env)[0] for label, command in commands.items()}
                 if len(set(checks.values())) != 1:
                     raise RuntimeError(f'{name} count={size}: checksum mismatch {checks}')
                 checksums[str(size)] = checks['c']
@@ -146,7 +179,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             for sample in range(samples + 1):
                 order = labels if sample % 2 == 0 else labels[::-1]
                 for label in order:
-                    actual, timing = execute(binaries[label], size, env)
+                    actual, timing = execute(commands[label], size, env)
                     if checksum is None:
                         checksum = actual
                     if actual != checksum:
@@ -162,6 +195,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 'build_seconds': builds,
                 'binary_sha256': {label: digest(binary) for label, binary in binaries.items()},
                 'binary_bytes': {label: binary.stat().st_size for label, binary in binaries.items()},
+                'runner_sha256': {label: digest(runner) for label, runner in runners.items()},
+                'artifact_kind': {label: 'html' if label in runners else 'native' for label in binaries},
                 'samples': measured, 'median_kernel_ms': medians,
                 'median_wall_seconds': {label: statistics.median(row['wall_seconds'] for row in rows)
                                         for label, rows in measured.items()},
@@ -180,15 +215,20 @@ if __name__ == '__main__':
     cli.add_argument('--samples', type=positive, default=5)
     cli.add_argument('--count', type=positive, help='Override the input size for every selected workload')
     cli.add_argument('--cc', default='cc')
+    cli.add_argument('--target', choices=['native', 'wasm'], default='native',
+                     help='Core target; the C baseline always runs natively')
+    cli.add_argument('--node', default='node', help='Node executable for --target wasm')
     cli.add_argument('--clock', choices=['wall', 'thread-cpu'], default='wall')
     cli.add_argument('--mode', choices=['default', 'release', 'both'], default='release',
                      help='Core build mode; both compares default and release with the same inputs')
     cli.add_argument('--output', type=Path, required=True)
     options = cli.parse_args()
+    if options.target == 'wasm' and options.clock != 'wall':
+        cli.error('--target wasm requires --clock wall; thread-cpu uses native syscalls')
     compilers = {}
     if options.baseline:
         compilers['baseline'] = options.baseline.resolve(strict=True)
     compilers['candidate'] = options.compiler.resolve(strict=True)
     report = measure(compilers, options.workloads or list(COUNTS), options.samples, options.cc,
-                     options.count, options.clock, options.mode)
+                     options.count, options.clock, options.mode, options.target, options.node)
     options.output.write_text(json.dumps(report, indent=2) + '\n')
