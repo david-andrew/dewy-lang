@@ -1,5 +1,6 @@
 """The local driver must never silently validate a stale or failed compiler build."""
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -65,6 +66,65 @@ def test_core_driver_rejects_damaged_seed(checkout, damage):
         first.write_text('not the compiler we built')
     assert core.toolchain(root=root, cache=cache) != first
     assert calls[-1] == {'bootstrap': True, 'seed': None}
+
+
+def test_core_driver_unchanged_launch_does_not_hash(checkout, monkeypatch):
+    root, cache, calls = checkout
+    first = core.toolchain(root=root, cache=cache)
+    monkeypatch.setattr(core, 'digest', lambda path: pytest.fail(f'rehashed unchanged {path}'))
+    assert core.toolchain(root=root, cache=cache) == first
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('target', ['source', 'binary'])
+def test_core_driver_detects_same_size_edit_with_restored_mtime(checkout, target):
+    root, cache, calls = checkout
+    first = core.toolchain(root=root, cache=cache)
+    path = root / 'core/compiler/main.jo' if target == 'source' else first
+    before = path.stat()
+    path.write_bytes(b'!' * before.st_size)
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert core.toolchain(root=root, cache=cache) != first
+    assert calls[-1] == {'bootstrap': target == 'binary',
+                         'seed': first if target == 'source' else None}
+
+
+@pytest.mark.parametrize('target', ['source', 'binary'])
+def test_core_driver_rechecks_touch_without_rebuilding(checkout, monkeypatch, target):
+    root, cache, calls = checkout
+    first = core.toolchain(root=root, cache=cache)
+    path = root / 'core/compiler/main.jo' if target == 'source' else first
+    before = path.stat()
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+    assert core.toolchain(root=root, cache=cache) == first
+    monkeypatch.setattr(core, 'digest', lambda path: pytest.fail(f'rehashed unchanged {path}'))
+    assert core.toolchain(root=root, cache=cache) == first
+    assert len(calls) == 1
+
+
+def test_core_driver_detects_added_and_deleted_sources(checkout):
+    root, cache, calls = checkout
+    first = core.toolchain(root=root, cache=cache)
+    path = root / 'core/compiler/new_module.jo'
+    path.write_text('new module')
+    second = core.toolchain(root=root, cache=cache)
+    assert second != first
+    path.unlink()
+    assert core.toolchain(root=root, cache=cache) != second
+    assert len(calls) == 3
+
+
+def test_core_driver_upgrades_existing_cache_without_rebuilding(checkout, monkeypatch):
+    root, cache, calls = checkout
+    first = core.toolchain(root=root, cache=cache)
+    path = cache / 'current.json'
+    state = json.loads(path.read_text())
+    del state['source_stamp'], state['binary_stamp']
+    path.write_text(json.dumps(state))
+    assert core.toolchain(root=root, cache=cache) == first
+    monkeypatch.setattr(core, 'digest', lambda path: pytest.fail(f'rehashed unchanged {path}'))
+    assert core.toolchain(root=root, cache=cache) == first
+    assert len(calls) == 1
 
 
 def test_core_driver_forced_bootstrap(checkout):

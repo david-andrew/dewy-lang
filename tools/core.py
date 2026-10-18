@@ -19,8 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from tools.sloppy_core.build import ROOT, build
-
+ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '__dewycache__' / 'compact-core'
 TESTS = (
     'tests/python_misc/test_sloppy_core.py',
@@ -37,15 +36,38 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def source_identity(root: Path) -> str:
+def build(*args, **kwargs):
+    # Most invocations reuse the toolchain; don't import bootstrap tooling then.
+    from tools.sloppy_core.build import build as build_toolchain
+    return build_toolchain(*args, **kwargs)
+
+
+def source_paths(root: Path) -> list[Path]:
     paths = [root / 'tools/sloppy_core/build.py']
     core = root / 'core'
     paths.extend(core / name for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'))
     for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
         paths.extend(path for path in (core / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)
+    return sorted(paths)
+
+
+def file_stamp(path: Path) -> list[int]:
+    stat = path.stat()
+    # ctime catches same-size writes even when a tool restores the old mtime;
+    # inode/device catch replacement files. These are local cache hints only.
+    return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+            stat.st_ctime_ns, stat.st_mode]
+
+
+def source_stamp(root: Path) -> list:
+    # Enumerate every time so new/deleted inputs invalidate the fast path too.
+    return [[str(path.relative_to(root)), *file_stamp(path)] for path in source_paths(root)]
+
+
+def source_identity(root: Path) -> str:
     identity = hashlib.sha256()
-    for path in sorted(paths):
+    for path in source_paths(root):
         identity.update(str(path.relative_to(root)).encode())
         identity.update(b'\0')
         identity.update(bytes.fromhex(digest(path)))
@@ -56,15 +78,24 @@ def cached_state(cache: Path) -> tuple[dict, Path | None]:
     try:
         state = json.loads((cache / 'current.json').read_text())
         binary = (cache / state['binary']).resolve(strict=True)
-        if not binary.is_relative_to(cache.resolve()) or digest(binary) != state['binary_sha256']:
+        if not binary.is_relative_to(cache.resolve()):
+            return {}, None
+        stamp = file_stamp(binary)
+        if state.get('binary_stamp') != stamp and digest(binary) != state['binary_sha256']:
             return {}, None
         return state, binary
     except (OSError, ValueError, KeyError, TypeError):
         return {}, None
 
 
+def publish_state(cache: Path, state: dict):
+    temporary = cache / 'current.json.tmp'
+    temporary.write_text(json.dumps(state, indent=2) + '\n')
+    temporary.replace(cache / 'current.json')
+
+
 def test_runner_options(python: Path, arguments: list[str]) -> list[str]:
-    explicit = any(arg.startswith('-n') or arg.startswith('--numprocesses') for arg in arguments)
+    explicit = any(arg.startswith(('-n', '--numprocesses')) for arg in arguments)
     # Focused iteration should not pay worker startup/collection costs. Explicit
     # pytest worker options still work despite disabling unrelated plugin autoload.
     if arguments and not explicit:
@@ -91,9 +122,16 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
     # toolchain directory when another invocation rebuilds newer sources.
     with (cache / 'build.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        identity = source_identity(root)
+        stamp = source_stamp(root)
         state, seed = cached_state(cache)
+        if (not bootstrap and seed is not None and state.get('source_stamp') == stamp
+                and state.get('binary_stamp') == file_stamp(seed)):
+            return seed
+        identity = source_identity(root)
         if not bootstrap and seed is not None and state.get('source_identity') == identity:
+            state['source_stamp'] = stamp
+            state['binary_stamp'] = file_stamp(seed)
+            publish_state(cache, state)
             return seed
         output = cache / f'build-{time.time_ns()}'
         from_c = bootstrap or seed is None
@@ -102,13 +140,12 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
         binary = build(output, bootstrap=from_c, seed=None if from_c else seed)
         # A source edit during compilation must not publish a misleading cache
         # hit. The built snapshot remains available for diagnosis/reuse manually.
-        if source_identity(root) != identity:
+        if source_identity(root) != identity or source_stamp(root) != stamp:
             raise RuntimeError('Compiler sources changed during the build; run the command again.')
         state = {'source_identity': identity, 'binary': str(binary.relative_to(cache)),
-                 'binary_sha256': digest(binary)}
-        temporary = cache / 'current.json.tmp'
-        temporary.write_text(json.dumps(state, indent=2) + '\n')
-        temporary.replace(cache / 'current.json')
+                 'binary_stamp': file_stamp(binary), 'binary_sha256': digest(binary),
+                 'source_stamp': stamp}
+        publish_state(cache, state)
         print(f'Compiler ready: {binary}', file=sys.stderr, flush=True)
         return binary
 

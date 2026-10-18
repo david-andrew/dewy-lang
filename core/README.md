@@ -31,6 +31,10 @@ sources/libraries/build inputs are unchanged, or rebuild with the previous core.
 Failed builds stop the command and leave the previous toolchain intact; tests
 never silently fall back to it. Changes during a build also stop publication.
 Concurrent invocations share a build lock and use separate immutable snapshots.
+Unchanged launches compare file metadata (including nanosecond change times and
+inode identity) rather than hashing every source and the compiler again. Changed
+metadata triggers content checks; additions and removals are checked every time.
+`--bootstrap` forces a fresh C build.
 The cache and build logs live in `__dewycache__/compact-core/`; removing that
 generated directory resets it. No installed compiler is changed.
 
