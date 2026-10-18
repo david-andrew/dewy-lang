@@ -4552,6 +4552,12 @@ check_match = (m: int, expected: int) -> int:
                         nodes[e].type = i32(pt)
                         add_flag(e, NF_CHECKED)
                         value = e
+                else if is_union(st) and is_union(pt) and union_within(pt, st):
+                    nodes[p].type = i32(pt)
+                    loop member in union_members(pt):
+                        seen[union_index(st, member)] = true
+                        arm_members.push(member)
+                    if binding != 0: wrap_conv(value, .union_, pt)
                 else if types[st].kind == .opt and type_eq(pt, telem(st)):
                     finite_seen |= 1
                     if binding != 0:

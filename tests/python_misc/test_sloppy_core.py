@@ -2748,6 +2748,30 @@ if b is? Item b.values[0]=99
 return if a is? Item a.values[0]+a.values[1] else 1}''',
     'optional-array': '''main=()=>{let xs:array<int64?>=[20 none 22] let sum:int64=0
 loop x in xs {if x is? int64 sum+=x} return sum}''',
+    'match-union-subset-binding': '''TextOrCount:type=int64|string
+read=(v:TextOrCount):>int64=>if v is? int64 v else v.length
+pick=(v:TextOrCount|bool):>int64=>match v {part:TextOrCount=>read(part) <bool>=>2}
+main=()=>pick(37)+pick("abc")+pick(true)''',
+    'match-union-subset-narrow': '''read=(v:int64|string):>int64=>if v is? int64 v else v.length
+pick=(v:int64|string|bool):>int64=>match v {<int64|string>=>read(v) _=>if v 2 else 0}
+main=()=>pick(37)+pick("abc")+pick(true)+pick(false)''',
+    'match-union-subset-path': '''Envelope:type=[value:int64|string|bool]
+read=(v:int64|string):>int64=>if v is? int64 v else v.length
+pick=(box:Envelope):>int64=>match box.value {<int64|string>=>read(box.value) _=>if box.value 2 else 0}
+main=()=>pick(Envelope[37])+pick(Envelope["abc"])+pick(Envelope[true])''',
+    'match-union-subset-copy': '''Numbers:type=[values:array<int64>]
+main=()=>{let original:Numbers|string|bool=Numbers[[20 22]]
+let result=match original {part:Numbers|string=>{
+if part is? string return 1
+part.values[0]=99
+part.values[1]} <bool>=>0}
+return if original is? Numbers original.values[0]+result else 1}''',
+    'match-union-subset-overlap': '''pick=(v:int64|string|bool):>int64=>match v {
+<int64|string>=>20 <bool|string>=>2}
+main=()=>pick(0)+pick("first arm")+pick(true)''',
+    'match-union-subset-generic': '''read=(v:int64|string):>int64=>if v is? int64 v else v.length
+pick=<T>(v:T|bool):>int64=>match v {part:T=>read(part) <bool>=>2}
+main=()=>pick<int64|string>(37)+pick<int64|string>("abc")+pick<int64|string>(true)''',
     'match-union-literals': '''pick=(v:int64|string):>int64=>match v {
 <0>=>1 s:"yes"=>s.length+v.length <"no">=>0 n:42=>n _=>2}
 main=()=>pick(0)+pick("yes")+pick("no")+pick(42)-pick(8)-pick("other")-3''',
@@ -3417,6 +3441,8 @@ ERRORS = {
     'main-float-result': ('main=()=>42.5', 'main must return void or an integer exit code'),
     'operator-comparison-result': ('Box:type=[value:int64]\n__lt__=(a:Box b:Box)=>a.value-b.value\nmain=()=>Box[1] <? Box[2]', 'must return bool'),
     'named-duplicate': ('add=(x:int64 y:int64)=>x+y\nmain=()=>add(40 x=2)', 'given twice'),
+    'match-union-subset-incomplete': ('pick=(v:int64|string|bool)=>match v {<int64|string>=>42}\nmain=()=>pick(0)', 'no arm for'),
+    'match-union-subset-wrong-type': ('pick=(v:int64|string|bool)=>match v {<int64|float64>=>0 _=>42}\nmain=()=>pick(42)', 'not a member'),
     'match-union-literal-incomplete': ('pick=(v:int64|string)=>match v {<0>=>42 <string>=>0}\nmain=()=>pick(0)', 'no arm for'),
     'match-union-bool-incomplete': ('pick=(v:bool|string)=>match v {<true>=>42 <string>=>0}\nmain=()=>pick(true)', 'no arm for'),
     'match-union-literal-wrong-type': ('pick=(v:int64|bool)=>match v {<"no">=>0 _=>42}\nmain=()=>pick(42)', 'not a member'),

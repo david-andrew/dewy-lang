@@ -905,6 +905,13 @@ type selection as assignment: with `int64|uint8`, `<42>` selects `int64`, while 
 `uint8` value needs a `uint8` arm. A literal covers only its value, so other values
 of that type still need an arm. `<true>` and `<false>` together cover `bool`.
 
+A type arm can group a subset of the union's members. For a value of type
+`int64|string|bool`, `part:int64|string=>...` binds an independent `int64|string`
+value and narrows the original variable or field to the same subset. The remaining
+`_` arm knows the value is `bool`. `<int64|string>=>...` performs the same test
+without introducing a binding. Subset aliases and generic type parameters work
+too. Arms run in source order, including when their subsets overlap.
+
 Membership uses `in?`; negate it with `not in?` or `notin?`:
 
 ```dewy

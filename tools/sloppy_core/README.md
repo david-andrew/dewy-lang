@@ -71,9 +71,11 @@ exact union member types (including aliases), concrete types, optional payloads,
 integer/string/boolean literals, and named catch-alls. `else` and `else if` attach
 a fallback. The scrutinee is evaluated once; bindings are independent values.
 Boolean and optional coverage is checked directly, and union coverage reuses the
-core's tag checker. Other matches require a catch-all. Refinement, structural,
-sequence and union-subset patterns are not implemented yet; there is no
-proof-engine dependency. Integer, string and boolean literals also match union
+core's tag checker. Union-subset type arms also work, including aliases and
+generic parameters: they cover all selected tags, narrow the arm's source and
+bind an independent smaller union when named. Overlapping arms retain source
+order. Other matches require a catch-all. Refinement, structural and sequence
+patterns are not implemented yet; there is no proof-engine dependency. Integer, string and boolean literals also match union
 members, with tag checks before payload reads and member narrowing in the arm.
 Literal bindings receive that member's value. Literal coverage does not remove
 an entire type from later fallbacks, except that both boolean literals cover
