@@ -1,6 +1,7 @@
 # Dewy layout uses its own lexer. Preserve meaningful adjacency and physical
 # line breaks; normalize indentation, declarations and whitespace around them.
 use 'dewy_fast.jo'
+use 'dewy_parse.jo'
 
 df_lexemes: DewyLexeme[]
 df_file = () -> int: dn_file
@@ -28,8 +29,8 @@ df_tokens = (file: int, src: str) -> str[]:
     dn_file = saved
     out: str[]
     loop i in 0.. and t in df_lexemes:
-        if t.kind == "eof": break
-        sig = "{t.kind}:{src[t.start..t.stop)}"
+        if t.kind == .eof: break
+        sig = "{dw_kind_name(t.kind)}:{src[t.start..t.stop)}"
         if i > 0:
             sig += " n{t.newline}"
             if not df_free_gap(df_lexemes[i - 1].text, t.text): sig += " s{t.space}"
@@ -53,11 +54,11 @@ df_text = (src: str) -> str?:
         if end == len(src): newline = final_newline
         protected = start < opaque_end
         stop = at
-        loop stop < tokens.len() and tokens[stop].kind != "eof" and tokens[stop].start < content_end:
+        loop stop < tokens.len() and tokens[stop].kind != .eof and tokens[stop].start < content_end:
             if tokens[stop].stop > content_end: opaque_end = tokens[stop].stop
             stop += 1
         lead = 0
-        loop at + lead < stop and tokens[at + lead].kind == "op" and tokens[at + lead].text in [")", "]", "}"]: lead += 1
+        loop at + lead < stop and tokens[at + lead].kind == .op and tokens[at + lead].text in [")", "]", "}"]: lead += 1
         depth = max(0, stack.len() - lead)
         first = start
         loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
@@ -85,7 +86,7 @@ df_text = (src: str) -> str?:
         # code. Their contents stay untouched, but following delimiters count.
         loop i in [at..stop):
             t = tokens[i]
-            if t.kind != "op": continue
+            if t.kind != .op: continue
             if t.text in ["(", "[", "{"]:
                 stack.push(t.text)
                 if stack.len() > 256: return none

@@ -8,8 +8,77 @@ use 'parse.jo'
 use 'expr.jo'
 use 'check.jo'
 
+# Compact tags shared by lexical tokens and syntax nodes. Names are needed
+# only at the legacy parser boundary and for formatter/diagnostic text.
+enum DewyKind:
+    unknown, op, identifier, boolean, metatag, based_string, integer, real,
+    quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
+    flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
+    operator, postfix, prefix, string, string_chunk
+
+dw_kind_name = (kind: DewyKind) -> str:
+    match kind:
+        unknown: "Unknown"
+        op: "op"
+        identifier: "Identifier"
+        boolean: "Bool"
+        metatag: "Metatag"
+        based_string: "BasedString"
+        integer: "Integer"
+        real: "Real"
+        quoted: "quoted"
+        rawquoted: "rawquoted"
+        eof: "eof"
+        atom: "Atom"
+        ambiguous: "Ambiguous"
+        binary: "BinOp"
+        block: "Block"
+        combined_assignment: "CombinedAssignmentOp"
+        flat: "Flat"
+        flow: "Flow"
+        interpolated_string: "IString"
+        inverted_comparison: "InvertedComparisonOp"
+        keyword: "Keyword"
+        keyword_expr: "KeywordExpr"
+        operator: "Operator"
+        postfix: "Postfix"
+        prefix: "Prefix"
+        string: "String"
+        string_chunk: "StringChunk"
+
+dw_kind_from_name = (name: str) -> DewyKind:
+    match name:
+        "Unknown": DewyKind.unknown
+        "op": DewyKind.op
+        "Identifier": DewyKind.identifier
+        "Bool": DewyKind.boolean
+        "Metatag": DewyKind.metatag
+        "BasedString": DewyKind.based_string
+        "Integer": DewyKind.integer
+        "Real": DewyKind.real
+        "quoted": DewyKind.quoted
+        "rawquoted": DewyKind.rawquoted
+        "eof": DewyKind.eof
+        "Atom": DewyKind.atom
+        "Ambiguous": DewyKind.ambiguous
+        "BinOp": DewyKind.binary
+        "Block": DewyKind.block
+        "CombinedAssignmentOp": DewyKind.combined_assignment
+        "Flat": DewyKind.flat
+        "Flow": DewyKind.flow
+        "IString": DewyKind.interpolated_string
+        "InvertedComparisonOp": DewyKind.inverted_comparison
+        "Keyword": DewyKind.keyword
+        "KeywordExpr": DewyKind.keyword_expr
+        "Operator": DewyKind.operator
+        "Postfix": DewyKind.postfix
+        "Prefix": DewyKind.prefix
+        "String": DewyKind.string
+        "StringChunk": DewyKind.string_chunk
+        _: DewyKind.unknown
+
 struct DewySyntax:
-    kind: str
+    kind: DewyKind
     text: str
     pos: int
     children: int[]
@@ -26,8 +95,8 @@ dw_multiplications = (id: int) -> int:
 dw_unwrap = (id: int) -> int:
     let id = id
     loop true:
-        if dewy_syntax[id].kind == "Atom": id = dw_child(id, 0)
-        else if dewy_syntax[id].kind == "Ambiguous":
+        if dewy_syntax[id].kind == .atom: id = dw_child(id, 0)
+        else if dewy_syntax[id].kind == .ambiguous:
             best = -1
             score = 1000000000
             tied = false
@@ -44,12 +113,12 @@ dw_unwrap = (id: int) -> int:
     id
 dw_name = (id: int) -> str:
     let id = dw_unwrap(id)
-    if dewy_syntax[id].kind == "Identifier": return dewy_syntax[id].text
+    if dewy_syntax[id].kind == .identifier: return dewy_syntax[id].text
     ""
 dw_op = (id: int) -> str:
     let id = dw_unwrap(id)
-    if dewy_syntax[id].kind == "BinOp" and dewy_syntax[dw_child(id, 0)].kind == "CombinedAssignmentOp": return dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "="
-    if dewy_syntax[id].kind == "BinOp" or dewy_syntax[id].kind == "Prefix" or dewy_syntax[id].kind == "Postfix" or dewy_syntax[id].kind == "Flat": return dewy_syntax[dw_child(id, 0)].text
+    if dewy_syntax[id].kind == .binary and dewy_syntax[dw_child(id, 0)].kind == .combined_assignment: return dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "="
+    if dewy_syntax[id].kind == .binary or dewy_syntax[id].kind == .prefix or dewy_syntax[id].kind == .postfix or dewy_syntax[id].kind == .flat: return dewy_syntax[dw_child(id, 0)].text
     ""
 dw_fail = (id: int, what: str) -> int:
     fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
@@ -196,17 +265,17 @@ dw_binary = (id: int) -> int:
 dw_is_include = (id: int) -> bool:
     if not starts_with(dw_op(id), "CallJuxtapose"): return false
     tag = dw_unwrap(dw_child(id, 1))
-    dewy_syntax[tag].kind == "Metatag" and dewy_syntax[tag].text == "include_bytes"
+    dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "include_bytes"
 
 dw_include = (id: int) -> int:
     arg = dw_unwrap(dw_child(id, 2))
-    if dewy_syntax[arg].kind != "Block" or dewy_syntax[arg].children.len() != 1:
+    if dewy_syntax[arg].kind != .block or dewy_syntax[arg].children.len() != 1:
         return dw_fail(id, "$include_bytes without one literal path")
     path = dw_unwrap(dw_child(arg, 0))
     if dw_op(path) != "CallJuxtapose" or dw_name(dw_child(path, 1)) != "p":
         return dw_fail(path, "$include_bytes without a p\"path\" literal")
     path = dw_unwrap(dw_child(path, 2))
-    if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral asset path")
+    if dewy_syntax[path].kind != .string: return dw_fail(path, "a nonliteral asset path")
     callee = mk(.ident, dewy_syntax[id].pos)
     nodes[callee].name = i32(intern("embed"))
     call = mk(.call, dewy_syntax[id].pos)
@@ -235,7 +304,7 @@ dw_type = (id: int) -> int:
         n = mk(.tname, pos)
         nodes[n].name = i32(intern(name))
         return n
-    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "[]:":
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "[]:":
         n = mk(.trecord, pos)
         fields: int[]
         loop child in dewy_syntax[id].children:
@@ -249,13 +318,13 @@ dw_type = (id: int) -> int:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
         return n
-    if dewy_syntax[id].kind == "Postfix" and dw_op(id) == "?":
+    if dewy_syntax[id].kind == .postfix and dw_op(id) == "?":
         n = mk(.topt, pos)
         nodes[n].a = i32(dw_type(dw_child(id, 1)))
         return n
     if dw_op(id) == ":>":
         params = dw_child(id, 1)
-        if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
+        if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
         n = mk(.tfn, pos)
         types_: int[]
         loop param in dewy_syntax[params].children:
@@ -276,7 +345,7 @@ dw_type = (id: int) -> int:
         nodes[n].sval = i32(intern(owner))
         nodes[n].name = i32(intern(member))
         return n
-    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
         return dw_type(dw_child(id, 0))
     if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
@@ -338,7 +407,7 @@ dw_param = (id: int, kind: NK) -> int:
     by_place = dw_op(lhs) == "@"
     if by_place: lhs = dw_child(lhs, 1)
     name = dw_name(lhs)
-    pattern = kind == .param and dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:"
+    pattern = kind == .param and dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:"
     if name == "" and not pattern: return dw_fail(lhs, "this parameter or field")
     if pattern and by_place: return dw_fail(lhs, "unpacking a mutable parameter; use a named @ parameter")
     n = mk(kind, pos)
@@ -365,7 +434,7 @@ dw_function = (id: int, name: str) -> int:
         if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
         type_params = dw_type_params(dw_child(params, 1))
         params = dw_child(params, 2)
-    if dewy_syntax[params].kind != "Block" or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
+    if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
     if type_params.len() > 0:
@@ -380,7 +449,7 @@ dw_function = (id: int, name: str) -> int:
     capture = false
     bound: {int: bool} = {}
     loop p in dewy_syntax[params].children:
-        if dewy_syntax[p].kind == "Metatag":
+        if dewy_syntax[p].kind == .metatag:
             if dewy_syntax[p].text != "capture": return dw_fail(p, "this parameter modifier; use $capture")
             if capture: return dw_fail(p, "$capture without a local name")
             if name != "": return dw_fail(p, "$capture on a module function")
@@ -488,8 +557,8 @@ dw_expr = (id: int) -> int:
     op = dw_op(id)
     if op == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
     if dw_is_include(id): return dw_include(id)
-    if k == "BasedString": return dw_binary(id)
-    if k == "Identifier":
+    if k == .based_string: return dw_binary(id)
+    if k == .identifier:
         if text == "none": return mk(.none_lit, pos)
         if text == "end" and dw_index_context.len() > 0:
             ix = dw_index_context[dw_index_context.len() - 1]
@@ -501,7 +570,7 @@ dw_expr = (id: int) -> int:
         n = mk(.ident, pos)
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
-    if k == "Integer":
+    if k == .integer:
         if let value = dw_unsigned(text, id):
             n = mk(.int_lit, pos)
             nodes[n].ival = int(value)
@@ -509,7 +578,7 @@ dw_expr = (id: int) -> int:
             if nodes[n].ival < 0: add_flag(n, NF_U64)
             return n
         return dw_big_integer(text, id)
-    if k == "Real":
+    if k == .real:
         parts = split(text, "|")
         if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
         number = dw_digits(parts[0])
@@ -528,39 +597,39 @@ dw_expr = (id: int) -> int:
         nodes[n].fval = value!
         add_flag(n, NF_LITERAL)
         return n
-    if k == "IString":
+    if k == .interpolated_string:
         n = mk(.str_lit, pos)
         nodes[n].aux = 1
         pieces: int[]
         loop child in dewy_syntax[id].children:
-            if dewy_syntax[child].kind == "StringChunk":
+            if dewy_syntax[child].kind == .string_chunk:
                 part = mk(.str_lit, dewy_syntax[child].pos)
                 nodes[part].sval = i32(intern(dewy_syntax[child].text))
                 pieces.push(part)
             else:
-                if dewy_syntax[child].kind != "Block" or dewy_syntax[child].children.len() != 1: return dw_fail(child, "this string interpolation")
+                if dewy_syntax[child].kind != .block or dewy_syntax[child].children.len() != 1: return dw_fail(child, "this string interpolation")
                 part = mk(.pair, dewy_syntax[child].pos)
                 nodes[part].a = i32(dw_expr(dw_child(child, 0)))
                 nodes[part].sval = -1
                 pieces.push(part)
         set_list(n, pieces)
         return n
-    if k == "Bool":
+    if k == .boolean:
         n = mk(.bool_lit, pos)
         nodes[n].ival = if text == "true": 1 else: 0
         return n
-    if k == "String":
+    if k == .string:
         n = mk(.str_lit, pos)
         nodes[n].sval = i32(intern(text))
         return n
-    if k == "Block":
+    if k == .block:
         children = dewy_syntax[id].children
         if children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
-            if children.len() == 1 and dewy_syntax[children[0]].kind == "Flow":
+            if children.len() == 1 and dewy_syntax[children[0]].kind == .flow:
                 first = dw_child(children[0], 0)
-                if dewy_syntax[first].kind == "KeywordExpr" and dewy_syntax[dw_child(first, 0)].text == "loop": return dw_comprehension(children[0])
+                if dewy_syntax[first].kind == .keyword_expr and dewy_syntax[dw_child(first, 0)].text == "loop": return dw_comprehension(children[0])
             is_map = children.len() > 0 and dw_op(children[0]) == "->"
             is_record = children.len() > 0 and dw_op(children[0]) == "="
             loop child in children:
@@ -569,7 +638,7 @@ dw_expr = (id: int) -> int:
             xs: int[]
             loop child in children:
                 item = dw_unwrap(child)
-                if not is_map and dewy_syntax[item].kind == "Postfix" and dw_op(item) == "...":
+                if not is_map and dewy_syntax[item].kind == .postfix and dw_op(item) == "...":
                     value = dw_expr(dw_child(item, 1))
                     add_flag(value, NF_SPREAD)
                     xs.push(value)
@@ -592,9 +661,9 @@ dw_expr = (id: int) -> int:
             return n
         if text == "{{}}:": return dw_block(id)
         return dw_fail(id, "this expression block")
-    if k == "Postfix" and op == "...":
+    if k == .postfix and op == "...":
         fatal(pos, "spread is supported inside array or record literals: `[values... item]` or `[base... field=value]`")
-    if k == "Prefix":
+    if k == .prefix:
         e = dw_expr(dw_child(id, 1))
         if op == "@":
             add_flag(e, NF_MUT)
@@ -623,12 +692,12 @@ dw_expr = (id: int) -> int:
         nodes[n].op = i32(int(if op == "-": Tok.minus else: Tok.plus))
         nodes[n].a = i32(e)
         return n
-    if k == "Flow":
+    if k == .flow:
         loop arm in dewy_syntax[id].children:
-            if dewy_syntax[arm].kind == "KeywordExpr" and dewy_syntax[dw_child(arm, 0)].text == "loop":
+            if dewy_syntax[arm].kind == .keyword_expr and dewy_syntax[dw_child(arm, 0)].text == "loop":
                 return dw_fail(arm, "a loop used as a value; use return or a comprehension")
         return dw_flow(id, 0)
-    if k == "BinOp":
+    if k == .binary:
         left = dw_child(id, 1)
         right = dw_child(id, 2)
         if len(op) > 1 and op[0] == '.' and op[1] != '.':
@@ -637,12 +706,12 @@ dw_expr = (id: int) -> int:
             n = mk(.istype, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_type(right))
-            if op == "isnt?" or dewy_syntax[dw_child(id, 0)].kind == "InvertedComparisonOp":
+            if op == "isnt?" or dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison:
                 inverted = mk(.not_, pos)
                 nodes[inverted].a = i32(n)
                 return inverted
             return n
-        if dewy_syntax[dw_child(id, 0)].kind == "InvertedComparisonOp":
+        if dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison:
             comparison = mk(.binary, pos)
             nodes[comparison].op = i32(int(dw_binary_token(op, id)))
             nodes[comparison].a = i32(dw_expr(left))
@@ -683,7 +752,7 @@ dw_expr = (id: int) -> int:
             return n
         if starts_with(op, "CallJuxtapose") or op == "IndexJuxtapose":
             xs = dewy_syntax[right].children
-            bracket = dewy_syntax[right].kind == "Block" and dewy_syntax[right].text in ["[]:", "[):"]
+            bracket = dewy_syntax[right].kind == .block and dewy_syntax[right].text in ["[]:", "[):"]
             if bracket and dw_name(left) == "set":
                 return bc_call("__dewy_set", [dw_expr(right)], pos)
             n = mk(if bracket: NK.index else: NK.call, pos)
@@ -693,7 +762,7 @@ dw_expr = (id: int) -> int:
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             args: int[]
             if bracket: dw_index_context.push(n)
-            if dewy_syntax[right].kind != "Block": args.push(dw_expr(right))
+            if dewy_syntax[right].kind != .block: args.push(dw_expr(right))
             else if bracket and xs.len() == 1 and (dw_op(xs[0]) == "RangeJuxtapose" or dw_name(xs[0]) == ".."):
                 args.push(dw_iterable(right, true))
             else:
@@ -724,7 +793,7 @@ dw_expr = (id: int) -> int:
         nodes[n].a = i32(dw_expr(left))
         nodes[n].b = i32(if op == "in?": dw_membership(right) else: dw_expr(right))
         return n
-    return dw_fail(id, "syntax '{k}'")
+    return dw_fail(id, "syntax '{dw_kind_name(k)}'")
 
 dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
@@ -746,7 +815,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
             nodes[n].b = nodes[s].a
             return n
         return s
-    if k == "KeywordExpr":
+    if k == .keyword_expr:
         word = dewy_syntax[dw_child(id, 0)].text
         if word == "test":
             if not top: return dw_fail(id, "a test block inside another block; declare tests at the top level")
@@ -767,11 +836,11 @@ dw_stmt = (id: int, top: bool = false) -> int:
             n = mk(if word == "break": NK.break_ else: NK.continue_, pos)
             if dewy_syntax[id].children.len() > 1:
                 label = dw_child(id, 1)
-                if dewy_syntax[label].kind != "Metatag": return dw_fail(label, "a loop exit without a $label")
+                if dewy_syntax[label].kind != .metatag: return dw_fail(label, "a loop exit without a $label")
                 nodes[n].name = i32(intern(dewy_syntax[label].text))
             return n
         return dw_fail(id, "statement '{word}'")
-    if k == "Flow":
+    if k == .flow:
         n = dw_flow(id, 0)
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
@@ -792,7 +861,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
         if dw_op(id) == ":" or top and dw_op(lhs) == ":": return dw_declare(id, false, top)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
-        if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
+        if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
             pattern = mk(.tuple, dewy_syntax[lhs].pos)
             set_list(pattern, dw_bindings(lhs))
             nodes[n].a = i32(pattern)
@@ -815,7 +884,7 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
         if dw_op(child) == ":":
             annotation = dw_child(child, 2)
             child = dw_unwrap(dw_child(child, 1))
-        if dewy_syntax[child].kind == "Block" and dewy_syntax[child].text == "[]:":
+        if dewy_syntax[child].kind == .block and dewy_syntax[child].text == "[]:":
             if annotation != 0: return [dw_fail(child, "an annotated nested pattern; annotate its names or the whole declaration")]
             n = mk(.tuple, dewy_syntax[child].pos)
             set_list(n, dw_binding_items(child, seen))
@@ -854,7 +923,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if dw_op(lhs) == ":":
         annotation = dw_child(lhs, 2)
         lhs = dw_child(lhs, 1)
-    if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
+    if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
         if initial == 0: return dw_fail(lhs, "unpacking without a value")
         n = mk(.vardecl, dewy_syntax[id].pos)
         set_list(n, dw_bindings(lhs))
@@ -920,7 +989,7 @@ dw_import = (id: int) -> int:
     if value == "":
         if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use a library name or p\"file.dewy\"")
         path = dw_unwrap(dw_child(spec, 2))
-        if dewy_syntax[path].kind != "String": return dw_fail(path, "a nonliteral module path")
+        if dewy_syntax[path].kind != .string: return dw_fail(path, "a nonliteral module path")
         value = dewy_syntax[path].text
         nodes[n].aux2 = 1
     nodes[n].sval = i32(intern(value))
@@ -942,7 +1011,7 @@ dw_import = (id: int) -> int:
 
 dw_import_name = (id: int) -> int:
     let id = dw_unwrap(id)
-    loop dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
         id = dw_unwrap(dw_child(id, 0))
     alias = ""
     if dw_op(id) == "as":
@@ -965,7 +1034,7 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
     exclude_first = false
-    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
         wrapper = dewy_syntax[id].text
         if wrapper not in ["[]:", "[):", "():", "(]:"]: return dw_fail(id, "this range boundary")
         inclusive = wrapper == "[]:" or wrapper == "(]:"
@@ -1017,7 +1086,7 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             add_flag(n, NF_MUT)
             binder = dw_unwrap(dw_child(binder, 1))
         binders: int[]
-        if dewy_syntax[binder].kind == "Block" and dewy_syntax[binder].text == "[]:":
+        if dewy_syntax[binder].kind == .block and dewy_syntax[binder].text == "[]:":
             if has_flag(n, NF_MUT): return dw_fail(binder, "unpacking a mutable loop binding; use a named @item and its fields")
             binders = dw_bindings(binder)
             # A one-element pattern still unpacks the iteration value. Keep
@@ -1073,12 +1142,12 @@ dw_pattern = (id: int) -> int:
         binding = dw_name(dw_child(id, 1))
         if binding == "": return dw_fail(id, "this match binding")
         id = dw_unwrap(dw_child(id, 2))
-    else if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "<>:" and dewy_syntax[id].children.len() == 1:
+    else if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "<>:" and dewy_syntax[id].children.len() == 1:
         id = dw_unwrap(dw_child(id, 0))
     else: return dw_fail(id, "this match pattern")
     k = dewy_syntax[id].kind
-    literal = k == "Integer" or k == "String" or k == "Bool" or dw_name(id) == "none"
-    if dw_op(id) == "-": literal = dewy_syntax[dw_unwrap(dw_child(id, 1))].kind == "Integer"
+    literal = k == .integer or k == .string or k == .boolean or dw_name(id) == "none"
+    if dw_op(id) == "-": literal = dewy_syntax[dw_unwrap(dw_child(id, 1))].kind == .integer
     p = mk(if literal: NK.plit else: NK.ptype, pos)
     nodes[p].a = i32(if literal: dw_expr(id) else: dw_type(id))
     if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
@@ -1089,7 +1158,7 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     nodes[n].a = i32(dw_expr(dw_child(id, 1)))
     body = dw_child(id, 2)
     arms = [body]
-    if dewy_syntax[body].kind == "Block" and dewy_syntax[body].text == "{{}}:": arms = dewy_syntax[body].children
+    if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dewy_syntax[body].children
     xs: int[]
     loop source in arms:
         if dw_op(source) != "=>": return dw_fail(source, "a match arm without =>")
@@ -1104,7 +1173,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     items = dewy_syntax[id].children
     if at >= items.len(): return 0
     arm = items[at]
-    if dewy_syntax[arm].kind != "KeywordExpr": return dw_block(arm, accumulator, map)
+    if dewy_syntax[arm].kind != .keyword_expr: return dw_block(arm, accumulator, map)
     word = dewy_syntax[dw_child(arm, 0)].text
     if word == "match":
         n = dw_match(arm, accumulator, map)
@@ -1152,12 +1221,12 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
 dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.block, dewy_syntax[id].pos)
     statements: int[]
-    if dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "{{}}:":
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
         children = dewy_syntax[id].children
         label = 0
         label_pos = 0
         loop i in 0.. and child in children:
-            if dewy_syntax[child].kind == "Metatag":
+            if dewy_syntax[child].kind == .metatag:
                 if label != 0: fatal(label_pos, "a loop label must be followed by a loop")
                 label = intern(dewy_syntax[child].text)
                 label_pos = dewy_syntax[child].pos
@@ -1181,24 +1250,24 @@ dw_collection_kind = (id: int) -> int:
     kind = dewy_syntax[id].kind
     children = dewy_syntax[id].children
     candidates: int[]
-    if kind == "Flow":
+    if kind == .flow:
         loop arm in children:
-            if dewy_syntax[arm].kind == "KeywordExpr":
+            if dewy_syntax[arm].kind == .keyword_expr:
                 word = dewy_syntax[dw_child(arm, 0)].text
                 if word == "match":
                     body = dw_child(arm, 2)
                     arms = [body]
-                    if dewy_syntax[body].kind == "Block": arms = dewy_syntax[body].children
+                    if dewy_syntax[body].kind == .block: arms = dewy_syntax[body].children
                     loop branch in arms:
                         if dw_op(branch) != "=>": return dw_fail(branch, "a match arm without =>")
                         candidates.push(dw_child(branch, 2))
                 else: candidates.push(dw_child(arm, 2))
             else: candidates.push(arm)
-    else if kind == "Block" and dewy_syntax[id].text == "{{}}:":
+    else if kind == .block and dewy_syntax[id].text == "{{}}:":
         if children.len() == 0: return 0
         candidates.push(children[children.len() - 1])
     else:
-        if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return 0
+        if kind == .keyword_expr or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return 0
         return if dw_op(id) == "->": 2 else: 1
     result = 0
     loop candidate in candidates:
@@ -1211,12 +1280,12 @@ dw_collection_kind = (id: int) -> int:
 dw_collect = (id: int, accumulator: int, map: bool) -> int:
     let id = dw_unwrap(id)
     kind = dewy_syntax[id].kind
-    if kind == "Flow":
+    if kind == .flow:
         n = dw_flow(id, 0, accumulator, map)
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
-    if kind == "Block" and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
-    if kind == "KeywordExpr" or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return dw_stmt(id)
+    if kind == .block and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
+    if kind == .keyword_expr or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return dw_stmt(id)
     pos = dewy_syntax[id].pos
     value = 0
     if map:
@@ -1265,7 +1334,7 @@ dw_comprehension = (id: int) -> int:
 # Strip grouping parentheses when recognizing a function declaration or group.
 dw_grouped = (id: int) -> int:
     let id = dw_unwrap(id)
-    loop dewy_syntax[id].kind == "Block" and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
         id = dw_unwrap(dw_child(id, 0))
     id
 
@@ -1282,7 +1351,7 @@ dw_overload_members = (id: int, name: str, declarations: mut int[]):
 dw_top_declarations = (id: int) -> int[]:
     declaration = dw_unwrap(id)
     if dw_op(declaration) == "SemicolonJuxtapose": declaration = dw_unwrap(dw_child(declaration, 1))
-    if dewy_syntax[declaration].kind == "KeywordExpr":
+    if dewy_syntax[declaration].kind == .keyword_expr:
         word = dewy_syntax[dw_child(declaration, 0)].text
         if word == "let" or word == "const": declaration = dw_unwrap(dw_child(declaration, 1))
     if dw_op(declaration) == "=":
@@ -1350,7 +1419,7 @@ dewy_parse_file = (file: int) -> int[]:
         if depth < 0 or depth > stack.len() or start < 0: fatal(mkpos(file, 0), "invalid syntax location")
         stack.truncate(depth)
         id = dewy_syntax.len()
-        dewy_syntax.push(DewySyntax(fields[1], text, mkpos(file, start)))
+        dewy_syntax.push(DewySyntax(dw_kind_from_name(fields[1]), text, mkpos(file, start)))
         if stack.len() > 0: dewy_syntax[stack[stack.len() - 1]].children.push(id)
         else: root = id
         stack.push(id)

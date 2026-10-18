@@ -295,10 +295,21 @@ case's return value outside the compilation timer. Five-sample default-build
 CPU medians were 330/614/918 ms, with 1,862/4,925/8,006 loaded Dewy lines
 (including generated drivers and imported fixtures), plus about 36k implementation
 lines. The all-case bundle contains 5,367 physical case-source lines and a
-1,832-line driver. This is a conformance stress workload, not a game; it exposes
+1,830-line driver. This is a conformance stress workload, not a game; it exposes
 substantial distance from the throughput target, and keeps runtime correctness
 attached to the measured build. Reproduce with `benchmark_corpus` in the
 [development guide](../core/README.md).
+
+
+The Dewy lexer and syntax projection now share integer node tags instead of
+managed kind-name strings. Operator spelling tables are initialized once rather
+than rebuilt while scanning each token. The [five-pair comparison](audits/2026-10-18/syntax-tags-compile.json)
+measured 922 → 866 ms compilation CPU for the full conformance bundle in default
+mode (6% less), and 1321 → 1261 ms in release mode (4.5% less). Small-app and
+self-build differences were modest/noisy; this is not a general 6% speedup claim.
+Source syntax and value semantics are unchanged. Validation includes an independent
+C bootstrap, 191 native/web smoke checks, 213 formatter-related checks, and all
+893 conformance cases executing successfully in both native build modes.
 
 ## What the comparison establishes
 
