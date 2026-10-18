@@ -850,7 +850,7 @@ mark=(value:int64):>int64=>{trace=trace*10+value return value}
 main=()=>{
 let pair=Pair(right=[mark(2)] left=[item=mark(1)])
 return if trace=?21 and pair.left.item=?1 and pair.right[0]=?2 42 else 1}''',
-    'generic-constructor-imported': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Tagged\n'+'''main=()=>{
+    'generic-constructor-imported': ('from p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'" import Tagged\n'+'''main=()=>{
 let value=Tagged([20 22] "kept") let copied=value
 value.value[0]=99
 return copied.value[0]+copied.value[1]}'''),
@@ -1204,7 +1204,7 @@ next=():>int64=>{calls+=1 return -7}
 main=()=>{
 let values=[next()%3 next()//3 next()%1 next()//1 next()%2 next()//2 next()%8 next()//8]
 return if calls=?8 and values=?[2 -3 0 -7 1 -4 1 -1] 42 else 1}''',
-    'numeric-floor-helper-overloads': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/floor_helpers.jo')+'"\n'
+    'numeric-floor-helper-overloads': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/floor_helpers.jo').as_posix()+'"\n'
                                        'main=()=>floor_helpers.check()'),
     'array-comparison-word-boundaries': '''verify=<T>(values:array<T> different:T):>bool=>{
 loop count in [0..values.length] {
@@ -1254,7 +1254,7 @@ hash=<T>(box:HashOnly<T>):>uint64=>(box.value as uint64).hash()
 main=()=>{
 if [Box<int64>[20]] not=?[Box<int64>[20]] return 1
 return if hash([HashOnly<int64>[22]])=?hash([HashOnly<int64>[22]]) 42 else 2}''',
-    'sequence-value-protocol-nesting': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key, Tagged\n'+'''main=()=>{
+    'sequence-value-protocol-nesting': ('from p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'" import Key, Tagged\n'+'''main=()=>{
 let a=Key[7 "first"] let b=Key[7 "other"]
 if [a] not=?[b] or [item=a] not=?[item=b] return 1
 let optional:Key?=a let other:Key?=b
@@ -1585,7 +1585,7 @@ values.min_by(key) values.max_by(key)
 before=alloc_count() extra=false
 let low=values.min_by(key) let high=values.max_by(key)
 return if not extra and low=?1 and high=?99 42 else 1}''',
-    'dictionary-equality-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''through=(values:array<dict<int64 set_effects.Key>>):>int64=>{
+    'dictionary-equality-callback-borrow': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo').as_posix()+'"\n'+'''through=(values:array<dict<int64 set_effects.Key>>):>int64=>{
 let other=[[2->set_effects.Key[22] 1->set_effects.Key[20]]]
 if values not=?other return 1
 let noise=[[3->set_effects.Key[99]]]
@@ -1596,7 +1596,7 @@ set_effects.current_maps=[[1->set_effects.Key[20] 2->set_effects.Key[22]]]
 set_effects.armed=true
 let result=through(set_effects.current_maps)
 return if set_effects.current_maps.length=?0 and not set_effects.armed result else 3}'''),
-    'dictionary-hash-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'"\n'+'''through=(values:array<dict<int64 hash_keys.Key>>):>int64=>{
+    'dictionary-hash-callback-borrow': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'"\n'+'''through=(values:array<dict<int64 hash_keys.Key>>):>int64=>{
 let code=hash(values)
 let noise=[[3->hash_keys.Key[99 "other"]]]
 return if noise.length=?1 and code=?hash(values) values[0].length*21 else 1
@@ -1625,12 +1625,12 @@ let first:dict<int64 string>=[] let second:dict<int64 string>=[]
 second.reserve(100) second[7]="gone" second.remove(7)
 let values=set[first second]
 return if values.length=?1 and [first]=?[second] 42 else 1}''',
-    'dictionary-custom-nested-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key\n'+'''main=()=>{
+    'dictionary-custom-nested-hash': ('from p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'" import Key\n'+'''main=()=>{
 let first=[Key[20 "a"]->Key[22 "b"]]
 let second=[Key[20 "other"]->Key[22 "labels"]]
 let values=[[mapping=first]->42]
 return values[[mapping=second]]}'''),
-    'dictionary-custom-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key\n'+'''main=()=>{
+    'dictionary-custom-hash': ('from p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'" import Key\n'+'''main=()=>{
 let values:dict<Key int64>=[]
 values[Key[7 "first"]]=20
 values[Key[7 "second"]]+=22
@@ -1640,7 +1640,7 @@ if values.insert_if_absent(Key[7 "fifth"] 99) return 3
 let saved=values
 if not values.remove(Key[7 "sixth"]) or values.length not=?0 return 4
 return saved[Key[7 "last"]]}'''),
-    'set-custom-hash': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Key, Tagged\n'+'''main=()=>{
+    'set-custom-hash': ('from p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'" import Key, Tagged\n'+'''main=()=>{
 let first=set[Key[20 "a"] Key[22 "b"] Key[20 "c"]]
 let second=set[Key[22 "other"] Key[20 "labels"]]
 if first.length not=?2 or first not=?second return 1
@@ -1650,7 +1650,7 @@ let records=[[members=first]->42]
 if records[[members=second]] not=?42 return 3
 let generic=set[Tagged<string>["same" "a"] Tagged<string>["same" "b"]]
 return if generic.length=?1 42 else 4}'''),
-    'set-hash-callback-borrow': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'"\n'+'''through=(values:array<set<hash_keys.Key>>):>int64=>{
+    'set-hash-callback-borrow': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy').as_posix()+'"\n'+'''through=(values:array<set<hash_keys.Key>>):>int64=>{
 let code=hash(values)
 let noise=[set[hash_keys.Key[99 "other"]]]
 return if noise.length=?1 and code=?hash(values) values[0].length*21 else 1
@@ -1885,13 +1885,13 @@ let second:set<int64>|string=set[22 20]
 if first not=? second return 1
 let values=[first->42]
 return values[second]}''',
-    'set-equality-callback-snapshot': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''main=()=>{
+    'set-equality-callback-snapshot': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo').as_posix()+'"\n'+'''main=()=>{
 set_effects.current=[set[set_effects.Key[20] set_effects.Key[22]]]
 let other=[set[set_effects.Key[22] set_effects.Key[20]]]
 set_effects.armed=true
 if set_effects.current not=? other return 1
 return if set_effects.current.length=?0 and not set_effects.armed 42 else 2}'''),
-    'set-callback-borrowed-argument': ('import p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo')+'"\n'+'''through=(value:array<set<set_effects.Key>>):>int64=>{
+    'set-callback-borrowed-argument': ('import p"'+(Path(__file__).resolve().parents[2] / 'core/tests/set_effects.jo').as_posix()+'"\n'+'''through=(value:array<set<set_effects.Key>>):>int64=>{
 let other=[set[set_effects.Key[22] set_effects.Key[20]]]
 if value not=? other return 1
 let noise=[set[set_effects.Key[99]]]

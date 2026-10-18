@@ -181,10 +181,10 @@ jobs:
       - name: Execute native and web language smoke checks
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
-        run: python -m pytest -q -o addopts='' --maxfail=1 -m core_quick tests/python_misc/test_sloppy_core.py
+        run: python -m pytest -q -o addopts='' -m core_quick tests/python_misc/test_sloppy_core.py
       - name: Exercise native project tests and diagnostics
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
         run: |
-          python -m pytest -q -o addopts='' --maxfail=1 tests/python_misc/test_sloppy_core_testing.py \
+          python -m pytest -q -o addopts='' tests/python_misc/test_sloppy_core_testing.py \
             -k 'native_tests_help or native_tests_imports or native_tests_game or native_tests_format or native_tests_example or check_does_not_execute_main'
