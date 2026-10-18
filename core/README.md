@@ -110,8 +110,11 @@ ARM64. The default in-process frontend is independent of the optional legacy
 parser's Linux-only source transport. The `compiler_hosts` check builds those
 three compilers; when QEMU is available, it uses the Linux ARM64 compiler to
 build and execute Dewy programs in default and release modes. This is initial
-host-port coverage, not a full Windows/macOS execution gate. CI downloads below
-remain Linux x86-64 toolchains.
+host-port coverage. CI also runs a bounded language/native-web and project-test
+suite on Windows x64, macOS ARM64 and Linux ARM64 runners using cross-built
+bundles. The full compiler gate remains on Linux x86-64. The development download
+below remains the Linux x86-64 toolchain; `compact-core-hosts-*` artifacts are
+inputs to the host checks, with their source/build provenance recorded separately.
 
 ## Download a CI build
 

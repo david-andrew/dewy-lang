@@ -1,0 +1,66 @@
+"""Prepare cross-built compiler bundles for the CI host execution checks."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import tarfile
+from pathlib import Path
+
+
+def build(toolchain: Path, output: Path) -> None:
+    toolchain = toolchain.resolve(strict=True)
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    compiler = toolchain / 'bin/dewy-core'
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env.update(DEWY_CORE_LIB=str(toolchain / 'lib'), SLOPPY_EMIT_WORKERS='1')
+    for host in ('windows', 'macos', 'linux-arm64'):
+        bundle = output / host / 'dewy-core'
+        (bundle / 'bin').mkdir(parents=True)
+        binary = bundle / 'bin' / ('dewy-core.exe' if host == 'windows' else 'dewy-core')
+        command = [compiler, 'build', toolchain / 'compiler/main.jo', '--target', host, '-o', binary]
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=90, check=False)
+        (output / f'{host}.log').write_text(result.stdout + result.stderr)
+        if result.returncode:
+            raise RuntimeError(f'{host} compiler build failed:\n{result.stdout}{result.stderr}')
+        shutil.copytree(toolchain / 'lib', bundle / 'lib')
+        for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
+            shutil.copy2(toolchain / name, bundle / name)
+        provenance = {
+            'host': host,
+            'cross_compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
+            'compiler_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+            'source_build': json.loads((toolchain / 'build.json').read_text()),
+        }
+        (bundle / 'HOST_BUILD.json').write_text(json.dumps(provenance, indent=2) + '\n')
+        archive = output / f'{host}.tar.gz'
+        with tarfile.open(archive, 'x:gz') as stream:
+            stream.add(bundle, arcname='dewy-core')
+        print(archive, flush=True)
+
+
+def extract(archive: Path, output: Path) -> None:
+    output.mkdir(parents=True, exist_ok=False)
+    with tarfile.open(archive) as stream:
+        stream.extractall(output, filter='data')
+
+
+if __name__ == '__main__':
+    cli = argparse.ArgumentParser(description=__doc__)
+    commands = cli.add_subparsers(dest='command', required=True)
+    prepare = commands.add_parser('build')
+    prepare.add_argument('toolchain', type=Path)
+    prepare.add_argument('--output', type=Path, required=True)
+    unpack = commands.add_parser('extract')
+    unpack.add_argument('archive', type=Path)
+    unpack.add_argument('--output', type=Path, required=True)
+    args = cli.parse_args()
+    if args.command == 'build':
+        build(args.toolchain, args.output)
+    else:
+        extract(args.archive, args.output)

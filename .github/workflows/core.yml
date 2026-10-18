@@ -120,6 +120,14 @@ jobs:
           name: dewy-core-linux-x86_64-${{ github.sha }}
           path: ${{ runner.temp }}/artifacts/*
           if-no-files-found: error
+      - name: Prepare compiler host execution checks
+        run: python -m tools.sloppy_core.hosts build "$RUNNER_TEMP/dewy-core" --output "$RUNNER_TEMP/core-hosts"
+      - name: Upload host-check compilers
+        uses: actions/upload-artifact@v4
+        with:
+          name: compact-core-hosts-${{ github.sha }}
+          path: ${{ runner.temp }}/core-hosts/*.tar.gz
+          if-no-files-found: error
       - name: Preserve test results and build provenance
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,3 +138,50 @@ jobs:
             ${{ runner.temp }}/dewy-core/build.json
             ${{ runner.temp }}/dewy-core/*.log
           if-no-files-found: ignore
+
+  host-smoke:
+    needs: bootstrap-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: windows
+            runner: windows-latest
+            suffix: .exe
+          - host: macos
+            runner: macos-15
+            suffix: ''
+          - host: linux-arm64
+            runner: ubuntu-24.04-arm
+            suffix: ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: compact-core-hosts-${{ github.sha }}
+          path: ${{ runner.temp }}/core-hosts
+      - name: Extract this host's compiler
+        run: python -m tools.sloppy_core.hosts extract "$RUNNER_TEMP/core-hosts/${{ matrix.host }}.tar.gz" --output "$RUNNER_TEMP/host-check"
+      - name: Install the test runner
+        run: python -m pip install pytest==9.0.2
+      - name: Execute native and web language smoke checks
+        run: python -m pytest -q -o addopts='' --maxfail=1 -m core_quick tests/python_misc/test_sloppy_core.py
+      - name: Exercise native project tests and diagnostics
+        run: |
+          python -m pytest -q -o addopts='' --maxfail=1 tests/python_misc/test_sloppy_core_testing.py \
+            -k 'native_tests_help or native_tests_imports or native_tests_game or native_tests_format or native_tests_example or check_does_not_execute_main'
