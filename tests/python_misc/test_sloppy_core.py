@@ -3715,6 +3715,56 @@ main=()=>sum(values change())''',
     'unpack-param-dictionary': '''sum=([[key value] [_ other]])=>value+other+key.length
 main=()=>sum(["hi"->20 "there"->20])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
+    'unpack-leaf-types': '''main=()=>{let [x:int64 y:float64]=[20 22]
+return if y is?float64 and x=?20 and y=?22.0 42 else 1}''',
+    'unpack-leaf-types-once': '''let calls=0
+pair=()=>{calls+=1 return [20 22]}
+main=()=>{const [x:int64 y:float64]=pair()
+return if y is?float64 and x=?20 and y=?22.0 and calls=?1 42 else 1}''',
+    'unpack-leaf-types-global': '''const [x:int64 y:float64]=[20 22]
+main=()=>if y is?float64 and x=?20 and y=?22.0 42 else 1''',
+    'unpack-leaf-types-record': '''main=()=>{
+let [x:float64 y:int64]=[y=22 x=20 z=99]
+return if x is?float64 and x=?20.0 and y=?22 42 else 1}''',
+    'unpack-leaf-types-nested': '''main=()=>{let [[x:float64] [y:int64]]=[[20] [22]]
+return if x is?float64 and x=?20.0 and y=?22 42 else 1}''',
+    'unpack-leaf-types-context': '''main=()=>{
+let [x:int64 y:float64]:array<uint8>=[20 22]
+return if y is?float64 and x=?20 and y=?22.0 42 else 1}''',
+    'unpack-leaf-types-fixed': '''main=()=>{
+let [x:int64 y:float64]:array<uint8 length=2>=[20 22]
+return if y is?float64 and x=?20 and y=?22.0 42 else 1}''',
+    'unpack-leaf-types-param': '''combine=([x:int64 y:float64])=>if y is?float64 and x=?20 and y=?22.0 42 else 1
+main=()=>combine([20 22])''',
+    'unpack-leaf-types-generic': '''combine=<T>([x:T y:float64]:array<T>)=>if y is?float64 and x=?20 and y=?22.0 42 else 1
+main=()=>combine<uint8>([20 22])''',
+    'unpack-leaf-types-closure': '''make=([x:int64 y:float64])=>()=>if y is?float64 and x=?20 and y=?22.0 42 else 1
+main=()=>{let f=make([20 22]) return f()}''',
+    'unpack-leaf-types-loop': '''main=()=>{let result=0
+loop [x:int64 y:float64] in [[20 22]] {if y is?float64 and x=?20 and y=?22.0 result=42}
+return result}''',
+    'unpack-leaf-types-loop-single': '''main=()=>{let result=0
+loop [x:float64] in [[42]] {if x is?float64 and x=?42.0 result=42}
+return result}''',
+    'unpack-leaf-types-combined': '''main=()=>{let result=0
+loop i in [0..1) and [x:int64 y:float64] in [[20 22]] {if y is?float64 and x=?20 and y=?22.0 result=42+i}
+return result}''',
+    'unpack-leaf-types-managed': '''main=()=>{
+let source=[[20] [22]] let [x:array<int64> y:array<int64>]=source
+x[0]=99 return if source=?[[20] [22]] and y=?[22] 42 else 1}''',
+    'unpack-leaf-types-discard': '''main=()=>{let [_:float64 x:int64]=[1 42] return x}''',
+    'unpack-leaf-types-loop-record': '''main=()=>{let result=0
+loop [x:int64 y:float64] in [[x=20 y=22]] {if y is?float64 and x=?20 and y=?22.0 result=42}
+return result}''',
+    'unpack-leaf-types-loop-dictionary': '''main=()=>{let result=0
+loop [key:int64 value:float64] in [20->22] {if value is?float64 and key=?20 and value=?22.0 result=42}
+return result}''',
+    'unpack-leaf-types-loop-sequence': '''Rows:type=[values:array<[x:int64 y:int64]>]
+len=(rows:Rows)=>rows.values.length
+__index__=(rows:Rows i:int64)=>rows.values[i]
+main=()=>{let result=0
+loop [x:int64 y:float64] in Rows[[[x=20 y=22]]] {if y is?float64 and x=?20 and y=?22.0 result=42}
+return result}''',
     'unpack-typed-narrow': '''byte=(x:uint8)=>x as int64
 main=()=>{let [a b]:array<uint8>=[20 22] return byte(a)+byte(b)}''',
     'unpack-typed-nested-fixed': '''main=()=>{
@@ -4165,6 +4215,13 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'unpack-leaf-narrow': ('main=()=>{let [x:uint8]=[42] return x}', 'cannot implicitly convert int to u8'),
+    'unpack-leaf-incompatible': ('main=()=>{let [x:string]=[42] return 42}', 'expected str, found int'),
+    'unpack-leaf-discard-incompatible': ('main=()=>{let [_:string]=[42] return 42}', 'expected str, found int'),
+    'unpack-leaf-constant-write': ('main=()=>{const [x:int64]=[20] x=42 return x}', 'cannot modify const'),
+    'unpack-leaf-reassignment': ('main=()=>{let x=20 [x:int64]=[42] return x}', 'type annotations declare bindings'),
+    'unpack-leaf-duplicate': ('main=()=>{let [x:int64 x:float64]=[20 22] return x}', 'duplicate unpacking name'),
+    'unpack-leaf-nested-annotation': ('main=()=>{let [[x]:array<int64>]=[[42]] return x}', 'annotated nested pattern'),
     'generic-constructor-narrow-overflow': ('Batch:type=<T>[items:array<T> exemplar:T]\nmain=()=>{let b=Batch([256] (0 as uint8)) return 42}', 'does not fit in u8'),
     'generic-constructor-conflicting-elements': ('Pair:type=<T>[left:array<T> right:array<T>]\nmain=()=>{let p=Pair([20] ["bad"]) return 42}', 'expected int, found str'),
     'generic-constructor-unresolved-empty': ('Box:type=<T>[value:T]\nmain=()=>{let box=Box([]) return box.value.length}', "cannot infer the type of 'box'"),
@@ -7866,14 +7923,14 @@ loop [key [x y]] in helper.pairs() {total+=x+y}
 loop i in [0..2) and [key [x y]] in helper.pairs() {total+=x+y}
 if total not=? 84 return 1
 return count+text.length+extra}''' if nested else
-                   'main=()=>{let [count text]=helper.pair() return count+text.length}')
+                   'main=()=>{let [count:float64 text:string]=helper.pair() return if count is?float64 (count as int64)+text.length else 1}')
     if parameter:
         if mismatch:
             program = ('sum=([[first second] [_]]:array<array<int64>>):>int64=>first+second\nmain=()=>sum([[42] [0]])' if nested else
                        'sum=([first second]:array<int64>):>int64=>first+second\nmain=()=>sum([42])')
         else:
             program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=()=>sum(helper.nested())' if nested else
-                       'sum=([count text])=>count+text.length\nmain=()=>sum(helper.pair())')
+                       'sum=([count:float64 text:string])=>if count is?float64 (count as int64)+text.length else 1\nmain=()=>sum(helper.pair())')
     source.write_text('import p"helper.jo"\n' + program)
     binary = tmp_path / 'unpack'
     node = shutil.which('node')

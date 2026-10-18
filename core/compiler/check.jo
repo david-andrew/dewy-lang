@@ -1968,12 +1968,20 @@ dewy_nested_loop_bindings = (s: int):
     declarations: int[]
     loop i in [0..nkids(s)):
         binding = kid(s, i)
-        if nodes[binding].kind != .tuple: continue
+        if nodes[binding].kind != .tuple and nodes[binding].a == 0: continue
+        # Array/custom-sequence patterns keep their field names until unpacked.
+        # A dictionary's key/value binders are separate iteration values.
+        if nodes[binding].kind != .tuple:
+            it = prune(ntype(int(nodes[s].a)))
+            if not is_map_type(it) and not is_map_entries_type(it): continue
         if has_flag(s, NF_MUT): fatal(nodes[binding].pos, "nested loop bindings yield independent values, not mutable aliases")
         name = "$unpack_loop{bc_count}"
         bc_count += 1
         d = mk(.vardecl, nodes[binding].pos)
-        set_list(d, kids(binding))
+        if nodes[binding].kind == .tuple: set_list(d, kids(binding))
+        else:
+            nodes[d].name = nodes[binding].name
+            nodes[d].a = nodes[binding].a
         nodes[d].b = i32(bc_ident(name, nodes[binding].pos))
         declarations.push(d)
         set_kid(s, i, bc_ident(name, nodes[binding].pos))
@@ -1982,9 +1990,9 @@ dewy_nested_loop_bindings = (s: int):
         set_list(body, declarations + kids(body))
 
 check_for = (s: int):
-    dewy_nested_loop_bindings(s)
     soa_loop(s)
     unpack_loop(s)
+    dewy_nested_loop_bindings(s)
     if dewy_cursor_loop(s): return
     if map_tidy_first(s): return
     if dewy_sequence_loop(s): return
@@ -2505,6 +2513,9 @@ check_assign = (s: int) -> int:
     op = int(nodes[s].op)
     if nodes[lhs].kind == .tuple:
         if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
+        if files[pos_file(nodes[s].pos)].is_dewy:
+            loop binding in binding_leaves(kids(lhs)):
+                if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
         t = prune(check_expr(int(nodes[s].b), 0))
         nodes[s].b = i32(last_checked)
         unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
@@ -3493,9 +3504,11 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     if not files[pos_file(pos)].is_dewy: return (unpack_array(e, t, bindings.len(), pos), bindings)
     leaves = binding_leaves(bindings)
     nested = false
+    annotated = false
     loop b in bindings:
-        if nodes[b].kind == .tuple: nested = true; break
-    if not nested and types[t].kind != .array and types[t].kind != .fixed and types[t].kind != .struct_: return (t, bindings)
+        if nodes[b].kind == .tuple: nested = true
+        if nodes[b].a != 0: annotated = true
+    if not nested and not annotated and types[t].kind != .array and types[t].kind != .fixed and types[t].kind != .struct_: return (t, bindings)
     statements: int[]
     values: int[]
     unpack_values(e, t, bindings, pos, statements, values)
@@ -3580,7 +3593,13 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         if nodes[binding].kind == .tuple:
             inner = prune(check_expr(value, 0))
             unpack_values(last_checked, inner, kids(binding), nodes[binding].pos, statements, values)
-        else: values.push(value)
+        else:
+            if nodes[binding].a != 0:
+                target = resolve_type(int(nodes[binding].a))
+                check_expr(value, target)
+                value = coerce(last_checked, target)
+                add_flag(value, NF_CHECKED)
+            values.push(value)
 
 unpack_array = (e: int, t: int, n: int, pos: int) -> int:
     if types[t].kind != .array or n < 2 or n > 4: return t

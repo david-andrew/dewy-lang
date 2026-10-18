@@ -148,8 +148,10 @@ values remain independent of the caller. `_` discards array or tuple elements;
 for records, leave unwanted fields out. Pattern bindings belong to the body,
 so defaults on later parameters cannot refer to them. Pass the whole argument
 positionally; other named parameters still work. Pattern names must be distinct
-across the signature. Mutable `@` patterns and annotations on individual pattern
-leaves are not supported; use a named parameter for those cases.
+across the signature. Individual names can have types, such as
+`([x:int64 y:float64])`; these check the extracted values inside the function,
+while a type on the whole parameter guides call arguments and overloads.
+Mutable `@` patterns are not supported; use a named parameter for those cases.
 
 Module-level overload groups join function literals with `&`:
 
@@ -661,7 +663,21 @@ const [[left] [right]]:array<array<int64>>=[[20] [22]]
 
 `const` patterns evaluate their source once and make every extracted binding
 read-only, at local or module scope. Copies made with `let` remain mutable.
-Annotations on individual leaves, such as `[x:int64 y:int64]`, are not supported.
+Individual names can also have types in declarations, parameter patterns and
+loop patterns:
+
+```dewy
+let [x:int64 y:float64]=[20 22]
+loop [key:string score:float64] in ["red"->20 "blue"->22] {printl(score)}
+```
+
+Each annotation uses ordinary assignment conversions on the extracted value;
+it does not change the source container's element type. For example, an `int64`
+element can widen to `float64`, while narrowing to `uint8` needs an explicit
+conversion or a whole-source `array<uint8>` annotation. Types on discarded
+`_` elements are checked too. Annotated patterns declare new bindings; use
+unannotated patterns to assign existing variables. A nested bracket group
+itself cannot have a type; annotate its names or the whole source instead.
 
 ```dewy
 let values=[loop i in [0..10) i*i]

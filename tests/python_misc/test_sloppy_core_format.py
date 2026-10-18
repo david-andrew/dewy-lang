@@ -59,6 +59,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'unpack-leaf-types': 'main=()=>{const [x:int64 y:float64]=[20 22] printl(x+y) return 0}',
     'record-spread': 'main=()=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y) return 0}',
     'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64> printl(f(42)) return 0}',
     'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=()=>{printl(pair()[0]) return 0}',

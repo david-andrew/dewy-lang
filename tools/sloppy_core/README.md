@@ -1622,3 +1622,18 @@ already bound to `uint8`. Rejecting that incompatible candidate restores the
 array overload. The corrected source passes all 4,569 checks in 93.33 seconds
 after three independent C bootstrap generations, including explicit and inferred
 generic bindings. The earlier focused selection had missed this interaction.
+
+Unpacking now accepts individual name annotations, such as
+`let [x:int64 y:float64]=[20 22]`. Local/module declarations, `const`, function
+parameters and loop patterns share ordinary assignment conversions on each
+extracted value. Arrays, fixed arrays, tuples, records and dictionaries retain
+once-only source evaluation and independent values. Whole-source annotations
+still supply literal context; leaf annotations do not silently narrow machine
+integers or change a function's call signature.
+
+The final focused selection passes 906 checks in 16.20 seconds, including all
+pinned Jo regressions. A preceding selection passed 884 checks in 15.95 seconds
+after three independent C bootstrap generations; the final source adds a guard
+keeping the new assignment diagnostic specific to Dewy. Native/web execution,
+both build modes, tuple interop and formatter round trips are covered. Hosted CI
+runs the final full gate. See `unpack-leaf-types-*` audits.

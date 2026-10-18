@@ -740,17 +740,23 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
     bindings: int[]
     loop child in dewy_syntax[id].children:
         let child = dw_unwrap(child)
+        annotation = 0
+        if dw_op(child) == ":":
+            annotation = dw_child(child, 2)
+            child = dw_unwrap(dw_child(child, 1))
         if dewy_syntax[child].kind == "Block" and dewy_syntax[child].text == "[]:":
+            if annotation != 0: return [dw_fail(child, "an annotated nested pattern; annotate its names or the whole declaration")]
             n = mk(.tuple, dewy_syntax[child].pos)
             set_list(n, dw_binding_items(child, seen))
             bindings.push(n)
             continue
         name = dw_name(child)
-        if name == "": return [dw_fail(child, "annotated unpacking targets; use names or nested brackets")]
+        if name == "": return [dw_fail(child, "this unpacking target; use names or nested brackets")]
         if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
         seen[name] = true
         n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
         nodes[n].name = i32(intern(name))
+        if annotation != 0: nodes[n].a = i32(dw_type(annotation))
         bindings.push(n)
     if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]
     bindings
