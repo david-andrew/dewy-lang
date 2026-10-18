@@ -11,12 +11,12 @@ main = () -> int:
     probe_fixed = get_struct_inst(probe_decl, [mk_array(T_INT)])
     if probe_early == probe_fixed: return 1
     if not unify(probe_var, T_INT): return 2
-    if get_struct_inst(probe_decl, [mk_array(T_INT)]) != probe_early: return 3
+    if get_struct_inst(probe_decl, [mk_array(T_INT)]) != probe_fixed or zonk(probe_early) != probe_fixed: return 3
     probe_later_var = mk_var()
     probe_later = get_struct_inst(probe_decl, [mk_array(probe_later_var)])
     probe_text = get_struct_inst(probe_decl, [mk_array(T_STR)])
     if not unify(probe_later_var, T_STR): return 4
-    if get_struct_inst(probe_decl, [mk_array(T_STR)]) != probe_later: return 5
+    if get_struct_inst(probe_decl, [mk_array(T_STR)]) != probe_text or zonk(probe_later) != probe_text: return 5
     if not type_eq(probe_later, probe_text): return 6
     if get_struct_inst(probe_decl, [T_INT, T_STR]) == get_struct_inst(probe_decl, [T_STR, T_INT]): return 7
     # A later inference instance must not replace an earlier concrete one.
@@ -28,5 +28,14 @@ main = () -> int:
     if not unify(probe_last_var, T_INT): return 8
     if get_struct_inst(probe_second_decl, [T_INT]) != probe_first_fixed: return 9
     if get_struct_inst(probe_decl, [T_INT]) == probe_first_fixed: return 10
+    # Even an already-bound variable is not a canonical argument ID.
+    probe_bound_decl = mk(.struct_, 0)
+    nodes[probe_bound_decl].name = i32(intern("Bound"))
+    probe_bound_var = mk_var()
+    if not unify(probe_bound_var, T_STR): return 11
+    probe_bound = get_struct_inst(probe_bound_decl, [probe_bound_var])
+    probe_resolved = zonk(probe_bound)
+    if has_var(probe_resolved) or probe_resolved != get_struct_inst(probe_bound_decl, [T_STR]): return 12
+    if not type_eq(probe_bound, probe_resolved): return 13
     print("ok")
     0

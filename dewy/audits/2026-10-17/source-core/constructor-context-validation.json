@@ -1,0 +1,27 @@
+{
+  "source_identity": "a059d87b7bc6f75059f0d228a52fa4f3aed76133a54d964deddb7d84ea16063e",
+  "binary": "build-1792282211769162325/bin/dewy-core",
+  "binary_sha256": "c876dfb2b0065a9de897de6121e7c0dc6120750d0278c3c92dce350ca67e82da",
+  "validation": {
+    "command": "TMPDIR=<workspace>/__dewycache__/task-tmp python3 -m tools.core --bootstrap test -n 4 --durations=10",
+    "passed": 3455,
+    "seconds": 40.71,
+    "focused": {
+      "passed": 42,
+      "seconds": 2.85
+    },
+    "coverage": [
+      "collection/record/set literal inference",
+      "empty arrays inferred by later writes",
+      "field-provided narrow integer and callback context",
+      "generic function references as callbacks",
+      "named argument order and one-time effects",
+      "imported constructors and independent copies",
+      "concrete record canonicalization after inference",
+      "conflicting elements and callbacks, narrow overflow and unresolved empty rejection"
+    ],
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "regression_before": "Box([20 22]) was rejected as unable to infer T. Reusing a formerly unresolved record could also reject a later fully inferred Box([])."
+}

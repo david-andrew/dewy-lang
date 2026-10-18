@@ -311,6 +311,12 @@ names such as `models.Box<string>`. Generic type aliases wrap their definition i
 parentheses. Each concrete function/type is specialized by the compact compiler;
 this adds no universal boxed-value representation. Defaults can use the bound
 type parameters, and generic functions can return closures or structural records.
+Generic constructors infer collection and record literals too: `Box([20 22])`
+holds an integer array, and `Box([x=20 y=22])` holds an anonymous record. Other
+fields can supply context for an empty collection or a callback's parameters.
+Within a function, later writes can settle an initially empty container's element
+type: `let box=Box([]); box.value.push(42)`. An empty container with no evidence
+for its element type still needs an annotation, such as `Box<array<int64>>[[]]`.
 Aliases also work as type values: a record alias can construct `Alias[42]`,
 and an integer alias exposes `.min` and `.max`. The editor completes these
 bounds and shows their integer type on hover; `end` inside brackets hovers as

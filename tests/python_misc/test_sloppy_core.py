@@ -46,6 +46,46 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'generic-constructor-collections': '''Box:type=<T>[value:T]
+main=()=>{
+let numbers=Box([20 22]) let words=Box(["hello" "world"])
+let record=Box([x=20 y=22]) let keys=Box(["answer"->42])
+let members=Box(set[20 22])
+if words.value[1] not=?"world" or keys.value["answer"] not=?42 return 1
+if not members.value.contains(20) or record.value.x+record.value.y not=?42 return 2
+return numbers.value[0]+numbers.value[1]}''',
+    'generic-constructor-empty-inference': '''Box:type=<T>[value:T]
+Batch:type=<T>[items:array<T> exemplar:T]
+main=()=>{
+let numbers=Box([]) numbers.value.push(40)
+let words=Box([]) words.value.push("hi")
+let empty=Batch([] 42) let narrow=Batch([20 22] (0 as uint8))
+let saved=numbers numbers.value[0]=99
+let fixed=Box([40])
+if saved not=?fixed or empty.items.length not=?0 or empty.exemplar not=?42 return 1
+if (narrow.items[0] as int64)+(narrow.items[1] as int64) not=?42 return 2
+return saved.value[0]+words.value[0].length}''',
+    'generic-constructor-callbacks': '''Transform:type=<T U>[value:T step:((x:T):>U)]
+Runner:type=<T>[value:T step:((x:T):>T)]
+Box:type=<T>[value:T]
+identity=<T>(value:T):>T=>value
+main=()=>{
+let transform=Transform(20 (x)=>x+22)
+let format=Transform(42 (x)=>"value={x}")
+let function=Box((x:int64)=>x+2)
+let runner=Runner(42 identity)
+return if transform.step(transform.value)=?42 and format.step(format.value)=?"value=42"
+and function.value(40)=?42 and runner.step(runner.value)=?42 42 else 1}''',
+    'generic-constructor-argument-order': '''Pair:type=<A B>[left:A right:B]
+let trace:int64=0
+mark=(value:int64):>int64=>{trace=trace*10+value return value}
+main=()=>{
+let pair=Pair(right=[mark(2)] left=[item=mark(1)])
+return if trace=?21 and pair.left.item=?1 and pair.right[0]=?2 42 else 1}''',
+    'generic-constructor-imported': ('from p"'+str(Path(__file__).resolve().parents[2] / 'core/tests/hash_keys.dewy')+'" import Tagged\n'+'''main=()=>{
+let value=Tagged([20 22] "kept") let copied=value
+value.value[0]=99
+return copied.value[0]+copied.value[1]}'''),
     'generic-record-ordered-arguments': '''Box:type=<T>[value:T]
 Pair:type=<A B>[left:A right:B]
 score=(box:Box<array<int64>>):>int64=>box.value[0]
@@ -3299,6 +3339,10 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'generic-constructor-narrow-overflow': ('Batch:type=<T>[items:array<T> exemplar:T]\nmain=()=>{let b=Batch([256] (0 as uint8)) return 42}', 'does not fit in u8'),
+    'generic-constructor-conflicting-elements': ('Pair:type=<T>[left:array<T> right:array<T>]\nmain=()=>{let p=Pair([20] ["bad"]) return 42}', 'expected int, found str'),
+    'generic-constructor-unresolved-empty': ('Box:type=<T>[value:T]\nmain=()=>{let box=Box([]) return box.value.length}', "cannot infer the type of 'box'"),
+    'generic-constructor-conflicting-callback': ('Runner:type=<T>[value:T step:((x:T):>T)]\nmain=()=>{let r=Runner(42 (x:string)=>x) return 42}', 'parameter type str does not match expected int'),
     'record-spread-array': ('main=()=>{let xs=[1] let record=[xs... answer=42] return 42}', 'only records can be spread into a record'),
     'record-spread-unnamed': ('main=()=>{let base=[answer=42] let record=[base... 1] return 42}', 'a record literal needs named fields or record spreads'),
     'generic-value-ambiguous': ('choose=<T>(x:T):>T=>x\nchoose=<T>(x:T y:T):>T=>y\nmain=()=>{let f=choose<int64> return 42}', 'multiple versions of'),

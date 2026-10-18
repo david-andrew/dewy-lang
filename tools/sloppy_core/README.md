@@ -310,16 +310,30 @@ exposed this hang and is now a timeout-bounded regression check. The independent
 C-bootstrap gate passes 3,421 checks in 49.29 seconds. See `type-capacity-*`;
 this is a completion fix, not a claimed finite baseline speed ratio.
 
-Concrete generic record/enum arguments now also have an index. A separate list
-retains instances with inference-bearing arguments, which may match after their
-variables bind; an earlier such match still wins over a later indexed instance.
-Unresolved requests retain structural matching. Seven alternating type-check
-pairs against the capacity-fixed baseline give CPU ratios of 0.969, 0.662 and
+Concrete generic record/enum arguments now also have an index. Unresolved
+requests retain structural matching; finishing inference produces the canonical
+concrete instance rather than an earlier instance still marked unresolved.
+Seven alternating type-check pairs against the capacity-fixed baseline, measured
+before this inference correction, gave CPU ratios of 0.969, 0.662 and
 0.353 for 500, 2,000 and 5,000 record specializations. Five fresh-build pairs give
 tour 0.989, Dunes 1.004 and compiler 1.015, with no ordinary build speedup claimed.
 All 3,431 checks pass on the independently C-built compiler in 45.19 seconds,
 including late inference bindings, ordered type arguments and recursive managed
 records. See `record-index-*` for the sources, samples and toolchain identities.
+
+Generic record constructors now infer contextual arguments using the same partial
+type binding as function calls. `Box([20 22])`, record/set literals, callbacks,
+and imported constructors work without spelling their type arguments. Known
+fields provide types for empty collections and callback parameters; later writes
+within a function can settle an initially empty array's element type. Finishing
+record inference now interns fully resolved arguments instead of reusing an
+instance permanently marked unresolved. This also removes the intermediate
+index's separate list of inference-bearing instances.
+
+The independent C gate passes 3,455 checks in 40.71 seconds, covering independent
+copies, argument order/effects, recursive records, callback context and rejected
+conflicts/unresolved types. Five fresh-build CPU pairs remain neutral: tour
+0.996, Dunes 0.998 and compiler 1.008. See `constructor-context-*`.
 
 Generic functions now look up concrete specializations by declaration and
 interned type arguments. Arguments still carrying inference variables retain

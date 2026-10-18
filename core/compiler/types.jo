@@ -791,16 +791,15 @@ type_nesting = (t0: int, lim: int) -> int:
 const MAX_TYPE_NESTING = 48
 
 # ---------- struct instances ----------
-# Concrete argument lists use an index. Keep inference-bearing instances in
-# declaration order: their variables can bind later, making an earlier instance
-# match a concrete request. They must still precede a later indexed match.
+# Concrete argument lists have canonical instances. Inference-bearing requests
+# still match structurally; zonking them must produce a concrete instance rather
+# than returning an earlier record whose TF_HAS_VAR flag can never clear.
 struct StructInstanceKey:
     decl: int
     args: int[]
 
 struct_instances: {StructInstanceKey: int} = {}
 struct_instance_groups: int[][]
-struct_instance_pending: int[][]
 struct_instance_group: {int: int} = {}
 
 get_struct_inst = (decl: int, targs: int[]) -> int:
@@ -813,14 +812,11 @@ get_struct_inst = (decl: int, targs: int[]) -> int:
         if has_var(t): stable = false
     indexed = stable and targs.len() > 0
     group = struct_instance_group.get(decl) ?? -1
-    found = -1
     instances: int[]
     if indexed:
-        found = struct_instances.get(StructInstanceKey(decl, targs)) ?? -1
-        if group >= 0: instances = struct_instance_pending[group]
+        if let found = struct_instances.get(StructInstanceKey(decl, targs)): return int(structs[found].type)
     else if group >= 0: instances = struct_instance_groups[group]
     loop i in instances:
-        if found >= 0 and i > found: break
         si = structs[i]
         if int(si.ntargs) != targs.len(): continue
         same = true
@@ -829,33 +825,28 @@ get_struct_inst = (decl: int, targs: int[]) -> int:
                 same = false
                 break
         if same: return int(si.type)
-    if found >= 0: return int(structs[found].type)
     # (a generic struct whose fields use it with bigger type arguments would expand without end)
     loop t in targs:
         if type_nesting(t, MAX_TYPE_NESTING + 1) > MAX_TYPE_NESTING:
             fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
     si = StructInfo(decl = i32(decl), ntargs = i32(targs.len()), name = name_of(int(nodes[decl].name)), record_ = has_flag(decl, NF_RECORD))
     si.targs = i32(type_args.len())
-    hv = false
     loop t in targs:
         type_args.push(i32(t))
-        if has_var(prune(t)): hv = true
     idx = structs.len()
     structs.push(si)
     kind = TK.struct_
     if nodes[decl].kind == .enum_: kind = .enum_
     flags = 0
-    if hv: flags = TF_HAS_VAR
+    if not stable: flags = TF_HAS_VAR
     types.push(TypeInfo(kind = kind, st = i32(idx), flags = i32(flags)))
     structs[idx].type = i32(types.len() - 1)
     if group < 0:
         group = struct_instance_groups.len()
         struct_instance_groups.push([])
-        struct_instance_pending.push([])
         struct_instance_group[decl] = group
     # Release the lookup snapshot before appending to the group's owned array.
     instances = []
     struct_instance_groups[group].push(idx)
     if indexed: struct_instances[StructInstanceKey(decl, targs)] = idx
-    else if not stable: struct_instance_pending[group].push(idx)
     types.len() - 1

@@ -1883,6 +1883,18 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 pat = resolve_type(int(nodes[f].a))
                 if is_lit(a): finalize_literal(a)
                 match_type(pat, ntype(a), binds, 0)
+            # As with function calls, first collect known argument types, then
+            # check contextual literals/callbacks against the partially bound
+            # field types. Empty collections can use another field's type.
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not ctx_dependent(a) or nodes[a].kind == .hole: continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                pat = resolve_type(int(nodes[f].a))
+                check_expr(a, subst_partial(pat, binds))
+                add_flag(a, NF_CHECKED)
+                match_type(pat, ntype(a), binds, 0)
             scope_reset(mark)
             loop i in [0..ntp):
                 if binds[i] == 0: fatal(nodes[n].pos, "cannot infer type parameter '{name_of(int(nodes[kid2(decl, i)].name))}' of {name_of(int(nodes[decl].name))}")
