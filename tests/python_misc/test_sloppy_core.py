@@ -4526,8 +4526,8 @@ ERRORS = {
                                  'GPU array expressions must return a fixed-width integer, float or bool, found Rational'),
     'gpu-array-managed-result': ('word=(x:float32)=>"value"\nmain=()=>{printl(cpu(word.(gpu([1.0]))))}',
                                  'GPU array expressions must return a fixed-width integer, float or bool'),
-    'gpu-array-capture': ('main=()=>{let offset=float32(1.0) let shift=(x:float32)=>x+offset '
-                          'printl(cpu(shift.(gpu([1.0 2.0]))))}',
+    'gpu-array-capture': (('main=()=>{let offset=float32(1.0) let shift=(x:float32)=>x+offset '
+                           'printl(cpu(shift.(gpu([1.0 2.0]))))}'),
                           'captures variables cannot run on the GPU'),
     'unpack-leaf-narrow': ('main=()=>{let [x:uint8]=[42] return x}', 'cannot implicitly convert int to u8'),
     'unpack-leaf-incompatible': ('main=()=>{let [x:string]=[42] return 42}', 'expected str, found int'),
