@@ -10,7 +10,10 @@ struct __GraphemeCursor:
     zwj_after_pictographic: bool
 
 __grapheme_word = (table: u8[], offset: int) -> int:
-    int(table[offset]) | (int(table[offset + 1]) << 8) | (int(table[offset + 2]) << 16) | (int(table[offset + 3]) << 24)
+    # Current native and web targets are little-endian and support unaligned
+    # loads. Check the whole word once before reading packed table records.
+    if offset < 0 or offset > table.len() - 4: panic("grapheme table word out of bounds")
+    int(((data(table) + offset) as *u32)[0])
 
 # Sorted nine-byte records: little-endian start, end, property.
 __grapheme_property = (table: u8[], scalar: int) -> int:
@@ -28,6 +31,34 @@ __grapheme_property = (table: u8[], scalar: int) -> int:
 # boundaries (notably for regional-indicator pairs). The scalar at the next
 # boundary is consumed on the following call.
 __grapheme_next = (s: str, c: mut __GraphemeCursor) -> int:
+    start = c.offset
+    # Adjacent ASCII bytes always break, except CR/LF. Require ASCII (or EOF)
+    # at the next boundary too: a following combining scalar can extend the
+    # cluster, and malformed lookahead must still use the checked decoder.
+    if start < len(s):
+        ascii_first = int(s[start])
+        if ascii_first < 128:
+            ascii_end = start + 1
+            ascii_last = ascii_first
+            if ascii_first == 13 and ascii_end < len(s) and s[ascii_end] == 10:
+                ascii_end += 1
+                ascii_last = 10
+            if ascii_end == len(s) or s[ascii_end] < 128:
+                c.previous = 0
+                if ascii_last == 13: c.previous = 1
+                else if ascii_last == 10: c.previous = 2
+                else if ascii_last < 32 or ascii_last == 127: c.previous = 3
+                c.regional_run = 0
+                c.indic_context = 0
+                c.pictographic_chain = false
+                c.zwj_after_pictographic = false
+                c.offset = ascii_end
+                return ascii_end
+    __grapheme_next_unicode(s, c)
+
+# Keep the general decoder separate so its register requirements do not make
+# the common ASCII case pay for the full Unicode state machine.
+__grapheme_next_unicode = (s: str, c: mut __GraphemeCursor) -> int:
     start = c.offset
     loop c.offset < len(s):
         offset = c.offset

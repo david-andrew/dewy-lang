@@ -49,6 +49,10 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-grapheme-packed-words': '''main=()=>{
+let words:array<uint8>=[99 120 86 52 18 128 255 255 255]
+return if __grapheme_word(words 1) =? 305419896
+and __grapheme_word(words 5) =? 4294967168 42 else 1}''',
     'array-comparison-conditional-empty': '''main=()=>{
 let empty:array<string>=[] let values=["a"] let hits=0 let before=alloc_count()
 loop i in [0..20) {
@@ -7346,6 +7350,9 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 @pytest.mark.parametrize('body, diagnostic', [
     ('printl([1 2] .+ [1 2 3])', 'shapes do not match'),
+    ('printl(__grapheme_word([0 0 0] 0))', 'grapheme table word out of bounds'),
+    ('printl(__grapheme_word([0 0 0 0] 1))', 'grapheme table word out of bounds'),
+    ('let offset=0-args().length printl(__grapheme_word([0 0 0 0] offset))', 'grapheme table word out of bounds'),
     ('let a=[1 2 3] let b=[4 5] printl([loop i in [0..a.length) a[i]+b[i]])', 'out of bounds'),
     ('let xs=[1 2] xs .+= [1 2 3]', 'shapes do not match'),
     ('let xs:array<int64 length=1>=[1] xs .+= [1 2]', 'fixed-size array needs 1 elements'),
@@ -8733,6 +8740,9 @@ def test_core_grapheme_conformance(compiler, tmp_path, release, target):
     cases.extend((data, None) for data in [b'\x80', b'\xc0\xaf', b'\xc1\xbf', b'\xc2',
                  b'\xe0\x80\x80', b'\xed\xa0\x80', b'\xf0\x80\x80\x80', b'\xf4\x90\x80\x80',
                  b'\xf5\x80\x80\x80', b'\xe2\x82', b'\xc2A', b'\xff'])
+    cases.extend((prefix + invalid, None)
+                 for prefix in [b'A', b'AB', b'\r', b'\r\n', b'\r\nA']
+                 for invalid in [b'\x80', b'\xc2', b'\xed\xa0\x80', b'\xf4\x90\x80\x80'])
     (tmp_path / 'cases.bin').write_bytes(b''.join(struct.pack('<I', len(data)) + data for data, _ in cases))
     expected = ['invalid' if boundaries is None else ','.join(map(str, boundaries)) for _, boundaries in cases]
     (tmp_path / 'iteration.dewy').write_text('''stream_clusters=(text:string):>array<string>=>[loop c in text c]
