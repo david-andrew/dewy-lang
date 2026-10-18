@@ -2925,6 +2925,8 @@ gen_expr = (e: int) -> Val:
         return V(norm(e_un(.not_, VI, v), t), false)
     if k == .not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
     if k == .and_ or k == .or_:
+        chain = range_tail(e)
+        if chain != e: return gen_expr(chain)
         range = gen_range_cond(e)
         if range >= 0: return V(range, false)
         r = vreg(VI)
@@ -3213,11 +3215,31 @@ const_array = (e: int, et: int) -> int:
     o
 
 # ---------------- conditions as branches ----------------
-# A constant interval test on the same ordinary integer local needs one
+# A constant interval test on the same ordinary integer read needs one
 # unsigned comparison: low <= x <= high is (u64(x) - u64(low)) <= u64(high-low).
-# The subtraction wraps, so negative values and intervals crossing zero work
-# without sign tests. Restrict the match to local reads: no calls, aliases,
-# overloaded comparisons or changes to short-circuit side effects.
+# The subtraction wraps, so negative values and intervals crossing zero work.
+# Two ordinary reads with no intervening user code. Keep this deliberately
+# shallow: array loads use a local receiver and a local/literal index, and no
+# raw pointers, deferred aliases or mutable parameters are admitted.
+same_range_local = (a: int, b: int) -> bool:
+    if nodes[a].kind != .ident or nodes[b].kind != .ident: return false
+    if nodes[a].aux != i32(int(SK.local)) or not same_var(a, b): return false
+    int(locals[int(nodes[a].sym)].flags) & (LF_ALIAS | LF_MUTPARAM) == 0
+
+same_range_read = (a: int, b: int) -> bool:
+    if same_range_local(a, b): return true
+    if nodes[a].kind != .index or nodes[b].kind != .index or nodes[a].aux != 0 or nodes[b].aux != 0: return false
+    x = int(nodes[a].a)
+    y = int(nodes[b].a)
+    if not same_range_local(x, y): return false
+    kind = tkind(ntype(x))
+    if kind != .array and kind != .fixed: return false
+    i = int(nodes[a].b)
+    j = int(nodes[b].b)
+    if i == 0 or j == 0: return false
+    if same_range_local(i, j): return true
+    nodes[i].kind == .int_lit and nodes[j].kind == .int_lit and nodes[i].ival == nodes[j].ival
+
 range_cmp = (e: int) -> (int, Tok, int):
     if nodes[e].kind != .binary or nodes[e].aux != 0: return (0, .eq, 0)
     op = nodes[e].op as Tok
@@ -3229,10 +3251,34 @@ range_cmp = (e: int) -> (int, Tok, int):
         a = b
         b = tmp
         op = if op == .lt: .gt else if op == .le: .ge else if op == .gt: .lt else: .le
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[b].kind != .int_lit: return (0, .eq, 0)
-    if prune(ntype(a)) != T_INT or prune(ntype(b)) != T_INT: return (0, .eq, 0)
-    if int(locals[int(nodes[a].sym)].flags) & (LF_ALIAS | LF_MUTPARAM) != 0: return (0, .eq, 0)
+    if nodes[b].kind != .int_lit: return (0, .eq, 0)
+    at = prune(ntype(a))
+    bt = prune(ntype(b))
+    if not is_int(at) or not is_int(bt) or at == T_U64 or bt == T_U64: return (0, .eq, 0)
+    if not same_range_read(a, a): return (0, .eq, 0)
     (a, op, nodes[b].ival)
+
+# Recognize the adjacent comparisons at the end of a guarded chain without
+# evaluating their array read before the guard: (guard and low) and high becomes
+# guard and (low and high). The same grouping preserves ordered `or` evaluation.
+range_tail = (e: int) -> int:
+    k = nodes[e].kind
+    if k != .and_ and k != .or_: return e
+    left = int(nodes[e].a)
+    right = int(nodes[e].b)
+    if nodes[left].kind != k or nodes[right].kind != .binary: return e
+    a = range_cmp(int(nodes[left].b))
+    if a.0 == 0: return e
+    b = range_cmp(right)
+    if b.0 == 0 or not same_range_read(a.0, b.0): return e
+    pair = nodes.len()
+    nodes.push(nodes[e])
+    nodes[pair].a = nodes[left].b
+    head = nodes.len()
+    nodes.push(nodes[e])
+    nodes[head].a = nodes[left].a
+    nodes[head].b = i32(pair)
+    head
 
 gen_range_cond = (e: int, invert: bool = false) -> int:
     k = nodes[e].kind
@@ -3240,7 +3286,8 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
     a = range_cmp(int(nodes[e].a))
     if a.0 == 0: return -1
     b = range_cmp(int(nodes[e].b))
-    if b.0 == 0 or not same_var(a.0, b.0): return -1
+    if b.0 == 0 or not same_range_read(a.0, b.0): return -1
+    first_read = a.0
     if k == .or_:
         a.1 = if a.1 == .lt: .ge else if a.1 == .le: .gt else if a.1 == .gt: .le else: .lt
         b.1 = if b.1 == .lt: .ge else if b.1 == .le: .gt else if b.1 == .gt: .le else: .lt
@@ -3259,8 +3306,9 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
         if high == -9223372036854775807 - 1: empty = true
         else: high -= 1
     outside = (k == .or_) != invert
+    # Even an empty interval must evaluate its first read and retain bounds checks.
+    value = gen_expr(first_read).v
     if empty or low > high: return e_iconst((if outside: 1 else: 0))
-    value = gen_expr(a.0).v
     if low != 0: value = e_bin(.sub, VI, value, e_iconst(low))
     op = if outside: Op.gtu else: Op.leu
     e_bin(op, VI, value, e_iconst(high - low))
@@ -3294,6 +3342,10 @@ negate_cmp = (op: Op) -> Op:
 
 # continue when e is true, branch to `level` when it is false
 jump_if_false = (e: int, level: int):
+    chain = range_tail(e)
+    if chain != e:
+        jump_if_false(chain, level)
+        return
     k = nodes[e].kind
     range = gen_range_cond(e, true)
     if range >= 0:
@@ -3325,6 +3377,10 @@ jump_if_false = (e: int, level: int):
 
 # continue when e is false, branch to `level` when it is true
 jump_if_true = (e: int, level: int):
+    chain = range_tail(e)
+    if chain != e:
+        jump_if_true(chain, level)
+        return
     k = nodes[e].kind
     range = gen_range_cond(e)
     if range >= 0:

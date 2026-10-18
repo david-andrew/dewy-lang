@@ -1029,6 +1029,18 @@ main=()=>{
 let sum:int64=0
 loop i in 0.. and i <? 4 {loop j in 0.. and j <? i {sum+=j}}
 return if sum =? 4 and fallback(0) =? 42 and fallback(2) =? 2 42 else 1}''',
+    'optimizer-interval-guarded-reads': '''inside=(take:bool xs:array<int64>):>bool=>take and xs[0] >=? 0 and xs[0] <=? 42
+outside=(skip:bool xs:array<int64>):>bool=>skip or xs[0] <? 0 or xs[0] >? 42
+main=()=>{let empty:array<int64>=[]
+if inside(false empty) or not outside(true empty) return 1
+if not inside(true [42]) or outside(false [42]) return 2
+let xs=[20] let calls:int64=0
+index=()=>{calls+=1 return 0}
+let ok=xs[index()] >=? 0 and xs[index()] <=? 42
+if not ok or calls not=? 2 return 3
+calls=0
+let short=xs[index()] <? 42 or xs[index()] >? 100
+return if short and calls =? 1 42 else 4}''',
     'optimizer-interval-effects': '''let calls:int64=0
 next=():>int64=>{calls+=1 return calls-1}
 probe=(@x:int64):>bool=>x >=? 0 and x <? 4
@@ -3992,16 +4004,27 @@ ERRORS = {
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-def test_core_integer_interval_comparisons(compiler, tmp_path, target, release):
-    minimum, maximum = -(2**63), 2**63 - 1
+@pytest.mark.parametrize('integer, storage', [('int64', 'local'), ('int64', 'array'),
+                                               ('int64', 'fixed'), ('int8', 'array'),
+                                               ('uint8', 'array'), ('uint32', 'array'),
+                                               ('uint8', 'local')])
+def test_core_integer_interval_comparisons(compiler, tmp_path, target, release, integer, storage):
+    bits = int(re.search(r'\d+', integer)[0])
+    minimum = 0 if integer.startswith('u') else -(2**(bits-1))
+    maximum = 2**bits-1 if integer.startswith('u') else 2**(bits-1)-1
     bounds = [(minimum, maximum), (minimum, minimum), (maximum, maximum),
               (-10, 10), (0, 256), (48, 57), (-5, -1), (5, 5), (5, -5),
               (-1, 0), (minimum, 0), (0, maximum), (minimum + 1, maximum - 1),
               (maximum, minimum)]
+    bounds = [(lo, hi) for lo, hi in bounds if minimum <= lo <= maximum and minimum <= hi <= maximum]
     rng = random.Random(731)
     values = [minimum, minimum + 1, maximum - 1, maximum, *range(-12, 13),
               47, 48, 49, 56, 57, 58, 255, 256, 257,
               *(rng.randint(minimum, maximum) for _ in range(12))]
+    values = [v for v in values if minimum <= v <= maximum]
+    read = 'x' if storage == 'local' else 'xs[index]'
+    parameter = f'x:{integer}' if storage == 'local' else f'xs:array<{integer}{" length=1" if storage == "fixed" else ""}> index:int64'
+    argument = 'x' if storage == 'local' else '[x] 0'
     functions, body, expected = [], [], []
     for low, high in bounds:
         for lower_closed, upper_closed in [(True, True), (False, False),
@@ -4019,7 +4042,8 @@ def test_core_integer_interval_comparisons(compiler, tmp_path, target, release):
                 above = f'({high}) {"<?" if upper_closed else "<=?"} x'
             inside = f'{lower} and {upper}' if number % 3 else f'{upper} and {lower}'
             outside = f'{below} or {above}' if number % 3 else f'{above} or {below}'
-            functions.append(f'''probe_{number}=(x:int64):>int64=>{{
+            inside, outside = inside.replace('x', read), outside.replace('x', read)
+            functions.append(f'''probe_{number}=({parameter}):>int64=>{{
 let a={inside} let b={outside} let result:int64=0
 if a result+=1
 if b result+=2
@@ -4029,12 +4053,12 @@ if not ({inside}) result+=16
 if not ({outside}) result+=32
 return result
 }}''')
-            body.append(f'printl(to_json([loop x in values probe_{number}(x)]))')
+            body.append(f'printl(to_json([loop x in values probe_{number}({argument})]))')
             expected.append([37 if (x >= low if lower_closed else x > low)
                              and (x <= high if upper_closed else x < high) else 26
                              for x in values])
     literal = ' '.join(f'({x})' for x in values)
-    program = '\n'.join(functions) + f'\nmain=()=>{{let values=[{literal}]\n'
+    program = '\n'.join(functions) + f'\nmain=()=>{{let values:array<{integer}>=[{literal}]\n'
     program += '\n'.join(body) + '\nreturn 42\n}'
     command, error = build_case_batch(compiler, tmp_path, {'intervals': program},
                                       ['exit(case_0())'], release, target)
@@ -5047,6 +5071,9 @@ loop line in input.split("\\n") {
 
 
 @pytest.mark.parametrize('body', [
+    'let xs:array<int64>=[] printl(xs[0] >? 5 and xs[0] <? -5)',
+    'let xs:array<int64>=[] printl(xs[0] <=? 5 or xs[0] >=? -5)',
+
     '''let values=[42] let index:int64=0
 if values[index] >? 0 and values[index] <? 100 {index=-1}
 printl"{values[index]}"''',
@@ -5073,7 +5100,7 @@ loop i in [0..2) {
     'let values=[42] loop i in [0,2..values.length) {values.clear() printl(values[i])}',
     'let values=[20 22] loop i in [0,2..values.length] {printl(values[i])}',
     'let record=[values=[42]] loop i in [0,2..record.values.length) {i=-1 printl(record.values[i])}',
-], ids=['changed-index', 'changed-length', 'skipped-check', 'next-iteration',
+], ids=['empty-interval-read', 'full-interval-read', 'changed-index', 'changed-length', 'skipped-check', 'next-iteration',
         'counter-end', 'counter-negative', 'counter-reference',
         'counter-record-field', 'counter-after-read', 'counter-nested',
         'counter-nested-start', 'counter-overflowed-start', 'counter-descending',

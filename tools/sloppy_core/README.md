@@ -1214,3 +1214,21 @@ and summation are included. These are isolated selection workloads, not a broad
 application speed claim. Five fresh-build pairs show no compile-speed gain.
 The independent C-bootstrap suite passes 3,824 checks in 83.61 pytest seconds
 with two workers; the focused selection passes 448 checks in 6.86 seconds.
+
+
+Interval comparison lowering now covers narrow integers and ordinary reads from
+local growable/inline arrays. Adjacent comparisons after a leading guard can
+share one unsigned interval test: the guard still runs first, and even an empty
+interval performs the original first array read and its bounds check. Calls,
+mutable parameters, deferred aliases, raw pointers, overloaded comparisons and
+full-width unsigned integers retain the existing path.
+
+The final five-pair application run gives a median candidate/baseline thread-CPU
+ratio of 0.969 for unchanged text scanning; an earlier seven-pair run of the
+regrouped implementation measured 0.917. Helpers, arrays, records and graph give
+0.995, 0.994, 1.019 and 0.981 in the broad run, so there is no general speedup
+claim. Seven fresh-build CPU pairs give tour 0.988, Dunes 0.998 and compiler 0.999;
+separate medians fluctuate substantially with host load and are not evidence of
+a compilation gain. The independent C-bootstrap suite passes 3,860 checks in
+68.57 pytest seconds with two workers. See `range-load-*` and `range-chain-*`
+audits for measurements, the initial neutral experiment and validation limits.
