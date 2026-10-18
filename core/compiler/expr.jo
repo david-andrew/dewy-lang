@@ -5307,8 +5307,8 @@ check_expr = (n: int, expected: int) -> int:
         dewy_index_ranges(n, bt)
         bk = types[bt].kind
         b = int(nodes[n].b)
-        if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP):
-            if bk != .array and bk != .fixed: fatal(nodes[n].pos, "stepped slicing requires an array")
+        if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP) and not is_nd(bt):
+            if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
             nodes[n].a = i32(last_checked)
             call = dewy_array_slice(n)
             nodes[n] = nodes[call]
@@ -5358,7 +5358,7 @@ check_expr = (n: int, expected: int) -> int:
             return check_expr(n, expected)
         if bk == .typeval: t = mk_typeval(expr_as_type(n))
         else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
-        else if bk == .struct_ and is_part_index(n):
+        else if bk == .struct_ and is_part_index(n, bt):
             # m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
             call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
             add_flag(int(nodes[n].a), NF_CHECKED)
@@ -6231,15 +6231,19 @@ dewy_range_value = (range: int) -> int:
     if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
     result
 
-# m[...] with a range among its indexes (or a single range on an n-dimensional array)
-is_part_index = (n: int) -> bool:
-    b = int(nodes[n].b)
-    if b != 0: return nodes[b].kind == .range
-    loop i in [0..nkids(n)):
-        if nodes[kid(n, i)].kind == .range: return true
+# A matrix part can use literal ranges or ordinary stored IntRange values.
+is_part_index = (n: int, receiver: int = 0) -> bool:
+    ixs = kids(n)
+    if nodes[n].b != 0: ixs = [int(nodes[n].b)]
+    loop x in ixs:
+        if nodes[x].kind == .range: return true
+    if is_nd(receiver):
+        loop x in ixs:
+            if is_dewy_range_type(check_expr(clone(x), 0), "IntRange"): return true
     false
 
-# the indexes of m[...] as (lo, hi, kind) triples for __nd_slice (see lib/std/nd.jo)
+# Convert each axis to a small selector. The library binds open endpoints to
+# the captured shape and validates stored ranges without materializing indexes.
 part_spec = (n: int) -> int:
     pos = nodes[n].pos
     ixs = kids(n)
@@ -6247,24 +6251,12 @@ part_spec = (n: int) -> int:
     elems: int[]
     loop x in ixs:
         if nodes[x].kind != .range:
-            elems.push(x)
-            elems.push(bc_int(0, pos))
-            elems.push(bc_int(0, pos))
+            elems.push(bc_call("__nd_axis", [x], pos))
             continue
-        if has_flag(x, NF_STEP): fatal(nodes[x].pos, "stepped ranges cannot select parts of arrays")
-        if has_flag(x, NF_EXCL_FIRST): fatal(nodes[x].pos, "a matrix slice with an exclusive first bound (use an inclusive start)")
-        lo = int(nodes[x].a)
-        if lo == 0: lo = bc_int(0, pos)
-        elems.push(lo)
-        hi = int(nodes[x].b)
-        if hi == 0:
-            elems.push(bc_int(0, pos))
-            elems.push(bc_int(2, pos))
-        else:
-            # (m[a..b) leaves out b)
-            if not has_flag(x, NF_INCLUSIVE): hi = bc_bin(.minus, hi, bc_int(1, pos), pos)
-            elems.push(hi)
-            elems.push(bc_int(1, pos))
+        args = dewy_slice_args(x, pos)
+        exclusive = mk(.bool_lit, pos)
+        nodes[exclusive].ival = if has_flag(x, NF_EXCL_FIRST): 1 else: 0
+        elems.push(bc_call("__nd_axis_slice", args + [exclusive], pos))
     arr = mk(.array, pos)
     set_list(arr, elems)
     arr

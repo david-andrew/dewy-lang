@@ -1024,9 +1024,23 @@ are selected in full. A selection is an independent `NDArray` value. Assign a
 scalar to fill it, or an array/matrix with the same number of elements to replace
 it in row-major order. Bounds and replacement lengths are checked. The explicit
 inner brackets matter: `matrix[.. 1]` is one range ending at 1, while
-`matrix[[..] 1]` selects column 1. Matrix slices currently support forward unit
-ranges, inclusive starts and inclusive or exclusive stops; stepped and stored
-range selectors remain a gap for multidimensional arrays.
+`matrix[[..] 1]` selects column 1. Each axis accepts contiguous or stepped
+ranges, forward or backward, inclusive or exclusive endpoints, and stored
+`IntRange` values:
+
+```dewy
+let selected_rows = [0,2..rows(matrix))
+let sample = matrix[selected_rows [..]]
+let flipped = matrix[[..] [end,end-1..]]
+matrix[selected_rows [0,2..end]] .+= 10
+```
+
+The first two values define a step, as they do in ordinary array ranges. A
+range keeps its axis even when it selects zero or one element. An empty range
+selects no cells; a nonempty range must select only in-bounds coordinates.
+Stored ranges remain small values; selecting a matrix materializes the selected
+data. Scalar, array and matrix replacements work with stepped and stored
+selectors too.
 
 Dotted updates work on matrix slices too, using the selected shape for
 broadcasting. Axis indices and bounds evaluate once. Open endpoints and omitted

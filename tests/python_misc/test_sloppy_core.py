@@ -49,6 +49,82 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'array-comparison-conditional-empty': '''main=()=>{
+let empty:array<string>=[] let values=["a"] let hits=0 let before=alloc_count()
+loop i in [0..20) {
+if values =? ["a"] and empty =? [] hits+=1
+if false or empty not=? [] hits+=1000
+if empty =? [] and values not=? [] hits+=1
+}
+return if hits =? 40 and alloc_count() =? before 42 else 1}''',
+    'numeric-matrix-stepped-reshape': '''let m=reshape([loop i in [0..20) i] 4 5)
+let rows=[3,1..0] let cols=[0,2..4]
+right=()=>{rows=[0..0] cols=[1..1] m=reshape([loop i in [0..24) 100+i] 4 6) return [10 20 30]}
+main=()=>{m[rows cols] .+= right()
+let expected=[loop i in [0..24) 100+i]
+expected[18]=25 expected[20]=37 expected[22]=49
+expected[6]=15 expected[8]=27 expected[10]=39
+return if m.shape =? [4 6] and m.data =? expected 42 else 1}''',
+    'numeric-matrix-stepped-ranks': '''main=()=>{
+let values=[loop i in [0..24) i] let reverse=[1,0..0]
+let a=reshape(values 2 3 4)[reverse 1 [3,1..0]]
+let b=reshape(values 2 2 2 3)[reverse 1 [..] [2,0..0]]
+return if a.shape =? [2 2] and a.data =? [19 17 7 5]
+and b.shape =? [2 2 2] and b.data =? [20 18 23 21 8 6 11 9] 42 else 1}''',
+    'numeric-matrix-range-order': '''let trace=0 let m=reshape([loop i in [0..12) i] 3 4)
+source=()=>{trace=trace*10+1 return m}
+first=()=>{trace=trace*10+2 m=zeros<int64>(1 1) return 2}
+second=()=>{trace=trace*10+3 return 0}
+last=()=>{trace=trace*10+4 return 0}
+columns=()=>{trace=trace*10+5 return [3,1..0]}
+main=()=>{let out=source()[[first(),second()..last()] columns()]
+return if trace =? 12345 and out.shape =? [2 2] and out.data =? [11 9 3 1]
+and m.shape =? [1 1] 42 else 1}''',
+    'numeric-matrix-stepped-read': '''main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5)
+let selected=m[[3,1..0] [0,2..end]]
+let reversed=m[2 [end,end-1..]]
+return if selected.shape =? [2 3] and selected.data =? [15 17 19 5 7 9]
+and reversed.shape =? [5] and reversed.data =? [14 13 12 11 10] 42 else 1}''',
+    'numeric-matrix-stored-ranges': '''main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5)
+let rows=[3,1..0] let cols=[0,2..5)
+let selected=m[rows cols] let all_columns=m[rows]
+let pair:array<IntRange>=[rows cols]
+return if selected.shape =? [2 3] and selected.data =? [15 17 19 5 7 9]
+and all_columns.shape =? [2 5] and all_columns.data =? [15 16 17 18 19 5 6 7 8 9]
+and m[pair[0] pair[1]].data =? selected.data 42 else 1}''',
+    'numeric-matrix-stepped-update': '''main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5) let saved=m
+let rows=[3,1..0] let cols=[0,2..4]
+m[rows cols] .+= [10 20 30]
+m[0 [4,2..0]]=[100 200 300]
+m[[2,0..0] 1]=99
+return if m.data =? [300 99 200 3 100 15 6 27 8 39 10 99 12 13 14 25 16 37 18 49]
+and saved.data =? [loop i in [0..20) i] 42 else 1}''',
+    'numeric-matrix-exclusive-first': '''main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5)
+let part=m[(0..3] (0,2..4]]
+let reverse=m[(3,1..0] [..]]
+return if part.shape =? [3 2] and part.data =? [7 9 12 14 17 19]
+and reverse.shape =? [1 5] and reverse.data =? [5 6 7 8 9] 42 else 1}''',
+    'numeric-matrix-stored-empty': '''main=()=>{
+let m=reshape([loop i in [0..6) i] 2 3) let empty=[3..2]
+let a=m[empty [..]] let b=m[[..] empty]
+m[empty [..]] .+= [10 20 30]
+let zero=zeros<int64>(0 3) let c=zero[[..] [2,0..0]]
+return if a.shape =? [0 3] and b.shape =? [2 0] and c.shape =? [0 2]
+and m.data =? [0 1 2 3 4 5] 42 else 1}''',
+    'numeric-matrix-stepped-managed': '''work=():>void=>{
+let m=reshape([["a"] ["b"] ["c"] ["d"] ["e"] ["f"]] 2 3) let saved=m
+let rows=[1,0..0] let cols=[2,0..0]
+let selected=m[rows cols] selected.data[0].push("!")
+m[rows cols]=selected
+assert(m.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f" "!"]])
+assert(saved.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f"]])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'sequence-extend-slices': '''main=()=>{
 let source=[10 20 22 90] let out:array<int64>=[]
 out.extend(source[1..3)) out.extend(source[4..]) out.extend(source[..0))
@@ -4916,8 +4992,6 @@ ERRORS = {
     'spread-call-argument': ('f=(x:int64)=>x\nmain=()=>f([42]...)', 'spread is supported inside array or record literals'),
     'end-index-call': ('main=()=>{let xs=[42] return xs[end()]}', 'end is the last index inside brackets; it cannot be called'),
     'end-index-outside': ('main=()=>end', "unknown name 'end'"),
-    'numeric-matrix-stepped-slice': ('main=()=>{let m=zeros(2 3) printl(m[[..] [0,2..2]])}', 'stepped ranges cannot select parts of arrays'),
-    'numeric-matrix-exclusive-start-slice': ('main=()=>{let m=zeros(2 3) printl(m[[..] (0..2]])}', 'matrix slice with an exclusive first bound'),
     'numeric-bound-float': ('main=()=>float64.max', "type has no member 'max'"),
     'numeric-bound-unknown': ('main=()=>uint8.maximum', "type has no member 'maximum'"),
     'range-index-stepped-string': ('main=()=>"abc"[0,2..2].length', 'stepped slicing requires an array'),
@@ -7292,6 +7366,11 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
     ('let m=zeros(2 0) printl(m[0 end])', 'out of bounds'),
     ('let m=zeros(2 3) printl(m[[..] 3])', 'out of bounds'),
     ('let m=zeros(2 3) printl(m[[..] [0..4)])', 'out of bounds'),
+    ('let m=zeros(2 3) printl(m[[..] [0,0..2]])', 'range step must be nonzero'),
+    ('let m=zeros(2 3) let r=[2,1..-1] printl(m[[..] r])', 'out of bounds'),
+    ('let m=zeros(2 3) let r=IntRange[0 9223372036854775808 3 true false] printl(m[[..] r])', 'out of bounds'),
+    ('let m=zeros(2 3) let r=IntRange[0 1 0 true false] printl(m[[..] r])', 'out of bounds'),
+    ('let m=zeros(2 3) right=()=>{m=zeros(2 2) return 1.0} m[[..] [2,0..0]] .+= right()', 'out of bounds'),
     ('let m=zeros(2 3) m[[..] 1]=[1.0]', 'assigning 1 elements to a part of 2'),
     ('let m=zeros(2 3) printl(m[[..] [..] 0])', '3 indexes for an array'),
     ('printl(fill(0 (1<<61)+1).length)', 'array is too large'),
@@ -7888,6 +7967,57 @@ main=():>int64=>{
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_matrix_range_reference(compiler, tmp_path, target, release):
+    rng = random.Random(4187)
+    cases = {}
+
+    def array(values):
+        return '[' + ' '.join(map(str, values)) + ']'
+
+    for case in range(48):
+        shape = [rng.randrange(5) for _ in range(1 + case % 4)]
+        offsets, result_shape, declarations, selectors = [0], [], [], []
+        for axis, size in enumerate(shape):
+            if axis and size and rng.randrange(2):
+                index = rng.randrange(size)
+                selected = [index]
+                selectors.append(str(index))
+            else:
+                first = rng.randrange(size) if size else 0
+                step = rng.choice([-3, -2, -1, 1, 2, 3])
+                available = len(range(first, size if step > 0 else -1, step)) if size else 0
+                count = rng.randrange(available + 1)
+                selected = [first + step * i for i in range(count)]
+                expression = (f'[{first},{first + step}..{selected[-1]}]' if count else '[0..0)')
+                declarations.append(f'let r{axis}={expression}')
+                selectors.append(f'r{axis}')
+                result_shape.append(count)
+            offsets = [base * size + index for base in offsets for index in selected]
+        original = [i * 7 - 3 for i in range(math.prod(shape))]
+        picked = [original[i] for i in offsets]
+        updated = original.copy()
+        replacement = [1000 + i for i in range(len(offsets))]
+        for index, value in zip(offsets, replacement, strict=True):
+            updated[index] = value + 5
+        selection = ' '.join(selectors)
+        cases[f'matrix_{case}'] = (
+            'main=()=>{\n'
+            f'let values:array<int64>={array(original)}\n'
+            f'let m=reshape(values {array(shape)}) let saved=m\n'
+            + '\n'.join(declarations) + '\n'
+            + f'let picked=m[{selection}]\n'
+            + f'assert(picked.shape =? {array(result_shape)} and picked.data =? {array(picked)})\n'
+            + f'm[{selection}]={array(replacement)}\nm[{selection}] .+= 5\n'
+            + f'assert(m.data =? {array(updated)} and saved.data =? values)\nreturn 42\n}}')
+    body = [f'assert(case_{i}() =? 42)' for i in range(len(cases))] + ['exit(42)']
+    command, error = build_case_batch(compiler, tmp_path, cases, body, release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

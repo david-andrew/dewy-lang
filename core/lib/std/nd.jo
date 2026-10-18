@@ -100,108 +100,148 @@ __nd_1d[T] = (m: T[,]) -> T[]:
     m.data
 
 # ---------------- parts (slices) ----------------
-# m[a, b..c, ..] becomes __nd_slice(m, spec): for each index, (lo, hi, kind) with kind 0 a single
-# index (the axis goes away), 1 the range lo..hi, 2 the range from lo to the end of the axis
+# Each axis carries a small lazy range. Flags: 1 keeps the axis, 2 resolves an
+# open endpoint against the source shape, 4 excludes the first range value.
+struct __NDAxis:
+    selection: IntRange
+    flags: int
 
-# the first and last index along each axis, and which axes the result keeps
-__nd_part = (shape: int[], spec: int[]) -> (int[], int[], bool[]):
-    r = shape.len()
-    n = spec.len() / 3
-    if n > r: panic("{n} indexes for an array of shape {__shape_str(shape)}")
-    lo = fill(0, r)
-    hi = fill(0, r)
-    keep = fill(true, r)
-    loop d in [0..r):
-        if d >= n:
-            hi[d] = shape[d] - 1
-            continue
-        a = spec[3 * d]
-        b = spec[3 * d + 1]
-        k = spec[3 * d + 2]
-        if k == 0:
-            if a < 0 or a >= shape[d]: panic("index {a} out of bounds for axis {d} of an array of shape {__shape_str(shape)}")
-            b = a
-            keep[d] = false
+__nd_axis = (index: int) -> __NDAxis:
+    __NDAxis(__dewy_range(index, 0, index, false, true), 0)
+
+__nd_axis = (selection: IntRange) -> __NDAxis: __NDAxis(selection, 1)
+
+__nd_axis_slice = (first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, exclusive_first: bool) -> __NDAxis:
+    flags = 1
+    if not bounded: flags |= 2
+    if exclusive_first: flags |= 4
+    __NDAxis(__dewy_range(first, second, last, stepped, inclusive), flags)
+
+# Bind every axis before reading a selection or evaluating an update's RHS.
+# Bound selectors also work after the destination changes shape: revalidation
+# checks the same coordinates, and traversal uses the destination's new strides.
+__nd_bound_part = (shape: int[], spec: __NDAxis[]) -> __NDAxis[]:
+    rank = shape.len()
+    if spec.len() > rank: panic("{spec.len()} indexes for an array of shape {__shape_str(shape)}")
+    out: __NDAxis[]
+    out.reserve(rank)
+    loop d in [0..rank):
+        axis: __NDAxis
+        if d < spec.len(): axis = spec[d]
+        else: axis = __nd_axis(__dewy_range(0, 0, shape[d] - 1, false, true))
+        r = axis.selection
+        if axis.flags & 1 == 0:
+            if r._first < 0 or r._first >= shape[d]: panic("index {r._first} out of bounds for axis {d} of an array of shape {__shape_str(shape)}")
         else:
-            if k == 2: b = shape[d] - 1
-            if a < 0 or b >= shape[d] or a > b + 1: panic("range {a}..{b} out of bounds for axis {d} of an array of shape {__shape_str(shape)}")
-        lo[d] = a
-        hi[d] = b
-    (lo, hi, keep)
-
-# Capture explicit bounds for every axis before a dotted update evaluates its
-# RHS. The RHS may reshape the destination; writeback uses these coordinates.
-__nd_bound_part = (shape: int[], spec: int[]) -> int[]:
-    lo, hi, keep = __nd_part(shape, spec)
-    out: int[]
-    out.reserve(shape.len() * 3)
-    loop d in [0..shape.len()):
-        out.push(lo[d])
-        out.push(hi[d])
-        kind = if keep[d]: 1 else: 0
-        out.push(kind)
+            if axis.flags & 2 != 0:
+                r._empty = if r._up: r._first >= shape[d] else: r._first < 0
+                r._count = 0
+                if not r._empty:
+                    distance = if r._up: u64(shape[d] - 1) - u64(r._first) else: u64(r._first)
+                    r._count = distance / r._stride + 1
+            if axis.flags & 4 != 0: r = __dewy_range_tail(r)
+            __dewy_range_indices(shape[d], r)
+        out.push(__NDAxis(r, axis.flags & 1))
     out
 
-# where each run of the part along the last axis starts in m, in order (each is
-# hi - lo + 1 elements long on the last axis)
-__nd_runs = (shape: int[], lo: int[], hi: int[]) -> int[]:
+__nd_axis_count = (axis: __NDAxis) -> int:
+    if axis.selection._empty or axis.selection._stride == 0: return 0
+    int(axis.selection._count)
+
+__nd_axis_delta = (axis: __NDAxis) -> int:
+    if axis.selection._up: return int(axis.selection._stride)
+    int(u64(0) - axis.selection._stride)
+
+# Start offsets for every selected run along the final axis, in result order.
+# The final axis may itself be strided; contiguous runs use bulk copies.
+__nd_runs = (shape: int[], axes: __NDAxis[]) -> int[]:
     out: int[]
-    r = shape.len()
-    if r == 0: return out
-    loop d in [0..r):
-        if hi[d] < lo[d]: return out
-    ix = lo
+    rank = shape.len()
+    if rank == 0: return out
+    loop axis in axes:
+        if __nd_axis_count(axis) == 0: return out
+    if rank == 1: return [axes[0].selection._first]
+    if rank == 2:
+        count = __nd_axis_count(axes[0])
+        offset = axes[0].selection._first * shape[1] + axes[1].selection._first
+        stride = __nd_axis_delta(axes[0]) * shape[1]
+        out.reserve(count)
+        loop i in [0..count):
+            out.push(offset)
+            offset += stride
+        return out
+    ix = [loop axis in axes: axis.selection._first]
+    digits = fill(0, rank)
     loop:
-        o = 0
-        loop d in [0..r): o = o * shape[d] + ix[d]
-        out.push(o)
-        d = r - 2
+        offset = 0
+        loop d in [0..rank): offset = offset * shape[d] + ix[d]
+        out.push(offset)
+        d = rank - 2
         loop d >= 0:
-            ix[d] += 1
-            if ix[d] <= hi[d]: break
-            ix[d] = lo[d]
+            digits[d] += 1
+            if digits[d] < __nd_axis_count(axes[d]):
+                ix[d] += __nd_axis_delta(axes[d])
+                break
+            digits[d] = 0
+            ix[d] = axes[d].selection._first
             d -= 1
         if d < 0: break
     out
 
-__nd_slice[T] = (m: T[,], spec: int[]) -> T[,]:
-    lo, hi, keep = __nd_part(m.shape, spec)
+__nd_slice[T] = (m: T[,], spec: __NDAxis[]) -> T[,]:
+    axes = __nd_bound_part(m.shape, spec)
     shape: int[]
     n = 1
-    loop d in 0.. and k in keep:
-        n *= max(hi[d] - lo[d] + 1, 0)
-        if k: shape.push(hi[d] - lo[d] + 1)
+    loop axis in axes:
+        count = __nd_axis_count(axis)
+        n *= count
+        if axis.flags & 1 != 0: shape.push(count)
     out: T[]
     out.reserve(n)
-    if n > 0:
-        run = hi[hi.len() - 1] - lo[lo.len() - 1] + 1
-        loop o in __nd_runs(m.shape, lo, hi):
-            out.extend(m.data[o..o + run))
+    if n > 0 and axes.len() > 0:
+        last = axes[axes.len() - 1]
+        count = __nd_axis_count(last)
+        delta = __nd_axis_delta(last)
+        loop offset in __nd_runs(m.shape, axes):
+            if delta == 1: out.extend(m.data[offset..offset + count))
+            else:
+                index = offset
+                loop j in [0..count):
+                    out.push(m.data[index])
+                    index += delta
     NDArray(out, shape)
 
-# m[part] = x: every element of the part
-__nd_slice_set[T] = (m: mut T[,], spec: int[], x: T):
-    lo, hi, _ = __nd_part(m.shape, spec)
-    if lo.len() == 0: return
-    run = hi[hi.len() - 1] - lo[lo.len() - 1] + 1
-    loop o in __nd_runs(m.shape, lo, hi):
-        loop i in [o..o + run): m.data[i] = x
+# Scalar fill and value replacement share the same checked coordinate traversal.
+__nd_slice_set[T] = (m: mut T[,], spec: __NDAxis[], value: T):
+    axes = __nd_bound_part(m.shape, spec)
+    if axes.len() == 0: return
+    last = axes[axes.len() - 1]
+    count = __nd_axis_count(last)
+    delta = __nd_axis_delta(last)
+    loop offset in __nd_runs(m.shape, axes):
+        index = offset
+        loop j in [0..count):
+            m.data[index] = value
+            index += delta
 
-# m[part] = xs: the part's elements in order (as many as it has)
-__nd_slice_set[T] = (m: mut T[,], spec: int[], xs: T[]):
-    lo, hi, _ = __nd_part(m.shape, spec)
+__nd_slice_set[T] = (m: mut T[,], spec: __NDAxis[], values: T[]):
+    axes = __nd_bound_part(m.shape, spec)
     n = 1
-    loop d in [0..lo.len()): n *= max(hi[d] - lo[d] + 1, 0)
-    if xs.len() != n: panic("assigning {xs.len()} elements to a part of {n}")
-    if n == 0: return
-    run = hi[hi.len() - 1] - lo[lo.len() - 1] + 1
+    loop axis in axes: n *= __nd_axis_count(axis)
+    if values.len() != n: panic("assigning {values.len()} elements to a part of {n}")
+    if n == 0 or axes.len() == 0: return
+    last = axes[axes.len() - 1]
+    count = __nd_axis_count(last)
+    delta = __nd_axis_delta(last)
     k = 0
-    loop o in __nd_runs(m.shape, lo, hi):
-        loop i in [o..o + run):
-            m.data[i] = xs[k]
+    loop offset in __nd_runs(m.shape, axes):
+        index = offset
+        loop j in [0..count):
+            m.data[index] = values[k]
+            index += delta
             k += 1
 
-__nd_slice_set[T] = (m: mut T[,], spec: int[], xs: T[,]): __nd_slice_set(m, spec, xs.data)
+__nd_slice_set[T] = (m: mut T[,], spec: __NDAxis[], values: T[,]): __nd_slice_set(m, spec, values.data)
 
 # ---------------- array literals ----------------
 # [1 2; 3 4]: elements row by row
@@ -376,9 +416,11 @@ linspace = (a: f64, b: f64, n: int) -> f64[]:
 reshape[T] = (xs: T[], shape: int[]) -> T[,]: ndarray(xs, shape)
 reshape[T] = (xs: T[], a: int, b: int) -> T[,]: ndarray(xs, [a, b])
 reshape[T] = (xs: T[], a: int, b: int, c: int) -> T[,]: ndarray(xs, [a, b, c])
+reshape[T] = (xs: T[], a: int, b: int, c: int, d: int) -> T[,]: ndarray(xs, [a, b, c, d])
 reshape[T] = (m: T[,], shape: int[]) -> T[,]: ndarray(m.data, shape)
 reshape[T] = (m: T[,], a: int, b: int) -> T[,]: ndarray(m.data, [a, b])
 reshape[T] = (m: T[,], a: int, b: int, c: int) -> T[,]: ndarray(m.data, [a, b, c])
+reshape[T] = (m: T[,], a: int, b: int, c: int, d: int) -> T[,]: ndarray(m.data, [a, b, c, d])
 
 # the axes in reverse order (rows and columns swapped, for a 2-D array)
 transpose[T] = (m: T[,]) -> T[,]:

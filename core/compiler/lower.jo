@@ -307,6 +307,9 @@ reg_temp_slot = (s: int, t: int):
 
 reg_temp_vreg = (v: int, t: int):
     if not is_managed(t) or tl_items.len() == 0: return
+    # An empty literal is an immutable null constant. It owns no allocation,
+    # and conditional cleanup must not try to clear its constant register.
+    if is_kv(v) and kv_of(v) == 0: return
     tl_items[tl_items.len() - 1].push(TempItem(false, v, t, cond_depth > tl_cond[tl_cond.len() - 1]))
 
 borrow = (val: Val, t: int):

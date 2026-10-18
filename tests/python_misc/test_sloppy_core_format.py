@@ -75,6 +75,10 @@ let part:NDArray<int64>=m[[0..end] [1..end]]
 m[[..] end]=[20 22]
 m[[..] end] .+=10
 printl(part.data) printl(m.data) printl(m[0 [0..end+1)].data)
+let rows=[1,0..0]
+printl(m[rows [2,0..0]].data)
+m[rows (0..2]] .+= [1 2]
+printl(m[[..] [end,end-1..]].data)
 return 0
 }''',
     'unpack-leaf-types': 'main=()=>{const [x:int64 y:float64]=[20 22] printl(x+y) return 0}',
