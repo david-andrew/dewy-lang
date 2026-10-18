@@ -3582,6 +3582,47 @@ main=()=>{let value:Value=[] return value.answer}''',
     'record-empty-argument': '''Value:type=[answer:int64=42]
 get=(value:Value?)=>if value is? Value value.answer else 0
 main=()=>get([])''',
+    'unpack-param-default-shadow': '''apply=(@x:int64 callback=([[x]]:array<array<int64>>)=>x)=>callback([[42]])
+main=()=>{let value=1 return apply(@value)}''',
+    'unpack-param-default-once': '''let counter=0
+next=()=>{counter+=1 return [20 22]}
+sum=([a b]=next())=>a+b
+main=()=>{let answer=sum() if counter not=?1 return 1 return answer}''',
+    'unpack-nested-default-shadow': '''apply=(@x:int64 value:int64={let [[x]]=[[42]] x})=>value
+main=()=>{let value=1 return apply(@value)}''',
+    'unpack-loop-default-shadow': '''apply=(@x:int64 values:array<int64>=[loop [[x] [y]] in [[[20] [22]]] x+y])=>values[0]
+main=()=>{let value=1 return apply(@value)}''',
+    'unpack-param-array': 'sum=([a b])=>a+b\nmain=()=>sum([20 22])',
+    'unpack-param-typed': 'sum=([a b]:array<int64>)=>a+b\nmain=()=>sum([20 22])',
+    'unpack-param-record': 'sum=([y x]:[x:int64 y:int64])=>x+y\nmain=()=>sum([x=20 y=22])',
+    'unpack-param-nested': 'sum=([[a b] [_ c]])=>a+b+c\nmain=()=>sum([[10 12] [99 20]])',
+    'unpack-param-fixed': 'sum=([a b]:array<int64 length=2>)=>a+b\nmain=()=>sum([20 22])',
+    'unpack-param-generic': 'sum=<T>([a b]:array<T>):>T=>a+b\nmain=()=>sum<int64>([20 22])',
+    'unpack-param-default': 'sum=([a b]=[20 22])=>a+b\nmain=()=>sum()',
+    'unpack-param-closure': '''make=(bias:int64)=>(([a b]:array<int64>)=>a+b+bias)
+main=()=>{let add=make(2) return add([20 20])}''',
+    'unpack-param-callback': '''apply=(f:((xs:array<int64>):>int64))=>f([20 22])
+main=()=>apply(([a b])=>a+b)''',
+    'unpack-param-value': '''change=([a b]:array<array<int64>>)=>{a[0]+=2 b.push(99) return a[0]+b[0]}
+main=()=>{let values=[[20] [20]] let answer=change(values)
+if values not=?[[20] [20]] return 1
+return answer}''',
+    'unpack-param-order': '''let counter=0
+pair=()=>{counter+=1 return [counter 20]}
+last=()=>{counter+=10 return counter}
+sum=([a b] tail:int64)=>if a=?1 and b=?20 and tail=?11 and counter=?11 42 else 1
+main=()=>sum(pair() last())''',
+    'unpack-param-captured-copy': '''make=([a]:array<array<int64>>)=>()=>{a[0]+=1 return a[0]}
+main=()=>{let values=[[40]] let next=make(values)
+if next() not=?41 or values[0][0] not=?40 return 1
+return next()}''',
+    'unpack-param-snapshot': '''let values=[20 22]
+change=()=>{values[0]=99 return 0}
+sum=([a b] ignored:int64)=>a+b
+main=()=>sum(values change())''',
+    'unpack-param-named': 'sum=([a b] extra:int64=2)=>a+b+extra\nmain=()=>sum(extra=2 [20 20])',
+    'unpack-param-dictionary': '''sum=([[key value] [_ other]])=>value+other+key.length
+main=()=>sum(["hi"->20 "there"->20])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
     'unpack-nested-array': 'main=()=>{let [[a b] [c d]]=[[20 1] [2 19]] return a+b+c+d}',
     'unpack-nested-single': 'main=()=>{let [[answer]]=[[42]] return answer}',
@@ -4061,6 +4102,10 @@ ERRORS = {
     'record-inline-void': ('main=()=>{let v:[x:void]=[] return 0}', 'value types'),
     'record-inline-mutable-field': ('main=()=>{let v:[@x:int64]=[] return 0}', 'mutability belongs on the parameter'),
     'comprehension-mixed': ('main=()=>[loop i in [1 2] if i =? 1 "a"->2 else 3]', 'cannot mix'),
+    'unpack-param-duplicate': ('sum=([x y] x)=>x+y\nmain=()=>sum([20 22] 0)', 'duplicate parameter binding'),
+    'unpack-param-nested-duplicate': ('sum=([[x] [x]])=>x\nmain=()=>sum([[20] [22]])', 'duplicate unpacking name'),
+    'unpack-param-mutable': ('sum=(@[x y]:array<int64>)=>x+y\nmain=()=>{let xs=[20 22] return sum(@xs)}', 'unpacking a mutable parameter'),
+    'unpack-param-missing-field': ('sum=([missing])=>missing\nmain=()=>sum([x=42])', 'no field'),
     'unpack-duplicate': ('main=()=>{let [x x]=[20 22] return x}', 'duplicate unpacking name'),
     'unpack-missing-field': ('main=()=>{let [missing]=[x=42] return missing}', 'no field'),
     'unpack-record-discard': ('main=()=>{let [_]=[x=42] return 0}', 'leave unwanted fields out'),
@@ -6134,6 +6179,8 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
 
 
 @pytest.mark.parametrize('body', [
+    'let sum=([x y]:array<int64>)=>x+y printl(sum([42]))',
+    'let sum=([[x y]]:array<array<int64>>)=>x+y printl(sum([[42]]))',
     'loop [x y] in [[1] [2 3]] {printl(x+y)}',
     'loop [key [x y]] in ["a"->[1]] {printl(x+y)}',
     'loop i in [0..1) and [[x y]] in [[1]] {printl(x+y)}',
@@ -7449,7 +7496,8 @@ def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('mismatch', [False, True])
 @pytest.mark.parametrize('nested', [False, True])
-def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch, nested):
+@pytest.mark.parametrize('parameter', [False, True], ids=['binding', 'parameter'])
+def test_core_unpack_tuple_and_length_guard(compiler, tmp_path, target, release, mismatch, nested, parameter):
     (tmp_path / 'helper.jo').write_text('''pair = () -> (int, str): (39, "abc")
 nested = () -> ((int, str), int[]): ((39, "abc"), [0])
 pairs = () -> (str, int[])[]: [("a", [20, 1]), ("b", [2, 19])]''')
@@ -7465,6 +7513,13 @@ loop i in [0..2) and [key [x y]] in helper.pairs() {total+=x+y}
 if total not=? 84 return 1
 return count+text.length+extra}''' if nested else
                    'main=()=>{let [count text]=helper.pair() return count+text.length}')
+    if parameter:
+        if mismatch:
+            program = ('sum=([[first second] [_]]:array<array<int64>>):>int64=>first+second\nmain=()=>sum([[42] [0]])' if nested else
+                       'sum=([first second]:array<int64>):>int64=>first+second\nmain=()=>sum([42])')
+        else:
+            program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=()=>sum(helper.nested())' if nested else
+                       'sum=([count text])=>count+text.length\nmain=()=>sum(helper.pair())')
     source.write_text('import p"helper.jo"\n' + program)
     binary = tmp_path / 'unpack'
     node = shutil.which('node')

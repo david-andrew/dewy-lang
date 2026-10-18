@@ -6,6 +6,7 @@ use 'ast.jo'
 use 'lex.jo'
 use 'parse.jo'
 use 'expr.jo'
+use 'check.jo'
 
 struct DewySyntax:
     kind: str
@@ -337,8 +338,13 @@ dw_param = (id: int, kind: NK) -> int:
     by_place = dw_op(lhs) == "@"
     if by_place: lhs = dw_child(lhs, 1)
     name = dw_name(lhs)
-    if name == "": return dw_fail(lhs, "destructured parameters")
+    pattern = kind == .param and dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:"
+    if name == "" and not pattern: return dw_fail(lhs, "this parameter or field")
+    if pattern and by_place: return dw_fail(lhs, "unpacking a mutable parameter; use a named @ parameter")
     n = mk(kind, pos)
+    if pattern:
+        name = "$parameter{n}"
+        set_list(n, dw_bindings(lhs))
     nodes[n].name = i32(intern(name))
     if annotation != 0: nodes[n].a = i32(dw_type(annotation))
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
@@ -368,13 +374,23 @@ dw_function = (id: int, name: str) -> int:
         if dw_name(result) == "void": add_flag(n, NF_VOID)
         else: nodes[n].a = i32(dw_type(result))
     ps: int[]
-    loop p in dewy_syntax[params].children: ps.push(dw_param(p, .param))
+    bound: {int: bool} = {}
+    loop p in dewy_syntax[params].children:
+        param = dw_param(p, .param)
+        let bound_nodes = if nkids(param) > 0: binding_leaves(kids(param)) else: [param]
+        loop binding in bound_nodes:
+            nm = int(nodes[binding].name)
+            if name_of(nm) == "_": continue
+            if bound.has(nm): fatal(nodes[binding].pos, "duplicate parameter binding '{name_of(nm)}'")
+            bound[nm] = true
+        ps.push(param)
     body = dw_block(dw_child(id, 2))
     prefix: int[]
     loop param in ps:
         if has_flag(param, NF_MUT): continue
         local = mk(.vardecl, nodes[param].pos)
         nodes[local].name = nodes[param].name
+        if nkids(param) > 0: set_list(local, kids(param))
         value = mk(.ident, nodes[param].pos)
         nodes[value].name = nodes[param].name
         if name == "main":

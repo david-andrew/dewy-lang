@@ -120,6 +120,27 @@ are supported. Explicit arguments evaluate in written order, then omitted
 defaults in parameter order. An earlier parameter used in a default refers to
 its captured value, so `combine(next())` calls `next()` once.
 
+Parameters can unpack a single argument with the same patterns as `let` and
+`loop`: arrays and tuple results use positions, records use field names, and
+nested patterns can combine them.
+
+```dewy
+sum=([left right]:array<int64>)=>left+right
+score=([damage armor]:[damage:int64 armor:int64])=>damage-armor
+make_adder=(bias:int64)=>(([a b]:array<int64>)=>a+b+bias)
+main=()=>sum([20 22])
+```
+
+The whole parameter can have a type or default, such as `([a b]=[20 22])`.
+Untyped patterns infer the argument type, including when used as callbacks.
+The argument evaluates once; array lengths are checked on entry and extracted
+values remain independent of the caller. `_` discards array or tuple elements;
+for records, leave unwanted fields out. Pattern bindings belong to the body,
+so defaults on later parameters cannot refer to them. Pass the whole argument
+positionally; other named parameters still work. Pattern names must be distinct
+across the signature. Mutable `@` patterns and annotations on individual pattern
+leaves are not supported; use a named parameter for those cases.
+
 Module-level overload groups join function literals with `&`:
 
 ```dewy

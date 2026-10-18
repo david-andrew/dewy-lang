@@ -1422,3 +1422,18 @@ dashes use a one-pixel minimum.
 rendering were visually reviewed. Nine focused checks pass in 2.92 seconds,
 covering native/web series, native headless PNG export, dash continuity and the
 fractional stall regression. See `charts-*` audits and the language guide.
+
+
+Function parameters now accept Dewy unpacking patterns, including nested arrays,
+record fields, dictionaries and imported tuple values. Whole-parameter types and
+defaults reuse ordinary specialization and argument evaluation; callbacks can
+infer their parameter types. Body bindings remain independent values, including
+when a returned closure mutates a nested array. Duplicate bindings and mutable
+patterns are diagnosed. Named parameters can accompany positional patterns.
+
+Default-argument dependency analysis now sees every leaf of a nested declaration
+or loop pattern. This prevents a default callback's local name from being
+mistaken for an earlier outer parameter, including when that outer parameter is
+mutable. See `parameter-unpack-*` audits for the native/web checks and C gate.
+The final independent three-generation C bootstrap passes all 4,216 tests in
+72.73 pytest seconds; 462 focused and adjacent checks pass in 8.66 seconds.

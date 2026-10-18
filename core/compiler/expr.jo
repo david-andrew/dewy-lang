@@ -1200,12 +1200,12 @@ default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bo
             if default_uses_params(statement, decl, before, local_hidden): return true
             if nodes[statement].kind == .vardecl:
                 local_hidden.push(int(nodes[statement].name))
-                loop binding in kids(statement): local_hidden.push(int(nodes[binding].name))
+                loop binding in binding_leaves(kids(statement)): local_hidden.push(int(nodes[binding].name))
         return false
     if nodes[n].kind == .for_:
         if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
         local_hidden = hidden
-        loop binder in kids(n): local_hidden.push(int(nodes[binder].name))
+        loop binder in binding_leaves(kids(n)): local_hidden.push(int(nodes[binder].name))
         return default_uses_params(int(nodes[n].b), decl, before, local_hidden)
     if nodes[n].kind == .match_:
         if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
