@@ -69,6 +69,20 @@ return if total=?3 and n=?0 and alloc_count()=?before 42 else 2}
 main=()=>{work() let before=alloc_count()
 loop i in [0..20) {if work() not=?42 return 1}
 return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-managed-mut-return': '''make=()=>{let xs=[40] let result=[0]
+let advance=(@out:array<int64>)=>{xs[0]+=1 out=xs return xs}
+let first=advance(@result) advance(@result)
+return [first result]}
+work=()=>{let values=make() return if values=?[[41] [42]] 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
+    'closure-stack-callable-capture': '''make=()=>{let n=0 return ()=>{n+=1; n}}
+work=()=>{let inner=make() let outer=()=>inner()
+return if outer()=?1 and outer()=?2 and inner()=?1 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}''',
     'closure-stack-managed-return': '''make=()=>{let xs=[40]
 let parent=()=>{xs[0]+=1 return ()=>{xs[0]+=1; xs[0]}}
 return parent()}

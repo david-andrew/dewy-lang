@@ -1,0 +1,144 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "revision": "f32e09f4af6e9c85d7e69ad34516942bb0f2bc1d",
+  "working_tree": " M core/compiler/lower.jo\n M tests/python_misc/test_sloppy_core.py\n M tools/sloppy_core/benchmark_callbacks.py\n",
+  "diff_sha256": "52194e9c72e708c9d583f02c7f1d19c91c7f18b29f4ecb2c259a2c46e79edc7b",
+  "load_average_start": [
+    19.21875,
+    20.51123046875,
+    18.58935546875
+  ],
+  "workers": 1,
+  "samples": 5,
+  "warmups_per_compiler": 1,
+  "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792347147662084005/bin/dewy-core",
+      "sha256": "13757f3023afaca4229c1ca7f3ea746c38ee78a85ec20cdb4f06fa6a4e67bc0a"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792347287890442282/bin/dewy-core",
+      "sha256": "b0b69bf19f0c3aa7d50d4f2ea12cc4dfa6fd7c32b99cfcf6cf4d4cd60605bd0a"
+    }
+  },
+  "workloads": {
+    "conformance-default": {
+      "arguments": [
+        "build",
+        "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/conformance-throughput/main.dewy"
+      ],
+      "source_sha256": "5903787c3e09f2a41c077b29c96486a74406b71d31f1d742a95c161c2d669a35",
+      "seconds": {
+        "baseline": [
+          1.0283099869993748,
+          1.8894374960000277,
+          1.8459265540004708,
+          1.9245965020018048,
+          1.071081135996792
+        ],
+        "candidate": [
+          1.4362047179965884,
+          1.24489714900119,
+          1.552604517994041,
+          1.3948506119995727,
+          1.1811216209971462
+        ]
+      },
+      "median_seconds": {
+        "baseline": 1.8459265540004708,
+        "candidate": 1.3948506119995727
+      },
+      "cpu_seconds": {
+        "baseline": [
+          0.8383569999999998,
+          0.8773130000000005,
+          0.8670429999999989,
+          0.8738890000000008,
+          0.8354569999999995
+        ],
+        "candidate": [
+          0.8561930000000004,
+          0.8425129999999995,
+          0.8622310000000006,
+          0.8021150000000006,
+          0.7417289999999994
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 0.8670429999999989,
+        "candidate": 0.8425129999999995
+      },
+      "output_bytes": {
+        "candidate": 3461088,
+        "baseline": 3461352
+      }
+    },
+    "compiler": {
+      "arguments": [
+        "build",
+        "core/compiler/main.jo"
+      ],
+      "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+      "seconds": {
+        "baseline": [
+          3.803461834002519,
+          3.0217525260013645,
+          3.238052710003103,
+          2.0500156180060003,
+          2.521688382999855
+        ],
+        "candidate": [
+          2.7185260850019404,
+          2.3491172140056733,
+          3.045868414999859,
+          3.6221170089993393,
+          1.6376635510023334
+        ]
+      },
+      "median_seconds": {
+        "baseline": 3.0217525260013645,
+        "candidate": 2.7185260850019404
+      },
+      "cpu_seconds": {
+        "baseline": [
+          1.7851009999999996,
+          1.8381680000000005,
+          1.862617999999999,
+          1.511894,
+          1.8899800000000004
+        ],
+        "candidate": [
+          1.6428460000000007,
+          1.8425939999999978,
+          1.8941400000000024,
+          1.8435779999999988,
+          1.495159000000001
+        ]
+      },
+      "median_cpu_seconds": {
+        "baseline": 1.8381680000000005,
+        "candidate": 1.8425939999999978
+      },
+      "output_bytes": {
+        "candidate": 7269392,
+        "baseline": 7269392
+      }
+    }
+  },
+  "load_average_end": [
+    19.82568359375,
+    20.45703125,
+    18.68212890625
+  ]
+}

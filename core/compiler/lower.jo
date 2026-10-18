@@ -446,7 +446,9 @@ emit_scope_exit = (i: int):
         t = store_type(l)
         if locals[l].offset >= 0:
             a = e_slot(int(locals[l].offset))
-            drop_at(a, t)
+            target = if tkind(t) == .fn_: stack_closure_target(l) else: -1
+            if target >= 0: drop_stack_closure(a, target)
+            else: drop_at(a, t)
             e_zero(a, tsize(t))
         else:
             release(int(locals[l].vreg), t)
@@ -1469,6 +1471,9 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
 gen_closure_call = (callee: int, args: int[]) -> Val:
     ft = prune(ntype(callee))
     ret = int(types[ft].elem)
+    target = -1
+    if nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
+        target = stack_closure_target(int(nodes[callee].sym))
     cval = gen_expr(callee)
     # A const callable is a saved value: call a temporary copy so its private
     # state cannot change through the const binding. Explicit shared cells stay shared.
@@ -1482,8 +1487,9 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
     # Pin the exact environment when arguments or the callback can replace its
     # owner. Owned temporaries already stay alive through statement cleanup, and
     # an unaliased local callable needs no refcount traffic on every invocation.
-    pin = not cval.owned and (root == 0 or borrow_may_change(callee, args, -1, 0))
-    if not cval.owned and not pin and root != 0:
+    # The invocation-only proof also excludes replacing the owner through args.
+    pin = target < 0 and not cval.owned and (root == 0 or borrow_may_change(callee, args, -1, 0))
+    if target < 0 and not cval.owned and not pin and root != 0:
         loop arg in args:
             if has_flag(arg, NF_MUT) or may_write_root(arg, root): pin = true
     cv = cval.v
@@ -1493,9 +1499,6 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
         e_copy(cv, cval.v, tsize(ft))
         retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
         reg_temp_slot(saved, ft)
-    target = -1
-    if stack_closure_fn == cur_fn and nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
-        target = stack_closure_targets.get(int(nodes[callee].sym)) ?? -1
     fp = 0
     if target < 0:
         fp = e_load(VI, cv, 0, ptr_size)
@@ -1554,6 +1557,22 @@ closure_size = () -> int: 2 * ptr_size
 stack_closure_fn = -1
 stack_closure_locals: {int: bool} = {}
 stack_closure_targets: {int: int} = {}
+
+stack_closure_target = (l: int) -> int:
+    if stack_closure_fn != cur_fn: return -1
+    stack_closure_targets.get(l) ?? -1
+
+# Invocation pins have ended before scope cleanup. No value can retain this
+# environment, so only its managed captures need destruction, with no RC dispatch.
+drop_stack_closure = (addr: int, f: int):
+    managed = false
+    loop cap in fns[f].caps:
+        if is_managed(store_type(int(cap.inner))): managed = true
+    if not managed: return
+    env = e_load(VI, addr, ptr_size, ptr_size)
+    iff(env)
+    e_call(lf_helper(.stackenvdrop, 0, f), [env], -1)
+    endc()
 
 stack_closure_uses = (n: int, called: bool = false):
     if n == 0: return

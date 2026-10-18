@@ -1,0 +1,274 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "revision": "f32e09f4af6e9c85d7e69ad34516942bb0f2bc1d",
+  "diff_sha256": "a34f0e80b72faffc6e9daa0f6ed23813e51a9cd9323e9b6c80b77eb6f75c00e7",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792347147662084005/bin/dewy-core",
+      "sha256": "13757f3023afaca4229c1ca7f3ea746c38ee78a85ec20cdb4f06fa6a4e67bc0a"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792347287890442282/bin/dewy-core",
+      "sha256": "b0b69bf19f0c3aa7d50d4f2ea12cc4dfa6fd7c32b99cfcf6cf4d4cd60605bd0a"
+    }
+  },
+  "samples": 5,
+  "warmups": 1,
+  "load_average_start": [
+    20.76220703125,
+    20.9248046875,
+    18.60546875
+  ],
+  "cpu_time_definition": "User plus system CPU seconds of each fresh native process.",
+  "workloads": {
+    "local-counter": {
+      "source": "Counter:type=():>int64\nmake=()=>{let n=0 return ()=>{n+=1; n}}\nstep=(start:int64)=>{let n=start let next=()=>{n+=1; n}\nreturn next()+next()}\nmain=()=>{let sum=0\nloop i in [0..2000000) {sum+=step(i)}\nprintl(sum)}\n",
+      "expected": "4000004000000\n",
+      "modes": {
+        "default": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.04776440199930221,
+                "cpu_seconds": 0.026085
+              },
+              {
+                "wall_seconds": 0.06625917299970752,
+                "cpu_seconds": 0.026366000000000004
+              },
+              {
+                "wall_seconds": 0.031352151003375184,
+                "cpu_seconds": 0.024869000000000006
+              },
+              {
+                "wall_seconds": 0.04261818699887954,
+                "cpu_seconds": 0.025707999999999957
+              },
+              {
+                "wall_seconds": 0.08583063800324453,
+                "cpu_seconds": 0.023206999999999964
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.01594741999724647,
+                "cpu_seconds": 0.00799
+              },
+              {
+                "wall_seconds": 0.02193546199850971,
+                "cpu_seconds": 0.008407000000000001
+              },
+              {
+                "wall_seconds": 0.01789602099597687,
+                "cpu_seconds": 0.008286000000000019
+              },
+              {
+                "wall_seconds": 0.023169331005192362,
+                "cpu_seconds": 0.00780299999999998
+              },
+              {
+                "wall_seconds": 0.020047790996613912,
+                "cpu_seconds": 0.007746000000000017
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.04776440199930221,
+              "cpu_seconds": 0.025707999999999957
+            },
+            "candidate": {
+              "wall_seconds": 0.020047790996613912,
+              "cpu_seconds": 0.00799
+            }
+          }
+        },
+        "release": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.0436587279982632,
+                "cpu_seconds": 0.02059799999999999
+              },
+              {
+                "wall_seconds": 0.022987676995398942,
+                "cpu_seconds": 0.019468000000000082
+              },
+              {
+                "wall_seconds": 0.0431403189941193,
+                "cpu_seconds": 0.020408000000000023
+              },
+              {
+                "wall_seconds": 0.04199249600060284,
+                "cpu_seconds": 0.019676000000000013
+              },
+              {
+                "wall_seconds": 0.04303357099706773,
+                "cpu_seconds": 0.01980400000000007
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.027440818004834,
+                "cpu_seconds": 0.004910999999999985
+              },
+              {
+                "wall_seconds": 0.01327175000187708,
+                "cpu_seconds": 0.005298999999999984
+              },
+              {
+                "wall_seconds": 0.013265845998830628,
+                "cpu_seconds": 0.005526000000000017
+              },
+              {
+                "wall_seconds": 0.012531633001344744,
+                "cpu_seconds": 0.005530000000000021
+              },
+              {
+                "wall_seconds": 0.012446837004972622,
+                "cpu_seconds": 0.005645999999999957
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.04303357099706773,
+              "cpu_seconds": 0.01980400000000007
+            },
+            "candidate": {
+              "wall_seconds": 0.013265845998830628,
+              "cpu_seconds": 0.005526000000000017
+            }
+          }
+        }
+      }
+    },
+    "local-mut-argument": {
+      "source": "Counter:type=():>int64\nmake=()=>{let n=0 return ()=>{n+=1; n}}\nstep=(start:int64)=>{let n=start let total=0\nlet add=(@value:int64)=>{n+=1 value+=n}\nadd(@total) add(@total) return total}\nmain=()=>{let sum=0\nloop i in [0..2000000) {sum+=step(i)}\nprintl(sum)}\n",
+      "expected": "4000004000000\n",
+      "modes": {
+        "default": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.18445773800340248,
+                "cpu_seconds": 0.06820000000000012
+              },
+              {
+                "wall_seconds": 0.28407345300365705,
+                "cpu_seconds": 0.0656719999999999
+              },
+              {
+                "wall_seconds": 0.18024262900144095,
+                "cpu_seconds": 0.06723900000000008
+              },
+              {
+                "wall_seconds": 0.0886509260017192,
+                "cpu_seconds": 0.06565100000000015
+              },
+              {
+                "wall_seconds": 0.18084848799480824,
+                "cpu_seconds": 0.06328400000000015
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.019291070995677728,
+                "cpu_seconds": 0.008820999999999933
+              },
+              {
+                "wall_seconds": 0.02000904199667275,
+                "cpu_seconds": 0.008212999999999984
+              },
+              {
+                "wall_seconds": 0.010819840004842263,
+                "cpu_seconds": 0.006660999999999986
+              },
+              {
+                "wall_seconds": 0.021099295001477003,
+                "cpu_seconds": 0.008074999999999853
+              },
+              {
+                "wall_seconds": 0.021186243997362908,
+                "cpu_seconds": 0.007949000000000005
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.18084848799480824,
+              "cpu_seconds": 0.0656719999999999
+            },
+            "candidate": {
+              "wall_seconds": 0.02000904199667275,
+              "cpu_seconds": 0.008074999999999853
+            }
+          }
+        },
+        "release": {
+          "samples": {
+            "baseline": [
+              {
+                "wall_seconds": 0.04382863299542805,
+                "cpu_seconds": 0.03625900000000007
+              },
+              {
+                "wall_seconds": 0.1719656950008357,
+                "cpu_seconds": 0.0410360000000001
+              },
+              {
+                "wall_seconds": 0.05607026399957249,
+                "cpu_seconds": 0.039319999999999966
+              },
+              {
+                "wall_seconds": 0.11344429000018863,
+                "cpu_seconds": 0.04291100000000009
+              },
+              {
+                "wall_seconds": 0.10184420099540148,
+                "cpu_seconds": 0.04159899999999994
+              }
+            ],
+            "candidate": [
+              {
+                "wall_seconds": 0.01004260299669113,
+                "cpu_seconds": 0.005486999999999825
+              },
+              {
+                "wall_seconds": 0.013987528000143357,
+                "cpu_seconds": 0.00607500000000008
+              },
+              {
+                "wall_seconds": 0.014865260003716685,
+                "cpu_seconds": 0.006051999999999752
+              },
+              {
+                "wall_seconds": 0.018198575999122113,
+                "cpu_seconds": 0.0061269999999999936
+              },
+              {
+                "wall_seconds": 0.01744337000127416,
+                "cpu_seconds": 0.006126000000000076
+              }
+            ]
+          },
+          "medians": {
+            "baseline": {
+              "wall_seconds": 0.10184420099540148,
+              "cpu_seconds": 0.0410360000000001
+            },
+            "candidate": {
+              "wall_seconds": 0.014865260003716685,
+              "cpu_seconds": 0.00607500000000008
+            }
+          }
+        }
+      }
+    }
+  },
+  "load_average_end": [
+    20.76220703125,
+    20.9248046875,
+    18.60546875
+  ]
+}

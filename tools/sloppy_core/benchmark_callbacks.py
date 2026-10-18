@@ -25,6 +25,13 @@ main=()=>{let sum=0
 loop i in [0..2000000) {sum+=step(i)}
 printl(sum)}
 ''', '4000004000000\n'),
+    'local-mut-argument': ('''step=(start:int64)=>{let n=start let total=0
+let add=(@value:int64)=>{n+=1 value+=n}
+add(@total) add(@total) return total}
+main=()=>{let sum=0
+loop i in [0..2000000) {sum+=step(i)}
+printl(sum)}
+''', '4000004000000\n'),
     'counter': ('''twice=(f:Counter)=>f()+f()
 main=()=>{let a=make() let sum=0
 loop i in [0..2000000) {sum+=twice(a)}

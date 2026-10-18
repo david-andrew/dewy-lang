@@ -329,6 +329,20 @@ from 814 to 851 ms (4.5%). Wall times were noisy under unrelated host activity.
 Eight new lifetime cases cover zero allocation, temporary call pinning, escaped
 child callbacks, private/shared copies, fallback paths and loop cleanup.
 
+The same lifetime proof now removes generic reference-counted destruction and
+unnecessary invocation pins. Stack-local captures are destroyed directly at
+scope exit; scalar-only environments need no destructor call. A separate
+[five-pair comparison](audits/2026-10-18/stack-cleanup-runtime.json) against the
+first stack-allocation commit reduced local-counter CPU from 25.7 to 8.0 ms
+(default) and 19.8 to 5.5 ms (release). With an `@` argument, the corresponding
+figures were 65.7 to 8.1 ms and 41.0 to 6.1 ms. This remains a microbenchmark.
+Validation covers copied managed return values and private callable captures,
+as well as the previous lifetime and fallback cases. The
+[compilation comparison](audits/2026-10-18/stack-cleanup-compile.json) measured
+867 → 843 ms CPU for the fixed 893-case bundle, with compiler self-build CPU
+essentially unchanged (1838 → 1843 ms). The preceding stack-allocation commit
+also passed the complete CI gate and all three additional native host checks.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
