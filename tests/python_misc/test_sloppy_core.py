@@ -5421,16 +5421,18 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
-def test_core_bounded_remainder_ir(compiler, tmp_path, target):
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     source = tmp_path / 'bounded.dewy'
     source.write_text(CASES['numeric-bounded-remainder'])
-    flags = ['--ir', '--release', *(['--target', 'wasm'] if target == 'wasm' else [])]
+    flags = ['--ir', *(['--release'] if release else []), *(['--target', 'wasm'] if target == 'wasm' else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bounded', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     # The recurrence may now live entirely in main after inlining.
-    probe = re.search(r'^fn f_(?:probe|main)_.*?(?=^fn |\Z)',
-                      built.stdout + built.stderr, re.M | re.S)
+    output = built.stdout + built.stderr
+    probe = (re.search(r'^fn f_probe_.*?(?=^fn |\Z)', output, re.M | re.S)
+             or re.search(r'^fn f_main_.*?(?=^fn |\Z)', output, re.M | re.S))
     assert probe, 'bounded recurrence was not emitted'
     assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
     assert ' = mulhs ' not in probe[0]

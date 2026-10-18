@@ -1261,7 +1261,6 @@ positive_writes = (n: int):
     loop i in [0..nkids2(n)): positive_writes(kid2(n, i))
 
 gen_positive_mod = (n: int) -> int:
-    if not opt_release: return -1
     modulus = positive_modulus(n)
     if modulus == 0: return -1
     if positive_bounds_fn != cur_fn:

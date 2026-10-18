@@ -15,6 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKLOADS = {
+    'tour-default': ('build', 'examples/sloppy_core/tour.dewy'),
+    'netpong-default': ('build', 'examples/sloppy_core/netpong.dewy'),
+    'netpong-web-default': ('build', 'examples/sloppy_core/netpong.dewy', '--target', 'wasm'),
+    'dunes-default': ('build', 'examples/sloppy_core/dunes.dewy'),
     'tour': ('build', 'examples/sloppy_core/tour.dewy', '--release'),
     'history': ('build', 'examples/sloppy_core/history.dewy', '--release'),
     'exact-rationals': ('build', 'examples/sloppy_core/exact_rationals.dewy', '--release'),

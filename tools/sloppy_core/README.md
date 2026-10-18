@@ -876,16 +876,17 @@ debug/release checks compare 876 quotient/remainder pairs per mode with Python
 integers, spanning zero through `2^64−1` and every power-of-two divisor. Zero
 divisors fail in both modes, and signed literal/narrow-input inference is retained.
 
-Release builds recognize nonnegative, bounded integer expressions before a
-positive constant floor remainder. A local's initializer and every assignment
-must establish an independent bound; captured, address-taken and aliased locals
+Default and release builds recognize nonnegative, bounded integer expressions
+before a positive constant floor remainder. A local's initializer and every
+assignment must establish an independent bound; captured, address-taken and aliased locals
 are excluded. Addition and multiplication must fit signed 64-bit arithmetic.
 This lets a byte-hashing recurrence use unsigned remainder without negative-sign
 correction, while overflow, arbitrary mutations and user overloads retain their
 existing behavior. The analysis runs lazily only in functions with eligible calls.
 
-Seven alternating thread-CPU pairs on the unchanged text-scanning application
-give a median candidate/baseline ratio of 0.894 (251.79/225.04 ms separate medians).
+The initial release-only change, over seven alternating thread-CPU pairs on
+the unchanged text-scanning application, gave a median candidate/baseline ratio
+of 0.894 (251.79/225.04 ms separate medians).
 The candidate/C ratio is 1.251 for this workload. Five fresh-build CPU pairs give
 tour 0.979, Dunes 1.003 and compiler 0.966; no general compile-time gain is claimed.
 The independent C-bootstrap gate passes 3,420 checks in 39.51 seconds, including
@@ -1511,3 +1512,24 @@ two generated native games agreeing on a completed, confirmed state through a
 room in default/release builds. The generated browser game was also exercised
 in Practice mode with keyboard movement and no console errors. See
 `online-starter-*` audits; this does not establish public-network connectivity.
+
+
+The bounded-positive-remainder lowering now runs in default builds too. Seven
+alternating thread-CPU pairs on the byte-scanning application give a median
+candidate/baseline ratio of 0.533 (841.69/447.21 ms separate medians): about 47%
+less kernel CPU. The array workload is unchanged (0.996). This preserves floor
+semantics and the existing exclusions for negative writes, overflow and escapes.
+
+Paired fresh compilation remains similar: default Netpong 224.18/225.22 ms,
+Netpong web 121.52/118.76 ms, compiler 1166.65/1154.88 ms (baseline/candidate).
+The independent three-generation C bootstrap passes all 4,400 checks in 89.90
+pytest seconds; native/web IR checks now cover both modes. See
+`default-positive-mod-*` audits. These are workload-specific observations.
+
+`benchmark_apps --mode both` now compares default and release output with the
+same C baseline, alternating runs and recording each variant's flags. `--mode
+default` also supports compiler-to-compiler comparisons; the original default
+remains release. `benchmark_compile` has `tour-default`, `netpong-default`,
+`netpong-web-default` and `dunes-default` workloads. The earlier five-workload
+mode comparison is retained in `default-modes-baseline.*` as a baseline before
+this change, not a current scorecard.

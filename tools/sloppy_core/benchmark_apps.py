@@ -78,9 +78,13 @@ def execute(binary: Path, count: int, env: dict) -> tuple[int, dict]:
 
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
-            cc: str, count: int | None = None, clock: str = 'wall') -> dict:
+            cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release') -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_EMIT_WORKERS'] = '1'
+    modes = ['default', 'release'] if mode == 'both' else [mode]
+    variants = {label if mode != 'both' else f'{label}-{build_mode}':
+                (label, [] if build_mode == 'default' else ['--release'])
+                for label in compilers for build_mode in modes}
     result = {
         'platform': platform.platform(),
         'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
@@ -92,7 +96,10 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
         'samples': samples,
         'kernel_clock': clock,
         'warmups_per_binary': 1,
-        'core_flags': ['--release'],
+        'mode': mode,
+        'core_flags': [] if mode == 'default' else ['--release'] if mode == 'release' else None,
+        'variants': {label: {'compiler': compiler, 'flags': flags}
+                     for label, (compiler, flags) in variants.items()},
         'emission_workers': 1,
         'cc': run([cc, '--version'], env)[0],
         'c_flags': ['-O2'],
@@ -119,10 +126,10 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             result['measured_harness_sha256'] = prepare_clock(work, clock)
             c_source = work / f'{name}.c'
             shutil.copy2(APPS / c_source.name, c_source)
-            binaries = {label: work / f'{name}-{label}' for label in [*compilers, 'c']}
+            binaries = {label: work / f'{name}-{label}' for label in [*variants, 'c']}
             builds = {}
-            for label, compiler in compilers.items():
-                _, elapsed = run([compiler, 'build', source, '--release', '-o', binaries[label]], env)
+            for label, (compiler, flags) in variants.items():
+                _, elapsed = run([compilers[compiler], 'build', source, *flags, '-o', binaries[label]], env)
                 builds[label] = elapsed
             _, builds['c'] = run([cc, '-O2', c_source, '-o', binaries['c']], env)
             checksums = {}
@@ -174,6 +181,8 @@ if __name__ == '__main__':
     cli.add_argument('--count', type=positive, help='Override the input size for every selected workload')
     cli.add_argument('--cc', default='cc')
     cli.add_argument('--clock', choices=['wall', 'thread-cpu'], default='wall')
+    cli.add_argument('--mode', choices=['default', 'release', 'both'], default='release',
+                     help='Core build mode; both compares default and release with the same inputs')
     cli.add_argument('--output', type=Path, required=True)
     options = cli.parse_args()
     compilers = {}
@@ -181,5 +190,5 @@ if __name__ == '__main__':
         compilers['baseline'] = options.baseline.resolve(strict=True)
     compilers['candidate'] = options.compiler.resolve(strict=True)
     report = measure(compilers, options.workloads or list(COUNTS), options.samples, options.cc,
-                     options.count, options.clock)
+                     options.count, options.clock, options.mode)
     options.output.write_text(json.dumps(report, indent=2) + '\n')

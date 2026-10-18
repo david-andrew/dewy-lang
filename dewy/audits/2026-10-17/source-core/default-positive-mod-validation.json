@@ -1,0 +1,28 @@
+{
+  "change": "Run the existing bounded-positive-remainder analysis in default builds too. No new proof obligation: uncertain/negative/overflowing expressions retain floor-modulo helpers.",
+  "compiler": "build-1792305816629465322/bin/dewy-core",
+  "source_identity": "3c897b471ff159ffb3e80965733eeaf09c2fada06406a41f13766df63e76492f",
+  "focused": "453 passed in 7.72s; four native/web default/release IR checks passed in 1.57s",
+  "independent_c_gate": "4400 passed in 89.90s with two workers, after three C bootstrap generations",
+  "runtime": "Seven alternating baseline/candidate/C runs plus warmup; CPU 2 affinity, Linux thread CPU clock, checksums match. Text is byte scanning, not Unicode grapheme traversal. Input generation is excluded from kernel timing.",
+  "runtime_paired_ratios": {
+    "text": 0.5333197186059249,
+    "arrays": 0.9955752956006306
+  },
+  "runtime_medians_ms": {
+    "text": {
+      "baseline": 841.691251,
+      "candidate": 447.213389,
+      "c": 238.875634
+    },
+    "arrays": {
+      "baseline": 512.761171,
+      "candidate": 510.591454,
+      "c": 261.569614
+    }
+  },
+  "compile": "Seven alternating fresh default-mode builds; tour 35.12/34.79ms, Netpong 224.18/225.22ms, Netpong web 121.52/118.76ms, compiler self-build 1166.65/1154.88ms (baseline/candidate). No general compilation speedup claim.",
+  "tooling": "benchmark_apps --mode default|release|both, retaining release as default. benchmark_compile adds explicit default-mode tour/Netpong/Dunes workloads.",
+  "rejected": "Default readonly-parameter borrowing regressed text; direct bounds-check lowering was neutral. Both removed. Earlier stable-value caching and CSE validity reordering were also discarded.",
+  "limits": "The text result is about 47% less CPU in this specific default-build workload; arrays were unchanged. Compiler timing and runtime observations are local, not universal performance guarantees. Raw benchmark binaries were built before the independent C gate from the same compiler/library source identity."
+}
