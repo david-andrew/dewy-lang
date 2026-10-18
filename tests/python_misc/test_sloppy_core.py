@@ -6616,6 +6616,9 @@ def test_core_slider_controls(compiler, tmp_path, release):
                  '8:mouse=180x220,8:mouse_left+,9:mouse=210x450,10:mouse_left-'),
         'keys': '1:right+,2:right-,3:right+,4:right-',
         'touch': '1:touch1=405x80,2:touch1=600x350,3:touch1-',
+        'click': ('1:mouse=405x80,1:mouse_left+,1:mouse_left-,'
+                  '2:mouse=320x220,2:mouse_left+,2:mouse_left-,3:mouse=40x220,'
+                  '4:mouse=330x80,4:mouse_left+,4:mouse_left-'),
         'descending': '1:mouse=360x220,1:mouse_left+,2:mouse=700x450,3:mouse_left-',
     }
     for scenario, script in scripts.items():
@@ -6637,6 +6640,10 @@ def test_core_slider_controls(compiler, tmp_path, release):
         elif scenario == 'touch':
             assert [row[1] for row in values] == [10, 20, 30, 30, 30, 30, 30, 30, 30, 30, 30]
             assert all(row[2:] == [0, 0] for row in values)
+        elif scenario == 'click':
+            assert [row[1] for row in values] == [10, 20, 20, 20, 10, 10, 10, 10, 10, 10, 10]
+            assert [row[2] for row in values] == [0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+            assert all(row[3] == 0 for row in values)
         else:
             assert [row[3] for row in values] == [0, 10, -10, -10, -10, -10, -10, -10, -10, -10, -10]
             assert all(row[1:3] == [10, 0] for row in values)

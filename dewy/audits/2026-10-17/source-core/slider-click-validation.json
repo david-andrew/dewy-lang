@@ -1,0 +1,10 @@
+{
+  "problem": "A press and release between frames left sliders unchanged.",
+  "regression": "New same-frame click scenario fails against C-bootstrapped build-1792300209066707405; first menu click remains 10 instead of 20.",
+  "compiler": "build-1792300502700310775/bin/dewy-core",
+  "command": "python3 -m tools.core test -k controls",
+  "result": "9 passed, 4092 deselected in 5.94s",
+  "coverage": "Menu and HUD clicks, release ownership, existing drag/keyboard/touch/descending ranges in default and release builds; controls example native render and web build.",
+  "browser": "T3 Chromium/WebGL2, controls example at 1280x800: quick click at (1200,246) changes gravity from 9.8 to 18.9; before fix same click left 9.8. No application errors observed.",
+  "notes": "No compiler change or performance claim. Full independent C bootstrap remains covered by hosted CI."
+}

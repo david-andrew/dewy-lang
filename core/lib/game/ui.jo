@@ -201,13 +201,14 @@ ui_slider = (label: str, value: f64, step: f64 = 0.1, low: f64 = 0.0, high: f64 
     m = mouse_pos()
     # (pressed on its bar, it keeps the drag until let go, wherever the pointer goes meanwhile)
     key = "{__ui_menu}/{r.0}"
-    if mouse_pressed(.left) and ui_ready() and f64(m.x) >= bx - 10.0 and f64(m.x) <= bx + bw + 10.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0:
-        __slider_drag = key
+    pressed = mouse_pressed(.left) and ui_ready() and f64(m.x) >= bx - 10.0 and f64(m.x) <= bx + bw + 10.0 and abs(f64(m.y - c.y)) < ui_style.spacing / 2.0
+    if pressed: __slider_drag = key
     if __slider_drag == key:
-        if mouse_down(.left):
+        # A click may press and release between rendered frames.
+        if mouse_down(.left) or pressed:
             __ui_focus = r.0
             v = __step_to(low + (high - low) * clamp((f64(m.x) - bx) / bw, 0.0, 1.0), step, low, high)
-        else: __slider_drag = ""
+        if not mouse_down(.left): __slider_drag = ""
     col = ui_style.color
     if __ui_lit(r.2) or __slider_drag == key: col = ui_style.focus_color
     text(label, vec2(f32(f64(c.x) - w / 2.0), f32(f64(c.y) - ui_style.size * 0.5)), ui_style.size, col)
@@ -568,15 +569,16 @@ hud_slider = (r: Rect, value: f64, low: f64, high: f64, step: f64 = 0.0, label: 
     over = __hud_touch(r)
     key = "hud {r.x},{r.y},{r.w},{r.h}"
     v = clamp(value, min(low, high), max(low, high))
-    if over and mouse_pressed(.left): __slider_drag = key
+    pressed = over and mouse_pressed(.left)
+    if pressed: __slider_drag = key
     lw = 0.0
     size = min(hud_style.text_size, f64(r.h) * 0.6)
     if len(label) > 0: lw = text_width(label, size) + 12.0
     tx = f64(r.x) + lw + 10.0
     tw = max(f64(r.w) - lw - 20.0, 1.0)
     if __slider_drag == key:
-        if mouse_down(.left): v = __step_to(low + (high - low) * clamp((f64(mouse_pos().x) - tx) / tw, 0.0, 1.0), step, low, high)
-        else: __slider_drag = ""
+        if mouse_down(.left) or pressed: v = __step_to(low + (high - low) * clamp((f64(mouse_pos().x) - tx) / tw, 0.0, 1.0), step, low, high)
+        if not mouse_down(.left): __slider_drag = ""
     c = hud_style.button
     if __hud_lit(over) or __slider_drag == key: c = hud_style.hover
     rect(f64(r.x), f64(r.y), f64(r.w), f64(r.h), c)
