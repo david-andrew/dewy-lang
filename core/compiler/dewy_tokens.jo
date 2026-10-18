@@ -1,0 +1,299 @@
+# Numeric token spellings for the in-process Dewy parser. Keep textual payloads
+# for identifiers/literals; grammar dispatch must not compare allocated strings.
+use 'util.jo'
+
+enum DewyToken:
+    none, lparen, rparen, lbrack, rbrack, lbrace, rbrace, langle,
+    rangle, colon, dot, comma, semi, assign, plus, minus,
+    star, slash, percent, at, amp, pipe, caret, question,
+    bang, tilde, not_ge, not_le, not_eq, not_gt, not_lt, ge,
+    le, floor_assign, shl_assign, shr_assign, ellipsis, function, returns, arrow,
+    eq, gt, lt, plus_assign, minus_assign, star_assign, slash_assign, power_assign,
+    percent_assign, coalesce, floor, shl, shr, range, pipe_right, pipe_left,
+    angle_assign, is_type, isnt_type, contains, not_contains, kw_let, kw_const, kw_return,
+    kw_break, kw_continue, kw_import, kw_from, kw_else, kw_if, kw_loop, kw_match,
+    kw_test, kw_not, kw_as, kw_transmute, kw_or, kw_xor, kw_and, kw_in,
+    dot_not_ge, dot_not_le, dot_not_eq, dot_not_gt, dot_not_lt, dot_ge, dot_le, dot_floor_assign,
+    dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_percent_assign, dot_power_assign, dot_floor, dot_eq,
+    dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret
+
+dn_token_kind = (text: str) -> DewyToken:
+    if len(text) == 0: return .none
+    if len(text) == 1:
+        match text[0]:
+            '(': return .lparen
+            ')': return .rparen
+            '[': return .lbrack
+            ']': return .rbrack
+            '{': return .lbrace
+            '}': return .rbrace
+            '<': return .langle
+            '>': return .rangle
+            ':': return .colon
+            '.': return .dot
+            ',': return .comma
+            ';': return .semi
+            '=': return .assign
+            '+': return .plus
+            '-': return .minus
+            '*': return .star
+            '/': return .slash
+            '%': return .percent
+            '@': return .at
+            '&': return .amp
+            '|': return .pipe
+            '^': return .caret
+            '?': return .question
+            '!': return .bang
+            '~': return .tilde
+        return .none
+    match text[0]:
+        '%':
+            match text:
+                "%=": return .percent_assign
+        '*':
+            match text:
+                "*=": return .star_assign
+        '+':
+            match text:
+                "+=": return .plus_assign
+        '-':
+            match text:
+                "->": return .arrow
+                "-=": return .minus_assign
+        '.':
+            match text:
+                "...": return .ellipsis
+                "..": return .range
+                ".not>=?": return .dot_not_ge
+                ".not<=?": return .dot_not_le
+                ".not=?": return .dot_not_eq
+                ".not>?": return .dot_not_gt
+                ".not<?": return .dot_not_lt
+                ".>=?": return .dot_ge
+                ".<=?": return .dot_le
+                ".//=": return .dot_floor_assign
+                ".+=": return .dot_plus_assign
+                ".-=": return .dot_minus_assign
+                ".*=": return .dot_star_assign
+                "./=": return .dot_slash_assign
+                ".%=": return .dot_percent_assign
+                ".^=": return .dot_power_assign
+                ".//": return .dot_floor
+                ".=?": return .dot_eq
+                ".>?": return .dot_gt
+                ".<?": return .dot_lt
+                ".+": return .dot_plus
+                ".-": return .dot_minus
+                ".*": return .dot_star
+                "./": return .dot_slash
+                ".%": return .dot_percent
+                ".^": return .dot_caret
+        '/':
+            match text:
+                "//=": return .floor_assign
+                "/=": return .slash_assign
+                "//": return .floor
+        ':':
+            match text:
+                ":>": return .returns
+        '<':
+            match text:
+                "<=?": return .le
+                "<<=": return .shl_assign
+                "<?": return .lt
+                "<<": return .shl
+                "<|": return .pipe_left
+        '=':
+            match text:
+                "=>": return .function
+                "=?": return .eq
+        '>':
+            match text:
+                ">=?": return .ge
+                ">>=": return .shr_assign
+                ">?": return .gt
+                ">>": return .shr
+                ">=": return .angle_assign
+        '?':
+            match text:
+                "??": return .coalesce
+        '^':
+            match text:
+                "^=": return .power_assign
+        'a':
+            match text:
+                "as": return .kw_as
+                "and": return .kw_and
+        'b':
+            match text:
+                "break": return .kw_break
+        'c':
+            match text:
+                "const": return .kw_const
+                "continue": return .kw_continue
+        'e':
+            match text:
+                "else": return .kw_else
+        'f':
+            match text:
+                "from": return .kw_from
+        'i':
+            match text:
+                "is?": return .is_type
+                "isnt?": return .isnt_type
+                "in?": return .contains
+                "import": return .kw_import
+                "if": return .kw_if
+                "in": return .kw_in
+        'l':
+            match text:
+                "let": return .kw_let
+                "loop": return .kw_loop
+        'm':
+            match text:
+                "match": return .kw_match
+        'n':
+            match text:
+                "not>=?": return .not_ge
+                "not<=?": return .not_le
+                "not=?": return .not_eq
+                "not>?": return .not_gt
+                "not<?": return .not_lt
+                "notin?": return .not_contains
+                "not": return .kw_not
+        'o':
+            match text:
+                "or": return .kw_or
+        'r':
+            match text:
+                "return": return .kw_return
+        't':
+            match text:
+                "test": return .kw_test
+                "transmute": return .kw_transmute
+        'x':
+            match text:
+                "xor": return .kw_xor
+        '|':
+            match text:
+                "|>": return .pipe_right
+    .none
+
+dn_token_text = (token: DewyToken) -> str:
+    match token:
+        lparen: "("
+        rparen: ")"
+        lbrack: "["
+        rbrack: "]"
+        lbrace: "{{"
+        rbrace: "}}"
+        langle: "<"
+        rangle: ">"
+        colon: ":"
+        dot: "."
+        comma: ","
+        semi: ";"
+        assign: "="
+        plus: "+"
+        minus: "-"
+        star: "*"
+        slash: "/"
+        percent: "%"
+        at: "@"
+        amp: "&"
+        pipe: "|"
+        caret: "^"
+        question: "?"
+        bang: "!"
+        tilde: "~"
+        not_ge: "not>=?"
+        not_le: "not<=?"
+        not_eq: "not=?"
+        not_gt: "not>?"
+        not_lt: "not<?"
+        ge: ">=?"
+        le: "<=?"
+        floor_assign: "//="
+        shl_assign: "<<="
+        shr_assign: ">>="
+        ellipsis: "..."
+        function: "=>"
+        returns: ":>"
+        arrow: "->"
+        eq: "=?"
+        gt: ">?"
+        lt: "<?"
+        plus_assign: "+="
+        minus_assign: "-="
+        star_assign: "*="
+        slash_assign: "/="
+        power_assign: "^="
+        percent_assign: "%="
+        coalesce: "??"
+        floor: "//"
+        shl: "<<"
+        shr: ">>"
+        range: ".."
+        pipe_right: "|>"
+        pipe_left: "<|"
+        angle_assign: ">="
+        is_type: "is?"
+        isnt_type: "isnt?"
+        contains: "in?"
+        not_contains: "notin?"
+        kw_let: "let"
+        kw_const: "const"
+        kw_return: "return"
+        kw_break: "break"
+        kw_continue: "continue"
+        kw_import: "import"
+        kw_from: "from"
+        kw_else: "else"
+        kw_if: "if"
+        kw_loop: "loop"
+        kw_match: "match"
+        kw_test: "test"
+        kw_not: "not"
+        kw_as: "as"
+        kw_transmute: "transmute"
+        kw_or: "or"
+        kw_xor: "xor"
+        kw_and: "and"
+        kw_in: "in"
+        dot_not_ge: ".not>=?"
+        dot_not_le: ".not<=?"
+        dot_not_eq: ".not=?"
+        dot_not_gt: ".not>?"
+        dot_not_lt: ".not<?"
+        dot_ge: ".>=?"
+        dot_le: ".<=?"
+        dot_floor_assign: ".//="
+        dot_plus_assign: ".+="
+        dot_minus_assign: ".-="
+        dot_star_assign: ".*="
+        dot_slash_assign: "./="
+        dot_percent_assign: ".%="
+        dot_power_assign: ".^="
+        dot_floor: ".//"
+        dot_eq: ".=?"
+        dot_gt: ".>?"
+        dot_lt: ".<?"
+        dot_plus: ".+"
+        dot_minus: ".-"
+        dot_star: ".*"
+        dot_slash: "./"
+        dot_percent: ".%"
+        dot_caret: ".^"
+        _: ""
+
+# Spaced `not <?` has the same token as `not<?`, without joining strings.
+dn_token_invert = (token: DewyToken) -> DewyToken:
+    match token:
+        eq: .not_eq
+        lt: .not_lt
+        gt: .not_gt
+        le: .not_le
+        ge: .not_ge
+        contains: .not_contains
+        _: .none

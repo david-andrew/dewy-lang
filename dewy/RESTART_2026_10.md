@@ -494,6 +494,40 @@ taskset -c 2 python3 -m tools.sloppy_core.benchmark_sloppy \
   --output /path/to/comparison.json
 ```
 
+## Numeric grammar tokens
+
+Following the matched comparison, the in-process Dewy parser now classifies
+operators and contextual keywords once into numeric token tags, then uses those
+for precedence, grouping, flow and statement decisions. Finite grammar tests no
+longer allocate temporary membership arrays. Identifiers/literals retain their
+payload text, and whitespace, juxtaposition, generic-closer splitting, dotted
+operators and spaced inverted comparisons retain their existing behavior. The
+formatter still reads the same token text; no grammar restrictions were added.
+
+Five alternating single-worker CPU pairs against `2dd67e51`:
+
+| Fresh default build | Before | After | Median paired ratio |
+| --- | ---: | ---: | ---: |
+| Equivalent 2,000-function Dewy program | 963 ms | 837 ms | 0.866 |
+| Same generated Jo program | 557 ms | 555 ms | 0.982 |
+| Fixed 893-case conformance corpus | 828 ms | 788 ms | 0.948 |
+| Tour | 57 ms | 57 ms | 0.999 |
+| Netpong | 310 ms | 314 ms | 1.014 |
+| Compiler self-build (release in source) | 1830 ms | 1851 ms | 1.002 |
+
+The large Dewy workload improves about **13%**, and the conformance corpus about
+**5%**; library-heavy small programs and the Jo path are effectively unchanged.
+This does not reach the 250k LOC/s target. Wall times were affected by other work
+on the host; use the recorded alternating CPU samples for this comparison.
+[Samples and source/binary hashes](audits/2026-10-18/numeric-token-compile.json).
+
+Validation: the initial numeric-token implementation passed 207 smoke checks;
+the final implementation passed an independent C bootstrap and **all 5,757
+compact-core checks**, with two test workers, in 310.32 seconds on the shared
+host. This covers native/web, default/release, editor, formatter, reload,
+networking and compiler tooling. The next allocation target is the temporary
+syntax tree's separately managed child arrays.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,

@@ -6,6 +6,7 @@ use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'
 use 'dewy_parse.jo'
+use 'dewy_tokens.jo'
 
 struct DewyLexeme:
     kind: DewyKind
@@ -14,6 +15,7 @@ struct DewyLexeme:
     stop: int
     space: bool
     newline: bool
+    symbol: DewyToken = .none
 
 dn_tokens: DewyLexeme[]
 dn_at = 0
@@ -198,25 +200,27 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
                 if find_byte("()[]{{}}<>:.,;=+-*/%@&|^?!~", c) < 0: dn_error(start, "unexpected character in Dewy source")
                 i += 1
                 value = source[start..i)
-        out.push(DewyLexeme(kind, value, start, i, spaced, newline))
+        symbol = DewyToken.none
+        if kind == .op or kind == .identifier: symbol = dn_token_kind(value)
+        out.push(DewyLexeme(kind, value, start, i, spaced, newline, symbol))
         spaced = false
         newline = false
     out.push(DewyLexeme(.eof, "", stop, stop, spaced, newline))
     out
 
-dn_peek = () -> str: dn_tokens[dn_at].text
+dn_peek = () -> DewyToken: dn_tokens[dn_at].symbol
 dn_take = () -> DewyLexeme:
     value = dn_tokens[dn_at]
     dn_at += 1
     value
 
-dn_accept = (text: str) -> bool:
-    if dn_peek() != text: return false
+dn_accept = (symbol: DewyToken) -> bool:
+    if dn_peek() != symbol: return false
     dn_at += 1
     true
 
-dn_expect = (text: str):
-    if not dn_accept(text): dn_error(dn_tokens[dn_at].start, "expected '{text}'")
+dn_expect = (symbol: DewyToken):
+    if not dn_accept(symbol): dn_error(dn_tokens[dn_at].start, "expected '{dn_token_text(symbol)}'")
 
 dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = []) -> int:
     id = dewy_syntax.len()
@@ -230,42 +234,41 @@ dn_operator = (kind: DewyKind, op: str, left: int, right: int, offset: int) -> i
 
 # The supported precedence follows Dewy's user-facing operators. A whitespace
 # boundary between values ends an element; applications use adjacent brackets.
-dn_power = (op: str) -> int:
-    if len(op) > 1 and op[0] == '.' and op[1] != '.': return dn_power(op[1..])
+dn_power = (op: DewyToken) -> int:
     match op:
-        "=", "+=", "-=", "*=", "/=", "^=", "//=", "%=", "<<=", ">>=": 10
-        "->": 20
-        "=>": 30
-        ":>": 40
-        ":": 45
-        "as", "transmute": 50
-        "or": 60
-        "xor": 65
-        "and": 70
-        "=?", "not=?", "<?", "not<?", ">?", "not>?", "<=?", "not<=?", ">=?", "not>=?", "is?", "isnt?", "in?", "notin?": 80
-        "??": 82
-        "|": 85
-        "&": 90
-        "in": 95
-        "..": 100
-        ",": 105
-        "<<", ">>": 110
-        "+", "-": 120
-        "*", "/", "//", "%": 130
-        "^": 140
+        assign, plus_assign, minus_assign, star_assign, slash_assign, power_assign, floor_assign, percent_assign, shl_assign, shr_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_power_assign, dot_floor_assign, dot_percent_assign: 10
+        arrow: 20
+        function: 30
+        returns: 40
+        colon: 45
+        kw_as, kw_transmute: 50
+        kw_or: 60
+        kw_xor: 65
+        kw_and: 70
+        eq, not_eq, lt, not_lt, gt, not_gt, le, not_le, ge, not_ge, is_type, isnt_type, contains, not_contains, dot_eq, dot_not_eq, dot_lt, dot_not_lt, dot_gt, dot_not_gt, dot_le, dot_not_le, dot_ge, dot_not_ge: 80
+        coalesce: 82
+        pipe: 85
+        amp: 90
+        kw_in: 95
+        range: 100
+        comma: 105
+        shl, shr: 110
+        plus, minus, dot_plus, dot_minus: 120
+        star, slash, floor, percent, dot_star, dot_slash, dot_floor, dot_percent: 130
+        caret, dot_caret: 140
         _: 0
 
 dn_can_start = () -> bool:
     t = dn_tokens[dn_at]
     if t.kind == .eof: return false
-    if t.text in [")", "]", "}", ">", ">>", "else", ";", ","]: return false
+    if (t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace or t.symbol == .rangle or t.symbol == .shr or t.symbol == .kw_else or t.symbol == .semi or t.symbol == .comma): return false
     true
 
 dn_range_bound = () -> bool:
     if not dn_can_start(): return false
-    text = dn_peek()
-    if text in ["{", "let", "const", "return", "break", "continue", "if", "loop", "match"]: return false
-    dn_power(text) == 0 or text == "+" or text == "-"
+    symbol = dn_peek()
+    if (symbol == .lbrace or symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_if or symbol == .kw_loop or symbol == .kw_match): return false
+    dn_power(symbol) == 0 or symbol == .plus or symbol == .minus
 
 # Static Unicode scalar escapes: four hex digits, or one to six in braces.
 dn_unicode_escape = (source: str, start: int, stop: int) -> (int, int):
@@ -357,28 +360,29 @@ dn_string = (token: DewyLexeme) -> int:
 
 dn_block = () -> int:
     opening = dn_take()
-    if opening.text == "<": dn_angles += 1
-    close = if opening.text == "(": ")" else if opening.text == "[": "]" else if opening.text == "<": ">" else: "}"
+    if opening.symbol == .langle: dn_angles += 1
+    close = if opening.symbol == .lparen: DewyToken.rparen else if opening.symbol == .lbrack: DewyToken.rbrack else if opening.symbol == .langle: DewyToken.rangle else: DewyToken.rbrace
     children: int[]
     loop true:
-        if dn_tokens[dn_at].kind == .eof: dn_error(opening.start, "expected '{close}' before end of file")
+        if dn_tokens[dn_at].kind == .eof: dn_error(opening.start, "expected '{dn_token_text(close)}' before end of file")
         # Split adjacent generic closers, assignments and optional suffixes.
         # Consume one angle at a time, leaving the rest for its parent.
         # A spaced ` >? ` stays a comparison inside a refinement.
-        if close == ">" and (dn_peek() in [">>", ">>=", ">="] or (dn_peek() == ">?" and not dn_tokens[dn_at].space)):
+        if close == .rangle and ((dn_peek() == .shr or dn_peek() == .shr_assign or dn_peek() == .angle_assign) or (dn_peek() == .gt and not dn_tokens[dn_at].space)):
             dn_tokens[dn_at].text = dn_tokens[dn_at].text[1..]
             dn_tokens[dn_at].start += 1
+            dn_tokens[dn_at].symbol = dn_token_kind(dn_tokens[dn_at].text)
             break
         if dn_accept(close): break
-        if ((opening.text == "[" and dn_peek() == ")") or (opening.text == "(" and dn_peek() == "]")) and children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose":
+        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose":
             close = dn_peek()
             dn_at += 1
             break
         before = dn_at
         children.push(dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
-    if opening.text == "<": dn_angles -= 1
-    label = opening.text + close + ":"
+    if opening.symbol == .langle: dn_angles -= 1
+    label = opening.text + dn_token_text(close) + ":"
     dn_node(.block, label, opening.start, children)
 
 dn_flow = () -> int:
@@ -391,8 +395,8 @@ dn_flow = () -> int:
         if not dn_can_start(): dn_error(dn_tokens[dn_at].start, "expected a body after '{keyword.text}'")
         body = dn_expr(0)
         arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
-        if not dn_accept("else"): break
-        if dn_peek() == "if" or dn_peek() == "match": continue
+        if not dn_accept(.kw_else): break
+        if dn_peek() == .kw_if or dn_peek() == .kw_match: continue
         arms.push(dn_expr(0))
         break
     dn_node(.flow, "", start, arms)
@@ -400,20 +404,21 @@ dn_flow = () -> int:
 dn_atom = () -> int:
     token = dn_tokens[dn_at]
     text = token.text
+    symbol = token.symbol
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
-    if text == "(" or text == "[" or text == "{" or text == "<": return dn_block()
-    if text == "if" or text == "loop" or text == "match": return dn_flow()
-    if text in ["let", "const", "return", "break", "continue", "import", "from"]: return dn_stmt()
+    if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle: return dn_block()
+    if symbol == .kw_if or symbol == .kw_loop or symbol == .kw_match: return dn_flow()
+    if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from): return dn_stmt()
     dn_at += 1
     if token.kind == .quoted or token.kind == .rawquoted: return dn_string(token)
-    if text in ["+", "-", ".+", ".-", "@", "not"]:
+    if (symbol == .plus or symbol == .minus or symbol == .dot_plus or symbol == .dot_minus or symbol == .at or symbol == .kw_not):
         power = 125
         # A reference covers the full postfix place: @point.x, @items[i].x.
-        if text == "@": power = 160
-        if text == "not": power = 75
+        if symbol == .at: power = 160
+        if symbol == .kw_not: power = 75
         operator = dn_node(.operator, text, token.start)
         return dn_node(.prefix, "", token.start, [operator, dn_expr(power)])
-    if text == "..":
+    if symbol == .range:
         dots = dn_node(.identifier, "..", token.start)
         if not dn_range_bound(): return dots
         bound = dn_expr(101)
@@ -427,95 +432,98 @@ dn_expr = (minimum: int) -> int:
     left = dn_atom()
     loop true:
         token = dn_tokens[dn_at]
-        op = token.text
+        op = token.symbol
         if token.kind == .eof: break
-        if token.newline and dn_power(op) == 0 and op != "not": break
-        if dn_angles > 0 and (op in [">>", ">>=", ">="] or (op == ">?" and not token.space)): break
-        if op == "..." and minimum <= 170:
+        if token.newline and dn_power(op) == 0 and op != .kw_not: break
+        if dn_angles > 0 and ((op == .shr or op == .shr_assign or op == .angle_assign) or (op == .gt and not token.space)): break
+        if op == .ellipsis and minimum <= 170:
             dn_at += 1
             left = dn_node(.postfix, "", pos_off(dewy_syntax[left].pos), [dn_node(.operator, "...", token.start), left])
             continue
         # Literal coefficients are unambiguous: 2x and 2(x + 1). General
         # adjacent names remain separate arguments or block elements.
-        if not token.space and minimum <= 135 and (dewy_syntax[left].kind == .integer or dewy_syntax[left].kind == .real) and (token.kind == .identifier or op == "("):
+        if not token.space and minimum <= 135 and (dewy_syntax[left].kind == .integer or dewy_syntax[left].kind == .real) and (token.kind == .identifier or op == .lparen):
             left = dn_operator(.binary, "MultiplyJuxtapose", left, dn_expr(136), token.start)
             continue
-        if op == "." and minimum <= 170:
+        if op == .dot and minimum <= 170:
             dn_at += 1
-            if dn_peek() == "(" and not dn_tokens[dn_at].space:
+            if dn_peek() == .lparen and not dn_tokens[dn_at].space:
                 left = dn_operator(.binary, "CallJuxtaposeBroadcast", left, dn_block(), token.start)
                 continue
             right = dn_take()
             if right.kind != .identifier: return dn_error(right.start, "expected a member name")
             left = dn_operator(.binary, ".", left, dn_node(.identifier, right.text, right.start), token.start)
             continue
-        if not token.space and (op == "(" or op == "[") and minimum <= 170:
+        if not token.space and (op == .lparen or op == .lbrack) and minimum <= 170:
             right = dn_block()
-            label = if op == "(": "CallJuxtapose" else: "IndexJuxtapose"
+            label = if op == .lparen: "CallJuxtapose" else: "IndexJuxtapose"
             left = dn_operator(.binary, label, left, right, token.start)
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
             dn_at += 1
             left = dn_operator(.binary, "CallJuxtapose", left, dn_string(token), token.start)
             continue
-        if not token.space and op == "<" and minimum <= 160:
+        if not token.space and op == .langle and minimum <= 160:
             left = dn_operator(.binary, "TypeParamJuxtapose", left, dn_block(), token.start)
             continue
-        if op == "?" and minimum <= 140:
+        if op == .question and minimum <= 140:
             dn_at += 1
             left = dn_node(.postfix, "", pos_off(dewy_syntax[left].pos), [dn_node(.operator, "?", token.start), left])
             continue
         # An inverted comparison may be written with a space after `not`.
-        if op == "not" and dn_at + 1 < dn_tokens.len() and dn_tokens[dn_at + 1].text in ["=?", "<?", ">?", "<=?", ">=?", "in?"]:
-            op += dn_tokens[dn_at + 1].text
-            token.stop = dn_tokens[dn_at + 1].stop
+        if op == .kw_not and dn_at + 1 < dn_tokens.len():
+            inverted = dn_token_invert(dn_tokens[dn_at + 1].symbol)
+            if inverted != .none:
+                op = inverted
+                token.stop = dn_tokens[dn_at + 1].stop
         power = dn_power(op)
         if power == 0 or power < minimum: break
-        if (op == "+" or op == "-") and token.space and not dn_tokens[dn_at + 1].space: break
+        if (op == .plus or op == .minus) and token.space and not dn_tokens[dn_at + 1].space: break
         dn_at += 1
-        if token.text == "not": dn_at += 1
-        if op == "..":
+        if token.symbol == .kw_not: dn_at += 1
+        if op == .range:
             parts = [dn_node(.operator, "RangeJuxtapose", token.start), left, dn_node(.identifier, "..", token.start)]
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_node(.flat, "", pos_off(dewy_syntax[left].pos), parts)
             continue
-        right = dn_expr(if op == "=>" or op == "^" or op == ".^" or op == "??": power else: power + 1)
-        if op == ",":
+        right = dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
+        if op == .comma:
             parts: int[]
             if dw_op(left) == ",": parts = dewy_syntax[left].children
             else: parts = [dn_node(.operator, ",", token.start), left]
             parts.push(right)
             left = dn_node(.flat, "", pos_off(dewy_syntax[left].pos), parts)
-        else: left = dn_operator(.binary, op, left, right, token.start)
+        else: left = dn_operator(.binary, dn_token_text(op), left, right, token.start)
     dn_depth -= 1
     left
 
 dn_stmt = () -> int:
     token = dn_tokens[dn_at]
     word = token.text
+    symbol = token.symbol
     result = 0
     # Contextual keyword: ordinary bindings/calls named `test` still work.
-    if word == "test" and dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].kind == .quoted or dn_tokens[dn_at + 1].kind == .rawquoted) and not dn_tokens[dn_at + 1].newline:
+    if symbol == .kw_test and dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].kind == .quoted or dn_tokens[dn_at + 1].kind == .rawquoted) and not dn_tokens[dn_at + 1].newline:
         dn_at += 1
         name = dn_string(dn_take())
         if dewy_syntax[name].kind != .string: return dn_error(token.start, "a test name must be a constant string")
-        if dn_peek() != "{": return dn_error(dn_tokens[dn_at].start, "expected '{{' after the test name")
+        if dn_peek() != .lbrace: return dn_error(dn_tokens[dn_at].start, "expected '{{' after the test name")
         result = dn_node(.keyword_expr, "", token.start, [dn_node(.keyword, word, token.start), name, dn_block()])
-    else if word in ["let", "const", "return", "break", "continue", "import", "from"]:
+    else if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from):
         dn_at += 1
         parts = [dn_node(.keyword, word, token.start)]
-        if word != "break" and word != "continue":
-            if word != "return" or (dn_can_start() and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
+        if symbol != .kw_break and symbol != .kw_continue:
+            if symbol != .kw_return or (dn_can_start() and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
         else if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
             parts.push(dn_atom())
-        if word == "from":
+        if symbol == .kw_from:
             keyword = dn_tokens[dn_at]
-            dn_expect("import")
+            dn_expect(.kw_import)
             parts.push(dn_node(.keyword, "import", keyword.start))
             parts.push(dn_expr(0))
         result = dn_node(.keyword_expr, "", token.start, parts)
     else: result = dn_expr(0)
-    if dn_accept(";"): result = dn_operator(.binary, "SemicolonJuxtapose", result, 0, token.start)
+    if dn_accept(.semi): result = dn_operator(.binary, "SemicolonJuxtapose", result, 0, token.start)
     result
 
 dewy_fast_file = (file: int) -> int[]:
