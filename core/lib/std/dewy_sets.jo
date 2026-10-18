@@ -1,11 +1,15 @@
 # Insertion-ordered sets share the dictionary's hashing and COW value storage.
 struct Set[T]:
     _entries: {T: bool}
+    # Exclusive upper bound for the last live entry. Backward scans during pop
+    # consume each removed tail once; compaction/removal can lower this bound.
+    _tail: int
 
 __dewy_make_set[T] = (values: T[]) -> Set[T]:
     result: Set[T]
     if values.len() > 0: result._entries.reserve(values.len())
     loop value in values: result._entries.insert_if_absent(value, true)
+    result._tail = result._entries.keys.len()
     result
 
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
@@ -13,24 +17,38 @@ len[T] = (s: Set[T]) -> int: s._entries.len()
 is_empty[T] = (s: Set[T]) -> bool: s._entries.is_empty()
 contains[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
 has[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
-add[T] = (s: mut Set[T], value: T) -> bool: s._entries.insert_if_absent(value, true)
-push[T] = (s: mut Set[T], value: T): s._entries.insert_if_absent(value, true)
-remove[T] = (s: mut Set[T], value: T) -> bool: s._entries.remove(value)
-clear[T] = (s: mut Set[T]): s._entries.clear()
+add[T] = (s: mut Set[T], value: T) -> bool:
+    added = s._entries.insert_if_absent(value, true)
+    if added: s._tail = s._entries.keys.len()
+    added
+push[T] = (s: mut Set[T], value: T): s.add(value)
+remove[T] = (s: mut Set[T], value: T) -> bool:
+    removed = s._entries.remove(value)
+    # Removal may compact the entry arrays and renumber their indices.
+    if removed: s._tail = min(s._tail, s._entries.keys.len())
+    removed
+clear[T] = (s: mut Set[T]):
+    s._entries.clear()
+    s._tail = 0
 reserve[T] = (s: mut Set[T], count: int): s._entries.reserve(count)
 
 pop[T] = (s: mut Set[T], value: T) -> T:
-    if not s._entries.remove(value): panic("the set has no member {value}")
+    if not s.remove(value): panic("the set has no member {value}")
     value
 
 pop[T] = (s: mut Set[T], value: T, default: T?) -> T?:
-    if s._entries.remove(value): return value
+    if s.remove(value): return value
     default
 
 pop[T] = (s: mut Set[T]) -> T:
-    values = __dewy_set_values(s)
-    if values.len() == 0: panic("cannot pop an empty set")
-    s.pop(values[values.len() - 1])
+    if s.is_empty(): panic("cannot pop an empty set")
+    i = s._tail - 1
+    ng = s._entries.gone.len()
+    loop i < ng and s._entries.gone[i]: i -= 1
+    value = s._entries.keys[i]
+    s.pop(value)
+    s._tail = min(i, s._entries.keys.len())
+    value
 
 pop[T] = (s: mut Set[T], default: T?) -> T?:
     if s.is_empty(): return default

@@ -1113,3 +1113,20 @@ with two workers. Added checks cover sparse snapshots under source mutation,
 ordering, a two-array allocation budget, combined exhaustion and cleanup through
 continue/break/return. See the `map-entries-*` source-core audits for the toolchain,
 runtime measurements and separate fresh-compilation comparison.
+
+Set `pop()` now retains a tail cursor instead of collecting all live members
+before each removal. Insertions reset the upper bound; removal/compaction clamps
+it, and successive pops scan each removed tail only once. The cursor is a scalar
+part of the set value, so copies remain independent. This removes repeated
+whole-set projection and avoids retaining the key array across its mutation.
+
+Seven alternating thread-CPU pairs draining sets created from 4,096 members,
+with every fourth member removed before timing, measured scalar keys at
+12.03/0.138 ms and two-integer-array keys at 36.72/0.483 ms (baseline/candidate).
+Median paired ratios are 0.0111/0.0133. At 16,384 initial members, five pairs
+measured 297.19/0.797 ms and 584.29/1.937 ms respectively. Construction/removal
+is outside the timed drain; the Python oracle checks both values and pop order.
+This measures draining uniquely owned sets, not arbitrary applications or the
+necessary copy-on-write cost when another set snapshot is retained.
+`python3 -m tools.sloppy_core.benchmark_set_pop --help` documents the rerun;
+see `set-pop-*` source-core audits for measurements and validation.

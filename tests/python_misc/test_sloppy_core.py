@@ -642,6 +642,65 @@ let second=values.pop(default=none)
 if second is? none return 1
 if values.pop(default=none) not=? none or before.length not=?2 return 2
 return first+second}''',
+    'set-pop-tail-constructor': '''main=()=>{
+let values=set[20 99 22 20 22] values.remove(99)
+if values.pop() not=? 22 or values.pop() not=? 20 return 1
+values.push(42) values.reserve(100)
+return if values.pop() =? 42 and values.pop(default=none) =? none 42 else 2}''',
+    'set-pop-tail-compaction': '''main=()=>{
+let values=set[loop i in [0..64) i]
+loop i in [40..64) values.remove(i)
+if values.pop() not=? 39 return 1
+loop i in [0..30) values.remove(i)
+if [values...] not=? [30 31 32 33 34 35 36 37 38] return 2
+values.add(99) values.remove(99)
+if values.pop() not=? 38 return 3
+values.add(100) values.add(100)
+if values.pop() not=? 100 return 4
+loop expected in [37,36..30] {if values.pop() not=? expected return 5}
+values.clear() values.push(42)
+return values.pop()}''',
+    'set-pop-tail-operation-trace': '''main=()=>{
+let values:set<int64>=set[] let expected:array<int64>=[]
+loop step in [0..1200) {
+let key=(step*37+11)%41 let action=step%7
+if action <? 3 {
+let fresh=key not in? expected
+if values.add(key) not=? fresh return 1
+if fresh expected.push(key)
+} else if action =? 3 {
+if values.remove(key) not=? (key in? expected) return 2
+loop i in [0..expected.length) {if expected[i] =? key {expected.remove(i) break}}
+} else if action =? 4 {
+if expected.length >? 0 {if values.pop() not=? expected.pop() return 3}
+else {if values.pop(default=none) isnt? none return 4}
+} else if action =? 5 {
+let copy=values
+if expected.length >? 0 {if copy.pop() not=? expected[end] return 5}
+} else if step%13 =? 0 {values.clear() expected.clear()}
+if [values...] not=? expected return 6
+}
+loop expected.length >? 0 {if values.pop() not=? expected.pop() return 7}
+return if values.is_empty() 42 else 8}''',
+    'set-pop-tail-managed-copies': '''main=()=>{
+let values=set[[20] [99] [22]] values.remove([99])
+let saved=values let item=values.pop()
+item[0]=999
+if [saved...] not=? [[20] [22]] or [values...] not=? [[20]] return 1
+values.push([42])
+if values.pop() not=? [42] or saved.pop() not=? [22] return 2
+return values.pop()[0]+22}''',
+    'set-pop-tail-cleanup': '''work=()=>{
+let values=set[loop i in [0..100) [i i+1]]
+loop i in [0,3..100) values.remove([i i+1])
+let copy=values let total:int64=0
+loop not values.is_empty() {let item=values.pop() total+=item[1]-item[0]}
+loop not copy.is_empty() copy.pop()
+return total
+}
+main=()=>{if work() not=? 66 return 1 let before=alloc_count()
+loop i in [0..10) {if work() not=? 66 return 2}
+return if alloc_count() =? before 42 else 3}''',
     'set-context-comparison': '''main=()=>{
 let values:set<uint8>=set[20 22]
 if values not=? set[20 22] or set[22 20] not=? values return 1

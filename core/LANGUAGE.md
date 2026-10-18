@@ -628,6 +628,10 @@ member from a nonempty set. A missing member or empty set causes a checked
 runtime failure. Use `pop(value default=none)` or `pop(default=none)` to receive
 an optional value instead.
 
+Repeated `pop()` calls use a retained tail cursor instead of collecting the set's
+members each time. Arbitrary removals and internal compaction keep the cursor
+valid, and copied sets retain independent cursor and member values.
+
 `values.sorted()` returns an independent sorted array; `values.sort()` updates
 the receiver. Use `sorted_by(key)` or `sort_by(key)` for records:
 
