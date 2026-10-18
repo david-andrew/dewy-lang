@@ -657,6 +657,48 @@ in 67.56 seconds with two workers. Eight representative legacy-parser programs
 also retained their correct results. Both preceding frontend commits passed the
 full Linux CI and Windows/macOS ARM64/Linux ARM64 host jobs.
 
+## Refreshed matched comparison after the frontend work
+
+Seven alternating samples compare the pre-work `2dd67e51` compiler, the
+C-bootstrapped `c8f993a6` compiler, and a fresh snapshot of Sloppy at checkout
+`447ad81f`. Sloppy continued development during this work, so its fresh results
+must not be treated as measurements of the original Sloppy binary/library.
+All variants in this run use identical Jo or equivalent Dewy sources; binaries
+and libraries are snapshotted and identified by hashes in the report.
+
+| Fresh build, median CPU time | Default | Release |
+| --- | ---: | ---: |
+| Sloppy, its own library, Jo | 295 ms | 670 ms |
+| Sloppy, shared Dewy library, Jo | 337 ms | 667 ms |
+| Pre-work Dewy, same Jo | 518 ms | 584 ms |
+| Current Dewy, same Jo | 538 ms | 587 ms |
+| Pre-work Dewy, Dewy source | 950 ms | 947 ms |
+| Current Dewy, Dewy source | 693 ms | 738 ms |
+
+The median paired ratios are **0.741 default** and **0.777 release** for Dewy
+source: **26%** and **22%** less CPU time. The same-Jo controls are 0.997 and
+0.998, effectively unchanged despite variation in their separate medians.
+Current default throughput is about **64k physical Dewy lines/s** on this
+44,005-line input, versus about **169k Jo lines/s** for Sloppy's 50,009-line
+formatting. Neither is a claim that the 250k goal has been achieved locally.
+The shared release core remains about 12% faster than Sloppy on identical Jo.
+
+The matched million-particle kernel retained its speed and correct checksums:
+
+| Generated program, median thread CPU | Default | Release |
+| --- | ---: | ---: |
+| Sloppy / its own library | 529 ms | 187 ms |
+| Current Dewy / Dewy source | 170 ms | 165 ms |
+| C, `cc -O2` | 194 ms | 185 ms |
+
+This is evidence for this workload, not general C parity. The frontend changes
+do not trade away program speed. A callchain profile of the current full default
+build attributes about 20% of samples to the Dewy frontend, 22% to function-body
+checking, 17% to local optimization, and 15% to machine-code generation (some
+categories overlap). Further progress needs to address the shared compiler as
+well as the language frontend.
+[Matched samples and checksums](audits/2026-10-18/sloppy-matched-frontend.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
