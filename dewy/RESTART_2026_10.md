@@ -79,7 +79,7 @@ use it for their update loops. Copies remain independent, including snapshots
 made during iteration; the full C-bootstrap gate passes 5,458 checks. A
 250,000-record update pilot allocates nothing inside either indexed or mutable
 loops, with overlapping native timings. The same pilot exposes a web release
-slowdown in both forms, which remains a performance investigation; see the
+slowdown in both forms, addressed below; see the
 [measurements and scope](audits/2026-10-17/source-core/mutable-loop-validation.json).
 
 The web release slowdown now has a measured fix: retain calls to loop-containing
@@ -91,8 +91,19 @@ the particle variants comparable, supporting the tiering explanation. The
 1,225-check focused gate passes; [raw results and limits](audits/2026-10-17/source-core/wasm-loop-inline-validation.json)
 include baseline-only execution and the other application workloads.
 
+A fresh full-size native mode baseline puts release arrays at 282 ms versus
+280 ms for C, helpers at 918/821 ms, text at 258/212 ms, and records at 176/204 ms.
+Graph remains the largest gap at 988 ms default, 718 ms release and 465 ms for
+its differently structured C reference. [Native samples](audits/2026-10-17/source-core/native-app-modes-current.json)
+and the [Node/web baseline](audits/2026-10-17/source-core/web-app-modes-baseline.json)
+record inputs, hashes, modes, three fresh-process samples and limits.
+A SIMD experiment that preserved vector temporaries in web shadow-stack memory
+was rejected: it regressed particle and physics workloads. Future work should
+keep vector values in registers; [the rejected trial](audits/2026-10-17/source-core/wasm-vector-slots-rejected.json)
+retains its patch and measurements so it need not be repeated.
+
 The development gate now has over 5,400 checks; recent local full runs took
-151–186 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
+151–208 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects a small cross-section of those checks. Focused
 selections also typically take seconds. Value
 checks are batched into small programs: a controlled 674-case comparison reduced
