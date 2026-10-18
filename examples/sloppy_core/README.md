@@ -1,5 +1,12 @@
 # Dewy on the compact core
 
+[`trajectory_fit.dewy`](trajectory_fit.dewy) fits a quadratic to sampled heights
+with matrices, transpose and a linear solver. Run
+`./tools/dewy examples/sloppy_core/trajectory_fit.dewy`, or run its test blocks
+with `./tools/dewy test examples/sloppy_core/trajectory_fit.dewy`. The main program
+also builds for the web. See the
+[numeric array guide](../../core/LANGUAGE.md#numeric-arrays-and-matrices).
+
 [`parallel_particles.dewy`](parallel_particles.dewy) computes particle forces
 through the worker pool and checks every resulting value against the serial
 simulation. Run `SLOPPY_THREADS=2 ./tools/dewy --release examples/sloppy_core/parallel_particles.dewy`.

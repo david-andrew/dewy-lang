@@ -152,8 +152,9 @@ test "game logic" { assert(20+22 =? 42) }
 
 
 @pytest.mark.parametrize('flags', [[], ['--release']])
-def test_core_native_tests_example(compiler, flags):
-    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/paddle_tests.dewy'
+@pytest.mark.parametrize(('name', 'count'), [('paddle_tests', 3), ('trajectory_fit', 2)])
+def test_core_native_tests_example(compiler, flags, name, count):
+    source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{name}.dewy'
     result = command(compiler, 'test', *flags, source)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert '3 tests passed' in result.stdout
+    assert f'{count} tests passed' in result.stdout

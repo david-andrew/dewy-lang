@@ -1,0 +1,44 @@
+{
+  "change": "Check array allocation byte counts before multiplication, and validate numeric dimensions before multiplying shapes. Exercise inherited numeric operations through Dewy and add a runnable trajectory fit with project tests.",
+  "compiler": "__dewycache__/compact-core/build-1792313633088024171/bin/dewy-core",
+  "source_identity": null,
+  "bootstrap_generations_sha256": [
+    "cf47482746b604b82e6fa7cfb53a7463093e3bb90fc80cc28bcc502235177e9c",
+    "74c75eebc44a24f163f65ca78ec38eebf929db9f72ff5eee14895c7ab99312d0",
+    "9b65f65ed3e21e31a5ca1511b3017f7b149e3da8f3f021a28bf41dde3d560816"
+  ],
+  "validation": {
+    "focused": "100 passed in 7.22s (previous-core rebuild)",
+    "full": "4835 passed in 128.96s after independent C bootstrap",
+    "examples_and_web_limits": "15 passed in 3.61s, including 12 additional checks; final collected suite has 4847 checks",
+    "lint": "Ruff and git diff --check passed"
+  },
+  "reproduction_before_fix": {
+    "source": "main=()=>{let xs=fill(0 (1<<61)+1) printl(xs.length) let m=zeros(1<<32 1<<32) printl(m.shape) printl(size(m)) return 0}",
+    "baseline": "build-1792311942096452923",
+    "output": "2305843009213693953\n[4294967296, 4294967296]\n0\n",
+    "execution_limits": "512 MiB address space, 2s CPU, 5s timeout, one worker; reads metadata only"
+  },
+  "paired_runtime_candidate_over_baseline": {
+    "graph": {
+      "default": 1.012940780023582,
+      "release": 1.0061193579111836
+    },
+    "text": {
+      "default": 1.002685731307987,
+      "release": 0.9977156793258936
+    }
+  },
+  "performance_limits": "Seven alternating native application pairs, CPU 2, thread CPU clock; variable host performance, no speedup claimed. Five alternating compiler pairs are recorded separately. No compiler/library source edits during builds or local test/benchmark overlap.",
+  "coverage": [
+    "Native/web, default/release; matrix/vector products, transpose, 3D/4D indexing, solve with pivoting, inverse and determinant, reductions, zero dimensions, independent copies",
+    "Array fill and reserve overflow; wasm 32-bit allocation bounds; ND shape overflow, negative dimensions, product output shape overflow, shape/inner dimension mismatch, indexing and singular solve",
+    "Trajectory fit example run native/web and native project test blocks; example formatter"
+  ],
+  "limits": [
+    "No new multi-axis range syntax in this increment; documented row/col and scalar indexing work",
+    "Ordinary 1D fill of nonpositive count retains its empty-array behavior",
+    "Public NDArray fields can still be constructed or edited inconsistently; checked constructors are the documented API",
+    "Initial full invocation stopped at Python collection after a test formatting edit; repaired and full gate rerun. Initial example check caught invalid comprehension syntax; corrected before successful example validation."
+  ]
+}

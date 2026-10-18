@@ -23,8 +23,15 @@ struct NDArray[T]:
 
 # ---------------- shapes ----------------
 __nd_size = (shape: int[]) -> int:
+    empty = false
+    loop d in shape:
+        if d < 0: panic("array dimensions must be nonnegative")
+        if d == 0: empty = true
+    if empty: return 0
     n = 1
-    loop d in shape: n *= d
+    loop d in shape:
+        if n > 9223372036854775807 / d: panic("array shape is too large")
+        n *= d
     n
 
 __shape_str = (shape: int[]) -> str:
@@ -278,24 +285,27 @@ __bcast_last = (st: int[], size: int, n: int) -> int:
     st[st.len() - 1]
 
 # ---------------- making arrays ----------------
+__nd_fill[T] = (value: T, shape: int[]) -> T[,]:
+    NDArray(fill(value, __nd_size(shape)), shape)
+
 zeros = (n: int) -> f64[]: fill(0.0, n)
-zeros = (a: int, b: int) -> f64[,]: NDArray(fill(0.0, a * b), [a, b])
-zeros = (a: int, b: int, c: int) -> f64[,]: NDArray(fill(0.0, a * b * c), [a, b, c])
-zeros = (a: int, b: int, c: int, d: int) -> f64[,]: NDArray(fill(0.0, a * b * c * d), [a, b, c, d])
+zeros = (a: int, b: int) -> f64[,]: __nd_fill(0.0, [a, b])
+zeros = (a: int, b: int, c: int) -> f64[,]: __nd_fill(0.0, [a, b, c])
+zeros = (a: int, b: int, c: int, d: int) -> f64[,]: __nd_fill(0.0, [a, b, c, d])
 # of another type (NumPy's dtype): `zeros[int](rows, cols)` is an int[,] of zeros
 zeros[T] = (n: int) -> T[]:
     z: T
     fill(z, n)
 zeros[T] = (a: int, b: int) -> T[,]:
     z: T
-    NDArray(fill(z, a * b), [a, b])
+    __nd_fill(z, [a, b])
 zeros[T] = (a: int, b: int, c: int) -> T[,]:
     z: T
-    NDArray(fill(z, a * b * c), [a, b, c])
+    __nd_fill(z, [a, b, c])
 ones = (n: int) -> f64[]: fill(1.0, n)
-ones = (a: int, b: int) -> f64[,]: NDArray(fill(1.0, a * b), [a, b])
-ones = (a: int, b: int, c: int) -> f64[,]: NDArray(fill(1.0, a * b * c), [a, b, c])
-ones = (a: int, b: int, c: int, d: int) -> f64[,]: NDArray(fill(1.0, a * b * c * d), [a, b, c, d])
+ones = (a: int, b: int) -> f64[,]: __nd_fill(1.0, [a, b])
+ones = (a: int, b: int, c: int) -> f64[,]: __nd_fill(1.0, [a, b, c])
+ones = (a: int, b: int, c: int, d: int) -> f64[,]: __nd_fill(1.0, [a, b, c, d])
 
 # the identity matrix
 eye = (n: int) -> f64[,]:
@@ -309,9 +319,15 @@ rand = (n: int) -> f64[]:
     out.reserve(n)
     loop _ in [0..n): out.push(random())
     out
-rand = (a: int, b: int) -> f64[,]: NDArray(rand(a * b), [a, b])
-rand = (a: int, b: int, c: int) -> f64[,]: NDArray(rand(a * b * c), [a, b, c])
-rand = (a: int, b: int, c: int, d: int) -> f64[,]: NDArray(rand(a * b * c * d), [a, b, c, d])
+rand = (a: int, b: int) -> f64[,]:
+    shape = [a, b]
+    NDArray(rand(__nd_size(shape)), shape)
+rand = (a: int, b: int, c: int) -> f64[,]:
+    shape = [a, b, c]
+    NDArray(rand(__nd_size(shape)), shape)
+rand = (a: int, b: int, c: int, d: int) -> f64[,]:
+    shape = [a, b, c, d]
+    NDArray(rand(__nd_size(shape)), shape)
 
 # normally distributed (mean 0, standard deviation 1)
 randn = () -> f64:
@@ -322,9 +338,15 @@ randn = (n: int) -> f64[]:
     out.reserve(n)
     loop _ in [0..n): out.push(randn())
     out
-randn = (a: int, b: int) -> f64[,]: NDArray(randn(a * b), [a, b])
-randn = (a: int, b: int, c: int) -> f64[,]: NDArray(randn(a * b * c), [a, b, c])
-randn = (a: int, b: int, c: int, d: int) -> f64[,]: NDArray(randn(a * b * c * d), [a, b, c, d])
+randn = (a: int, b: int) -> f64[,]:
+    shape = [a, b]
+    NDArray(randn(__nd_size(shape)), shape)
+randn = (a: int, b: int, c: int) -> f64[,]:
+    shape = [a, b, c]
+    NDArray(randn(__nd_size(shape)), shape)
+randn = (a: int, b: int, c: int, d: int) -> f64[,]:
+    shape = [a, b, c, d]
+    NDArray(randn(__nd_size(shape)), shape)
 
 # n evenly spaced values from a to b (both included)
 linspace = (a: f64, b: f64, n: int) -> f64[]:
@@ -751,8 +773,9 @@ __swap_rows = (m: mut f64[], n: int, a: int, b: int):
     bc = cols(b)
     if ac != br: panic("matrix product of {ar}x{ac} and {br}x{bc}: inner sizes differ")
     zero = T(0)
-    out = fill(zero, ar * bc)
-    if a.data.len() != ar * ac or b.data.len() != br * bc: panic("matrix product of arrays not {ar}x{ac} and {br}x{bc}")
+    shape = [ar, bc]
+    if a.data.len() != __nd_size(a.shape) or b.data.len() != __nd_size(b.shape): panic("matrix product of arrays not {ar}x{ac} and {br}x{bc}")
+    out = fill(zero, __nd_size(shape))
     op = data(out)
     ap = data(a.data)
     bp = data(b.data)
@@ -768,7 +791,7 @@ __swap_rows = (m: mut f64[], n: int, a: int, b: int):
                 loop j in [0..bc): op[ro + j] += x * bp[bo + j]
     if ar > 1 and ar * ac * bc >= 1 << 18: __parallel_run(ar, some_rows)
     else: some_rows(0, ar)
-    NDArray(out, [ar, bc])
+    NDArray(out, shape)
 
 # matrix times column vector
 (*)[T] = (a: T[,], v: T[]) -> T[]:

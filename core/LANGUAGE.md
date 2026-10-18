@@ -877,6 +877,44 @@ They evaluate the key once per element and choose the first of equal keys.
 The scan does not allocate a copy of the array tail, and the returned value
 remains independent of the source. An empty input raises an error.
 
+## Numeric arrays and matrices
+
+The bundled numeric library uses ordinary value semantics. Make a matrix with
+`zeros(rows cols)`, `ones(rows cols)`, `eye(n)` or `reshape(values rows cols)`:
+
+```dewy
+let matrix = reshape([3.0 1.0 1.0 2.0] 2 2)
+let saved = matrix
+matrix[0 1] = 4.0
+assert(saved[0 1] =? 1.0)
+let solution = solve(saved [9.0 8.0])  # approximately [2.0 3.0]
+let product = saved*eye(2)
+assert(product.data =? saved.data)
+```
+
+`NDArray<T>` stores a flat, row-major `data` array and a `shape` array. Use
+`matrix[i j]` for a two-dimensional element; three- and four-dimensional
+indexing work too. `zeros<int64>(rows cols)` chooses integer elements instead of
+the default `float64`. Dimensions must be nonnegative and their product must
+fit the supported array size. A zero dimension produces an empty array.
+
+`reshape` checks the number of elements; `flatten`, `row` and `col` return
+independent array values. `transpose` reverses the axes. `size(matrix)` counts
+all elements; `rows` and `cols` inspect a two-dimensional shape. Use these
+constructors rather than changing `shape` independently of `data`.
+
+For matrices, `a*b` is the matrix product; `a*values` multiplies a matrix by a
+column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
+`max` reduce the elements. `solve(matrix values)`, `inverse(matrix)` and
+`det(matrix)` provide linear algebra on square `float64` matrices; a singular
+matrix raises an error in `solve` and `inverse`.
+
+[`trajectory_fit.dewy`](../examples/sloppy_core/trajectory_fit.dewy) fits a
+quadratic to sampled heights, predicts another height, and includes native test
+blocks. Its normal-equation example uses small, well-scaled times; it is not a
+general numerical fitting package. Multi-axis range slicing is not yet exposed
+through Dewy's bracket syntax; use `row`, `col`, or indexed loops for now.
+
 ## Parallel CPU work
 
 The bundled worker pool provides `parallel_map`, `parallel_range` and

@@ -565,10 +565,18 @@ __print_str = (s: str):
     __out(data("\n"), 1, true)
 
 # ---------------- arrays ----------------
+# Include allocator metadata and page rounding when checking the byte count.
+# In wasm the address space is 32-bit even though an array length is an int64.
+__arr_bytes = (cap: int, es: int) -> int:
+    limit = 9223372036854775807 - 65535 - 16 - 24
+    when TARGET == "wasm": limit = 4294967295 - 65535 - 16 - 24
+    if cap < 0 or es < 0 or (es > 0 and cap > limit / es): panic("array is too large")
+    24 + cap * es
+
 # (an array's elements past its length are not zeroed: whatever makes the array longer writes
 # them first)
 __arr_new_raw = (cap: int, es: int) -> *u8:
-    p = __alloc_raw(24 + cap * es)
+    p = __alloc_raw(__arr_bytes(cap, es))
     h = p as *int
     h[0] = 1
     h[1] = 0
@@ -639,7 +647,7 @@ __arr_grow = (slot: **u8, es: int, need: int):
     if h[2] >= need: return
     cap = h[2] * 2
     if cap < need: cap = need
-    q = __grow_alloc(p, 24 + h[1] * es, 24 + cap * es)
+    q = __grow_alloc(p, 24 + h[1] * es, __arr_bytes(cap, es))
     if es > 0: cap = (__alloc_size(q) - 24) / es
     (q as *int)[2] = cap
     slot[0] = q

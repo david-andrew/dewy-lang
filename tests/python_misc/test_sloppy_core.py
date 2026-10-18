@@ -294,6 +294,59 @@ let other:Pair=values return other[0]+other[1]}''',
 const base=1 const width=base+1
 let base=7 let values:array<int64 length=width>=[20 22]
 return values[0]+values[1]}''',
+    'numeric-matrix-copy': '''main=()=>{
+let a=reshape([3.0 1.0 1.0 2.0] 2 2) let saved=a
+let flat=flatten(a) let reshaped=reshape(a 1 4)
+a[0 1]=4.0 flat[0]=99.0 reshaped[0 3]=7.0
+assert(saved.data =? [3.0 1.0 1.0 2.0])
+assert(a[0 1] =? 4.0 and a[0 0] =? 3.0 and a[1 1] =? 2.0)
+return 42}''',
+    'numeric-matrix-product': '''main=()=>{
+let a=reshape([1 2 3 4 5 6] 2 3) let b=reshape([7 8 9 10 11 12] 3 2)
+let c=a*b
+assert(c.shape =? [2 2] and c.data =? [58 64 139 154])
+assert(a*[2 3 4] =? [20 47])
+let t=transpose(a)
+assert(t.shape =? [3 2] and t.data =? [1 4 2 5 3 6])
+assert(row(a 1) =? [4 5 6] and col(a 1) =? [2 5])
+return 42}''',
+    'numeric-matrix-solve': '''main=()=>{
+let a=reshape([0.0 2.0 1.0 3.0] 2 2) let b=[4.0 7.0]
+let x=solve(a b)
+assert(abs(x[0]-1.0) <? 1e-12 and abs(x[1]-2.0) <? 1e-12)
+let identity=a*inverse(a)
+loop i in [0..2) {loop j in [0..2) {
+assert(abs(identity[i j]-(if i =? j 1.0 else 0.0)) <? 1e-12)}}
+assert(abs(det(a)+2.0) <? 1e-12)
+assert(a.data =? [0.0 2.0 1.0 3.0] and b =? [4.0 7.0])
+return 42}''',
+    'numeric-matrix-ranks': '''main=()=>{
+let a=zeros<int64>(2 3 4) a[1 2 3]=42
+let b=ones(2 2 2 2) b[1 0 1 0]=9.0
+let saved=b b[1 0 1 0]=7.0
+assert(a.shape =? [2 3 4] and a[1 2 3] =? 42 and sum(a) =? 42)
+assert(saved[1 0 1 0] =? 9.0 and b[0 0 0 0] =? 1.0)
+let t=transpose(a)
+assert(t.shape =? [4 3 2] and t[3 2 1] =? 42)
+return 42}''',
+    'numeric-matrix-empty': '''main=()=>{
+let a=zeros(2 0) let b=zeros(0 3) let c=a*b
+assert(c.shape =? [2 3] and c.data =? [0.0 0.0 0.0 0.0 0.0 0.0])
+assert(transpose(a).shape =? [0 2] and size(transpose(a)) =? 0)
+let huge=zeros(1<<32 0 1<<32)
+assert(size(huge) =? 0 and huge.shape =? [1<<32 0 1<<32])
+assert(size(ones(0 2)) =? 0 and size(rand(2 0)) =? 0 and size(randn(0 2)) =? 0)
+assert(fill(0 -1).length =? 0)
+return 42}''',
+    'numeric-matrix-constructors': '''main=()=>{
+let a=ones(2 3) let b=eye(3) let c=zeros<int64>(2 2)
+assert(sum(a) =? 6.0 and mean(a) =? 1.0 and trace(b) =? 3.0)
+assert((a+a).data =? [2.0 2.0 2.0 2.0 2.0 2.0])
+assert((a*2.0).data =? (a+a).data and c.data =? [0 0 0 0])
+let r=rand(2 3 4) let n=randn(2 2 2 2)
+assert(r.shape =? [2 3 4] and size(r) =? 24 and size(n) =? 16)
+loop x in r.data {assert(x >=? 0.0 and x <? 1.0)}
+return 42}''',
     'numeric-sum-literal-integer': 'main=()=>sum([20 22])',
     'numeric-sum-literal-exact': '''main=()=>{
 let result=sum([9007199254740993 1])
@@ -4787,6 +4840,8 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unpack_errors': 'unpack',
                   'test_core_unpack_single_errors': 'unpack',
                   'test_core_fixed_array_errors': 'bounds',
+                  'test_core_numeric_array_errors': 'bounds',
+                  'test_core_web_array_size_errors': 'bounds',
                   'test_core_set_errors': 'set',
                   'test_core_format_errors': 'format',
                   'test_core_combined_range_errors': 'range',
@@ -6617,6 +6672,59 @@ def test_core_unpack_single_errors(error_batches, body, target, release):
 def test_core_fixed_array_errors(error_batches, body, diagnostic, target, release):
     ran = error_batches('bounds', body, release, target)
     assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body, diagnostic', [
+    ('printl(fill(0 (1<<61)+1).length)', 'array is too large'),
+    ('let xs:array<int64>=[] xs.reserve((1<<61)+1)', 'array is too large'),
+    ('let xs=[1] xs.reserve((1<<61)+1)', 'array is too large'),
+    ('printl(zeros(1<<32 1<<32).shape)', 'array shape is too large'),
+    ('printl(ones(1<<32 2 1<<31).shape)', 'array shape is too large'),
+    ('printl(zeros<int64>(1<<32 1<<32).shape)', 'array shape is too large'),
+    ('printl(rand(1<<32 1<<32).shape)', 'array shape is too large'),
+    ('printl(randn(1<<32 1<<32).shape)', 'array shape is too large'),
+    ('let xs:array<int64>=[] printl(reshape(xs 1<<32 1<<32))', 'array shape is too large'),
+    ('printl(zeros(1<<32 0)*zeros(0 1<<32))', 'array shape is too large'),
+    ('printl(zeros(-2 -3))', 'array dimensions must be nonnegative'),
+    ('printl(ones(0 -1))', 'array dimensions must be nonnegative'),
+    ('printl(zeros<int64>(2 -1 3))', 'array dimensions must be nonnegative'),
+    ('printl(rand(-1 2))', 'array dimensions must be nonnegative'),
+    ('printl(randn(2 -1))', 'array dimensions must be nonnegative'),
+    ('printl(reshape([1 2] 2 2))', 'elements do not make an array'),
+    ('printl(zeros(2 3)*zeros(2 3))', 'inner sizes differ'),
+    ('let m=zeros(2 3) printl(m[0 3])', 'out of bounds'),
+    ('printl(solve(zeros(2 2) [1.0 2.0]))', 'matrix has no inverse'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_array_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('bounds', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body', [
+    'printl(fill(0 (1<<29)+1).length)',
+    'let xs:array<uint8>=[] xs.reserve(1<<32)',
+    'printl(zeros(1<<16 1<<16).shape)',
+])
+@pytest.mark.parametrize('target', ['wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_web_array_size_errors(error_batches, body, target, release):
+    ran = error_batches('bounds', body, release, target)
+    assert ran.returncode != 0 and 'array is too large' in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_numeric_example(compiler, tmp_path, target, release):
+    source = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/trajectory_fit.dewy'
+    command, error = build_case_batch(compiler, tmp_path, {'trajectory': source.read_text()},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout == ('height = 1.501 + 8.008*t + -4.909*t*t\n'
+                          'height at 0.6 seconds: 4.538\n')
 
 
 @pytest.mark.parametrize('body, diagnostic', [
