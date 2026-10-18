@@ -34,7 +34,7 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     assert metadata['revision'] == 'test-revision'
     for name, expected in metadata['files'].items():
         assert hashlib.sha256((moved / name).read_bytes()).hexdigest() == expected
-    compiler = moved / 'bin/dewy-core'
+    compiler = moved / 'bin' / ('dewy-core.exe' if os.name == 'nt' else 'dewy-core')
     assert os.access(compiler, os.X_OK)
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env['PATH'] = ''
@@ -45,10 +45,10 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
         assert result.returncode == 0, result.stdout + result.stderr
         return result
 
-    assert run('--print-lib').stdout.strip() == str(moved / 'lib')
+    assert os.path.normcase(run('--print-lib').stdout.strip()) == os.path.normcase(str(moved / 'lib'))
     source = tmp_path / 'sample.dewy'
     source.write_text('main=()=>{let values=[20 22] return sum(values)}\n')
-    binary = tmp_path / 'sample'
+    binary = tmp_path / ('sample.exe' if os.name == 'nt' else 'sample')
     run('build', source, '-o', binary)
     executed = subprocess.run([binary], cwd=tmp_path, env=env, capture_output=True,
                               text=True, timeout=10, check=False)
@@ -71,15 +71,18 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     assert (tmp_path / 'game-web.html').is_file()
 
 
-@pytest.mark.parametrize('changed', ['bin/dewy-core', 'lib/core/rt.jo'])
+@pytest.mark.parametrize('changed', ['compiler', 'lib/core/rt.jo'])
 def test_core_package_rejects_changed_payload(toolchain, tmp_path, changed):
     copy = tmp_path / 'toolchain'
     copy.mkdir()
-    shutil.copy2(toolchain / 'build.json', copy / 'build.json')
+    provenance = 'HOST_BUILD.json' if (toolchain / 'HOST_BUILD.json').is_file() else 'build.json'
+    shutil.copy2(toolchain / provenance, copy / provenance)
     for name in ('bin', 'lib'):
         shutil.copytree(toolchain / name, copy / name)
     for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
         shutil.copy2(toolchain / name, copy / name)
+    if changed == 'compiler':
+        changed = 'bin/dewy-core.exe' if os.name == 'nt' else 'bin/dewy-core'
     with (copy / changed).open('ab') as stream:
         stream.write(b'changed')
     output = tmp_path / 'changed.tar.gz'

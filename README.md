@@ -35,7 +35,8 @@ previous implementation.
 
 To try the compact core without building it locally, use a
 [CI toolchain download](core/README.md#download-a-ci-build). Successful runs
-provide a standalone Linux x86-64 compiler with the native/web game libraries.
+provide standalone compilers for Linux x86-64/ARM64, macOS ARM64 and Windows x64,
+with the native/web game libraries.
 
 ### dewy
 

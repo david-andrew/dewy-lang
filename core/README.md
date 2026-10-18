@@ -112,18 +112,27 @@ three compilers; when QEMU is available, it uses the Linux ARM64 compiler to
 build and execute Dewy programs in default and release modes. This is initial
 host-port coverage. CI also runs a bounded language/native-web, project-test and editor-transport
 suite on Windows x64, macOS ARM64 and Linux ARM64 runners using cross-built
-bundles. The full compiler gate remains on Linux x86-64. The development download
-below remains the Linux x86-64 toolchain; `compact-core-hosts-*` artifacts are
-inputs to the host checks, with their source/build provenance recorded separately.
+bundles. The full compiler gate remains on Linux x86-64. Each host also checks
+its relocated standalone package without build tools on PATH before publishing
+a development download. `compact-core-hosts-*` artifacts are intermediate inputs
+to those checks.
 
 ## Download a CI build
 
 Successful [Compact core runs](https://github.com/david-andrew/dewy-lang/actions/workflows/core.yml)
-publish a `dewy-core-linux-x86_64-COMMIT` development artifact after the full
-gate passes. It includes the native compiler, bundled libraries and game
-templates, licenses and build provenance. Select a completed run on
-`restart/sloppy-frontend`, download that artifact, and extract the download ZIP.
-Then, from the directory containing the archive:
+publish development artifacts for these hosts:
+
+| Host | Artifact name |
+| --- | --- |
+| Linux x86-64 | `dewy-core-linux-x86_64-COMMIT` |
+| Linux ARM64 | `dewy-core-linux-arm64-COMMIT` |
+| macOS ARM64 | `dewy-core-macos-arm64-COMMIT` |
+| Windows x64 | `dewy-core-windows-x86_64-COMMIT` |
+
+Each includes the native compiler, bundled libraries and game templates,
+licenses, payload hashes and build provenance. Select a successful run on
+`restart/sloppy-frontend`, download your host's artifact, and extract the download
+ZIP. For Linux x86-64, from the directory containing the archive:
 
 ```sh
 sha256sum -c dewy-core-linux-x86_64.tar.gz.sha256
@@ -133,10 +142,26 @@ tar -xzf dewy-core-linux-x86_64.tar.gz
 ./dewy-core/bin/dewy-core build my-game/main.dewy --target wasm -o game-web
 ```
 
-Open `game-web.html` in a browser. The compiler runs on Linux x86-64 without
-Python or a C compiler. Keep its `bin/` and `lib/` directories together when
-moving the extracted toolchain. `PACKAGE.json` records the source revision and
-payload hashes; `build.json` retains the independent bootstrap provenance.
+For Linux ARM64, replace `linux-x86_64` with `linux-arm64`. On macOS, use
+`shasum -a 256 -c dewy-core-macos-arm64.tar.gz.sha256` and extract that archive.
+On Windows, use PowerShell:
+
+```powershell
+$actual = (Get-FileHash .\dewy-core-windows-x86_64.tar.gz -Algorithm SHA256).Hash
+$expected = (Get-Content .\dewy-core-windows-x86_64.tar.gz.sha256).Split(' ')[0]
+$actual -eq $expected
+tar -xzf dewy-core-windows-x86_64.tar.gz
+.\dewy-core\bin\dewy-core.exe --version
+.\dewy-core\bin\dewy-core.exe new my-game
+.\dewy-core\bin\dewy-core.exe build my-game/main.dewy --target wasm -o game-web
+```
+
+The PowerShell hash comparison should print `True`. Open `game-web.html` in a browser.
+The compiler runs without Python or a C compiler. Keep its `bin/` and `lib/`
+directories together when moving the extracted toolchain. `PACKAGE.json` records
+the source revision and payload hashes; `build.json` or `HOST_BUILD.json` retains
+the independent bootstrap and cross-build provenance. Native-host smoke checks
+do not certify every graphics driver or debugger integration.
 
 ## Build a standalone toolchain
 

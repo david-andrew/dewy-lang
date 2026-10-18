@@ -148,12 +148,15 @@ jobs:
           - host: windows
             runner: windows-latest
             suffix: .exe
+            package: windows-x86_64
           - host: macos
             runner: macos-15
             suffix: ''
+            package: macos-arm64
           - host: linux-arm64
             runner: ubuntu-24.04-arm
             suffix: ''
+            package: linux-arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     defaults:
@@ -196,3 +199,18 @@ jobs:
         run: |
           python -m pytest -q -o addopts='' tests/python_misc/test_sloppy_core_watch.py \
             -k 'watch_program or watch_tests or watch_function_asset or watch_missing_input'
+      - name: Check the relocated standalone package
+        env:
+          DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
+        run: python -m pytest -q -o addopts='' tests/python_misc/test_sloppy_core_package.py
+      - name: Package this host's tested toolchain
+        run: |
+          python -m tools.sloppy_core.package "$RUNNER_TEMP/host-check/dewy-core" \
+            --output "$RUNNER_TEMP/packages/dewy-core-${{ matrix.package }}.tar.gz" --revision "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dewy-core-${{ matrix.package }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/packages/*.tar.gz
+            ${{ runner.temp }}/packages/*.sha256
+          if-no-files-found: error

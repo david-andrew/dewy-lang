@@ -1,4 +1,4 @@
-"""Package a built Linux x86-64 core and its libraries for use without Python."""
+"""Package a built native core and its libraries for use without Python."""
 from __future__ import annotations
 
 import argparse
@@ -8,28 +8,35 @@ import json
 import tarfile
 from pathlib import Path
 
-README = """Dewy compact core — development toolchain for Linux x86-64
+HOSTS = {
+    'linux-x86_64': ('Linux x86-64', 'dewy-core', 'my-game-native', 'Linux'),
+    'windows': ('Windows x64', 'dewy-core.exe', 'my-game-native.exe', 'Windows'),
+    'macos': ('macOS ARM64', 'dewy-core', 'my-game-native', 'macOS'),
+    'linux-arm64': ('Linux ARM64', 'dewy-core', 'my-game-native', 'Linux'),
+}
+
+README = """Dewy compact core — development toolchain for {title}
 
 Keep bin/ and lib/ together; the compiler finds its libraries beside itself.
 The extracted directory can be moved. Running the compiler requires neither
 Python nor a C compiler.
 
 From this directory:
-  ./bin/dewy-core --version
-  ./bin/dewy-core new my-game
-  ./bin/dewy-core build my-game/main.dewy -o my-game-native
-  ./bin/dewy-core build my-game/main.dewy --target wasm -o my-game-web
-  ./bin/dewy-core watch my-game/main.dewy
+  ./bin/{binary} --version
+  ./bin/{binary} new my-game
+  ./bin/{binary} build my-game/main.dewy -o {native}
+  ./bin/{binary} build my-game/main.dewy --target wasm -o my-game-web
+  ./bin/{binary} watch my-game/main.dewy
 
-Open my-game-web.html in a browser, or run ./my-game-native on a Linux desktop.
+Open my-game-web.html in a browser, or run ./{native} on a {desktop} desktop.
 The compiler also accepts ordinary .dewy programs and an interactive `repl`.
-Use an absolute path to bin/dewy-core when working from another directory.
+Use an absolute path to bin/{binary} when working from another directory.
 
 This is the experimental compact core. Language and platform coverage:
 https://github.com/david-andrew/dewy-lang/blob/restart/sloppy-frontend/core/README.md
 
 PACKAGE.json records the payload hashes and an optional source revision.
-build.json records the compiler build and source provenance.
+{provenance} records the compiler build and source provenance.
 """
 
 
@@ -39,8 +46,22 @@ def digest(data: bytes) -> str:
 
 def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Path:
     toolchain = toolchain.resolve(strict=True)
-    manifest = json.loads((toolchain / 'build.json').read_text())
-    expected = {'bin/dewy-core': manifest['core_sha256']}
+    host = 'linux-x86_64'
+    provenance = 'build.json'
+    if (toolchain / 'HOST_BUILD.json').is_file():
+        provenance = 'HOST_BUILD.json'
+        cross = json.loads((toolchain / provenance).read_text())
+        host = cross['host']
+        if host not in HOSTS:
+            raise ValueError(f'unsupported compiler host: {host}')
+        manifest = cross['source_build']
+        compiler_hash = cross['compiler_sha256']
+    else:
+        manifest = json.loads((toolchain / provenance).read_text())
+        compiler_hash = manifest['core_sha256']
+    title, binary, native, desktop = HOSTS[host]
+    executable = f'bin/{binary}'
+    expected = {executable: compiler_hash}
     expected.update({name: sha for name, sha in manifest['sources_sha256'].items()
                      if name.startswith('lib/')})
     for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
@@ -55,9 +76,10 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
         if digest(data) != sha:
             raise ValueError(f'toolchain changed since its build: {name}')
         payload[name] = data
-    payload['build.json'] = (toolchain / 'build.json').read_bytes()
-    payload['README.txt'] = README.encode()
-    metadata = {'format': 1, 'host': 'linux-x86_64', 'revision': revision,
+    payload[provenance] = (toolchain / provenance).read_bytes()
+    payload['README.txt'] = README.format(title=title, binary=binary, native=native,
+                                         desktop=desktop, provenance=provenance).encode()
+    metadata = {'format': 1, 'host': host, 'revision': revision,
                 'files': {name: digest(data) for name, data in payload.items()}}
     payload['PACKAGE.json'] = (json.dumps(metadata, indent=2) + '\n').encode()
     output = output.resolve()
@@ -67,7 +89,7 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
         for name, data in sorted(payload.items()):
             member = tarfile.TarInfo(f'dewy-core/{name}')
             member.size = len(data)
-            member.mode = 0o755 if name == 'bin/dewy-core' else 0o644
+            member.mode = 0o755 if name == executable else 0o644
             archive.addfile(member, io.BytesIO(data))
     checksum = output.with_name(output.name + '.sha256')
     checksum.write_text(f'{digest(output.read_bytes())}  {output.name}\n')
@@ -76,7 +98,7 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
 
 if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument('toolchain', type=Path, help='built toolchain directory containing bin/, lib/ and build.json')
+    cli.add_argument('toolchain', type=Path, help='built toolchain with bin/, lib/ and build.json or HOST_BUILD.json')
     cli.add_argument('--output', type=Path, required=True, help='new .tar.gz archive')
     cli.add_argument('--revision', help='source commit, when known by the build runner')
     args = cli.parse_args()
