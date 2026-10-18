@@ -73,6 +73,7 @@ return 0
 let m=reshape([1 2 3 4 5 6] 2 3)
 let part:NDArray<int64>=m[[0..end] [1..end]]
 m[[..] end]=[20 22]
+m[[..] end] .+=10
 printl(part.data) printl(m.data) printl(m[0 [0..end+1)].data)
 return 0
 }''',

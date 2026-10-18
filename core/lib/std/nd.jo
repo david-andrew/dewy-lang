@@ -129,6 +129,19 @@ __nd_part = (shape: int[], spec: int[]) -> (int[], int[], bool[]):
         hi[d] = b
     (lo, hi, keep)
 
+# Capture explicit bounds for every axis before a dotted update evaluates its
+# RHS. The RHS may reshape the destination; writeback uses these coordinates.
+__nd_bound_part = (shape: int[], spec: int[]) -> int[]:
+    lo, hi, keep = __nd_part(shape, spec)
+    out: int[]
+    out.reserve(shape.len() * 3)
+    loop d in [0..shape.len()):
+        out.push(lo[d])
+        out.push(hi[d])
+        kind = if keep[d]: 1 else: 0
+        out.push(kind)
+    out
+
 # where each run of the part along the last axis starts in m, in order (each is
 # hi - lo + 1 elements long on the last axis)
 __nd_runs = (shape: int[], lo: int[], hi: int[]) -> int[]:
@@ -302,6 +315,9 @@ zeros[T] = (a: int, b: int) -> T[,]:
 zeros[T] = (a: int, b: int, c: int) -> T[,]:
     z: T
     __nd_fill(z, [a, b, c])
+zeros[T] = (a: int, b: int, c: int, d: int) -> T[,]:
+    z: T
+    __nd_fill(z, [a, b, c, d])
 ones = (n: int) -> f64[]: fill(1.0, n)
 ones = (a: int, b: int) -> f64[,]: __nd_fill(1.0, [a, b])
 ones = (a: int, b: int, c: int) -> f64[,]: __nd_fill(1.0, [a, b, c])

@@ -49,6 +49,58 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-broadcast-matrix-selection': '''main=()=>{
+let m=reshape([1 2 3 4 5 6 7 8 9 10 11 12] 3 4) let saved=m
+m[[..] 1] .*= 2
+m[1 [1..3)] .+= [10 20]
+m[[1..2] [0..1]] .-= [1 2]
+m[[0..0] [..]] .//= 2
+return if m.shape =? [3 4] and m.data =? [0 2 1 2 4 20 27 8 8 18 11 12]
+and saved.data =? [1 2 3 4 5 6 7 8 9 10 11 12] 42 else 1
+}''',
+    'numeric-broadcast-matrix-selection-reshape': '''let m=reshape([1 2 3 4] 2 2)
+right=()=>{m=reshape([100 200 300 400 500 600] 2 3) return 10}
+main=()=>{
+m[[..] [..]] .+= right()
+if m.shape not=? [2 3] or m.data not=? [11 12 300 13 14 600] return 1
+m=reshape([1 2 3 4] 2 2)
+m[0..0] .+= right()
+return if m.shape =? [2 3] and m.data =? [11 12 300 400 500 600] 42 else 2
+}''',
+    'numeric-broadcast-matrix-selection-order': '''let boxes=[[matrix=reshape([1 2 3 4 5 6] 2 3)]]
+let trace=0 let index=0
+at=()=>{trace=trace*10+1 return index}
+row=()=>{trace=trace*10+2 boxes[0].matrix=reshape([10 20 30 40 50 60] 2 3) return 1}
+lower=()=>{trace=trace*10+3 return 1}
+right=()=>{trace=trace*10+4 boxes.push([matrix=zeros<int64>(1 1)]) index=1 return 10}
+main=()=>{let saved=boxes
+boxes[at()].matrix[row() [lower()..end]] .+= right()
+return if trace =? 1234 and boxes[0].matrix.data =? [10 20 30 40 15 16]
+and saved[0].matrix.data =? [1 2 3 4 5 6] 42 else 1}''',
+    'numeric-broadcast-matrix-selection-empty': '''main=()=>{
+let a=zeros<int64>(0 3) a[[..] [..]] .+= [1 2 3]
+let b=zeros<int64>(2 0) b[[..] [..]] .*= 2
+let c=reshape([1 2 3 4] 2 2) c[[1..1) [..]] .+= 10
+return if a.shape =? [0 3] and b.shape =? [2 0]
+and a.data.length =? 0 and b.data.length =? 0 and c.data =? [1 2 3 4] 42 else 1
+}''',
+    'numeric-broadcast-matrix-selection-ranks': '''main=()=>{
+let m=reshape([loop i in [0..24) i] 2 3 4) let saved=m
+m[[..] end [0..end+1)] .+= [10 20 30 40]
+loop i in [0..2) {loop j in [0..3) {loop k in [0..4) {
+let expected=i*12+j*4+k+(if j =? 2 (k+1)*10 else 0)
+if m[i j k] not=? expected return 1
+}}}
+let n=zeros<float32>(2 2 2 2) n[end [..] 0 [..]] .+= 2.5
+return if saved[1 2 3] =? 23 and sum(n) =? 10.0 and n[1 1 0 1] =? 2.5 42 else 2
+}''',
+    'numeric-broadcast-matrix-selection-managed': '''work=()=>{
+let m=reshape(["a" "b" "c" "d"] 2 2) let saved=m
+m[[..] 1] .+= "!"
+assert(m.data =? ["a" "b!" "c" "d!"] and saved.data =? ["a" "b" "c" "d"])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'numeric-broadcast-selection-ranges': '''main=()=>{
 let xs=[1 2 3 4 5 6] let saved=xs
 xs[1..3] .+= 10
@@ -4769,6 +4821,7 @@ ERRORS = {
     'numeric-broadcast-update-constant': ('main=()=>{const xs=[1 2] xs .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-constant': ('main=()=>{const xs=[1 2] xs[..] .+= 1 return 0}', 'constant'),
     'numeric-broadcast-selection-mask-constant': ('main=()=>{const xs=[1 2] xs[[true false]] .+= 1 return 0}', 'constant'),
+    'numeric-broadcast-matrix-selection-constant': ('main=()=>{const m=zeros(2 3) m[[..] 1] .+= 1.0 return 0}', 'constant'),
     'gpu-array-cpu-input': ('main=()=>{printl(cpu(gpu([1.0 2.0]) .+ [3.0 4.0]))}',
                             'this array is in CPU memory'),
     'gpu-array-exact-division': ('main=()=>{printl(cpu(gpu([1 2]) ./ 2))}',
@@ -7172,6 +7225,10 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
     ('let xs=[1 2] right=()=>{xs.pop() return 10} xs[..] .+= right()', 'out of bounds'),
     ('let xs=[1 2] right=()=>{panic("RHS evaluated") return 10} xs[[2]] .+= right()', 'out of bounds'),
     ('let xs=[1 2] xs[[true]] .+= 10', 'a mask of 1 for 2 elements'),
+    ('let m=zeros(2 3) m[[..] 1] .+= [1.0 2.0 3.0]', 'do not match for an elementwise operation'),
+    ('let m=zeros(2 3) m[[0..0] 1] .+= [1.0 2.0]', 'assigning 2 elements to a part of 1'),
+    ('let m=zeros(2 3) right=()=>{m=zeros(1 1) return 1.0} m[[..] [..]] .+= right()', 'out of bounds'),
+    ('let m=zeros(2 3) right=()=>{panic("RHS evaluated") return 1.0} m[[..] 3] .+= right()', 'out of bounds'),
     ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),
     ('printl(zeros(0 3) .+ zeros(2 3))', 'do not match for an elementwise operation'),
     ('let m=zeros(0 3) printl(m[end 0])', 'out of bounds'),

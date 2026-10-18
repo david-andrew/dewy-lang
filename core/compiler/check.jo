@@ -2505,7 +2505,7 @@ dewy_end_assign = (s: int) -> int:
 # A dotted selection update reads the original source, captures its selector,
 # computes the result, then reacquires the destination for writeback. An open
 # slice becomes a small stored range before the RHS can resize the destination.
-dewy_selection_update = (s: int) -> int:
+dewy_selection_update = (s: int, matrix: bool = false) -> int:
     lhs = int(nodes[s].a)
     pos = nodes[s].pos
     stmts: int[]
@@ -2522,13 +2522,17 @@ dewy_selection_update = (s: int) -> int:
     captured = "$selection{elem_tmp_n}"
     reads = [bc_let(source, clone(int(nodes[lhs].a)), pos)]
     spec = int(nodes[lhs].b)
-    if nodes[spec].kind == .range:
+    if matrix:
+        shape = bc_field(bc_ident(source, pos), "shape", pos)
+        spec = bc_call("__nd_bound_part", [shape, part_spec(lhs)], pos)
+    else if nodes[spec].kind == .range:
         size = bc_method(bc_ident(source, pos), "len", [], pos)
         spec = bc_call("__dewy_slice_range", [size] + dewy_slice_args(spec, pos), pos)
     reads.push(bc_let(selector, spec, pos))
     picked = mk(.index, pos)
     nodes[picked].a = i32(bc_ident(source, pos))
     nodes[picked].b = i32(bc_ident(selector, pos))
+    if matrix: picked = bc_call("__nd_slice", [bc_ident(source, pos), bc_ident(selector, pos)], pos)
     pair = mk(.tuple, pos)
     set_list(pair, [bc_ident(selector, pos), picked])
     reads.push(bc_stmt(pair, pos))
@@ -2546,10 +2550,15 @@ dewy_selection_update = (s: int) -> int:
     nodes.push(nodes[s])
     nodes[update].a = i32(bc_ident(value, pos))
     stmts.push(update)
-    nodes[lhs].b = i32(bc_ident(selector, pos))
     # Capturing receiver indices changed checked paths; resolve those paths
     # again with the new index bindings before generating the write.
-    stmts.push(bc_assign(clone(lhs), bc_ident(value, pos), pos))
+    if matrix:
+        receiver = clone(int(nodes[lhs].a))
+        add_flag(receiver, NF_MUT)
+        stmts.push(bc_stmt(bc_call("__nd_slice_set", [receiver, bc_ident(selector, pos), bc_ident(value, pos)], pos), pos))
+    else:
+        nodes[lhs].b = i32(bc_ident(selector, pos))
+        stmts.push(bc_assign(clone(lhs), bc_ident(value, pos), pos))
     block = bc_block(stmts, pos)
     check_stmt(block)
     block
@@ -2623,6 +2632,7 @@ check_assign = (s: int) -> int:
                 return es
         if types[bt].kind == .struct_ and is_part_index(lhs):
             # m[.., j] = xs: writes into a part of m
+            if has_flag(s, NF_BROADCAST) and is_nd(bt): return dewy_selection_update(s, true)
             if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
             recv = int(nodes[lhs].a)
             add_flag(recv, NF_MUT)

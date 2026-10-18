@@ -997,8 +997,7 @@ winning. Saved copies remain independent. These operations allocate the selected
 values and result; an otherwise unique destination does not need a full-array
 copy merely to keep the temporary input snapshot alive.
 
-Matrix slices still require an explicit read and assignment. Dotted prefix
-operators remain unsupported.
+Dotted prefix operators remain unsupported.
 
 Put a range in its own brackets when selecting axes:
 
@@ -1009,6 +1008,7 @@ let row = matrix[1 [..]]              # shape [3], values [4 5 6]
 let block = matrix[[0..2) [1..3)]     # shape [2 2], values [2 3 5 6]
 matrix[[..] 1] = [20 50]
 matrix[0 [1..3)] = 99                # fill each selected element
+matrix[[..] 1] .*= 2                 # update a column elementwise
 assert(column.data =? [2 5])
 ```
 
@@ -1020,6 +1020,15 @@ inner brackets matter: `matrix[.. 1]` is one range ending at 1, while
 `matrix[[..] 1]` selects column 1. Matrix slices currently support forward unit
 ranges, inclusive starts and inclusive or exclusive stops; stepped and stored
 range selectors remain a gap for multidimensional arrays.
+
+Dotted updates work on matrix slices too, using the selected shape for
+broadcasting. Axis indices and bounds evaluate once. Open endpoints and omitted
+trailing axes are fixed from the original shape before evaluating the right
+side; if that side reshapes the destination, writeback uses those same
+coordinates with the new shape's strides. The destination must still contain
+those coordinates, and the result must have exactly the selected element count.
+Saved matrices remain independent, including when selected elements are managed
+values such as strings.
 
 `end` refers to the last index of its own axis: `matrix[end end]` selects the
 bottom-right element, and `matrix[[..] end]` selects the last column, including
