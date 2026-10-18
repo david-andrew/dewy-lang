@@ -5295,7 +5295,7 @@ check_expr = (n: int, expected: int) -> int:
                 stmts.push(bc_let(name, source, pos))
                 end_source = bc_ident(name, pos)
                 nodes[n].a = i32(bc_ident(name, pos))
-            stmts.push(bc_let(name_of(int(nodes[n].sval)), dewy_index_end(end_source, pos), pos))
+            loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
             nodes[n].sval = 0
             ix = nodes.len()
             nodes.push(nodes[n])
@@ -6323,6 +6323,25 @@ dewy_end_arithmetic = (n: int, name: int) -> bool:
     if k == .binary or k == .unary or k == .range:
         return dewy_end_arithmetic(int(nodes[n].a), name) and dewy_end_arithmetic(int(nodes[n].b), name) and dewy_end_arithmetic(int(nodes[n].c), name)
     false
+
+# Bind end once per axis of an NDArray. Other receivers still compute their
+# length only once, even if several custom index arguments contain end.
+dewy_index_end_bindings = (index: int, source: int, source_type: int) -> int[]:
+    pos = nodes[index].pos
+    base = name_of(int(nodes[index].sval))
+    out: int[]
+    loop axis in [0..max(nkids(index), 1)):
+        name = if axis == 0: base else: "{base}_{axis}"
+        value = 0
+        if is_nd(source_type):
+            dim = mk(.index, pos)
+            nodes[dim].a = i32(bc_field(clone(source), "shape", pos))
+            nodes[dim].b = i32(bc_int(axis, pos))
+            value = bc_bin(.minus, dim, bc_int(1, pos), pos)
+        else if axis == 0: value = dewy_index_end(clone(source), pos)
+        else: value = bc_ident(base, pos)
+        out.push(bc_let(name, value, pos))
+    out
 
 dewy_index_end = (source: int, pos: int) -> int:
     bc_bin(.minus, bc_method(source, "len", [], pos), bc_int(1, pos), pos)

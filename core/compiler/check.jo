@@ -2471,7 +2471,7 @@ dewy_end_assign = (s: int) -> int:
     if ix == 0: return 0
     pos = nodes[ix].pos
     receiver = int(nodes[ix].a)
-    check_expr(clone(receiver), 0)
+    source_type = prune(check_expr(clone(receiver), 0))
     stable = dewy_end_place(last_checked)
     stmts: int[]
     receiver_path = index_update_path(receiver)
@@ -2487,7 +2487,7 @@ dewy_end_assign = (s: int) -> int:
         stmts.push(bc_let(name, end_source, pos))
         end_source = bc_ident(name, pos)
         nodes[ix].a = i32(bc_ident(name, pos))
-    stmts.push(bc_let(name_of(int(nodes[ix].sval)), dewy_index_end(end_source, pos), pos))
+    loop binding in dewy_index_end_bindings(ix, end_source, source_type): stmts.push(binding)
     nodes[ix].sval = 0
     update = nodes.len()
     nodes.push(nodes[s])

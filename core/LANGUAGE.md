@@ -930,6 +930,12 @@ inner brackets matter: `matrix[.. 1]` is one range ending at 1, while
 ranges, inclusive starts and inclusive or exclusive stops; stepped and stored
 range selectors remain a gap for multidimensional arrays.
 
+`end` refers to the last index of its own axis: `matrix[end end]` selects the
+bottom-right element, and `matrix[[..] end]` selects the last column, including
+on non-square matrices. The receiver is evaluated once. In a zero-length axis,
+`end` is -1; an element read fails its bounds check, while `[0..end+1)` selects
+the empty axis.
+
 [`trajectory_fit.dewy`](../examples/sloppy_core/trajectory_fit.dewy) fits a
 quadratic to sampled heights, predicts another height, and includes native test
 blocks. Its normal-equation example uses small, well-scaled times; it is not a

@@ -448,9 +448,11 @@ dw_expr = (id: int) -> int:
         if text == "none": return mk(.none_lit, pos)
         if text == "end" and dw_index_context.len() > 0:
             ix = dw_index_context[dw_index_context.len() - 1]
-            name = intern("$index_end{ix}")
-            nodes[ix].sval = i32(name)
-            return comp_ident(name, pos)
+            base = "$index_end{ix}"
+            nodes[ix].sval = i32(intern(base))
+            axis = int(nodes[ix].aux2)
+            name = if axis == 0: base else: "{base}_{axis}"
+            return comp_ident(intern(name), pos)
         n = mk(.ident, pos)
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
@@ -643,6 +645,8 @@ dw_expr = (id: int) -> int:
             else:
                 if dewy_syntax[right].text == "[):": return dw_fail(right, "an exclusive index without a range")
                 loop child in xs:
+                    # Temporary parse cursor: each axis gives contextual end its own name.
+                    if bracket: nodes[n].aux2 = i32(args.len())
                     if dw_op(child) == "=":
                         a = mk(.namedarg, dewy_syntax[child].pos)
                         nodes[a].name = i32(intern(dw_name(dw_child(child, 1))))
@@ -650,7 +654,9 @@ dw_expr = (id: int) -> int:
                         args.push(a)
                     else if bracket and xs.len() > 1: args.push(dw_iterable(child, true, true))
                     else: args.push(dw_expr(child))
-            if bracket: dw_index_context.pop()
+            if bracket:
+                dw_index_context.pop()
+                nodes[n].aux2 = 0
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n

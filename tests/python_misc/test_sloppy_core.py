@@ -294,6 +294,52 @@ let other:Pair=values return other[0]+other[1]}''',
 const base=1 const width=base+1
 let base=7 let values:array<int64 length=width>=[20 22]
 return values[0]+values[1]}''',
+    'numeric-matrix-end': '''main=()=>{
+let m=reshape([1 2 3 4 5 6] 2 3)
+assert(m[end end] =? 6 and m[0 end] =? 3 and m[end 0] =? 4)
+assert(m[end-1 end] =? 3)
+assert(m[0 [0..end]].data =? [1 2 3])
+assert(m[[0..end] end].data =? [3 6])
+assert(m[[0..end] [0..end]].data =? m.data)
+let saved=m m[end end]=42
+assert(m.data =? [1 2 3 4 5 42] and saved.data =? [1 2 3 4 5 6])
+m[0 end]+=10
+assert(m[0 end] =? 13)
+m[[0..end] end]=[20 22]
+assert(m.data =? [1 2 20 4 5 22])
+return 42}''',
+    'numeric-matrix-end-ranks': '''main=()=>{
+let m=reshape([loop i in [0..24) i] 2 3 4)
+assert(m[end end end] =? 23 and m[0 end end] =? 11)
+assert(m[[..] end end].data =? [11 23])
+let n=zeros(2 3 4 5) n[end end end end]=42.0
+assert(n[1 2 3 4] =? 42.0 and sum(n) =? 42.0)
+return 42}''',
+    'numeric-matrix-end-empty': '''main=()=>{
+let m=zeros(2 0)
+let part=m[[0..end+1) [0..end+1)]
+assert(part.shape =? [2 0] and size(part) =? 0)
+m[[0..end+1) [0..end+1)]=[]
+assert(size(m) =? 0)
+return 42}''',
+    'numeric-matrix-end-place': '''let calls=0
+pick=()=>{calls+=1 return 0}
+main=()=>{
+let boxes=[[matrix=reshape([1 2 3 4 5 6] 2 3)]] let saved=boxes
+boxes[pick()].matrix[end end]=42
+assert(calls =? 1 and boxes[0].matrix[1 2] =? 42)
+assert(saved[0].matrix[1 2] =? 6)
+boxes[pick()].matrix[[..] end]=[20 22]
+assert(calls =? 2 and boxes[0].matrix[[..] 2].data =? [20 22])
+return 42}''',
+    'numeric-matrix-end-evaluation': '''let m=reshape([1 2 3 4 5 6] 2 3)
+let calls=0
+source=()=>{calls+=1 return m}
+change=()=>{m=zeros<int64>(4 5) return 0}
+main=()=>{
+let value=source()[change() end]
+assert(value =? 3 and calls =? 1 and m.shape =? [4 5])
+return 42}''',
     'numeric-matrix-slices': '''main=()=>{
 let a=reshape([1 2 3 4 5 6] 2 3)
 assert(a[[..] 1].shape =? [2] and a[[..] 1].data =? [2 5])
@@ -6743,6 +6789,8 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let m=zeros(0 3) printl(m[end 0])', 'out of bounds'),
+    ('let m=zeros(2 0) printl(m[0 end])', 'out of bounds'),
     ('let m=zeros(2 3) printl(m[[..] 3])', 'out of bounds'),
     ('let m=zeros(2 3) printl(m[[..] [0..4)])', 'out of bounds'),
     ('let m=zeros(2 3) m[[..] 1]=[1.0]', 'assigning 1 elements to a part of 2'),
@@ -6804,14 +6852,25 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
 def test_core_numeric_ranges_custom_index(compiler, tmp_path, target, release):
     (tmp_path / 'lookup.jo').write_text('''struct Lookup:
     value: int
+calls = 0
+len = (x: Lookup) -> int:
+    calls += 1
+    x.value
+count = () -> int: calls
+([]) = (x: Lookup, a: int, b: int) -> int: a + b
+([]=) = (x: mut Lookup, a: int, b: int, value: int): x.value = value + a + b
 ([]) = (x: Lookup, a: IntRange, b: IntRange) -> int: x.value + a._first + b._first
 ([]=) = (x: mut Lookup, a: IntRange, b: IntRange, value: int): x.value = value + a._first + b._first
 ''')
-    program = '''from p"lookup.jo" import Lookup
+    program = '''from p"lookup.jo" import Lookup, count
 main=()=>{
 let x=Lookup[10]
 assert(x[[1..3] (1..3]] =? 13)
 x[[1,3..5] [4,2..0]]=37
+let other=Lookup[22]
+assert(other[end end] =? 42 and count() =? 1)
+other[end end]=0
+assert(other.value =? 42 and count() =? 2)
 return x.value
 }'''
     command, error = build_case_batch(compiler, tmp_path, {'custom_index': program},
