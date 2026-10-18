@@ -59,6 +59,11 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'decimal-literals': '''main=()=>{
+printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
+printl(0d18_446_744_073_709_551_615) printl(18_446_744_073_709_551_616)
+printl(-0d9_223_372_036_854_775_808) return 0
+}''',
     'closure-captures': '''main=()=>{
 let n=0 let xs=[10]
 let next=($capture @n step:int64

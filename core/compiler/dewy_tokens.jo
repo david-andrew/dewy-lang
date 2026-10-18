@@ -15,7 +15,8 @@ enum DewyToken:
     kw_test, kw_not, kw_as, kw_transmute, kw_or, kw_xor, kw_and, kw_in,
     dot_not_ge, dot_not_le, dot_not_eq, dot_not_gt, dot_not_lt, dot_ge, dot_le, dot_floor_assign,
     dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_percent_assign, dot_power_assign, dot_floor, dot_eq,
-    dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret
+    dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
+    multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end
 
 dn_token_kind = (text: str) -> DewyToken:
     if len(text) == 0: return .none
@@ -285,6 +286,13 @@ dn_token_text = (token: DewyToken) -> str:
         dot_slash: "./"
         dot_percent: ".%"
         dot_caret: ".^"
+        multiply_apply: "MultiplyJuxtapose"
+        call: "CallJuxtapose"
+        broadcast_call: "CallJuxtaposeBroadcast"
+        index: "IndexJuxtapose"
+        type_apply: "TypeParamJuxtapose"
+        range_apply: "RangeJuxtapose"
+        statement_end: "SemicolonJuxtapose"
         _: ""
 
 # Spaced `not <?` has the same token as `not<?`, without joining strings.
@@ -297,3 +305,63 @@ dn_token_invert = (token: DewyToken) -> DewyToken:
         ge: .not_ge
         contains: .not_contains
         _: .none
+
+# Only syntax operators use the nonlexical application/range spellings.
+dn_syntax_token = (text: str) -> DewyToken:
+    if text == "MultiplyJuxtapose": return .multiply_apply
+    if text == "CallJuxtaposeBroadcast": return .broadcast_call
+    # Legacy calls can retain alternative juxtaposition labels in one payload.
+    if starts_with(text, "CallJuxtapose"): return .call
+    if text == "IndexJuxtapose": return .index
+    if text == "TypeParamJuxtapose": return .type_apply
+    if text == "RangeJuxtapose": return .range_apply
+    if text == "SemicolonJuxtapose": return .statement_end
+    dn_token_kind(text)
+
+dn_token_call = (token: DewyToken) -> bool: token == .call or token == .broadcast_call
+
+dn_token_undot = (token: DewyToken) -> DewyToken:
+    match token:
+        dot_not_ge: .not_ge
+        dot_not_le: .not_le
+        dot_not_eq: .not_eq
+        dot_not_gt: .not_gt
+        dot_not_lt: .not_lt
+        dot_ge: .ge
+        dot_le: .le
+        dot_floor_assign: .floor_assign
+        dot_plus_assign: .plus_assign
+        dot_minus_assign: .minus_assign
+        dot_star_assign: .star_assign
+        dot_slash_assign: .slash_assign
+        dot_percent_assign: .percent_assign
+        dot_power_assign: .power_assign
+        dot_floor: .floor
+        dot_eq: .eq
+        dot_gt: .gt
+        dot_lt: .lt
+        dot_plus: .plus
+        dot_minus: .minus
+        dot_star: .star
+        dot_slash: .slash
+        dot_percent: .percent
+        dot_caret: .caret
+        _: .none
+
+dn_token_uninvert = (token: DewyToken) -> DewyToken:
+    match token:
+        not_eq: .eq
+        not_lt: .lt
+        not_gt: .gt
+        not_le: .le
+        not_ge: .ge
+        not_contains: .contains
+        _: token
+
+dn_token_assignment = (token: DewyToken) -> bool:
+    match token:
+        plus_assign, minus_assign, star_assign, slash_assign, floor_assign, percent_assign, power_assign, shl_assign, shr_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_floor_assign, dot_percent_assign, dot_power_assign: true
+        _: false
+
+dn_token_statement = (token: DewyToken) -> bool:
+    token == .statement_end or token == .assign or dn_token_assignment(token)

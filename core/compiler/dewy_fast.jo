@@ -152,28 +152,22 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
                     if is_digit(d) or d == '_' or (prefix != "0d:" and is_alpha(d)): i += 1
                     else: break
                 if i == digits: dn_error(start, "expected digits after the base prefix")
-                value = prefix + source[digits..i)
-                kind = .integer
-                fraction = ""
-                exponent = ""
+                kind = if prefix == "0d:": DewyKind.source_integer else: DewyKind.integer
                 if prefix == "0d:" and i + 1 < stop and source[i] == '.' and is_digit(source[i + 1]):
                     i += 1
-                    first = i
                     loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
-                    fraction = "0d:" + source[first..i)
-                    kind = .real
+                    kind = .source_real
                 if prefix == "0d:" and i + 1 < stop and (source[i] == 'e' or source[i] == 'E') and (is_digit(source[i + 1]) or source[i + 1] == '+' or source[i + 1] == '-'):
                     i += 1
-                    sign = "+"
-                    if i < stop and (source[i] == '+' or source[i] == '-'):
-                        sign = source[i..i + 1)
-                        i += 1
+                    if i < stop and (source[i] == '+' or source[i] == '-'): i += 1
                     first = i
                     loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
                     if i == first: dn_error(start, "expected exponent digits")
-                    exponent = sign + "e0d:" + source[first..i)
-                    kind = .real
-                if kind == .real: value += "|" + fraction + "|" + exponent
+                    kind = .source_real
+                # Decimal tokens retain their source spelling. The legacy parser's
+                # base/fraction/exponent serialization is unnecessary in process.
+                value = source[digits..i)
+                if prefix != "0d:": value = prefix + value
         else if c == '"' or c == '\'':
             i = dn_quote_end(source, i, stop)
             kind = .quoted
@@ -227,10 +221,17 @@ dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = []) -> int:
     dewy_syntax.push(DewySyntax(kind, text, mkpos(dn_file, offset), children))
     id
 
-dn_operator = (kind: DewyKind, op: str, left: int, right: int, offset: int) -> int:
-    inverted = starts_with(op, "not")
-    operator = dn_node(if inverted: DewyKind.inverted_comparison else: DewyKind.operator, if inverted: op[3..] else: op, offset)
-    dn_node(kind, "", pos_off(dewy_syntax[left].pos), [operator, left, right])
+# Expression operators are scalar tags on their parent node. Child zero is
+# the shared ordinary/inverted sentinel; operands retain indices one onward.
+dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -> int:
+    id = dewy_syntax.len()
+    dewy_syntax.push(DewySyntax(kind, "", mkpos(dn_file, offset), children, symbol))
+    id
+
+dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int:
+    scalar = dn_token_uninvert(op)
+    sentinel = if scalar != op: 1 else: 0
+    dn_op_node(kind, scalar, pos_off(dewy_syntax[left].pos), [sentinel, left, right])
 
 # The supported precedence follows Dewy's user-facing operators. A whitespace
 # boundary between values ends an element; applications use adjacent brackets.
@@ -374,7 +375,7 @@ dn_block = () -> int:
             dn_tokens[dn_at].symbol = dn_token_kind(dn_tokens[dn_at].text)
             break
         if dn_accept(close): break
-        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose":
+        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and children.len() == 1 and dw_op(children[0]) == .range_apply:
             close = dn_peek()
             dn_at += 1
             break
@@ -416,13 +417,12 @@ dn_atom = () -> int:
         # A reference covers the full postfix place: @point.x, @items[i].x.
         if symbol == .at: power = 160
         if symbol == .kw_not: power = 75
-        operator = dn_node(.operator, text, token.start)
-        return dn_node(.prefix, "", token.start, [operator, dn_expr(power)])
+        return dn_op_node(.prefix, symbol, token.start, [0, dn_expr(power)])
     if symbol == .range:
         dots = dn_node(.identifier, "..", token.start)
         if not dn_range_bound(): return dots
         bound = dn_expr(101)
-        return dn_node(.flat, "", token.start, [dn_node(.operator, "RangeJuxtapose", token.start), dots, bound])
+        return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])
     if token.kind == .op: return dn_error(token.start, "expected an expression, found '{text}'")
     dn_node(token.kind, text, token.start)
 
@@ -438,37 +438,37 @@ dn_expr = (minimum: int) -> int:
         if dn_angles > 0 and ((op == .shr or op == .shr_assign or op == .angle_assign) or (op == .gt and not token.space)): break
         if op == .ellipsis and minimum <= 170:
             dn_at += 1
-            left = dn_node(.postfix, "", pos_off(dewy_syntax[left].pos), [dn_node(.operator, "...", token.start), left])
+            left = dn_op_node(.postfix, .ellipsis, pos_off(dewy_syntax[left].pos), [0, left])
             continue
         # Literal coefficients are unambiguous: 2x and 2(x + 1). General
         # adjacent names remain separate arguments or block elements.
-        if not token.space and minimum <= 135 and (dewy_syntax[left].kind == .integer or dewy_syntax[left].kind == .real) and (token.kind == .identifier or op == .lparen):
-            left = dn_operator(.binary, "MultiplyJuxtapose", left, dn_expr(136), token.start)
+        if not token.space and minimum <= 135 and (dw_integer_kind(dewy_syntax[left].kind) or dewy_syntax[left].kind == .source_real) and (token.kind == .identifier or op == .lparen):
+            left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
             continue
         if op == .dot and minimum <= 170:
             dn_at += 1
             if dn_peek() == .lparen and not dn_tokens[dn_at].space:
-                left = dn_operator(.binary, "CallJuxtaposeBroadcast", left, dn_block(), token.start)
+                left = dn_operator(.binary, .broadcast_call, left, dn_block())
                 continue
             right = dn_take()
             if right.kind != .identifier: return dn_error(right.start, "expected a member name")
-            left = dn_operator(.binary, ".", left, dn_node(.identifier, right.text, right.start), token.start)
+            left = dn_operator(.binary, .dot, left, dn_node(.identifier, right.text, right.start))
             continue
         if not token.space and (op == .lparen or op == .lbrack) and minimum <= 170:
             right = dn_block()
-            label = if op == .lparen: "CallJuxtapose" else: "IndexJuxtapose"
-            left = dn_operator(.binary, label, left, right, token.start)
+            label = if op == .lparen: DewyToken.call else: DewyToken.index
+            left = dn_operator(.binary, label, left, right)
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
             dn_at += 1
-            left = dn_operator(.binary, "CallJuxtapose", left, dn_string(token), token.start)
+            left = dn_operator(.binary, .call, left, dn_string(token))
             continue
         if not token.space and op == .langle and minimum <= 160:
-            left = dn_operator(.binary, "TypeParamJuxtapose", left, dn_block(), token.start)
+            left = dn_operator(.binary, .type_apply, left, dn_block())
             continue
         if op == .question and minimum <= 140:
             dn_at += 1
-            left = dn_node(.postfix, "", pos_off(dewy_syntax[left].pos), [dn_node(.operator, "?", token.start), left])
+            left = dn_op_node(.postfix, .question, pos_off(dewy_syntax[left].pos), [0, left])
             continue
         # An inverted comparison may be written with a space after `not`.
         if op == .kw_not and dn_at + 1 < dn_tokens.len():
@@ -482,18 +482,18 @@ dn_expr = (minimum: int) -> int:
         dn_at += 1
         if token.symbol == .kw_not: dn_at += 1
         if op == .range:
-            parts = [dn_node(.operator, "RangeJuxtapose", token.start), left, dn_node(.identifier, "..", token.start)]
+            parts = [0, left, dn_node(.identifier, "..", token.start)]
             if dn_range_bound(): parts.push(dn_expr(power + 1))
-            left = dn_node(.flat, "", pos_off(dewy_syntax[left].pos), parts)
+            left = dn_op_node(.flat, .range_apply, pos_off(dewy_syntax[left].pos), parts)
             continue
         right = dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
         if op == .comma:
             parts: int[]
-            if dw_op(left) == ",": parts = dewy_syntax[left].children
-            else: parts = [dn_node(.operator, ",", token.start), left]
+            if dw_op(left) == .comma: parts = dewy_syntax[left].children
+            else: parts = [0, left]
             parts.push(right)
-            left = dn_node(.flat, "", pos_off(dewy_syntax[left].pos), parts)
-        else: left = dn_operator(.binary, dn_token_text(op), left, right, token.start)
+            left = dn_op_node(.flat, .comma, pos_off(dewy_syntax[left].pos), parts)
+        else: left = dn_operator(.binary, op, left, right)
     dn_depth -= 1
     left
 
@@ -523,7 +523,7 @@ dn_stmt = () -> int:
             parts.push(dn_expr(0))
         result = dn_node(.keyword_expr, "", token.start, parts)
     else: result = dn_expr(0)
-    if dn_accept(.semi): result = dn_operator(.binary, "SemicolonJuxtapose", result, 0, token.start)
+    if dn_accept(.semi): result = dn_operator(.binary, .statement_end, result, 0)
     result
 
 dewy_fast_file = (file: int) -> int[]:
@@ -533,7 +533,7 @@ dewy_fast_file = (file: int) -> int[]:
     dn_at = 0
     dn_angles = 0
     dn_depth = 0
-    dewy_syntax = [DewySyntax()]
+    dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
     declarations: int[]
     loop dn_tokens[dn_at].kind != .eof:
         before = dn_at
@@ -541,7 +541,7 @@ dewy_fast_file = (file: int) -> int[]:
         loop declaration in dw_top_declarations(syntax): declarations.push(declaration)
         # Projection owns the retained data in the compact AST. Discard each
         # declaration's temporary syntax before parsing the next declaration.
-        dewy_syntax.truncate(1)
+        dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     dn_tokens = []
     dewy_syntax = []

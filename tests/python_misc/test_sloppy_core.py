@@ -5201,7 +5201,15 @@ return if x <? 0 and x+1 =? -9223372036854775807 42 else 1}''',
     'narrow-integers': '''main=()=>{let a:int8=-128 let b:uint8=0xff
 let c:int16=-32768 let d:uint16=0xffff
 return if (a as int64) =? -128 and (b as int64) =? 255 and (c as int64) =? -32768 and (d as int64) =? 65535 42 else 1}''',
-    'scientific': '''main=()=>if 4.2e1 =? 42.0 and 420e-1 =? 42.0 and 4_200e-2 =? 42.0 and 42e+0 =? 42.0 42 else 1''',
+    'scientific': '''main=()=>if 4.2e1 =? 42.0 and 420e-1 =? 42.0 and 4_200e-2 =? 42.0
+and 42e+0 =? 42.0 and 0d4_2.0_0E+0_0 =? 42.0 and 0d4.2E1 =? 42.0
+and 2.1(10+10) =? 42.0 42 else 1''',
+    'numeric-decimal-literal-boundaries': '''main=()=>{
+let top:uint64=0d18_446_744_073_709_551_615
+let large=18_446_744_073_709_551_616
+if top not=? 0xffff_ffff_ffff_ffff or large not=? 0x1_0000_0000_0000_0000 return 1
+if -0d9_223_372_036_854_775_808 not=? -9223372036854775808 return 2
+return if 000_042 =? 42 and large-top =? 1 42 else 1}''',
     'unary-plus': 'positive=(x:int64)=>+x\nmain=()=>positive(42)',
     'panic-ended-search': '''find_value=(xs:array<int64> target:int64):>int64=>{loop x in xs {if x =? target return x} panic("missing")}
 main=()=>find_value([20 42] 42)''',

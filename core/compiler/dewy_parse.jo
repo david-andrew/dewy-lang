@@ -7,6 +7,7 @@ use 'lex.jo'
 use 'parse.jo'
 use 'expr.jo'
 use 'check.jo'
+use 'dewy_tokens.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only at the legacy parser boundary and for formatter/diagnostic text.
@@ -14,7 +15,7 @@ enum DewyKind:
     unknown, op, identifier, boolean, metatag, based_string, integer, real,
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
-    operator, postfix, prefix, string, string_chunk
+    operator, postfix, prefix, string, string_chunk, source_integer, source_real
 
 dw_kind_name = (kind: DewyKind) -> str:
     match kind:
@@ -25,7 +26,9 @@ dw_kind_name = (kind: DewyKind) -> str:
         metatag: "Metatag"
         based_string: "BasedString"
         integer: "Integer"
+        source_integer: "Integer"
         real: "Real"
+        source_real: "Real"
         quoted: "quoted"
         rawquoted: "rawquoted"
         eof: "eof"
@@ -82,6 +85,7 @@ struct DewySyntax:
     text: str
     pos: int
     children: int[]
+    symbol: DewyToken = .none
 
 dewy_syntax: DewySyntax[]
 dw_index_context: int[]  # enclosing index nodes, for contextual `end`
@@ -115,11 +119,17 @@ dw_name = (id: int) -> str:
     let id = dw_unwrap(id)
     if dewy_syntax[id].kind == .identifier: return dewy_syntax[id].text
     ""
-dw_op = (id: int) -> str:
+dw_op = (id: int) -> DewyToken:
     let id = dw_unwrap(id)
-    if dewy_syntax[id].kind == .binary and dewy_syntax[dw_child(id, 0)].kind == .combined_assignment: return dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "="
-    if dewy_syntax[id].kind == .binary or dewy_syntax[id].kind == .prefix or dewy_syntax[id].kind == .postfix or dewy_syntax[id].kind == .flat: return dewy_syntax[dw_child(id, 0)].text
-    ""
+    kind = dewy_syntax[id].kind
+    if kind != .binary and kind != .prefix and kind != .postfix and kind != .flat: return .none
+    symbol = dewy_syntax[id].symbol
+    if symbol != .none: return symbol
+    # The optional legacy parser represents each operator as a child node.
+    if kind == .binary and dewy_syntax[dw_child(id, 0)].kind == .combined_assignment:
+        return dn_token_kind(dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "=")
+    dewy_syntax[dw_child(id, 0)].symbol
+
 dw_fail = (id: int, what: str) -> int:
     fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
     0
@@ -145,7 +155,18 @@ dw_alphabet = (text: str, id: int) -> str:
         _: dw_fail(id, "this numeric base")
     alphabet
 
+dw_integer_kind = (kind: DewyKind) -> bool:
+    kind == .integer or kind == .source_integer
+
 dw_unsigned = (text: str, id: int) -> u64?:
+    if dewy_syntax[id].kind == .source_integer:
+        value: u64 = 0
+        loop c in text:
+            if c == '_': continue
+            digit = u64(c - '0')
+            if value > 1844674407370955161 or (value == 1844674407370955161 and digit > 5): return none
+            value = value * 10 + digit
+        return value
     alphabet = dw_alphabet(text, id)
     base = u64(len(alphabet))
     value: u64 = 0
@@ -201,10 +222,12 @@ dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
     result
 
 dw_big_integer = (text: str, id: int) -> int:
-    alphabet = dw_alphabet(text, id)
+    decimal = dewy_syntax[id].kind == .source_integer
+    alphabet = if decimal: "0123456789" else: dw_alphabet(text, id)
+    digits = if decimal: text else: lower(dw_digits(text))
     base = u64(len(alphabet))
     limbs: u64[]
-    loop c in lower(dw_digits(text)):
+    loop c in digits:
         if c == '_': continue
         digit = find_byte(alphabet, c)
         if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
@@ -263,7 +286,7 @@ dw_binary = (id: int) -> int:
     call
 
 dw_is_include = (id: int) -> bool:
-    if not starts_with(dw_op(id), "CallJuxtapose"): return false
+    if not dn_token_call(dw_op(id)): return false
     tag = dw_unwrap(dw_child(id, 1))
     dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "include_bytes"
 
@@ -272,7 +295,7 @@ dw_include = (id: int) -> int:
     if dewy_syntax[arg].kind != .block or dewy_syntax[arg].children.len() != 1:
         return dw_fail(id, "$include_bytes without one literal path")
     path = dw_unwrap(dw_child(arg, 0))
-    if dw_op(path) != "CallJuxtapose" or dw_name(dw_child(path, 1)) != "p":
+    if dw_op(path) != .call or dw_name(dw_child(path, 1)) != "p":
         return dw_fail(path, "$include_bytes without a p\"path\" literal")
     path = dw_unwrap(dw_child(path, 2))
     if dewy_syntax[path].kind != .string: return dw_fail(path, "a nonliteral asset path")
@@ -308,21 +331,21 @@ dw_type = (id: int) -> int:
         n = mk(.trecord, pos)
         fields: int[]
         loop child in dewy_syntax[id].children:
-            if dw_op(child) != ":": return dw_fail(child, "an inline record field without a type; use a named record for defaults")
+            if dw_op(child) != .colon: return dw_fail(child, "an inline record field without a type; use a named record for defaults")
             field = dw_param(child, .vardecl)
             if has_flag(field, NF_MUT): return dw_fail(child, "a mutable inline record field; mutability belongs on the parameter")
             fields.push(field)
         set_list(n, fields)
         return n
-    if dw_op(id) == "|":
+    if dw_op(id) == .pipe:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
         return n
-    if dewy_syntax[id].kind == .postfix and dw_op(id) == "?":
+    if dewy_syntax[id].kind == .postfix and dw_op(id) == .question:
         n = mk(.topt, pos)
         nodes[n].a = i32(dw_type(dw_child(id, 1)))
         return n
-    if dw_op(id) == ":>":
+    if dw_op(id) == .returns:
         params = dw_child(id, 1)
         if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
         n = mk(.tfn, pos)
@@ -337,7 +360,7 @@ dw_type = (id: int) -> int:
         result = dw_child(id, 2)
         if dw_name(result) != "void": nodes[n].a = i32(dw_type(result))
         return n
-    if dw_op(id) == ".":
+    if dw_op(id) == .dot:
         owner = dw_name(dw_child(id, 1))
         member = dw_name(dw_child(id, 2))
         if owner == "" or member == "": return dw_fail(id, "this qualified type")
@@ -347,7 +370,7 @@ dw_type = (id: int) -> int:
         return n
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
         return dw_type(dw_child(id, 0))
-    if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "array":
+    if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
         count = dewy_syntax[args].children.len()
         if count < 1 or count > 2: return dw_fail(id, "array type constraints; use array<T> or array<T length=N>")
@@ -355,18 +378,18 @@ dw_type = (id: int) -> int:
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         if count == 2:
             constraint = dw_child(args, 1)
-            if dw_op(constraint) != "=" or dw_name(dw_child(constraint, 1)) != "length":
+            if dw_op(constraint) != .assign or dw_name(dw_child(constraint, 1)) != "length":
                 return dw_fail(constraint, "array type constraints; the supported constraint is length=N")
             nodes[n].b = i32(dw_expr(dw_child(constraint, 2)))
         return n
-    if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "dict":
+    if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "dict":
         args = dw_child(id, 2)
         if dewy_syntax[args].children.len() != 2: return dw_fail(id, "dictionary type constraints")
         n = mk(.tmap, pos)
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         nodes[n].b = i32(dw_type(dw_child(args, 1)))
         return n
-    if dw_op(id) == "TypeParamJuxtapose":
+    if dw_op(id) == .type_apply:
         n = dw_type(dw_child(id, 1))
         if nodes[n].kind != .tname or nkids(n) != 0: return dw_fail(id, "type arguments on this type expression")
         args: int[]
@@ -395,16 +418,16 @@ dw_param = (id: int, kind: NK) -> int:
     let id = id
     pos = dewy_syntax[id].pos
     initial = 0
-    if dw_op(id) == "=":
+    if dw_op(id) == .assign:
         initial = dw_child(id, 2)
         id = dw_child(id, 1)
     lhs = id
     annotation = 0
-    if dw_op(id) == ":":
+    if dw_op(id) == .colon:
         lhs = dw_child(id, 1)
         annotation = dw_child(id, 2)
     else if kind == .vardecl and initial == 0: return dw_fail(id, "a field without a type or default")
-    by_place = dw_op(lhs) == "@"
+    by_place = dw_op(lhs) == .at
     if by_place: lhs = dw_child(lhs, 1)
     name = dw_name(lhs)
     pattern = kind == .param and dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:"
@@ -424,13 +447,13 @@ dw_function = (id: int, name: str) -> int:
     signature = dw_child(id, 1)
     params = signature
     result = 0
-    if dw_op(signature) == ":>":
+    if dw_op(signature) == .returns:
         params = dw_child(signature, 1)
         result = dw_child(signature, 2)
-    if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "[]:":
+    if dw_op(params) == .call and dewy_syntax[dw_child(params, 1)].text == "[]:":
         return dw_fail(params, "a separate capture list; use ($capture @name) in the parameter list")
     type_params: int[]
-    if dw_op(params) == "CallJuxtapose" and dewy_syntax[dw_child(params, 1)].text == "<>:":
+    if dw_op(params) == .call and dewy_syntax[dw_child(params, 1)].text == "<>:":
         if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
         type_params = dw_type_params(dw_child(params, 1))
         params = dw_child(params, 2)
@@ -456,11 +479,11 @@ dw_function = (id: int, name: str) -> int:
             capture = true
             continue
         if capture:
-            target = if dw_op(p) == "@": dw_child(p, 1) else: p
+            target = if dw_op(p) == .at: dw_child(p, 1) else: p
             nm = dw_name(target)
             if nm == "" or nm == "_": return dw_fail(p, "a capture other than an enclosing local name")
             cap = dw_expr(target)
-            if dw_op(p) == "@": add_flag(cap, NF_MUT)
+            if dw_op(p) == .at: add_flag(cap, NF_MUT)
             if bound.has(int(nodes[cap].name)): fatal(nodes[cap].pos, "duplicate parameter binding '{nm}'")
             bound[int(nodes[cap].name)] = true
             captures.push(cap)
@@ -504,46 +527,45 @@ dw_function = (id: int, name: str) -> int:
     nodes[n].b = i32(body)
     return n
 
-dw_binary_token = (op: str, id: int) -> Tok:
+dw_binary_token = (op: DewyToken, id: int) -> Tok:
     match op:
-        "+": .plus
-        "-": .minus
-        "*", "MultiplyJuxtapose": .star
-        "/": .slash
-        "%": .percent
-        "=?": .eq
-        "not=?": .ne
-        "in?": .kw_in
-        "<?": .lt
-        "<=?": .le
-        ">?": .gt
-        ">=?": .ge
-        "<<": .shl
-        ">>": .shr
-        "and", "&": .amp
-        "or", "|": .pipe
-        "xor": .caret
+        plus: .plus
+        minus: .minus
+        star, multiply_apply: .star
+        slash: .slash
+        percent: .percent
+        eq: .eq
+        not_eq: .ne
+        contains: .kw_in
+        lt: .lt
+        le: .le
+        gt: .gt
+        ge: .ge
+        shl: .shl
+        shr: .shr
+        kw_and, amp: .amp
+        kw_or, pipe: .pipe
+        kw_xor: .caret
         _:
-            dw_fail(id, "operator '{op}'")
+            dw_fail(id, "operator '{dn_token_text(op)}'")
             .eof
 
 # Reuse the fused array lowering, with Dewy's scalar arithmetic inside it.
 # In particular, integer ./ stays exact division and .// rounds downward.
-dw_broadcast = (op: str, a: int, b: int, id: int) -> int:
+dw_broadcast = (op: DewyToken, a: int, b: int, id: int) -> int:
     pos = dewy_syntax[id].pos
-    if op in ["/", "//", "%", "^"]:
-        name = if op == "/": "__dewy_divide" else if op == "//": "__floor_div" else if op == "%": "__floor_mod" else: "__dewy_power"
+    if (op == .slash or op == .floor or op == .percent or op == .caret):
+        name = if op == .slash: "__dewy_divide" else if op == .floor: "__floor_div" else if op == .percent: "__floor_mod" else: "__dewy_power"
         n = bc_call(name, [a, b], pos)
         add_flag(n, NF_BROADCAST)
         return n
-    spelling = op
-    inverted = starts_with(op, "not")
-    if inverted: spelling = op[3..]
-    if spelling not in ["+", "-", "*", "=?", "<?", "<=?", ">?", ">=?"]: return dw_fail(id, "broadcast operator '.{op}'")
+    spelling = dn_token_uninvert(op)
+    inverted = spelling != op
+    if not (spelling == .plus or spelling == .minus or spelling == .star or spelling == .eq or spelling == .lt or spelling == .le or spelling == .gt or spelling == .ge): return dw_fail(id, "broadcast operator '.{dn_token_text(op)}'")
     n = mk(.binary, pos)
     nodes[n].op = i32(int(Tok.dotop))
-    nodes[n].aux = i32(spelling[0])
-    nodes[n].aux2 = if spelling == "<=?" or spelling == ">=?": 1 else: 0
+    nodes[n].aux = i32(dn_token_text(spelling)[0])
+    nodes[n].aux2 = if spelling == .le or spelling == .ge: 1 else: 0
     nodes[n].ival = int(inverted)
     nodes[n].a = i32(a)
     nodes[n].b = i32(b)
@@ -555,7 +577,7 @@ dw_expr = (id: int) -> int:
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     op = dw_op(id)
-    if op == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
+    if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
     if dw_is_include(id): return dw_include(id)
     if k == .based_string: return dw_binary(id)
     if k == .identifier:
@@ -570,7 +592,7 @@ dw_expr = (id: int) -> int:
         n = mk(.ident, pos)
         nodes[n].name = i32(intern(if text == "printl": "print" else: text))
         return n
-    if k == .integer:
+    if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):
             n = mk(.int_lit, pos)
             nodes[n].ival = int(value)
@@ -578,18 +600,20 @@ dw_expr = (id: int) -> int:
             if nodes[n].ival < 0: add_flag(n, NF_U64)
             return n
         return dw_big_integer(text, id)
-    if k == .real:
-        parts = split(text, "|")
-        if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
-        number = dw_digits(parts[0])
-        if parts[1] != "":
-            if not starts_with(parts[1], "0d:"): return dw_fail(id, "nondecimal real fractions")
-            number = number + "." + dw_digits(parts[1])
-        if parts[2] != "":
-            exponent = parts[2]
-            if exponent[1] != 'e' or not starts_with(exponent[2..], "0d:"):
-                return dw_fail(id, "nondecimal real exponents")
-            number += "e" + exponent[..1) + dw_digits(exponent[2..])
+    if k == .real or k == .source_real:
+        number = text
+        if k == .real:
+            parts = split(text, "|")
+            if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
+            number = dw_digits(parts[0])
+            if parts[1] != "":
+                if not starts_with(parts[1], "0d:"): return dw_fail(id, "nondecimal real fractions")
+                number = number + "." + dw_digits(parts[1])
+            if parts[2] != "":
+                exponent = parts[2]
+                if exponent[1] != 'e' or not starts_with(exponent[2..], "0d:"):
+                    return dw_fail(id, "nondecimal real exponents")
+                number += "e" + exponent[..1) + dw_digits(exponent[2..])
         value = to_float(replace(number, "_", ""))
         if value == none: return dw_fail(id, "this real literal")
         if value! - value! != 0.0: fatal(pos, "real literal exceeds float64")
@@ -624,32 +648,32 @@ dw_expr = (id: int) -> int:
         return n
     if k == .block:
         children = dewy_syntax[id].children
-        if children.len() == 1 and dw_op(children[0]) == "RangeJuxtapose": return dw_range_value(dw_iterable(id, true, true))
+        if children.len() == 1 and dw_op(children[0]) == .range_apply: return dw_range_value(dw_iterable(id, true, true))
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
             if children.len() == 1 and dewy_syntax[children[0]].kind == .flow:
                 first = dw_child(children[0], 0)
                 if dewy_syntax[first].kind == .keyword_expr and dewy_syntax[dw_child(first, 0)].text == "loop": return dw_comprehension(children[0])
-            is_map = children.len() > 0 and dw_op(children[0]) == "->"
-            is_record = children.len() > 0 and dw_op(children[0]) == "="
+            is_map = children.len() > 0 and dw_op(children[0]) == .arrow
+            is_record = children.len() > 0 and dw_op(children[0]) == .assign
             loop child in children:
-                if dw_op(child) == "=": is_record = true
+                if dw_op(child) == .assign: is_record = true
             n = mk(if is_map: NK.map_lit else if is_record: NK.record_lit else: NK.array, pos)
             xs: int[]
             loop child in children:
                 item = dw_unwrap(child)
-                if not is_map and dewy_syntax[item].kind == .postfix and dw_op(item) == "...":
+                if not is_map and dewy_syntax[item].kind == .postfix and dw_op(item) == .ellipsis:
                     value = dw_expr(dw_child(item, 1))
                     add_flag(value, NF_SPREAD)
                     xs.push(value)
                 else if is_map:
-                    if dw_op(child) != "->": return dw_fail(child, "a dictionary item without ->")
+                    if dw_op(child) != .arrow: return dw_fail(child, "a dictionary item without ->")
                     pair = mk(.pair, dewy_syntax[child].pos)
                     nodes[pair].a = i32(dw_expr(dw_child(child, 1)))
                     nodes[pair].b = i32(dw_expr(dw_child(child, 2)))
                     xs.push(pair)
                 else if is_record:
-                    if dw_op(child) != "=": return dw_fail(child, "a record item without a field name and =")
+                    if dw_op(child) != .assign: return dw_fail(child, "a record item without a field name and =")
                     name = dw_name(dw_child(child, 1))
                     if name == "": return dw_fail(child, "a record field without a simple name")
                     field = mk(.namedarg, dewy_syntax[child].pos)
@@ -661,20 +685,20 @@ dw_expr = (id: int) -> int:
             return n
         if text == "{{}}:": return dw_block(id)
         return dw_fail(id, "this expression block")
-    if k == .postfix and op == "...":
+    if k == .postfix and op == .ellipsis:
         fatal(pos, "spread is supported inside array or record literals: `[values... item]` or `[base... field=value]`")
     if k == .prefix:
         e = dw_expr(dw_child(id, 1))
-        if op == "@":
+        if op == .at:
             add_flag(e, NF_MUT)
             return e
-        if op == ".-" or op == ".+":
+        if op == .dot_minus or op == .dot_plus:
             n = mk(.unary, pos)
-            nodes[n].op = i32(int(if op == ".-": Tok.minus else: Tok.plus))
+            nodes[n].op = i32(int(if op == .dot_minus: Tok.minus else: Tok.plus))
             nodes[n].a = i32(e)
             add_flag(n, NF_BROADCAST)
             return n
-        if op == "-" and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
+        if op == .minus and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
             if has_flag(e, NF_U64) and nodes[e].ival != -9223372036854775807 - 1:
                 value = u64(nodes[e].ival)
                 return dw_bigint_value([value & 0xFFFFFFFF, value >> 32], pos, true)
@@ -683,13 +707,13 @@ dw_expr = (id: int) -> int:
             nodes[e].aux2 = 1
             clear_flag(e, NF_U64)
             return e
-        if op == "-" and nodes[e].kind == .float_lit:
+        if op == .minus and nodes[e].kind == .float_lit:
             nodes[e].fval = -nodes[e].fval
             nodes[e].pos = pos
             return e
-        n = mk(if op == "not": NK.not_ else: NK.unary, pos)
-        if op != "-" and op != "not" and op != "+": return dw_fail(id, "prefix '{op}'")
-        nodes[n].op = i32(int(if op == "-": Tok.minus else: Tok.plus))
+        n = mk(if op == .kw_not: NK.not_ else: NK.unary, pos)
+        if op != .minus and op != .kw_not and op != .plus: return dw_fail(id, "prefix '{op}'")
+        nodes[n].op = i32(int(if op == .minus: Tok.minus else: Tok.plus))
         nodes[n].a = i32(e)
         return n
     if k == .flow:
@@ -700,13 +724,14 @@ dw_expr = (id: int) -> int:
     if k == .binary:
         left = dw_child(id, 1)
         right = dw_child(id, 2)
-        if len(op) > 1 and op[0] == '.' and op[1] != '.':
-            return dw_broadcast(op[1..], dw_expr(left), dw_expr(right), id)
-        if op == "is?" or op == "isnt?":
+        scalar_op = dn_token_undot(op)
+        if scalar_op != .none:
+            return dw_broadcast(scalar_op, dw_expr(left), dw_expr(right), id)
+        if op == .is_type or op == .isnt_type:
             n = mk(.istype, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_type(right))
-            if op == "isnt?" or dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison:
+            if op == .isnt_type or dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison:
                 inverted = mk(.not_, pos)
                 nodes[inverted].a = i32(n)
                 return inverted
@@ -715,12 +740,12 @@ dw_expr = (id: int) -> int:
             comparison = mk(.binary, pos)
             nodes[comparison].op = i32(int(dw_binary_token(op, id)))
             nodes[comparison].a = i32(dw_expr(left))
-            nodes[comparison].b = i32(if op == "in?": dw_membership(right) else: dw_expr(right))
+            nodes[comparison].b = i32(if op == .contains: dw_membership(right) else: dw_expr(right))
             n = mk(.not_, pos)
             nodes[n].a = i32(comparison)
             return n
-        if op == "=>": return dw_function(id, "")
-        if op == "TypeParamJuxtapose":
+        if op == .function: return dw_function(id, "")
+        if op == .type_apply:
             n = mk(.typeapply, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].c = i32(dw_type(id))
@@ -728,49 +753,49 @@ dw_expr = (id: int) -> int:
             loop child in dewy_syntax[right].children: args.push(dw_type(child))
             set_list(n, args)
             return n
-        if op == "//" or op == "%" or op == "^" or op == "/":
+        if op == .floor or op == .percent or op == .caret or op == .slash:
             a = dw_expr(left)
             b = dw_expr(right)
-            name = if op == "/": "__dewy_divide" else if op == "^": "__dewy_power" else if op == "//": "__floor_div" else: "__floor_mod"
+            name = if op == .slash: "__dewy_divide" else if op == .caret: "__dewy_power" else if op == .floor: "__floor_div" else: "__floor_mod"
             callee = mk(.ident, pos)
             nodes[callee].name = i32(intern(name))
             n = mk(.call, pos)
             nodes[n].a = i32(callee)
             set_list(n, [a, b])
             return n
-        if op == ".":
+        if op == .dot:
             name = dw_name(right)
             if name == "": return dw_fail(id, "computed member names")
             n = mk(.field, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].name = i32(intern(name))
             return n
-        if op == "as":
+        if op == .kw_as:
             n = mk(.cast, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_type(right))
             return n
-        if starts_with(op, "CallJuxtapose") or op == "IndexJuxtapose":
+        if dn_token_call(op) or op == .index:
             xs = dewy_syntax[right].children
             bracket = dewy_syntax[right].kind == .block and dewy_syntax[right].text in ["[]:", "[):"]
             if bracket and dw_name(left) == "set":
                 return bc_call("__dewy_set", [dw_expr(right)], pos)
             n = mk(if bracket: NK.index else: NK.call, pos)
-            if op == "CallJuxtaposeBroadcast": add_flag(n, NF_BROADCAST)
+            if op == .broadcast_call: add_flag(n, NF_BROADCAST)
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             args: int[]
             if bracket: dw_index_context.push(n)
             if dewy_syntax[right].kind != .block: args.push(dw_expr(right))
-            else if bracket and xs.len() == 1 and (dw_op(xs[0]) == "RangeJuxtapose" or dw_name(xs[0]) == ".."):
+            else if bracket and xs.len() == 1 and (dw_op(xs[0]) == .range_apply or dw_name(xs[0]) == ".."):
                 args.push(dw_iterable(right, true))
             else:
                 if dewy_syntax[right].text == "[):": return dw_fail(right, "an exclusive index without a range")
                 loop child in xs:
                     # Temporary parse cursor: each axis gives contextual end its own name.
                     if bracket: nodes[n].aux2 = i32(args.len())
-                    if dw_op(child) == "=":
+                    if dw_op(child) == .assign:
                         a = mk(.namedarg, dewy_syntax[child].pos)
                         nodes[a].name = i32(intern(dw_name(dw_child(child, 1))))
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
@@ -783,15 +808,15 @@ dw_expr = (id: int) -> int:
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
-        if op == "??":
+        if op == .coalesce:
             n = mk(.coalesce, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_expr(right))
             return n
-        n = mk(if op == "and": NK.and_ else if op == "or": NK.or_ else: NK.binary, pos)
+        n = mk(if op == .kw_and: NK.and_ else if op == .kw_or: NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
         nodes[n].a = i32(dw_expr(left))
-        nodes[n].b = i32(if op == "in?": dw_membership(right) else: dw_expr(right))
+        nodes[n].b = i32(if op == .contains: dw_membership(right) else: dw_expr(right))
         return n
     return dw_fail(id, "syntax '{dw_kind_name(k)}'")
 
@@ -799,14 +824,14 @@ dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
     k = dewy_syntax[id].kind
-    if dw_op(id) == "as" and dw_is_include(dw_child(id, 1)):
+    if dw_op(id) == .kw_as and dw_is_include(dw_child(id, 1)):
         name = dw_name(dw_child(id, 2))
         if name == "": return dw_fail(id, "this asset binding")
         n = mk(.vardecl, pos)
         nodes[n].name = i32(intern(name))
         nodes[n].b = i32(dw_include(dw_child(id, 1)))
         return n
-    if dw_op(id) == "SemicolonJuxtapose":
+    if dw_op(id) == .statement_end:
         s = dw_stmt(dw_child(id, 1), top)
         if nodes[s].kind == .exprstmt:
             n = mk(.assign, pos)
@@ -844,21 +869,22 @@ dw_stmt = (id: int, top: bool = false) -> int:
         n = dw_flow(id, 0)
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
-    if dw_op(id) in ["+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]:
+    if dn_token_assignment(dw_op(id)):
         n = mk(.assign, pos)
         op = dw_op(id)
-        if op[0] == '.':
+        scalar_op = dn_token_undot(op)
+        if scalar_op != .none:
             add_flag(n, NF_BROADCAST)
-            op = op[1..]
-        nodes[n].op = i32(int(if op == "+=": Tok.pluseq else if op == "-=": Tok.minuseq else if op == "/=" or op == "//=": Tok.slasheq else if op == "%=": Tok.percenteq else if op == "^=": Tok.careteq else if op == "<<=": Tok.shleq else if op == ">>=": Tok.shreq else: Tok.stareq))
-        if op in ["/=", "//=", "%=", "^="]:
-            nodes[n].sval = i32(intern(if op == "/=": "__dewy_divide" else if op == "//=": "__floor_div" else if op == "%=": "__floor_mod" else: "__dewy_power"))
+            op = scalar_op
+        nodes[n].op = i32(int(if op == .plus_assign: Tok.pluseq else if op == .minus_assign: Tok.minuseq else if op == .slash_assign or op == .floor_assign: Tok.slasheq else if op == .percent_assign: Tok.percenteq else if op == .power_assign: Tok.careteq else if op == .shl_assign: Tok.shleq else if op == .shr_assign: Tok.shreq else: Tok.stareq))
+        if (op == .slash_assign or op == .floor_assign or op == .percent_assign or op == .power_assign):
+            nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
         nodes[n].a = i32(dw_expr(dw_child(id, 1)))
         nodes[n].b = i32(dw_expr(dw_child(id, 2)))
         return n
-    if dw_op(id) == "=" or dw_op(id) == ":":
+    if dw_op(id) == .assign or dw_op(id) == .colon:
         lhs = dw_unwrap(dw_child(id, 1))
-        if dw_op(id) == ":" or top and dw_op(lhs) == ":": return dw_declare(id, false, top)
+        if dw_op(id) == .colon or top and dw_op(lhs) == .colon: return dw_declare(id, false, top)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
         if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
@@ -881,7 +907,7 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
     loop child in dewy_syntax[id].children:
         let child = dw_unwrap(child)
         annotation = 0
-        if dw_op(child) == ":":
+        if dw_op(child) == .colon:
             annotation = dw_child(child, 2)
             child = dw_unwrap(dw_child(child, 1))
         if dewy_syntax[child].kind == .block and dewy_syntax[child].text == "[]:":
@@ -915,12 +941,12 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
     initial = 0
     lhs = id
-    if dw_op(id) == "=":
+    if dw_op(id) == .assign:
         lhs = dw_child(id, 1)
         initial = dw_child(id, 2)
     if constant and initial == 0: return dw_fail(lhs, "a const declaration without an initializer")
     annotation = 0
-    if dw_op(lhs) == ":":
+    if dw_op(lhs) == .colon:
         annotation = dw_child(lhs, 2)
         lhs = dw_child(lhs, 1)
     if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
@@ -933,9 +959,9 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
-    if not top and initial != 0 and dw_op(dw_grouped(initial)) == "&":
+    if not top and initial != 0 and dw_op(dw_grouped(initial)) == .amp:
         return dw_fail(initial, "a local overload group; declare it at module level")
-    if initial != 0 and dw_op(initial) == "=>":
+    if initial != 0 and dw_op(initial) == .function:
         if top: return dw_function(initial, name)
         n = mk(.vardecl, dewy_syntax[id].pos)
         nodes[n].name = i32(intern(name))
@@ -946,7 +972,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if annotation != 0 and dw_name(annotation) == "type":
         if initial == 0: return dw_fail(id, "a type declaration without a definition")
         type_params: int[]
-        if dw_op(initial) in ["IndexJuxtapose", "CallJuxtapose"] and dewy_syntax[dw_child(initial, 1)].text == "<>:":
+        if (dw_op(initial) == .index or dw_op(initial) == .call) and dewy_syntax[dw_child(initial, 1)].text == "<>:":
             type_params = dw_type_params(dw_child(initial, 1))
             initial = dw_child(initial, 2)
         if dewy_syntax[initial].text != "[]:":
@@ -981,13 +1007,13 @@ dw_import = (id: int) -> int:
     n = mk(.import_, pos)
     spec = dw_unwrap(dw_child(id, 1))
     alias = ""
-    if dw_op(spec) == "as":
+    if dw_op(spec) == .kw_as:
         alias = dw_name(dw_child(spec, 2))
         if alias == "": return dw_fail(spec, "this module alias")
         spec = dw_unwrap(dw_child(spec, 1))
     value = dw_name(spec)
     if value == "":
-        if dw_op(spec) != "CallJuxtapose" or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use a library name or p\"file.dewy\"")
+        if dw_op(spec) != .call or dw_name(dw_child(spec, 1)) != "p": return dw_fail(spec, "this module path; use a library name or p\"file.dewy\"")
         path = dw_unwrap(dw_child(spec, 2))
         if dewy_syntax[path].kind != .string: return dw_fail(path, "a nonliteral module path")
         value = dewy_syntax[path].text
@@ -1000,7 +1026,7 @@ dw_import = (id: int) -> int:
         nodes[n].aux = 2
         selected = dw_unwrap(dw_child(id, 3))
         imported: int[]
-        if dw_op(selected) == ",":
+        if dw_op(selected) == .comma:
             loop i in [1..dewy_syntax[selected].children.len()): imported.push(dw_import_name(dw_child(selected, i)))
         else: imported.push(dw_import_name(selected))
         loop item in imported:
@@ -1014,7 +1040,7 @@ dw_import_name = (id: int) -> int:
     loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
         id = dw_unwrap(dw_child(id, 0))
     alias = ""
-    if dw_op(id) == "as":
+    if dw_op(id) == .kw_as:
         alias = dw_name(dw_child(id, 2))
         if alias == "": return dw_fail(id, "this imported alias; group each aliased name")
         id = dw_child(id, 1)
@@ -1034,7 +1060,7 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
     exclude_first = false
-    if dewy_syntax[id].kind == .block and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == "RangeJuxtapose" or dw_name(dw_child(id, 0)) == ".."):
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == .range_apply or dw_name(dw_child(id, 0)) == ".."):
         wrapper = dewy_syntax[id].text
         if wrapper not in ["[]:", "[):", "():", "(]:"]: return dw_fail(id, "this range boundary")
         inclusive = wrapper == "[]:" or wrapper == "(]:"
@@ -1042,7 +1068,7 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
         if exclude_first and slice and not membership: return dw_fail(id, "a slice with an exclusive first bound")
         id = dw_unwrap(dw_child(id, 0))
     if slice and dw_name(id) == "..": return mk(.range, dewy_syntax[id].pos)
-    if dw_op(id) != "RangeJuxtapose":
+    if dw_op(id) != .range_apply:
         value = dw_expr(id)
         if slice: return value
         # Resolve streaming text/ranges and dense dictionary snapshots once,
@@ -1058,7 +1084,7 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     at = 1
     if dw_name(dw_child(id, at)) != "..":
         first = dw_unwrap(dw_child(id, at))
-        if dw_op(first) == ",":
+        if dw_op(first) == .comma:
             if dewy_syntax[first].children.len() != 3: return dw_fail(first, "a stepped range without exactly two starting values")
             nodes[n].a = i32(dw_expr(dw_child(first, 1)))
             nodes[n].c = i32(dw_expr(dw_child(first, 2)))
@@ -1078,10 +1104,10 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
     let id = dw_unwrap(id)
     op = dw_op(id)
     n = mk(.lhead, dewy_syntax[id].pos)
-    if op == "in":
+    if op == .kw_in:
         nodes[n].op = 1
         binder = dw_unwrap(dw_child(id, 1))
-        if dw_op(binder) == "@":
+        if dw_op(binder) == .at:
             if combined: return dw_fail(binder, "a mutable binding in a combined loop; use a separate loop @item in items")
             add_flag(n, NF_MUT)
             binder = dw_unwrap(dw_child(binder, 1))
@@ -1112,8 +1138,8 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
                 it = bc_call("__dewy_open_range_iter", [int(nodes[it].a), int(nodes[it].c)], nodes[it].pos)
             else: it = bc_call("__dewy_iter", [dw_range_value(it)], nodes[it].pos)
         nodes[n].a = i32(it)
-    else if op == "and" or op == "or":
-        nodes[n].op = if op == "and": 2 else: 3
+    else if op == .kw_and or op == .kw_or:
+        nodes[n].op = if op == .kw_and: 2 else: 3
         nodes[n].a = i32(dw_loop_head(dw_child(id, 1), true))
         nodes[n].b = i32(dw_loop_head(dw_child(id, 2), true))
         return head_collapse(n)
@@ -1138,7 +1164,7 @@ dw_pattern = (id: int) -> int:
         if name != "_": nodes[p].name = i32(intern(name))
         return p
     binding = ""
-    if dw_op(id) == ":":
+    if dw_op(id) == .colon:
         binding = dw_name(dw_child(id, 1))
         if binding == "": return dw_fail(id, "this match binding")
         id = dw_unwrap(dw_child(id, 2))
@@ -1146,8 +1172,8 @@ dw_pattern = (id: int) -> int:
         id = dw_unwrap(dw_child(id, 0))
     else: return dw_fail(id, "this match pattern")
     k = dewy_syntax[id].kind
-    literal = k == .integer or k == .string or k == .boolean or dw_name(id) == "none"
-    if dw_op(id) == "-": literal = dewy_syntax[dw_unwrap(dw_child(id, 1))].kind == .integer
+    literal = dw_integer_kind(k) or k == .string or k == .boolean or dw_name(id) == "none"
+    if dw_op(id) == .minus: literal = dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
     p = mk(if literal: NK.plit else: NK.ptype, pos)
     nodes[p].a = i32(if literal: dw_expr(id) else: dw_type(id))
     if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
@@ -1161,7 +1187,7 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dewy_syntax[body].children
     xs: int[]
     loop source in arms:
-        if dw_op(source) != "=>": return dw_fail(source, "a match arm without =>")
+        if dw_op(source) != .function: return dw_fail(source, "a match arm without =>")
         arm = mk(.arm, dewy_syntax[source].pos)
         set_list(arm, [dw_pattern(dw_child(source, 1))])
         nodes[arm].b = i32(dw_block(dw_child(source, 2), accumulator, map))
@@ -1259,7 +1285,7 @@ dw_collection_kind = (id: int) -> int:
                     arms = [body]
                     if dewy_syntax[body].kind == .block: arms = dewy_syntax[body].children
                     loop branch in arms:
-                        if dw_op(branch) != "=>": return dw_fail(branch, "a match arm without =>")
+                        if dw_op(branch) != .function: return dw_fail(branch, "a match arm without =>")
                         candidates.push(dw_child(branch, 2))
                 else: candidates.push(dw_child(arm, 2))
             else: candidates.push(arm)
@@ -1267,8 +1293,8 @@ dw_collection_kind = (id: int) -> int:
         if children.len() == 0: return 0
         candidates.push(children[children.len() - 1])
     else:
-        if kind == .keyword_expr or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return 0
-        return if dw_op(id) == "->": 2 else: 1
+        if kind == .keyword_expr or dn_token_statement(dw_op(id)): return 0
+        return if dw_op(id) == .arrow: 2 else: 1
     result = 0
     loop candidate in candidates:
         next = dw_collection_kind(candidate)
@@ -1285,11 +1311,11 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
     if kind == .block and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
-    if kind == .keyword_expr or dw_op(id) in ["SemicolonJuxtapose", "=", "+=", "-=", "*=", "/=", "//=", "%=", "^=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".//=", ".%=", ".^="]: return dw_stmt(id)
+    if kind == .keyword_expr or dn_token_statement(dw_op(id)): return dw_stmt(id)
     pos = dewy_syntax[id].pos
     value = 0
     if map:
-        if dw_op(id) != "->": return dw_fail(id, "a dictionary comprehension element without ->")
+        if dw_op(id) != .arrow: return dw_fail(id, "a dictionary comprehension element without ->")
         value = mk(.tuple, pos)
         set_list(value, [dw_expr(dw_child(id, 1)), dw_expr(dw_child(id, 2))])
     else: value = dw_expr(id)
@@ -1340,29 +1366,29 @@ dw_grouped = (id: int) -> int:
 
 dw_overload_members = (id: int, name: str, declarations: mut int[]):
     let id = dw_grouped(id)
-    if dw_op(id) == "&":
+    if dw_op(id) == .amp:
         loop i in [1..dewy_syntax[id].children.len()):
             dw_overload_members(dw_child(id, i), name, declarations)
-    else if dw_op(id) == "=>": declarations.push(dw_function(id, name))
+    else if dw_op(id) == .function: declarations.push(dw_function(id, name))
     else: dw_fail(id, "an overload group member other than a function literal")
 
 # Expand a static overload group directly into ordinary declarations. This keeps
 # overload selection, generic specialization and callable context in one checker.
 dw_top_declarations = (id: int) -> int[]:
     declaration = dw_unwrap(id)
-    if dw_op(declaration) == "SemicolonJuxtapose": declaration = dw_unwrap(dw_child(declaration, 1))
+    if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
     if dewy_syntax[declaration].kind == .keyword_expr:
         word = dewy_syntax[dw_child(declaration, 0)].text
         if word == "let" or word == "const": declaration = dw_unwrap(dw_child(declaration, 1))
-    if dw_op(declaration) == "=":
+    if dw_op(declaration) == .assign:
         name = dw_name(dw_child(declaration, 1))
         initial = dw_grouped(dw_child(declaration, 2))
-        if name != "" and dw_op(initial) == "&":
+        if name != "" and dw_op(initial) == .amp:
             if name == "main": return [dw_fail(id, "an overloaded entry point")]
             declarations: int[]
             dw_overload_members(initial, name, declarations)
             return declarations
-        if name != "" and dw_op(initial) == "=>": return [dw_function(initial, name)]
+        if name != "" and dw_op(initial) == .function: return [dw_function(initial, name)]
     [dw_stmt(id, true)]
 
 # Only the optional legacy parser uses this Linux transport. Keep it out of
@@ -1419,7 +1445,8 @@ dewy_parse_file = (file: int) -> int[]:
         if depth < 0 or depth > stack.len() or start < 0: fatal(mkpos(file, 0), "invalid syntax location")
         stack.truncate(depth)
         id = dewy_syntax.len()
-        dewy_syntax.push(DewySyntax(dw_kind_from_name(fields[1]), text, mkpos(file, start)))
+        kind = dw_kind_from_name(fields[1])
+        dewy_syntax.push(DewySyntax(kind, text, mkpos(file, start), [], dn_syntax_token(text)))
         if stack.len() > 0: dewy_syntax[stack[stack.len() - 1]].children.push(id)
         else: root = id
         stack.push(id)

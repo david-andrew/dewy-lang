@@ -552,6 +552,74 @@ with two workers, covering native/web and default/release. The preceding numeric
 token commit also passed the full Linux CI and Windows/macOS ARM64/Linux ARM64
 host jobs.
 
+## Keep syntax operators and decimal literals compact
+
+Expression nodes now carry numeric operator tags directly, eliminating the
+separate operator nodes and string lookups in projection. The optional legacy
+parser still translates its original tree at its boundary. Decimal literals
+retain one source spelling instead of serializing base/fraction/exponent fields
+and then splitting and reconstructing them. Unsigned decimal accumulation uses
+a constant overflow bound, with the existing exact-integer fallback above u64.
+Scientific notation, underscores, explicit decimal prefixes, based literals,
+negative literal patterns and literal coefficients retain their semantics.
+This follows Sloppy's direct numeric-token/literal processing without adopting
+its rejection of integers larger than 64 bits.
+
+Five alternating CPU pairs measured the operator change at roughly 2–3% on the
+large Dewy program and conformance corpus; small shifts also appear on Jo/control
+workloads, so treat that isolated speed result cautiously. Removing decimal
+serialization on top of it gives a clearer result:
+
+| Fresh default build | Parent operators | Source literals | Median paired ratio |
+| --- | ---: | ---: | ---: |
+| Generated Dewy program | 800 ms | 735 ms | 0.907 |
+| Fixed conformance corpus | 725 ms | 661 ms | 0.909 |
+| Same generated Jo program | 543 ms | 537 ms | 0.989 |
+| Tour | 54 ms | 54 ms | 0.985 |
+| Netpong | 369 ms | 372 ms | 1.025 |
+| Compiler self-build (release) | 1738 ms | 1687 ms | 0.973 |
+
+The two large Dewy inputs improve about **9%**; small/library-heavy builds do not
+show a consistent gain. Use the median of paired CPU ratios, rather than dividing
+separate medians, because the shared host varies during the measurements.
+[Operator samples](audits/2026-10-18/parent-operators-compile.json),
+[literal samples](audits/2026-10-18/source-literals-compile.json).
+
+A separate end-to-end comparison against the compiler from before this frontend
+work (`2dd67e51`) measured median paired CPU ratios of **0.835 default** and
+**0.836 release** on the generated Dewy program: about **16% less CPU time**.
+The corpus ratio was 0.927; same-source Jo default, Tour, Netpong and the compiler
+self-build were essentially flat (Jo release was 1.037). Peak RSS fell from
+162,944 to 132,232 KiB, about **19%**, with the generated program's result unchanged.
+The default build's 669 ms median CPU time is roughly 66k physical Dewy lines/s,
+still far from 250k. These combined samples supersede any estimate obtained by
+multiplying improvements measured in separate sessions.
+[Combined measurements](audits/2026-10-18/combined-frontend-compile.json).
+
+The operator/literal changes passed an independent C bootstrap and **5,759
+checks in 234.15 seconds**, with two workers. Ten targeted literal/formatter
+checks also passed, adding native/web coverage of explicit decimal prefixes,
+scientific notation, coefficients, and u64/exact-integer boundaries. A follow-up
+fix classifies all legacy token payloads, including juxtaposition nodes whose
+kind has no compact equivalent, and preserves legacy combined call labels. Eight
+representative legacy-parser programs produced the same correct results as the
+previous compiler. The in-process smoke suite also passed all 207 checks.
+
+## Default optimization is a measured tradeoff
+
+An isolated experiment disabled default vectorization, local optimization, or
+all three default optimizer/inliner/vectorizer passes, leaving release alone.
+Removing just vectorization saved little. Removing local optimization cut fresh
+compile CPU time by about 20% on Jo and 14% on the large Dewy program, but made
+six default application kernels roughly **20–130% slower**. For example, array
+updates went from 312 to 526 ms, record updates from 209 to 344 ms, and text
+processing from 284 to 639 ms. Outputs were checked against the same C references.
+The current default therefore retains these passes; frontend representation
+improvements avoid that generated-code penalty.
+[Compile samples](audits/2026-10-18/default-passes-compile.json),
+[runtime samples](audits/2026-10-18/default-passes-runtime.json),
+[isolated variant identities](audits/2026-10-18/default-pass-variants.json).
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
