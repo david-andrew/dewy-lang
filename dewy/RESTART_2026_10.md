@@ -699,6 +699,37 @@ categories overlap). Further progress needs to address the shared compiler as
 well as the language frontend.
 [Matched samples and checksums](audits/2026-10-18/sloppy-matched-frontend.json).
 
+## Skip argument mapping for ordinary positional calls
+
+The next change addresses shared type-checking overhead. Exact-arity positional
+calls now reuse the supplied argument list instead of allocating parameter-name,
+default-presence and remapped-argument arrays for each overload candidate.
+Missing, named and defaulted arguments still use the existing mapper. Dewy call
+ordering also returns immediately when the written arguments already occupy
+the leading parameter slots; reordered named arguments retain their metadata.
+Candidate type checking, overload selection and default evaluation are unchanged.
+
+Seven alternating single-worker samples against `c8f993a6`:
+
+| Fresh build | Median paired CPU ratio |
+| --- | ---: |
+| Generated Dewy program | 0.969 |
+| Same generated Jo program | 0.979 |
+| Fixed conformance corpus | 0.992 |
+| Tour, default | 0.995 |
+| Netpong, default | 0.987 |
+| Compiler self-build, release | 0.973 |
+
+The large programs improve about **2–3%**; smaller changes are close to the
+measurement noise. These ratios are against the preceding frontend work, not
+new overall measurements against the original compiler.
+[Samples and binary/source hashes](audits/2026-10-18/positional-calls-compile.json).
+
+Validation: 207 smoke checks passed, followed by an independent C bootstrap and
+**all 5,763 compact-core checks** in 207.32 seconds with two workers. This includes
+overloads, named/default argument evaluation order, native/web values and
+rejections, formatter/editor, networking, reload and compiler tooling.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

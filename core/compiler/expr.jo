@@ -774,6 +774,15 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[]) -> 
 # c holds a list of integer-literal slot numbers only when reordering is needed.
 save_call_order = (n: int, given: int[], final: int[]):
     if not files[pos_file(nodes[n].pos)].is_dewy: return
+    # Most calls already have their written arguments in parameter order.
+    # Omitted trailing defaults follow them without any ordering metadata.
+    ordered = given.len() <= final.len()
+    if ordered:
+        loop i in [0..given.len()):
+            if unnamed(given[i]) != final[i]:
+                ordered = false
+                break
+    if ordered: return
     order: int[]
     loop a in given:
         value = unnamed(a)
@@ -1310,6 +1319,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
     targs_here = call_targs
     call_targs = []
     check_args_untyped(args)
+    positional = true
+    loop arg in args:
+        if arg == 0 or nodes[arg].kind == .namedarg:
+            positional = false
+            break
     cands: Cand[]
     last_err = ""
     last_err_pos = 0          # (where the argument it is about is: the error points there)
@@ -1340,15 +1354,18 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
             if p0 != a0t and (pk0 == .vec or pk0 == .int_ or pk0 == .float_) and not can_coerce(0, a0t, p0): continue
         cd = Cand(decl = d, sig = decl_infos[di].sig)
         np = nkids(d)
-        pnames: int[]
-        hasdef: bool[]
-        loop i in [0..np):
-            pnames.push(int(nodes[kid(d, i)].name))
-            hasdef.push(nodes[kid(d, i)].b != 0)
-        err = map_args(pnames, hasdef, args, cd.args)
-        if len(err) > 0:
-            if last_err_arg == 0: last_err = err
-            continue
+        if positional and args.len() == np:
+            cd.args = args
+        else:
+            pnames: int[]
+            hasdef: bool[]
+            loop i in [0..np):
+                pnames.push(int(nodes[kid(d, i)].name))
+                hasdef.push(nodes[kid(d, i)].b != 0)
+            err = map_args(pnames, hasdef, args, cd.args)
+            if len(err) > 0:
+                if last_err_arg == 0: last_err = err
+                continue
         cd.binds = fill(0, int(cd.sig.ntp))
         if targs_here.len() > 0:
             # f[T](...): the declared type parameters, given
@@ -1401,11 +1418,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
                     a = cd.args[fi]
                     last_err_arg = i + 1
                     ptx = subst(cd.sig.params[fi], cd.binds)
-                    if nodes[a].type != 0: last_err = "argument '{name_of(pnames[fi])}' expects {type_str(ptx)}, found {type_str(ntype(a))}{variant_hint(a, ptx)}"
+                    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {type_str(ptx)}, found {type_str(ntype(a))}{variant_hint(a, ptx)}"
                     else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
                         vn = int(nodes[a].name)
                         last_err = "{type_str(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"
-                    else: last_err = "argument '{name_of(pnames[fi])}' has the wrong type (expects {type_str(ptx)})"
+                    else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {type_str(ptx)})"
                     last_err += uncalled_hint(a, ptx)
                     fnm = name_of(int(nodes[int(cd.decl)].name))
                     # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
@@ -1437,7 +1454,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
                     # (xs.sort((a, b): ...): a comparison, as JavaScript sorts)
                     if nodes[a].kind == .lambda and nkids(a) == 2 and name_of(int(nodes[int(cd.decl)].name)) == "sort": last_err += " (`sort_with(xs, (a, b): a.hp > b.hp)` sorts by a comparison, `sort_by(xs, (x): x.hp)` by a key)"
                     if tkind(ptx) == .cfn and (nodes[a].kind == .lambda or (nodes[a].type != 0 and tkind(ntype(a)) == .fn_)):
-                        last_err = "argument '{name_of(pnames[fi])}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
+                        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
                     last_err_pos = nodes[a].pos
                     break
                 cost += r
