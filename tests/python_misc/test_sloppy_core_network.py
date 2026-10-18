@@ -6,6 +6,7 @@ import shutil
 import socket
 import struct
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,8 @@ def compiler():
 
 def environment():
     return {k: v for k, v in os.environ.items()
-            if not k.startswith(('SLOPPY_', 'DEWY_')) and k not in ('HOST', 'JOIN', 'INVITE')}
+            if not k.startswith(('SLOPPY_', 'DEWY_'))
+            and k not in ('HOST', 'JOIN', 'INVITE', 'ROOM', 'TURN', 'TURN_SECRET', 'ROLE', 'NAME')}
 
 
 def free_port():
@@ -221,3 +223,112 @@ def test_core_network_shared_read_buffer(compiler, tmp_path, release):
         ran = subprocess.run([binary, *map(str, fds)], pass_fds=fds, env=environment(),
                              capture_output=True, text=True, timeout=10, check=False)
         assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.fixture(scope='module', params=[False, True], ids=['debug', 'release'])
+def room_binaries(compiler, tmp_path_factory, request):
+    work = tmp_path_factory.mktemp('rooms')
+    server, game = work / 'rendezvous', work / 'room_game'
+    build(compiler, ROOT / 'tools/sloppy_core/rendezvous.jo', server, request.param)
+    build(compiler, ROOT / 'core/tests/room_game.jo', game, request.param)
+    return server, game
+
+
+@contextmanager
+def room_server(binary, work):
+    port = free_port()
+    rooms = work / 'rooms.txt'
+    rooms.write_text('game/SAVED saved-key 1792300000\n')
+    env = environment()
+    env.update(PORT=str(port), ROOMS=str(rooms), TURN='', TURN_SECRET='', MAX_CLIENTS='20')
+    server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True)
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            assert selector.select(10), 'room server did not become ready'
+        line = server.stdout.readline()
+        assert line.startswith(f'rendezvous on port {port}: 1 rooms kept'), line
+        yield port
+    finally:
+        stop(server)
+
+
+def test_core_room_protocol(room_binaries, tmp_path):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is needed for room protocol checks')
+    with room_server(room_binaries[0], tmp_path) as port:
+        result = subprocess.run([node, ROOT / 'core/tests/room_protocol.cjs', str(port)],
+                                env=environment(), capture_output=True, text=True,
+                                timeout=12, check=False)
+        assert result.returncode == 0 and result.stdout.strip() == 'complete', result.stdout + result.stderr
+
+
+def test_core_room_native_peers(room_binaries, tmp_path):
+    processes = []
+    with room_server(room_binaries[0], tmp_path) as port:
+        def start(name, room=''):
+            env = environment()
+            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', SLOPPY_SOFTWARE='1',
+                       SLOPPY_THREADS='1', SLOPPY_FRAMES='900', ROLE='join' if room else 'host',
+                       NAME=name, ROOM=room, XDG_DATA_HOME=str(tmp_path / name))
+            process = subprocess.Popen([room_binaries[1]], env=env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True)
+            processes.append(process)
+            return process
+
+        try:
+            host = start('host')
+            with selectors.DefaultSelector() as selector:
+                selector.register(host.stdout, selectors.EVENT_READ)
+                assert selector.select(10), 'host did not open its room'
+            line = host.stdout.readline().strip()
+            assert line.startswith('room '), line
+            code = line.split()[1]
+            start('alice', code.lower())
+            start('bob', f'https://example.com/game/?room={code}&server=unused')
+            outputs = [p.communicate(timeout=15) for p in processes]
+            for process, (out, err) in zip(processes, outputs, strict=True):
+                assert process.returncode == 0, out + err
+            assert outputs[0][0].splitlines() == ['host got: hello from alice', 'host got: hello from bob']
+            assert outputs[1][0].strip() == 'alice got: hello from host'
+            assert outputs[2][0].strip() == 'bob got: hello from host'
+        finally:
+            for process in processes:
+                stop(process)
+
+
+def test_core_room_fragmented_messages(room_binaries, tmp_path):
+    with room_server(room_binaries[0], tmp_path) as port, socket.create_connection(('127.0.0.1', port), timeout=3) as peer:
+        peer.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n')
+        reply = b''
+        while b'\r\n\r\n' not in reply:
+            reply += peer.recv(4096)
+        assert reply.startswith(b'HTTP/1.1 101'), reply
+
+        def frame(op, payload):
+            size = len(payload)
+            header = bytes([op, 0x80 | size]) if size < 126 else bytes([op, 0xFE]) + struct.pack('!H', size)
+            peer.sendall(header + bytes(4) + payload)
+
+        def receive(size):
+            data = b''
+            while len(data) < size:
+                part = peer.recv(size - len(data))
+                assert part, data
+                data += part
+            return data
+
+        # Pong acknowledges a poll between fragments, without a timed sleep.
+        frame(0x01, b'pi')
+        frame(0x89, b'')
+        assert receive(2) == b'\x8a\x00'
+        frame(0x80, b'ng')
+        assert receive(6) == b'\x81\x04pong'
+        # Each fragment fits, but their assembled message exceeds listen's limit.
+        frame(0x01, b'x' * 3000)
+        frame(0x89, b'')
+        assert receive(2) == b'\x8a\x00'
+        frame(0x80, b'x' * 3000)
+        assert peer.recv(1) == b''

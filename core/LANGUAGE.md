@@ -1195,6 +1195,13 @@ multiplayer using `import net`. `net.listen(port)` hosts natively,
 events, and `net.send(peer value)` sends strings or byte arrays. Browser builds
 can connect to a native host or use direct invite codes through `import invite`.
 See the [multiplayer run instructions](../examples/sloppy_core/README.md#multiplayer).
+For short room codes and links, configure `invite.server(url)` and run the
+bundled rendezvous server. The same invite screens exchange offers automatically;
+`invite.arrivals()` supports additional lobby members. See
+[short-code rooms](../examples/sloppy_core/README.md#short-code-rooms) for setup
+and native/browser endpoint details. `net.listen(port largest=4096)` can bound
+incoming message size for a small signaling service; ordinary games retain the
+16 MiB default. Fragmented WebSocket messages retain their bytes across polls.
 
 `import netplay` adds rollback sessions: each peer runs the game from ordinary
 value snapshots, predicts remote input, then rewinds and replays when late input

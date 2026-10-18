@@ -1,0 +1,323 @@
+# Adapted from Sloppy b0796e307ad920e54ecb0aef328675d4f302d73b; MIT license: core/LICENSE.
+# A matchmaking server for games that use lib/invite.jo's rooms: a game hosts a room with a short
+# code ("KX7P4"), friends join it with the code (or a link with it), and this passes the invite
+# and reply codes between them. Nothing of the game goes through it: the games then connect
+# straight to each other (WebRTC), or through a TURN relay where no straight path works.
+# See examples/sloppy_core/README.md#short-code-rooms for setup.
+#
+#   dewy-core build tools/sloppy_core/rendezvous.jo -o rendezvous
+#   PORT=7700 ./rendezvous
+#   ./rendezvous check ws://match.example.org:7700        (is one there, answering? and its TURN)
+#
+# Settings (environment):
+#   PORT          the port (7700): WebSockets, plain; a proxy in front gives web pages wss://
+#   TURN          a TURN server for the games ("turn:match.example.org:3478"), with
+#   TURN_SECRET   its shared secret (coturn's static-auth-secret): each game connecting is
+#                 given a user name and password for it that work for a day
+#   ROOMS         the file the rooms are kept in between restarts (rooms.txt in the program's
+#                 data directory: ~/.local/share/rendezvous/)
+#   MAX_CLIENTS   connections at once (2000); more are turned away
+#
+# The protocol: text messages, words between spaces (codes have none). G is the game (its
+# PROGRAM_NAME, in small letters: rooms of different games are apart), CODE the room's code
+# (letters and digits), KEY the host's secret for it (kept with the code on the host's computer:
+# only it can open that room again).
+#   from a game                  answer
+#   host G CODE KEY              hosting CODE; or taken (another computer has that code: make
+#                                another), error ...
+#   busy, open                   (the host: friends who come now wait, or come in)
+#   join G CODE                  asking (the host is told: its invite follows); wait host (the
+#                                room's game is not open now), wait new (no game has opened it),
+#                                wait busy (its host is busy): told again as that changes
+#   invite ID CODE               (the host, for friend ID: they get "invite CODE")
+#   reply CODE                   (the friend: the host gets "reply ID CODE")
+#   done ID                      (the host: friend ID is connected, or given up on)
+#   ping                         pong (a game says something every 20 s; silent for 150, it is let go)
+# and to the host, unasked: guest ID (a friend wants in: invite them), gone ID (they went away
+# before connecting), replaced (the room is open in another window of the game now); to every
+# game on connecting: turn URL USER PASSWORD (when TURN is set).
+import net
+import crypto
+
+const IDLE = 150.0              # seconds silent before a connection is let go (a game in a hidden browser tab says nothing)
+const WAIT_MOST = 1800.0        # a friend waiting for a room, at most
+const KEEP_DAYS = 30.0          # a room not hosted for this long is forgotten
+const MOST_ROOMS = 100000
+const MOST_GUESTS = 32          # waiting in one room
+const JOINS = 30                # joins a connection may ask in 10 minutes
+
+struct Room:
+    key = ""                    # (the host's secret; "" while no host has opened it)
+    host = -1                   # its connection (-1: away)
+    busy = false
+    seen = 0.0                  # when it was last hosted (unix_time)
+    guests: int[]               # connections that asked to join it
+
+struct Client:
+    since = 0.0
+    last = 0.0                  # when it last said something
+    hosts = ""                  # the room it hosts ("game/CODE")
+    joins = ""                  # the room it is joining
+    told = false                # (joining: the host has been told of it)
+    asked: f64[]                # (when it asked to join)
+
+port = to_int(env("PORT") ?? "7700") ?? 7700
+turn = env("TURN") ?? ""
+turn_secret = env("TURN_SECRET") ?? ""
+most_clients = to_int(env("MAX_CLIENTS") ?? "2000") ?? 2000
+rooms_file = env("ROOMS") ?? ""
+rooms: {str: Room}
+clients: {int: Client}
+dirty = false
+
+# ---------------- the rooms kept between restarts: "game/CODE key seen", a line each ----------------
+load_rooms = ():
+    text = if len(rooms_file) > 0: read_file(rooms_file) else: load_data("rooms.txt")
+    if text == none: return
+    loop line in text!.lines():
+        w = split(line, " ")
+        if w.len() == 3 and len(w[1]) > 0: rooms[w[0]] = Room(key = w[1], seen = to_float(w[2]) ?? unix_time())
+
+save_rooms = ():
+    out: str[]
+    loop k, r in rooms:
+        if len(r.key) > 0: out.push("{k} {r.key} {r.seen}")
+    text = join(out, "\n") + "\n"
+    ok = if len(rooms_file) > 0: write_file(rooms_file, text) else: save_data("rooms.txt", text)
+    if not ok: print("could not keep the rooms: {file_error()}")
+
+# ---------------- what is said ----------------
+say = (to: int, what: str): net.send(to, what)
+
+# a game's name and a room's code: small letters, digits and -_. (a name); capitals and digits (a code)
+good_game = (s: str) -> bool:
+    if len(s) == 0 or len(s) > 40: return false
+    loop c in s:
+        if not (is_lower(c) or is_digit(c) or c == '-' or c == '_' or c == '.'): return false
+    true
+good_code = (s: str) -> bool:
+    if len(s) < 4 or len(s) > 12: return false
+    loop c in s:
+        if not (is_upper(c) or is_digit(c)): return false
+    true
+
+# what a friend waiting for room rk is told: the host is told of them, or they wait (and why)
+let_in = (id: int, rk: str):
+    r = rooms[rk]
+    if r.host < 0: say(id, if len(r.key) == 0: "wait new" else: "wait host")
+    else if r.busy: say(id, "wait busy")
+    else:
+        clients[id].told = true
+        say(r.host, "guest {id}")
+        say(id, "asking")
+
+# the room's host has gone (or left it): its friends wait for it again
+host_gone = (rk: str):
+    if not rooms.has(rk): return
+    rooms[rk].host = -1
+    rooms[rk].busy = false
+    loop g in rooms[rk].guests:
+        clients[g].told = false
+        say(g, "wait host")
+
+# a friend no longer joins the room it was joining
+unjoin = (id: int):
+    rk = clients[id].joins
+    if len(rk) == 0 or not rooms.has(rk): return
+    clients[id].joins = ""
+    rooms[rk].guests = rooms[rk].guests.filter((g): g != id)
+    if rooms[rk].host >= 0 and clients[id].told: say(rooms[rk].host, "gone {id}")
+    clients[id].told = false
+    if len(rooms[rk].key) == 0 and rooms[rk].guests.len() == 0: rooms.remove(rk)
+
+unhost = (id: int):
+    rk = clients[id].hosts
+    clients[id].hosts = ""
+    if len(rk) > 0 and rooms.has(rk) and rooms[rk].host == id: host_gone(rk)
+
+drop = (id: int):
+    if not clients.has(id): return
+    unhost(id)
+    unjoin(id)
+    clients.remove(id)
+
+host = (id: int, game: str, code: str, key: str):
+    if not good_game(game) or not good_code(code) or len(key) < 8 or len(key) > 64:
+        say(id, "error that is not a room")
+        return
+    rk = "{game}/{code}"
+    if not rooms.has(rk) and rooms.len() >= MOST_ROOMS:
+        forget_old()
+        if rooms.len() >= MOST_ROOMS:
+            say(id, "error the server has all the rooms it can keep")
+            return
+    if rooms.has(rk) and len(rooms[rk].key) > 0 and rooms[rk].key != key:
+        say(id, "taken")
+        return
+    if clients[id].hosts != rk: unhost(id)
+    unjoin(id)
+    if not rooms.has(rk): rooms[rk] = Room()
+    old = rooms[rk].host
+    if old >= 0 and old != id and clients.has(old):
+        clients[old].hosts = ""
+        say(old, "replaced")
+    if len(rooms[rk].key) == 0 or old != id: dirty = true
+    rooms[rk].key = key
+    rooms[rk].host = id
+    rooms[rk].busy = false
+    rooms[rk].seen = unix_time()
+    clients[id].hosts = rk
+    say(id, "hosting {code}")
+    loop g in rooms[rk].guests:
+        clients[g].told = false
+        let_in(g, rk)
+
+join_room = (id: int, game: str, code: str):
+    if not good_game(game) or not good_code(code):
+        say(id, "error that is not a room code")
+        return
+    now = time()
+    clients[id].asked = clients[id].asked.filter((t): now - t < 600.0)
+    if clients[id].asked.len() >= JOINS:
+        say(id, "error too many tries: wait a few minutes")
+        return
+    clients[id].asked.push(now)
+    rk = "{game}/{code}"
+    if rooms.has(rk) and rooms[rk].host == id:
+        say(id, "error that is this game's own room")
+        return
+    unjoin(id)
+    unhost(id)
+    if rooms.has(rk) and rooms[rk].guests.len() >= MOST_GUESTS:
+        say(id, "error that room has too many waiting")
+        return
+    if not rooms.has(rk) and rooms.len() >= MOST_ROOMS:
+        say(id, "error the server is full")
+        return
+    if not rooms.has(rk): rooms[rk] = Room()
+    rooms[rk].guests.push(id)
+    clients[id].joins = rk
+    clients[id].since = now
+    let_in(id, rk)
+
+set_busy = (id: int, on: bool):
+    rk = clients[id].hosts
+    if len(rk) == 0 or not rooms.has(rk) or rooms[rk].host != id or rooms[rk].busy == on: return
+    rooms[rk].busy = on
+    loop g in rooms[rk].guests:
+        if on and not clients[g].told: say(g, "wait busy")
+        else if not on and not clients[g].told: let_in(g, rk)
+
+# (the host's invite for a friend, and the friend's reply: passed on)
+pass_invite = (id: int, to: int, code: str):
+    rk = clients[id].hosts
+    if len(rk) == 0 or not clients.has(to) or clients[to].joins != rk: return
+    say(to, "invite {code}")
+
+pass_reply = (id: int, code: str):
+    rk = clients[id].joins
+    if len(rk) == 0 or not rooms.has(rk) or rooms[rk].host < 0 or not clients[id].told: return
+    say(rooms[rk].host, "reply {id} {code}")
+
+done = (id: int, g: int):
+    if clients.has(g) and len(clients[id].hosts) > 0 and clients[g].joins == clients[id].hosts:
+        rk = clients[g].joins
+        clients[g].joins = ""
+        clients[g].told = false
+        rooms[rk].guests = rooms[rk].guests.filter((x): x != g)
+
+heard = (id: int, text: str):
+    if not clients.has(id): return
+    clients[id].last = time()
+    w = split(text, " ")
+    if w.len() == 0: return
+    c = w[0]
+    if c == "ping": say(id, "pong")
+    else if c == "host" and w.len() == 4: host(id, w[1], w[2], w[3])
+    else if c == "join" and w.len() == 3: join_room(id, w[1], w[2])
+    else if c == "busy": set_busy(id, true)
+    else if c == "open": set_busy(id, false)
+    else if c == "invite" and w.len() == 3: pass_invite(id, to_int(w[1]) ?? -1, w[2])
+    else if c == "reply" and w.len() == 2: pass_reply(id, w[1])
+    else if c == "done" and w.len() == 2: done(id, to_int(w[1]) ?? -1)
+    else: say(id, "error what is that?")
+
+# a user name and password for TURN (coturn's use-auth-secret): good for a day
+turn_login = () -> str:
+    user = "{int(unix_time()) + 86400}:dewy"
+    pw = base64_encode(crypto.hmac_sha1(bytes(turn_secret), bytes(user)))
+    "turn {turn} {user} {pw}"
+
+# rooms not hosted for KEEP_DAYS (and no one waiting) are forgotten
+forget_old = ():
+    old: str[]
+    loop k, r in rooms:
+        if r.host < 0 and r.guests.len() == 0 and unix_time() - r.seen > KEEP_DAYS * 86400.0: old.push(k)
+    loop k in old: rooms.remove(k)
+    if old.len() > 0: dirty = true
+
+# connections silent too long, and friends waiting too long, are let go
+sweep = ():
+    now = time()
+    quiet: int[]
+    loop id, c in clients:
+        if now - c.last > IDLE or (len(c.joins) > 0 and now - c.since > WAIT_MOST): quiet.push(id)
+    loop id in quiet:
+        net.close(id)
+        drop(id)
+
+# `rendezvous check URL`: connect to a server, say ping, and say what it answered
+check = (url: str):
+    p = net.connect(url)
+    t0 = time()
+    loop time() - t0 < 10.0:
+        loop e in net.receive():
+            if e.kind == .joined: net.send(p, "ping")
+            else if e.kind == .left:
+                print("no: {net.why(p)}")
+                exit(1)
+            else if starts_with(e.text, "turn "): print("it gives games a TURN server: {split(e.text, " ")[1]}, user {split(e.text, " ")[2]}, password {split(e.text, " ")[3]}")
+            else if e.text == "pong":
+                print("ok: a matchmaking server answers at {url}")
+                exit(0)
+        sleep(0.02)
+    print("no answer from {url} in 10 seconds")
+    exit(1)
+
+if args().len() >= 3 and args()[1] == "check": check(args()[2])
+if not net.listen(port, largest = 4096): panic("rendezvous: cannot listen on port {port} (another program has it?)")
+load_rooms()
+print("rendezvous on port {port}: {rooms.len()} rooms kept{if len(turn) > 0: ", TURN at " + turn else: ""}")
+swept = time()
+saved = time()
+told = time()
+loop:
+    loop e in net.receive_server():
+        if e.kind == .joined:
+            if clients.len() >= most_clients:
+                say(e.peer, "error the server is full: try again later")
+                net.close(e.peer)
+                continue
+            clients[e.peer] = Client(since = time(), last = time())
+            if len(turn) > 0 and len(turn_secret) > 0: say(e.peer, turn_login())
+        else if e.kind == .left: drop(e.peer)
+        else: heard(e.peer, e.text)
+    now = time()
+    if now - swept > 5.0:
+        swept = now
+        sweep()
+    if now - saved > 60.0:
+        saved = now
+        forget_old()
+        if dirty:
+            save_rooms()
+            dirty = false
+    if now - told > 3600.0:
+        told = now
+        hosted = 0
+        waiting = 0
+        loop _, r in rooms:
+            if r.host >= 0: hosted += 1
+            waiting += r.guests.len()
+        print("{clients.len()} connected, {hosted} rooms open, {waiting} waiting to join, {rooms.len()} kept")
+    sleep(0.02)

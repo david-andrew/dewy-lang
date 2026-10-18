@@ -1,0 +1,20 @@
+{
+  "upstream": "Room support and rendezvous from Sloppy b0796e307ad920e54ecb0aef328675d4f302d73b",
+  "compiler": "build-1792304387411168902/bin/dewy-core",
+  "source_identity": "fd64629ce152bf456322ab3b2c1a59d98f4bcd43fa94487f78f4216b414bd99e",
+  "command": "python3 -m tools.core test -k 'room or network or netpong'",
+  "result": "17 passed, 4340 deselected in 9.49s",
+  "coverage": [
+    "Native debug/release three-player room and greeting exchange, isolated data directories, STUN disabled",
+    "Node WebSocket room protocol: saved ownership loading, game namespaces, waiting, busy/open, invite/reply forwarding, host reconnect/replacement and departures",
+    "Fragmented messages across polls with interleaved ping, including assembled message limit; regression reproduced before fix",
+    "Existing native/Node networking, large message ownership, Netpong winning state, software renderer and web builds"
+  ],
+  "adaptations": [
+    "DEWY_MATCH_SERVER primary override; legacy SLOPPY_SERVER and browser ?server= retained",
+    "Netpong configuration/help and local setup documentation",
+    "Per-peer WebSocket fragment storage fixes lost fragments across poll calls"
+  ],
+  "browser": "T3 Chromium: Netpong room link connected to native software-rendered host and played; screenshot rooms-browser.png, no console errors. Validation copies disabled public STUN and started the native invite screen automatically. Owned browser tab and local server/game processes stopped.",
+  "limits": "Local connections only; no public service deployment or TURN/cross-router validation. No native TLS. Server saves room reservations every minute. Library-only increment: focused local checks, full C suite in hosted CI."
+}

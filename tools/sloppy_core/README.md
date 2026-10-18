@@ -1472,3 +1472,18 @@ same compiler over inherited local sockets. Across seven paired 10,000-poll runs
 median CPU ratios are 0.423/0.425/0.428 at 1/8/32 idle peers: about 57% less CPU
 in this polling workload. This is not a game FPS or network-throughput claim.
 See `network-buffer-*` audits and `python3 -m tools.sloppy_core.benchmark_network --help`.
+
+
+Sloppy `b0796e3`'s short-code rooms and rendezvous service now work with Dewy
+Netpong. `DEWY_MATCH_SERVER` selects a service; the existing invite screens
+exchange connection offers automatically. Larger lobbies can use `arrivals`,
+`room_busy` and `close_room`. Manual invite codes remain available. See the
+[room setup](../../examples/sloppy_core/README.md#short-code-rooms).
+
+Seventeen focused checks pass in 9.49 seconds, including three native peers,
+browser-compatible signaling, saved room loading and host reconnection. A new
+fragmentation regression first reproduced an existing WebSocket bug, then passed
+after storing incomplete messages per peer; total message limits now span polls.
+The actual browser Netpong also connected through a room to a native host and
+played with no console errors. See `rooms-*` audits; public TURN/cross-router
+behavior was not tested and no public service was deployed.

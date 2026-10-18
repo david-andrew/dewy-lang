@@ -1,0 +1,37 @@
+# Local room integration: isolated save directories and no public STUN traffic.
+build:
+    name = "room_game"
+import net
+import invite
+import rtc
+
+window("Room test", 320, 200)
+rtc.rtc_stun_servers = []
+role = env("ROLE") ?? "host"
+me = env("NAME") ?? role
+want = if role == "host": 2 else: 1
+if role == "host": invite.start(players = 0)
+else: invite.from_link()
+got: str[]
+wrote = false
+done_at = -1.0
+started = time()
+
+met = (c: invite.Invited): net.send(c.peer, "hello from {me}")
+draw = ():
+    clear()
+    if invite.active():
+        if let c = invite.screen("Room test"): met(c)
+    loop c in invite.arrivals(): met(c)
+    if role == "host" and not wrote and invite.__inv_room_state == "open":
+        print("room {invite.room_code()}")
+        wrote = true
+    loop e in net.receive():
+        if e.kind == .message: got.push(e.text)
+    if done_at < 0.0 and got.len() >= want:
+        done_at = time()
+        loop g in sorted(got): print("{me} got: {g}")
+    if done_at > 0.0 and time() - done_at > 0.1: quit()
+    if time() - started > 12.0:
+        print("timeout: {invite.room_status()} {invite.__inv_join_state}")
+        exit(1)

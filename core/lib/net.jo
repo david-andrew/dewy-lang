@@ -37,6 +37,7 @@ struct __NetPeer:
     port: int
     inbuf: u8[]
     outbuf: u8[]
+    message: u8[]           # a fragmented message may span multiple socket polls
     since: f64              # (connecting: when it began)
     rtc = -1                # (straight to another player, WebRTC: its connection; else -1)
     answering = false       # (joined with a code: its own code is the reply)
@@ -49,6 +50,7 @@ __net_events: NetEvent[]
 __net_accepted: {int: bool}     # the peers that connected to this program's server
 __net_key = ""              # (a client's handshake key)
 const __NET_MAX = 16 << 20  # the biggest message taken (bigger: the connection ends)
+__net_largest = __NET_MAX   # accepted peers use the limit supplied to listen
 __net_rbuf: u8[]            # native socket reads share scratch storage; peer input buffers own their bytes
 
 # ---------------- straight to another player, with no server (WebRTC) ----------------
@@ -210,12 +212,14 @@ __net_fail = (i: int, why: str):
     __net_why[__net_peers[i].id] = why
     __net_gone(i)
 
-# start a server on port (native programs); false if the port cannot be had
+# start a server on port (native programs); false if the port cannot be had.
+# largest limits incoming messages; an incomplete handshake expires after 10 seconds.
 @no_web("does nothing in a web page: a page can only connect (the server is a native program)")
-listen = (port: int) -> bool:
+listen = (port: int, largest: int = 16 << 20) -> bool:
     when TARGET == "wasm":
         return false
     else:
+        __net_largest = min(largest, __NET_MAX)
         if __net_listen_fd >= 0: return true
         __pace_real_time = true         # (a test's screenshot run: at the other end's pace, a frame each 60th of a second)
         __net_hook()
@@ -513,6 +517,10 @@ __net_poll = ():
             st = __net_peers[i].state
             if st == 3 or __net_peers[i].rtc >= 0: continue
             fd = __net_peers[i].fd
+            if st == 1 and not __net_peers[i].client and time() - __net_peers[i].since > 10.0:
+                __n_close(fd)
+                __net_gone(i)
+                continue
             if st == 0:
                 c = __n_connected(fd)
                 if c < 0 or c == 0 and time() - __net_peers[i].since > 10.0:
@@ -590,7 +598,7 @@ __net_parse = (i: int):
         __net_peers[i].state = 2
         __net_events.push(NetEvent(.joined, __net_peers[i].id, []))
     # frames: [fin, opcode] [mask, length] [16 or 64-bit length] [mask key] payload
-    msg: u8[]
+    most = if __net_peers[i].client: __NET_MAX else: __net_largest
     loop __net_peers[i].state == 2:
         b = __net_peers[i].inbuf
         if b.len() < 2: return
@@ -607,7 +615,7 @@ __net_parse = (i: int):
             n = 0
             loop k in [2..10): n = (n << 8) | int(b[k])
             at = 10
-        if n > __NET_MAX or n < 0:
+        if n > most or n < 0:
             # (a frame bigger than any message is let be: the peer is not playing)
             __n_close(__net_peers[i].fd)
             __net_gone(i)
@@ -633,14 +641,14 @@ __net_parse = (i: int):
             __net_flush(i)
             continue
         if op == 10: continue
-        msg.extend(payload)
-        if msg.len() > __NET_MAX:
+        __net_peers[i].message.extend(payload)
+        if __net_peers[i].message.len() > most:
             __n_close(__net_peers[i].fd)
             __net_gone(i)
             return
         if fin:
-            __net_events.push(__net_msg(__net_peers[i].id, msg))
-            msg = []
+            __net_events.push(__net_msg(__net_peers[i].id, __net_peers[i].message))
+            __net_peers[i].message = []
 
 __find_crlf2 = (b: u8[]) -> int:
     loop k in [0..b.len() - 3):

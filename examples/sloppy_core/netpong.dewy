@@ -16,6 +16,9 @@ const WIN = 7
 # Set this to a hosted build's URL to share links from native games. With no URL,
 # native games share invite codes; browser games use their own page address.
 const WEB_PAGE = ""
+# Optional rendezvous service for short room codes; DEWY_MATCH_SERVER overrides it.
+const MATCH_SERVER = ""
+invite.server(MATCH_SERVER)
 
 let Screen = [title = 0 help = 1 friend = 2 by_address = 3 joining = 4 waiting = 5 playing = 6 over = 7]
 
@@ -159,7 +162,7 @@ network = () => {
     }
 }
 
-# HOST/JOIN start a local connection; INVITE opens a received invite code.
+# HOST/JOIN start a local connection; ROOM/INVITE open a received room or invite.
 if env("HOST") not=? none { host() }
 else if env("JOIN") not=? none { join() }
 else if invite.from_link() { friend_screens() }
@@ -327,7 +330,7 @@ draw_waiting = () => {
 }
 
 let HELP = [
-    "Invite a friend: share the generated code or link. The other player opens it or pastes it into Join a friend, then sends their reply code back. Paste that reply to connect directly."
+    "Invite a friend: share the room code or link. Your friend opens it or pastes it into Join a friend. Without a matchmaking server, exchange the longer invite and reply codes shown on screen."
     "Same network: run a native game and choose Host on this network. The other player chooses Join an address and enters the shown address. On one computer, use localhost."
     "Browser players can join a native host. Open the web build over local HTTP and enter ws://host:port. Secure (HTTPS) pages need a secure WebSocket server, or use Invite a friend."
     "If direct invites cannot connect on your network, try Same network by address. Both players must keep the game open while exchanging invite codes."

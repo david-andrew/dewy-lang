@@ -1,4 +1,5 @@
 import net
+import crypto
 
 # Invite a friend, and Join a friend: the screens that connect two players with invite codes
 # (net.invite: no server), for any game. One player's game gives a link to send in a chat; the
@@ -21,13 +22,23 @@ import net
 #
 # A game on a computer gives a link to its web page (web_page) when it has one, so the friend
 # needs nothing installed; a web page gives its own address. Without either, it gives the code.
+#
+# With a matchmaking server (tools/sloppy_core/rendezvous.jo, run on a server of your own: invite.server),
+# there is nothing to send back. Invite a friend opens this computer's room, with a short code
+# ("KX7P4") and a link with it, the same each time (kept: a refresh or a restart gives the same
+# link); friends type the code into Join a friend, or open the link, and their games and this one
+# pass the invite and its reply through the server. The games still connect straight to each
+# other: the server sees only those codes. Rooms let in several friends (players), one by one,
+# while the game is in its menu: invite.arrivals() has those who came after the first, and
+# invite.room_busy(true) makes those who come wait (a fight is on). Without the server (none set,
+# or it cannot be reached), the screen says so, and Invite with a code instead is the way above.
 
 # the other player, once connected
 struct Invited:
     peer: int                   # (a net peer: net.send, net.receive)
     inviter: bool               # this side invited (and the other joined)
 
-__inv_mode = 0                  # 0 no screen, 1 Invite a friend, 2 Join a friend
+__inv_mode = 0                  # 0 no screen, 1 Invite a friend (codes), 2 Join a friend, 3 Invite a friend (a room), 4 joining a room
 __inv_peer = -1
 __inv_reliable = true
 __inv_code = ""                 # this side's code, once made
@@ -37,27 +48,86 @@ __inv_status = ""
 __inv_why = ""
 __inv_shown_at = 0.0            # (when this side's code was made: how long it has waited)
 
+# (rooms, through a matchmaking server)
+__inv_server = ""               # where web pages reach the server, and native programs ("" for those: derived)
+__inv_native = ""
+__inv_server_set = false
+__inv_server_env = false        # (set by an environment override: the room's link says it too)
+__inv_rv = -1                   # the connection to it (hosting a room, or joining one)
+__inv_rv_up = false
+__inv_rv_heard = 0.0            # (when it last said something)
+__inv_rv_pinged = 0.0
+__inv_pumped_at = 0.0           # (frames stop in a hidden browser tab: a long gap is not the server's silence)
+__inv_rv_retry = 0.0            # (when to connect again, after losing it: 0, not)
+__inv_rv_tries = 0
+__inv_rv_why = ""               # (why it could not be reached, or was lost)
+__inv_rv_error = ""             # (what it said was wrong)
+__inv_room = ""                 # this computer's room (kept: save_data)
+__inv_room_key = ""
+__inv_hosting = false           # the room is open (or opening: connecting to the server)
+__inv_room_state = ""           # "connecting", "open", "replaced" (open in another window)
+__inv_players = 2
+__inv_came = 0                  # (friends connected since it opened)
+__inv_busy = false              # (the game's: friends who come wait)
+__inv_busy_told = false         # (what the server was told)
+__inv_guests: {int: int}        # (the server's number for each friend coming, and their peer)
+__inv_sent: int[]               # (the peers whose invite has gone to them)
+__inv_replied: int[]            # (and whose reply has come: connecting)
+__inv_pending: int[]            # (the peers not connected yet)
+__inv_failed = ""               # (why the last friend could not connect)
+__inv_arrived: Invited[]
+__inv_joining = ""              # the room this side is joining
+__inv_join_state = ""           # what the server said last: "asking", "wait host", "invited", "failed"...
+__inv_join_at = 0.0             # (when it said so)
+__inv_reply_sent = false
+
 # show Invite a friend: an invite is made at once (reliable = false: lost messages are not sent
-# again, nor do they hold up later ones; for fast games and rollback)
-start = (reliable: bool = true):
+# again, nor do they hold up later ones; for fast games and rollback). With a matchmaking server,
+# this computer's room opens instead, for players in all (this side too: 0 for any number, until
+# close_room); the screen has Invite with a code instead
+start = (reliable: bool = true, players: int = 2):
+    __inv_server_init()
+    if len(__inv_server) == 0:
+        __inv_start_codes(reliable)
+        return
+    __inv_reset()
+    __inv_mode = 3
+    __inv_reliable = reliable
+    __inv_room_open(reliable, players)
+
+__inv_start_codes = (reliable: bool):
     __inv_reset()
     __inv_mode = 1
     __inv_reliable = reliable
     __inv_peer = net.invite(reliable)
     net.__net_hold(__inv_peer, true)
 
-# show Join a friend, with their link or code if given (joined at once)
+# show Join a friend, with their link or code if given (joined at once): an invite's, or a room's
+# (with a matchmaking server: the short code, or a link with ?room= in it)
 join = (code: str = ""):
+    __inv_server_init()
     __inv_reset()
-    __inv_mode = 2
     __inv_theirs = code
+    room = __inv_room_in(code)
+    if len(room) > 0 and len(__inv_server) > 0:
+        __inv_mode = 4
+        __inv_join_room(room)
+        return
+    __inv_mode = 2
+    if len(room) > 0:
+        __inv_status = "{room} is a room code, for a game with a matchmaking server, and this one has none: your friend can send an invite link instead"
+        return
     if len(trim(code)) > 0:
         __inv_peer = net.join_invite(trim(code))
         net.__net_hold(__inv_peer, true)
 
-# the program was opened from an invite link (a web page's ?invite=..., or INVITE=code): Join a
-# friend with it, and true
+# the program was opened from an invite link (a web page's ?invite=... or ?room=..., or INVITE=code
+# or ROOM=code): Join a friend with it, and true
 from_link = () -> bool:
+    room = trim(env("ROOM") ?? "")
+    if len(room) > 0:
+        join(if find(room, "room=") >= 0: room else: "room=" + room)
+        return true
     code = env("INVITE") ?? ""
     if len(trim(code)) == 0: return false
     join(code)
@@ -80,9 +150,12 @@ reply = (code: str) -> bool:
     else if not ok: __inv_status = "that is not their reply code: copied whole?"
     ok
 
-# leave the screens (Back does it too), dropping the invite if it has not connected
+# leave the screens (Back does it too), dropping the invite if it has not connected (and the room,
+# if no friend has come through it)
 cancel = ():
     __inv_reset()
+    if len(__inv_joining) > 0: __inv_stop_joining()
+    if __inv_hosting and __inv_came == 0: close_room()
     __inv_mode = 0
 
 __inv_reset = ():
@@ -101,6 +174,15 @@ __inv_reset = ():
 # web_page is where it is on the web, for a computer's invite to link to
 screen = (game: str = "the game", web_page: str = "") -> Invited?:
     if __inv_mode == 0: return none
+    was = __inv_mode
+    __inv_room_pump()
+    if was == 3 and __inv_arrived.len() > 0:
+        c = __inv_arrived[0]
+        __inv_arrived.remove(0)
+        __inv_reset()
+        __inv_mode = 0
+        return c
+    if __inv_mode == 0: return none
     if __inv_peer >= 0:
         # (its joining and leaving, which net.receive() leaves for this until it is connected;
         # what it says goes to the game then)
@@ -108,20 +190,25 @@ screen = (game: str = "the game", web_page: str = "") -> Invited?:
             if e.kind == .joined:
                 net.__net_hold(__inv_peer, false)
                 c = Invited(__inv_peer, __inv_mode == 1)
+                if __inv_mode == 1 and __inv_hosting: __inv_came += 1
                 __inv_peer = -1
                 cancel()
                 return c
             if e.kind == .left:
                 net.__net_hold(__inv_peer, false)
                 # (joining: why, said large, as it is mostly the code pasted)
-                if __inv_mode == 2 and len(net.why(e.peer)) > 0:
+                if __inv_mode == 4:
+                    __inv_status = "no connection could be made: {net.why(e.peer)}"
+                    if len(net.why(e.peer)) == 0: __inv_status = "no connection could be made"
+                    __inv_join_state = "failed"
+                else if __inv_mode == 2 and len(net.why(e.peer)) > 0:
                     __inv_status = net.why(e.peer)
                     __inv_why = ""
                 else:
                     __inv_status = "no connection was made"
                     __inv_why = net.why(e.peer)
                 __inv_peer = -1
-        if __inv_peer >= 0 and len(__inv_code) == 0:
+        if __inv_peer >= 0 and len(__inv_code) == 0 and __inv_mode != 4:
             __inv_code = net.invite_code(__inv_peer)
             if len(__inv_code) > 0: __inv_shown_at = time()
             if len(__inv_code) > 0 and not __inv_copied:
@@ -132,7 +219,9 @@ screen = (game: str = "the game", web_page: str = "") -> Invited?:
     top = max((f64(sz.y) - 720.0) / 2.0, 0.0)
     w = min(800.0, f64(sz.x) - 60.0)
     if __inv_mode == 1: __inv_draw_invite(game, web_page, cx, top, w)
-    else: __inv_draw_join(game, cx, top, w)
+    else if __inv_mode == 2: __inv_draw_join(game, cx, top, w)
+    else if __inv_mode == 3: __inv_draw_room(game, web_page, cx, top, w)
+    else: __inv_draw_joining(game, cx, top, w)
     if len(__inv_why) > 0: text_wrapped(__inv_why, vec2(f32(cx - w / 2.0), f32(top + 615.0)), w, 18, hud_style.disabled, align = .center)
     if hud_button(Rect(30, f32(top + 24.0), 120, 44), "Back") or (key_pressed(.escape) and not ui_typing()): cancel()
     none
@@ -151,7 +240,7 @@ __inv_draw_invite = (game: str, web_page: str, cx: f64, top: f64, w: f64):
     what = if link == __inv_code: "code" else: "link"
     if __inv_peer < 0 and len(__inv_status) > 0:
         text_centered(__inv_status, vec2(f32(cx), f32(top + 200.0)), 26)
-        if hud_button(Rect(f32(cx - 80.0), f32(top + 250.0), 160, 44), "Try again"): start(__inv_reliable)
+        if hud_button(Rect(f32(cx - 80.0), f32(top + 250.0), 160, 44), "Try again"): __inv_start_codes(__inv_reliable)
         return
     text_centered("1. Send them this {what}: in a chat or a message, any way", vec2(f32(cx), f32(top + 120.0)), 24)
     if len(__inv_code) == 0: text_centered("(making it: a moment)", vec2(f32(cx), f32(top + 170.0)), 22, hud_style.disabled)
@@ -172,14 +261,11 @@ __inv_draw_join = (game: str, cx: f64, top: f64, w: f64):
     text_centered("Join a friend", vec2(f32(cx), f32(top + 70.0)), 44, hud_style.accent)
     if __inv_peer < 0:
         if len(__inv_status) > 0: text_wrapped(__inv_status, vec2(f32(cx - w / 2.0), f32(top + 115.0)), w, 22, hud_style.text, align = .center)
-        text_centered("Paste the link or code your friend sent you, then Next:", vec2(f32(cx), f32(top + 180.0)), 26)
+        ask = if len(__inv_server) > 0: "Type the code or paste the link your friend sent you, then Next:" else: "Paste the link or code your friend sent you, then Next:"
+        text_centered(ask, vec2(f32(cx), f32(top + 180.0)), 26)
         __inv_theirs = hud_text_field(Rect(f32(cx - w / 2.0), f32(top + 220.0), f32(w), 44), __inv_theirs, "invite code", 400, __inv_paste_hint())
         if hud_button(Rect(f32(cx - 80.0), f32(top + 285.0), 160, 44), "Next") or key_pressed(.enter):
-            if len(trim(__inv_theirs)) > 0:
-                __inv_status = ""
-                __inv_why = ""
-                __inv_peer = net.join_invite(trim(__inv_theirs))
-                net.__net_hold(__inv_peer, true)
+            if len(trim(__inv_theirs)) > 0: join(trim(__inv_theirs))
         if len(__inv_why) == 0: text_wrapped("Your friend chooses Invite a friend in their {game}, and sends you what it gives them.", vec2(f32(cx - w / 2.0), f32(top + 640.0)), w, 18, hud_style.disabled, align = .center)
         return
     text_centered("Send this code back to your friend:", vec2(f32(cx), f32(top + 160.0)), 26)
@@ -218,3 +304,408 @@ __inv_paste_hint = () -> str: if touch_input(): "their code: tap here, then Past
 __inv_copied_note = () -> str:
     if touch_input(): return "(then paste it into a message)"
     "(it is copied: paste it with ctrl+V, or cmd+V on a Mac)"
+
+# ---------------- rooms, through a matchmaking server (tools/sloppy_core/rendezvous.jo) ----------------
+
+# the matchmaking server for rooms (tools/sloppy_core/rendezvous.jo: examples/sloppy_core/README.md#short-code-rooms runs one): url is
+# where web pages reach it, as wss://match.example.com (a page served over https may only reach
+# wss://), native where native programs do, which have no TLS ("": ws:// to the same host, on the
+# server's own port, 7700). "" for none. DEWY_MATCH_SERVER (legacy SLOPPY_SERVER, or a web page's ?server=) sets it for any
+# game, over the game's own ("none": no server): for trying a server of one's own
+server = (url: str, native: str = ""):
+    __inv_server_set = true
+    __inv_server = trim(url)
+    __inv_native = trim(native)
+    __inv_server_env = false
+    if let o = env("DEWY_MATCH_SERVER") ?? env("SLOPPY_SERVER"):
+        __inv_server_env = trim(o) != "none"
+        __inv_server = if trim(o) == "none": "" else: trim(o)
+        __inv_native = ""
+
+# there is a matchmaking server (rooms: start opens one, join takes a room's code)
+has_server = () -> bool:
+    __inv_server_init()
+    len(__inv_server) > 0
+
+__inv_server_init = ():
+    if not __inv_server_set: server("")
+
+__inv_server_url = () -> str:
+    when TARGET == "wasm":
+        return __inv_server
+    else:
+        if len(__inv_native) > 0: return __inv_native
+        if not starts_with(__inv_server, "wss://"): return __inv_server
+        h = __inv_server[6..]
+        k = find(h, "/")
+        if k >= 0: h = h[..k)
+        k = find(h, ":")
+        if k >= 0: h = h[..k)
+        "ws://{h}:7700"
+
+# this computer's room code while its room is open ("" when it is not): to show in a game's lobby
+room_code = () -> str:
+    __inv_room_pump()
+    if __inv_hosting: __inv_room else: ""
+
+# a link to the open room: this page's address (or web_page) with ?room= ("" with neither, or no room)
+room_link = (web_page: str = "") -> str:
+    if not __inv_hosting: return ""
+    base = page_url()
+    if len(base) == 0: base = web_page
+    if len(base) == 0: return ""
+    if __inv_server_env: return "{base}?room={__inv_room}&server={__inv_server}"
+    "{base}?room={__inv_room}"
+
+# what the room is doing, in words ("" when it is not open)
+room_status = () -> str:
+    __inv_room_pump()
+    if not __inv_hosting: return ""
+    if __inv_room_state == "replaced": return "This room is open in another window of the game now."
+    if __inv_rv < 0 and len(__inv_rv_why) > 0: return "The matchmaking server cannot be reached ({__inv_rv_why}): trying again. Invite with a code instead works without it."
+    if len(__inv_rv_error) > 0: return "The matchmaking server says: {__inv_rv_error}"
+    if not __inv_rv_up or __inv_room_state != "open": return "Reaching the matchmaking server..."
+    if __inv_pending.len() > 0: return if __inv_pending.len() == 1: "A friend is connecting..." else: "{__inv_pending.len()} friends are connecting..."
+    if len(__inv_failed) > 0: return "A friend could not connect: {__inv_failed}"
+    if __inv_busy: return "Friends who come now wait until the game is back in its menu."
+    if __inv_came > 0: return "Open: more friends can join with the code."
+    "Waiting for friends to join..."
+
+# friends who have connected through the open room since the last call (the first, while the
+# screen is up, comes from screen): each a peer, as screen's. Call it every frame while hosting
+arrivals = () -> Invited[]:
+    __inv_room_pump()
+    out = __inv_arrived
+    __inv_arrived = []
+    out
+
+# while on, friends who come to the room wait (told so) until it is off: for a game whose fight
+# has started (call it every frame, with whether that is so)
+room_busy = (on: bool):
+    __inv_busy = on
+    __inv_room_pump()
+
+# close the room: friends can no longer join with its code (until start opens it again)
+close_room = ():
+    __inv_room_shut()
+    if __inv_mode == 3: __inv_mode = 0
+
+__inv_room_shut = ():
+    __inv_hosting = false
+    __inv_room_state = ""
+    loop p in __inv_pending:
+        net.__net_hold(p, false)
+        net.close(p)
+    __inv_pending = []
+    __inv_guests = {}
+    __inv_sent = []
+    __inv_replied = []
+    __inv_failed = ""
+    if len(__inv_joining) == 0: __inv_rv_close()
+
+# a new code for this computer's room (the old one, and links with it, no longer lead here)
+new_room_code = ():
+    __inv_room = __inv_random_code()
+    __inv_room_key = crypto.hex_text(crypto.random_bytes(12))
+    save_data("invite_room", "{__inv_room} {__inv_room_key}")
+    if __inv_hosting and __inv_rv_up: __inv_rv_hello()
+
+# (5 letters and digits, none that look like another: 0 O, 1 I L, 2 Z, 5 S, 8 B)
+__inv_random_code = () -> str:
+    abc = "ACDEFGHJKMNPQRTUVWXY34679"
+    out = ""
+    loop b in crypto.random_bytes(5): out += byte_str(abc[int(b) % len(abc)])
+    out
+
+__inv_room_load = ():
+    if len(__inv_room) > 0: return
+    if let s = load_data("invite_room"):
+        w = split(trim(s), " ")
+        if w.len() == 2 and len(__inv_room_in(w[0])) > 0 and len(w[1]) >= 8:
+            __inv_room = w[0]
+            __inv_room_key = w[1]
+            return
+    new_room_code()
+
+# a room's code in what was typed or pasted: the short code itself, or a link with ?room= ("" if none)
+__inv_room_in = (text: str) -> str:
+    t = trim(text)
+    k = find(t, "room=")
+    if k >= 0:
+        t = t[k + 5..]
+        e = find(t, "&")
+        if e >= 0: t = t[..e)
+    else if find(t, "invite=") >= 0: return ""
+    c = ""
+    loop b in t:
+        if b == ' ' or b == '-': continue
+        if not is_alnum(b): return ""
+        c += byte_str(b)
+    if len(c) < 4 or len(c) > 12: return ""
+    c.upper()
+
+# (rooms of different games are apart: the program's name, in small letters)
+__inv_game_id = () -> str:
+    out = ""
+    loop b in PROGRAM_NAME.lower():
+        if is_lower(b) or is_digit(b) or b == '-' or b == '_' or b == '.': out += byte_str(b)
+        else if b == ' ': out += "-"
+    if len(out) == 0: return "game"
+    out[..min(len(out), 40))
+
+__inv_room_open = (reliable: bool, players: int):
+    __inv_reliable = reliable
+    __inv_players = players
+    if __inv_hosting and __inv_room_state != "replaced": return
+    if len(__inv_joining) > 0: __inv_stop_joining()
+    __inv_room_load()
+    __inv_hosting = true
+    __inv_came = 0
+    __inv_failed = ""
+    __inv_room_state = "connecting"
+    if __inv_rv >= 0 and __inv_rv_up: __inv_rv_hello()
+    else: __inv_rv_connect()
+
+__inv_join_room = (room: str):
+    if __inv_hosting: close_room()
+    __inv_joining = room
+    __inv_join_state = ""
+    __inv_reply_sent = false
+    __inv_rv_error = ""
+    __inv_status = ""
+    if __inv_rv >= 0 and __inv_rv_up: __inv_rv_hello()
+    else: __inv_rv_connect()
+
+__inv_stop_joining = ():
+    __inv_joining = ""
+    __inv_join_state = ""
+    if not __inv_hosting: __inv_rv_close()
+
+__inv_rv_connect = ():
+    if __inv_rv >= 0: return
+    __inv_rv_retry = 0.0
+    __inv_rv_error = ""
+    __inv_rv = net.connect(__inv_server_url())
+    net.__net_hold(__inv_rv, true)
+    __inv_rv_up = false
+    __inv_rv_heard = time()
+
+__inv_rv_close = ():
+    __inv_rv_retry = 0.0
+    __inv_rv_tries = 0
+    __inv_rv_why = ""
+    if __inv_rv < 0: return
+    r = __inv_rv
+    __inv_rv = -1
+    __inv_rv_up = false
+    net.close(r)
+    net.__net_take([r], true)
+    net.__net_take([r], false)
+    net.__net_hold(r, false)
+
+__inv_rv_say = (what: str):
+    if __inv_rv >= 0 and __inv_rv_up: net.send(__inv_rv, what)
+
+# (connected: host the room, or join one)
+__inv_rv_hello = ():
+    if __inv_hosting:
+        __inv_room_state = "connecting"
+        __inv_busy_told = false
+        __inv_rv_say("host {__inv_game_id()} {__inv_room} {__inv_room_key}")
+    else if len(__inv_joining) > 0:
+        __inv_join_state = ""
+        __inv_rv_say("join {__inv_game_id()} {__inv_joining}")
+
+# the connection to the server lost (or never made): tried again in a few seconds
+__inv_rv_lost = (why: str):
+    net.__net_hold(__inv_rv, false)
+    __inv_rv = -1
+    __inv_rv_up = false
+    __inv_rv_why = if len(why) > 0: why else: "the connection to it ended"
+    __inv_rv_tries += 1
+    __inv_rv_retry = time() + min(2.0 * f64(__inv_rv_tries), 20.0)
+    # (friends whose reply has not come: the server tells them to wait, and they ask again)
+    loop _, p in __inv_guests:
+        if p in __inv_replied: continue
+        net.__net_hold(p, false)
+        net.close(p)
+        __inv_pending = __inv_pending.filter((x): x != p)
+    __inv_guests = {}
+    __inv_sent = []
+    __inv_replied = []
+    if __inv_hosting: __inv_room_state = "connecting"
+
+# what the server said
+__inv_rv_said = (text: str):
+    w = split(text, " ")
+    if w.len() == 0: return
+    c = w[0]
+    if c == "turn" and w.len() == 4: net.turn_server(w[1], w[2], w[3])
+    else if c == "pong": pass
+    else if c == "error": __inv_rv_error = text[min(6, len(text))..]
+    else if c == "hosting" and __inv_hosting:
+        __inv_room_state = "open"
+        __inv_rv_error = ""
+    else if c == "taken" and __inv_hosting: new_room_code()
+    else if c == "replaced" and __inv_hosting:
+        __inv_room_state = "replaced"
+        __inv_rv_close()
+    else if c == "guest" and w.len() == 2 and __inv_hosting:
+        id = to_int(w[1]) ?? -1
+        if id < 0 or __inv_guests.has(id): return
+        p = net.invite(__inv_reliable)
+        net.__net_hold(p, true)
+        __inv_guests[id] = p
+        __inv_pending.push(p)
+        __inv_failed = ""
+    else if c == "gone" and w.len() == 2:
+        id = to_int(w[1]) ?? -1
+        if let p = __inv_guests.get(id):
+            __inv_guests.remove(id)
+            if not (p in __inv_replied):
+                net.__net_hold(p, false)
+                net.close(p)
+                __inv_pending = __inv_pending.filter((x): x != p)
+    else if c == "reply" and w.len() == 3:
+        if let p = __inv_guests.get(to_int(w[1]) ?? -1):
+            if net.accept_reply(p, w[2]) and not (p in __inv_replied): __inv_replied.push(p)
+    else if (c == "asking" or c == "wait") and len(__inv_joining) > 0:
+        if (__inv_peer < 0 or c == "wait") and __inv_join_state != text:
+            __inv_join_state = text
+            __inv_join_at = time()
+        # (the host gone while connecting: its invite is no more)
+        if c == "wait" and __inv_peer >= 0:
+            net.__net_hold(__inv_peer, false)
+            net.close(__inv_peer)
+            __inv_peer = -1
+    else if c == "invite" and w.len() == 2 and len(__inv_joining) > 0:
+        if __inv_peer >= 0:
+            net.__net_hold(__inv_peer, false)
+            net.close(__inv_peer)
+        __inv_peer = net.join_invite(w[1])
+        net.__net_hold(__inv_peer, true)
+        __inv_reply_sent = false
+        __inv_join_state = "invited"
+        __inv_status = ""
+
+# (every frame a room is open or being joined: the server's messages, the friends' connections)
+__inv_room_pump = ():
+    if not __inv_hosting and len(__inv_joining) == 0: return
+    if __inv_rv < 0:
+        if __inv_rv_retry > 0.0 and time() >= __inv_rv_retry: __inv_rv_connect()
+    if __inv_rv >= 0:
+        # (messages first: one that came before the connection ended is still read)
+        r = __inv_rv
+        loop e in net.__net_take([r], true):
+            __inv_rv_heard = time()
+            __inv_rv_said(e.text)
+        if __inv_rv == r:
+            loop e in net.__net_take([r], false):
+                if e.kind == .joined:
+                    __inv_rv_up = true
+                    __inv_rv_tries = 0
+                    __inv_rv_why = ""
+                    __inv_rv_heard = time()
+                    __inv_rv_pinged = time()
+                    __inv_rv_hello()
+                else if e.kind == .left and __inv_rv == r: __inv_rv_lost(net.why(r))
+    if time() - __inv_pumped_at > 10.0:
+        __inv_rv_heard = time()
+        __inv_rv_pinged = 0.0
+    __inv_pumped_at = time()
+    if __inv_rv >= 0 and __inv_rv_up:
+        if time() - __inv_rv_pinged > 20.0:
+            __inv_rv_pinged = time()
+            __inv_rv_say("ping")
+        if time() - __inv_rv_heard > 50.0:
+            r = __inv_rv
+            net.close(r)
+            net.__net_take([r], true)
+            net.__net_take([r], false)
+            __inv_rv_lost("it stopped answering")
+    if __inv_hosting:
+        if __inv_room_state == "open" and __inv_busy != __inv_busy_told:
+            __inv_busy_told = __inv_busy
+            __inv_rv_say(if __inv_busy: "busy" else: "open")
+        # (each friend's invite, once made; their connecting)
+        loop id, p in __inv_guests:
+            if p in __inv_sent: continue
+            k = net.invite_code(p)
+            if len(k) > 0:
+                __inv_sent.push(p)
+                __inv_rv_say("invite {id} {k}")
+        if __inv_pending.len() > 0:
+            loop e in net.__net_take(__inv_pending, false):
+                net.__net_hold(e.peer, false)
+                __inv_pending = __inv_pending.filter((x): x != e.peer)
+                g = -1
+                loop id, p in __inv_guests:
+                    if p == e.peer: g = id
+                if g >= 0:
+                    __inv_rv_say("done {g}")
+                    __inv_guests.remove(g)
+                if e.kind == .joined:
+                    __inv_arrived.push(Invited(e.peer, true))
+                    __inv_came += 1
+                else: __inv_failed = if len(net.why(e.peer)) > 0: net.why(e.peer) else: "no path between the two games was found"
+            # (as many as play: the room closes, the screen still up to give the last one)
+            if __inv_players > 0 and __inv_came + 1 >= __inv_players: __inv_room_shut()
+    else if len(__inv_joining) > 0 and __inv_peer >= 0 and not __inv_reply_sent:
+        k = net.invite_code(__inv_peer)
+        if len(k) > 0:
+            __inv_reply_sent = true
+            __inv_rv_say("reply {k}")
+    # (joined: the server is not needed now)
+    if len(__inv_joining) > 0 and __inv_mode == 0: __inv_stop_joining()
+
+# Invite a friend, with a room: its code and link, and how it is going
+__inv_draw_room = (game: str, web_page: str, cx: f64, top: f64, w: f64):
+    text_centered("Invite a friend", vec2(f32(cx), f32(top + 60.0)), 44, hud_style.accent)
+    link = room_link(web_page)
+    gold = rgb(1.0, 0.85, 0.3)
+    if __inv_room_state == "open" and len(link) > 0 and not __inv_copied:
+        set_clipboard(link)
+        __inv_copied = true
+    text_centered("Friends join with this code:", vec2(f32(cx), f32(top + 120.0)), 24)
+    text_centered(__inv_room, vec2(f32(cx), f32(top + 180.0)), 64, if __inv_room_state == "open": gold else: hud_style.disabled, mono = true)
+    if len(link) > 0:
+        text_centered(link, vec2(f32(cx), f32(top + 240.0)), 18, hud_style.disabled, mono = true)
+        __inv_copy_buttons(link, cx, top + 265.0)
+        if __inv_copied: text_centered("(the link is copied: paste it into a message)", vec2(f32(cx), f32(top + 325.0)), 18, hud_style.disabled)
+        text_centered("They open the link in a web browser and play there, or type the code into Join a friend in their {game}", vec2(f32(cx), f32(top + 355.0)), 18, hud_style.disabled)
+    else: text_centered("They type it into Join a friend in their {game}", vec2(f32(cx), f32(top + 255.0)), 20, hud_style.disabled)
+    text_wrapped(room_status(), vec2(f32(cx - w / 2.0), f32(top + 400.0)), w, 22, hud_style.text, align = .center)
+    if __inv_room_state == "replaced":
+        if hud_button(Rect(f32(cx - 170.0), f32(top + 480.0), 160, 44), "Open it here"): __inv_room_open(__inv_reliable, __inv_players)
+    else if hud_button(Rect(f32(cx - 170.0), f32(top + 480.0), 160, 44), "New code"):
+        new_room_code()
+        __inv_copied = false
+    if hud_button(Rect(f32(cx + 10.0), f32(top + 480.0), 300, 44), "Invite with a code instead"): __inv_start_codes(__inv_reliable)
+    text_wrapped("The code stays the same on this computer: New code makes another (and the old link no longer leads here).", vec2(f32(cx - w / 2.0), f32(top + 640.0)), w, 18, hud_style.disabled, align = .center)
+
+# joining a room: what is happening, in words
+__inv_draw_joining = (game: str, cx: f64, top: f64, w: f64):
+    text_centered("Join a friend", vec2(f32(cx), f32(top + 70.0)), 44, hud_style.accent)
+    text_centered("Room {__inv_joining}", vec2(f32(cx), f32(top + 150.0)), 40, rgb(1.0, 0.85, 0.3), mono = true)
+    text_wrapped(__inv_join_words(), vec2(f32(cx - w / 2.0), f32(top + 210.0)), w, 24, hud_style.text, align = .center)
+    again = __inv_join_state == "failed" or len(__inv_rv_error) > 0
+    if again and hud_button(Rect(f32(cx - 170.0), f32(top + 330.0), 160, 44), "Try again"): __inv_join_room(__inv_joining)
+    if hud_button(Rect(f32(if again: cx + 10.0 else: cx - 80.0), f32(top + 330.0), 160, 44), "Another code"):
+        __inv_reset()
+        __inv_stop_joining()
+        __inv_mode = 2
+    text_wrapped("Your friend chooses Invite a friend in their {game}: it shows the code.", vec2(f32(cx - w / 2.0), f32(top + 640.0)), w, 18, hud_style.disabled, align = .center)
+
+__inv_join_words = () -> str:
+    if len(__inv_rv_error) > 0: return "The matchmaking server says: {__inv_rv_error}"
+    if __inv_join_state == "failed": return __inv_status
+    if __inv_peer >= 0: return "Connecting to your friend..."
+    if __inv_rv < 0 and len(__inv_rv_why) > 0: return "The matchmaking server cannot be reached ({__inv_rv_why}): trying again. Without it, your friend can send an invite link: Invite a friend, then Invite with a code instead."
+    if not __inv_rv_up: return "Reaching the matchmaking server..."
+    s = __inv_join_state
+    if s == "wait new": return "No game has opened this room. Check the code with your friend: this joins by itself once their game opens it."
+    if s == "wait host": return "Your friend's game is not open now: this joins by itself once it is."
+    if s == "wait busy": return "Your friend's game is not taking players just now (a fight is on?): you join when it is."
+    if s == "asking" and time() - __inv_join_at > 8.0: return "Found your friend's game, which has not answered yet: a game in a browser tab answers once its tab is shown."
+    if s == "asking": return "Found your friend's game: connecting..."
+    "Asking for the room..."

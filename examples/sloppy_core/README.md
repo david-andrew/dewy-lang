@@ -250,3 +250,51 @@ The actual browser game was also connected to a native host and driven with
 keyboard input.
 
 ![Netpong connected to a native host](../../dewy/audits/2026-10-17/source-core/netpong-browser.png)
+
+## Short-code rooms
+
+Netpong can also connect friends with a short room code or link, without sending
+a reply code back. Run the bundled rendezvous server and point both games at it:
+
+```sh
+python3 -m tools.core build tools/sloppy_core/rendezvous.jo -o /tmp/dewy-rendezvous
+PORT=7700 ROOMS=/tmp/dewy-rooms.txt /tmp/dewy-rendezvous
+# In another terminal, for each game:
+DEWY_MATCH_SERVER=ws://127.0.0.1:7700 /tmp/dewy-netpong
+```
+
+Choose **Invite a friend**, then enter its short code in the other game's
+**Join a friend** screen. Browser builds accept `?server=ws://127.0.0.1:7700`;
+shared links include `?room=CODE` and an overridden server address. Use an address
+reachable by both players when they are on different computers. `MATCH_SERVER`
+in the example can set the service for a published game. `WEB_PAGE` supplies the
+browser game's URL when sharing links from native games.
+
+The host remembers its code in the program's data directory. The server keeps
+room ownership in `ROOMS` (or its own data directory) and saves changes every
+minute. Friends can wait for an absent host, and reconnecting the host opens the
+same room. A server crash before the next save can lose a newly reserved code.
+Room names are scoped to the game's `PROGRAM_NAME`; native and browser builds
+must use the same name.
+
+For your own game, `invite.server(url native="")` configures the service,
+`invite.start(players=2)` opens a room, and `invite.join(code_or_link)` joins it.
+Continue drawing `invite.screen()` to receive the first connection. For larger
+lobbies, call `invite.arrivals()` every frame for later connections and
+`invite.room_busy(true)` while new players should wait. `players=0` leaves the
+room open until `invite.close_room()`. `room_code()`, `room_link(web_page)` and
+`room_status()` support a custom lobby; `new_room_code()` replaces its code.
+
+HTTPS pages require a `wss://` endpoint, usually a TLS proxy in front of the
+server. Native clients currently use plain WebSockets: supply a separate native
+URL to `invite.server`, or the library derives `ws://hostname:7700` from a
+configured `wss://` URL. `DEWY_MATCH_SERVER` overrides both; legacy `SLOPPY_SERVER`
+and the browser's `?server=` remain supported. Set the override to `none` to use
+manual invites. The invite screen also offers **Invite with a code instead**.
+
+The rendezvous service forwards connection offers and replies; game traffic
+uses peer connections. For networks that need a relay, the server can supply
+temporary TURN credentials from `TURN` and `TURN_SECRET` (see its source header).
+No public matchmaking or TURN service is bundled or deployed. Local tests cover
+room signaling, multiple native peers, saved room loading and host reconnection;
+they do not establish connectivity across every router or mobile network.
