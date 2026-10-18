@@ -1537,8 +1537,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         globals[g].init = nodes[d].b      # unchecked original: each use checks a fresh copy
     else if nodes[d].nlist > 0:
         if not has_flag(d, NF_CHECKED):
-            t = prune(check_expr(int(nodes[d].b), 0))
-            nodes[d].b = i32(last_checked)
+            t = check_binding_input(d)
             unpacked = unpack_binding(int(nodes[d].b), t, kids(d), nodes[d].pos)
             t = unpacked.0
             set_list(d, unpacked.1)
@@ -2734,6 +2733,17 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
         fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
     fatal(at, "'{nm}' has type {type_str(lt)}{made} and cannot hold this {type_str(rt)}: {how}")
 
+# A type on the whole pattern supplies context before extracting its leaves.
+check_binding_input = (s: int) -> int:
+    expected = 0
+    if nodes[s].a != 0: expected = resolve_type(int(nodes[s].a))
+    t = prune(check_expr(int(nodes[s].b), expected))
+    nodes[s].b = i32(last_checked)
+    if expected != 0:
+        nodes[s].b = i32(coerce(int(nodes[s].b), expected))
+        t = prune(expected)
+    t
+
 check_vardecl = (s: int):
     if has_flag(s, NF_SOA):
         soa_alias(s)
@@ -2759,8 +2769,7 @@ check_vardecl = (s: int):
                     ensure_global(int(nodes[binding].sym), nodes[s].pos, true)
                     return
             # With only discards, no global initializer checks the source for us.
-        t = prune(check_expr(int(nodes[s].b), 0))
-        nodes[s].b = i32(last_checked)
+        t = check_binding_input(s)
         unpacked = unpack_binding(int(nodes[s].b), t, kids(s), nodes[s].pos)
         t = unpacked.0
         set_list(s, unpacked.1)
@@ -2771,6 +2780,7 @@ check_vardecl = (s: int):
             if nodes[id].kind == .hole: continue
             l = new_local(int(nodes[id].name), targ(t, i), nodes[id].pos)
             locals[l].flags = i32(LF_DECL | LF_QUIET)
+            if has_flag(s, NF_RDONLY): locals[l].flags = i32(LF_DECL | LF_QUIET | LF_CONST)
             nodes[id].sym = i32(l)
         nodes[s].type = i32(t)
         return

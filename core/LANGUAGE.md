@@ -643,7 +643,17 @@ This corrects the earlier behavior that discarded the outer brackets of a
 one-element loop pattern. The same rule applies in comprehensions and combined
 loop headers.
 
-Annotated targets and `const` unpacking are not implemented yet.
+A declaration can annotate the whole source value, including nested and fixed
+arrays, records and dictionaries. The annotation supplies context for literals:
+
+```dewy
+let [red green blue]:array<uint8>=[255 128 0]
+const [[left] [right]]:array<array<int64>>=[[20] [22]]
+```
+
+`const` patterns evaluate their source once and make every extracted binding
+read-only, at local or module scope. Copies made with `let` remain mutable.
+Annotations on individual leaves, such as `[x:int64 y:int64]`, are not supported.
 
 ```dewy
 let values=[loop i in [0..10) i*i]

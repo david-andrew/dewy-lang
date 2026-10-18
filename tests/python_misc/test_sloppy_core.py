@@ -3672,6 +3672,34 @@ main=()=>sum(values change())''',
     'unpack-param-dictionary': '''sum=([[key value] [_ other]])=>value+other+key.length
 main=()=>sum(["hi"->20 "there"->20])''',
     'unpack-array': 'main=()=>{let [x y]=[20 22] return x+y}',
+    'unpack-typed-narrow': '''byte=(x:uint8)=>x as int64
+main=()=>{let [a b]:array<uint8>=[20 22] return byte(a)+byte(b)}''',
+    'unpack-typed-nested-fixed': '''main=()=>{
+let [[a b] [c d]]:array<array<int64 length=2> length=2>=[[10 12] [9 11]]
+return a+b+c+d}''',
+    'unpack-typed-record': '''main=()=>{
+let [y x]:[x:int64 y:int64 z:int64]=[x=20 y=22 z=99]
+return x+y}''',
+    'unpack-typed-generic': '''combine_parts=<T>(values:array<T>)=>{let [a b]:array<T>=values return a+b}
+main=()=>if combine_parts(["he" "llo"])=?"hello" combine_parts([20 22]) else 1''',
+    'unpack-const-typed': '''byte=(x:uint8)=>x as int64
+main=()=>{const [a b]:array<uint8>=[20 22] return byte(a)+byte(b)}''',
+    'unpack-const-global-once': '''let calls=0
+make=()=>{calls+=1 return [[20] [22]]}
+const [[left] [right]]:array<array<int64>>=make()
+main=()=>if calls=?1 left+right else 1''',
+    'unpack-const-global-discard': '''let calls=0
+make=()=>{calls+=1 return [20 22]}
+const [_ _]:array<int64>=make()
+main=()=>calls+41''',
+    'unpack-const-closure-copy': '''make=()=>{
+let source=[[20 22]] const [saved]=source let read=()=>saved
+source[0][0]=99 return read}
+main=()=>{let read=make() let copy=read() copy[0]=0
+return if read()=?[20 22] 42 else 1}''',
+    'unpack-const-dictionary': '''main=()=>{
+const [[key a] [_ b]]:dict<string int64>=["hi"->20 "bye"->20]
+return a+b+key.length}''',
     'unpack-nested-array': 'main=()=>{let [[a b] [c d]]=[[20 1] [2 19]] return a+b+c+d}',
     'unpack-nested-single': 'main=()=>{let [[answer]]=[[42]] return answer}',
     'unpack-loop-single-array': 'main=()=>{let total=0 loop [x] in [[20] [22]] {total+=x} return total}',
@@ -4139,6 +4167,12 @@ ERRORS = {
     'array-comparison-narrow-variable': ('main=()=>{let values:array<uint8>=[1] let other:int64=1 return values =? [other]}', 'cannot implicitly convert'),
     'array-comparison-different-arrays': ('main=()=>{let values:array<uint8>=[1] let other=[1] return values =? other}', 'cannot compare'),
     'constant-assign': ('value=()=>40\nmain=()=>{const x=value() x=42 return x}', 'cannot modify const'),
+    'constant-unpack-write': ('main=()=>{const [a b]=[20 22] a=99 return a+b}', 'cannot modify const'),
+    'constant-unpack-nested-write': ('main=()=>{const [[a]]=[[[20 22]]] a[0]=99 return 42}', 'cannot modify const'),
+    'constant-unpack-global-write': ('const [a b]=[20 22]\nmain=()=>{b=99 return a+b}', 'cannot modify const'),
+    'constant-unpack-captured-write': ('main=()=>{const [a]=[20] let change=()=>{a+=1} change() return 42}', 'cannot modify const'),
+    'constant-unpack-mutable-argument': ('bump=(@x:int64)=>{x+=2}\nmain=()=>{const [a]=[40] bump(@a) return a}', 'cannot modify const'),
+    'unpack-type-mismatch': ('main=()=>{let [a b]:array<uint8>=[256 0] return 42}', 'u8'),
     'constant-literal-assign': ('main=()=>{const x=40 x=42 return x}', 'cannot modify const'),
     'constant-array-write': ('main=()=>{const xs=[20 22] xs[0]=99 return 42}', 'cannot modify const'),
     'constant-map-write': ('main=()=>{const xs=["a"->20] xs["b"]=22 return 42}', 'cannot modify const'),
@@ -6350,6 +6384,8 @@ def test_core_range_index_errors(error_batches, body, diagnostic, target, releas
 
 
 @pytest.mark.parametrize('body', [
+    'const [x y]:array<int64>=[42] printl(x+y)',
+    'let [x y]:array<int64>=[42] printl(x+y)',
     'let sum=([x y]:array<int64>)=>x+y printl(sum([42]))',
     'let sum=([[x y]]:array<array<int64>>)=>x+y printl(sum([[42]]))',
     'loop [x y] in [[1] [2 3]] {printl(x+y)}',

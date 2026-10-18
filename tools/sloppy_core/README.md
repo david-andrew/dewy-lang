@@ -1586,3 +1586,15 @@ now includes the once-only initializer case: 153 checks in 3.21 seconds.
 Seven fresh-build pairs gave ratios 0.986/1.070/0.994/1.001 for tour/default
 Netpong/web Netpong/compiler: Netpong was about 7% slower in this run, with no
 general compilation-speed claim. See `constant-values-*` audits.
+
+Unpacking declarations now accept `const` and a type for the whole pattern:
+`const [[left] [right]]:array<array<int64>>=[[20] [22]]`. Every extracted name
+is read-only, including captured and module-level bindings; `let` copies remain
+mutable. The annotation supplies context before extraction, so
+`let [a b]:array<uint8>=[20 22]` gives byte-valued bindings. Nested fixed arrays,
+records and dictionaries share the existing once-only source evaluation,
+snapshot and exact-length checks. Individual leaf annotations remain unsupported.
+
+The 769 focused checks pass in 12.73 seconds and again in 12.60 seconds after
+three independent C bootstrap generations. This focused increment relies on
+hosted CI for the full gate. See `const-unpack-*` audits.

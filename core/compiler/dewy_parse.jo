@@ -778,10 +778,12 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         annotation = dw_child(lhs, 2)
         lhs = dw_child(lhs, 1)
     if dewy_syntax[lhs].kind == "Block" and dewy_syntax[lhs].text == "[]:":
-        if initial == 0 or annotation != 0 or constant: return dw_fail(lhs, "unpacking without a value, with an annotation, or with const")
+        if initial == 0: return dw_fail(lhs, "unpacking without a value")
         n = mk(.vardecl, dewy_syntax[id].pos)
         set_list(n, dw_bindings(lhs))
         nodes[n].b = i32(dw_expr(initial))
+        if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+        if constant: add_flag(n, NF_RDONLY)
         return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
