@@ -10,7 +10,7 @@ use 'dewy_tokens.jo'
 
 struct DewyLexeme:
     kind: DewyKind
-    text: str
+    name: i32
     start: int
     stop: int
     space: bool
@@ -171,7 +171,7 @@ dn_lex_symbol = (source: str, at: int, stop: int) -> DewyToken:
             if dn_matches(source, at, stop, "|>"): return .pipe_right
     dn_single_token(source[at])
 
-dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
+dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     source = files[file].src
     out: DewyLexeme[]
     i = begin
@@ -191,15 +191,18 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
         start = i
         kind = DewyKind.op
         symbol = DewyToken.none
+        name: i32 = 0
         value = ""
         if c == 'r' and i + 1 < stop and (source[i + 1] == '"' or source[i + 1] == '\''):
             i = dn_quote_end(source, i + 1, stop, 0, true)
             kind = .rawquoted
-            value = source[start..i)
         else if dn_ident_start(c):
             i += 1
             loop i < stop and dn_ident_part(source[i]): i += 1
-            value = source[start..i)
+            if intern_names:
+                name = i32(intern_sub(source, start, i - start))
+                value = name_of(int(name))
+            else: value = source[start..i)
             kind = .identifier
             if value == "true" or value == "false": kind = .boolean
             if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and source[i] == '?':
@@ -211,55 +214,64 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             loop i < stop and dn_ident_part(source[i]): i += 1
             if i == start + 1: dn_error(start, "expected a name after $")
             kind = .metatag
-            value = source[start + 1..i)
         else if is_digit(c):
-            prefix = "0d:"
+            decimal = true
             digits = start
             if c == '0' and i + 1 < stop and find_byte("btqsodzxug", source[i + 1]) >= 0:
-                prefix = source[i..i + 2) + ":"
+                decimal = source[i + 1] == 'd'
                 i += 2
                 digits = i
             if i < stop and (source[i] == '"' or source[i] == '\''):
                 i = dn_quote_end(source, i, stop)
                 kind = .based_string
-                value = prefix + source[digits + 1..i - 1)
             else:
                 loop i < stop:
                     d = source[i]
-                    if is_digit(d) or d == '_' or (prefix != "0d:" and is_alpha(d)): i += 1
+                    if is_digit(d) or d == '_' or (not decimal and is_alpha(d)): i += 1
                     else: break
                 if i == digits: dn_error(start, "expected digits after the base prefix")
-                kind = if prefix == "0d:": DewyKind.source_integer else: DewyKind.integer
-                if prefix == "0d:" and i + 1 < stop and source[i] == '.' and is_digit(source[i + 1]):
+                kind = if decimal: DewyKind.source_integer else: DewyKind.integer
+                if decimal and i + 1 < stop and source[i] == '.' and is_digit(source[i + 1]):
                     i += 1
                     loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
                     kind = .source_real
-                if prefix == "0d:" and i + 1 < stop and (source[i] == 'e' or source[i] == 'E') and (is_digit(source[i + 1]) or source[i + 1] == '+' or source[i + 1] == '-'):
+                if decimal and i + 1 < stop and (source[i] == 'e' or source[i] == 'E') and (is_digit(source[i + 1]) or source[i + 1] == '+' or source[i + 1] == '-'):
                     i += 1
                     if i < stop and (source[i] == '+' or source[i] == '-'): i += 1
                     first = i
                     loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
                     if i == first: dn_error(start, "expected exponent digits")
                     kind = .source_real
-                # Decimal tokens retain their source spelling. The legacy parser's
-                # base/fraction/exponent serialization is unnecessary in process.
-                value = source[digits..i)
-                if prefix != "0d:": value = prefix + value
         else if c == '"' or c == '\'':
             i = dn_quote_end(source, i, stop)
             kind = .quoted
-            value = source[start..i)
         else:
             symbol = dn_lex_symbol(source, start, stop)
             if symbol == .none: dn_error(start, "unexpected character in Dewy source")
             value = dn_token_text(symbol)
             i += len(value)
         if symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
-        out.push(DewyLexeme(kind, value, start, i, spaced, newline, symbol))
+        out.push(DewyLexeme(kind, name, start, i, spaced, newline, symbol))
         spaced = false
         newline = false
-    out.push(DewyLexeme(.eof, "", stop, stop, spaced, newline))
+    out.push(DewyLexeme(.eof, 0, stop, stop, spaced, newline))
     out
+
+# Tokens contain only scalar tags, name IDs and source spans. Materialize text
+# only when projection needs a literal payload; grammar lookahead copies no
+# reference-counted strings. Formatting uses the spans and tags directly.
+dn_payload = (token: DewyLexeme) -> str:
+    if token.symbol != .none: return dn_token_text(token.symbol)
+    if token.name != 0: return name_of(int(token.name))
+    source = files[dn_file].src
+    first = token.start
+    if token.kind == .metatag: return source[first + 1..token.stop)
+    if token.kind == .integer:
+        return source[first..first + 2) + ":" + source[first + 2..token.stop)
+    if token.kind == .based_string:
+        return source[first..first + 2) + ":" + source[first + 3..token.stop - 1)
+    if (token.kind == .source_integer or token.kind == .source_real) and first + 1 < token.stop and source[first] == '0' and source[first + 1] == 'd': first += 2
+    source[first..token.stop)
 
 dn_peek = () -> DewyToken: dn_tokens[dn_at].symbol
 dn_take = () -> DewyLexeme:
@@ -275,9 +287,9 @@ dn_accept = (symbol: DewyToken) -> bool:
 dn_expect = (symbol: DewyToken):
     if not dn_accept(symbol): dn_error(dn_tokens[dn_at].start, "expected '{dn_token_text(symbol)}'")
 
-dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = []) -> int:
+dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int:
     id = dewy_syntax.len()
-    dewy_syntax.push(DewySyntax(kind, text, mkpos(dn_file, offset), children))
+    dewy_syntax.push(DewySyntax(kind, text, mkpos(dn_file, offset), children, .none, name))
     id
 
 # Expression operators are scalar tags on their parent node. Child zero is
@@ -429,9 +441,9 @@ dn_block = () -> int:
         # Consume one angle at a time, leaving the rest for its parent.
         # A spaced ` >? ` stays a comparison inside a refinement.
         if close == .rangle and ((dn_peek() == .shr or dn_peek() == .shr_assign or dn_peek() == .angle_assign) or (dn_peek() == .gt and not dn_tokens[dn_at].space)):
-            dn_tokens[dn_at].text = dn_tokens[dn_at].text[1..]
             dn_tokens[dn_at].start += 1
-            dn_tokens[dn_at].symbol = dn_token_kind(dn_tokens[dn_at].text)
+            tail = dn_tokens[dn_at]
+            dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
             break
         if dn_accept(close): break
         if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and children.len() == 1 and dw_op(children[0]) == .range_apply:
@@ -442,7 +454,7 @@ dn_block = () -> int:
         children.push(dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
     if opening.symbol == .langle: dn_angles -= 1
-    label = opening.text + dn_token_text(close) + ":"
+    label = dn_token_text(opening.symbol) + dn_token_text(close) + ":"
     dn_node(.block, label, opening.start, children)
 
 dn_flow = () -> int:
@@ -450,9 +462,9 @@ dn_flow = () -> int:
     arms: int[]
     loop true:
         keyword = dn_take()
-        key = dn_node(.keyword, keyword.text, keyword.start)
+        key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
         condition = dn_expr(0)
-        if not dn_can_start(): dn_error(dn_tokens[dn_at].start, "expected a body after '{keyword.text}'")
+        if not dn_can_start(): dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'")
         body = dn_expr(0)
         arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
         if not dn_accept(.kw_else): break
@@ -463,7 +475,6 @@ dn_flow = () -> int:
 
 dn_atom = () -> int:
     token = dn_tokens[dn_at]
-    text = token.text
     symbol = token.symbol
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
     if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle: return dn_block()
@@ -482,8 +493,9 @@ dn_atom = () -> int:
         if not dn_range_bound(): return dots
         bound = dn_expr(101)
         return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])
+    text = dn_payload(token)
     if token.kind == .op: return dn_error(token.start, "expected an expression, found '{text}'")
-    dn_node(token.kind, text, token.start)
+    dn_node(token.kind, text, token.start, name = token.name)
 
 dn_expr = (minimum: int) -> int:
     dn_depth += 1
@@ -511,7 +523,7 @@ dn_expr = (minimum: int) -> int:
                 continue
             right = dn_take()
             if right.kind != .identifier: return dn_error(right.start, "expected a member name")
-            left = dn_operator(.binary, .dot, left, dn_node(.identifier, right.text, right.start))
+            left = dn_operator(.binary, .dot, left, dn_node(.identifier, dn_payload(right), right.start, name = right.name))
             continue
         if not token.space and (op == .lparen or op == .lbrack) and minimum <= 170:
             right = dn_block()
@@ -558,7 +570,7 @@ dn_expr = (minimum: int) -> int:
 
 dn_stmt = () -> int:
     token = dn_tokens[dn_at]
-    word = token.text
+    word = dn_token_text(token.symbol)
     symbol = token.symbol
     result = 0
     # Contextual keyword: ordinary bindings/calls named `test` still work.

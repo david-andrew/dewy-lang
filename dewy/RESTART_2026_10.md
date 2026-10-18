@@ -627,6 +627,36 @@ Validation: **207 smoke checks** and **4,062 syntax/value, rejection, string,
 membership, frontend-selection and formatter checks** passed. The focused run
 took 35.53 seconds with two workers and covered native/web and default/release.
 
+## Scalar tokens and interned identifier IDs
+
+Like Sloppy's lexer, the Dewy lexer now interns identifiers from source spans
+without allocating duplicate strings. Tokens carry scalar tags, name IDs and
+source bounds, with no managed text field. Syntax conversion reuses those IDs
+for ordinary names and materializes literal text only when consumed. Formatting
+uses tags and original source spans; it does not intern document-specific names
+into the compiler's persistent name table.
+
+Interning names alone measured essentially flat CPU time and was not shipped as
+a standalone speed optimization. Combining it with scalar tokens measured median
+paired CPU ratios of **0.953** on the large Dewy program and **0.968** on the
+conformance corpus against `b01623a2`, about **5%** and **3%** less time. The Jo
+control and Tour were flat, Netpong was 0.976, and compiler self-build was 1.025.
+These are small timing changes on a shared host, not a claim of universal gain.
+[Interning-only samples](audits/2026-10-18/interned-names-compile.json),
+[scalar-token samples](audits/2026-10-18/scalar-tokens-compile.json).
+
+The memory benefit is clearer: three alternating builds measured median peak RSS
+of **126,084 KiB before**, **115,840 KiB with name interning**, and **111,668 KiB
+with scalar tokens**, an overall **11% reduction** relative to `b01623a2`.
+Every generated program produced the expected result.
+[Memory samples](audits/2026-10-18/scalar-token-memory.json).
+
+Validation: an independent C bootstrap and **4,151 syntax/value, rejection,
+string, membership, frontend-selection, formatter and editor checks** passed
+in 67.56 seconds with two workers. Eight representative legacy-parser programs
+also retained their correct results. Both preceding frontend commits passed the
+full Linux CI and Windows/macOS ARM64/Linux ARM64 host jobs.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

@@ -86,6 +86,7 @@ struct DewySyntax:
     pos: int
     children: int[]
     symbol: DewyToken = .none
+    name: i32 = 0
 
 dewy_syntax: DewySyntax[]
 dw_index_context: int[]  # enclosing index nodes, for contextual `end`
@@ -119,6 +120,14 @@ dw_name = (id: int) -> str:
     let id = dw_unwrap(id)
     if dewy_syntax[id].kind == .identifier: return dewy_syntax[id].text
     ""
+# Lexer-interned names pass straight into the compact AST. Legacy and synthetic
+# identifier nodes fill this cache on their first use.
+dw_name_id = (id: int) -> i32:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind != .identifier: return 0
+    if dewy_syntax[id].name == 0: dewy_syntax[id].name = i32(intern(dewy_syntax[id].text))
+    dewy_syntax[id].name
+
 dw_op = (id: int) -> DewyToken:
     let id = dw_unwrap(id)
     kind = dewy_syntax[id].kind
@@ -325,7 +334,7 @@ dw_type = (id: int) -> int:
         else if name == "set": name = "Set"
         else if name == "int" or name == "uint": return dw_fail(id, "unbounded integer types; use an explicit fixed width in this experiment")
         n = mk(.tname, pos)
-        nodes[n].name = i32(intern(name))
+        nodes[n].name = if name == dewy_syntax[id].text: dw_name_id(id) else: i32(intern(name))
         return n
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "[]:":
         n = mk(.trecord, pos)
@@ -409,7 +418,7 @@ dw_type_params = (id: int) -> int[]:
         if seen.contains(name): fatal(dewy_syntax[child].pos, "duplicate type parameter '{name}'")
         seen.push(name)
         n = mk(.ident, dewy_syntax[child].pos)
-        nodes[n].name = i32(intern(name))
+        nodes[n].name = dw_name_id(child)
         out.push(n)
     if out.len() == 0: return [dw_fail(id, "an empty type parameter declaration")]
     out
@@ -437,7 +446,7 @@ dw_param = (id: int, kind: NK) -> int:
     if pattern:
         name = "$parameter{n}"
         set_list(n, dw_bindings(lhs))
-    nodes[n].name = i32(intern(name))
+    nodes[n].name = if pattern: i32(intern(name)) else: dw_name_id(lhs)
     if annotation != 0: nodes[n].a = i32(dw_type(annotation))
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
     if by_place: add_flag(n, NF_MUT)
@@ -590,7 +599,7 @@ dw_expr = (id: int) -> int:
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
         n = mk(.ident, pos)
-        nodes[n].name = i32(intern(if text == "printl": "print" else: text))
+        nodes[n].name = if text == "printl": i32(intern("print")) else: dw_name_id(id)
         return n
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):
@@ -768,7 +777,7 @@ dw_expr = (id: int) -> int:
             if name == "": return dw_fail(id, "computed member names")
             n = mk(.field, pos)
             nodes[n].a = i32(dw_expr(left))
-            nodes[n].name = i32(intern(name))
+            nodes[n].name = dw_name_id(right)
             return n
         if op == .kw_as:
             n = mk(.cast, pos)
@@ -797,7 +806,7 @@ dw_expr = (id: int) -> int:
                     if bracket: nodes[n].aux2 = i32(args.len())
                     if dw_op(child) == .assign:
                         a = mk(.namedarg, dewy_syntax[child].pos)
-                        nodes[a].name = i32(intern(dw_name(dw_child(child, 1))))
+                        nodes[a].name = dw_name_id(dw_child(child, 1))
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
                         args.push(a)
                     else if bracket and xs.len() > 1: args.push(dw_iterable(child, true, true))
@@ -921,7 +930,7 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
         if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
         seen[name] = true
         n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
-        nodes[n].name = i32(intern(name))
+        nodes[n].name = dw_name_id(child)
         if annotation != 0: nodes[n].a = i32(dw_type(annotation))
         bindings.push(n)
     if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]

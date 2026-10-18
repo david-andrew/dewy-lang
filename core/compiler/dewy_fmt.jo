@@ -2,30 +2,31 @@
 # line breaks; normalize indentation, declarations and whitespace around them.
 use 'dewy_fast.jo'
 use 'dewy_parse.jo'
+use 'dewy_tokens.jo'
 
 df_lexemes: DewyLexeme[]
 df_file = () -> int: dn_file
 df_file = (file: int): dn_file = file
 
-df_assignment = (s: str) -> bool:
-    s in ["=", "=>", ":>", "+=", "-=", "*=", "/=", "^=", "//=", "%=", "<<=", ">>=", ".+=", ".-=", ".*=", "./=", ".^=", ".//=", ".%="]
+df_assignment = (s: DewyToken) -> bool:
+    s == .assign or s == .function or s == .returns or dn_token_assignment(s)
 
 # Only these boundaries are independent of adjacency in the Dewy grammar.
 # In particular, preserve calls/indexing, coefficients, generic applications,
 # optional suffixes and the distinction between a-b and [a -b].
-df_free_gap = (left: str, right: str) -> bool:
-    df_assignment(left) or df_assignment(right) or left in [":", ",", ";", "{"] or right in [":", ",", ";", "}"]
+df_free_gap = (left: DewyToken, right: DewyToken) -> bool:
+    df_assignment(left) or df_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .semi or right == .rbrace
 
 df_gap = (left: DewyLexeme, right: DewyLexeme) -> str:
-    if right.text in [":", ",", ";"]: return ""
-    if left.text == "{" and right.text == "}": return ""
-    if df_free_gap(left.text, right.text): return " "
+    if right.symbol == .colon or right.symbol == .comma or right.symbol == .semi: return ""
+    if left.symbol == .lbrace and right.symbol == .rbrace: return ""
+    if df_free_gap(left.symbol, right.symbol): return " "
     if right.space: " " else: ""
 
 df_tokens = (file: int, src: str) -> str[]:
     saved = dn_file
     dn_file = file
-    df_lexemes = dn_lex(file, 0, len(src))
+    df_lexemes = dn_lex(file, 0, len(src), false)
     dn_file = saved
     out: str[]
     loop i in 0.. and t in df_lexemes:
@@ -33,14 +34,14 @@ df_tokens = (file: int, src: str) -> str[]:
         sig = "{dw_kind_name(t.kind)}:{src[t.start..t.stop)}"
         if i > 0:
             sig += " n{t.newline}"
-            if not df_free_gap(df_lexemes[i - 1].text, t.text): sig += " s{t.space}"
+            if not df_free_gap(df_lexemes[i - 1].symbol, t.symbol): sig += " s{t.space}"
         out.push(sig)
     out
 
 df_text = (src: str) -> str?:
     tokens = df_lexemes
     lines: str[]
-    stack: str[]
+    stack: DewyToken[]
     at = 0
     start = 0
     opaque_end = 0
@@ -58,7 +59,7 @@ df_text = (src: str) -> str?:
             if tokens[stop].stop > content_end: opaque_end = tokens[stop].stop
             stop += 1
         lead = 0
-        loop at + lead < stop and tokens[at + lead].kind == .op and tokens[at + lead].text in [")", "]", "}"]: lead += 1
+        loop at + lead < stop and tokens[at + lead].kind == .op and (tokens[at + lead].symbol == .rparen or tokens[at + lead].symbol == .rbrack or tokens[at + lead].symbol == .rbrace): lead += 1
         depth = max(0, stack.len() - lead)
         first = start
         loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
@@ -87,13 +88,13 @@ df_text = (src: str) -> str?:
         loop i in [at..stop):
             t = tokens[i]
             if t.kind != .op: continue
-            if t.text in ["(", "[", "{"]:
-                stack.push(t.text)
+            if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
+                stack.push(t.symbol)
                 if stack.len() > 256: return none
-            else if t.text in [")", "]", "}"]:
+            else if t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace:
                 if stack.len() == 0: return none
                 opening = stack.pop()
-                if (opening == "{") != (t.text == "}"): return none
+                if (opening == .lbrace) != (t.symbol == .rbrace): return none
                 # [a..b) and (a..b] are valid Dewy range delimiters.
         lines.push(newline)
         at = stop
