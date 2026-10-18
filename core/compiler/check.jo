@@ -1802,7 +1802,7 @@ unpack_loop = (s: int):
     if nodes[it].kind == .range: fatal(nodes[s].pos, "`loop a, b in` unpacks pairs; a range has single numbers")
     t = prune(check_expr(it, 0))
     nodes[s].a = i32(last_checked)
-    if types[t].kind != .array: return
+    if types[t].kind != .array and types[t].kind != .fixed: return
     pos = nodes[s].pos
     et = prune(int(types[t].elem))
     if not dewy and (types[et].kind != .tuple or int(types[et].nargs) != 2): fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {type_str(et)}; to count them write `loop i in 0.. and x in xs`")
@@ -3454,7 +3454,7 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     nested = false
     loop b in bindings:
         if nodes[b].kind == .tuple: nested = true; break
-    if not nested and types[t].kind != .array and types[t].kind != .struct_: return (t, bindings)
+    if not nested and types[t].kind != .array and types[t].kind != .fixed and types[t].kind != .struct_: return (t, bindings)
     statements: int[]
     values: int[]
     unpack_values(e, t, bindings, pos, statements, values)
@@ -3480,13 +3480,16 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         at = prune(check_expr(bc_call("__dewy_set_values", [e], pos), 0))
         unpack_values(last_checked, at, bindings, pos, statements, values)
         return
-    is_array = types[t].kind == .array
+    is_fixed = types[t].kind == .fixed
+    is_array = types[t].kind == .array or is_fixed
     is_tuple = types[t].kind == .tuple
     is_map = is_map_type(t)
     if not is_array and not is_tuple and types[t].kind != .struct_:
         fatal(pos, "unpacking needs an array, tuple, dictionary or record, found {type_str(t)}")
     if is_tuple and int(types[t].nargs) != bindings.len():
         fatal(pos, "expected a tuple with {bindings.len()} elements, found {type_str(t)}")
+    if is_fixed and fixed_len(t) != bindings.len():
+        fatal(pos, "unpacking requires exactly {bindings.len()} elements, found {type_str(t)}")
     input = e
     input_type = t
     if is_map:
@@ -3494,7 +3497,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         input_type = prune(check_expr(bc_call("__map_entries", [input], pos), 0))
         input = last_checked
     source = capture_value(input, input_type, statements)
-    if is_array or is_map:
+    if (is_array and not is_fixed) or is_map:
         length = mk(.call, pos)
         length_source = source
         if is_map: length_source = bc_field(source, "keys", pos)

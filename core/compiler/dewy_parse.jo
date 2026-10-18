@@ -279,9 +279,15 @@ dw_type = (id: int) -> int:
         return dw_type(dw_child(id, 0))
     if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
-        if dewy_syntax[args].children.len() != 1: return dw_fail(id, "array type constraints")
+        count = dewy_syntax[args].children.len()
+        if count < 1 or count > 2: return dw_fail(id, "array type constraints; use array<T> or array<T length=N>")
         n = mk(.tarray, pos)
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
+        if count == 2:
+            constraint = dw_child(args, 1)
+            if dw_op(constraint) != "=" or dw_name(dw_child(constraint, 1)) != "length":
+                return dw_fail(constraint, "array type constraints; the supported constraint is length=N")
+            nodes[n].b = i32(dw_expr(dw_child(constraint, 2)))
         return n
     if dw_op(id) == "TypeParamJuxtapose" and dw_name(dw_child(id, 1)) == "dict":
         args = dw_child(id, 2)

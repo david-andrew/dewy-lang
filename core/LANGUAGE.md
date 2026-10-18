@@ -438,6 +438,33 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
+Use `array<T length=N>` for a known, positive compile-time length:
+
+```dewy
+const WIDTH:int64=2
+Pair:type=<T>(array<T length=WIDTH>)
+let position:Pair<float64>=[10 20]
+let copy=position
+copy[0]=30
+let [x y]=position
+```
+
+These arrays store their elements inline, including inside records and dictionary
+values. Copies are independent; nested strings and growable arrays retain their
+copy-on-write behavior. Indexing, `.length`, loops, equality and positional
+unpacking work as usual. Fixed arrays cannot grow or shrink. The length can use
+integer constants and constant arithmetic; zero-length inline arrays are not
+currently supported.
+In a fixed-array context, `[]` initializes every element to its zero value;
+otherwise a literal must supply exactly the declared number of elements.
+
+An ordinary `array<T>` remains growable. Assigning or passing one to a fixed-array
+value checks its exact length at runtime and copies the elements. An empty
+growable array therefore fails that check. Converting back creates a growable array.
+Both conversions require the same element type and also support `as` casts.
+Mutable arguments require the exact array type, so conversion cannot silently
+redirect a mutation into a temporary copy.
+
 Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before
 the next operand runs. The result has independent value semantics, including

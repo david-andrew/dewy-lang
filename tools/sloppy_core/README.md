@@ -1130,3 +1130,26 @@ This measures draining uniquely owned sets, not arbitrary applications or the
 necessary copy-on-write cost when another set snapshot is retained.
 `python3 -m tools.sloppy_core.benchmark_set_pop --help` documents the rerun;
 see `set-pop-*` source-core audits for measurements and validation.
+
+Known-size arrays now use Dewy's `array<T length=N>` syntax and the inherited
+inline-array backend. Positive constant lengths work with generic aliases,
+record/dictionary fields, optionals, value copies, counted/zipped loops and
+nested unpacking. Growable-to-inline conversion checks the length once and
+copies; the reverse conversion creates a growable array. Mutable parameters
+still require an exact type. Reading a fixed array's `.length` preserves receiver
+effects and bounds checks even though its result is constant.
+
+Seven paired thread-CPU graph runs with one million nodes measured 703.71 ms
+with ordinary growable neighbor arrays and 628.83 ms with explicitly inline
+four-element neighbors (median paired ratio 0.858). The C reference measured
+475.17 ms. This is a source representation choice, not automatic specialization
+or a speedup to unchanged code. C uses a custom table and one flat neighbor
+allocation; graph construction is outside the timed BFS kernel. The benchmark
+checks matching outputs for empty, single-node, small and measured graphs.
+Run `python3 -m tools.sloppy_core.benchmark_fixed_graph --help` to reproduce it.
+
+The independent C-bootstrap suite passes 3,696 checks in 81.17 pytest seconds
+with two workers. New checks run natively and on WebAssembly in default/release
+modes, including managed-value cleanup, runtime shape failures, generic context,
+side effects and mutable-argument rejection. See `fixed-array-*` source-core
+audits for raw measurements and validation.

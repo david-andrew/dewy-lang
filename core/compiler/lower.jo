@@ -2077,6 +2077,10 @@ gen_intrinsic = (e: int) -> Val:
     id = nodes[e].aux as IN
     args = kids(e)
     if id == .len or id == .arrcap:
+        at = prune(ntype(args[0]))
+        if id == .len and types[at].kind == .fixed:
+            gen_borrowed(args[0])
+            return V(e_iconst(fixed_len(at)), false)
         if id == .len:
             fixed = fixed_path_of(args[0])
             if fixed >= 0: return V(fixed_paths[fixed].len, false)
@@ -2708,6 +2712,18 @@ gen_conv = (e: int) -> Val:
                 to_off = int(fields[int(variants[int(structs[tsi].variants) + j].fields)].offset)
                 if tsize(m) > 0: e_copy(e_addi(d, to_off), e_addi(src, fo), tsize(m))
             endc()
+        return Val(d, true, s)
+    if cv == .arr2fixed:
+        # Check the shape once, then copy the value into inline storage.
+        src = gen_borrowed(a).v
+        n = fixed_len(to)
+        iff(e_bin(.ne, VI, arr_len(src), e_iconst(n)))
+        e_call_nr(rt("__panic"), [e_daddr(str_data("fixed-size array needs {n} elements"))], -1)
+        endc()
+        s = new_temp(to)
+        d = e_slot(s)
+        e_copy(d, e_addi(src, 24), tsize(to))
+        if is_managed(to): copy_at(d, to)
         return Val(d, true, s)
     if cv == .fixed2arr:
         # a new array holding copies of the elements

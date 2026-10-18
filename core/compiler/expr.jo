@@ -16,7 +16,7 @@ enum IN:
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed
 
 struct Intrinsic:
     name: str
@@ -155,7 +155,9 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .fixed and tk == .array: return type_eq(int(types[from].elem), int(types[to].elem))
     if tk == .array and is_nd(from): return type_eq(nd_elem(from), int(types[to].elem))
     if fk == .fn_ and tk == .fn_ and never_fn_fits(from, to): return true
-    if fk == .array and tk == .fixed and n != 0 and fixed_literal_ok(n, to): return true
+    if fk == .array and tk == .fixed:
+        if n != 0 and fixed_literal_ok(n, to): return true
+        return n != 0 and nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem))
     if tk == .opt:
         if fk == .none_lit: return true
         if type_eq(from, int(types[to].elem)): return true
@@ -277,6 +279,9 @@ coerce = (n: int, target: int) -> int:
         check_expr(n, to)
         return n
     if fk == .array and tk == .fixed:
+        if nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem)):
+            wrap_conv(n, .arr2fixed, to)
+            return n
         if not fixed_literal_ok(n, to):
             els = "{fixed_len(to)} elements"
             if fixed_len(to) == 1: els = "1 element"
@@ -1077,6 +1082,10 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         loop i in [0..nkids(a)):
             if not can_coerce(kid(a, i), ntype(kid(a, i)), et): return -1
         return 1
+    if types[fp].kind == .fixed and nodes[a].kind != .array and tkind(ntype(a)) == .array:
+        r = match_type(int(types[fp].elem), int(types[prune(ntype(a))].elem), binds, 1)
+        if r >= 0: return r + 1
+        return -1
     r = match_type(pat, ntype(a), binds, 0)
     if r < 0 and types[fp].kind == .array and is_nd(ntype(a)):
         # a 1-D T[,] (a row, a column) for a T[] parameter
@@ -2203,6 +2212,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if types[t0].kind == .fixed:
             if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
             if intrinsics[ii].id != .len: fatal(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {type_str(t0)} has a fixed size")
+            # Calls and indexed receivers still evaluate, even though the
+            # resulting length is statically known.
+            if nodes[a0].kind != .ident: return check_intrinsic(n, .len, args, expected)
             # (the size is part of the type)
             nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = fixed_len(t0), type = i32(T_INT), flags = i32(NF_CHECKED))
             return T_INT
@@ -3435,7 +3447,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             add_flag(args[0], NF_CHECKED)
             nodes[n] = nodes[bc_call("__dewy_string_length", args, nodes[n].pos)]
             return check_expr(n, expected)
-        if types[t].kind != .array and types[t].kind != .str_: fatal(nodes[n].pos, "len() expects an array or string, found {type_str(t)}")
+        if types[t].kind != .array and types[t].kind != .str_ and not (id == .len and types[t].kind == .fixed): fatal(nodes[n].pos, "len() expects an array or string, found {type_str(t)}")
         r = T_INT
     else if id == .push:
         # (xs.push(1, 2, 3): JavaScript's push of several)
@@ -5077,7 +5089,7 @@ check_expr = (n: int, expected: int) -> int:
         fname = int(nodes[n].name)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
         bk = types[bt].kind
-        if name_of(fname) == "length" and (bk == .array or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
+        if name_of(fname) == "length" and (bk == .array or bk == .fixed or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
             method = mk(.field, nodes[n].pos)
             nodes[method].a = nodes[n].a
             nodes[method].name = i32(intern("len"))
@@ -5738,6 +5750,11 @@ check_expr = (n: int, expected: int) -> int:
             return tt
         fk = types[ft].kind
         tk = types[tt].kind
+        if ((fk == .array and tk == .fixed) or (fk == .fixed and tk == .array)) and can_coerce(a, ft, tt):
+            coerce(a, tt)
+            nodes[n] = nodes[a]
+            last_checked = n
+            return tt
         if files[pos_file(nodes[n].pos)].is_dewy:
             if is_numeric(ft) and is_numeric(tt):
                 add_flag(a, NF_CHECKED)

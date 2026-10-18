@@ -33,6 +33,7 @@ QUICK_CASES = {
     'named-managed-order', 'argument-borrow-callback-write', 'record-spread-order',
     'unpack-dictionary-nested', 'loop-else-conditions', 'json-typed-nested',
     'optional-managed-copy', 'grapheme-loop', 'optimizer-nested-exits',
+    'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
 QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
 
@@ -1173,6 +1174,76 @@ choose=<T>(x:T y:T):>T=>y
 apply=(f:((x:int64):>int64))=>f(42)
 main=()=>{let pair:((x:int64 y:int64):>int64)=choose<int64>
 return pair(0 apply(choose<int64>))}''',
+    'fixed-array-values': '''const WIDTH:int64=2
+Pair:type=<T>(array<T length=WIDTH>)
+make=(a:int64 b:int64):>Pair<int64>=>[a b]
+change=(@value:Pair<int64>):>void=>{value[0]=99}
+main=()=>{let before=alloc_count() let pair=make(20 22) let copy=pair
+change(@copy)
+if pair[0] not=? 20 or copy[0] not=? 99 or pair[end] not=? 22 return 1
+let total:int64=0 loop value in pair {total+=value}
+return if pair.length =? 2 and alloc_count() =? before total else 2}''',
+    'fixed-array-generic-context': '''first=<T>(values:array<T length=2>):>T=>values[0]
+main=()=>{let pair:array<uint8 length=2>=[20 22]
+return if first(["first" "last"]) =? "first" and pair =? [20 22]
+(first(pair) as int64)+(first([22 99])) else 1}''',
+    'fixed-array-managed-copies': '''Pair:type=array<array<int64> length=2>
+Box:type=[items:Pair]
+main=()=>{let pair:Pair=[[20] [22]] let box=Box[pair] let copied=box
+copied.items[0].push(99) copied.items[1][0]=0
+let dynamic:array<array<int64>>=pair dynamic[0][0]=100
+return if pair[0] =? [20] and box.items[1] =? [22]
+and copied.items[0] =? [20 99] and copied.items[1] =? [0] 42 else 1}''',
+    'fixed-array-loops': '''main=()=>{let pair:array<int64 length=2>=[20 22]
+let total:int64=0
+loop i in 0.. and value in pair {total+=value+i}
+loop value in pair and expected in [20 22] {if value not=? expected return 1}
+return total-1}''',
+    'fixed-array-dictionary': '''Pair:type=array<int64 length=2>
+main=()=>{let values:dict<int64 Pair>=[0->[0 0] 1->[20 22]]
+let zero=values.get(0) if zero is? none return 1
+let copy=values copy[1][0]=99
+if values[1][0] not=? 20 or copy[1][0] not=? 99 return 2
+let total:int64=0 loop [key pair] in values {loop value in pair {total+=value}}
+return total}''',
+    'fixed-array-length-effects': '''Pair:type=array<string length=2>
+let calls:int64=0
+make=():>Pair=>{calls+=1 return ["first" "last"]}
+index=()=>{calls+=10 return 0}
+main=()=>{let pairs:array<Pair>=[make()] calls=0
+if make().length not=? 2 or calls not=? 1 return 1
+if pairs[index()].length not=? 2 or calls not=? 11 return 2
+let before=alloc_count()
+loop i in [0..20) {if make().len() not=? 2 return 3}
+return if alloc_count() =? before and calls =? 31 42 else 4}''',
+    'fixed-array-unpack': '''Pair:type=array<int64 length=2>
+main=()=>{let pair:Pair=[20 22] let [a b]=pair
+[a b]=[b a]
+let rows:array<Pair length=2>=[[10 11] [12 9]]
+let total:int64=0 loop [left right] in rows {total+=left+right}
+let [[x y] [z w]]=rows
+return if a =? 22 and b =? 20 and x+y+z+w =? 42 total else 1}''',
+    'fixed-array-dynamic-conversion': '''Pair:type=array<array<int64> length=2>
+first=<T>(values:array<T length=2>):>T=>values[0]
+main=()=>{let source=[[20] [22]] let pair:Pair=source
+pair[0].push(99) source[1][0]=0
+let back:array<array<int64>>=pair back[0][0]=100
+let converted=source as Pair
+return if pair[0] =? [20 99] and pair[1] =? [22] and converted[1] =? [0]
+and source[0] =? [20] (first(source)[0]+pair[1][0]) else 1}''',
+    'fixed-array-dynamic-return': '''Pair:type=array<int64 length=2>
+let calls:int64=0
+source=()=>{calls+=1 return [20 22]}
+make=():>Pair=>source()
+main=()=>{let pair=make() let [a b]=pair
+return if calls =? 1 a+b else 1}''',
+    'fixed-array-cleanup': '''Pair:type=array<array<int64> length=2>
+work=()=>{let pair:Pair=[[20] [22]] let copy=pair copy[0].push(1)
+let values:array<Pair>=[pair copy] values[0][1][0]=0
+return pair[0][0]+pair[1][0]}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}''',
     'spread-arrays': '''main=()=>{let head=[1 2] let tail=[20 22]
 let all=[0 head... 3 tail...]
 return if all =? [0 1 2 3 20 22] all[end]+all[end-1] else 1}''',
@@ -3623,6 +3694,12 @@ ERRORS = {
     'generic-constructor-conflicting-elements': ('Pair:type=<T>[left:array<T> right:array<T>]\nmain=()=>{let p=Pair([20] ["bad"]) return 42}', 'expected int, found str'),
     'generic-constructor-unresolved-empty': ('Box:type=<T>[value:T]\nmain=()=>{let box=Box([]) return box.value.length}', "cannot infer the type of 'box'"),
     'generic-constructor-conflicting-callback': ('Runner:type=<T>[value:T step:((x:T):>T)]\nmain=()=>{let r=Runner(42 (x:string)=>x) return 42}', 'parameter type str does not match expected int'),
+    'fixed-array-wrong-length': ('main=()=>{let values:array<int64 length=2>=[1 2 3] return 42}', '2 elements'),
+    'fixed-array-unpack-length': ('main=()=>{let values:array<int64 length=2>=[20 22] let [a b c]=values return 42}', 'exactly 3 elements'),
+    'fixed-array-zero-length': ('main=()=>{let values:array<int64 length=0>=[] return 42}', 'at least 1'),
+    'fixed-array-grow': ('main=()=>{let values:array<int64 length=2>=[20 22] values.push(0) return 42}', 'fixed size'),
+    'fixed-array-mutable-conversion': ('change=(@xs:array<int64 length=2>)=>{xs[0]=42}\nmain=()=>{let xs=[20 22] change(@xs) return 42}', 'exact match'),
+    'fixed-array-unknown-constraint': ('main=()=>{let values:array<int64 capacity=2>=[20 22] return 42}', 'length=N'),
     'record-spread-set': ('main=()=>{let values=set[1] let record=[values... answer=42] return 42}', 'only records can be spread into a record'),
     'set-spread-wrong-type': ('main=()=>{let values:array<uint8>=[set["wrong"]...] return 42}', 'u8'),
     'record-spread-array': ('main=()=>{let xs=[1] let record=[xs... answer=42] return 42}', 'only records can be spread into a record'),
@@ -4074,6 +4151,7 @@ def error_batches(compiler, tmp_path_factory, request):
                   'test_core_unit_range_errors': 'range',
                   'test_core_range_index_errors': 'range',
                   'test_core_unpack_errors': 'unpack',
+                  'test_core_fixed_array_errors': 'bounds',
                   'test_core_set_errors': 'set',
                   'test_core_combined_range_errors': 'range',
                   'test_core_compound_errors': 'compound',
@@ -5704,6 +5782,19 @@ def test_core_unpack_errors(error_batches, body, target, release):
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('let input=[20] let pair:array<int64 length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),
+    ('let input=[20 22 99] printl(input as array<int64 length=2>)', 'fixed-size array needs 2 elements'),
+    ('let input:array<string>=[] let pair:array<string length=2>=input printl(pair)', 'fixed-size array needs 2 elements'),
+    ('let rows:array<array<int64 length=2>>=[] printl(rows[args().length].length)', 'out of bounds'),
+])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_fixed_array_errors(error_batches, body, diagnostic, target, release):
+    ran = error_batches('bounds', body, release, target)
+    assert ran.returncode != 0 and diagnostic in ran.stdout + ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('body, diagnostic', [
     ('let values=set[20] printl(values.pop(22))', 'the set has no member 22'),
     ('let values:set<int64>=set[] printl(values.pop())', 'cannot pop an empty set'),
 ])
@@ -6194,7 +6285,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('game-camera-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
