@@ -14,6 +14,24 @@ const __WATCH_REGION = 0x50000000           # (taken at start: compiler/x64.jo, 
 const __WATCH_REGION_MAC = 0x120000000      # (macOS: compiler/macho.jo, the loader)
 const __WATCH_MARK = 0x6A6F74776174636B
 
+# The test-watch driver keeps its running tests in a separate POSIX group.
+# Keep C function pointers here: the small C seed only loads lib/core.
+when TARGET != "windows" and TARGET != "wasm":
+    __watch_test_pid: *int = null
+    __watch_tests_signals = (pid: *int):
+        __watch_test_pid = pid
+        h: cfn(i32, *u8, *u8) = __watch_test_interrupt
+        # SA_SIGINFO | SA_RESTORER | SA_RESETHAND; the handler never returns.
+        act = [h as int, 4 | 0x04000000 | 0x80000000, h as int, 0]
+        loop sig in [2, 15]: syscall(13, sig, data(act), 0, 8)
+
+    @cabi
+    __watch_test_interrupt = (sig: i32, info: *u8, context: *u8):
+        # No allocation or I/O buffering inside a signal handler.
+        pid = __watch_test_pid[0]
+        if pid > 0: syscall(62, -pid, 15)
+        __exit(128 + int(sig))
+
 __watch_on = false
 __watch_hin: *u8 = null          # (Windows: the pipes, handles passed in SLOPPY_WATCH_PIPES)
 __watch_hout: *u8 = null

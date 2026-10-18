@@ -887,26 +887,14 @@ w_cache = "/tmp/dewy-core-cache"
 
 w_dirs: {str: bool} = {}
 
-when TARGET != "windows" and TARGET != "wasm":
-    # Only async-signal-safe system calls: the test run has a separate group,
-    # so Ctrl-C/termination of this driver must explicitly stop that group.
-    @cabi
-    watch_test_interrupt = (sig: i32, info: *u8, context: *u8):
-        if w_pid > 0: syscall(62, -w_pid, 15)
-        __exit(128 + int(sig))
-
 watch_main = (path: str, args: str[]):
     # Diagnostic retries re-exec the original command; a watcher must not start
     # another watcher inside its build child after a type error.
     more_errors = false
     when TARGET == "windows":
         if test_mode: __test_process_group()
-    when TARGET != "windows" and TARGET != "wasm":
-        if test_mode:
-            h: cfn(i32, *u8, *u8) = watch_test_interrupt
-            # SA_SIGINFO | SA_RESTORER | SA_RESETHAND; this handler never returns.
-            act = [h as int, 4 | 0x04000000 | 0x80000000, h as int, 0]
-            loop sig in [2, 15]: syscall(13, sig, data(act), 0, 8)
+    when not BOOTSTRAP and TARGET != "windows" and TARGET != "wasm":
+        if test_mode: __watch_tests_signals(&w_pid)
     w_cache = os_path(temp_dir()) + "/dewy-core-cache"
     mkdir(w_cache)
     w_out = "{w_cache}/watch-{w_self_id()}.bin"
