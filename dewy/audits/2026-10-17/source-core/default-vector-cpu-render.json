@@ -1,0 +1,132 @@
+{
+  "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+  "samples": 1,
+  "warmups": 1,
+  "last_frame_index": 8,
+  "threads": 2,
+  "mode": "default",
+  "affinity": [
+    2,
+    3
+  ],
+  "load_start": [
+    6.01904296875,
+    7.80029296875,
+    8.52001953125
+  ],
+  "revision": "ab5bc8dade67e8bfdc4f793331d409751d79d31d",
+  "diff_sha256": "acdbf0d5dc00f71ac02ab912c0e81e5760e617002ef25c8c7129aaeaaf6636f3",
+  "compilers": {
+    "baseline": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792315562875631118/bin/dewy-core",
+      "sha256": "9049f4b69b388c128a995b2de92f3d4d60bca20a678cde74b9c5ced12cf6dd3f",
+      "draw3d_sha256": "f59af4580c38476c3eb626fbbfde010ba1f3de8f9ff5007a40147123549a3a05",
+      "softgl_sha256": "75f0c80cd7dc798c83ddcee8cc884549501678c144933a463ddf9c46dbe50b2b"
+    },
+    "candidate": {
+      "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792316157126014568/bin/dewy-core",
+      "sha256": "39bfb8d4242c59f9aaf1c88cf7a63e0edb3c7295a3be32dee8be50dba617da07",
+      "draw3d_sha256": "f59af4580c38476c3eb626fbbfde010ba1f3de8f9ff5007a40147123549a3a05",
+      "softgl_sha256": "75f0c80cd7dc798c83ddcee8cc884549501678c144933a463ddf9c46dbe50b2b"
+    }
+  },
+  "limits": [
+    "Fresh default executables, fixed 1/60-second simulation steps, no interactive window or GPU.",
+    "frame_ms is monotonic elapsed update/draw/submit time, despite the runtime label \"frame cpu\".",
+    "process_cpu_seconds includes startup and PNG writing, and sums CPU time across threads.",
+    "Shadow quality can differ; inspect retained images before accepting a speedup."
+  ],
+  "workloads": {
+    "forest": {
+      "sources": {
+        "baseline": {
+          "path": "/var/home/david/dev/dewy-lang/examples/sloppy_core/forest.dewy",
+          "sha256": "435cca799020032e602b5cbeb342c7e2da15280f0fafc8dc73d9222a3c7159cb"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/examples/sloppy_core/forest.dewy",
+          "sha256": "435cca799020032e602b5cbeb342c7e2da15280f0fafc8dc73d9222a3c7159cb"
+        }
+      },
+      "samples": {
+        "baseline": [
+          {
+            "frame_ms": 180.51,
+            "process_wall_seconds": 2.066162842002086,
+            "process_cpu_seconds": 1.7172929999999997
+          }
+        ],
+        "candidate": [
+          {
+            "frame_ms": 167.72,
+            "process_wall_seconds": 1.9227645769969968,
+            "process_cpu_seconds": 1.708835
+          }
+        ]
+      },
+      "images": {
+        "baseline": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/default-vector-cpu/render/forest-baseline.png",
+          "sha256": "fec4c79de1052f80953d3fb8a93f6e8311b57ff0b10776f14af205a6c0f7f6f3"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/default-vector-cpu/render/forest-candidate.png",
+          "sha256": "fec4c79de1052f80953d3fb8a93f6e8311b57ff0b10776f14af205a6c0f7f6f3"
+        }
+      },
+      "median_paired_candidate_baseline_ratio": {
+        "frame_ms": 0.9291451997119273,
+        "process_wall_seconds": 0.9305968232077302,
+        "process_cpu_seconds": 0.9950748066870362
+      }
+    },
+    "dunes": {
+      "sources": {
+        "baseline": {
+          "path": "/var/home/david/dev/dewy-lang/examples/sloppy_core/dunes.dewy",
+          "sha256": "eccb8bc150b8711a9b340b42efb3fb951e2069b547e8609d2718a89994d37ba1"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/examples/sloppy_core/dunes.dewy",
+          "sha256": "eccb8bc150b8711a9b340b42efb3fb951e2069b547e8609d2718a89994d37ba1"
+        }
+      },
+      "samples": {
+        "baseline": [
+          {
+            "frame_ms": 180.94,
+            "process_wall_seconds": 2.2995876710010634,
+            "process_cpu_seconds": 2.393532
+          }
+        ],
+        "candidate": [
+          {
+            "frame_ms": 198.81,
+            "process_wall_seconds": 2.452835950000008,
+            "process_cpu_seconds": 2.4515809999999987
+          }
+        ]
+      },
+      "images": {
+        "baseline": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/default-vector-cpu/render/dunes-baseline.png",
+          "sha256": "6a2334cbded64d287d10849c4ba307689bc8665491d04231f1926d0daabef32b"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/default-vector-cpu/render/dunes-candidate.png",
+          "sha256": "6a2334cbded64d287d10849c4ba307689bc8665491d04231f1926d0daabef32b"
+        }
+      },
+      "median_paired_candidate_baseline_ratio": {
+        "frame_ms": 1.0987620205593014,
+        "process_wall_seconds": 1.0666416335987017,
+        "process_cpu_seconds": 1.0242524436690208
+      }
+    }
+  },
+  "load_end": [
+    6.54345703125,
+    7.79833984375,
+    8.50390625
+  ]
+}

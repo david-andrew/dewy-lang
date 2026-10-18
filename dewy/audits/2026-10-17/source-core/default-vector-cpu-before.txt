@@ -1,0 +1,29 @@
+F
+=================================== FAILURES ===================================
+______________ test_core_numeric_cpu_feature_initializer[default] ______________
+
+compiler = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792315562875631118/bin/dewy-core')
+tmp_path = PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/pytest-of-david/pytest-341/test_core_numeric_cpu_feature_0')
+flags = []
+
+    @pytest.mark.parametrize('flags', [[], ['--release']], ids=['default', 'release'])
+    def test_core_numeric_cpu_feature_initializer(compiler, tmp_path, flags):
+        if platform.machine().lower() not in ('x86_64', 'amd64'):
+            pytest.skip('the vectorizer currently targets native x86-64')
+        source = tmp_path / 'matrix.dewy'
+        source.write_text('main=()=>{let a=ones(2 2) return sum(a*a) as int64}')
+        binary = tmp_path / 'matrix'
+        built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
+                               capture_output=True, text=True, timeout=30, check=False)
+        assert built.returncode == 0, built.stdout + built.stderr
+        # Merely reserving the vectorizer's global leaves it zero: its runtime
+        # initializer must stay reachable without an explicit reference in user code.
+>       assert 'fn f___cpu_detect_' in built.stdout
+E       AssertionError: assert 'fn f___cpu_detect_' in 'fn f_init_matrix_667 (params 0, ret -1):\n  v0 = call a=0 b=0 c=0 imm=4 ty=0 args:\n  ret a=-1 b=0 c=0 imm=0 ty=0\nfn...=8 imm=0 ty=0\n  v44 = gaddr a=0 b=0 c=0 imm=32 ty=0\n  store a=44 b=5 c=1 imm=0 ty=0\n  ret a=-1 b=0 c=0 imm=0 ty=0\n'
+E        +  where 'fn f_init_matrix_667 (params 0, ret -1):\n  v0 = call a=0 b=0 c=0 imm=4 ty=0 args:\n  ret a=-1 b=0 c=0 imm=0 ty=0\nfn...=8 imm=0 ty=0\n  v44 = gaddr a=0 b=0 c=0 imm=32 ty=0\n  store a=44 b=5 c=1 imm=0 ty=0\n  ret a=-1 b=0 c=0 imm=0 ty=0\n' = CompletedProcess(args=[PosixPath('/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792315562875631118/b...0\n  v44 = gaddr a=0 b=0 c=0 imm=32 ty=0\n  store a=44 b=5 c=1 imm=0 ty=0\n  ret a=-1 b=0 c=0 imm=0 ty=0\n', stderr='').stdout
+
+tests/python_misc/test_sloppy_core.py:6915: AssertionError
+=========================== short test summary info ============================
+FAILED tests/python_misc/test_sloppy_core.py::test_core_numeric_cpu_feature_initializer[default]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 4669 deselected in 1.09s

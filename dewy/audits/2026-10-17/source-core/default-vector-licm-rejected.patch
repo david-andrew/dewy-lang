@@ -1,0 +1,41 @@
+diff --git a/core/compiler/loops.jo b/core/compiler/loops.jo
+index 9a8ee2e0..a8f55c9a 100644
+--- a/core/compiler/loops.jo
++++ b/core/compiler/loops.jo
+@@ -512,20 +512,20 @@ fast_vectorize = ():
+     floats = false
+     loop ins in ir.code:
+         if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv: floats = true
+-    if floats: loop_versioning(true)
++    if floats and loop_versioning(true): ir.code = o_licm(ir.code)
+ 
+ # version the counting loops of the current function that have checks to drop
+ lx_dbg_read = false
+ lx_dbg = ""
+-loop_versioning = (vector_only: bool = false):
++loop_versioning = (vector_only: bool = false) -> bool:
+     if not lx_dbg_read:
+         lx_dbg_read = true
+         lx_dbg = env("SLOPPY_LXDBG") ?? ""
+-    if len(lx_dbg) > 0 and find(ir.name, lx_dbg) < 0: return
++    if len(lx_dbg) > 0 and find(ir.name, lx_dbg) < 0: return false
+     code = ir.code
+     ends = lx_ends(code)
+     cl = lx_counting(code, ends)
+-    if cl.len() == 0: return
++    if cl.len() == 0: return false
+     nv = ir.vtypes.len()
+     lx_known = 0
+     lx_sync()
+@@ -611,9 +611,10 @@ loop_versioning = (vector_only: bool = false):
+             lx_copy(code, L.pl, L.pe, nochecks, empty, out, 1)
+             out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
+         at = L.pe + 1
+-    if at == 0: return
++    if at == 0: return false
+     loop p in [at..code.len()): out.push(code[p])
+     ir.code = lx_dce(out)
++    true
+ 
+ # drop pure instructions whose results are unused (what the checks computed, in the copies)
+ lx_dce = (code: Ins[]) -> Ins[]:

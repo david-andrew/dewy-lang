@@ -954,13 +954,12 @@ python3 -m tools.sloppy_core.benchmark_matrix "$(python3 -m tools.core path)" \
     --size 192 --steps 8 --samples 7 --threads 2 --output /tmp/matrix.json
 ```
 
-The recorded 192×192 and 384×384 runs put single-thread release at roughly
-1.17× and 1.11× C's kernel time, respectively. A subsequent focused default-build
-optimization reduced the 192×192 workload by another 29%, to about 2.10× C's time.
+The recorded 192×192 run puts both single-thread default and release builds at
+roughly 1.14× C's kernel time. A separate 384×384 run put release at about 1.11×.
 These are specific bundled-library workloads with allocation included, not
 general C performance parity. The
 [paired results](../dewy/audits/2026-10-17/source-core/matrix-performance-validation.json)
-and [default-build follow-up](../dewy/audits/2026-10-17/source-core/default-vector-validation.json)
+and [default-build follow-up](../dewy/audits/2026-10-17/source-core/default-vector-cpu-validation.json)
 record compiler identities, input checks, flags and limits.
 
 ## Parallel CPU work

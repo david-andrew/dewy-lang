@@ -6900,6 +6900,23 @@ return 42
         assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
+@pytest.mark.parametrize('flags', [[], ['--release']], ids=['default', 'release'])
+def test_core_numeric_cpu_feature_initializer(compiler, tmp_path, flags):
+    if platform.machine().lower() not in ('x86_64', 'amd64'):
+        pytest.skip('the vectorizer currently targets native x86-64')
+    source = tmp_path / 'matrix.dewy'
+    source.write_text('main=()=>{let a=ones(2 2) return sum(a*a) as int64}')
+    binary = tmp_path / 'matrix'
+    built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    # Merely reserving the vectorizer's global leaves it zero: its runtime
+    # initializer must stay reachable without an explicit reference in user code.
+    assert 'fn f___cpu_detect_' in built.stdout
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 8, ran.stdout + ran.stderr
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_numeric_ranges_custom_index(compiler, tmp_path, target, release):
