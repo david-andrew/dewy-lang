@@ -26,6 +26,7 @@ TESTS = (
     'tests/python_misc/test_sloppy_core_editor.py',
     'tests/python_misc/test_sloppy_core_format.py',
     'tests/python_misc/test_sloppy_core_network.py',
+    'tests/python_misc/test_sloppy_core_package.py',
     'tests/python_misc/test_sloppy_core_watch.py',
     'tests/python_misc/test_sloppy_core_upstream.py',
     'tests/python_misc/test_core_dev.py',

@@ -32,6 +32,10 @@ it remains stable across compiler rebuilds. `python3 -m tools.core test` runs th
 full compact-core gate. The published installer below still installs the
 previous implementation.
 
+To try the compact core without building it locally, use a
+[CI toolchain download](core/README.md#download-a-ci-build). Successful runs
+provide a standalone Linux x86-64 compiler with the native/web game libraries.
+
 ### dewy
 
 The previous compiler lives under [dewy/](dewy/), retained as a language-design

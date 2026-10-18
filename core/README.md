@@ -94,6 +94,28 @@ launches CodeLLDB with this toolchain's value formatters. See the
 `dewy-core --print-lib` reports the active library directory for tooling,
 including `DEWY_CORE_LIB` overrides and development-launcher snapshots.
 
+## Download a CI build
+
+Successful [Compact core runs](https://github.com/david-andrew/dewy-lang/actions/workflows/core.yml)
+publish a `dewy-core-linux-x86_64-COMMIT` development artifact after the full
+gate passes. It includes the native compiler, bundled libraries and game
+templates, licenses and build provenance. Select a completed run on
+`restart/sloppy-frontend`, download that artifact, and extract the download ZIP.
+Then, from the directory containing the archive:
+
+```sh
+sha256sum -c dewy-core-linux-x86_64.tar.gz.sha256
+tar -xzf dewy-core-linux-x86_64.tar.gz
+./dewy-core/bin/dewy-core --version
+./dewy-core/bin/dewy-core new my-game
+./dewy-core/bin/dewy-core build my-game/main.dewy --target wasm -o game-web
+```
+
+Open `game-web.html` in a browser. The compiler runs on Linux x86-64 without
+Python or a C compiler. Keep its `bin/` and `lib/` directories together when
+moving the extracted toolchain. `PACKAGE.json` records the source revision and
+payload hashes; `build.json` retains the independent bootstrap provenance.
+
 ## Build a standalone toolchain
 
 From the repository root, using Python, a C compiler and `make`:
@@ -118,6 +140,16 @@ changed. Python is build tooling only; program compilation and execution are
 native. The compiler host currently requires Linux x86-64; native Linux and web
 programs are covered by the development gate. Other inherited targets are not
 certified for this frontend.
+
+Package a locally built toolchain with the same layout used by CI:
+
+```sh
+python3 -m tools.sloppy_core.package /tmp/dewy-core \
+  --output /tmp/dewy-core-linux-x86_64.tar.gz
+```
+
+The output archive must be new. Packaging verifies the compiler and library
+contents against the build manifest and writes a sibling `.sha256` file.
 
 Once a core has been built, rebuild into a new toolchain without the
 old compiler or C bootstrap:
@@ -149,6 +181,7 @@ DEWY_CORE_COMPILER=/tmp/dewy-core/bin/dewy-core \
   tests/python_misc/test_sloppy_core_editor.py \
   tests/python_misc/test_sloppy_core_format.py \
   tests/python_misc/test_sloppy_core_network.py \
+  tests/python_misc/test_sloppy_core_package.py \
   tests/python_misc/test_sloppy_core_watch.py \
   tests/python_misc/test_sloppy_core_upstream.py \
   tests/python_misc/test_core_dev.py
@@ -158,7 +191,7 @@ The gate needs pytest and Node (for web/client tests). Shader compilation/linkin
 also uses EGL/GLES3 libraries; local runs skip those checks when unavailable,
 while CI ensures that the driver is installed. The
 `Compact core` GitHub workflow bootstraps from C and runs it independently of
-the earlier compiler suite. The gate has over 3,500 checks and typically takes
+the earlier compiler suite. The gate has over 4,600 checks and typically takes
 one to two minutes locally, depending on host load. It tests expected Dewy
 behavior, Unicode grapheme conformance, native/web game simulation, a headless
 render, unsaved editor changes, and focused shared-core regressions. The upstream

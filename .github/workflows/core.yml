@@ -101,9 +101,21 @@ jobs:
             tests/python_misc/test_sloppy_core_editor.py \
             tests/python_misc/test_sloppy_core_format.py \
             tests/python_misc/test_sloppy_core_network.py \
+            tests/python_misc/test_sloppy_core_package.py \
             tests/python_misc/test_sloppy_core_watch.py \
             tests/python_misc/test_sloppy_core_upstream.py \
             tests/python_misc/test_core_dev.py
+      - name: Package the tested development toolchain
+        run: |
+          python -m tools.sloppy_core.package "$RUNNER_TEMP/dewy-core" \
+            --revision "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/artifacts/dewy-core-linux-x86_64.tar.gz"
+      - name: Upload the development toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: dewy-core-linux-x86_64-${{ github.sha }}
+          path: ${{ runner.temp }}/artifacts/*
+          if-no-files-found: error
       - name: Preserve test results and build provenance
         if: always()
         uses: actions/upload-artifact@v4

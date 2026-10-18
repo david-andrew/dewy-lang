@@ -1647,3 +1647,15 @@ Existing context-dependent generic-element and standard-library priority rules
 remain in place. The focused selection passes 1,391 native/web, default/release
 checks in 20.35 seconds; hosted CI runs the full C-bootstrap gate. See
 `array-overload-length-*` audits.
+
+Successful compact-core CI runs now publish a standalone Linux x86-64 archive
+after the full gate passes. It contains the tested compiler, bundled libraries
+and templates, licenses and provenance, with a sibling SHA-256 checksum.
+`python3 -m tools.sloppy_core.package TOOLCHAIN --output NEW.tar.gz` makes the
+same package locally and rejects payloads changed since their build.
+
+The package integration test extracts and relocates the archive to a path with
+spaces, empties `PATH`, executes native/web sample programs and builds a generated
+game for both targets. Compiler/library discovery, executable permissions and
+payload hashes are checked. The package and driver selection passes 31 checks in
+2.53 seconds. The download workflow is documented in `core/README.md`.

@@ -73,7 +73,7 @@ release kernel within about 14% of C. Detailed results and limits are in the
 [implementation notes](../tools/sloppy_core/README.md) and
 [example guide](../examples/sloppy_core/README.md).
 
-The development gate now has over 4,400 checks; recent local full runs took
+The development gate now has over 4,600 checks; recent local full runs took
 78–135 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects 157 checks and takes roughly 3–4 pytest seconds. Focused
 selections also typically take seconds. Value
