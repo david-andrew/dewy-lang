@@ -1,5 +1,16 @@
 # Dewy on the compact core
 
+[`rollback_lab.dewy`](rollback_lab.dewy) runs two copies of a small game over a
+simulated network. Adjust latency, jitter and packet loss to see prediction,
+rewinding and replay; **P** pauses and **R** resets. Each pane shows its peer's
+current prediction, which can differ briefly while inputs are in flight. The
+[model](rollback_model.dewy) uses ordinary Dewy records, arrays and value copies
+with the bundled `netplay` library. Run it with
+`python3 -m tools.core run examples/sloppy_core/rollback_lab.dewy`, or build with
+`--target wasm` for a browser. Its native/web regression harness compares both
+peers' confirmed history with an independent Python simulation, including a
+saved original value that must remain unchanged.
+
 [`camera_roll.dewy`](camera_roll.dewy) demonstrates a rolling 3D camera, labels
 projected from world positions, cursor-ray picking and menus with long labels.
 Use the slider to roll, **P** to rotate automatically, and **R** to reset. The orange

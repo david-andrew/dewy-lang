@@ -1,0 +1,20 @@
+# Inspect retained history only in this regression harness; the game demo uses
+# the public session API. Python independently checks the confirmed game state.
+from p"../../examples/sloppy_core/rollback_model.dewy" import fresh, advance
+
+main=(args:array<string>):>void=>{
+    let delayed=args.length>?1 and args[1]=?"delayed"
+    let simulation=if delayed fresh() else fresh(0.0 0.0 0.0)
+    let original=simulation.left.state
+    loop frame in [0..900) {advance(@simulation)}
+    let confirmed=min(min(simulation.left.confirmed() simulation.right.confirmed())
+                      min(simulation.left.tick simulation.right.tick))-1
+    printl(confirmed)
+    printl(to_json(simulation.left.__states[confirmed%128]))
+    printl(to_json(simulation.right.__states[confirmed%128]))
+    printl(simulation.left.rollbacks)
+    printl(simulation.right.rollbacks)
+    printl(simulation.left.desync)
+    printl(simulation.right.desync)
+    printl(to_json(original))
+}

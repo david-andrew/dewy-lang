@@ -1060,3 +1060,15 @@ and share their width across frames. `camera_roll.dewy` exercises camera roll,
 projected labels, cursor-ray picking and a long-label settings menu. Native/web
 checks cover projection, inverse picking, audio orientation and restoring the
 default camera orientation. The original Sloppy checkout is not modified.
+
+
+The Dewy rollback lab exercises the inherited generic `netplay` library with
+Dewy state/input records and a Dewy tick callback. Two peers predict, retain COW
+snapshots and replay late inputs over a deterministic simulated link. Native/web,
+default/release checks run 900 frames both without delay and with 120 ms latency,
+30 ms jitter and 10% loss. Python independently computes the state at a confirmed
+tick and checks both peers, zero desynchronization reports, actual rollbacks and
+an unchanged original snapshot. The interactive example also has software-render
+and web-build checks. Seven focused checks pass in 10.00 seconds using the same
+C-built compiler as the preceding full 3,525-check gate. No compiler or library
+inputs changed for this example; see `rollback-validation.json` for scope.

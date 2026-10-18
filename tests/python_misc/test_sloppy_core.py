@@ -5633,6 +5633,53 @@ class Scripts(HTMLParser):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_rollback_model(compiler, tmp_path, target, release):
+    source = Path(__file__).resolve().parents[2] / 'core/tests/rollback.dewy'
+    binary = tmp_path / 'rollback'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for web rollback checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'rollback.cjs'
+        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [node, runner]
+    for scenario in ['direct', 'delayed']:
+        ran = subprocess.run([*command, scenario], capture_output=True, text=True,
+                             timeout=15, check=False)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert not ran.stderr, ran.stderr
+        lines = ran.stdout.splitlines()
+        assert len(lines) == 8, ran.stdout
+        tick = int(lines[0])
+        assert 700 < tick < 900
+        positions, scores = [0, 0], [0, 0]
+        for t in range(2, tick):
+            for player in range(2):
+                positions[player] += (t//12 + player) % 3 - 1
+                if (t + player*3) % 11 == 0 and abs(positions[player] - positions[1-player]) < 5:
+                    scores[player] += 1
+        expected = {'positions': positions, 'scores': scores, 'hits': sum(scores)}
+        assert json.loads(lines[1]) == json.loads(lines[2]) == expected
+        rollbacks = list(map(int, lines[3:5]))
+        if scenario == 'delayed':
+            assert all(n > 30 for n in rollbacks)
+        else:
+            assert rollbacks == [0, 0]
+        assert lines[5:7] == ['-1', '-1']
+        assert json.loads(lines[7]) == {'positions': [0, 0], 'scores': [0, 0], 'hits': 0}
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.core_quick
 def test_core_game_model(compiler, tmp_path, target, release):
     node = shutil.which('node')
@@ -5822,7 +5869,7 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_game_web_build(compiler, tmp_path, game, release):
     node = shutil.which('node')
@@ -5845,7 +5892,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     assert validation.returncode == 0, validation.stdout + validation.stderr
 
 
-@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll'])
+@pytest.mark.parametrize('game', ['paddle', 'physics', 'forest', 'dunes', 'netpong', 'camera_roll', 'rollback_lab'])
 def test_core_game_renderer(compiler, tmp_path, game):
     source = Path(__file__).resolve().parents[2] / f'examples/sloppy_core/{game}.dewy'
     binary = tmp_path / game

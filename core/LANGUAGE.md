@@ -987,6 +987,15 @@ events, and `net.send(peer value)` sends strings or byte arrays. Browser builds
 can connect to a native host or use direct invite codes through `import invite`.
 See the [multiplayer run instructions](../examples/sloppy_core/README.md#multiplayer).
 
+`import netplay` adds rollback sessions: each peer runs the game from ordinary
+value snapshots, predicts remote input, then rewinds and replays when late input
+differs. The tick callback must be deterministic for its state and inputs; keep
+random seeds in the state and leave clocks and rendering outside that callback.
+The [rollback lab](../examples/sloppy_core/rollback_lab.dewy) runs two peers on a
+simulated link with adjustable latency, jitter and loss. Its
+[model](../examples/sloppy_core/rollback_model.dewy) shows session construction,
+`play`, outgoing packets and delivery using Dewy records and COW arrays.
+
 This remains a developing subset of Dewy. The earlier proof/effect system,
 automatic growth of machine integers on overflow, general structural conversions and every historical
 juxtaposition form have not been recreated. See the
