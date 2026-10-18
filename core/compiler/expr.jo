@@ -6778,6 +6778,8 @@ check_dotted = (n: int, expected: int) -> int:
         lt = prune(check_expr(lam, 0))
         lam = last_checked
         rt = prune(int(types[lt].elem))
+        if not is_int(rt) and not is_float(rt) and types[rt].kind != .bool_:
+            fatal(pos, "GPU array expressions must return a fixed-width integer, float or bool, found {type_str(rt)}; use CPU arrays for exact rationals and managed values")
         runf = "__gpu_run_f"
         if is_int(rt): runf = "__gpu_run_i"
         ds = mk(.str_lit, pos)

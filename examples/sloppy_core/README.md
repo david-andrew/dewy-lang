@@ -1,5 +1,11 @@
 # Dewy on the compact core
 
+[`terrain_array.dewy`](terrain_array.dewy) generates a height field with one fused
+GPU expression and checks it against the same Dewy function on the CPU. Run
+`./tools/dewy examples/sloppy_core/terrain_array.dewy`, or build with `--target wasm`
+for the browser. `SLOPPY_SOFTWARE=1` exercises the CPU fallback. See the
+[GPU array guide](../../core/LANGUAGE.md#gpu-arrays).
+
 [`trajectory_fit.dewy`](trajectory_fit.dewy) fits a quadratic to sampled heights
 with matrices, transpose and a linear solver. Run
 `./tools/dewy examples/sloppy_core/trajectory_fit.dewy`, or run its test blocks

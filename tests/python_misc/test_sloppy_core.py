@@ -4520,6 +4520,15 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'gpu-array-cpu-input': ('main=()=>{printl(cpu(gpu([1.0 2.0]) .+ [3.0 4.0]))}',
+                            'this array is in CPU memory'),
+    'gpu-array-exact-division': ('main=()=>{printl(cpu(gpu([1 2]) ./ 2))}',
+                                 'GPU array expressions must return a fixed-width integer, float or bool, found Rational'),
+    'gpu-array-managed-result': ('word=(x:float32)=>"value"\nmain=()=>{printl(cpu(word.(gpu([1.0]))))}',
+                                 'GPU array expressions must return a fixed-width integer, float or bool'),
+    'gpu-array-capture': ('main=()=>{let offset=float32(1.0) let shift=(x:float32)=>x+offset '
+                          'printl(cpu(shift.(gpu([1.0 2.0]))))}',
+                          'captures variables cannot run on the GPU'),
     'unpack-leaf-narrow': ('main=()=>{let [x:uint8]=[42] return x}', 'cannot implicitly convert int to u8'),
     'unpack-leaf-incompatible': ('main=()=>{let [x:string]=[42] return 42}', 'expected str, found int'),
     'unpack-leaf-discard-incompatible': ('main=()=>{let [_:string]=[42] return 42}', 'expected str, found int'),
@@ -6962,6 +6971,73 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout == ('height = 1.501 + 8.008*t + -4.909*t*t\n'
                           'height at 0.6 seconds: 4.538\n')
+
+
+@pytest.mark.parametrize('target, backend', [
+    ('native', 'fallback'), ('wasm', 'fallback'),
+    ('native', 'gles'), ('native', 'vulkan'),
+])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env.update(SLOPPY_THREADS='2', LP_NUM_THREADS='2', SLOPPY_VK_PIPELINE_CACHE='0')
+    if backend == 'fallback':
+        env['SLOPPY_SOFTWARE'] = '1'
+    else:
+        if platform.system() != 'Linux':
+            pytest.skip('offscreen Mesa driver checks currently target Linux')
+        env.update(LIBGL_ALWAYS_SOFTWARE='1', EGL_PLATFORM='surfaceless')
+        if backend == 'gles':
+            request.getfixturevalue('shader_driver')
+            env['SLOPPY_VULKAN'] = '0'
+        else:
+            drivers = list(Path('/usr/share/vulkan/icd.d').glob('lvp_icd*.json'))
+            drivers = [path for path in drivers if 'i686' not in path.name]
+            if not drivers:
+                pytest.skip('Mesa lavapipe Vulkan driver is needed')
+            env.update(SLOPPY_VULKAN='1', VK_DRIVER_FILES=str(drivers[0]),
+                       VK_ICD_FILENAMES=str(drivers[0]))
+    program = '''import p"@lib/game/gpuarray.jo" as engine
+half=(x:float32):>float32=>x*0.5+0.25
+main=()=>{
+printl"{gpu_available()} {engine.__gpu_vk}"
+let original=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
+original[0]=99.0
+let h=half.(g) .* 2.0 .+ 1.0
+assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
+assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
+assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
+let m=gpu(reshape([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))
+let row=gpu([10.0 20.0 30.0]) let col=gpu(reshape([100.0 200.0] 2 1))
+let result=cpu(m .+ row .+ col)
+assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 236.0])
+assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
+let ints=gpu([-7 0 9])
+assert(cpu(ints .* 2 .+ 1).data =? [-13 1 19])
+assert(sum(ints) =? 2 and min(ints) =? -7 and max(ints) =? 9)
+let empty=gpu(zeros(0 3)) .+ row
+assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
+let many=gpu(fill(1.0 4097)) .* 3.0
+assert(sum(many) =? 12291.0 and min(many) =? 3.0 and max(many) =? 3.0)
+loop i in [0..24) {g=g .+ 0.5}
+assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
+assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
+let downloaded=cpu(saved) downloaded[0]=123.0
+assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
+return 0
+}'''
+    example = Path(__file__).resolve().parents[2] / 'examples/sloppy_core/terrain_array.dewy'
+    command, error = build_case_batch(compiler, tmp_path, {'gpu': program, 'terrain': example.read_text()},
+                                      ['exit(case_0()+case_1())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    expected = {'fallback': 'false false\n', 'gles': 'true false\n', 'vulkan': 'true true\n'}
+    available = 'false' if backend == 'fallback' else 'true'
+    assert ran.stdout.startswith(expected[backend] +
+                                f'Generated 33x33 height field (GPU available: {available}).\n'), ran.stdout + ran.stderr
+    assert ran.stdout.splitlines()[2].startswith('Maximum CPU difference: '), ran.stdout
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

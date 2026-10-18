@@ -989,6 +989,41 @@ general C performance parity. The
 and [default-build follow-up](../dewy/audits/2026-10-17/source-core/default-vector-cpu-validation.json)
 record compiler identities, input checks, flags and limits.
 
+## GPU arrays
+
+`gpu(values)` uploads a numeric array or `NDArray`; `cpu(value)` downloads an
+independent `NDArray` with the same shape. Floating inputs become `float32`,
+integer inputs become `int32`, and arrays may have up to four dimensions:
+
+```dewy
+let xs = gpu([1.0 2.0 3.0])
+let shifted = xs .* 2.0 .+ 1.0
+assert(cpu(shifted).data =? [3.0 5.0 7.0])
+assert(cpu(xs).data =? [1.0 2.0 3.0])
+```
+
+Adjacent dotted operations fuse into one GPU program, including calls to named
+functions written in Dewy. Shapes broadcast as on the CPU. `sum`, `min`, `max`
+and `mean` also accept GPU arrays. Comparisons produce `float32` masks containing
+zero or one. The uploaded value and saved copies remain unchanged when another
+binding receives the next result. Upload reusable inputs once and download at
+the point where CPU code needs the result.
+
+Native Linux programs try Vulkan, then offscreen GLES; browser builds use
+WebGL 2 where available. `gpu_available()` reports whether the driver path is
+active. Otherwise—including Node and `SLOPPY_SOFTWARE=1`—the same expression runs
+on the CPU. GPU functions must use shader-compatible numeric values and cannot
+capture closures or allocate managed collections. These restrictions are checked
+at compilation even if execution will use the CPU fallback. Exact rational
+integer division is therefore a CPU-array operation; use floating GPU inputs
+for `./`. Single-precision GPU math can differ slightly from CPU results.
+
+[`terrain_array.dewy`](../examples/sloppy_core/terrain_array.dewy) broadcasts two
+axes into a height field using a Dewy function, then compares the downloaded
+field with its CPU reference. Regression checks exercise native/web CPU fallback
+and offscreen Mesa GLES/Vulkan execution. Those software-driver checks validate
+the generated programs; they are not hardware GPU performance measurements.
+
 ## Parallel CPU work
 
 The bundled worker pool provides `parallel_map`, `parallel_range` and

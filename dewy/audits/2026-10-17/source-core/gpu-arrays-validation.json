@@ -1,0 +1,26 @@
+{
+  "change": "Exercise Dewy GPU arrays through CPU fallback and offscreen GLES/Vulkan; add a terrain height-field example and report unsupported result types at the user expression.",
+  "compiler": "build-1792317802771367751/bin/dewy-core",
+  "source_identity": "a89c705d2569c30817e62b71fd67aab26f6070477e1cbf95229f0e55037ff1aa",
+  "validation": "55 checks passed in 6.54s, covering native/web default/release GPU-array fallback, native GLES/Vulkan software drivers, dotted CPU regressions and shader driver checks. Ruff and git diff --check passed.",
+  "coverage": [
+    "integer/float upload, scalar arithmetic and named functions",
+    "broadcast rows and columns, empty shapes",
+    "sum/min/max with 4097-element reduction",
+    "original CPU inputs, GPU snapshots and downloaded results remain independent",
+    "24 repeated result replacements exercise resource reuse",
+    "terrain example checks a 33x33 trigonometric field against a CPU reference within 2e-5",
+    "reject mixed CPU/GPU inputs, captures, exact rational and managed GPU results"
+  ],
+  "drivers": {
+    "gles": "surfaceless Mesa, LIBGL_ALWAYS_SOFTWARE=1, LP_NUM_THREADS=2",
+    "vulkan": "lavapipe, explicitly selected /usr/share/vulkan/icd.d/lvp_icd.x86_64.json; separate probe identified llvmpipe LLVM 22.1.8. The Vulkan validation layer is not installed.",
+    "fallback": "SLOPPY_SOFTWARE=1 for native; Node for web"
+  },
+  "limits": [
+    "No hardware GPU throughput claim.",
+    "WebGL execution in a browser is not covered here; web fallback and GLES shader execution are.",
+    "Vulkan tests skip when the lavapipe ICD is not installed.",
+    "Previous-core rebuild for the diagnostic change; the parent broadcasting commit passed independent C-bootstrap CI (39117496083)."
+  ]
+}
