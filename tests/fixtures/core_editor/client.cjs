@@ -139,6 +139,26 @@ async function change(text, predicate) {
         const stale = format();
         document.version++;
         assert.equal(await stale, null, 'formatting an old document version must not replace newer edits');
+        const helperSource = path.join(directory, 'helper.dewy');
+        const helperDisk = 'offset=(amount:int64)=>amount+2';
+        fs.writeFileSync(helperSource, helperDisk);
+        const helper = {
+            uri: uri(pathToFileURL(helperSource).href), languageId: 'dewy', version: 1,
+            getText: () => 'offset=(amount:int64)=>amount+3',
+        };
+        vscode.workspace.textDocuments.push(helper);
+        fire('open', helper);
+        await until(() => values.has(helper.uri.toString()));
+        assert.deepEqual(values.get(helper.uri.toString()), []);
+        await change('from p"helper.dewy" import offset\nmain=()=>offset(amount=39)', (ds) => ds.length === 0);
+        const parameterRefs = await providers.references.provideReferences(
+            helper, new Position(0, 9), { includeDeclaration: false });
+        assert.equal(parameterRefs.length, 2);
+        const namedArgument = parameterRefs.find((item) => item.uri.toString() === document.uri.toString());
+        assert.deepEqual(namedArgument.range, new Range(new Position(1, 16), new Position(1, 22)));
+        vscode.workspace.textDocuments = [document];
+        fire('close', helper);
+        assert.equal(fs.readFileSync(helperSource, 'utf8'), helperDisk);
         await change('main=()=>{let point=[x=42 y=1] return point.x}', (ds) => ds.length === 0);
         const fields = await providers.completion.provideCompletionItems(document, new Position(0, body.lastIndexOf('.x') + 1));
         assert.equal(fields.items.find((item) => item.label === 'x').kind, 4); // VS Code Field

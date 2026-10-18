@@ -110,7 +110,7 @@ ARM64. The default in-process frontend is independent of the optional legacy
 parser's Linux-only source transport. The `compiler_hosts` check builds those
 three compilers; when QEMU is available, it uses the Linux ARM64 compiler to
 build and execute Dewy programs in default and release modes. This is initial
-host-port coverage. CI also runs a bounded language/native-web and project-test
+host-port coverage. CI also runs a bounded language/native-web, project-test and editor-transport
 suite on Windows x64, macOS ARM64 and Linux ARM64 runners using cross-built
 bundles. The full compiler gate remains on Linux x86-64. The development download
 below remains the Linux x86-64 toolchain; `compact-core-hosts-*` artifacts are
@@ -159,9 +159,9 @@ The complete C-bootstrap build steps take about 17 seconds on the development
 machine. The output directory must be new. It contains a standalone `bin/` and `lib/`,
 source snapshots, build logs and a hash manifest. No installed compiler is
 changed. Python is build tooling only; program compilation and execution are
-native. The compiler host currently requires Linux x86-64; native Linux and web
-programs are covered by the development gate. Other inherited targets are not
-certified for this frontend.
+native. This independent bootstrap recipe requires Linux x86-64. Cross-built
+compiler hosts have the smoke coverage described above; that is not full
+release certification for every inherited target and tool.
 
 Package a locally built toolchain with the same layout used by CI:
 
