@@ -237,6 +237,8 @@ def test_vscode_core_test_tasks(tmp_path):
     ('', 'let value=123456789012345678901234567890 return if value >? 1 42 else 1', 'value', 'BigInt'),
     ('', 'let value:array<string>=["answer"] return value.length', 'value', 'array<string>'),
     ('', 'let value=zeros(2 3) return size(value)', 'value', 'NDArray<float64>'),
+    ('', 'let value=[1 2 3] .* 2 .+ 1 return value[0]', 'value', 'array<int64>'),
+    ('', 'let value=zeros(2 3) .+ [1.0 2.0 3.0] return size(value)', 'value', 'NDArray<float64>'),
     ('', 'let value=zeros<int16>(2 3) return size(value)', 'value', 'NDArray<int16>'),
     ('', 'let value=[zeros(2 3)] return size(value[0])', 'value', 'array<NDArray<float64>>'),
     ('', 'let value:NDArray<float64>?=zeros(0 0) return if value is? none 0 else 1', 'value', 'NDArray<float64>?'),

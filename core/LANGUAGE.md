@@ -909,6 +909,33 @@ column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
 `det(matrix)` provide linear algebra on square `float64` matrices; a singular
 matrix raises an error in `solve` and `inverse`.
 
+Dotted operators apply scalar arithmetic to each element. Adjacent dotted
+operations and calls fuse into one traversal without intermediate result arrays:
+
+```dewy
+let xs = [1.0 4.0 9.0]
+let shifted = sqrt.(xs) .* 2.0 .+ 1.0       # [3.0 5.0 7.0]
+let mask = shifted .>=? 5.0                # [false true true]
+let grid = reshape([10 20] 2 1) .+ [1 2 3] # shape [2 3]
+```
+
+`.+`, `.-`, `.*`, `./`, `.//`, `.%`, `.^` and dotted numeric comparisons use
+the corresponding scalar operation. In particular, integer `./` produces exact
+rationals, `.//` rounds down, and integer `.%` has the divisor's sign. Floating
+`//` and `%` have the same current limitations as their scalar forms.
+`f.(values other)` applies a function elementwise; scalar arguments are repeated.
+Array operands are evaluated once, left to right. CPU callbacks run in row-major
+order and may return managed values such as strings and arrays.
+
+Shapes align at the last dimension. Equal dimensions match; a dimension of one
+stretches to the other operand's size, and missing leading dimensions behave as
+one. A one-dimensional array therefore acts as a row when combined with a
+matrix. Empty dimensions produce empty results when the other dimension is
+zero or one; incompatible shapes raise an error. Fixed-size array operands are
+accepted and produce ordinary dynamic arrays. Results are independent values.
+Use `xs = xs .+ amount` for updates; dotted compound assignments and dotted
+prefix operators are not yet supported by this frontend.
+
 Put a range in its own brackets when selecting axes:
 
 ```dewy

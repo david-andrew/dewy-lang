@@ -2432,7 +2432,10 @@ gen_intrinsic = (e: int) -> Val:
         # the new ones are zeroed, as the stores that write them drop what they replace)
         if id == .setlen and not is_managed(et):
             p = read_place(pl, at)
+            # reserve(0) leaves an empty array null; it has no length header.
+            iff(e_bin(.ne, VI, p, e_iconst(0)))
             hdr_store(p, 8, n)
+            endc()
             return V(-1, false)
         if is_managed(et):
             # drop elements beyond the new length

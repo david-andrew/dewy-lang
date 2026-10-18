@@ -49,6 +49,111 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'numeric-broadcast-unordered': '''main=()=>{
+let zero:float64=0.0 let nan=zero/zero let xs=[nan 1.0]
+if (xs .not<? 2.0) not=? [true false] return 1
+if (xs .not<=? 2.0) not=? [true false] return 2
+if (xs .not>? 2.0) not=? [true true] return 3
+if (xs .not>=? 2.0) not=? [true true] return 4
+if (xs .not=? xs) not=? [true false] return 5
+return 42
+}''',
+    'numeric-broadcast-fixed': '''main=()=>{
+let xs:array<float32 length=3>=[1 2 3] let saved=xs
+let result=xs .* 2 .+ 1
+if result not=? [3.0 5.0 7.0] or xs not=? saved return 1
+let words:array<string length=2>=["a" "b"]
+let decorate=(s:string)=>s+"!"
+return if decorate.(words) =? ["a!" "b!"] 42 else 2
+}''',
+    'numeric-broadcast-arithmetic': '''main=()=>{
+let xs=[1 2 3] let saved=xs
+let ys=xs .* 2 .+ [10] .- 1
+if ys not=? [11 13 15] or xs not=? saved return 1
+if (2 .* xs .^ 2) not=? [2 8 18] return 2
+if ([2] .^ [3] .^ [2]) not=? [512] return 3
+if (xs .+ 1) .* (xs .- 1) not=? [0 3 8] return 4
+if (20 .+ 22) not=? 42 return 5
+return 42
+}''',
+    'numeric-broadcast-division': '''main=()=>{
+let xs=[-7 7 -7 7] let ys=[2 2 -2 -2]
+if (xs .// ys) not=? [-4 3 3 -4] return 1
+if (xs .% ys) not=? [1 1 -1 -1] return 2
+let fractions=xs ./ ys
+if fractions[0] not=? -7/2 or fractions[1] not=? 7/2 return 3
+if fractions[2] not=? 7/2 or fractions[3] not=? -7/2 return 4
+if ([1.0 2.0 3.0] ./ 2.0) not=? [0.5 1.0 1.5] return 5
+return 42
+}''',
+    'numeric-broadcast-comparisons': '''main=()=>{
+let xs=[1 2 3]
+if (xs .=? 2) not=? [false true false] return 1
+if (xs .not=? 2) not=? [true false true] return 2
+if (xs .<? 2) not=? [true false false] return 3
+if (xs .<=? 2) not=? [true true false] return 4
+if (xs .>? 2) not=? [false false true] return 5
+if (xs .>=? 2) not=? [false true true] return 6
+if (xs .not<? 2) not=? [false true true] return 7
+if (xs .not<=? 2) not=? [false false true] return 8
+if (xs .not>? 2) not=? [true true false] return 9
+if (xs .not>=? 2) not=? [true false false] return 10
+return 42
+}''',
+    'numeric-broadcast-functions': '''square=(x:float64)=>x*x
+blend=(x:float64 y:float64 scale:float64)=>x+y*scale
+main=()=>{
+let xs=[1.0 4.0 9.0]
+if sqrt.(xs) not=? [1.0 2.0 3.0] return 1
+if square.(sqrt.(xs) .+ 1.0) not=? [4.0 9.0 16.0] return 2
+if blend.(xs [2.0] 0.5) not=? [2.0 5.0 10.0] return 3
+let offset=3.0 let shift=(x:float64)=>x+offset
+if shift.(xs) not=? [4.0 7.0 12.0] return 4
+return 42
+}''',
+    'numeric-broadcast-shapes': '''main=()=>{
+let m=reshape([1 2 3 4 5 6] 2 3)
+let row=[10 20 30] let col=reshape([100 200] 2 1)
+let result=m .+ row .+ col
+if result.shape not=? [2 3] or result.data not=? [111 122 133 214 225 236] return 1
+let outer=col .* row
+if outer.shape not=? [2 3] or outer.data not=? [1000 2000 3000 2000 4000 6000] return 2
+let volume=reshape([1 2 3 4 5 6 7 8] 2 2 2) .* [1 10]
+if volume.shape not=? [2 2 2] or volume.data not=? [1 20 3 40 5 60 7 80] return 3
+let mask=m .>? 3
+if mask.data not=? [false false false true true true] return 4
+result[0 0]=99
+return if m.data =? [1 2 3 4 5 6] and row =? [10 20 30] 42 else 5
+}''',
+    'numeric-broadcast-empty': '''main=()=>{
+let xs:array<float64>=[]
+if (xs .* 2.0 .+ [1.0]).length not=? 0 return 1
+if sqrt.(xs).length not=? 0 return 2
+let result=zeros(0 3) .+ [1.0 2.0 3.0]
+if result.shape not=? [0 3] or size(result) not=? 0 return 3
+let other=zeros(2 0) .+ reshape([10.0 20.0] 2 1)
+return if other.shape =? [2 0] and size(other) =? 0 42 else 4
+}''',
+    'numeric-broadcast-order': '''let trace:int64=0
+values=(tag:int64)=>{trace=trace*10+tag return [1 2 3]}
+scalar=()=>{trace=trace*10+3 return 2}
+main=()=>{
+let result=values(1) .+ values(2) .* scalar()
+if trace not=? 123 or result not=? [3 6 9] return 1
+let seen:array<int64>=[]
+visit=(x:int64)=>{seen.push(x) return x+1}
+let visited=visit.([1 2 3])
+return if visited =? [2 3 4] and seen =? [1 2 3] 42 else 2
+}''',
+    'numeric-broadcast-managed': '''wrap=(text:string)=>[text "!"]
+work=()=>{
+let rows=wrap.(["a" "b" "c"]) let saved=rows
+rows[0].push("changed")
+assert(saved =? [["a" "!"] ["b" "!"] ["c" "!"]])
+assert(rows[0] =? ["a" "!" "changed"])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}''',
     'format-argument-order': '''let word="first"
 spec=():>string=>{word="later" return ">8"}
 main=()=>{
@@ -6798,6 +6903,9 @@ def test_core_fixed_array_errors(error_batches, body, diagnostic, target, releas
 
 
 @pytest.mark.parametrize('body, diagnostic', [
+    ('printl([1 2] .+ [1 2 3])', 'shapes do not match'),
+    ('printl(zeros(2 3) .+ [1.0 2.0])', 'do not match for an elementwise operation'),
+    ('printl(zeros(0 3) .+ zeros(2 3))', 'do not match for an elementwise operation'),
     ('let m=zeros(0 3) printl(m[end 0])', 'out of bounds'),
     ('let m=zeros(2 0) printl(m[0 end])', 'out of bounds'),
     ('let m=zeros(2 3) printl(m[[..] 3])', 'out of bounds'),

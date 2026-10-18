@@ -435,6 +435,28 @@ dw_binary_token = (op: str, id: int) -> Tok:
             dw_fail(id, "operator '{op}'")
             .eof
 
+# Reuse the fused array lowering, with Dewy's scalar arithmetic inside it.
+# In particular, integer ./ stays exact division and .// rounds downward.
+dw_broadcast = (op: str, a: int, b: int, id: int) -> int:
+    pos = dewy_syntax[id].pos
+    if op in ["/", "//", "%", "^"]:
+        name = if op == "/": "__dewy_divide" else if op == "//": "__floor_div" else if op == "%": "__floor_mod" else: "__dewy_power"
+        n = bc_call(name, [a, b], pos)
+        add_flag(n, NF_BROADCAST)
+        return n
+    spelling = op
+    inverted = starts_with(op, "not")
+    if inverted: spelling = op[3..]
+    if spelling not in ["+", "-", "*", "=?", "<?", "<=?", ">?", ">=?"]: return dw_fail(id, "broadcast operator '.{op}'")
+    n = mk(.binary, pos)
+    nodes[n].op = i32(int(Tok.dotop))
+    nodes[n].aux = i32(spelling[0])
+    nodes[n].aux2 = if spelling == "<=?" or spelling == ">=?": 1 else: 0
+    nodes[n].ival = int(inverted)
+    nodes[n].a = i32(a)
+    nodes[n].b = i32(b)
+    return n
+
 dw_expr = (id: int) -> int:
     let id = dw_unwrap(id)
     k = dewy_syntax[id].kind
@@ -580,6 +602,8 @@ dw_expr = (id: int) -> int:
     if k == "BinOp":
         left = dw_child(id, 1)
         right = dw_child(id, 2)
+        if len(op) > 1 and op[0] == '.' and op[1] != '.':
+            return dw_broadcast(op[1..], dw_expr(left), dw_expr(right), id)
         if op == "is?" or op == "isnt?":
             n = mk(.istype, pos)
             nodes[n].a = i32(dw_expr(left))
@@ -634,6 +658,7 @@ dw_expr = (id: int) -> int:
             if bracket and dw_name(left) == "set":
                 return bc_call("__dewy_set", [dw_expr(right)], pos)
             n = mk(if bracket: NK.index else: NK.call, pos)
+            if op == "CallJuxtaposeBroadcast": add_flag(n, NF_BROADCAST)
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)

@@ -1,0 +1,37 @@
+{
+  "change": "Expose fused dotted arithmetic, comparisons and function calls through the Dewy frontend; preserve scalar Dewy division, remainder and power semantics. Support fixed-size inputs and fix the inherited null header write on empty broadcast results.",
+  "compiler": "build-1792317497352556939/bin/dewy-core",
+  "source_identity": "2587228b1ebdcdce70572042f03e35edd527366a9831da4277c5a00ad04238f9",
+  "validation": {
+    "full": "Independent C bootstrap, 5000 checks passed in 179.25s. This preceded the final NaN comparison correction.",
+    "final": "Previous-core rebuild after the NaN correction: 564 numeric, formatting and hover checks passed in 29.59s.",
+    "lint": "Ruff and git diff --check passed."
+  },
+  "compile_performance": {
+    "samples": 5,
+    "affinity": [
+      2
+    ],
+    "paired_cpu_candidate_over_baseline": {
+      "tour-default": 1.0036182131258313,
+      "netpong-default": 0.9950863450240365,
+      "compiler": 0.9983231280460081
+    },
+    "conclusion": "No meaningful compile-time change on tour, Netpong and the compiler; wall time is noisier."
+  },
+  "coverage": [
+    "native/web, default/release",
+    "rational division, signed floor division/remainder, right-associative powers",
+    "scalar/vector/multidimensional broadcasting, empty and incompatible shapes",
+    "fixed and managed inputs, snapshots and cleanup",
+    "left-to-right operand evaluation and callback order",
+    "NaN inverted comparisons",
+    "editor hover and formatting"
+  ],
+  "limits": [
+    "Dotted compound assignment and prefix operators remain unsupported.",
+    "GPU execution is not yet validated by these checks.",
+    "Existing scalar floating floor division/remainder limits remain.",
+    "No general runtime speedup claim from this feature increment."
+  ]
+}

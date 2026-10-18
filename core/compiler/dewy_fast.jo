@@ -171,8 +171,15 @@ dn_lex = (file: int, begin: int, stop: int) -> DewyLexeme[]:
             kind = "quoted"
             value = source[start..i)
         else:
+            if c == '.':
+                loop op in [".not>=?", ".not<=?", ".not=?", ".not>?", ".not<?", ".>=?", ".<=?", ".//", ".=?", ".>?", ".<?", ".+", ".-", ".*", "./", ".%", ".^"]:
+                    if dn_matches(source, start, stop, op):
+                        value = op
+                        i += len(op)
+                        break
             # Longest spelling wins. Dewy's comparison ? belongs to the operator.
             loop op in ["not>=?", "not<=?", "not=?", "not>?", "not<?", ">=?", "<=?", "//=", "<<=", ">>=", "...", "=>", ":>", "->", "=?", ">?", "<?", "+=", "-=", "*=", "/=", "^=", "%=", "??", "//", "<<", ">>", "..", "|>", "<|"]:
+                if value != "": break
                 if dn_matches(source, start, stop, op):
                     # Adjacent generic closers followed by a function arrow:
                     # `array<array<T>>=>` is `>>` then `=>`, not `>>=` then `>`.
@@ -217,6 +224,7 @@ dn_operator = (kind: str, op: str, left: int, right: int, offset: int) -> int:
 # The supported precedence follows Dewy's user-facing operators. A whitespace
 # boundary between values ends an element; applications use adjacent brackets.
 dn_power = (op: str) -> int:
+    if len(op) > 1 and op[0] == '.' and op[1] != '.': return dn_power(op[1..])
     match op:
         "=", "+=", "-=", "*=", "/=", "^=", "//=", "%=", "<<=", ">>=": 10
         "->": 20
@@ -427,6 +435,9 @@ dn_expr = (minimum: int) -> int:
             continue
         if op == "." and minimum <= 170:
             dn_at += 1
+            if dn_peek() == "(" and not dn_tokens[dn_at].space:
+                left = dn_operator("BinOp", "CallJuxtaposeBroadcast", left, dn_block(), token.start)
+                continue
             right = dn_take()
             if right.kind != "Identifier": return dn_error(right.start, "expected a member name")
             left = dn_operator("BinOp", ".", left, dn_node("Identifier", right.text, right.start), token.start)
@@ -461,7 +472,7 @@ dn_expr = (minimum: int) -> int:
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_node("Flat", "", pos_off(dewy_syntax[left].pos), parts)
             continue
-        right = dn_expr(if op == "=>" or op == "^" or op == "??": power else: power + 1)
+        right = dn_expr(if op == "=>" or op == "^" or op == ".^" or op == "??": power else: power + 1)
         if op == ",":
             parts: int[]
             if dw_op(left) == ",": parts = dewy_syntax[left].children

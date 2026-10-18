@@ -6512,7 +6512,13 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
         b = dot_template(int(nodes[n].b), leaves, tag)
         op = dot_base_op(n)
         if op == .caret: return bc_call("pow", [a, b], pos)
-        return bc_bin(op, a, b, pos)
+        result = bc_bin(op, a, b, pos)
+        # Dewy's .not<? negates the comparison, including unordered floats.
+        if nodes[n].ival != 0:
+            negated = mk(.not_, pos)
+            nodes[negated].a = i32(result)
+            return negated
+        return result
     if k == .call and has_flag(n, NF_BROADCAST):
         c = mk(.call, pos)
         nodes[c].a = nodes[n].a
@@ -6548,7 +6554,8 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
     stmts.push(bc_let("{pre}shp", bc_call("__bcast_shape", [id("shs")], pos), pos))
     stmts.push(bc_let("{pre}n", bc_call("__nd_size", [id("shp")], pos), pos))
     stmts.push(bc_let("{pre}in", bc_call("__bcast_inner", [id("shs"), id("shp")], pos), pos))
-    stmts.push(bc_let("{pre}on", bc_bin(.slash, id("n"), bc_call("max", [id("in"), bc_int(1, pos)], pos), pos), pos))
+    # Shape counts are nonnegative integers, including in Dewy source where / is exact.
+    stmts.push(bc_let("{pre}on", bc_call("__floor_div", [id("n"), bc_call("max", [id("in"), bc_int(1, pos)], pos)], pos), pos))
     loop k in [0..kinds.len()):
         if kinds[k] == 0: continue
         src = bc_ident(arrs[k], pos)
@@ -6703,6 +6710,9 @@ check_dotted = (n: int, expected: int) -> int:
         lf = last_checked
         finalize_literal(lf)
         t = prune(ntype(lf))
+        if types[t].kind == .fixed:
+            t = mk_array(int(types[t].elem))
+            lf = coerce(lf, t)
         r = 0
         if types[t].kind == .array: r = 1
         else if is_nd(t): r = 2
