@@ -4,6 +4,7 @@
 # caller is optimized again.
 
 use 'ir.jo'
+use 'check.jo'
 use 'opt.jo'
 
 const INLINE_MAX = 24       # callee size limit, in IR instructions
@@ -77,6 +78,10 @@ inlinable = (f: IrFn) -> int:
         # (calls on rarely taken paths, like the out-of-line refcounting during a parallel job,
         # do not count)
         if (ins.op == .call and ins.c == 0) or ins.op == .calli or ins.op == .callc or ins.op == .syscall: leaf = false
+    # Keep a web loop kernel independently callable. Repeated calls let the
+    # runtime tier it up; embedding it in a one-shot outer loop can keep the
+    # entire workload in baseline machine code for that invocation.
+    if target_wasm and has_loop: return 0
     if f.code.len() <= INLINE_MAX: return 1
     if leaf and has_loop: return 3
     if leaf: return 2

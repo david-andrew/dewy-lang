@@ -82,6 +82,15 @@ loops, with overlapping native timings. The same pilot exposes a web release
 slowdown in both forms, which remains a performance investigation; see the
 [measurements and scope](audits/2026-10-17/source-core/mutable-loop-validation.json).
 
+The web release slowdown now has a measured fix: retain calls to loop-containing
+functions so the web runtime can optimize those kernels across invocations.
+In the paired Node/V8 pilot, particle updates fall from 188 to 76 ms, helpers
+from 1,265 to 631 ms, and records from 86 to 34 ms. A longer text recheck is
+within 1%; native inlining is unchanged. Forcing V8's optimizing compiler makes
+the particle variants comparable, supporting the tiering explanation. The
+1,225-check focused gate passes; [raw results and limits](audits/2026-10-17/source-core/wasm-loop-inline-validation.json)
+include baseline-only execution and the other application workloads.
+
 The development gate now has over 5,400 checks; recent local full runs took
 151–186 pytest seconds with two workers, excluding the independent C bootstrap. The quick smoke
 suite selects a small cross-section of those checks. Focused

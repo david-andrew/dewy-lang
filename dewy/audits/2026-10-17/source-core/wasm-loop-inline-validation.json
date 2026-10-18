@@ -1,0 +1,372 @@
+{
+  "compilers": {
+    "baseline": "__dewycache__/compact-core/build-1792326987745531326/bin/dewy-core",
+    "candidate": "__dewycache__/compact-core/build-1792327352717179138/bin/dewy-core"
+  },
+  "workloads": {
+    "particles": {
+      "source": "Particle:type=[pos:vec3 vel:vec3 age:float64]\nstep=(@particles:array<Particle> dt:float64):>void=>{\nloop @particle in particles {\nparticle.pos += particle.vel*dt\nparticle.age += dt\n}\n}\nmain=()=>{\nlet particles=[loop i in [0..250000) Particle[vec3(i%100 i%77 i%31) vec3(0.1 0.2 -0.3) 0.0]]\nlet allocations=alloc_count() let start=time_ns()\nloop frame in [0..60) step(@particles 1.0/60.0)\nlet elapsed=time_ns()-start let extra=alloc_count()-allocations\nlet total=0.0\nloop particle in particles total+=particle.pos.x+particle.pos.y+particle.pos.z+particle.age\nprintl\"{elapsed} {extra} {total}\"\n}\n",
+      "count": null,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.10452088299643947,
+          "html_bytes": 107822,
+          "runs": [
+            "181419631 0 25874326.51876062",
+            "222101098 0 25874326.51876062",
+            "188120161 0 25874326.51876062"
+          ],
+          "wasm_bytes": 43100,
+          "wasm_sha256": "8896a67fefe1271fb6cd49cc45a9871307b4c752fbbe2f53e381ee43c8f9a9ab"
+        },
+        "candidate": {
+          "build_seconds": 0.08438348199706525,
+          "html_bytes": 106206,
+          "runs": [
+            "75779845 0 25874326.51876062",
+            "76455911 0 25874326.51876062",
+            "76944616 0 25874326.51876062"
+          ],
+          "wasm_bytes": 41889,
+          "wasm_sha256": "1d0e08f6e283a3d33dba313883e0c725c41f42ec98ade9c7b5b0d291021cd6fd"
+        }
+      }
+    },
+    "physics": {
+      "source": "import physics3d\nmain=()=>{\n    let world=physics3d.World[gravity=vec3(0 -18 0)]\n    world.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(0 1.5 -20) vec3(40 3 1) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(0 1.5 20) vec3(40 3 1) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(-20 1.5 0) vec3(1 3 40) kind=physics3d.BodyKind.fixed)\n    world.add_box(vec3(20 1.5 0) vec3(1 3 40) kind=physics3d.BodyKind.fixed)\n    let crates:array<physics3d.Body>=[]\n    seed_random(3)\n    loop i in [0..18) {\n        let size=random(1.2 2.8)\n        let center=vec3(random(-16.0 16.0) size/2.0 random(-16.0 16.0))\n        if length(vec2(center.x center.z)-vec2(0 8))<?3.0 continue\n        crates.push(world.add_box(center vec3(size size size) density=150))\n    }\n    let player=world.character(vec3(0 0 8) radius=0.35)\n    let before=time_ns()\n    loop frame in [0..600) {\n        if frame%60=?0 {\n            let body=crates[(frame//60)%crates.length]\n            world.push(body vec3(400 500 0) world.pos(body))\n        }\n        let direction=if frame%240<?120 1.0 else -1.0\n        let jump=if frame%120=?0 6.5 else 0.0\n        world.walk(@player vec3(direction 0 0) 1.0/60.0 jump=jump)\n        world.step(1.0/60.0)\n    }\n    let elapsed=time_ns()-before\n    let sum=0.0\n    loop body in crates sum+=float64(world.pos(body).x+world.pos(body).y+world.pos(body).z)\n    printl\"{elapsed} {sum} {player.feet}\"\n}\n",
+      "count": null,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.10934211999847321,
+          "html_bytes": 319435,
+          "runs": [
+            "105075594 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+            "110406286 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+            "99834421 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+          ],
+          "wasm_bytes": 201813,
+          "wasm_sha256": "6bbe98d23a9a09c8f9202592ef6105389069529ffbcd815b3544aa148f77603b"
+        },
+        "candidate": {
+          "build_seconds": 0.1069188569963444,
+          "html_bytes": 316071,
+          "runs": [
+            "100908264 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+            "99959059 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)",
+            "102942026 -76.57031035423279 vec3(1.9999988, -4.4703484e-8, 8.0)"
+          ],
+          "wasm_bytes": 199288,
+          "wasm_sha256": "0f5282cbca00d1d74f21d7ee299b032d8a08a938c1a5aad11bfa0db3fca75638"
+        }
+      }
+    },
+    "helpers": {
+      "source": "# Helper-heavy scalar loops: small functions called from a hot loop.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\ngcd = (a:int64 b:int64):>int64 => {\n    let x=a\n    let y=b\n    loop y not=? 0 {\n        let rest=x%y\n        x=y\n        y=rest\n    }\n    return x\n}\ncollatz = (start:int64):>int64 => {\n    let steps:int64=0\n    let value=start\n    loop value >? 1 and steps <? 200 {\n        value=if value%2 =? 0 value//2 else 3*value+1\n        steps+=1\n    }\n    return steps\n}\nclamp = (value:int64 low:int64 high:int64):>int64 => if value <? low low else if value >? high high else value\n\nkernel = (count:int64):>int64 => {\n    let hash:int64=7\n    let i:int64=1\n    loop i <=? count {\n        hash=mix(hash gcd(i 360360))\n        hash=mix(hash collatz(i))\n        hash=mix(hash clamp(i%1000-500 (-100) 100)+100)\n        i+=1\n    }\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 200000)\n    let started=clock()\n    let result=kernel(count)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "count": 1000000,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.0467768820017227,
+          "html_bytes": 97166,
+          "runs": [
+            "815859247 1230611691",
+            "815859247 1279398890",
+            "815859247 1264934395"
+          ],
+          "wasm_bytes": 35107,
+          "wasm_sha256": "0c45fcacdb65817720f46d1b8a242deae8407ed3da16314b595c844b0028ed17"
+        },
+        "candidate": {
+          "build_seconds": 0.04538815900014015,
+          "html_bytes": 97002,
+          "runs": [
+            "815859247 637950543",
+            "815859247 621097630",
+            "815859247 630521372"
+          ],
+          "wasm_bytes": 34985,
+          "wasm_sha256": "9c6a4a3f488563342ca06b90b5bdebcbd159c1f78983aba6b18684c219d68190"
+        }
+      }
+    },
+    "arrays": {
+      "source": "# Flat integer-array loops: fill, prefix sums, a sieve, an in-place reverse.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nfill = (count:int64):>array<int64> => {\n    let values:array<int64>=[]\n    let seed:int64=12345\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        values.push(seed%1000)\n        i+=1\n    }\n    return values\n}\n\nprefix_sums = (@values:array<int64>):>void => {\n    let total:int64=0\n    loop i in 0.. and i <? values.length {\n        total=(total+values[i])%1000000007\n        values[i]=total\n    }\n}\n\n# Primes below the length of `flags`, which starts as all ones.\nsieve = (@flags:array<int64>):>int64 => {\n    let found:int64=0\n    loop i in 2.. and i <? flags.length {\n        if flags[i] =? 1 {\n            found+=1\n            let j=i+i\n            loop j <? flags.length {\n                flags[j]=0\n                j+=i\n            }\n        }\n    }\n    return found\n}\n\nreverse = (@values:array<int64>):>void => {\n    let low:int64=0\n    let high=values.length\n    loop low+1 <? high {\n        high-=1\n        let kept=values[low]\n        values[low]=values[high]\n        values[high]=kept\n        low+=1\n    }\n}\n\nkernel = (@values:array<int64> @flags:array<int64>):>int64 => {\n    prefix_sums(@values)\n    reverse(@values)\n    let hash=sieve(@flags)\n    loop i in 0.. and i <? values.length {hash=mix(hash values[i])}\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let values=fill(count)\n    let flags:array<int64>=[]\n    let i:int64=0\n    loop i <? count {\n        flags.push(1)\n        i+=1\n    }\n    let started=clock()\n    let result=kernel(@values @flags)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "count": 1000000,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.044369775998347905,
+          "html_bytes": 100233,
+          "runs": [
+            "717036671 101317315",
+            "717036671 92432442",
+            "717036671 99211339"
+          ],
+          "wasm_bytes": 37410,
+          "wasm_sha256": "7ec8ace7df644ee6621d20a09c956acfea00ee0a902001e07240d6367e20f23b"
+        },
+        "candidate": {
+          "build_seconds": 0.04482828800246352,
+          "html_bytes": 100017,
+          "runs": [
+            "717036671 92880431",
+            "717036671 90165906",
+            "717036671 87942962"
+          ],
+          "wasm_bytes": 37247,
+          "wasm_sha256": "2a348ebfe6e6a6cf1be8d24399fa8e1af5611ac4c008cf9d48c9c405085583c7"
+        }
+      }
+    },
+    "records": {
+      "source": "# Loops over an array of small records: integer particles stepped in a box.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nParticle:type = [x:int64 y:int64 dx:int64 dy:int64]\n\nconst BOX:int64=4096\n\npopulate = (count:int64):>array<Particle> => {\n    let particles:array<Particle>=[]\n    let seed:int64=2024\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        let x=seed%BOX\n        seed=(seed*1103515245+12345)%2147483648\n        let y=seed%BOX\n        seed=(seed*1103515245+12345)%2147483648\n        particles.push(Particle(x=x y=y dx=seed%17-8 dy=(seed//32)%17-8))\n        i+=1\n    }\n    return particles\n}\n\nstep = (@particles:array<Particle>):>void => {\n    loop i in 0.. and i <? particles.length {\n        let x=particles[i].x+particles[i].dx\n        let y=particles[i].y+particles[i].dy\n        if x <? 0 or x >=? BOX {\n            particles[i].dx=0-particles[i].dx\n            x=particles[i].x\n        }\n        if y <? 0 or y >=? BOX {\n            particles[i].dy=0-particles[i].dy\n            y=particles[i].y\n        }\n        particles[i].x=x\n        particles[i].y=y\n    }\n}\n\nkernel = (@particles:array<Particle> rounds:int64):>int64 => {\n    let round:int64=0\n    loop round <? rounds {\n        step(@particles)\n        round+=1\n    }\n    let hash:int64=3\n    loop particle in particles {hash=mix(mix(hash particle.x) particle.y)}\n    return hash\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 100000)\n    let particles=populate(count)\n    let started=clock()\n    let result=kernel(@particles 50)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "count": 100000,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.04992451699945377,
+          "html_bytes": 98774,
+          "runs": [
+            "585799323 86428551",
+            "585799323 97673906",
+            "585799323 55815804"
+          ],
+          "wasm_bytes": 36315,
+          "wasm_sha256": "bb9c8d76dd36e5d0c342d267565edb905c0cdec4833122950675e5efddfa0e39"
+        },
+        "candidate": {
+          "build_seconds": 0.044027613002981525,
+          "html_bytes": 98586,
+          "runs": [
+            "585799323 36529025",
+            "585799323 34355390",
+            "585799323 31168433"
+          ],
+          "wasm_bytes": 36173,
+          "wasm_sha256": "5a3327eb2ac155573fcebd333ffef6d347faca3a3b55d474e1c44c2ff7ce7e57"
+        }
+      }
+    },
+    "text": {
+      "source": "# Text scanning and parsing: split generated text into words and numbers.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\n# `count` tokens: words of lowercase letters and decimal numbers, separated\n# by spaces and newlines.\ngenerate = (count:int64):>array<uint8> => {\n    let text:array<uint8>=[]\n    let seed:int64=99\n    let i:int64=0\n    loop i <? count {\n        seed=(seed*1103515245+12345)%2147483648\n        let size=seed%7+1\n        let digits=(seed//8)%3 =? 0\n        let j:int64=0\n        loop j <? size {\n            seed=(seed*1103515245+12345)%2147483648\n            if digits {text.push((48+seed%10) as uint8)} else {text.push((97+seed%26) as uint8)}\n            j+=1\n        }\n        text.push(if i%12 =? 11 10 as uint8 else 32 as uint8)\n        i+=1\n    }\n    return text\n}\n\nkernel = (text:array<uint8>):>int64 => {\n    let words:int64=0\n    let lines:int64=0\n    let total:int64=0\n    let hash:int64=5\n    let i:int64=0\n    loop i <? text.length {\n        let byte=text[i] as int64\n        if byte =? 10 {\n            lines+=1\n            i+=1\n        } else if byte =? 32 {i+=1} else if byte >=? 48 and byte <=? 57 {\n            let value:int64=0\n            loop i <? text.length and text[i] >=? 48 and text[i] <=? 57 {\n                value=value*10+(text[i] as int64)-48\n                i+=1\n            }\n            total=(total+value)%1000000007\n        } else {\n            let word:int64=0\n            loop i <? text.length and text[i] >=? 97 and text[i] <=? 122 {\n                word=(word*131+(text[i] as int64))%1000000007\n                i+=1\n            }\n            words+=1\n            hash=mix(hash word)\n        }\n    }\n    return mix(mix(mix(hash words) lines) total)\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 1000000)\n    let text=generate(count)\n    let started=clock()\n    let result=kernel(text)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "count": 1000000,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.04525776699301787,
+          "html_bytes": 100175,
+          "runs": [
+            "861275418 115052681",
+            "861275418 128815855",
+            "861275418 114157510"
+          ],
+          "wasm_bytes": 37367,
+          "wasm_sha256": "12537ceb325c87804334a2862c963a44d32b26bcbc1ddaed93bf02f23c6d345f"
+        },
+        "candidate": {
+          "build_seconds": 0.04508420699858107,
+          "html_bytes": 99959,
+          "runs": [
+            "861275418 115399473",
+            "861275418 119161093",
+            "861275418 172843610"
+          ],
+          "wasm_bytes": 37204,
+          "wasm_sha256": "f160eca6d357b6fd250c2e393a331e3c98850a73c2fdb7656d2bfbddeefd71e9"
+        }
+      }
+    },
+    "graph": {
+      "source": "# Dictionary and graph traversal: breadth-first search over a generated\n# graph whose nodes are sparse integer labels held in dictionaries.\nfrom p\"benchmark_harness.jo\" import size_argument, clock, mix\n\nconst DEGREE:int64=4\n\nlabel = (index:int64):>int64 => index*7919+13\n\n# Every node's neighbours, `DEGREE` each.\ngenerate = (count:int64):>dict<int64 array<int64>> => {\n    let edges:dict<int64 array<int64>>=[]\n    let seed:int64=4242\n    let i:int64=0\n    loop i <? count {\n        let targets:array<int64>=[label((i+1)%count)]\n        let j:int64=1\n        loop j <? DEGREE {\n            seed=(seed*1103515245+12345)%2147483648\n            targets.push(label(seed%count))\n            j+=1\n        }\n        edges[label(i)]=targets\n        i+=1\n    }\n    return edges\n}\n\nkernel = (edges:dict<int64 array<int64>>):>int64 => {\n    let distance:dict<int64 int64>=[]\n    let queue:array<int64>=[label(0)]\n    distance[label(0)]=0\n    let hash:int64=11\n    let head:int64=0\n    loop head <? queue.length {\n        let node=queue[head]\n        head+=1\n        let reached=distance.get(node)\n        let targets=edges.get(node)\n        if reached is? none or targets is? none {continue}\n        hash=mix(hash node%1000+reached)\n        loop target in targets {\n            if distance.get(target) is? none {\n                distance[target]=reached+1\n                queue.push(target)\n            }\n        }\n    }\n    return mix(hash queue.length as int64)\n}\n\nmain = (args:array<string>):>int64 => {\n    let count=size_argument(args 200000)\n    let edges=generate(count)\n    let started=clock()\n    let result=kernel(edges)\n    let finished=clock()\n    printl\"{result} {finished-started}\"\n    return 0\n}\n",
+      "count": 100000,
+      "variants": {
+        "baseline": {
+          "build_seconds": 0.06598901899997145,
+          "html_bytes": 122692,
+          "runs": [
+            "907960968 137881420",
+            "907960968 131610804",
+            "907960968 135676777"
+          ],
+          "wasm_bytes": 54255,
+          "wasm_sha256": "5bb9170c58c06b767df19f0639a5ab668a03769697d0df8cb531d0fab50cb5bf"
+        },
+        "candidate": {
+          "build_seconds": 0.04823483299696818,
+          "html_bytes": 122316,
+          "runs": [
+            "907960968 130632124",
+            "907960968 130116015",
+            "907960968 125419483"
+          ],
+          "wasm_bytes": 53972,
+          "wasm_sha256": "22db5d819ea71ceb23a1a4fad9c0725e23848165aeff8a2d3f06b7e587d4a7e0"
+        }
+      }
+    }
+  },
+  "scope": "WebAssembly release only. Three paired fresh Node processes per workload, alternating baseline/candidate, pinned to CPU 2, SLOPPY_THREADS=1. Program timers exclude startup; runtime tiering work during kernels is included. Other user work was not stopped. Build times are single observations. Native inlining policy is unchanged.",
+  "machine": {
+    "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+    "node": "v26.8.1",
+    "cpu": "Intel(R) Core(TM) i7-6700 CPU @ 3.40GHz"
+  },
+  "compiler_source_identity": "e23879e9249447aa5835a5879d6eb19ddf84670dae55787189919ff4af36c79a",
+  "change": "On the wasm target, leave functions containing loops as calls instead of expanding their bodies during release inlining.",
+  "mechanism_evidence": {
+    "ir": "Baseline release main contains the particle update loop and no separate step function; candidate retains f_step and calls it.",
+    "original_tiering_probe": {
+      "--no-liftoff": {
+        "default": [
+          {
+            "code": 0,
+            "output": "132379497 0 25874326.51876062",
+            "error": ""
+          },
+          {
+            "code": 0,
+            "output": "93547808 0 25874326.51876062",
+            "error": ""
+          }
+        ],
+        "release": [
+          {
+            "code": 0,
+            "output": "87575944 0 25874326.51876062",
+            "error": ""
+          },
+          {
+            "code": 0,
+            "output": "71469803 0 25874326.51876062",
+            "error": ""
+          }
+        ]
+      },
+      "--liftoff-only": {
+        "default": [
+          {
+            "code": 0,
+            "output": "253434507 0 25874326.51876062",
+            "error": ""
+          },
+          {
+            "code": 0,
+            "output": "231145905 0 25874326.51876062",
+            "error": ""
+          }
+        ],
+        "release": [
+          {
+            "code": 0,
+            "output": "181586889 0 25874326.51876062",
+            "error": ""
+          },
+          {
+            "code": 0,
+            "output": "190263873 0 25874326.51876062",
+            "error": ""
+          }
+        ]
+      }
+    },
+    "followup": {
+      "text []": {
+        "baseline": [
+          "861275418 120169297",
+          "861275418 118292320",
+          "861275418 115026584",
+          "861275418 116020919",
+          "861275418 136249430",
+          "861275418 113186722",
+          "861275418 114148852"
+        ],
+        "candidate": [
+          "861275418 126783674",
+          "861275418 131368763",
+          "861275418 116696193",
+          "861275418 115506282",
+          "861275418 114975731",
+          "861275418 118951966",
+          "861275418 115375339"
+        ]
+      },
+      "particles ['--no-liftoff']": {
+        "baseline": [
+          "72480547 0 25874326.51876062",
+          "83748722 0 25874326.51876062",
+          "75508626 0 25874326.51876062"
+        ],
+        "candidate": [
+          "76300809 0 25874326.51876062",
+          "75126155 0 25874326.51876062",
+          "81927571 0 25874326.51876062"
+        ]
+      },
+      "particles ['--liftoff-only']": {
+        "baseline": [
+          "172200742 0 25874326.51876062",
+          "172744602 0 25874326.51876062",
+          "186321546 0 25874326.51876062"
+        ],
+        "candidate": [
+          "194434840 0 25874326.51876062",
+          "182644288 0 25874326.51876062",
+          "180443957 0 25874326.51876062"
+        ]
+      }
+    }
+  },
+  "summary": {
+    "particles": {
+      "median_kernel_ms": {
+        "baseline": 188.120161,
+        "candidate": 76.455911
+      },
+      "candidate_over_baseline": 0.4064206121958401
+    },
+    "physics": {
+      "median_kernel_ms": {
+        "baseline": 105.075594,
+        "candidate": 100.908264
+      },
+      "candidate_over_baseline": 0.9603396960097128
+    },
+    "helpers": {
+      "median_kernel_ms": {
+        "baseline": 1264.934395,
+        "candidate": 630.521372
+      },
+      "candidate_over_baseline": 0.49846171824587
+    },
+    "arrays": {
+      "median_kernel_ms": {
+        "baseline": 99.211339,
+        "candidate": 90.165906
+      },
+      "candidate_over_baseline": 0.9088266211183785
+    },
+    "records": {
+      "median_kernel_ms": {
+        "baseline": 86.428551,
+        "candidate": 34.35539
+      },
+      "candidate_over_baseline": 0.39750047411994677
+    },
+    "text": {
+      "median_kernel_ms": {
+        "baseline": 115.052681,
+        "candidate": 119.161093
+      },
+      "candidate_over_baseline": 1.0357089636181531
+    },
+    "graph": {
+      "median_kernel_ms": {
+        "baseline": 135.676777,
+        "candidate": 130.116015
+      },
+      "candidate_over_baseline": 0.9590146366758109
+    }
+  },
+  "interpretation": "The particle slowdown is consistent with lost tier-up opportunities after loop inlining: default V8 execution improves 2.46x, while forcing optimized compilation makes baseline/candidate comparable. Baseline-only V8 execution is modestly slower with the retained call. Helpers and records improve about 2x and 2.5x; other workloads are smaller changes. Seven additional paired text runs have medians 116.02/116.70ms (0.6% difference). Results are Node/V8 evidence, not cross-browser performance guarantees.",
+  "harness_source": "# Platform boundary for the Dewy application benchmarks. The original\n# harness uses compiler-specific raw syscalls; this uses the core's library.\nsize_argument = (values: str[], fallback: int) -> int:\n    if values.len() < 2: return fallback\n    text = values[1]\n    value = 0\n    loop byte in text:\n        if byte < 48 or byte > 57: return fallback\n        value = value * 10 + int(byte) - 48\n        if value > 1000000000: return fallback\n    value\n\nclock = () -> int: time_ns()\nmix = (hash: int, value: int) -> int: __floor_mod(hash * 31 + value, 1000000007)\n",
+  "validation": {
+    "focused": "1225 passed, 4233 deselected in 44.81s; native/web default/release optimizer, numeric, sequence, comprehension, game starters, formatting, pinned-core checks",
+    "compiler": "built from the preceding C3 compiler; full independent C bootstrap delegated to CI for this increment"
+  }
+}
