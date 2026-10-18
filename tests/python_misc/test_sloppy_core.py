@@ -39,6 +39,7 @@ QUICK_CASES = {
     'named-managed-order', 'argument-borrow-callback-write', 'record-spread-order',
     'unpack-dictionary-nested', 'loop-else-conditions', 'json-typed-nested',
     'optional-managed-copy', 'grapheme-loop', 'optimizer-nested-exits',
+    'optimizer-return-facts-rejoin', 'optimizer-return-facts-float',
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
 QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
@@ -54,6 +55,37 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'optimizer-return-facts': """probe=(value:int64):>int64=>{
+if value=?0 return 11
+if value=?0 return 12
+return 13}
+main=()=>{loop value in [-1 0 1] {
+if probe(value) not=? (if value=?0 11 else 13) return 1}
+return 42}""",
+    'optimizer-return-facts-mutation': """probe=(value:int64):>int64=>{
+let x=value
+if x<?0 return 11
+x=-1
+if x<?0 return 12
+return 13}
+main=()=>{return if probe(-1)=?11 and probe(0)=?12 and probe(1)=?12 42 else 1}""",
+    'optimizer-return-facts-rejoin': """probe=(first:bool second:bool):>int64=>{
+loop true {
+if first {if second break else return 11}
+if first return 12
+return 13}
+return if first 14 else 15}
+main=()=>{loop first in [false true] {loop second in [false true] {
+let expected=if first (if second 14 else 11) else 13
+if probe(first second) not=?expected return 1}}
+return 42}""",
+    'optimizer-return-facts-float': """probe=(value:float64):>int64=>{
+if value<?0.0 return 11
+if value<?0.0 return 12
+if value>=?0.0 return 13
+return 14}
+main=()=>{if probe(-1.0) not=?11 or probe(0.0) not=?13 or probe(1.0) not=?13 return 1
+return if probe(NAN)=?14 42 else 2}""",
     'array-comparison-string-effectful-right': '''let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
 change=()=>{values=[] let noise=str_from_bytes([120 121 122] as array<uint8>)
 return if noise.length=?3 "abc" else "wrong"}
@@ -7166,6 +7198,27 @@ main=()=>if probe([1->[42]] 1) 1 else 42
                       built.stdout + built.stderr, re.M | re.S)
     assert probe, 'presence probe was not emitted'
     assert ' = load ' not in probe[0], 'presence query still loads an optional tag'
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_return_condition_facts(compiler, tmp_path, target, release):
+    # Execution and rejoining exits are covered by the optimizer-return-facts value cases.
+    source = tmp_path / 'return_facts.jo'
+    source.write_text("""@noinline
+probe = (value: int) -> int:
+    if value == 0: return 11
+    if value == 0: return 12
+    return 13
+main = () -> int: probe(1)
+""")
+    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'return_facts', *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'guarded-return function was not emitted'
+    assert len(re.findall(r'^\s+(?:if_|brif) ', probe[0], re.M)) == 1, probe[0]
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

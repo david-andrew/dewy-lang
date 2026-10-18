@@ -1105,8 +1105,8 @@ optimize = ():
     o_out.reserve(ir.code.len())
     o_cse = true
     ht_setup(ir.code.len() + 16)
-    ctl: int[]          # per open construct: 0 normal, 1 if(true), 2 if(false), 3 if(c) with c >= 0 at ctl_c
-    ctl_c: int[]        # condition of an open if (-1 otherwise)
+    ctl: int[]          # 0 normal, 1 if(true), 2 if(false), 3 block
+    ctl_c: int[]        # an if's condition, or a conditional exit from a block (-1 otherwise)
     ctl_nbr: int[]      # branch count when the construct was opened
     skip = 0           # nesting depth inside a dead branch
     loop pos in 0.. and ins in ir.code:
@@ -1130,7 +1130,9 @@ optimize = ():
         if op == .nop: continue
         if op == .block or op == .loop:
             if op == .loop: enter_loop()
-            ctl.push(0)
+            kind = 0
+            if op == .block: kind = 3
+            ctl.push(kind)
             ctl_c.push(-1)
             ctl_nbr.push(o_nbr)
             o_scope_open(op == .block)
@@ -1172,19 +1174,24 @@ optimize = ():
             o_out.push(ins)
             continue
         if op == .end:
-            # an if whose body never returns (a failed check) leaves its condition known false
+            # A terminating if arm leaves its condition false. For a block with exactly
+            # one conditional exit and a terminating tail, only that taken exit reaches
+            # the join. Count all branches conservatively, including nested breaks.
             c = ctl_c.pop()
             nbr = ctl_nbr.pop()
-            ctl.pop()
+            kind = ctl.pop()
             last = o_out[o_out.len() - 1]
-            noret = c >= 0 and last.op == .call and last.c == 1 and nbr == o_nbr
+            terminates = last.op == .ret or last.op == .trap or (last.op == .call and last.c == 1)
+            noret = c >= 0 and terminates
             o_scope_close()
             if last.op == .block or last.op == .if_:
                 # empty construct: drop it (an if's condition is pure)
                 o_out.pop()
                 continue
             o_out.push(ins)
-            if noret: add_fact_false(c)
+            if noret:
+                if kind == 3 and nbr + 1 == o_nbr: add_fact_true(c)
+                else if kind == 0 and nbr == o_nbr: add_fact_false(c)
             continue
         if op == .brif:
             # a branch on a known condition: always or never taken
@@ -1192,6 +1199,10 @@ optimize = ():
             if o_const[c] or fact_false(c) or fact_true(c):
                 if (o_const[c] and o_cval[c] != 0) or fact_true(c): o_emit(Ins(.br, 0, 0, 0, 0, 0, ins.imm))
                 continue
+            # Remember an exit's condition for a possible terminating block. Multiple
+            # exits (even with the same condition) fail the branch-count check at its end.
+            target = ctl.len() - 1 - int(ins.imm)
+            if target >= 0 and ctl[target] == 3: ctl_c[target] = c
             # (after it, in this construct, the condition is false)
             o_simplify(ins, pos)
             add_fact_false(c)

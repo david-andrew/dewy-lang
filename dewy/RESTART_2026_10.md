@@ -413,6 +413,23 @@ also covers request IDs with escapes/Unicode, numeric versus string IDs,
 rename errors, changed versions, disconnects, and fragmented headers/bodies.
 The native-host CI selection includes this regression on every supported host.
 
+The existing optimizer now carries conditions past terminating branches. For a
+block with one conditional exit and a terminating tail, reaching the join proves
+that exit was taken; additional branches disable this inference. This removes
+repeated checks after guards without adding an optimization pass. Native/web
+checks cover mutations, nested exits, NaNs and actual removal of the repeated
+branch: 563 focused checks passed, followed by an independent C bootstrap and
+211 smoke/optimizer checks. The [runtime measurements](audits/2026-10-18/return-facts-runtime.json)
+show about 9% less default-mode string-comparison CPU time using the median of
+corresponding candidate/baseline pairs; release-mode comparison and text scanning
+are roughly flat. Separate medians exaggerate differences when CPU speed changes
+between rounds, so the paired samples are the useful comparison here. The
+[other applications](audits/2026-10-18/return-facts-apps.json) were within a few
+percent of baseline. [Fresh compilation](audits/2026-10-18/return-facts-compile.json)
+remained essentially flat: fixed 893-case corpus 831 → 826 ms CPU and compiler
+self-build 1804 → 1816 ms. These are code-quality/runtime improvements, not a
+claim of progress toward 250k lines/s on this sample.
+
 ## What the comparison establishes
 
 Sloppy already has a compact per-function IR, dense aggregate storage,
