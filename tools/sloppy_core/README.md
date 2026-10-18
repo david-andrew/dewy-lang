@@ -1345,3 +1345,15 @@ focused gate includes game renders/web builds, real GLES lighting shader
 compilation, default parameters and overlapping triangles crossing worker chunks
 with one/two threads. See `software-render-*` audits and reproduce with
 `python3 -m tools.sloppy_core.benchmark_render --help`.
+
+
+Dunes' custom sand shader now follows the renderer's actual shadow texture size
+and selects four samples for software rendering, nine for GPU rendering. It no
+longer assumes a 2048-square texture in the CPU fallback. A frozen copy of the
+previous example and the updated example, built with the same compiler/library
+snapshot, give median paired frame-time/process-CPU ratios of 0.907/0.914 across
+seven 31-frame runs with the same two-thread software-rendering setup. Scene
+content was visually checked; shadow edges are softer. Ten focused checks cover
+Dunes' headless model, software frame, native/web builds and real GLES shader
+compilation. See `dunes-shadow-*`; `benchmark_render --baseline-sources` compares
+example changes while keeping the compiler fixed.

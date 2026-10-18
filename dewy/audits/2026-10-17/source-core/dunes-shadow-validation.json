@@ -1,0 +1,20 @@
+{
+  "baseline_revision": "a3aa39da9c145882d348d47ed5697001503453d1",
+  "compiler_for_both": "build-1792298943784834053/bin/dewy-core",
+  "focused_command": "TMPDIR=/var/home/david/dev/dewy-lang/__dewycache__/task-tmp python3 -m tools.core test -k \"dunes or shader_driver\"",
+  "focused_result": "10 passed, 3934 deselected in 2.88s",
+  "benchmark_command": "TMPDIR=/var/home/david/dev/dewy-lang/__dewycache__/task-tmp taskset -c 2,3 .venv/bin/python -m tools.sloppy_core.benchmark_render __dewycache__/compact-core/build-1792298943784834053/bin/dewy-core --baseline __dewycache__/compact-core/build-1792298943784834053/bin/dewy-core --baseline-sources __dewycache__/task-tmp/dunes-shadow-before --game dunes --samples 7 --frames 30 --threads 2 --artifacts __dewycache__/task-tmp/dunes-shadow-images --output dewy/audits/2026-10-17/source-core/dunes-shadow-benchmark.json",
+  "reproduction": "Restore examples/sloppy_core/dunes.dewy and dunes_model.dewy from baseline_revision into the --baseline-sources directory. Both executables use the same compiler/library snapshot.",
+  "sources": {
+    "dunes.dewy": {
+      "baseline": "a09ce6947513cafd55f0da6a502bf9585335c22161bc9a7e3dcb0225fe5360cd",
+      "candidate": "eccb8bc150b8711a9b340b42efb3fb951e2069b547e8609d2718a89994d37ba1"
+    },
+    "dunes_model.dewy": {
+      "baseline": "3d96f91088a9a8566f917f20a14b43625680e686b01d5cce535b69382b8c2c3f",
+      "candidate": "4b5a5fddc5d5670cb0494cf5f3fff477b5d67ee3fbc73e80e41f4e9f4e32f885"
+    }
+  },
+  "visual_review": "Inspected the candidate 1280x720 frame against the preceding rendering comparison. Scene content remains consistent, with softer shadow edges. Four taps in software, nine on GPU; texel spacing comes from actual texture width.",
+  "scope": "Example and benchmark driver only; compiler/library inputs unchanged. Native/web builds, software frame, headless model and real GLES shader compilation passed."
+}

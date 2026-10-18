@@ -26,6 +26,8 @@ SandParams:type=[
     time: float32
     shadow_strength: float32
     shadow_map: Texture
+    shadow_texel: float32 = 1.0 / 2048.0
+    shadow_taps: float32 = 9.0
 ]
 SandOut:type=[
     pos: vec4
@@ -52,15 +54,24 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
     let sp = i.shadow_pos.xyz / i.shadow_pos.w * 0.5 + vec3(0.5 0.5 0.5)
     let sh: float32 = 1.0
     if sp.x >? 0.0 and sp.x <? 1.0 and sp.y >? 0.0 and sp.y <? 1.0 and sp.z <? 1.0 {
-        # 3x3 filtered lookup: soft shadow edges
+        # Match the real shadow map: four samples on the CPU, nine on a GPU.
         let lit: float32 = 0.0
-        loop x in [-1..2) {
-            loop y in [-1..2) {
-                let d = sample(u.shadow_map sp.xy + vec2(f32(x) f32(y)) * (1.0 / 2048.0)).x
+        if u.shadow_taps <? 5.0 {
+            loop k in [0..4) {
+                let d = sample(u.shadow_map sp.xy + vec2(f32(k%2)-0.5 f32(k//2)-0.5) * u.shadow_texel).x
                 if sp.z - 0.003 <=? d {lit = lit + 1.0}
             }
+            lit /= 4.0
+        } else {
+            loop x in [-1..2) {
+                loop y in [-1..2) {
+                    let d = sample(u.shadow_map sp.xy + vec2(f32(x) f32(y)) * u.shadow_texel).x
+                    if sp.z - 0.003 <=? d {lit = lit + 1.0}
+                }
+            }
+            lit /= 9.0
         }
-        sh = 1.0 - u.shadow_strength * (1.0 - lit / 9.0)
+        sh = 1.0 - u.shadow_strength * (1.0 - lit)
     }
     let c = sand * (u.sky * 0.42 + u.sun_color * wrap * sh)
     # cool fill in the shade, warm bounce from lit sand

@@ -22,7 +22,7 @@ def digest(path: Path) -> str:
 
 
 def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
-            samples: int, frames: int, threads: int) -> dict:
+            samples: int, frames: int, threads: int, baseline_sources: Path | None = None) -> dict:
     artifacts.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(SLOPPY_SOFTWARE='1', SLOPPY_WINDOW='1280x720', SLOPPY_FRAMES=str(frames),
@@ -46,9 +46,11 @@ def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
         'workloads': {},
     }
     for game in games:
-        source = ROOT / f'examples/sloppy_core/{game}.dewy'
-        binaries, images = {}, {}
+        binaries, images, sources = {}, {}, {}
         for label, compiler in compilers.items():
+            directory = baseline_sources if label == 'baseline' and baseline_sources else ROOT / 'examples/sloppy_core'
+            source = directory / f'{game}.dewy'
+            sources[label] = {'path': str(source), 'sha256': digest(source)}
             binaries[label] = artifacts / f'{game}-{label}'
             images[label] = artifacts / f'{game}-{label}.png'
             built = subprocess.run([compiler, 'build', source, '--release', '-o', binaries[label]],
@@ -77,7 +79,7 @@ def measure(compilers: dict[str, Path], games: list[str], artifacts: Path,
                         'frame_ms': float(match[1]), 'process_wall_seconds': wall,
                         'process_cpu_seconds': cpu1.ru_utime + cpu1.ru_stime - cpu0.ru_utime - cpu0.ru_stime,
                     })
-        result = {'source_sha256': digest(source), 'samples': rows,
+        result = {'sources': sources, 'samples': rows,
                   'images': {label: {'path': str(path), 'sha256': digest(path)} for label, path in images.items()}}
         if 'baseline' in rows:
             result['median_paired_candidate_baseline_ratio'] = {
@@ -94,6 +96,8 @@ if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('compiler', type=Path)
     cli.add_argument('--baseline', type=Path)
+    cli.add_argument('--baseline-sources', type=Path,
+                     help='Directory of baseline game sources and their relative imports')
     cli.add_argument('--game', choices=['paddle', 'forest', 'dunes'], action='append')
     cli.add_argument('--samples', type=positive, default=7)
     cli.add_argument('--frames', type=positive, default=30)
@@ -106,5 +110,6 @@ if __name__ == '__main__':
         compilers['baseline'] = args.baseline.resolve(strict=True)
     compilers['candidate'] = args.compiler.resolve(strict=True)
     report = measure(compilers, args.game or ['paddle', 'forest', 'dunes'],
-                     args.artifacts.resolve(), args.samples, args.frames, args.threads)
+                     args.artifacts.resolve(), args.samples, args.frames, args.threads,
+                     args.baseline_sources.resolve() if args.baseline_sources else None)
     args.output.write_text(json.dumps(report, indent=2) + '\n')

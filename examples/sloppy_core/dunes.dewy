@@ -206,8 +206,11 @@ draw=()=>{
     post_effects(0.55 0.78 0.3 1.05 vec3(1.03 1.0 0.96))
     camera3d(cam_pos pos + vec3(0 2.9 0) 50.0 0.1 700.0)
     draw_custom(()=>{
+        let shadow = scene_shadow_map()
+        let taps:float32 = if soft_rendering() 4.0 else 9.0
         let p = SandParams(scene_view_proj() scene_shadow_vp() scene_camera() scene_sun() scene_sun_color() scene_sky_color()
-            scene_fog_color() scene_fog() f32(elapsed()) scene_shadow_strength() scene_shadow_map())
+            scene_fog_color() scene_fog() f32(elapsed()) scene_shadow_strength() shadow
+            shadow_texel=f32(1.0 / f64(max(shadow.width 1))) shadow_taps=taps)
         draw(sand_sh terrain p)
     }
     )
