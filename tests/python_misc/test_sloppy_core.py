@@ -24,6 +24,10 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'optimizer-data-narrowed-parameter', 'optimizer-data-mutable-loop',
+    'optimizer-data-parameter-snapshots', 'optimizer-data-index-once',
+    'optimizer-data-nested-array', 'optimizer-data-record-local',
+    'optimizer-data-private-capture', 'optimizer-data-shared-capture', 'optimizer-data-loop-local',
     'lexer-keyword-ids', 'optimizer-parameter-effects-shared-scan',
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'array-comparison-string-blocks', 'sequence-value-protocol-nesting',
@@ -2410,6 +2414,66 @@ if edit(original original original original true) not=? 71 return 1
 if edit(original original original original false) not=? 40 return 2
 if read(original original original) not=? 30 return 3
 return if original =? [10 22] 42 else 4}''',
+    'optimizer-data-parameter-snapshots': '''Box:type=[values:array<int64>]
+bump=(@values:array<int64>):>void=>{values[0]+=1}
+edit=(first:Box raw:Box changed:Box last:Box take:bool):>int64=>{
+if take {let p=raw.values.data() p[0]=40 bump(@changed.values)}
+return first.values[0]+raw.values[0]+changed.values[0]+last.values[0]}
+read=(first:Box second:Box third:Box):>int64=>first.values[0]+second.values[0]+third.values[0]
+main=()=>{let original=Box[[10]] original.values.push(22)
+if edit(original original original original true) not=? 71 return 1
+if edit(original original original original false) not=? 40 return 2
+if read(original original original) not=? 30 return 3
+return if original.values =? [10 22] 42 else 4}''',
+    'optimizer-data-index-once': '''Box:type=[values:array<int64>]
+main=()=>{let rows=[Box[[10 11]] Box[[20 21]]]
+let saved=rows
+let calls:int64=0
+index=($capture @calls):>int64=>{calls+=1 return 0}
+let p=rows[index()].values.data()
+p[0]=42
+if calls not=? 1 return 1
+if saved[0].values not=? [10 11] or saved[1].values not=? [20 21] return 2
+return if rows[0].values =? [42 11] and rows[1].values =? [20 21] 42 else 3}''',
+    'optimizer-data-nested-array': '''main=()=>{
+let rows=[[[10 11] [20 21]] [[30 31]]]
+let saved=rows
+let p=rows[0][1].data()
+p[0]=42
+return if saved =? [[[10 11] [20 21]] [[30 31]]] and rows =? [[[10 11] [42 21]] [[30 31]]] 42 else 1}''',
+    'optimizer-data-narrowed-parameter': '''Box:type=[values:array<int64>]
+edit=(box:Box?):>int64=>{
+if box is? none return 0
+let p=box.values.data() p[0]=42
+return box.values[0]}
+main=()=>{let original=Box[[10 11]]
+return if edit(original) =? 42 and edit(none) =? 0 and original.values =? [10 11] 42 else 1}''',
+    'optimizer-data-mutable-loop': '''Box:type=[values:array<int64>]
+main=()=>{let rows=[Box[[10 11]] Box[[20 21]]] let saved=rows
+loop @item in rows {let p=item.values.data() p[0]+=1}
+return if rows[0].values =? [11 11] and rows[1].values =? [21 21] and saved[0].values =? [10 11] and saved[1].values =? [20 21] 42 else 1}''',
+    'optimizer-data-record-local': '''Box:type=[values:array<int64>]
+main=()=>{let rows=[Box[[10 11]]]
+let item=rows[0]
+let p=item.values.data() p[0]=42
+return if rows[0].values =? [10 11] and item.values =? [42 11] 42 else 1}''',
+    'optimizer-data-private-capture': '''make=()=>{let values=[0]
+return ()=>{let p=values.data() p[0]+=1 return values[0]}}
+work=():>int64=>{let a=make() let b=a
+let first=a() let second=b() let third=a()
+return if first =? 1 and second =? 1 and third =? 2 42 else 1}
+main=()=>{if work() not=? 42 return 1
+let before=alloc_count()
+loop i in [0..20) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}''',
+    'optimizer-data-shared-capture': '''main=()=>{let values=[0] let saved=values
+let a=($capture @values)=>{let p=values.data() p[0]+=1 return values[0]}
+let b=a let first=a() let second=b()
+return if first =? 1 and second =? 2 and values =? [2] and saved =? [0] 42 else 1}''',
+    'optimizer-data-loop-local': '''Box:type=[values:array<int64>]
+main=()=>{let rows=[Box[[10 11]] Box[[20 21]]] let total:int64=0
+loop value in rows {let item=value let p=item.values.data() p[0]+=1 total+=item.values[0]}
+return if total =? 32 and rows[0].values =? [10 11] and rows[1].values =? [20 21] 42 else 1}''',
     'optimizer-parameter-raw-copy': '''edit=(values:array<int64>):>array<int64>=>{let p=values.data() p[0]=42 return values}
 main=()=>{let values=[20 22] values.push(0) let edited=edit(values)
 return if values =? [20 22 0] and edited =? [42 22 0] 42 else 1}''',

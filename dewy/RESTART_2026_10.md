@@ -1135,9 +1135,30 @@ unmeasured for this stage. Fresh default throughput is about **72k root
 lines/CPU-second** on the contended host, still well short of 250k.
 [Validation and measurements](audits/2026-10-19/parameter-effects.json).
 
-The new testing also exposed a preexisting issue in raw `.data()` access through
-nested record fields. Its regression case and the broader interaction with
-borrowed locals and closure state are the next correctness work.
+## Preserve owned values when exposing raw array elements
+
+Writable `.data()` access now detaches the array at its actual storage path,
+including nested fields and indexed arrays. The path's indices run once. A
+checker flag keeps exposed locals out of borrowed record/parameter views and
+marks private closure state as mutable for closure copying. Narrowed optional
+bindings and explicit mutable-loop aliases resolve to their owning storage;
+`$capture @name` continues to share the binding while preserving older value
+snapshots.
+
+Previously, these paths could modify other value copies or write into literal
+storage. All **36** new focused checks fail on the preceding compiler and pass
+with the fix, covering native/WebAssembly and default/release builds. Private
+closure tests also repeat creation, copying and calls to check cleanup. The
+independent C bootstrap passes **342 quick checks**, and the full suite passes
+**5,969 checks in 155.44 seconds**, with two workers.
+
+All **44** performance comparisons pass after targeted rechecks, retaining every
+matched sample. Large default/release compilation is essentially unchanged
+(**1.002× / 1.000×** the previous stage); all eight runtime workloads retain
+their accepted artifacts and pass fresh checks. Fresh runtime-to-C ratios remain
+unmeasured for these unchanged workloads. Programs using the corrected raw
+storage paths intentionally change behavior; byte compatibility is not the goal.
+[Regression evidence, validation and performance](audits/2026-10-19/nested-data-ownership.json).
 
 ## Default optimization is a measured tradeoff
 

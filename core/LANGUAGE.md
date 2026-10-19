@@ -673,6 +673,25 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
+Low-level code can obtain an owned growable array's element pointer with
+`.data()`. This first detaches shared storage, including containing arrays along
+a field/index path, so existing value copies remain independent:
+
+```dewy
+Buffer:type=[values:array<int64>]
+let original=Buffer[[20 22]]
+let copy=original
+let p=copy.values.data()
+p[0]=42
+# original.values is [20 22]; copy.values is [42 22]
+```
+
+The receiver's indices run once. A private closure capture keeps its independent
+state when accessed this way; `$capture @name` still shares the binding explicitly.
+The pointer is a low-level view: keep its owner alive and do not resize or replace
+the array while using it. Ordinary read-only iteration bindings remain read-only;
+make a local value copy before editing one, or use `loop @item` to edit storage.
+
 Use `array<T length=N>` for a known, positive compile-time length:
 
 ```dewy

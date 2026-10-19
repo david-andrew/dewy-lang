@@ -2420,10 +2420,20 @@ gen_swizzle = (e: int) -> Val:
     Val(d, true, s)
 
 data_writable = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .field or k == .index or k == .unwrap or k == .narrow:
+        # A field/element of owned storage needs the same detachment as a named
+        # array. Slices are temporary values, not writable storage paths.
+        if k == .index and nodes[e].aux == 1: return false
+        return data_writable(int(nodes[e].a))
+    if k != .ident: return false
     if nodes[e].aux == i32(int(SK.global)): return true
     if nodes[e].aux != i32(int(SK.local)): return false
-    f = int(locals[int(nodes[e].sym)].flags)
-    if f & (LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return false
+    l = int(nodes[e].sym)
+    f = int(locals[l].flags)
+    if f & LF_ALIAS != 0: return locals[l].alias != 0 and data_writable(int(locals[l].alias))
+    if f & LF_BYREF != 0: return false
+    if f & LF_CAPTURE != 0: return f & LF_VALUECAP != 0 or is_shared(l)
     f & LF_PARAM == 0 or f & LF_MUTPARAM != 0
 
 # ---------------- intrinsics ----------------
@@ -2703,10 +2713,15 @@ gen_intrinsic = (e: int) -> Val:
         # copy first (a literal, or a shared one, must not change)
         a0 = args[0]
         at = prune(ntype(a0))
-        if types[at].kind == .array and nodes[a0].kind == .ident and data_writable(a0):
+        p = 0
+        if types[at].kind == .array and data_writable(a0):
             pl = gen_place(a0, true)
             arr_unique(pl, at)
-        p = gen_borrowed(args[0]).v
+            # gen_place also detaches containing arrays and evaluates indexes.
+            # Read that place directly; evaluating a side-effectful index again
+            # could select another element or run the user's code twice.
+            p = read_place(pl, at)
+        else: p = gen_borrowed(a0).v
         r = vreg(VI)
         e_mov(r, e_iconst(0))
         iff(e_bin(.ne, VI, p, e_iconst(0)))
@@ -4044,7 +4059,7 @@ param_writes_scanned = false
 param_view_decl = (s: int, l: int) -> bool:
     if dbg_on or nodes[s].aux2 != 1: return false
     fl = int(locals[l].flags)
-    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
+    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_RAWDATA) != 0 or is_shared(l): return false
     # Most local initializers are not the parameter binding introduced by the
     # frontend. Reject their shape before asking about layouts or closure types.
     iv = int(nodes[s].b)
@@ -4077,7 +4092,7 @@ cur_block_i = 0
 view_decl = (s: int, l: int) -> bool:
     if not opt_release or cur_block == 0 or kid(cur_block, cur_block_i) != s: return false
     fl = int(locals[l].flags)
-    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
+    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_RAWDATA) != 0 or is_shared(l): return false
     t = prune(int(locals[l].type))
     if types[t].kind != .struct_ and types[t].kind != .tuple: return false
     if type_has_fn(t): return false
@@ -6360,7 +6375,7 @@ helper_envcopy = (f: int):
         loop cap in fns[f].caps:
             inn = int(cap.inner)
             flags = int(locals[inn].flags)
-            if flags & LF_VALUECAP != 0 and (flags & LF_ASSIGNED != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type))): mutable = true
+            if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_RAWDATA) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type))): mutable = true
         if not mutable:
             retain(src, T_STR)
             return e_ret(src)
