@@ -15,3 +15,12 @@ files and need no network or old compiler.
 Unicode data copyright © Unicode, Inc. The accompanying `LICENSE.txt` is the
 Unicode License V3, retrieved from <https://www.unicode.org/license.txt> on
 2026-10-16. The conformance fixture retains its own Unicode copyright header.
+
+`grapheme_pages.bin` is derived from those same three tables by
+`python -m tools.sloppy_core.unicode_pages` (use `--check` to verify it).
+It starts with 4,352 little-endian unsigned 16-bit page IDs, followed by
+unique 256-byte pages. Each property byte stores the grapheme-break class in
+bits 0..3, Indic-conjunct class in 4..5, and extended-pictographic flag in bit 6.
+The original range tables remain the canonical input and independent test oracle.
+Regenerate the packed table after an intentional Unicode update; no network
+access is involved in packing or ordinary builds.

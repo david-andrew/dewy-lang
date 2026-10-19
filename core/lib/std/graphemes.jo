@@ -27,6 +27,19 @@ __grapheme_property = (table: u8[], scalar: int) -> int:
         else: return int(table[at + 8])
     0
 
+# Two table reads replace three binary searches. Each byte combines the
+# grapheme-break class (bits 0..3), Indic class (4..5), and pictographic bit (6).
+# The 4,352 little-endian u16 page IDs precede deduplicated 256-byte pages.
+__grapheme_property_bits = (scalar: int) -> int:
+    if scalar < 0 or scalar >= 0x110000: return 0
+    __grapheme_page_lookup(embed("unicode/grapheme_pages.bin"), scalar)
+
+# A read-only parameter keeps data(table) on the immutable view. A mutable
+# local holding an embedded array would detach the whole table on every read.
+__grapheme_page_lookup = (table: u8[], scalar: int) -> int:
+    page = int(((data(table) + (scalar >> 8) * 2) as *u16)[0])
+    int(table[8704 + page * 256 + (scalar & 255)])
+
 # The next boundary, or -1 for malformed UTF-8. Context is retained across
 # boundaries (notably for regional-indicator pairs). The scalar at the next
 # boundary is consumed on the following call.
@@ -84,9 +97,10 @@ __grapheme_next_unicode = (s: str, c: mut __GraphemeCursor) -> int:
             else if scalar == 10: current = 2
             else if scalar < 32 or scalar == 127: current = 3
         else:
-            current = __grapheme_property(embed("unicode/grapheme_break.bin"), scalar)
-            indic = __grapheme_property(embed("unicode/indic_conjunct_break.bin"), scalar)
-            pictographic = __grapheme_property(embed("unicode/extended_pictographic.bin"), scalar) == 1
+            properties = __grapheme_property_bits(scalar)
+            current = properties & 15
+            indic = (properties >> 4) & 3
+            pictographic = properties & 64 != 0
         previous = c.previous
         boundary = true
         if previous == 1 and current == 2: boundary = false
@@ -141,9 +155,35 @@ __dewy_decode_utf8 = (source: u8[]) -> str?:
     text
 
 __dewy_string_length = (s: str) -> int:
-    c = __GraphemeCursor()
+    n = len(s)
+    p = data(s)
+    offset = 0
     count = 0
-    loop c.offset < len(s):
+    last = 0
+    # Eight ASCII bytes without CR are eight clusters. Read only full words;
+    # CR/LF and the short tail use the scalar prefix loop below.
+    loop offset + 8 <= n:
+        word = ((p + offset) as *u64)[0]
+        cr = word xor 0x0d0d0d0d0d0d0d0d
+        if word & 0x8080808080808080 != 0 or (cr - 0x0101010101010101) & (cr xor 0xffffffffffffffff) & 0x8080808080808080 != 0: break
+        last = offset + 7
+        offset += 8
+        count += 8
+    loop offset < n and p[offset] < 128:
+        last = offset
+        first = p[offset]
+        offset += 1
+        if first == 13 and offset < n and p[offset] == 10: offset += 1
+        count += 1
+    if offset == n: return count
+    # A non-ASCII combining scalar may extend the final ASCII cluster.
+    # Revisit that cluster, restoring Unicode context from its first byte;
+    # every earlier ASCII cluster is already complete.
+    c = __GraphemeCursor()
+    if offset > 0:
+        c.offset = last
+        count -= 1
+    loop c.offset < n:
         if __grapheme_next(s, c) < 0: panic("invalid UTF-8 in grapheme operation")
         count += 1
     count

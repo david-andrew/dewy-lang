@@ -12786,3 +12786,154 @@ main = () -> int:
         messages = [line for line in ran.stdout.splitlines() if line.startswith('message ')]
         assert messages == (['message -23', 'message -10'] if failure == 'multiple' else ['message -23'])
         assert ('value=-23:value=-10' if failure == 'multiple' else 'value=-23') in ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
+    # Independent counts exercise each possible ASCII byte around word edges,
+    # CR/LF, and Unicode that can extend the last cluster of an ASCII prefix.
+    cases = []
+    sizes = [*range(34), 63, 64, 65, 127, 128, 129]
+    for n in sizes:
+        prefix = b'a' * n
+        for byte in range(128):
+            data = prefix + bytes([byte]) + b'\nend'
+            cases.append((data, len(data) - data.count(b'\r\n')))
+        for suffix, extra in [('é', 1), ('👩‍👩‍👧‍👦', 1), ('🇺🇸🇨', 2),
+                              ('क्ष', 1), ('\r\n', 1), ('\r\n\u0301', 2),
+                              ('\u0301', int(n == 0)), ('\u0301\u0308', int(n == 0)),
+                              ('\u200d', int(n == 0))]:
+            cases.append((prefix + suffix.encode(), n + extra))
+        cases.append((b'a\r\n' * n + '\u0301'.encode(), 2*n + 1))
+        cases.append((prefix, n))
+    (tmp_path / 'counts.bin').write_bytes(b''.join(struct.pack('<II', len(s), count) + s
+                                                 for s, count in cases))
+    source = tmp_path / 'counts.jo'
+    source.write_text('''main = () -> int:
+    cases = embed("counts.bin")
+    at = 0
+    loop at < cases.len():
+        size = __grapheme_word(cases, at)
+        expected = __grapheme_word(cases, at + 4)
+        at += 8
+        text = str_from_bytes(cases[at..at + size))
+        assert(__dewy_string_length(text) == expected)
+        at += size
+    42
+''')
+    binary = tmp_path / 'counts'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web conformance')
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('prefix', [0, 7, 8, 15, 16, 31, 32, 65])
+def test_core_grapheme_length_invalid_tail(compiler, tmp_path, prefix):
+    source = tmp_path / 'invalid.dewy'
+    source.write_text('main=()=>{let text=str_from_bytes([' + '97 '*prefix +
+                      '226 130]) return text.length}\n')
+    binary = tmp_path / 'invalid'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0 and 'invalid UTF-8 in grapheme operation' in ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+def test_core_grapheme_pages_reproducible():
+    from tools.sloppy_core.unicode_pages import DIRECTORY, pack
+    assert pack() == (DIRECTORY / 'grapheme_pages.bin').read_bytes()
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_grapheme_property_pages(compiler, tmp_path, release, target):
+    from bisect import bisect_right
+    directory = Path(__file__).resolve().parents[2] / 'core/lib/std/unicode'
+    tables = [list(struct.iter_unpack('<IIB', (directory / name).read_bytes()))
+              for name in ('grapheme_break.bin', 'indic_conjunct_break.bin',
+                           'extended_pictographic.bin')]
+    starts = [[row[0] for row in table] for table in tables]
+    points = {-1, 0x110000}
+    for page in range(0, 0x110001, 256):
+        points.update((page-1, page, page+1))
+    for table in tables:
+        for start, end, _ in table:
+            points.update((start-1, start, end, end+1))
+    rng = random.Random(1600)
+    points.update(rng.randrange(0x110000) for _ in range(4096))
+
+    def expected(scalar):
+        properties = []
+        for table, keys in zip(tables, starts):
+            index = bisect_right(keys, scalar) - 1
+            properties.append(table[index][2] if index >= 0 and scalar <= table[index][1] else 0)
+        return properties[0] | properties[1] << 4 | properties[2] << 6
+
+    (tmp_path / 'properties.bin').write_bytes(b''.join(struct.pack('<iI', p, expected(p))
+                                                     for p in sorted(points)))
+    source = tmp_path / 'properties.jo'
+    source.write_text('''main = () -> int:
+    cases = embed("properties.bin")
+    loop row in [0..cases.len() / 8):
+        at = row * 8
+        scalar = int(__grapheme_word(cases, at) as i32)
+        expected = __grapheme_word(cases, at + 4)
+        assert(__grapheme_property_bits(scalar) == expected)
+    42
+''')
+    binary = tmp_path / 'properties'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web conformance')
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+def test_core_grapheme_lookup_borrows_table(compiler, tmp_path):
+    source = tmp_path / 'lookup.jo'
+    source.write_text('main = () -> int: __grapheme_property_bits(0x301)\n')
+    binary = tmp_path / 'lookup'
+    built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    functions = re.findall(r'^fn f___grapheme_(?:property_bits|page_lookup)_[^\n]*\n.*?(?=^fn |\Z)',
+                           built.stdout + built.stderr, re.M | re.S)
+    assert functions, 'grapheme table lookup was not emitted'
+    # CALL_IF_SHARED would clone the embedded table for data() on a mutable
+    # local. The lookup must borrow its bytes regardless of table size.
+    assert not any(re.search(r'\bcall .*\bc=3\b', fn) for fn in functions), '\n'.join(functions)

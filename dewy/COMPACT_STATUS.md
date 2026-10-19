@@ -94,6 +94,13 @@ New front-end or user-facing language design requires David's approval.
   seeds in five modes. The ordinary checkpoint has 68 passing comparisons and
   four inconclusive runtime timings, with no established regression.
   [Evidence and limitations](audits/2026-10-19/buffered-input.json).
+- Grapheme length now scans ASCII prefixes in words; Unicode boundaries use
+  a deduplicated combined property table. On the laptop, release mixed-Unicode
+  length is about 4x faster and traversal 2.6x; ASCII length is about 35x faster.
+  All 32 ordinary benchmark artifacts are unchanged and all twelve compilation
+  comparisons pass. The batch passes 6,455 checks after independent bootstrap
+  and 100 fresh fuzz seeds in five modes. Unicode 16 behavior is unchanged.
+  [Evidence, including rejected prototypes](audits/2026-10-19/grapheme-pages.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
