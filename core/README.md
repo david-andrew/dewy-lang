@@ -64,7 +64,7 @@ baseline. Compiler binaries and bundled libraries are checked against their
 build manifests before and after the run.
 
 The gate measures default/release compilation of a nontrivial generated Dewy
-program, three application builds and a fixed compiler self-build, then six
+program, three application builds and a fixed compiler self-build, then seven
 checked runtime kernels in both modes against C. It uses nine alternating
 samples by default and paired CPU-time ratios. Approximate bootstrap intervals
 distinguish passing results, regressions and inconclusive noise; the latter two

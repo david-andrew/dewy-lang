@@ -1,0 +1,47 @@
+# Dense opcode classification; the key varies on every iteration.
+from p"harness.dewy" import size_argument, clock
+
+classify=(code:int64):>int64=>match code {
+    <0>=>17
+    <1>=>4
+    <2>=>91
+    <3>=>6
+    <4>=>22
+    <5>=>37
+    <6>=>8
+    <7>=>53
+    <8>=>11
+    <9>=>68
+    <10>=>2
+    <11>=>79
+    <12>=>41
+    <13>=>13
+    <14>=>97
+    <15>=>29
+    <16>=>59
+    <17>=>3
+    <18>=>83
+    <19>=>31
+    <20>=>7
+    <21>=>73
+    <22>=>43
+    <23>=>19
+    _=>5
+}
+
+kernel=(count:int64):>int64=>{
+    let state:int64=305419896
+    let checksum:int64=0
+    loop i in [0..count) {
+        state=(state*1664525+1013904223)&2147483647
+        checksum+=classify((state>>16)&31)
+    }
+    return checksum
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 10000000)
+    let started=clock()
+    let result=kernel(count)
+    printl"{result} {clock()-started}"
+    return 0
+}

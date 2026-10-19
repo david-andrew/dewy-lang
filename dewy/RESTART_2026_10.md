@@ -933,6 +933,44 @@ The final busy-host compilation recheck measured roughly 67k root lines/CPU-seco
 absolute rates across these load conditions should not be treated as speedups.
 [Final validation, raw measurements and assessment](audits/2026-10-18/bounded-native-equality.json).
 
+## Constant-valued match dispatch
+
+Dense integer and enum matches whose result arms are scalar constants now use
+a compact read-only lookup table. The subject still evaluates once, holes and
+out-of-range values use the wildcard arm, and effectful or converting bodies
+retain ordinary control flow. Entries use the smallest sufficient signed or
+unsigned width. The portable IR supports native and web targets; debug builds
+keep their original branches. Overflowing key spans fall back to comparisons.
+
+The new application benchmark dispatches ten million varying inputs through
+24 constant-valued arms, with an algorithm-matched C implementation. An initial
+nine-pair run reduced default CPU time from roughly **124 to 54 ms** and release
+time from **123 to 40 ms**, versus about **36 ms for C**. This is a dispatch
+improvement, not a claim of general C parity. The compiler's own operator
+precedence lookup also becomes small enough for its existing inliner; diagnostic
+instruction counts fall by about 0.3% on the large generated build.
+
+The independently C-bootstrapped compiler passes **5,879 checks in 140.43 seconds**.
+All 40 compilation/runtime comparisons pass against both the fixed baseline and
+the preceding stage. Initial noisy measurements and focused follow-ups are
+pooled without dropping samples: compilation comparisons use 32 or 55 matched
+pairs, and runtime comparisons use 9, 32 or 45. The six existing runtime
+workloads produce identical artifacts to the preceding stage after toolchain
+path normalization. The new dispatch kernel's release time is about **1.06 times
+C** in the full gate. Fresh default compilation measured about **89k root
+lines/CPU-second** in that run; the absolute target remains unmet, and changing
+host load prevents interpreting later absolute rates as compiler improvements.
+[Validation, all samples and final assessment](audits/2026-10-18/constant-match-lookup.json).
+
+Before this change, three isolated frontend storage experiments tried a flat
+child arena, batched arena growth and four inline children per syntax node.
+Their measured gains were too small to justify the representation change, so
+none is retained. A compiler built from the preserved Sloppy seed also did more
+work on the same sources than the current compiler. Both builds already use
+release optimization. The [experiment audit](audits/2026-10-18/frontend-storage-experiments.json)
+preserves patches, raw timing and instruction measurements for those rejected
+approaches.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

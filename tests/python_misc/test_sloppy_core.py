@@ -41,7 +41,8 @@ QUICK_CASES = {
     'unpack-dictionary-nested', 'loop-else-conditions', 'json-typed-nested',
     'optional-managed-copy', 'grapheme-loop', 'optimizer-nested-exits',
     'optimizer-return-facts-rejoin', 'optimizer-return-facts-float',
-    'optimizer-boolean-value-effects',
+    'optimizer-boolean-value-effects', 'match-constant-widths',
+    'match-constant-effects', 'match-constant-wide-keys',
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
 QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
@@ -4597,6 +4598,49 @@ main=()=>{let small:uint8=42 return pick(42)+pick(small)+pick("42")}''',
 classify=(v:bool|Count|string):>int64=>match v {
 <bool>=>10 n:Count=>n s:string=>s.length}
 main=()=>classify(true)+classify(29)+classify("abc")''',
+    'match-constant-widths': """byte=(v:int64):>int64=>match v {<-2>=>255 <0>=>2 <3>=>7 _=>5}
+short=(v:int64):>int64=>match v {<-2>=>65535 <0>=>2 <3>=>7 _=>5}
+word=(v:int64):>int64=>match v {<-2>=>4294967295 <0>=>2 <3>=>7 _=>5}
+wide=(v:int64):>int64=>match v {<-2>=>9223372036854775807 <0>=>2 <3>=>7 _=>5}
+sbyte=(v:int64):>int64=>match v {<-2>=>-128 <0>=>2 <3>=>7 _=>-5}
+sshort=(v:int64):>int64=>match v {<-2>=>-32768 <0>=>2 <3>=>7 _=>-5}
+sword=(v:int64):>int64=>match v {<-2>=>-2147483648 <0>=>2 <3>=>7 _=>-5}
+swide=(v:int64):>int64=>match v {<-2>=>-9223372036854775808 <0>=>2 <3>=>7 _=>-5}
+main=()=>{
+    if byte(-2) not=? 255 or short(-2) not=? 65535 or word(-2) not=? 4294967295 or wide(-2) not=? 9223372036854775807 return 1
+    if sbyte(-2) not=? -128 or sshort(-2) not=? -32768 or sword(-2) not=? -2147483648 or swide(-2) not=? -9223372036854775808 return 2
+    loop v in [-9223372036854775808 -3 -1 0 1 2 3 4 9223372036854775807] {
+        let expected=if v=?0 2 else if v=?3 7 else 5
+        if byte(v) not=? expected or short(v) not=? expected or word(v) not=? expected or wide(v) not=? expected return 3
+        if expected=?5 expected=-5
+        if sbyte(v) not=? expected or sshort(v) not=? expected or sword(v) not=? expected or swide(v) not=? expected return 4
+    }
+    return 42
+}""",
+    'match-constant-unsigned': """pick=(v:uint64):>int64=>match v {
+<18446744073709551610>=>10 <18446744073709551612>=>20 <18446744073709551615>=>30 _=>2}
+main=()=>{
+    if pick(18446744073709551610) not=? 10 or pick(18446744073709551612) not=? 20 or pick(18446744073709551615) not=? 30 return 1
+    if pick(0) not=? 2 or pick(18446744073709551614) not=? 2 return 2
+    return 42
+}""",
+    'match-constant-effects': """let calls:int64=0
+next=(v:int64):>int64=>{calls+=1 v}
+pick=(v:int64):>int64=>match next(v) {<0>=>10 <1>=>{calls+=10 20} <2>=>30 _=>{calls+=100 40}}
+main=()=>{
+    if pick(0) not=? 10 or calls not=? 1 return 1
+    if pick(1) not=? 20 or calls not=? 12 return 2
+    if pick(2) not=? 30 or calls not=? 13 return 3
+    if pick(-1) not=? 40 or calls not=? 114 return 4
+    return 42
+}""",
+    'match-constant-wide-keys': """pick=(v:int64):>int64=>match v {
+<-9223372036854775808>=>10 <0>=>20 <9223372036854775807>=>30 _=>2}
+main=()=>{
+    if pick(-9223372036854775808) not=? 10 or pick(0) not=? 20 or pick(9223372036854775807) not=? 30 return 1
+    if pick(-1) not=? 2 or pick(1) not=? 2 return 2
+    return 42
+}""",
     'match-integers': '''pick=(v:int64)=>match v {<-1>=>1 answer:42=>answer <3>=>3 rest=>rest+1}
 main=()=>pick(-1)+pick(42)-pick(3)+pick(1)''',
     'match-strings': '''pick=(s:string)=>match s {<"yes">=>40 <"no">=>0 _=>2}
@@ -7264,6 +7308,34 @@ main=()=>probe(-7)
     probe = re.search(r'^fn f_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
     assert probe, 'constant arithmetic probe was not emitted'
     assert 'call' not in probe[0], 'literal floor arithmetic still calls a helper in default builds'
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_constant_match_lookup(compiler, tmp_path, target, release):
+    # The value batches cover widths, holes, unsigned/extreme keys and effects.
+    # Keep this probe out of callers so the lookup itself stays inspectable.
+    source = tmp_path / 'lookup.jo'
+    source.write_text("""@noinline
+lookup_probe = (key: int) -> int:
+    match key:
+        -2: 17
+        0: 3
+        3: 42
+        _: 5
+main = () -> int: lookup_probe(3)
+""")
+    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    binary = tmp_path / 'lookup'
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_lookup_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'constant match probe was not emitted'
+    assert 'brtable' not in probe[0], probe[0]
+    assert ' = daddr ' in probe[0] and ' = load ' in probe[0], probe[0]
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
