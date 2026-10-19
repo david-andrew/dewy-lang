@@ -1264,6 +1264,32 @@ modes, and both native optimization modes. They cover token kinds, payloads,
 byte spans, spacing, operators, numeric boundaries, Unicode and string excerpts.
 [Validation and measurements](audits/2026-10-19/bounded-lexer.json).
 
+## Bind parameter views before allocating their storage
+
+Read-only Dewy value parameters now bind to borrowed storage before local-frame
+allocation. This removes unused record slots and resets those bindings on every
+lowering, including REPL reuse. Debug builds, private writes, captures and raw
+buffer exposure retain the existing owned-storage safeguards.
+
+The bounded default inliner now accepts nonreturning failure calls. A small
+array reader can therefore inline while preserving its bounds check and panic;
+ordinary returning calls still disqualify default leaf helpers. The managed-value
+helper workload uses **0.596×** the preceding stage's default CPU time. Release
+is unchanged and remains **1.559× C**, so this is not broad C parity. Early
+parameter binding alone removed storage but did not measurably speed this kernel.
+
+Large default/release compilation ratios are **0.993× / 0.995×**; the compiler
+self-build is flat. All **44** performance comparisons pass without rechecks.
+Seven runtime workloads retain certified artifacts with fresh checks; the
+managed-parameter workload receives new matched default/release/C timings.
+Fresh throughput on the loaded host is about **71k root lines/CPU-second**.
+
+The independent C-bootstrap candidate passes **360 quick checks** and the full
+suite passes **5,987 checks in 140.48 seconds**, with two workers. Added tests
+cover frame storage, debugger locals, repeated REPL submissions, private copied
+state, and actual native/web failure paths after inlining.
+[Validation and all measurements](audits/2026-10-19/checked-parameters.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

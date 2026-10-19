@@ -11238,3 +11238,89 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('debug', [False, True], ids=['default', 'debug'])
+def test_core_parameter_view_frame(compiler, tmp_path, debug):
+    source = tmp_path / 'parameter-frame.dewy'
+    source.write_text('''Row:type=[values:array<int64> bias:int64]
+parameter_frame_probe=(row:Row):>int64=>row.values[0]+row.bias
+let callback=parameter_frame_probe
+main=()=>callback(Row[[20] 22])
+''')
+    binary = tmp_path / 'parameter-frame'
+    built = subprocess.run([compiler, 'build', source, '--ir', *(['-g'] if debug else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_parameter_frame_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'parameter-view probe was not emitted'
+    slots = re.findall(r'^  slot\d+:', probe[0], re.M)
+    if debug:
+        assert slots, 'debugger-visible parameter local lost its owned storage'
+    else:
+        assert not slots, f'read-only parameter still reserves dead frame storage:\n{probe[0]}'
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+def test_core_repl_parameter_views(compiler, tmp_path):
+    # Subsequent submissions lower checked functions again. A borrowed local
+    # must bind to this lowering's parameter storage, while writes stay private.
+    text = '''Row:type=[values:array<int64> bias:int64]
+score=(row:Row):>int64=>row.values[0]+row.bias
+let row=Row[[20] 22]
+score(row)
+let saved=row
+row.values[0]=99
+score(row)
+score(saved)
+copy=(row:Row):>Row=>{row.values[0]+=1 return row}
+let next=copy(saved)
+score(next)
+score(saved)
+:quit
+'''
+    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
+                         capture_output=True, text=True, timeout=20)
+    assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['42', '121', '42', '43', '42']
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_fast_inline_failure_path(compiler, tmp_path, target):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise the web failure path')
+    source = tmp_path / 'checked-leaf.jo'
+    source.write_text('''read = (values: int[], at: int) -> int: values[at]
+@noinline
+checked_leaf_probe = (values: int[], at: int, live: int) -> int: read(values, at) + live
+main = () -> int:
+    at = if args().len() > 1: 1 else: 0
+    checked_leaf_probe([20], at, 22)
+''')
+    binary = tmp_path / 'checked-leaf'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_checked_leaf_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'bounds-checking caller was not emitted'
+    assert ' = call ' not in probe[0], 'small checked helper was not inlined'
+    assert re.search(r'\bcall .* c=1 ', probe[0]), 'inlining removed the failure path'
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'checked-leaf.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    good = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert good.returncode == 42, good.stdout + good.stderr
+    bad = subprocess.run([*command, 'outside'], capture_output=True, text=True, timeout=10)
+    assert bad.returncode not in (0, 42), bad.stdout + bad.stderr
+    assert 'out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr

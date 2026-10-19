@@ -4032,7 +4032,8 @@ gen_vardecl = (s: int):
         return
     l = int(nodes[s].sym)
     t = int(locals[l].type)
-    if param_view_decl(s, l) or view_decl(s, l): return
+    if nodes[s].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0: return
+    if view_decl(s, l): return
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
     if nodes[s].b != 0:
@@ -5776,6 +5777,18 @@ lower_inst = (lf: int, f: int):
         loop l in fns[f].params:
             t = prune(int(locals[l].type))
             if types[t].kind == .int_ and tsize(t) < 8 and int(locals[l].flags) & LF_MUTPARAM == 0: e_mov(int(locals[l].vreg), norm(int(locals[l].vreg), t))
+    # Bind read-only Dewy value parameters before allocating local storage.
+    # These declarations form a contiguous synthetic prefix. Rebind on every
+    # lowering so watch/repl and debug builds cannot reuse old virtual registers.
+    body = int(fns[f].body)
+    loop i in [0..nkids(body)):
+        s = kid(body, i)
+        if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+        if nkids(s) > 0 or has_flag(s, NF_GLOBAL): continue
+        l = int(nodes[s].sym)
+        if l < 0: continue
+        locals[l].flags &= i32(~LF_PARAM)
+        param_view_decl(s, l)
     # locals
     loop l in fns[f].locals:
         fl = int(locals[l].flags)
@@ -5801,7 +5814,6 @@ lower_inst = (lf: int, f: int):
         locals[l].vreg = i32(vreg(vt_of(t)))
         if is_managed(t): e_mov(int(locals[l].vreg), e_iconst(0))
     scope_push()
-    body = int(fns[f].body)
     if fns[f].kind == FK_INIT:
         gen_block_stmts(body)
     else:
