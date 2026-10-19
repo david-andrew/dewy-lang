@@ -1,0 +1,449 @@
+{
+  "status": "deferred",
+  "implementation": "Compact fixed-use/destination descriptors plus dynamic shapes for calls, returns and indexed memory operations; compiler-only prototype, reverted.",
+  "patch": "diff --git a/core/compiler/ir.jo b/core/compiler/ir.jo\nindex 53de4841..a6a0dd69 100644\n--- a/core/compiler/ir.jo\n+++ b/core/compiler/ir.jo\n@@ -328,10 +328,29 @@ ir_has_use = (v: int) -> bool:\n         if ir_use(i) == v: return true\n     false\n \n+# Fixed operand shapes encode use count in bits 0..1 and a destination in\n+# bit 2. The remaining shapes need the instruction's indexing or call fields.\n+# Constant enum matches lower to a compact read-only lookup table.\n+ir_operand_shape = (op: Op) -> int:\n+    match op:\n+        nop, block, loop, end, else_, br, trap, zeroslots, vzu: 0\n+        iconst, fconst, slot, gaddr, daddr, faddr: 4\n+        intr, call, syscall: 8\n+        calli, callc: 9\n+        if_, brif, brtable, assume, zero: 1\n+        ret: 10\n+        store: 11\n+        vst: 12\n+        copy: 2\n+        memcpy, memset, vop: 3\n+        select, memeq: 7\n+        load: 13\n+        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat: 5\n+        _: 6\n+\n # Sets the operand view; returns the defined vreg or -1. zeroslots definitions\n # are carried in ir.args and handled separately by the consumers.\n ir_operands = (ins: Ins) -> int:\n-    ir_use_count = 0\n     ir_use_span = -1\n     a = int(ins.a)\n     bb = int(ins.b)\n@@ -339,58 +358,29 @@ ir_operands = (ins: Ins) -> int:\n     ir_use_values.0 = a\n     ir_use_values.1 = bb\n     ir_use_values.2 = int(ins.c)\n-    match ins.op:\n-        nop, block, loop, end, else_, br, trap, zeroslots: return -1\n-        iconst, fconst, slot, gaddr, daddr, faddr: return d\n-        intr, call, syscall:\n-            ir_use_span = a\n-            ir_use_span_count = bb\n-            ir_use_count = bb\n-            return d\n-        calli, callc:\n+    shape = ir_operand_shape(ins.op)\n+    if shape < 8:\n+        ir_use_count = shape & 3\n+        return if shape & 4 != 0: d else: -1\n+    match shape:\n+        8, 9:\n             ir_use_span = a\n             ir_use_span_count = bb\n-            ir_use_count = bb + 1\n+            ir_use_count = bb + (if shape == 9: 1 else: 0)\n             return d\n-        if_, brif, brtable, assume:\n-            ir_use_count = 1\n+        10:\n+            ir_use_count = if a >= 0: 1 else: 0\n             return -1\n-        ret:\n-            if a >= 0: ir_use_count = 1\n-            return -1\n-        store:\n+        11:\n             ir_use_count = 2\n             if int(ins.c) & M_INDEX != 0:\n                 ir_use_values.2 = d\n                 ir_use_count = 3\n             return -1\n-        vst:\n+        12:\n             ir_use_values.2 = d\n             ir_use_count = 3\n             return -1\n-        vsplat:\n-            ir_use_count = 1\n-            return d\n-        vzu: return -1\n-        copy:\n-            ir_use_count = 2\n-            return -1\n-        zero:\n-            ir_use_count = 1\n-            return -1\n-        memcpy, memset, vop:\n-            ir_use_count = 3\n-            return -1\n-        select, memeq:\n-            ir_use_count = 3\n-            return d\n-        load:\n-            ir_use_count = 1\n-            if int(ins.c) & M_INDEX != 0: ir_use_count = 2\n-            return d\n-        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:\n-            ir_use_count = 1\n-            return d\n         _:\n-            ir_use_count = 2\n+            ir_use_count = if int(ins.c) & M_INDEX != 0: 2 else: 1\n             return d\n",
+  "patch_sha256": "1e1be4750b59e5a366d2601f94c62782147a486dfb2b726a49a8bd381034213a",
+  "compile_pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "de61eb75ea436de852fe9ed34cbae9d6130b1bb533146d33579f00f8ddc7ec01",
+        "compiler_sources_sha256": "ab23faba62c3d216dd133716601f7a6f652b8cbdc10b5734d8b86a6c48276f86",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "b279467ece6668407ce33fdc2298d7d1472c60d479814a0497a3b8484757522a",
+        "compiler_sources_sha256": "3e1fdd090c6a0989a854eebc196d81f7c812816f38b53c9c8eff8f5d1b4eadb0",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "da8812d7775f502b7af0ba51dbea34e7332ff422",
+      "working_tree": " M core/compiler/ir.jo\n",
+      "diff_sha256": "1e1be4750b59e5a366d2601f94c62782147a486dfb2b726a49a8bd381034213a",
+      "load_average_start": [
+        5.1455078125,
+        5.16259765625,
+        5.75244140625
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792400479984894857/bin/dewy-core",
+          "sha256": "de61eb75ea436de852fe9ed34cbae9d6130b1bb533146d33579f00f8ddc7ec01"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792401203808078036/bin/dewy-core",
+          "sha256": "b279467ece6668407ce33fdc2298d7d1472c60d479814a0497a3b8484757522a"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/operand-shapes-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.6474525090015959,
+              0.6375634420110146,
+              0.6398277820117073,
+              0.6389830859989161,
+              0.6365644549950957,
+              0.6358583310066024,
+              0.6349976430064999
+            ],
+            "candidate": [
+              0.6467540950106923,
+              0.636695655004587,
+              0.6407472800055984,
+              0.6390371259913081,
+              0.640073319998919,
+              0.6406141269981163,
+              0.6410200100071961
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.6375634420110146,
+            "candidate": 0.6406141269981163
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.6407329999999997,
+              0.631743,
+              0.6339169999999994,
+              0.632933,
+              0.6306690000000009,
+              0.6298979999999993,
+              0.6286250000000002
+            ],
+            "candidate": [
+              0.638826,
+              0.6307689999999998,
+              0.6347820000000002,
+              0.6329460000000005,
+              0.6341499999999992,
+              0.6347819999999993,
+              0.6350050000000007
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.631743,
+            "candidate": 0.6347819999999993
+          },
+          "output_bytes": {
+            "candidate": 1987376,
+            "previous": 1987376
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/operand-shapes-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.8337731970095774,
+              0.8373736530047609,
+              0.8327465869951993,
+              0.8359082679962739,
+              0.8340260460099671,
+              0.830922446999466,
+              0.8364477129944135
+            ],
+            "candidate": [
+              0.8307795139990048,
+              0.8345497739937855,
+              0.8363703409995651,
+              0.8361441640008707,
+              0.8347903980029514,
+              0.8351253139990149,
+              0.8302382289984962
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.8340260460099671,
+            "candidate": 0.8347903980029514
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.8254060000000011,
+              0.8291399999999995,
+              0.8243240000000001,
+              0.8276460000000022,
+              0.8259289999999982,
+              0.8228169999999982,
+              0.8285429999999971
+            ],
+            "candidate": [
+              0.8226430000000003,
+              0.8263700000000006,
+              0.8278579999999994,
+              0.8277120000000034,
+              0.8247359999999997,
+              0.8272570000000015,
+              0.8225520000000012
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.8259289999999982,
+            "candidate": 0.8263700000000006
+          },
+          "output_bytes": {
+            "candidate": 2227072,
+            "previous": 2227072
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.6858398110052804,
+              1.6869332979986211,
+              1.6773569460056024,
+              1.6841653019946534,
+              1.6853449210029794,
+              1.6847883470036322,
+              1.694532257009996
+            ],
+            "candidate": [
+              1.6932180790026905,
+              1.6882786500063958,
+              1.6859724019886926,
+              1.6936431579961209,
+              1.6879717349947896,
+              1.6936004220042378,
+              1.6928150470048422
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.6853449210029794,
+            "candidate": 1.6928150470048422
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.6707009999999998,
+              1.6711220000000009,
+              1.6622069999999967,
+              1.669392000000009,
+              1.669945999999996,
+              1.669232999999999,
+              1.6772010000000053
+            ],
+            "candidate": [
+              1.6782460000000012,
+              1.672818000000001,
+              1.670565999999998,
+              1.6784089999999976,
+              1.6723580000000053,
+              1.6772569999999938,
+              1.6769100000000052
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.669945999999996,
+            "candidate": 1.6769100000000052
+          },
+          "output_bytes": {
+            "candidate": 7146624,
+            "previous": 7146624
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        5.0615234375,
+        5.13525390625,
+        5.71044921875
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 1.0013645319497675,
+        "bootstrap_95_percent_interval": [
+          0.9984582338071015,
+          1.0077536363030204
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 0.9985555659142631,
+        "bootstrap_95_percent_interval": [
+          0.9966525564388911,
+          1.00428714922773
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 1.0045160684048202,
+        "bootstrap_95_percent_interval": [
+          1.001014887004061,
+          1.0050288562134568
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      }
+    },
+    "peak_rss_kib": {
+      "throughput-default": {
+        "previous": [
+          108220,
+          108220,
+          108220
+        ],
+        "candidate": [
+          108352,
+          108352,
+          108352
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          242460,
+          242460,
+          242456
+        ],
+        "candidate": [
+          242332,
+          242332,
+          242336
+        ]
+      }
+    }
+  },
+  "instruction_counts": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "de61eb75ea436de852fe9ed34cbae9d6130b1bb533146d33579f00f8ddc7ec01",
+        "compiler_sources_sha256": "ab23faba62c3d216dd133716601f7a6f652b8cbdc10b5734d8b86a6c48276f86",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "b279467ece6668407ce33fdc2298d7d1472c60d479814a0497a3b8484757522a",
+        "compiler_sources_sha256": "3e1fdd090c6a0989a854eebc196d81f7c812816f38b53c9c8eff8f5d1b4eadb0",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "instructions": {
+      "throughput-default": {
+        "previous": [
+          {
+            "instructions": 2567665968,
+            "enabled_ns": 618555601,
+            "running_ns": 618555601
+          },
+          {
+            "instructions": 2567665977,
+            "enabled_ns": 623585440,
+            "running_ns": 623585440
+          },
+          {
+            "instructions": 2567666006,
+            "enabled_ns": 623393078,
+            "running_ns": 623393078
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 2569260341,
+            "enabled_ns": 622844342,
+            "running_ns": 622844342
+          },
+          {
+            "instructions": 2569260336,
+            "enabled_ns": 623140152,
+            "running_ns": 623140152
+          },
+          {
+            "instructions": 2569260346,
+            "enabled_ns": 628034635,
+            "running_ns": 628034635
+          }
+        ]
+      },
+      "throughput-release": {
+        "previous": [
+          {
+            "instructions": 3603659910,
+            "enabled_ns": 819210602,
+            "running_ns": 819210602
+          },
+          {
+            "instructions": 3603659909,
+            "enabled_ns": 817381370,
+            "running_ns": 817381370
+          },
+          {
+            "instructions": 3603659920,
+            "enabled_ns": 819565583,
+            "running_ns": 819565583
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 3608039009,
+            "enabled_ns": 818791831,
+            "running_ns": 818791831
+          },
+          {
+            "instructions": 3608039000,
+            "enabled_ns": 817270412,
+            "running_ns": 817270412
+          },
+          {
+            "instructions": 3608039006,
+            "enabled_ns": 822259517,
+            "running_ns": 822259517
+          }
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          {
+            "instructions": 7255205210,
+            "enabled_ns": 1665824113,
+            "running_ns": 1665824113
+          },
+          {
+            "instructions": 7255205211,
+            "enabled_ns": 1674448060,
+            "running_ns": 1674448060
+          },
+          {
+            "instructions": 7255205206,
+            "enabled_ns": 1673397908,
+            "running_ns": 1673397908
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 7255316500,
+            "enabled_ns": 1685630450,
+            "running_ns": 1685630450
+          },
+          {
+            "instructions": 7255316508,
+            "enabled_ns": 1684006496,
+            "running_ns": 1684006496
+          },
+          {
+            "instructions": 7255316524,
+            "enabled_ns": 1681280166,
+            "running_ns": 1681280166
+          }
+        ]
+      }
+    }
+  },
+  "validation": {
+    "quick_suite": {
+      "passed": 360,
+      "seconds": 7.03,
+      "workers": 2
+    },
+    "independent_operand_probe": {
+      "operations": 97,
+      "cases": 388,
+      "exit_code": 42,
+      "checked_before_and_after": true,
+      "generator": "from pathlib import Path\nimport re\nroot=Path.cwd();b=root/'__dewycache__/task-tmp/sloppy-comparison';s=(root/'core/compiler/ir.jo').read_text()\nenum=s[s.index('enum Op:')+len('enum Op:'):s.index('const VI')]\nnames=re.findall(r'\\b\\w+\\b','\\n'.join(line.split('#')[0] for line in enum.splitlines()))\nno_use=set('nop block loop end else_ br trap zeroslots vzu iconst fconst slot gaddr daddr faddr'.split())\none_use=set('mov neg not_ fneg fsqrt fabs ffloor fceil ftrunc sext8 sext16 sext32 zext8 zext16 zext32 i2f u2f f2i f2f bits2f f2bits vsplat if_ brif brtable assume zero'.split())\ntwo_use=set('add sub mul divs divu rems remu and_ or_ xor shl shrs shru eq ne lts les gts ges ltu leu gtu geu fadd fsub fmul fdiv fmin fmax feq fne flt fle fgt fge copy vld vbin mulhs mulhu streq'.split())\nthree_use=set('memcpy memset vop select memeq'.split())\nspecial=set('intr call syscall calli callc ret store vst load'.split())\nno_def=set('nop block loop end else_ br trap zeroslots vzu if_ brif brtable assume ret store vst copy zero memcpy memset vop'.split())\nassert set(names)==no_use|one_use|two_use|three_use|special,(set(names)-(no_use|one_use|two_use|three_use|special))\nhead=s[s.index('enum Op:'):s.index('# current function being built')]+'\\nir: IrFn\\n'+s[s.index('ir_use_count ='):]\nbody=['main = () -> int:', '    ir.args = [101, 102, 103, 104]']\nfor name in names:\n for mode in [0,128]:\n  for no_value in [False,True]:\n   a=11;b0=12;c=13+mode;d=17\n   if name in ('intr','call','syscall','calli','callc'):a=1;b0=2\n   if name=='ret' and no_value:a=-1\n   used=[]\n   if name in one_use:used=[a]\n   elif name in two_use:used=[a,b0]\n   elif name in three_use:used=[a,b0,c]\n   elif name in ('intr','call','syscall'):used=[102,103]\n   elif name in ('calli','callc'):used=[102,103,c]\n   elif name=='ret':used=[] if a<0 else [a]\n   elif name=='store':used=[a,b0]+([d] if mode else [])\n   elif name=='vst':used=[a,b0,d]\n   elif name=='load':used=[a]+([b0] if mode else [])\n   out=-1 if name in no_def else d\n   body += [f'    assert(ir_operands(Ins(.{name}, 0, {d}, {a}, {b0}, {c}, 0)) == {out})',f'    assert(ir_use_count == {len(used)})']\n   body += [f'    assert(ir_use({i}) == {v})' for i,v in enumerate(used)]\nbody+=['    42']\n(b/'operand-probe.jo').write_text(head+'\\n'+'\\n'.join(body)+'\\n')\nprint(len(names),'ops,',len(names)*4,'cases')\n"
+    },
+    "independent_C_bootstrap": false,
+    "full_suite": false,
+    "complete_stage_gate": false
+  },
+  "decision": [
+    "Default/release compile ratios 1.0014/0.9986 are essentially flat; fixed compiler self-build is 1.0045.",
+    "Instructions increase about 0.06%/0.12% for large default/release builds; self-build is effectively unchanged. No useful gain to justify the descriptor representation.",
+    "Preserve the exact patch and pilot; do not promote the compiler or ratchet either performance reference."
+  ]
+}

@@ -1290,6 +1290,17 @@ cover frame storage, debugger locals, repeated REPL submissions, private copied
 state, and actual native/web failure paths after inlining.
 [Validation and all measurements](audits/2026-10-19/checked-parameters.json).
 
+## Deferred operand-descriptor experiment
+
+A compact table replaced repeated IR operand dispatch in an isolated compiler
+prototype. Its transient operand view matched independent expectations for all
+97 operations across 388 cases, and 360 quick checks passed. However, seven
+matched pairs put large default/release builds at **1.001× / 0.999×** the accepted
+compiler and its self-build at **1.005×**. Diagnostic instruction counts were
+slightly higher. The prototype is **reverted**, with its patch and measurements
+retained; it did not proceed to independent C bootstrap or a full stage gate.
+[Experiment evidence](audits/2026-10-19/operand-shapes-experiment.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
