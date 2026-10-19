@@ -5,6 +5,23 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Current optimized-host validation (2026-10-19)
+
+The maintained O3 PGO/LTO builder now has a freshly trained host for `259e2c5c`,
+including recursive values and sibling narrowing. All **6,282 tests pass in
+159.81 s**. All twelve existing runtime kernels in both modes match the native
+compiler's generated artifacts apart from equal-width bundle paths, with fresh
+checksum checks. The host changes compilation speed, not program behavior.
+
+Against the earlier frame-omitting optimized host, compilation instruction counts
+increase **0.48% default / 0.36% release / 0.33% compiler rebuild** across the
+intervening language features. All seven paired timing comparisons are
+**inconclusive** under variable load. The current default 44,005-line build takes
+**318.23 ms wall / 314.31 ms CPU** (about **138k / 140k lines/s**); the older
+control also slowed to 314.37 / 310.37 ms. This is not a target-speed claim or a
+new accepted baseline. The fixed reference remains unchanged.
+[Build, validation and measured evidence](audits/2026-10-19/current-optimized-host.json).
+
 ## Independent narrowing in sibling branches (2026-10-19)
 
 Assigning an optional or union local in one `if` or `match` arm no longer
