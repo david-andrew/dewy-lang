@@ -11930,3 +11930,55 @@ def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
+def test_core_immediate_store_widths(compiler, tmp_path, mode):
+    source = tmp_path / 'immediate-stores.jo'
+    source.write_text('''g_before: int = 123456789
+g8: u8 = 17
+g16: u16 = 18
+g32: u32 = 19
+g64: int = 20
+g_bool: bool = false
+g_after: int = 987654321
+@noinline
+write_globals = ():
+    g8 = u8(255)
+    g16 = u16(48879)
+    g32 = u32(305419896)
+    g64 = -2147483648
+    g_bool = true
+@noinline
+write_bytes = (p: *u8, at: int):
+    p[at] = u8(255)
+    ((p + at + 1) as *u16)[0] = u16(48879)
+    ((p + at + 3) as *u32)[0] = u32(305419896)
+    ((p + at + 7) as *int)[0] = -2147483648
+    ((p + at + 15) as *int)[0] = 2147483647
+    ((p + at + 23) as *u64)[0] = u64(4294967295)
+main = ():
+    write_globals()
+    print("{g_before} {g8} {g16} {g32} {g64} {g_bool} {g_after}")
+    loop at in [0, 1, 7]:
+        bytes = fill(u8(165), 40)
+        write_bytes(bytes.data(), at)
+        loop x in bytes: print(int(x))
+''')
+    binary = tmp_path / 'immediate-stores'
+    flags = {'default': [], 'release': ['--release'], 'debug': ['-g']}[mode]
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    expected = ['123456789 255 48879 305419896 -2147483648 true 987654321']
+    payload = (bytes([255]) + (48879).to_bytes(2, 'little') +
+               (305419896).to_bytes(4, 'little') +
+               (-2147483648).to_bytes(8, 'little', signed=True) +
+               (2147483647).to_bytes(8, 'little') +
+               (4294967295).to_bytes(8, 'little'))
+    for at in (0, 1, 7):
+        expected.extend(map(str, bytes([165])*at + payload + bytes([165])*(40-at-len(payload))))
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected

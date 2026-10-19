@@ -29,6 +29,23 @@ the prototype and accepted compiler. They cover signed/unsigned conversions at
 measurements are retained in
 [`narrowing-experiment.json`](audits/2026-10-19/narrowing-experiment.json).
 
+## Immediate integer stores: deferred (2026-10-19)
+
+Direct x86 immediate stores were extended to byte/word and RIP-relative global
+addresses, including relocation adjustment for trailing immediate bytes. The
+independent C bootstrap passed **406 quick checks**, and native default/release/
+debug checks passed on both candidate and accepted compiler. The tests verify
+unaligned byte/word/dword/qword writes, signed immediates, large-constant fallback,
+global neighbors and untouched sentinel bytes against an independent byte oracle.
+Seven paired compilation samples were flat and inconclusive: candidate/previous
+CPU ratios **1.00530 default**, **0.99565 release**, **1.00425 self-build**. The
+emitter change is reverted; no full suite or stage gate was run. The patch and
+samples are in
+[`immediate-stores-experiment.json`](audits/2026-10-19/immediate-stores-experiment.json).
+A static branch-table scan also ruled out a narrowly scoped few-destination
+bitset emitter as the next experiment: the compiler's hot dispatch tables have
+more destinations than that approach would handle.
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until
