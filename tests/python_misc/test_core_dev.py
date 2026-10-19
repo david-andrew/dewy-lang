@@ -455,7 +455,8 @@ def test_core_benchmark_reuses_only_equivalent_artifacts():
 
 
 @pytest.mark.parametrize('bad_duplicate', [False, True])
-def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, bad_duplicate):
+@pytest.mark.parametrize('unchanged', [False, True])
+def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, bad_duplicate, unchanged):
     from collections import Counter
     from copy import deepcopy
 
@@ -496,25 +497,29 @@ def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, ba
     def checkpoint(report):
         completed.append(deepcopy(report))
 
+    proof = (lambda *_args: {'evidence': 'test artifact proof'}) if unchanged else None
     if bad_duplicate:
         with pytest.raises(RuntimeError, match='checksum|expected'):
             apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True,
-                         on_progress=checkpoint)
+                         on_progress=checkpoint, unchanged_proof=proof)
         assert executed['other', 99] == 1
         assert completed == []
         return
     report = apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True,
-                          on_progress=checkpoint)
+                          on_progress=checkpoint, unchanged_proof=proof)
     assert len(completed) == 1
     assert completed[0]['workloads'] == report['workloads']
     workload = report['workloads']['arrays']
-    assert workload['timing_reused_from'] == {'other': 'first'}
+    assert workload['timing_reused_from'] == ({} if unchanged else {'other': 'first'})
     assert workload['samples']['other'] == workload['samples']['first']
     for label in ('first', 'other', 'c'):
         for count in (0, 1, 17, 1000):
             assert executed[label, count] == 1
-    assert executed['first', 99] == executed['c', 99] == 8
+    assert executed['first', 99] == executed['c', 99] == (1 if unchanged else 8)
     assert executed['other', 99] == 1
+    if unchanged:
+        assert all(rows == [] for rows in workload['samples'].values())
+        assert all(value is None for value in workload['median_kernel_ms'].values())
 
 
 def test_core_performance_checkpoint_preserves_previous_report_on_failure(tmp_path):
@@ -584,3 +589,121 @@ def test_core_performance_checkpoint_never_accepts_an_incomplete_gate(tmp_path, 
     assert 'finished' in partial['compilation']['workloads']
     assert 'finished' in partial['runtime']['workloads']
     assert gate.benchmark_compile.WORKLOADS == workloads
+
+
+@pytest.fixture
+def runtime_certificate(tmp_path):
+    from copy import deepcopy
+
+    from tools.sloppy_core.benchmark_apps import artifact_identity
+    from tools.sloppy_core.runtime_certificate import RuntimeCertificate
+
+    previous = tmp_path / 'old/bin/core'
+    candidate = tmp_path / 'new/bin/core'
+    before = tmp_path / 'before'
+    after = tmp_path / 'afterx'
+    before.mkdir()
+    after.mkdir()
+
+    def artifact(directory, compiler, mode, label):
+        path = directory / label
+        path.write_bytes(b'code:' + mode.encode() + b'\0' + str(compiler.parent.parent).encode()
+                         + b'/lib/rt.jo\0' + str(directory).encode() + b'/kernel.dewy\0tail')
+        return artifact_identity(path, compiler, directory)
+
+    metadata = {'target': 'native', 'mode': 'both', 'core_flags': None, 'kernel_clock': 'thread-cpu',
+                'harness_sha256': 'harness', 'c_harness_sha256': 'c-harness',
+                'measured_harness_sha256': {'dewy': 'clock', 'c': 'c-clock'}}
+    workload = {'count': 1000, 'source_sha256': 'source', 'adapted_source_sha256': 'adapted',
+                'c_source_sha256': 'c-source'}
+    accepted_artifacts = {f'candidate-{mode}': artifact(before, previous, mode, mode)
+                          for mode in ('default', 'release')}
+    current_artifacts = {f'{label}-{mode}': artifact(after, compiler, mode, f'{label}-{mode}')
+                         for label, compiler in [('previous', previous), ('candidate', candidate)]
+                         for mode in ('default', 'release')}
+    old = {**metadata, 'workloads': {'kernel': {**workload, 'artifact_identity': accepted_artifacts}},
+           'variants': {f'candidate-{mode}': {'flags': [] if mode == 'default' else ['--release']}
+                        for mode in ('default', 'release')}}
+    current = {**deepcopy(metadata),
+               'variants': {f'{label}-{mode}': {'flags': [] if mode == 'default' else ['--release']}
+                            for label in ('previous', 'candidate') for mode in ('default', 'release')}}
+    identities = {'reference': {'binary_sha256': 'fixed'}, 'previous': {'binary_sha256': 'old'},
+                  'candidate': {'binary_sha256': 'new'}}
+    stage = {'toolchains': {'reference': identities['reference'], 'candidate': identities['previous']},
+             'runtime': old}
+    assessment = {'no_regression': True,
+                  'comparisons': {f'runtime/kernel/{mode}/reference': {'status': 'pass'}
+                                  for mode in ('default', 'release')}}
+    document = {'stage_measurement': stage, 'final_assessment': assessment}
+    path = tmp_path / 'accepted.json'
+    path.write_text(json.dumps(document))
+    return RuntimeCertificate(path, identities), current, {**workload, 'artifact_identity': current_artifacts}, document, path, identities
+
+
+def test_core_runtime_certificate_proves_code_without_inventing_timings(runtime_certificate):
+    from tools.sloppy_core.performance_gate import assess
+
+    certificate, current, workload, *_ = runtime_certificate
+    proof = certificate.prove('kernel', current, workload)
+    assert proof['previous_report_sha256'] == certificate.report_sha256
+    assert set(proof['accepted_artifact_canonical_sha256']) == {'default', 'release'}
+    compilation = {'workloads': {'throughput-default': {'cpu_seconds': {
+        label: [0.1] * 9 for label in ('reference', 'previous', 'candidate')}}}}
+    result = assess(compilation, {'workloads': {'kernel': {'unchanged_runtime_proof': proof}}},
+                    ['reference', 'previous'], 44005)
+    assert result['no_regression']
+    assert result['comparisons']['runtime/kernel/default/previous']['paired_median_ratio'] is None
+    assert result['targets']['release_kernel_ratios_to_c']['kernel'] is None
+    assert not result['targets']['all_runtime_targets_measured']
+    assert not result['targets']['met_on_these_workloads']
+
+
+@pytest.mark.parametrize('change', ['source', 'adapted', 'c-source', 'count', 'harness', 'clock',
+                                   'target', 'mode', 'flags', 'changed-code', 'changed-previous',
+                                   'path-width', 'missing-canonical', 'missing-acceptance'])
+def test_core_runtime_certificate_requires_matching_inputs_and_binaries(runtime_certificate, change):
+    certificate, current, workload, *_ = runtime_certificate
+    if change in ('source', 'adapted', 'c-source'):
+        key = {'source': 'source_sha256', 'adapted': 'adapted_source_sha256', 'c-source': 'c_source_sha256'}[change]
+        workload[key] = 'changed'
+    elif change == 'count':
+        workload['count'] += 1
+    elif change == 'harness':
+        current['harness_sha256'] = 'changed'
+    elif change == 'clock':
+        current['measured_harness_sha256']['dewy'] = 'changed'
+    elif change == 'target':
+        current['target'] = 'wasm'
+    elif change == 'mode':
+        current['mode'] = 'release'
+    elif change == 'flags':
+        current['variants']['candidate-release']['flags'] = ['--release', '-g']
+    elif change == 'changed-code':
+        workload['artifact_identity']['candidate-default'].update(binary_sha256='changed', masked_sha256='changed')
+    elif change == 'changed-previous':
+        workload['artifact_identity']['previous-default']['canonical_sha256'] = 'changed'
+    elif change == 'path-width':
+        workload['artifact_identity']['previous-default']['input_directory_bytes'] += 1
+    elif change == 'missing-canonical':
+        del workload['artifact_identity']['previous-default']['canonical_sha256']
+    elif change == 'missing-acceptance':
+        del certificate.comparisons['runtime/kernel/default/reference']
+    assert certificate.prove('kernel', current, workload) is None
+
+
+@pytest.mark.parametrize('change', ['not-accepted', 'failed-comparison', 'previous-toolchain', 'fixed-reference'])
+def test_core_runtime_certificate_rejects_invalid_previous_stage(runtime_certificate, change):
+    from tools.sloppy_core.runtime_certificate import RuntimeCertificate
+
+    _, _, _, document, path, identities = runtime_certificate
+    if change == 'not-accepted':
+        document['final_assessment']['no_regression'] = False
+    elif change == 'failed-comparison':
+        document['final_assessment']['comparisons']['runtime/kernel/default/reference']['status'] = 'inconclusive'
+    elif change == 'previous-toolchain':
+        document['stage_measurement']['toolchains']['candidate'] = {'binary_sha256': 'wrong'}
+    else:
+        document['stage_measurement']['toolchains']['reference'] = {'binary_sha256': 'wrong'}
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError):
+        RuntimeCertificate(path, identities)

@@ -81,6 +81,12 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                 workload['cpu_seconds'][reference], workload['cpu_seconds']['candidate'], limit)
     for name, workload in runtime['workloads'].items():
         for mode in ('default', 'release'):
+            proof = workload.get('unchanged_runtime_proof')
+            if proof:
+                for reference in references:
+                    comparisons[f'runtime/{name}/{mode}/{reference}'] = {
+                        **proof, 'status': 'pass', 'paired_median_ratio': None, 'limit': limit}
+                continue
             candidate = [row['kernel_ns'] for row in workload['samples'][f'candidate-{mode}']]
             for reference in references:
                 before = [row['kernel_ns'] for row in workload['samples'][f'{reference}-{mode}']]
@@ -99,16 +105,20 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                                                   'paths; all code, layout and other data are byte-identical')
                 comparisons[f'runtime/{name}/{mode}/{reference}'] = comparison
     throughput = lines / statistics.median(compilation['workloads']['throughput-default']['cpu_seconds']['candidate'])
-    c_ratios = {name: statistics.median(row['kernel_ns'] for row in workload['samples']['candidate-release']) /
-                statistics.median(row['kernel_ns'] for row in workload['samples']['c'])
+    c_ratios = {name: (None if workload.get('unchanged_runtime_proof') else
+                      statistics.median(row['kernel_ns'] for row in workload['samples']['candidate-release']) /
+                      statistics.median(row['kernel_ns'] for row in workload['samples']['c']))
                 for name, workload in runtime['workloads'].items()}
+    runtime_targets_measured = all(ratio is not None for ratio in c_ratios.values())
+    c_parity = runtime_targets_measured and all(ratio <= 1 for ratio in c_ratios.values())
     return {'comparisons': comparisons,
             'no_regression': all(row['status'] == 'pass' for row in comparisons.values()),
             'targets': {'fresh_default_root_lines_per_cpu_second': throughput,
                         'compile_goal_lines_per_second': 250000,
                         'release_kernel_ratios_to_c': c_ratios,
-                        'at_or_faster_than_c_on_all_kernels': all(r <= 1 for r in c_ratios.values()),
-                        'met_on_these_workloads': throughput >= 250000 and all(r <= 1 for r in c_ratios.values())},
+                        'all_runtime_targets_measured': runtime_targets_measured,
+                        'at_or_faster_than_c_on_all_kernels': c_parity,
+                        'met_on_these_workloads': throughput >= 250000 and c_parity},
             'limits': ['A 2% timing resolution is not a per-stage slowdown budget; compare both references.',
                        'Bootstrap intervals are approximate; inconclusive results require an isolated recheck.',
                        'Passing measured budgets does not establish language completeness or universal C parity.']}
@@ -129,7 +139,8 @@ def save_report(path: Path, report: dict) -> None:
 
 
 def measure(reference: Path, previous: Path, candidate: Path, samples: int,
-            on_progress: Callable[[dict], None] | None = None) -> dict:
+            on_progress: Callable[[dict], None] | None = None,
+            previous_report: Path | None = None) -> dict:
     # Keep the generic benchmark analysis importable on non-Linux test hosts.
     from tools.sloppy_core.benchmark_sloppy import generate_dewy
 
@@ -148,6 +159,12 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int,
         identities['previous'] = prior_identity
     references = [label for label in compilers if label != 'candidate']
     report = {'reference_stage': pinned, 'toolchains': identities, 'status': 'incomplete'}
+    certificate = None
+    if previous_report is not None:
+        from tools.sloppy_core.runtime_certificate import RuntimeCertificate
+
+        certificate = RuntimeCertificate(previous_report, identities)
+        report['accepted_previous_report_sha256'] = certificate.report_sha256
 
     def checkpoint(section: str, result: dict) -> None:
         # Only called between completed workloads, outside every timed region.
@@ -196,7 +213,8 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int,
             report['runtime'] = benchmark_apps.measure(compilers, list(benchmark_apps.COUNTS),
                                                        samples, 'cc', clock='thread-cpu', mode='both',
                                                        reuse_identical_artifacts=True,
-                                                       on_progress=lambda result: checkpoint('runtime', result))
+                                                       on_progress=lambda result: checkpoint('runtime', result),
+                                                       unchanged_proof=certificate.prove if certificate else None)
             lines = len(source.read_text().splitlines())
     finally:
         benchmark_compile.WORKLOADS.clear()
@@ -218,16 +236,21 @@ def main() -> int:
     cli.add_argument('--samples', type=int, default=9)
     cli.add_argument('--cpu', type=int, required=True)
     cli.add_argument('--require-targets', action='store_true')
+    cli.add_argument('--previous-report', type=Path,
+                     help='Accepted previous stage: prove unchanged runtime artifacts instead of retiming them')
     cli.add_argument('--output', type=Path, required=True)
     args = cli.parse_args()
     os.sched_setaffinity(0, {args.cpu})
     report = measure(args.reference.resolve(strict=True), args.previous.resolve(strict=True),
                      args.candidate.resolve(strict=True), args.samples,
-                     on_progress=lambda partial: save_report(args.output, partial))
+                     on_progress=lambda partial: save_report(args.output, partial),
+                     previous_report=None if args.require_targets else args.previous_report)
     save_report(args.output, report)
     assessment = report['assessment']
     for name, result in assessment['comparisons'].items():
-        print(f'{name}: {result["status"]}, paired CPU ratio {result["paired_median_ratio"]:.4f}')
+        ratio = result['paired_median_ratio']
+        detail = result['evidence'] if ratio is None else f'paired CPU ratio {ratio:.4f}'
+        print(f'{name}: {result["status"]}, {detail}')
     print(json.dumps(assessment['targets'], indent=2))
     return int(not assessment['no_regression'] or
                (args.require_targets and not assessment['targets']['met_on_these_workloads']))

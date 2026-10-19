@@ -20,16 +20,18 @@ from tools.sloppy_core.benchmark_compile import positive, sample_order
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ROOT / 'dewy/benchmarks/apps'
 COUNTS = {'helpers': 2000000, 'arrays': 10000000, 'records': 1000000,
-          'text': 10000000, 'graph': 1000000, 'string_equal': 10000000, 'match_dispatch': 10000000}
+          'text': 10000000, 'graph': 1000000, 'string_equal': 10000000, 'match_dispatch': 10000000,
+          'managed_params': 10000000}
 CHECKSUMS_1000 = {'helpers': 985290002, 'arrays': 876830114, 'records': 649125068,
-                  'text': 681360428, 'graph': 740553269, 'string_equal': 171284, 'match_dispatch': 29443}
+                  'text': 681360428, 'graph': 740553269, 'string_equal': 171284, 'match_dispatch': 29443,
+                  'managed_params': 250508}
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def artifact_identity(path: Path, compiler: Path) -> dict:
+def artifact_identity(path: Path, compiler: Path, input_directory: Path | None = None) -> dict:
     """Keep the raw hash and isolate embedded toolchain paths without moving bytes.
 
     Native benchmark inputs are identical between variants. Their panic locations
@@ -38,10 +40,18 @@ def artifact_identity(path: Path, compiler: Path) -> dict:
     """
     data = path.read_bytes()
     prefix = str(compiler.resolve().parent.parent).encode()
-    return {'binary_sha256': hashlib.sha256(data).hexdigest(),
-            'bundle_path': prefix.decode(), 'bundle_path_bytes': len(prefix),
-            'occurrences': data.count(prefix),
-            'masked_sha256': hashlib.sha256(data.replace(prefix, b'\0' * len(prefix))).hexdigest()}
+    masked = data.replace(prefix, b'\0' * len(prefix))
+    result = {'binary_sha256': hashlib.sha256(data).hexdigest(),
+              'bundle_path': prefix.decode(), 'bundle_path_bytes': len(prefix),
+              'occurrences': data.count(prefix),
+              'masked_sha256': hashlib.sha256(masked).hexdigest()}
+    if input_directory is not None:
+        source_prefix = str(input_directory.resolve()).encode()
+        result.update(input_directory=source_prefix.decode(), input_directory_bytes=len(source_prefix),
+                      input_directory_occurrences=data.count(source_prefix),
+                      canonical_sha256=hashlib.sha256(
+                          masked.replace(source_prefix, b'\0' * len(source_prefix))).hexdigest())
+    return result
 
 
 def equivalent_artifact(left: dict, right: dict) -> bool:
@@ -50,6 +60,18 @@ def equivalent_artifact(left: dict, right: dict) -> bool:
     return bool(left.get('masked_sha256') and left['masked_sha256'] == right.get('masked_sha256')
                 and left.get('bundle_path_bytes') == right.get('bundle_path_bytes')
                 and left.get('occurrences', 0) > 0 and left['occurrences'] == right.get('occurrences'))
+
+
+def equivalent_canonical_artifact(left: dict, right: dict) -> bool:
+    """Compare separate runs, masking only equal-width bundle/input path prefixes."""
+    return bool(left.get('canonical_sha256') and left['canonical_sha256'] == right.get('canonical_sha256')
+                and isinstance(left.get('bundle_path_bytes'), int) and left['bundle_path_bytes'] > 0
+                and left.get('bundle_path_bytes') == right.get('bundle_path_bytes')
+                and left.get('occurrences', 0) > 0 and left['occurrences'] == right.get('occurrences')
+                and isinstance(left.get('input_directory_bytes'), int) and left['input_directory_bytes'] > 0
+                and left['input_directory_bytes'] == right.get('input_directory_bytes')
+                and left.get('input_directory_occurrences') is not None
+                and left['input_directory_occurrences'] == right.get('input_directory_occurrences'))
 
 
 def artifact_representatives(identities: dict[str, dict]) -> dict[str, str]:
@@ -119,7 +141,8 @@ def execute(binary: Path | list[str | Path], count: int, env: dict) -> tuple[int
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release',
             target: str = 'native', node: str = 'node', reuse_identical_artifacts: bool = False,
-            on_progress: Callable[[dict], None] | None = None) -> dict:
+            on_progress: Callable[[dict], None] | None = None,
+            unchanged_proof: Callable[[str, dict, dict], dict | None] | None = None) -> dict:
     if target == 'wasm' and clock != 'wall':
         raise ValueError('WebAssembly benchmarks require --clock wall; the thread CPU clock uses native syscalls')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
@@ -206,7 +229,7 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                     commands[label] = [node, runner]
                     binaries[label] = artifact
             _, builds['c'] = run([cc, '-O2', c_source, '-o', binaries['c']], env)
-            identities = {label: artifact_identity(binaries[label], compilers[compiler])
+            identities = {label: artifact_identity(binaries[label], compilers[compiler], work)
                           for label, (compiler, _) in variants.items()} if target == 'native' else {}
             reused = artifact_representatives(identities) if reuse_identical_artifacts else {}
             checksums = {}
@@ -217,10 +240,14 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                     raise RuntimeError(f'{name} count={size}: checksum mismatch {checks}')
                 checksums[str(size)] = checks['c']
             size = count if count is not None else COUNTS[name]
+            workload = {'count': size, 'source_sha256': digest(APPS / f'{name}.dewy'),
+                        'adapted_source_sha256': digest(source), 'c_source_sha256': digest(c_source),
+                        'artifact_identity': identities}
+            proof = unchanged_proof(name, result, workload) if unchanged_proof is not None else None
             measured = {label: [] for label in binaries}
             labels = list(binaries)
             checksum = None
-            for sample in range(samples + 1):
+            for sample in range(1 if proof else samples + 1):
                 # Every binary runs at full size once, even when its later timings
                 # can be shared with a byte-equivalent representative.
                 timed = [label for label in labels if sample == 0 or label not in reused]
@@ -236,26 +263,27 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
                 if sample:
                     for label, representative in reused.items():
                         measured[label].append(measured[representative][-1].copy())
-            medians = {label: statistics.median(row['kernel_ns'] for row in rows) / 1e6
+            medians = {label: statistics.median(row['kernel_ns'] for row in rows) / 1e6 if rows else None
                        for label, rows in measured.items()}
             result['workloads'][name] = {
-                'count': size, 'checksum': checksum, 'preflight_checksums': checksums,
-                'source_sha256': digest(APPS / f'{name}.dewy'),
-                'adapted_source_sha256': digest(source), 'c_source_sha256': digest(c_source),
+                **workload, 'checksum': checksum, 'preflight_checksums': checksums,
                 'build_seconds': builds,
                 'binary_sha256': {label: digest(binary) for label, binary in binaries.items()},
                 'binary_bytes': {label: binary.stat().st_size for label, binary in binaries.items()},
-                'artifact_identity': identities,
-                'timing_reused_from': reused,
+                'timing_reused_from': {} if proof else reused,
+                'unchanged_runtime_proof': proof,
                 'runner_sha256': {label: digest(runner) for label, runner in runners.items()},
                 'artifact_kind': {label: 'html' if label in runners else 'native' for label in binaries},
                 'samples': measured, 'median_kernel_ms': medians,
-                'median_wall_seconds': {label: statistics.median(row['wall_seconds'] for row in rows)
+                'median_wall_seconds': {label: statistics.median(row['wall_seconds'] for row in rows) if rows else None
                                         for label, rows in measured.items()},
             }
-            print(name + f' ({clock} kernel): ' + ', '.join(
-                f'{label} {ms:.2f} ms' + (f' (same artifact as {reused[label]})' if label in reused else '')
-                for label, ms in medians.items()), flush=True)
+            if proof:
+                print(name + ': verified unchanged runtime artifacts; all binaries passed full-size checks', flush=True)
+            else:
+                print(name + f' ({clock} kernel): ' + ', '.join(
+                    f'{label} {ms:.2f} ms' + (f' (same artifact as {reused[label]})' if label in reused else '')
+                    for label, ms in medians.items()), flush=True)
             if on_progress is not None:
                 on_progress(result)
     result['load_average_end'] = os.getloadavg()

@@ -64,7 +64,7 @@ baseline. Compiler binaries and bundled libraries are checked against their
 build manifests before and after the run.
 
 The gate measures default/release compilation of a nontrivial generated Dewy
-program, three application builds and a fixed compiler self-build, then seven
+program, three application builds and a fixed compiler self-build, then eight
 checked runtime kernels in both modes against C. It uses nine alternating
 samples by default and paired CPU-time ratios. Approximate bootstrap intervals
 distinguish passing results, regressions and inconclusive noise; the latter two
@@ -89,6 +89,22 @@ and no assessment. Only a fully measured run with verified toolchain identities
 gets `status: complete`; this means the run finished, not that performance passed.
 Check `assessment.no_regression` and the separate target results. Checkpoints are
 replaced atomically and do not automatically resume or reuse earlier timings.
+
+For a compiler-only change, `--previous-report /path/to/accepted-stage.json`
+can avoid repeatedly timing unchanged generated programs. It requires an
+accepted report for the exact previous compiler and fixed reference, matching
+workload/harness hashes, input sizes and build flags, and matching artifacts in
+both build modes. Across runs, only equal-width input-directory and compiler
+bundle path prefixes embedded in source locations may be masked; all other
+bytes and layout must match. Every binary still runs the boundary checks and
+one full-size checksum check. Missing or changed evidence triggers ordinary
+timing measurements for that workload.
+
+This records an `unchanged_runtime_proof` and empty timing samples, never
+substituted historical measurements. Fresh C ratios are `null` for those
+workloads, and the absolute runtime target is not marked as measured.
+`--require-targets` always performs fresh timing, even with `--previous-report`.
+The compiler latency comparisons against both references always run.
 
 The report keeps absolute throughput and each runtime/C ratio separate from
 the regression decision. `--require-targets` additionally requires 250k physical

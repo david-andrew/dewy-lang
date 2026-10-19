@@ -27,6 +27,15 @@ from a fixed linear congruential sequence, so nothing folds away at compile
 time. Setup and output are outside the timed kernel; a program prints
 `<checksum> <kernel nanoseconds>`. The runner also reports the whole run.
 
+The compact-core runner, `python3 -m tools.sloppy_core.benchmark_apps`, also
+includes `string_equal`, `match_dispatch` and `managed_params`. The last exercises
+small read-only helpers taking an array and a record containing an array through
+ordinary value parameters, with ten million calls over varying rows and indices.
+Its C counterpart uses the same indexing and arithmetic. At 1,000 calls the
+expected checksum is 250508. Native/web checks cover both build modes; runtime
+measurements compare default and release with C. These additions describe the
+compact-core implementation, separately from the earlier runner below.
+
 ## Semantics matched and differences recorded
 
 - Arithmetic is 64-bit signed integers in both languages; every division and
