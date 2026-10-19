@@ -12090,7 +12090,8 @@ def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
         assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.parametrize('mode', ['separate-units', 'link-time', 'profile-guided', 'profile-guided-lto'])
+@pytest.mark.parametrize('mode', ['separate-units', 'link-time', 'profile-guided', 'profile-guided-lto',
+                                  'profile-guided-o2', 'profile-guided-o2-lto'])
 def test_core_optimized_host_scalar_interchange(compiler, tmp_path, mode):
     """Exercise the maintained exporter, C ABI, raw memory and recovery together."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
@@ -12149,7 +12150,11 @@ main = () -> int: probe(-args().len())
             pytest.skip('GCC profile-guided host requires gcov-dump')
         from tools.sloppy_core.profiled_host import compile_profiled_c
         built = compile_profiled_c(generated, binary, ['gcc'], [[str(binary)], [str(binary)]],
-                                   dict(os.environ), expected_status=42, lto=mode.endswith('-lto'))
+                                   dict(os.environ), expected_status=42, lto=mode.endswith('-lto'),
+                                   **({'optimization': 2} if '-o2' in mode else {}))
+        level = '-O2' if '-o2' in mode else '-O3'
+        assert level in built['flags']
+        assert built['instrumented_build']['flags'] == built['flags']
         assert built['profile_data_sha256'] and len(built['training']) == 2
         assert [step['accumulated_runs'] for step in built['training']] == [1, 2]
         assert built['training'][0]['expected_status'] == 42

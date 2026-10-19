@@ -36,16 +36,19 @@ def compiler_training(bundle: Path, work: Path) -> tuple[list[list[str]], dict[s
 
 def compile_profiled_c(directory: Path, output: Path, cc: list[str],
                        commands: list[list[str]], env: dict[str, str], *,
-                       expected_status: int = 0, lto: bool = False) -> dict:
+                       expected_status: int = 0, lto: bool = False, optimization: int = 3) -> dict:
     """Collect fresh freestanding profiles, then build without instrumentation.
 
     Custom startup needs explicit counter registration and dumping. Streaming
     counters alone loses run summaries and can crash GCC's LTO profile reader.
     Counter correction handles inconsistent string-operation frequencies;
-    source mismatches and missing profiles remain fatal.
+    source mismatches and missing profiles remain fatal. Training and final
+    compilation use the same optimization level to preserve counter layouts.
     """
     from tools.sloppy_core.build_optimized_host import compile_c, run_command
 
+    if optimization not in (2, 3):
+        raise ValueError('Compiler-host optimization must be 2 or 3')
     if not commands:
         raise ValueError('Profile-guided builds need at least one training command')
     started = time.monotonic()
@@ -71,7 +74,7 @@ def compile_profiled_c(directory: Path, output: Path, cc: list[str],
 
     generate_flags = [f'-fprofile-generate={profiles}', '-fprofile-info-section=gcov_info',
                       '-DDEWY_PROFILE_GENERATE']
-    instrumented = compile_c(directory, output, [*cc, *generate_flags], lto=lto)
+    instrumented = compile_c(directory, output, [*cc, *generate_flags], lto=lto, optimization=optimization)
     generation_logs = work / 'profile-generate-logs'
     generation_logs.mkdir()
     for log in directory.glob('*.log'):
@@ -106,7 +109,7 @@ def compile_profiled_c(directory: Path, output: Path, cc: list[str],
         raise ValueError('Training produced no GCC profile data')
     use_flags = [f'-fprofile-use={profiles}', '-fprofile-correction', '-fprofile-partial-training',
                  '-Werror=coverage-mismatch', '-Werror=missing-profile']
-    result = compile_c(directory, output, [*cc, *use_flags], lto=lto)
+    result = compile_c(directory, output, [*cc, *use_flags], lto=lto, optimization=optimization)
     return dict(result, pgo=True, seconds=time.monotonic() - started, profile_use_build=result,
                   profile_generate_flags=generate_flags, profile_use_flags=use_flags,
                   instrumented_build=instrumented, instrumented_binary_sha256=identity(saved),

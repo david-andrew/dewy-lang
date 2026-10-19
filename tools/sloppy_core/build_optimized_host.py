@@ -22,7 +22,7 @@ from tools.sloppy_core.c_host import translate
 from tools.sloppy_core.performance_gate import toolchain_identity
 
 HERE = Path(__file__).resolve().parent
-FLAGS = ['-O2', '-fno-strict-aliasing', '-ffp-contract=off',
+FLAGS = ['-fno-strict-aliasing', '-ffp-contract=off',
          '-fno-stack-protector', '-fno-pie', '-fno-omit-frame-pointer',
          '-Werror=implicit-function-declaration', '-g1']
 
@@ -56,13 +56,16 @@ def run_command(command, log: Path, timeout: float, *, env=None, expected_status
     return {'command': [str(x) for x in command], 'seconds': time.monotonic() - before}
 
 
-def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False) -> dict:
+def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False,
+              optimization: int = 2) -> dict:
     """Compile sequentially. Each C job has a time and address-space limit."""
+    if optimization not in (2, 3):
+        raise ValueError('Compiler-host optimization must be 2 or 3')
     manifest = json.loads((directory / 'manifest.json').read_text())
     steps = []
     objects = []
     started = time.monotonic()
-    flags = [*FLAGS, *(['-flto=1'] if lto else [])]
+    flags = [f'-O{optimization}', *FLAGS, *(['-flto=1'] if lto else [])]
     version = subprocess.check_output([*cc, '--version'], text=True).splitlines()[0]
 
     def run(command, log, timeout):
@@ -81,9 +84,13 @@ def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False
             'peak_child_rss_kib': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss}
 
 
-def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pgo: bool = False) -> Path:
+def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pgo: bool = False,
+          optimization: int | None = None) -> Path:
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise ValueError('The optimized compiler-host build currently requires Linux x86-64')
+    optimization = (3 if pgo else 2) if optimization is None else optimization
+    if optimization not in (2, 3):
+        raise ValueError('Compiler-host optimization must be 2 or 3')
     toolchain = toolchain.resolve(strict=True)
     seed = toolchain / 'bin/dewy-core'
     seed_identity = toolchain_identity(seed)
@@ -110,14 +117,14 @@ def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pg
     if pgo:
         from tools.sloppy_core.profiled_host import compiler_training, compile_profiled_c
         commands, training_hashes = compiler_training(output, work)
-        result = compile_profiled_c(work / 'c', binary, cc, commands, env, lto=lto)
+        result = compile_profiled_c(work / 'c', binary, cc, commands, env, lto=lto, optimization=optimization)
         translation['units'] = json.loads((work / 'c/manifest.json').read_text())['units']
         current_training = {str(p.relative_to(work)): identity(p)
                             for p in sorted((work / 'training-examples').rglob('*')) if p.is_file()}
         if current_training != training_hashes:
             raise ValueError('Training sources changed during the host build')
     else:
-        result = compile_c(work / 'c', binary, cc, lto=lto)
+        result = compile_c(work / 'c', binary, cc, lto=lto, optimization=optimization)
     if toolchain_identity(seed) != seed_identity:
         raise ValueError('Native source toolchain changed during the host build')
     provenance = {
@@ -145,5 +152,8 @@ if __name__ == '__main__':
     cli.add_argument('--cc', default=os.environ.get('CC', 'gcc'), help='GCC-compatible C compiler command')
     cli.add_argument('--pgo', action='store_true', help='train GCC on representative builds, then optimize from fresh profiles (one worker)')
     cli.add_argument('--lto', action='store_true', help='also optimize across C units at link time (one worker)')
+    cli.add_argument('--optimization', type=int, choices=(2, 3),
+                     help='GCC optimization level (default: 3 with PGO, otherwise 2); training and final build use the same level')
     args = cli.parse_args()
-    print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto, pgo=args.pgo))
+    print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto, pgo=args.pgo,
+                optimization=args.optimization))

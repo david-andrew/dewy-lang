@@ -5,6 +5,39 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Fresh O3 profile-trained compiler host (2026-10-19)
+
+The maintained optimized-host builder now uses `-O3` for PGO, with an explicit
+`--optimization 2` override; non-PGO builds keep `-O2`. Training and final builds
+use the same level. Reusing O2 profiles for O3 failed GCC's counter-layout checks,
+so the candidate was trained afresh without weakening those checks. No fast-math
+or machine-specific instruction sets are enabled.
+
+All **6,243 checks pass in 128.79 s**, including profile-generation/use at both
+levels with and without LTO. Nine rotating pairs compare otherwise identical
+fresh O2/O3 PGO+LTO hosts: all seven compilation comparisons pass, with roughly
+**3–4% lower CPU times**. Three hardware-count pairs show **4.9% fewer instructions**
+for large default/release builds and **5.1% fewer** for the fixed compiler rebuild.
+The pilot reaches **238k root lines/wall-second**, **242k/CPU-second**; the full
+stage reaches **238k/CPU-second**. The rough 250k target is still ahead.
+
+The full stage against the fixed reference and last accepted optimized host has
+**40 passing comparisons, 20 inconclusive, no established regression**. All twelve
+compilation comparisons pass; large default/release builds use about **31% less
+CPU** than the last accepted host. Runtime checks cover twelve kernels in both
+modes, with independent C results. Twenty runtime comparisons remain uncertain;
+this does not accept a new whole-stage baseline or establish C parity. Examples
+of remaining release/C ratios are **1.21× text**, **1.26× graph**, and **1.43–1.47×
+managed-parameter helpers**. Records and shifted-array kernels are faster than C
+on these workloads. No repeated timing campaign was used to force acceptance.
+
+The O3 host build took **462 s**, about **359 MiB** peak child RSS. This remains
+an optional release-toolchain step; ordinary compiler edits use the native build.
+The measured artifact predates the new parameter interface and used the same
+builder with its flags overridden in process; actual commands and provenance are
+retained, and the integrated interface is covered by the full suite.
+[Raw comparisons, instruction counts, build provenance and validation](audits/2026-10-19/host-pgo-o3.json).
+
 ## Regex matching tables and bounded DFAs (2026-10-19)
 
 Ported Sloppy `6d46316`'s regex engine without changing Dewy's syntax or callback

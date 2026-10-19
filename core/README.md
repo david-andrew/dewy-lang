@@ -51,6 +51,12 @@ bundle retains source hashes, commands, logs, profiles and the instrumented
 binary. This requires GCC and its matching `gcov-dump` and takes two sequential
 C builds. The final compiler does not collect profiles.
 
+PGO uses `-O3` for both the instrumented and final builds; non-PGO builds
+keep `-O2`. Use `--optimization 2` or `--optimization 3` to override this
+explicitly. Profiles are always trained afresh at the chosen level: changing
+the level between training and use can change GCC counter layouts. Neither
+option enables fast-math or machine-specific instruction sets.
+
 PGO can be combined with `--lto`. Each training run must contribute complete
 GCC run summaries; source/profile mismatches and missing profiles are fatal.
 It uses GCC's profile correction for inconsistent memory-operation
