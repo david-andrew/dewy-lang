@@ -5,6 +5,25 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Cache stable-value facts in the optimizer (2026-10-19)
+
+The existing prepass now caches whether a register has one definition preceding
+all uses. Lookups read one boolean instead of repeatedly reading definition
+counts and positions from three arrays. Parameters, constants, new temporaries,
+and hidden zero-slot definitions maintain the same invariant. No additional
+whole-function pass is needed.
+
+A diagnostic build asserted equality with the original predicate throughout
+453 quick checks, large default/release builds and compiler self-compilation.
+The production implementation passes an independent C bootstrap and **6,282
+checks in 168.84 s**. Native compilation instruction counts fall **0.11% default /
+0.33% release / 0.70% compiler rebuild**. Paired timing gives **4 pass /
+8 inconclusive**, with no established regression. All twelve existing kernels
+plus recursive tree/list have equivalent generated artifacts in both modes,
+verified with fresh checksums. Optimized-host benefit is still unmeasured; the
+fixed reference and accepted whole-stage baseline remain unchanged.
+[Invariant, bootstrap and performance evidence](audits/2026-10-19/stable-value-cache.json).
+
 ## Current optimized-host validation (2026-10-19)
 
 The maintained O3 PGO/LTO builder now has a freshly trained host for `259e2c5c`,

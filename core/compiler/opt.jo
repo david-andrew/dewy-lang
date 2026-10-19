@@ -7,6 +7,7 @@ use 'ir.jo'
 const MIN_INT = -9223372036854775807 - 1
 
 o_ndef: i32[]       # static definitions per vreg (params count as one)
+o_stable: bool[]    # single definition preceding every use; maintained with the prepass metadata
 o_defpos: i32[]     # position of the (last) definition
 o_first: i32[]      # first use position
 o_nuse: i32[]
@@ -75,6 +76,7 @@ o_pure = (op: Op) -> bool:
 o_resize = (n: int):
     if o_ndef.len() < n:
         o_ndef.resize(n)
+        o_stable.resize(n)
         o_defpos.resize(n)
         o_first.resize(n)
         o_nuse.resize(n)
@@ -95,6 +97,7 @@ o_resize = (n: int):
         o_dop[v] = -1
         o_ver[v] = 0
         o_ndef[v] = 0
+        o_stable[v] = false
         o_defpos[v] = -1
         o_first[v] = 2147483647
         o_nuse[v] = 0
@@ -182,6 +185,7 @@ o_kconst = (v: int) -> int:
         k = k_vreg(v)
         o_resize_one(k)
         o_ndef[k] = 1
+        o_stable[k] = true
         o_const[k] = true
         o_cval[k] = v
         o_kmap[v] = k
@@ -189,6 +193,7 @@ o_kconst = (v: int) -> int:
     d = vreg(VI)
     o_resize_one(d)
     o_ndef[d] = 1
+    o_stable[d] = true
     o_const[d] = true
     o_cval[d] = v
     o_emit(Ins(.iconst, VI, i32(d), 0, 0, 0, v))
@@ -197,6 +202,7 @@ o_kconst = (v: int) -> int:
 o_resize_one = (d: int):
     loop o_ndef.len() <= d:
         o_ndef.push(0)
+        o_stable.push(false)
         o_defpos.push(-1)
         o_first.push(2147483647)
         o_nuse.push(0)
@@ -221,6 +227,7 @@ o_resize_one = (d: int):
     o_dop[d] = -1
     o_ver[d] = 0
     o_ndef[d] = 0
+    o_stable[d] = false
     o_defpos[d] = -1
     o_first[d] = 2147483647
     o_nuse[d] = 0
@@ -236,6 +243,7 @@ o_tmp = () -> int:
     d = vreg(VI)
     o_resize_one(d)
     o_ndef[d] = 1
+    o_stable[d] = true
     d
 
 # can uses of d be replaced by s? both must be single-definition values defined before use
@@ -392,7 +400,7 @@ ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: i
 
 
 # a value that is defined once and never read before its definition
-stable = (v: int) -> bool: o_ndef[v] == 1 and o_first[v] > o_defpos[v]
+stable = (v: int) -> bool: o_stable[v]
 
 # Available expressions have at most two register operands, always a then b.
 # Read their versions directly instead of filling the general operand buffer
@@ -586,7 +594,7 @@ o_simplify = (ins0: Ins, pos: int):
     a = int(ins.a)
     bb = int(ins.b)
     if op == .iconst:
-        if o_ndef[d] == 1 and o_first[d] > o_defpos[d]:
+        if stable(d):
             o_const[d] = true
             o_cval[d] = ins.imm
         o_emit(ins)
@@ -1103,12 +1111,14 @@ optimize = ():
     o_resize(nv)
     loop p in [0..ir.nparams):
         o_ndef[p] = 1
+        o_stable[p] = true
         o_defpos[p] = -1
     # constant vregs: one canonical vreg per value
     o_kmap.clear()
     loop v in [0..ir.kval.len()):
         if is_kv(v):
             o_ndef[v] = 1
+            o_stable[v] = true
             o_const[v] = true
             o_cval[v] = ir.kval[v]
             if let c = o_kmap.get(ir.kval[v]): o_repl[v] = i32(c)
@@ -1129,10 +1139,15 @@ optimize = ():
         if d >= 0:
             o_ndef[d] += 1
             o_defpos[d] = i32(pos)
+            # Uses are visited in order, before the definition at this position.
+            # Later uses cannot change whether the first one preceded this definition.
+            o_stable[d] = o_ndef[d] == 1 and o_first[d] > pos
         if ins.op == .zeroslots:
             loop k in [0..int(ins.b)):
                 item = int(ir.args[int(ins.a) + k])
-                if item & 1 == 1: o_ndef[item >> 1] += 2
+                if item & 1 == 1:
+                    o_ndef[item >> 1] += 2
+                    o_stable[item >> 1] = false
     loop_prepass()
     # forward: fold, propagate copies, eliminate common subexpressions, drop dead branches
     o_out = []
