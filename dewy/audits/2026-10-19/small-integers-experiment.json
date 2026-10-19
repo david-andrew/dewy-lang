@@ -1,0 +1,284 @@
+{
+  "status": "deferred; compiler changes reverted",
+  "scope": "Decode common small decimal literals from source bytes into DewySyntax.name, bypassing temporary numeric strings. No token layout or language change.",
+  "patch": "diff --git a/core/compiler/dewy_fast.jo b/core/compiler/dewy_fast.jo\nindex 5b68ee5f..20b5cead 100644\n--- a/core/compiler/dewy_fast.jo\n+++ b/core/compiler/dewy_fast.jo\n@@ -516,6 +516,22 @@ dn_flow = () -> int:\n         break\n     dn_node(.flow, \"\", start, arms)\n \n+# Keep common decimal literals scalar while projecting syntax. The lexer\n+# has already validated this span; at most ten digits fit comfortably in int.\n+# Larger literals retain the full unsigned/exact-integer path in dw_unsigned.\n+dn_small_integer = (token: DewyLexeme) -> int:\n+    source = files[dn_file].src\n+    bytes = data(source)\n+    i = token.start\n+    if i + 1 < token.stop and bytes[i] == '0' and bytes[i + 1] == 'd': i += 2\n+    if token.stop - i > 10: return -1\n+    value = 0\n+    loop i < token.stop:\n+        c = bytes[i]\n+        if c != '_': value = value * 10 + int(c - '0')\n+        i += 1\n+    if value <= 2147483647: value else: -1\n+\n dn_atom = () -> int:\n     token = dn_tokens[dn_at]\n     symbol = token.symbol\n@@ -536,6 +552,12 @@ dn_atom = () -> int:\n         if not dn_range_bound(): return dots\n         bound = dn_expr(101)\n         return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])\n+    if token.kind == .source_integer:\n+        value = dn_small_integer(token)\n+        if value >= 0:\n+            # Name IDs are positive. A negative name stores -(value + 1),\n+            # including zero, without changing syntax/token record sizes.\n+            return dn_node(token.kind, \"\", token.start, name = i32(-value - 1))\n     text = dn_payload(token)\n     if token.kind == .op: return dn_error(token.start, \"expected an expression, found '{text}'\")\n     dn_node(token.kind, text, token.start, name = token.name)\ndiff --git a/core/compiler/dewy_parse.jo b/core/compiler/dewy_parse.jo\nindex ae587166..9ced0700 100644\n--- a/core/compiler/dewy_parse.jo\n+++ b/core/compiler/dewy_parse.jo\n@@ -169,6 +169,8 @@ dw_integer_kind = (kind: DewyKind) -> bool:\n \n dw_unsigned = (text: str, id: int) -> u64?:\n     if dewy_syntax[id].kind == .source_integer:\n+        encoded = int(dewy_syntax[id].name)\n+        if encoded < 0: return u64(-encoded - 1)\n         value: u64 = 0\n         loop c in text:\n             if c == '_': continue\n",
+  "validation": {
+    "quick_tests": 376,
+    "seconds": 8.7,
+    "compiler": "__dewycache__/compact-core/build-1792405321615062336/bin/dewy-core",
+    "independent_c_bootstrap": false,
+    "full_suite": false,
+    "full_stage_gate": false
+  },
+  "pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "0dd0a37cdb9cd10b53f9991549c955f6e1ce5a2a40b58b364d9b55cb1b771de0",
+        "compiler_sources_sha256": "c88ee7be7a6297e4c6097c15246841fdf787d1ccd5ee549da3d8cbba2051a69a",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "3f0bc5acfb9f05d8f38889c37942a21f375ab6a3c21c96aad0e89fd39d88a54e",
+        "compiler_sources_sha256": "4344dc09350bd475ab402b123337f200c3776d67137f72fb1214cd944d49ace2",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "e45453e423e72fb6d1ed1145eb94c218de431dfe",
+      "working_tree": " M core/compiler/dewy_fast.jo\n M core/compiler/dewy_parse.jo\n",
+      "diff_sha256": "03df5bec18927421af6cd55a0eba2b808c7a3dae90ae8d80b17e4a508b42f375",
+      "load_average_start": [
+        4.978515625,
+        4.53759765625,
+        4.84228515625
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792404210572009281/bin/dewy-core",
+          "sha256": "0dd0a37cdb9cd10b53f9991549c955f6e1ce5a2a40b58b364d9b55cb1b771de0"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792405321615062336/bin/dewy-core",
+          "sha256": "3f0bc5acfb9f05d8f38889c37942a21f375ab6a3c21c96aad0e89fd39d88a54e"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/small-integers-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.6419114910095232,
+              0.6418525040062377,
+              0.640416769994772,
+              0.6437901499884902,
+              0.6389034340099897,
+              0.6419404640037101,
+              0.6415162869961932
+            ],
+            "candidate": [
+              0.6420319460012252,
+              0.637647627008846,
+              0.6367167950083967,
+              0.6375522000016645,
+              0.6389610600017477,
+              0.6429137980012456,
+              0.6448645329946885
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.6418525040062377,
+            "candidate": 0.6389610600017477
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.6356250000000001,
+              0.6351580000000003,
+              0.6338390000000009,
+              0.6370139999999997,
+              0.6320970000000001,
+              0.6351179999999993,
+              0.6348680000000001
+            ],
+            "candidate": [
+              0.6358990000000001,
+              0.630848,
+              0.6298159999999994,
+              0.6309549999999993,
+              0.632278,
+              0.6360140000000006,
+              0.6380019999999984
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.6351179999999993,
+            "candidate": 0.632278
+          },
+          "output_bytes": {
+            "candidate": 1987376,
+            "previous": 1987376
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/small-integers-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.8360763420059811,
+              0.8376259729993762,
+              0.8103159720049007,
+              0.8382417520042509,
+              0.8424539039988304,
+              0.8388509409996914,
+              0.8393595490051666
+            ],
+            "candidate": [
+              0.8373248049902031,
+              0.8328658679965883,
+              0.8371173000050476,
+              0.8392893470008858,
+              0.8396109109889949,
+              0.8380264430015814,
+              0.8392825000046287
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.8382417520042509,
+            "candidate": 0.8380264430015814
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.8277840000000017,
+              0.8292629999999998,
+              0.802042999999999,
+              0.8299229999999997,
+              0.8325520000000008,
+              0.830191000000004,
+              0.8309859999999987
+            ],
+            "candidate": [
+              0.829017999999999,
+              0.8240679999999986,
+              0.8286220000000005,
+              0.8310160000000024,
+              0.8311649999999994,
+              0.829423,
+              0.8307479999999962
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.8299229999999997,
+            "candidate": 0.829423
+          },
+          "output_bytes": {
+            "candidate": 2227072,
+            "previous": 2227072
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.697755736997351,
+              1.6942370070028119,
+              1.6966195650020381,
+              1.698134142003255,
+              1.696247442989261,
+              1.6971189469913952,
+              1.0573212829913246
+            ],
+            "candidate": [
+              1.6926995239919052,
+              1.6971179249958368,
+              1.7029791680106428,
+              1.6967217920027906,
+              1.695916363998549,
+              1.6234710969874868,
+              1.0583414300053846
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.6966195650020381,
+            "candidate": 1.695916363998549
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.6819310000000003,
+              1.6794339999999974,
+              1.6808220000000078,
+              1.682784999999998,
+              1.6803020000000002,
+              1.681286999999998,
+              1.0485659999999979
+            ],
+            "candidate": [
+              1.676832000000001,
+              1.6784140000000036,
+              1.6872899999999968,
+              1.6811379999999951,
+              1.6801830000000035,
+              1.6083560000000037,
+              1.049648999999997
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.6808220000000078,
+            "candidate": 1.6784140000000036
+          },
+          "output_bytes": {
+            "candidate": 7150920,
+            "previous": 7150920
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        5.1953125,
+        4.67138671875,
+        4.87353515625
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 1.000286348456012,
+        "bootstrap_95_percent_interval": [
+          0.9932142868388647,
+          1.0014107614648007
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 0.9997135932494621,
+        "bootstrap_95_percent_interval": [
+          0.9983340379940214,
+          1.0014907270495652
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 0.9993926525246042,
+        "bootstrap_95_percent_interval": [
+          0.9969683655274805,
+          1.0010328391345886
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      }
+    }
+  },
+  "decision": "Seven rotating matched pairs show no useful compilation improvement in default, release, or compiler self-build. Revert the representation complexity; no claim of a performance gain."
+}

@@ -5,6 +5,16 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Small decimal literals: deferred (2026-10-19)
+
+A source-byte decimal decoder avoided temporary strings for common literals,
+but seven matched compilation pairs were flat: candidate/previous CPU ratios
+1.00029 default, 0.99971 release and 0.99939 compiler self-build. Its 376 quick
+tests passed; no independent C bootstrap, full suite or stage gate was run.
+The compiler changes are reverted, with the patch and samples retained in
+[`small-integers-experiment.json`](audits/2026-10-19/small-integers-experiment.json).
+The accepted shifted-index stage also passed all platform CI checks.
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until
