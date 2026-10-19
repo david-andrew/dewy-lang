@@ -5,6 +5,31 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Redirect redundant native jumps (2026-10-19)
+
+The x86-64 emitter now redirects branches whose destination contains only
+structural ends followed by another unconditional branch. It resolves loop
+backedges immediately and forwards other fixups to their final block. Lookahead
+is bounded at eight ends, and no instructions move or new compiler pass runs.
+This removes an extra taken jump at each level of the recursive search tree.
+
+Seven paired samples show **16.4% less default runtime** and **19.4% less release
+runtime** for tree lookup; list traversal stays flat. All four comparisons pass.
+The independent C bootstrap emits the exact measured workload artifacts apart
+from equal-width bundle paths, verified with fresh checksums. Tree lookup remains
+behind C; this is a targeted improvement, not general parity.
+
+All **6,274 checks pass in 164.17 s** with that bootstrapped compiler. After
+self-compilation, instruction counts relative to the recursive-value compiler
+change by **−0.021% default / +0.0027% release / +0.066% fixed compiler rebuild**.
+The earlier native-seed generation and its slightly higher costs are retained in
+the audit. Compilation timing gives **5 pass / 7 inconclusive**; the twelve
+existing kernels in both modes give **13 pass / 11 inconclusive**, with no
+established regression. CPU conditions varied substantially during this bounded
+run, so compare paired samples rather than medians from separate campaigns.
+The fixed reference and last accepted whole-stage baseline remain unchanged.
+[Raw runtime/compile measurements, artifact proof and full validation](audits/2026-10-19/branch-redirection.json).
+
 ## Recursive values with fast traversal (2026-10-19)
 
 Records can now contain themselves through optionals, other records, generic

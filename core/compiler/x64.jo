@@ -1362,6 +1362,32 @@ branch_target_jcc = (depth: int, cc: int):
         b32(target - (code.len() + 4))
     else: xctl[c].fixups.push(jcc32(cc))
 
+# An end followed only by ends and an unconditional branch is the branch's
+# destination. Redirect its incoming jumps now, rather than making each loop
+# iteration execute a jump to another jump. Bound the lookahead so deeply nested
+# source cannot turn emission into a quadratic scan. No instructions are moved.
+patch_control_end = (c: XCtl, pos: int):
+    if c.fixups.len() == 0 and c.ifx.len() == 0: return
+    next = pos + 1
+    closed = 0
+    loop next < ir.code.len() and closed < 8 and ir.code[next].op == .end:
+        next += 1
+        closed += 1
+    target = -1
+    if next < ir.code.len() and ir.code[next].op == .br:
+        target = xctl.len() - closed - 1 - int(ir.code[next].imm)
+    if target >= 0:
+        if xctl[target].kind == 1:
+            addr = xctl[target].start
+            loop f in c.fixups: patch32(f, addr - (f + 4))
+            loop f in c.ifx: patch32(f, addr - (f + 4))
+        else:
+            loop f in c.fixups: xctl[target].fixups.push(f)
+            loop f in c.ifx: xctl[target].fixups.push(f)
+        return
+    loop f in c.fixups: patch_here(f)
+    loop f in c.ifx: patch_here(f)
+
 # d = a + b (sign -1: a - b, b a constant) into a register other than a's in one instruction:
 # lea d, [a + b]
 lea_add = (d: int, a: int, bb: int, sign: int) -> bool:
@@ -2354,8 +2380,7 @@ emit_ins = (pos: int, ins: Ins):
             xctl[c].ifx = []
         end:
             c = xctl.pop()
-            loop f in c.fixups: patch_here(f)
-            loop f in c.ifx: patch_here(f)
+            patch_control_end(c, pos)
         br: branch_target_fix(int(ins.imm))
         brif:
             if fused_cc >= 0:
