@@ -6242,6 +6242,60 @@ main=()=>{
     ]
 
 
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_core_json_scanning(compiler, tmp_path, target, release):
+    # Exercise literal tokens and escaped strings with an independent JSON
+    # oracle, including empty strings, UTF-8, controls and allocation boundaries.
+    rng = random.Random(2917)
+    values = ['', 'ordinary object key', 'é日本🙂', '"\\\n\t\r\b\f\0',
+              None, True, False, 42, -3.125, -0.0, float('inf'), -float('inf'),
+              *['a' * n for n in (1, 7, 8, 15, 16, 31, 32, 127, 1024)]]
+    alphabet = 'abcXYZé日🙂"\\\n\t'
+    for _ in range(48):
+        text = ''.join(rng.choice(alphabet) for _ in range(rng.randrange(80)))
+        values.extend([text, {'name': text, 'enabled': True, 'missing': None}])
+    inputs, expected = [], []
+    for value in values:
+        for ascii_only in (False, True):
+            inputs.append(json.dumps(value, ensure_ascii=ascii_only))
+            expected.append(value)
+    # Existing permissive unknown escapes and raw controls still use the same
+    # decoder after a plain prefix. Do not silently tighten parsing in a speedup.
+    inputs += ['"plain\\qtail"', '"raw\tcontrol"', '"prefix\\uD83D\\uDE42"']
+    expected += ['plainqtail', 'raw\tcontrol', 'prefix🙂']
+
+    def quote(text):
+        return json.dumps(text, ensure_ascii=False).replace('{', r'\{').replace('}', r'\}')
+
+    body = ['main=()=>{', 'let inputs=[' + ' '.join(map(quote, inputs)) + ']',
+            'loop input in inputs {', 'let result=parse_json(input)',
+            'if result is? JsonError {printl(result.message) return 1}',
+            'printl(to_json(result))', '}']
+    errors = [('', 'a value was expected, found the end', 1, 1),
+              ('tru', 'a value was expected', 1, 1),
+              ('nul', 'a value was expected', 1, 1),
+              ('Infinit', 'a value was expected', 1, 1),
+              ('falsex', 'more after the end of the value', 1, 6),
+              ('"', 'the text has no closing \'"\'', 1, 2),
+              ('"plain', 'the text has no closing \'"\'', 1, 7),
+              ('"plain\\', 'the text has no closing \'"\'', 1, 8),
+              ('"prefix\\u12x4"', '\\u needs four hex digits', 1, 12),
+              ('\n  "abc', 'the text has no closing \'"\'', 2, 7)]
+    body += ['let bad=[' + ' '.join(quote(x[0]) for x in errors) + ']',
+             'loop input in bad {let result=parse_json(input)',
+             'if not (result is? JsonError) return 2',
+             'printl(to_json(result))', '}', 'return 42', '}']
+    command, error = build_case_batch(compiler, tmp_path, {'scanning': '\n'.join(body)},
+                                      ['exit(case_0())'], release, target)
+    assert error is None, error
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+    assert [json.loads(line) for line in ran.stdout.splitlines()] == [
+        *expected, *[dict(message=message, line=line, column=column)
+                     for _, message, line, column in errors]]
+
+
 @pytest.fixture(scope='module')
 def compiler():
     value = os.environ.get('DEWY_CORE_COMPILER')

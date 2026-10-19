@@ -20,6 +20,11 @@ New front-end or user-facing language design requires David's approval.
   8.4 ms. The independent native bootstrap passes 6,303 tests in 170 seconds.
   Its checkpoint has 56 passes and four inconclusive record timings, with no
   established regression. [Summary and raw evidence](audits/2026-10-19/bounded-wrapper-inlining.json).
+- Selective Sloppy JSON token fast paths cut object parsing about 30%, numeric
+  arrays about 36%, and keyword arrays about 86% in paired desktop measurements.
+  String timing remains machine-sensitive: desktop release regressed, while a
+  bounded laptop check of the same executables was flat. String-copy prototypes
+  were dropped. [Evidence](audits/2026-10-19/json-token-dispatch.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

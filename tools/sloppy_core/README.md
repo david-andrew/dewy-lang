@@ -1779,3 +1779,18 @@ samples after warmup. `--iteration-divisor 1000` is a harness smoke check only.
 Use `TMPDIR` to select scratch storage; the host must support Linux thread CPU
 clocks. The [initial port audit](../../dewy/audits/2026-10-19/regex-engine.json)
 retains the full-sized samples and their compiler/library identities.
+
+## JSON performance checks
+
+```sh
+python3 -m tools.sloppy_core.benchmark_json \
+  --core /path/to/candidate/bin/dewy-core \
+  --baseline /path/to/baseline/bin/dewy-core --json /path/to/report.json
+```
+
+Six workloads cover plain and escaped strings, small objects, arrays of game
+objects, keywords and numbers in default and release modes. Each executable
+checks a full parsed value against Python's JSON decoder outside timing, then
+times repeated parsing and a size checksum. Runs alternate on one CPU with
+seven samples after warmup; allocation and destruction are included. This
+measures relative library performance, not parity with a C JSON implementation.

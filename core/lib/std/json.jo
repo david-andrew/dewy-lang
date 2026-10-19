@@ -38,7 +38,10 @@ parse_json = (s: str) -> Json | JsonError:
     return v
 
 __json_space = (r: mut __JsonReader):
-    loop r.i < len(r.s) and is_space(r.s[r.i]): r.i += 1
+    s = r.s
+    i = r.i
+    loop i < len(s) and is_space(s[i]): i += 1
+    r.i = i
 
 __json_fail = (r: mut __JsonReader, msg: str) -> Json:
     if r.err == "": r.err = msg
@@ -90,9 +93,9 @@ __json_value = (r: mut __JsonReader, depth: int) -> Json:
         return Json.null_
     if c == '"': return Json.text(__json_string(r))
     # (infinity and NaN, which JSON leaves out, as JavaScript's and Python's write them)
-    if __json_word(r, "Infinity"): return Json.number(1e308 * 10.0)
-    if __json_word(r, "-Infinity"): return Json.number(-1e308 * 10.0)
-    if __json_word(r, "NaN"): return Json.number(0.0 / 0.0)
+    if c == 'I' and __json_word(r, "Infinity"): return Json.number(1e308 * 10.0)
+    if c == '-' and __json_word(r, "-Infinity"): return Json.number(-1e308 * 10.0)
+    if c == 'N' and __json_word(r, "NaN"): return Json.number(0.0 / 0.0)
     if c == '-' or is_digit(c):
         start = r.i
         r.i += 1
@@ -100,16 +103,15 @@ __json_value = (r: mut __JsonReader, depth: int) -> Json:
         if let n = to_float(r.s[start..r.i)): return Json.number(n)
         r.i = start
         return __json_fail(r, "not a number")
-    if __json_word(r, "true"): return Json.boolean(true)
-    if __json_word(r, "false"): return Json.boolean(false)
-    if __json_word(r, "null"): return Json.null_
+    if c == 't' and __json_word(r, "true"): return Json.boolean(true)
+    if c == 'f' and __json_word(r, "false"): return Json.boolean(false)
+    if c == 'n' and __json_word(r, "null"): return Json.null_
     __json_fail(r, "a value was expected")
 
 __json_word = (r: mut __JsonReader, w: str) -> bool:
-    if r.i + len(w) <= len(r.s) and r.s[r.i..r.i + len(w)) == w:
-        r.i += len(w)
-        return true
-    false
+    if r.i + len(w) > len(r.s) or not __mem_eq(data(r.s) + r.i, data(w), len(w)): return false
+    r.i += len(w)
+    true
 
 __json_hex4 = (r: mut __JsonReader) -> int:
     v = 0

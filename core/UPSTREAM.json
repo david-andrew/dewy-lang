@@ -232,6 +232,13 @@
         "tests/t/held_views_copies.jo": "d3270327a756b0a99282a742093a4bcb1262849bf58409217385184c808e2d76",
         "tests/t/held_views_copies.out": "e82d91a2b6236f03a6ac0c7c9e2647143639ea9bcba5e6b615daa1cea21dee88"
       }
+    },
+    {
+      "revision": "63d3f33195b1ec608c673af6154f0ea160bccc2e",
+      "paths": [
+        "lib/std/json.jo"
+      ],
+      "description": "Selective JSON reader fast paths: dispatch literal tokens by their first byte, compare words without temporary substring allocations, and scan whitespace with a local cursor. The upstream number representation, decoder changes and new formatting APIs are not imported. String bulk-copy experiments were measured and dropped after escaped-string regressions."
     }
   ]
 }
