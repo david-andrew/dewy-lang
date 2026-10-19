@@ -1160,6 +1160,29 @@ unmeasured for these unchanged workloads. Programs using the corrected raw
 storage paths intentionally change behavior; byte compatibility is not the goal.
 [Regression evidence, validation and performance](audits/2026-10-19/nested-data-ownership.json).
 
+## Use scaled addressing for small integer multipliers
+
+The x86-64 emitter now writes products by 3, 5 and 9 directly with scaled
+addressing, preserving wrapping 64-bit arithmetic. An initial version retained
+an unnecessary input move and showed no clear gain; that experiment is retained
+in the audit. The accepted version reads the input register directly.
+
+The helper-call workload uses **0.960× default / 0.966× release** CPU time versus
+the preceding stage. Release remains **1.084× C** in matched samples, so this
+does not establish C parity. Large default/release compilation is unchanged
+(**0.998× / 1.002×**), and all **44** stage comparisons pass, including focused
+rechecks with every sample retained. Three runtime workloads retain certified
+artifacts and pass fresh checks; the other five receive fresh timing samples.
+The final assessment also uses matched C samples rather than dividing separate
+medians, which can be misleading on this variable-speed host.
+
+The independent C bootstrap passes **344 quick checks**; the full suite passes
+**5,972 checks in 207.78 seconds** with two workers. New coverage checks signed
+boundaries, random words, register pressure and actual instruction selection.
+Fresh throughput is about **98k root lines/CPU-second**, below 250k. Host load
+fell during these measurements; the absolute improvement over the preceding
+report is not a compiler speedup. [Validation and all measurements](audits/2026-10-19/scaled-multiply.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

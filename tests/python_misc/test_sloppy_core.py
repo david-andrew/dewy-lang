@@ -10914,3 +10914,55 @@ def test_core_emission_fixup_bounds(compiler, tmp_path, offset):
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode != 0, ran.stdout + ran.stderr
     assert 'panic:' in ran.stderr, ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_scaled_multiply(compiler, tmp_path, release):
+    rng = random.Random(3549)
+    values = [-(1 << 63), -(1 << 63)+1, -(1 << 31), -1, 0, 1,
+              (1 << 31)-1, (1 << 63)-2, (1 << 63)-1]
+    values += [rng.randrange(-(1 << 63), 1 << 63) for _ in range(24)]
+    coefficients = [3, 5, 9] * 4
+    params = ', '.join(f'a{i}: int' for i in range(12))
+    products = '\n'.join(f'    v{i} = a{i} * {c}' for i, c in enumerate(coefficients))
+    arguments = ', '.join(f'v{i}' for i in range(12))
+    total = ' + '.join(f'a{i}' for i in range(12))
+    calls = '\n'.join(f'    print(mul3({v})); print(mul5({v})); print(mul9({v}))' for v in values)
+    pressure_values = values[:12]
+    source = tmp_path / 'scaled-multiply.jo'
+    source.write_text(f'''@noinline
+mul3 = (x: int) -> int: x * 3
+@noinline
+mul5 = (x: int) -> int: x * 5
+@noinline
+mul9 = (x: int) -> int: x * 9
+@noinline
+sink = ({params}) -> int: {total}
+@noinline
+pressure = ({params}) -> int:
+{products}
+    sink({arguments})
+main = () -> int:
+{calls}
+    print(pressure({', '.join(map(str, pressure_values))}))
+    0
+''')
+    binary = tmp_path / 'scaled-multiply'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    def signed_word(value):
+        return (value + (1 << 63)) % (1 << 64) - (1 << 63)
+    expected = [signed_word(v*c) for v in values for c in (3, 5, 9)]
+    expected.append(signed_word(sum(v*c for v, c in zip(pressure_values, coefficients))))
+    assert [int(line) for line in ran.stdout.splitlines()] == expected
+    objdump = shutil.which('objdump')
+    if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
+        for name in ('mul3', 'mul5', 'mul9'):
+            assembly = subprocess.check_output([objdump, '-d', f'--disassemble={name}', binary], text=True)
+            assert re.search(r'\blea\b', assembly), assembly
+            assert not re.search(r'\bimul\b', assembly), assembly

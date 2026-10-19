@@ -1735,15 +1735,26 @@ emit_ins = (pos: int, ins: Ins):
             if vloc[d] == LOC_NONE: return
             r = dreg(d, RAX)
             if vloc[bb] == r and r != vloc[a]: r = RAX
-            ld(r, a)
             l = vloc[bb]
             if l == LOC_CONST:
                 c = vcval[bb]
-                rex(true, r, 0, r, false)
-                b(0x69)
-                modrr(r, r)
-                b32(c)
+                if c == 3 or c == 5 or c == 9:
+                    # x + x * {2,4,8}, preserving the same low 64 bits.
+                    scale = 1
+                    if c == 5: scale = 2
+                    else if c == 9: scale = 3
+                    base = reg_of(a, RAX)
+                    use_index(base, scale)
+                    lea(r, base, 0)
+                    cur_index = -1
+                else:
+                    ld(r, a)
+                    rex(true, r, 0, r, false)
+                    b(0x69)
+                    modrr(r, r)
+                    b32(c)
             else:
+                ld(r, a)
                 rb = reg_of(bb, RCX)
                 rex(true, r, 0, rb, false)
                 b(0x0F)
