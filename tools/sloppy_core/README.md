@@ -122,7 +122,8 @@ those arguments explicitly.
 Numeric `as` performs value conversion, including integer/float and float-width
 conversions. Float-to-integer conversions truncate toward zero and saturate to
 the destination range (NaN becomes zero), using the same core lowering on native
-and web. `transmute` is still unsupported. Named libraries are available as
+and web. `transmute` reinterprets equal-width machine integer/float bits in
+scalar native/web code. Named libraries are available as
 `import physics`, `import physics as dynamics`, or `from physics import World`;
 `p"..."` remains an explicit file path. Tuple results from libraries support
 literal indexing such as `world.ends(joint)[0]`.

@@ -5,6 +5,29 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Numeric bit reinterpretation (2026-10-19)
+
+`value transmute Type` now supports equal-width machine integers and floats.
+`as` remains numeric value conversion. The source is checked independently of
+the destination and evaluated once; signed zero and NaN payloads survive bit
+round trips. Managed values, records, booleans and unions are rejected. Native
+and web lowering reuse the existing bit-reinterpretation instructions.
+
+All **38 focused checks** pass with both the normal native build and independent
+C bootstrap, including generic aliases, width errors and formatter round trips.
+The **429-check quick suite** passes in 10.00 s. All twelve existing runtime
+kernels have unchanged generated artifacts and pass fresh full-size checks.
+
+A seven-pair native pilot finds no definite compilation regression. Default
+throughput, Tour, Netpong, Dunes and self-build comparisons against the immediate
+native predecessor pass; release throughput remains inconclusive (paired ratio
+1.013, interval 0.945–1.059). Three instruction-count pairs show only **0.005%**
+more work for default throughput, **0.004%** for release, and **0.00003%** for
+self-build. This adds no new optimization pass or runtime representation.
+The fixed and last accepted stage references remain unchanged; no resampling
+loop was used to force acceptance. [Validation, pilot, counters and artifact
+proof](audits/2026-10-19/numeric-transmute.json).
+
 ## Profile-guided compiler toolchains (2026-10-19)
 
 The maintained optional host builder now supports `--pgo`, including `--pgo

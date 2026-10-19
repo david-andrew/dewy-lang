@@ -59,6 +59,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'transmute': 'main=()=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(1.0 transmute uint64) return 0}',
     'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
 let iffy=true and not false
 printl(iffy) printl(is isnt? int64) printl(isnt is? none)

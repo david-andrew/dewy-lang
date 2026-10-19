@@ -357,6 +357,14 @@ when they fit. Use `as` or a type call such as `uint8(value)` for numeric value
 conversion. Integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.
+`value transmute Type` reinterprets bits between equal-width machine integers
+and floats; for example, `1.0 transmute uint64` is `4607182418800017408`.
+It evaluates the source once, preserving signed zero and NaN payloads. The
+source has its own type: to reinterpret 32 bits, write a `uint32` or `float32`
+source explicitly. The destination does not change the width of a literal.
+This currently supports scalar native/web code; booleans, collections, records
+and optional/union types cannot be reinterpreted this way.
+
 `string(value)` formats a value as text. Integer `//` is floor
 division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support signed `int64` and unsigned `uint64`, preserving the full

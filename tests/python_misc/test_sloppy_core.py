@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'conversion-transmute-bit-roundtrip',
     'optimizer-text-case-values',
     'optimizer-read-method-mutable-loop', 'optimizer-read-method-global-loop',
     'optimizer-read-method-parallel',
@@ -53,7 +54,7 @@ QUICK_CASES = {
     'match-constant-effects', 'match-constant-wide-keys',
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
-QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow',
+QUICK_ERRORS = {'conversion-transmute-integer-width', 'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow',
                 'method-mutating-loop', 'method-hidden-global-loop', 'method-indirect-mutating-loop'}
 VALUE_BATCH_SIZE = 64
 
@@ -67,6 +68,13 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'conversion-transmute-widths': 'main=()=>{\nlet a:int8=-1 let b:int16=-2 let c:int32=-3 let d:int64=-4\nif (a transmute uint8) not=?255 or (b transmute uint16) not=?65534 return 1\nif (c transmute uint32) not=?4294967293 or (d transmute uint64) not=?18446744073709551612 return 2\nlet x:uint8=128 let y:uint16=32768 let z:uint32=2147483648 let w:uint64=9223372036854775808\nreturn if (x transmute int8)=?-128 and (y transmute int16)=?-32768 and (z transmute int32)=?-2147483648 and (w transmute int64)=?-9223372036854775808 42 else 3\n}',
+    'conversion-transmute-floats': 'main=()=>{\nlet one:float32=1.0 let negative:float32=-0.0\nif (one transmute uint32) not=?1065353216 or (negative transmute uint32) not=?2147483648 return 1\nif (1.0 transmute uint64) not=?4607182418800017408 or (-0.0 transmute uint64) not=?9223372036854775808 return 2\nlet f:uint32=1073741824 let d:uint64=4611686018427387904\nreturn if (f transmute float32)=?2.0 and (d transmute float64)=?2.0 and (1.0 as uint64)=?1 42 else 3\n}',
+    'conversion-transmute-bit-roundtrip': 'main=()=>{\nlet small:array<uint32>=[0 1 2147483648 2139095040 4286578688 2143363909 4290773281 8388607 8388608 2139095039]\nloop bits in small {let value=bits transmute float32 if (value transmute uint32) not=?bits return 1}\nlet wide:array<uint64>=[0 1 9223372036854775808 9218868437227405312 18442240474082181120 9221140253039434428 18444512289894291659 4503599627370495 4503599627370496 9218868437227405311]\nloop bits in wide {let value=bits transmute float64 if (value transmute uint64) not=?bits return 2}\nreturn 42\n}',
+    'conversion-transmute-evaluate-once': 'let calls:int64=0\nsource=():>uint64=>{calls+=1 4607182418800017408}\nmain=()=>{let value=source() transmute float64 return if value=?1.0 and calls=?1 42 else 1}',
+    'conversion-transmute-generic': 'Word:type=uint32\nreinterpret=<T U>(value:T):>U=>value transmute U\nmain=()=>{let bits:Word=1065353216 let value=reinterpret<Word float32>(bits)\nreturn if value=?1.0 and reinterpret<float32 Word>(value)=?bits 42 else 1}',
+    'conversion-transmute-context-independent': 'main=()=>{\nlet value:float64=4607182418800017408 transmute float64\nlet bits:uint64=1.0 transmute uint64\nreturn if value=?1.0 and bits=?4607182418800017408 42 else 1\n}',
+    'conversion-transmute-constant': 'const bits:uint64=1.0 transmute uint64\nmain=()=>{const value=bits transmute float64 return if value=?1.0 and bits=?4607182418800017408 42 else 1}',
     'optimizer-text-case-values': 'main=()=>{\nlet text="café Ωω Яя" let saved=text\nif text.upper() not=? "CAFÉ ΩΩ ЯЯ" return 1\nif text.lower() not=? "café ωω яя" return 2\nreturn if text=?saved 42 else 3\n}',
     'lexer-keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64):>int64=>{
 if false or not true return 1
@@ -5784,6 +5792,14 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'conversion-transmute-integer-width': ('main=()=>{let x:uint32=42 return x transmute uint64}', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-float-width': ('main=()=>{let x:float32=1.0 return x transmute uint64}', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-literal-width': ('main=()=>1 transmute float32', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-boolean': ('main=()=>true transmute uint8', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-optional': ('main=()=>{let x:int64|none=42 return x transmute int64}', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-to-optional': ('main=()=>42 transmute (int64|none)', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-managed': ('main=()=>"abc" transmute uint64', 'transmute needs integer or float values of equal width'),
+    'conversion-transmute-record': ('main=()=>{let x=[value=42] return x transmute int64}', 'transmute needs integer or float values of equal width'),
     'closure-shared-duplicate': ('main=()=>{let n=0 let f=($capture @n $capture @n)=>n return f()}', 'duplicate parameter binding'),
     'closure-capture-mixed-duplicate': ('main=()=>{let n=0 let f=($capture n $capture @n)=>n return f()}', 'duplicate parameter binding'),
     'closure-capture-parameter-conflict': ('main=()=>{let n=0 let f=($capture @n n:int64)=>n return f(1)}', 'duplicate parameter binding'),

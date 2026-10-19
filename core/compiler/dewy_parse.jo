@@ -782,10 +782,11 @@ dw_expr = (id: int) -> int:
             nodes[n].a = i32(dw_expr(left))
             nodes[n].name = dw_name_id(right)
             return n
-        if op == .kw_as:
+        if op == .kw_as or op == .kw_transmute:
             n = mk(.cast, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_type(right))
+            if op == .kw_transmute: nodes[n].aux2 = 1
             return n
         if dn_token_call(op) or op == .index:
             xs = dewy_syntax[right].children

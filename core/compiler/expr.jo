@@ -5771,6 +5771,20 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .cast:
         a = int(nodes[n].a)
         tt = prune(resolve_type(int(nodes[n].b)))
+        if nodes[n].aux2 == 1:
+            # The written source type determines its bits. In particular the
+            # destination must not coerce a literal before reinterpretation.
+            check_expr(a, 0)
+            a = last_checked
+            nodes[n].a = i32(a)
+            finalize_literal(a)
+            ft = prune(ntype(a))
+            if not is_numeric(ft) or not is_numeric(tt) or tsize(ft) != tsize(tt):
+                fatal(nodes[n].pos, "transmute needs integer or float values of equal width (found {type_str(ft)} to {type_str(tt)})")
+            nodes[n].type = i32(tt)
+            add_flag(n, NF_CHECKED)
+            last_checked = n
+            return tt
         ak = nodes[a].kind
         if ak == .array or ak == .map_lit or ak == .tuple or ((ak == .int_lit or ak == .float_lit) and (is_numeric(tt))):
             # `[1, 2] as [u8]`, `0.5 as f32`: the target type guides the literal
