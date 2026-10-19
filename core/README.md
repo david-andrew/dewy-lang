@@ -201,6 +201,22 @@ and enabled times for raw-count comparisons. Use these counts to locate extra
 compiler work; elapsed CPU time and application timings remain the acceptance
 checks.
 
+The maintained runner builds that driver, verifies immutable compiler bundles,
+and compares the same six compilation workloads against both references:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_instructions \
+  --reference /path/to/fixed-reference/bin/dewy-core \
+  --previous /path/to/previous/bin/dewy-core \
+  --candidate /path/to/candidate/bin/dewy-core --json instructions.json
+```
+
+It uses three samples per compiler after warmup, one emitter and one CPU.
+`--workload` selects a focused subset. The compiler rebuild always uses the
+fixed reference's source, and generated throughput programs check their output.
+Unavailable or multiplexed counters fail explicitly. This is a diagnostic,
+not a replacement for timing checks or a new accepted performance baseline.
+
 Callback runtime comparisons are available with `python3 -m
 tools.sloppy_core.benchmark_callbacks CANDIDATE --baseline BASELINE --output
 callbacks.json`. Use `--workload local-counter` to isolate stack-local callbacks;

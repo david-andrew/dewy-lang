@@ -13,6 +13,26 @@ from tools import core
 pytestmark = pytest.mark.core_quick
 
 
+@pytest.mark.parametrize('stderr', ['', 'warning', '{}', '[]',
+                                   '{"instructions": 3, "enabled_ns": 5, "running_ns": 4}',
+                                   '{"instructions": 0, "enabled_ns": 5, "running_ns": 5}',
+                                   '{"instructions": true, "enabled_ns": 5, "running_ns": 5}',
+                                   '{"instructions": 3, "enabled_ns": 0, "running_ns": 0}'])
+def test_instruction_counter_rejects_unusable_measurement(stderr):
+    from tools.sloppy_core.benchmark_instructions import counter_result
+
+    with pytest.raises(ValueError):
+        counter_result(stderr)
+
+
+def test_instruction_counter_accepts_complete_measurement_after_diagnostics():
+    from tools.sloppy_core.benchmark_instructions import counter_result
+
+    assert counter_result('compiler diagnostic\n'
+                          '{"instructions": 123, "enabled_ns": 456, "running_ns": 456}\n') == {
+        'instructions': 123, 'enabled_ns': 456, 'running_ns': 456}
+
+
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
     root = tmp_path / 'source'
