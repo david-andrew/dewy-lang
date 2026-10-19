@@ -1207,6 +1207,22 @@ is retained. Match dispatch and managed parameters retain certified artifacts
 with fresh correctness checks and no new timing claims.
 [Validation, provenance and measurements](audits/2026-10-19/native-select.json).
 
+## Deferred allocator experiment
+
+An allocator-only adaptation from Sloppy `06a297d` tried denser size classes,
+cheaper main-thread state lookup, and direct carving from fresh chunks. The
+compiler self-build's peak RSS fell from about **237 to 220 MiB**, but seven
+matched pairs showed no clear compilation-time gain. The graph pilot's release
+median was **1.047×** the preceding stage, with uncertainty spanning the 2%
+resolution boundary. This does not establish an acceptable performance gain.
+
+The allocator changes are **deferred and reverted**, with the exact patch and
+raw pilots retained. The prototype passed four native/web allocation checks and
+351 quick checks; it did not proceed to independent C bootstrap or the full
+performance gate. Four useful alignment, reuse-zeroing, growth, chunk-boundary
+and C-ABI lookup checks remain, and pass on the accepted compiler in 3.02 seconds.
+[Experiment and measurements](audits/2026-10-19/allocator-experiment.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

@@ -11018,3 +11018,78 @@ def test_core_integer_select_flags(compiler, tmp_path, release):
             assert re.search(r'\bcmov\w*\b', assembly), assembly
             if name != 'constant_arms':  # constant definitions separate compare/select
                 assert not re.search(r'\bset\w+\b', assembly), assembly
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_allocator_boundaries(compiler, tmp_path, release, target):
+    sizes = {0, 1, 15, 16, 17, 262127, 262128, 262129, 300000}
+    for power in range(5, 19):
+        for block_size in (1 << power, 3 * (1 << (power - 1))):
+            sizes.update(block_size + delta for delta in (-17, -16, -15))
+    boundary_sizes = ', '.join(map(str, sorted(sizes)))
+    source = tmp_path / 'allocator.jo'
+    source.write_text(f"""@noinline
+check_size = (n: int):
+    p = __alloc(n)
+    assert((p as int) & 15 == 0)
+    assert(__alloc_size(p) >= n)
+    loop i in [0..n):
+        assert(p[i] == 0)
+        p[i] = u8(i % 251 + 1)
+    q = __grow_alloc(p, n, n + 17)
+    assert((q as int) & 15 == 0 and __alloc_size(q) >= n + 17)
+    loop i in [0..n): assert(q[i] == u8(i % 251 + 1))
+    mem_set(q, 255, n + 17)
+    __free(q)
+    # A block reused from a free list must be zeroed just like fresh pages.
+    z = __alloc(n + 17)
+    loop i in [0..n + 17): assert(z[i] == 0)
+    __free(z)
+@cabi
+ffi_alloc = (n: int) -> int:
+    check_size(n)
+    7
+check_chunks = ():
+    # Cross several fresh 4 MiB chunks while keeping previous buffers live.
+    buffers: *u8[]
+    loop k in [0..40):
+        p = __alloc(200000)
+        assert(p[0] == 0 and p[199999] == 0)
+        p[0] = u8(k)
+        p[199999] = u8(k + 1)
+        buffers.push(p)
+    loop k in [0..40):
+        assert(buffers[k][0] == u8(k) and buffers[k][199999] == u8(k + 1))
+        __free(buffers[k])
+main = () -> int:
+    warm = __alloc(1)
+    __free(warm)
+    before = alloc_count()
+    loop n in [{boundary_sizes}]: check_size(n)
+    assert(alloc_count() == before)
+    check_chunks()
+    assert(alloc_count() == before)
+    # Calling a C-ABI entry switches allocator lookup to the stack-aware path.
+    assert(ffi_alloc(33) == 7 and ffi_alloc(262129) == 7)
+    assert(alloc_count() == before)
+    0
+""")
+    binary = tmp_path / 'allocator'
+    built = subprocess.run([compiler, 'build', source, '--target', target,
+                            *(['--release'] if release else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if not node:
+            pytest.skip('Node is needed for allocator checks under WebAssembly')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'allocator.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
