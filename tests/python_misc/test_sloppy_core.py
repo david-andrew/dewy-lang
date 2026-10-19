@@ -11143,3 +11143,98 @@ main = () -> int:
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=15)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+def lexer_span_helpers(compiler):
+    directory = compiler.parent.parent / 'compiler'
+    if not directory.exists():
+        directory = Path(__file__).resolve().parents[2] / 'core/compiler'
+    # Compile the actual lexer and its intern/token helpers in a small probe.
+    # Diagnostics are stubbed; malformed-source integration tests use the compiler.
+    fast = (directory / 'dewy_fast.jo').read_text(encoding='utf-8')
+    util = (directory / 'util.jo').read_text(encoding='utf-8')
+    parse = (directory / 'dewy_parse.jo').read_text(encoding='utf-8')
+    tokens = (directory / 'dewy_tokens.jo').read_text(encoding='utf-8')
+    lex = (directory / 'lex.jo').read_text(encoding='utf-8')
+    return '\n'.join([
+        lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
+        util[util.index('struct SrcFile:'):util.index("# a file's name")],
+        parse[parse.index('enum DewyKind:'):parse.index('dw_kind_name =')],
+        tokens[tokens.index('enum DewyToken:'):],
+        'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
+        'fatal = (pos: int, message: str): panic(message)',
+        fast[fast.index('struct DewyLexeme:'):fast.index('dn_peek =')],
+    ])
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_lexer_bounded_spans(compiler, tmp_path, release):
+    # Expected payloads and byte spans are independent of the lexer implementation.
+    cases = [
+        ('', 'ignored', []),
+        ('>>=>', 'tail', [('op', '>>', 0, 2), ('op', '=>', 2, 4)]),
+        ('>>=', '>tail', [('op', '>>=', 0, 3)]),
+        ('notin', '?tail', [('identifier', 'notin', 0, 5)]),
+        ('notin?', 'tail', [('op', 'notin?', 0, 6)]),
+        ('isnt', '?tail', [('identifier', 'isnt', 0, 4)]),
+        ('is?', 'tail', [('op', 'is?', 0, 3)]),
+        ('0', 'xAF', [('source_integer', '0', 0, 1)]),
+        ('0x2F', 'AB', [('integer', '0x:2F', 0, 4)]),
+        ('0d12.5e+2', '34', [('source_real', '12.5e+2', 0, 9)]),
+        ('12.', '3', [('source_integer', '12', 0, 2), ('op', '.', 2, 3)]),
+        ('12e', '+3', [('source_integer', '12', 0, 2), ('identifier', 'e', 2, 3)]),
+        ('r', '"tail"', [('identifier', 'r', 0, 1)]),
+        ("r'a{b}'", 'tail', [('rawquoted', "r'a{b}'", 0, 7)]),
+        ('"{x + 1}"', 'tail', [('quoted', '"{x + 1}"', 0, 9)]),
+        ('λ2', 'π', [('identifier', 'λ2', 0, 3)]),
+        ('$capture', 'name', [('metatag', 'capture', 0, 8)]),
+        ('true false if', 'fy', [('boolean', 'true', 0, 4), ('boolean', 'false', 5, 10), ('identifier', 'if', 11, 13)]),
+        ('a # trailing', '\nb', [('identifier', 'a', 0, 1)]),
+        ('a # comment\nλ', 'x', [('identifier', 'a', 0, 1), ('identifier', 'λ', 12, 14)]),
+    ]
+
+    def quote(text):
+        return json.dumps(text.replace('{', '{{').replace('}', '}}'), ensure_ascii=False)
+
+    symbols = {'>>': 'shr', '=>': 'function', '>>=': 'shr_assign',
+               'notin?': 'not_contains', 'is?': 'is_type', '.': 'dot', 'if': 'kw_if'}
+    body = ['main = () -> int:', '    loop intern_names in [false, true]:']
+    for text, suffix, expected in cases:
+        raw = text.encode('utf-8')
+        expected = [*expected, ('eof', '', len(raw), len(raw))]
+        for prefix in ('', 'excluded:'):
+            start = len(prefix.encode('utf-8'))
+            stop = start + len(raw)
+            full_text = quote(prefix + text + suffix)
+            # Each case is scoped to avoid lexical binding interference.
+            body += [
+                '        if true:',
+                f'            files = [SrcFile(path = "span.dewy", src = {full_text}, is_dewy = true)]',
+                '            dn_file = 0',
+                f'            ts = dn_lex(0, {start}, {stop}, intern_names)',
+                f'            assert(ts.len() == {len(expected)})',
+            ]
+            previous_stop = 0
+            for i, (kind, payload, begin, end) in enumerate(expected):
+                gap = raw[previous_stop:begin]
+                symbol = symbols.get(payload, 'none')
+                spaced = str(bool(gap)).lower()
+                newline = str(10 in gap).lower()
+                body += [
+                    f'            assert(ts[{i}].kind == DewyKind.{kind})',
+                    f'            assert(ts[{i}].start == {start + begin} and ts[{i}].stop == {start + end})',
+                    f'            assert(dn_payload(ts[{i}]) == {quote(payload)})',
+                    f'            assert(ts[{i}].space == {spaced} and ts[{i}].newline == {newline})',
+                    f'            assert(ts[{i}].symbol == DewyToken.{symbol})',
+                ]
+                previous_stop = end
+    body += ['    42']
+    source = tmp_path / 'lexer-spans.jo'
+    source.write_text(lexer_span_helpers(compiler) + '\n' + '\n'.join(body) + '\n', encoding='utf-8')
+    binary = tmp_path / 'lexer-spans'
+    built = subprocess.run([compiler, 'build', source, *(['--release'] if release else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

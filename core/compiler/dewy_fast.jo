@@ -106,15 +106,15 @@ dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool 
     if allow_incomplete: return -1
     dn_error(start, "unterminated string")
 
-dn_matches = (source: str, at: int, stop: int, value: str) -> bool:
-    if at + len(value) > stop: return false
+dn_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
+    if len(value) > stop - at: return false
     loop i in [0..len(value)):
         if source[at + i] != value[i]: return false
     true
 
 # Dispatch punctuation by its leading byte, trying only relevant longer
 # spellings. Canonical token text avoids allocating a string per punctuation.
-dn_lex_symbol = (source: str, at: int, stop: int) -> DewyToken:
+dn_lex_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
     match source[at]:
         '%':
             if dn_matches(source, at, stop, "%="): return .percent_assign
@@ -197,19 +197,25 @@ dn_lex_symbol = (source: str, at: int, stop: int) -> DewyToken:
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src
+    # Hold the immutable string while scanning its bounded byte span. The
+    # guards below are against stop, including interpolation subexpressions.
+    assert(begin >= 0 and begin <= stop and stop <= len(source))
+    bytes = source.data()
+    if lx_cls == null: lx_init_classes()
+    classes = lx_cls
     out: DewyLexeme[]
     i = begin
     spaced = false
     newline = false
     loop i < stop:
-        c = source[i]
+        c = bytes[i]
         if c == ' ' or c == '\t' or c == '\r' or c == '\n':
             spaced = true
             if c == '\n': newline = true
             i += 1
             continue
         if c == '#':
-            loop i < stop and source[i] != '\n': i += 1
+            loop i < stop and bytes[i] != '\n': i += 1
             spaced = true
             continue
         start = i
@@ -217,19 +223,19 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
         symbol = DewyToken.none
         name: i32 = 0
         value = ""
-        if c == 'r' and i + 1 < stop and (source[i + 1] == '"' or source[i + 1] == '\''):
+        if c == 'r' and i + 1 < stop and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
             i = dn_quote_end(source, i + 1, stop, 0, true)
             kind = .rawquoted
-        else if dn_ident_start(c):
+        else if classes[c] & 1 != 0:
             i += 1
-            loop i < stop and dn_ident_part(source[i]): i += 1
+            loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
             kind = .identifier
             if intern_names:
                 id = intern_sub(source, start, i - start)
                 name = i32(id)
                 if id < dn_word_tokens.len(): symbol = dn_word_tokens[id]
                 if id == dn_true_id or id == dn_false_id: kind = .boolean
-                if i < stop and source[i] == '?':
+                if i < stop and bytes[i] == '?':
                     query = DewyToken.none
                     if id == dn_is_id: query = .is_type
                     else if id == dn_isnt_id: query = .isnt_type
@@ -242,48 +248,48 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
             else:
                 value = source[start..i)
                 if value == "true" or value == "false": kind = .boolean
-                if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and source[i] == '?':
+                if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and bytes[i] == '?':
                     value += "?"
                     i += 1
                     kind = .op
         else if c == '$':
             i += 1
-            loop i < stop and dn_ident_part(source[i]): i += 1
+            loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
             if i == start + 1: dn_error(start, "expected a name after $")
             kind = .metatag
         else if is_digit(c):
             decimal = true
             digits = start
-            if c == '0' and i + 1 < stop and find_byte("btqsodzxug", source[i + 1]) >= 0:
-                decimal = source[i + 1] == 'd'
+            if c == '0' and i + 1 < stop and find_byte("btqsodzxug", bytes[i + 1]) >= 0:
+                decimal = bytes[i + 1] == 'd'
                 i += 2
                 digits = i
-            if i < stop and (source[i] == '"' or source[i] == '\''):
+            if i < stop and (bytes[i] == '"' or bytes[i] == '\''):
                 i = dn_quote_end(source, i, stop)
                 kind = .based_string
             else:
                 loop i < stop:
-                    d = source[i]
+                    d = bytes[i]
                     if is_digit(d) or d == '_' or (not decimal and is_alpha(d)): i += 1
                     else: break
                 if i == digits: dn_error(start, "expected digits after the base prefix")
                 kind = if decimal: DewyKind.source_integer else: DewyKind.integer
-                if decimal and i + 1 < stop and source[i] == '.' and is_digit(source[i + 1]):
+                if decimal and i + 1 < stop and bytes[i] == '.' and is_digit(bytes[i + 1]):
                     i += 1
-                    loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
+                    loop i < stop and (is_digit(bytes[i]) or bytes[i] == '_'): i += 1
                     kind = .source_real
-                if decimal and i + 1 < stop and (source[i] == 'e' or source[i] == 'E') and (is_digit(source[i + 1]) or source[i + 1] == '+' or source[i + 1] == '-'):
+                if decimal and i + 1 < stop and (bytes[i] == 'e' or bytes[i] == 'E') and (is_digit(bytes[i + 1]) or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
                     i += 1
-                    if i < stop and (source[i] == '+' or source[i] == '-'): i += 1
+                    if i < stop and (bytes[i] == '+' or bytes[i] == '-'): i += 1
                     first = i
-                    loop i < stop and (is_digit(source[i]) or source[i] == '_'): i += 1
+                    loop i < stop and (is_digit(bytes[i]) or bytes[i] == '_'): i += 1
                     if i == first: dn_error(start, "expected exponent digits")
                     kind = .source_real
         else if c == '"' or c == '\'':
             i = dn_quote_end(source, i, stop)
             kind = .quoted
         else:
-            symbol = dn_lex_symbol(source, start, stop)
+            symbol = dn_lex_symbol(bytes, start, stop)
             if symbol == .none: dn_error(start, "unexpected character in Dewy source")
             value = dn_token_text(symbol)
             i += len(value)

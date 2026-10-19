@@ -1240,6 +1240,30 @@ all measurements are retained, along with useful copy bounds and live-register
 tests. This candidate does not become the next performance reference.
 [Experiment and measurements](audits/2026-10-19/short-copy-experiment.json).
 
+## Bounded Dewy lexer scanning
+
+The Dewy lexer now retains its immutable source while scanning a validated byte
+span. Explicit end checks still bound every lookahead, including interpolation
+excerpts; quoted strings and source slices keep their checked string operations.
+Identifier scanning reuses the existing Sloppy-derived byte-class table without
+changing Unicode name classification.
+
+The diagnostic large default build retires **1.03% fewer instructions**. In the
+complete matched gate, default/release CPU ratios are **0.994× / 0.998×** against
+the preceding stage; other compile workloads are essentially flat. All **44**
+comparisons pass without rechecks. All eight runtime workloads retain certified
+artifacts and pass fresh correctness checks; this stage makes no new C timing
+claims. The loaded host measures about **71k fresh root lines/CPU-second** here;
+that absolute rate is not comparable to a less-loaded run and remains below the
+250k target.
+
+The independent C bootstrap passes **355 quick checks**, and the full suite passes
+**5,982 checks in 145.21 seconds** with two workers. New direct lexer tests check
+20 independent cases with excluded prefixes/suffixes, interning and formatting
+modes, and both native optimization modes. They cover token kinds, payloads,
+byte spans, spacing, operators, numeric boundaries, Unicode and string excerpts.
+[Validation and measurements](audits/2026-10-19/bounded-lexer.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
