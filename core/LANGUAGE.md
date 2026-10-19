@@ -1611,6 +1611,35 @@ and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
 is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
 
+`regex(pattern)` prepares a reusable regular expression. `text.find(pattern)`
+returns `Match|none`; `find_all` returns nonoverlapping matches, `contains` tests
+for any match, and `matches` requires the whole string to match. A `Match` has
+`text`, `groups`, `start` and `end`. **Match offsets and the optional `find`
+starting offset are UTF-8 byte offsets**, while regex atoms consume code points.
+They are not Dewy's ordinary grapheme indices; use the returned `text` directly.
+
+```dewy
+let date = regex(r"(\d{4})-(\d\d)-(\d\d)")
+let found = "due 2026-10-19!".find(date)
+if found isnt? none {printl(found.groups[0])}
+let rewritten = "due 2026-10-19!".replace(date "$3/$2/$1")
+let fields = "a, b;c".split(regex(r"[,;]\s*"))
+```
+
+Patterns support character classes, alternatives, captured and `(?:...)`
+uncaptured groups, greedy/lazy repetitions, line anchors `^`/`$`, and word
+boundaries. `(?i)` at the start folds ASCII case. Use `regex_error(pattern)`
+to check user-supplied patterns before preparing them. An empty match advances
+one code point before the next search; unmatched capture groups contain `""`.
+`replace` accepts `$0` for the match, `$1` onward for captures, `$$` for a dollar,
+or a `(Match):>string` callback. `split` returns the text between matches.
+
+Matching uses compact tables and skips impossible starting positions. Long
+inputs can use bounded lazy DFAs, with the Pike VM retained for anchors, captures
+and fallback. Prepare a pattern once when matching many strings. This bounds
+the matching strategy without exponential backtracking; the precise performance
+depends on the pattern, input and whether preparation is included.
+
 Interpolation uses `{expression}` inside a string.
 Single or double quotes support escapes and interpolation. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces

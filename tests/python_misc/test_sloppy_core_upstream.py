@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-CASES = ('arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
+CASES = ('regex', 'arrays', 'cow', 'bounds', 'loops', 'loopdecl', 'loopopt', 'optloops',
          'loop_combined_mut', 'loop_kv_mut', 'arg_alias_copy', 'loop_and_unpack',
          'optionals', 'unions', 'narrow_none', 'union_infer', 'match', 'match_path', 'enum_union')
 

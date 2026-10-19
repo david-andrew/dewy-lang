@@ -1,0 +1,25 @@
+# requires: sloppy
+# regular expressions: groups, classes, greedy and lazy repeats, (?i), \b, anchors on lines, empty
+# matches, replace with $n and with a function, split, code points, no blow-up on (a*)*b
+date = regex(r"(\d{4})-(\d\d)-(\d\d)")
+if let m = "due 2026-10-14!".find(date): print(m.text, m.groups, m.start, m.end)
+print("2026-10-14".matches(date), "x2026-10-14".matches(date), "2026-10-14".contains(regex(r"-1\d-")))
+print("a1b22c333".find_all(regex(r"\d+")).map((m): m.text))
+print("x = 1, y = 2".replace(regex(r"(\w) = (\d)"), "$2=$1"))
+print("a, b;c".split(regex(r"[,;]\s*")))
+print("<a><b>".find_all(regex("<.*?>")).map((m): m.text), "<a><b>".find(regex("<.*>"))!.text)
+print("Hello World".replace(regex(r"(?i)o"), "0"), "HELLO".matches(regex(r"(?i)hel+o")))
+print("cat category dog".find_all(regex(r"\bcat\b")).len(), "aaa".find_all(regex("a*")).len())
+print("ab".split(regex("")), "x".replace(regex("y*"), "-"))
+print("café naïve".find_all(regex(r"[^\s]+")).map((m): m.text), "é".matches(regex(".")))
+print("color colour".find_all(regex("colou?r")).len(), "ab ab ab".replace(regex("(ab) ?"), (m): m.groups[0].upper()))
+print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab".matches(regex("(a*)*b")), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".matches(regex("(a|aa)*c")))
+print("x\{2}".find(regex(r"x\{2\}")) != none, "abc".find(regex("b|c"))!.text, "line1\nline2".find_all(regex("^l\\w+$")).len())
+# long texts (the DFAs): spans, groups, contains, matches, a match's start found from its end,
+# (?i), text past ASCII, and bytes that are not UTF-8 (the VM)
+long = "x".repeat(300) + " see https://example.com/a?b=1 and http://x.org/ ok " + "y".repeat(300)
+print(long.find_all(regex(r"https?://([a-z.]+)(/\S*)")).map((m): "{m.start} {m.groups}"))
+print(long.contains(regex(r"x\.org/ ok")), long.contains(regex(r"x\.org/ no")), long.matches(regex(r"x+ see .* y+")), long.matches(regex(r"x+ see .* z+")))
+print(("ab" * 200 + "aab").find(regex("a+b"), 390)!.start, ("ab" * 200 + "aab").find_all(regex("(?i)A+B")).len())
+print(("é日" * 200 + "日本語!").find(regex(r"[^é]+!"))!.start, ("x" * 300 + "\xC3A" + "B" * 3).find_all(regex("[A-Z]+")).map((m): m.start))
+print(("a" * 300 + "b").find(regex("a*?b|a"))!.end, ("a" * 300).replace(regex(r"a{7}"), "7").len(), ("ba" * 200).split(regex("a")).len())

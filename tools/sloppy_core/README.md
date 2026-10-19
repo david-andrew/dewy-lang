@@ -1760,3 +1760,21 @@ about 21.5 versus 13.9 pytest seconds, with aggregate child CPU time falling fro
 All 4,735 checks passed in the full gate in 141.38 seconds under different host
 conditions; this is a value-suite improvement, not a paired full-gate speed claim.
 See `value-batch-size-*` audits.
+
+## Regex performance checks
+
+Measure seven regex workloads in default and release modes:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_regex \
+  --core /path/to/candidate/bin/dewy-core \
+  --baseline /path/to/baseline/bin/dewy-core --json /path/to/report.json
+```
+
+The harness alternates sequential runs on one CPU, uses thread CPU time and independently checks every result.
+Long searches, captures, Unicode, line anchors, reused short patterns and
+prepare-plus-match costs are reported separately. The default is seven matched
+samples after warmup. `--iteration-divisor 1000` is a harness smoke check only.
+Use `TMPDIR` to select scratch storage; the host must support Linux thread CPU
+clocks. The [initial port audit](../../dewy/audits/2026-10-19/regex-engine.json)
+retains the full-sized samples and their compiler/library identities.

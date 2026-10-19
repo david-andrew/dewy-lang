@@ -11,7 +11,10 @@
 # \w takes letters of any script ("Zürich" is one word). A pattern a user typed is checked first
 # with regex_error(pattern) (regex(pattern) stops the program when it is wrong).
 # Matching takes time in proportion to the text's length times the pattern's (it never
-# backtracks without end), and works on characters (code points), not bytes.
+# backtracks without end), and works on characters (code points), not bytes. Make a Regex once
+# and use it for every text: regex() reads and prepares the pattern each time. On a long text,
+# a pattern without ^ $ \b \B is matched a character at a time by a table made as it goes
+# (a DFA), a few nanoseconds a character.
 
 struct Regex:
     pattern: str
@@ -19,8 +22,24 @@ struct Regex:
     classes: __ReClass[]
     groups: int             # how many ( ) groups it has
     icase = false
-    first = -1              # (an ASCII character every match starts with, or -1: skipped to with memchr)
-    first_pc = -1           # (the instruction that reads every match's first character, or -1)
+    # (made from prog and classes for matching: each instruction's op, x and y in a row (for a
+    # character, its other case under (?i), else itself again); each class's ASCII characters
+    # as 128 bits, and its ranges and whether it is negated for the others; the ASCII characters
+    # a match can start with, whether one past ASCII can, and start_any: no telling (it can be
+    # empty); the text every match starts with)
+    code: int[]
+    amap: int[]
+    crange: int[]
+    cstart: int[]
+    cneg: int[]
+    smap: int[]
+    start_wide = true
+    start_any = true
+    prefix = ""
+    # (with no ^ $ \b \B in it: long texts are matched by DFAs made as they are needed, and
+    # rcode is the program of the pattern read from right to left, for where a match starts)
+    dfa = false
+    rcode: int[]
 
 # one match: where it is (byte offsets), its text, and the text of each ( ) group ("" for a
 # group that took no part)
@@ -82,24 +101,20 @@ regex = (pattern: str) -> Regex:
     __re_emit(p, ast, prog)
     prog.push(__ReIns(__RE_MATCH))
     r.prog = prog
-    # (the first character read, when it is always the same one)
-    pc = 0
-    loop pc < prog.len():
-        op = prog[pc].op
-        if op == __RE_SAVE or op == __RE_BOL or op == __RE_EOL or op == __RE_WORDB or op == __RE_NWORDB: pc += 1
-        else if op == __RE_JMP: pc = prog[pc].x
-        else:
-            if op == __RE_CHAR and prog[pc].x < 128 and not (r.icase and is_alpha(u8(prog[pc].x))): r.first = prog[pc].x
-            if op == __RE_CHAR or op == __RE_CLASS or op == __RE_ANY: r.first_pc = pc
-            break
+    __re_compile(r)
+    if r.dfa:
+        rprog: __ReIns[]
+        __re_emit(p, ast, rprog, true)
+        rprog.push(__ReIns(__RE_MATCH))
+        r.rcode = __re_code(rprog, r.icase)
     r
 
 # the first match in s (from byte offset `from` on), or none
 find = (s: str, r: Regex, from: int = 0) -> Match?:
+    if from > len(s): return none
     vm = __re_vm(r)
-    caps = __re_run(r, s, from, false, false, vm)
-    if caps.len() == 0: return none
-    __re_match(s, r, caps)
+    if not __re_search(vm, s, max(from, 0)): return none
+    __re_match(s, r.groups, vm.found)
 
 # every match in s, from left to right, not overlapping
 find_all = (s: str, r: Regex) -> Match[]:
@@ -107,23 +122,32 @@ find_all = (s: str, r: Regex) -> Match[]:
     at = 0
     vm = __re_vm(r)
     loop at <= len(s):
-        caps = __re_run(r, s, at, false, false, vm)
-        if caps.len() == 0: break
-        out.push(__re_match(s, r, caps))
+        if not __re_search(vm, s, at): break
+        out.push(__re_match(s, r.groups, vm.found))
         # (an empty match: go on from the next character)
-        if caps[1] == caps[0]: at = caps[1] + max(__re_cp_len(s, caps[1]), 1)
-        else: at = caps[1]
+        a = vm.found[0]
+        e = vm.found[1]
+        if e == a: at = e + max(__re_cp_len(s, e), 1)
+        else: at = e
     out
 
 # the whole of s matches r (not only a part of it)
 matches = (s: str, r: Regex) -> bool:
     vm = __re_vm(r)
-    __re_run(r, s, 0, true, true, vm).len() > 0
+    if vm.dfa and len(s) >= __RE_LONG:
+        d = __re_dfa(vm, vm.code, false)
+        e, lo = __re_dfa_run(d, s, 0, false)
+        if e != -2: return e == len(s)
+    __re_run(vm, s, 0, true, true)
 
 # r matches somewhere in s
 contains = (s: str, r: Regex) -> bool:
     vm = __re_vm(r)
-    __re_run(r, s, 0, false, false, vm).len() > 0
+    if vm.dfa and len(s) >= __RE_LONG:
+        d = __re_dfa(vm, vm.code, true)
+        e, lo = __re_dfa_run(d, s, 0, true)
+        if e != -2: return e >= 0
+    __re_run(vm, s, 0, false, false)
 
 # s with each match of r replaced by `with`, where $0 is the match and $1, $2 ... its groups
 # ($$ for a $)
@@ -157,9 +181,9 @@ split = (s: str, r: Regex) -> str[]:
     out.push(s[last..])
     out
 
-__re_match = (s: str, r: Regex, caps: int[]) -> Match:
+__re_match = (s: str, groups: int, caps: int[]) -> Match:
     gs: str[]
-    loop g in [1..r.groups]:
+    loop g in [1..groups]:
         a = caps[g * 2]
         b = caps[g * 2 + 1]
         if a >= 0 and b >= a: gs.push(s[a..b))
@@ -187,95 +211,571 @@ __re_expand = (with: str, m: Match) -> str:
 
 # ---------------- matching: a Pike VM (every thread of the program in step, one character at a time) ----------------
 
-# the capture positions of the first match (leftmost, preferring what the pattern prefers) at or
-# after byte `from`; empty: none. anchored: only at `from`; whole: only one that ends at the end
-# (the threads at this position and at the next: lists [k] for k = cur and 1 - cur; on[pc] is the
-# generation in which pc was reached, a new one for each list filled)
+# (the instructions as matching reads them, the classes' ASCII bitmaps and ranges, and what a
+# match can start with)
+__re_compile = (r: mut Regex):
+    code = __re_code(r.prog, r.icase)
+    r.code = code
+    r.dfa = true
+    loop ins in r.prog:
+        if ins.op == __RE_BOL or ins.op == __RE_EOL or ins.op == __RE_WORDB or ins.op == __RE_NWORDB: r.dfa = false
+    amap = fill(0, 2 * r.classes.len())
+    crange: int[]
+    cstart: int[]
+    cneg: int[]
+    loop x in 0.. and k in r.classes:
+        # (its ranges' ASCII characters, under (?i) each letter's other case too, then the
+        # others when it is negated)
+        m0 = 0
+        m1 = 0
+        i = 0
+        loop i < k.ranges.len():
+            c = k.ranges[i]
+            hi = min(k.ranges[i + 1], 127)
+            loop c <= hi:
+                if c < 64: m0 = m0 | (1 << c)
+                else: m1 = m1 | (1 << (c - 64))
+                c += 1
+            i += 2
+        if r.icase:
+            # (A-Z are bits 1 to 26 of m1 and a-z bits 33 to 58: each to the other's place)
+            m1 = m1 | ((m1 >> 32) & 0x7FFFFFE) | ((m1 & 0x7FFFFFE) << 32)
+        if k.neg:
+            m0 = m0 xor -1
+            m1 = m1 xor -1
+        amap[x * 2] = m0
+        amap[x * 2 + 1] = m1
+        cstart.push(crange.len())
+        loop v in k.ranges: crange.push(v)
+        if k.neg: cneg.push(1)
+        else: cneg.push(0)
+    cstart.push(crange.len())
+    r.amap = amap
+    r.crange = crange
+    r.cstart = cstart
+    r.cneg = cneg
+    # (the instructions a match's first character can be read by: those reached from the start
+    # through jumps, splits, saves and assertions (taken as passed: this only skips places no
+    # match can start at))
+    smap = [0, 0]
+    wide = false
+    any = false
+    seen = fill(false, r.prog.len())
+    todo = [0]
+    loop todo.len() > 0:
+        pc = todo.pop()
+        if seen[pc]: continue
+        seen[pc] = true
+        ins = r.prog[pc]
+        op = ins.op
+        if op == __RE_JMP: todo.push(ins.x)
+        else if op == __RE_SPLIT:
+            todo.push(ins.x)
+            todo.push(ins.y)
+        else if op == __RE_MATCH: any = true
+        else if op == __RE_CHAR:
+            if ins.x >= 128: wide = true
+            else:
+                loop c in [ins.x, code[pc * 3 + 2]]: smap[c >> 6] = smap[c >> 6] | (1 << (c & 63))
+        else if op == __RE_ANY:
+            wide = true
+            smap[0] = smap[0] | (-1 xor (1 << 10))
+            smap[1] = -1
+        else if op == __RE_CLASS:
+            smap[0] = smap[0] | amap[ins.x * 2]
+            smap[1] = smap[1] | amap[ins.x * 2 + 1]
+            k = r.classes[ins.x]
+            if k.neg: wide = true
+            loop i in [0..k.ranges.len() / 2):
+                if k.ranges[i * 2 + 1] >= 128: wide = true
+        else: todo.push(pc + 1)
+    r.smap = smap
+    r.start_wide = wide
+    r.start_any = any
+    # (the characters every match starts with, when they are always the same ones)
+    pre: u8[]
+    pc = 0
+    loop pc < r.prog.len():
+        ins = r.prog[pc]
+        op = ins.op
+        if op == __RE_SAVE: pc += 1
+        else if op == __RE_JMP: pc = ins.x
+        else if (op == __RE_BOL or op == __RE_EOL or op == __RE_WORDB or op == __RE_NWORDB) and pre.len() == 0: pc += 1
+        else if op == __RE_CHAR and code[pc * 3 + 2] == ins.x:
+            __utf8_push(pre, ins.x)
+            pc += 1
+        else: break
+    r.prefix = str_from_bytes(pre)
+
+# (each instruction's op, x and y in a row; for a character, y is its other case under (?i),
+# else itself again)
+__re_code = (prog: __ReIns[], icase: bool) -> int[]:
+    code = fill(0, prog.len() * 3)
+    loop i in 0.. and ins in prog:
+        y = ins.y
+        if ins.op == __RE_CHAR:
+            y = ins.x
+            if icase:
+                y = __re_upper(ins.x)
+                if y == ins.x: y = __re_fold(ins.x)
+        code[i * 3] = ins.op
+        code[i * 3 + 1] = ins.x
+        code[i * 3 + 2] = y
+    code
+
+# the threads at this position and at the next: two lists of up to one thread per instruction,
+# at [0..np) and [np..2 np) of tpc (the instruction each is at, in the order the pattern prefers
+# them) and of tcap (nc numbers each: where its match started, then its groups' starts and
+# ends); on[pc] is the generation in which pc was reached, a new one for each list filled. (The
+# pattern's tables are copied in, so that matching passes this along, not the Regex)
 struct __ReVM:
+    code: int[]
+    amap: int[]
+    crange: int[]
+    cstart: int[]
+    cneg: int[]
+    s0 = 0                      # (the ASCII characters a match can start with, as 128 bits)
+    s1 = 0
+    wide = true
+    any = true
+    prefix = ""
+    dfa = false
+    rcode: int[]
+    np = 0                      # (how many instructions)
+    nc = 0                      # (how many numbers a thread's captures take)
     on: int[]
     gen = 0
-    gens: int[]                 # (each list's generation)
-    pcs: int[][]                # (the threads, in the order the pattern prefers them)
-    starts: int[][]             # (where each one's match started)
-    caps: int[][][]             # (its groups' starts and ends; slots 0 and 1 unused)
-    empty: int[]
+    tpc: int[]
+    tcap: int[]
+    scratch: int[]              # (the captures of the thread being followed)
+    stack: int[]                # (what is left to follow: an instruction, or a capture to put back)
+    found: int[]                # (the match: its start, end, then its groups' starts and ends)
+    fwd: __ReDFA                # (the DFAs, made when first needed)
+    rev: __ReDFA
+    no_dfa = false              # (one gave up: the Pike VM from then on)
 
 __re_vm = (r: Regex) -> __ReVM:
-    __ReVM(fill(0, r.prog.len()), 0, [1, 2], [[], []], [[], []], [[], []], fill(-1, 2 * (r.groups + 1)))
+    np = r.prog.len()
+    nc = 2 * (r.groups + 1)
+    vm = __ReVM(r.code, r.amap, r.crange, r.cstart, r.cneg, r.smap[0], r.smap[1], r.start_wide, r.start_any, r.prefix, r.dfa, r.rcode, np, nc)
+    vm.on = fill(0, np)
+    vm.tpc = fill(0, 2 * np)
+    vm.tcap = fill(-1, 2 * np * nc)
+    vm.scratch = fill(-1, nc)
+    vm.stack = fill(0, 4 * np + 8)
+    vm.found = fill(-1, nc)
+    vm
 
-__re_run = (r: Regex, s: str, from: int, anchored: bool, whole: bool, vm: mut __ReVM) -> int[]:
-    found: int[]                # (the best match's captures so far, and where it starts and ends)
-    found_at = -1
-    found_end = -1
-    pos = from
+# the first match (leftmost, preferring what the pattern prefers) at or after byte `from`, into
+# vm.found; false: none. anchored: only at `from`; whole: only one that ends at the end
+__re_run = (vm: mut __ReVM, s: str, from: int, anchored: bool, whole: bool) -> bool:
     n = len(s)
+    sp = data(s)
+    code = data(vm.code)
+    amap = data(vm.amap)
+    crange = data(vm.crange)
+    cstart = data(vm.cstart)
+    cneg = data(vm.cneg)
+    np = vm.np
+    nc = vm.nc
+    on = data(vm.on)
+    tpc = data(vm.tpc)
+    tcap = data(vm.tcap)
+    sc = data(vm.scratch)
+    st = data(vm.stack)
+    fd = data(vm.found)
+    s0 = vm.s0
+    s1 = vm.s1
+    wide = vm.wide
+    any = vm.any
+    pre = vm.prefix
+    found_at = -1
+    pos = from
     cur = 0
-    __re_clear(vm, 0)
-    __re_clear(vm, 1)
+    ccur = 0
+    gen = vm.gen + 1
+    gcur = gen
     loop true:
         if found_at < 0 and (not anchored or pos == from):
-            # (nothing running: on to where the first character is)
-            if vm.pcs[cur].len() == 0 and not anchored:
-                if r.first >= 0:
-                    pos = __memchr(data(s), pos, n, u8(r.first))
+            go = true
+            if ccur == 0 and not anchored:
+                # (nothing running: on to where a match can start)
+                if len(pre) > 0:
+                    pos = find(s, pre, pos)
                     if pos < 0: break
-                else if r.first_pc >= 0:
-                    # (past the characters no match can start with)
-                    fi = r.prog[r.first_pc]
+                else if not any:
                     loop pos < n:
-                        fc = int(s[pos])
-                        if fc >= 0x80 or __re_step(r, fi, fc): break
+                        b = int(sp[pos])
+                        if b >= 128:
+                            if wide: break
+                        else if b < 64:
+                            if (s0 >> b) & 1 != 0: break
+                        else if (s1 >> (b - 64)) & 1 != 0: break
                         pos += 1
                     if pos >= n: break
-            __re_add(r, s, vm, cur, 0, pos, pos, vm.empty)
+            else if not any:
+                # (a match starting here too, when this character can start one)
+                go = false
+                if pos < n:
+                    b = int(sp[pos])
+                    if b >= 128: go = wide
+                    else if b < 64: go = (s0 >> b) & 1 != 0
+                    else: go = (s1 >> (b - 64)) & 1 != 0
+            if go:
+                loop j in [0..nc): sc[j] = -1
+                sc[0] = pos
+                ccur = __re_close(code, on, gcur, st, sc, nc, tpc, tcap, cur * np, ccur, 0, pos, sp, n)
         # (none left: done, unless a match may still start further on)
-        if vm.pcs[cur].len() == 0 and (found_at >= 0 or anchored): break
+        if ccur == 0 and (found_at >= 0 or anchored): break
         c = -1
         clen = 0
         if pos < n:
-            c, clen = __re_cp(s, pos)
+            c = int(sp[pos])
+            clen = 1
+            if c >= 0x80: c, clen = __re_cp(s, pos)
         nx = 1 - cur
+        gen += 1
+        cnx = 0
         i = 0
-        loop i < vm.pcs[cur].len():
-            pc = vm.pcs[cur][i]
-            ins = r.prog[pc]
-            if ins.op == __RE_MATCH:
+        loop i < ccur:
+            t = cur * np + i
+            pc = tpc[t]
+            o = pc * 3
+            op = code[o]
+            if op == __RE_MATCH:
                 if not whole or pos == n:
-                    found = vm.caps[cur][i]
-                    found_at = vm.starts[cur][i]
-                    found_end = pos
+                    loop j in [0..nc): fd[j] = tcap[t * nc + j]
+                    fd[1] = pos
+                    found_at = fd[0]
                     # (the rest are threads the pattern likes less)
                     break
-            else if c >= 0 and __re_step(r, ins, c): __re_add(r, s, vm, nx, pc + 1, pos + clen, vm.starts[cur][i], vm.caps[cur][i])
+            else if c >= 0 and __re_test(code, o, c, amap, crange, cstart, cneg):
+                o2 = o + 3
+                if code[o2] <= __RE_CLASS or code[o2] == __RE_MATCH:
+                    # (the next instruction reads a character too: the thread goes on to it)
+                    if on[pc + 1] != gen:
+                        on[pc + 1] = gen
+                        t2 = nx * np + cnx
+                        tpc[t2] = pc + 1
+                        loop j in [0..nc): tcap[t2 * nc + j] = tcap[t * nc + j]
+                        cnx += 1
+                else:
+                    loop j in [0..nc): sc[j] = tcap[t * nc + j]
+                    cnx = __re_close(code, on, gen, st, sc, nc, tpc, tcap, nx * np, cnx, pc + 1, pos + clen, sp, n)
             i += 1
         if pos >= n: break
         pos += clen
-        __re_clear(vm, cur)
         cur = nx
-    if found_at < 0: return []
-    found[0] = found_at
-    found[1] = found_end
-    found
+        ccur = cnx
+        gcur = gen
+    vm.gen = gen
+    found_at >= 0
 
-# list k emptied, for a new position
-__re_clear = (vm: mut __ReVM, k: int):
-    vm.pcs[k].clear()
-    vm.starts[k].clear()
-    vm.caps[k].clear()
-    vm.gen += 1
-    vm.gens[k] = vm.gen
+# (the instruction at code[o] reads character c)
+__re_test = (code: *int, o: int, c: int, amap: *int, crange: *int, cstart: *int, cneg: *int) -> bool:
+    op = code[o]
+    if op == __RE_CHAR: return c == code[o + 1] or c == code[o + 2]
+    if op == __RE_ANY: return c != 10
+    x = code[o + 1]
+    if c < 64: return (amap[x * 2] >> c) & 1 != 0
+    if c < 128: return (amap[x * 2 + 1] >> (c - 64)) & 1 != 0
+    k = cstart[x]
+    loop k < cstart[x + 1]:
+        if c >= crange[k] and c <= crange[k + 1]: return cneg[x] == 0
+        k += 2
+    cneg[x] != 0
 
-__re_step = (r: Regex, ins: __ReIns, c: int) -> bool:
-    if ins.op == __RE_CHAR:
-        if c == ins.x: return true
-        return r.icase and __re_fold(c) == __re_fold(ins.x)
-    if ins.op == __RE_ANY: return c != 10
-    if ins.op == __RE_CLASS:
-        k = r.classes[ins.x]
-        hit = __re_in(k, c)
-        if not hit and r.icase: hit = __re_in(k, __re_fold(c)) or __re_in(k, __re_upper(c))
-        return hit != k.neg
-    false
+# a thread at pc (at byte pos, with the captures in sc), followed through jumps, splits, saves
+# and assertions to the instructions that read a character (or match), each put at the end of
+# the list at `base` (cnt threads in it so far); how many there are then. (The stack's entries
+# are two numbers: an instruction, or -1 - a capture and the value to put back in it)
+__re_close = (code: *int, on: *int, gen: int, st: *int, sc: *int, nc: int, tpc: *int, tcap: *int, base: int, cnt0: int, pc0: int, pos: int, sp: *u8, n: int) -> int:
+    cnt = cnt0
+    st[0] = pc0
+    top = 2
+    loop top > 0:
+        top -= 2
+        pc = st[top]
+        if pc < 0:
+            sc[-1 - pc] = st[top + 1]
+            continue
+        # (one path followed to its end: the other way of a split, and a capture to put back,
+        # left on the stack)
+        loop on[pc] != gen:
+            on[pc] = gen
+            o = pc * 3
+            op = code[o]
+            if op == __RE_JMP: pc = code[o + 1]
+            else if op == __RE_SPLIT:
+                st[top] = code[o + 2]
+                top += 2
+                pc = code[o + 1]
+            else if op == __RE_SAVE:
+                slot = code[o + 1]
+                st[top] = -1 - slot
+                st[top + 1] = sc[slot]
+                top += 2
+                sc[slot] = pos
+                pc += 1
+            else if op == __RE_BOL:
+                if pos > 0 and sp[pos - 1] != '\n': break
+                pc += 1
+            else if op == __RE_EOL:
+                if pos < n and sp[pos] != '\n': break
+                pc += 1
+            else if op == __RE_WORDB or op == __RE_NWORDB:
+                wa = pos > 0 and __re_word(int(sp[pos - 1]))
+                wb = pos < n and __re_word(int(sp[pos]))
+                if (wa != wb) != (op == __RE_WORDB): break
+                pc += 1
+            else:
+                t = base + cnt
+                tpc[t] = pc
+                loop j in [0..nc): tcap[t * nc + j] = sc[j]
+                cnt += 1
+                break
+    cnt
+
+# ---------------- matching long texts: DFAs ----------------
+# A state is a list of instructions, the ones the Pike VM's threads would be at, in order; its
+# next state for a character is made the first time that character comes. The forward one
+# (cut) works as the VM does, without captures: what comes after a MATCH in a list is dropped
+# (threads the pattern likes less), and once a match was seen no new one starts; it gives where
+# the match ends. The one of the pattern read from right to left, run back from there, gives
+# the first place a match ending there can start (the match's start: no match starts before
+# it); the VM then finds the groups in that match only. A pattern with ^ $ \b \B, a text with
+# bytes that are not UTF-8, or a pattern whose DFA has too many states, is left to the VM.
+
+const __RE_LONG = 256           # (shorter texts: the VM, with nothing to make first)
+const __RE_STATES = 2000
+const __RE_SEEN = 1             # (a match was seen at or before this place: none starts after)
+const __RE_HAS = 2              # (a match ends here)
+const __RE_DEAD = 4             # (no threads: nothing goes on from here)
+
+struct __ReDFA:
+    code: int[]
+    cut = false
+    amap: int[]                 # (the pattern's tables, as in __ReVM)
+    crange: int[]
+    cstart: int[]
+    cneg: int[]
+    s0 = 0
+    s1 = 0
+    wide = true
+    any = true
+    prefix = ""
+    pool: int[]                 # (each state's instructions, one state after another)
+    off: int[]                  # (state i's are pool[off[i]..off[i + 1]))
+    flags: int[]
+    index: {str: int}
+    trans: int[]                # (state * 128 + an ASCII character: the next state, -1 not made yet)
+    wide_trans: {int: int}      # (state * 0x110000 + another character)
+    on: int[]
+    st: int[]
+    sc: int[]
+    buf: int[]
+    gen = 0
+
+__re_dfa = (vm: __ReVM, code: int[], cut: bool) -> __ReDFA:
+    np = code.len() / 3
+    d = __ReDFA(code, cut, vm.amap, vm.crange, vm.cstart, vm.cneg, vm.s0, vm.s1, vm.wide, vm.any, vm.prefix)
+    d.off = [0]
+    d.on = fill(0, np)
+    d.st = fill(0, 4 * np + 8)
+    d.sc = fill(-1, vm.nc)
+    d.buf = fill(0, np)
+    d.gen = 1
+    # (state 0: a match starting here, and nothing else running)
+    cnt = __re_close(data(d.code), data(d.on), 1, data(d.st), data(d.sc), 0, data(d.buf), data(d.buf), 0, 0, 0, 0, data(d.prefix), 0)
+    __re_dfa_add(d, cnt, 0, true)
+    d
+
+# the state of the cnt instructions in d.buf (a new one, or the one already made); fresh: only
+# a match starting here, nothing from before (the same list as one with threads running into it
+# is another state: no match starts before this one's place)
+__re_dfa_add = (d: mut __ReDFA, cnt: int, seen: int, fresh: bool) -> int:
+    has = 0
+    n = cnt
+    loop i in [0..cnt):
+        if d.code[d.buf[i] * 3] == __RE_MATCH:
+            has = __RE_HAS
+            # (the ones after it are never followed)
+            if d.cut: n = i + 1
+            break
+    kb: u8[]
+    if fresh: kb.push(u8(seen | 8))
+    else: kb.push(u8(seen))
+    loop i in [0..n):
+        pc = d.buf[i]
+        kb.push(u8(pc & 255))
+        kb.push(u8((pc >> 8) & 255))
+        kb.push(u8((pc >> 16) & 255))
+        kb.push(u8((pc >> 24) & 255))
+    key = str_from_bytes(kb)
+    k = d.index.get(key, -1)
+    if k >= 0: return k
+    k = d.flags.len()
+    d.index[key] = k
+    loop i in [0..n): d.pool.push(d.buf[i])
+    d.off.push(d.pool.len())
+    dead = 0
+    if n == 0: dead = __RE_DEAD
+    d.flags.push(seen | has | dead)
+    loop _ in [0..128): d.trans.push(-1)
+    k
+
+# the state after state si reads character c (made when it is not there yet; -1: too many states)
+__re_dfa_go = (d: mut __ReDFA, si: int, c: int) -> int:
+    key = si * 0x110000 + c
+    if c < 128:
+        t = d.trans[si * 128 + c]
+        if t >= 0: return t
+    else:
+        t = d.wide_trans.get(key, -1)
+        if t >= 0: return t
+    code = data(d.code)
+    d.gen += 1
+    gen = d.gen
+    cnt = 0
+    loop k in [d.off[si]..d.off[si + 1]):
+        pc = d.pool[k]
+        if code[pc * 3] != __RE_MATCH and __re_test(code, pc * 3, c, data(d.amap), data(d.crange), data(d.cstart), data(d.cneg)):
+            cnt = __re_close(code, data(d.on), gen, data(d.st), data(d.sc), 0, data(d.buf), data(d.buf), 0, cnt, pc + 1, 0, data(d.prefix), 0)
+    seen = 0
+    fresh = false
+    if d.cut:
+        if d.flags[si] & (__RE_SEEN | __RE_HAS) != 0: seen = __RE_SEEN
+        else:
+            fresh = cnt == 0
+            cnt = __re_close(code, data(d.on), gen, data(d.st), data(d.sc), 0, data(d.buf), data(d.buf), 0, cnt, 0, 0, data(d.prefix), 0)
+    t = __re_dfa_add(d, cnt, seen, fresh)
+    if c < 128: d.trans[si * 128 + c] = t
+    else: d.wide_trans[key] = t
+    if d.flags.len() > __RE_STATES: return -1
+    t
+
+# (the bytes of the character at i are UTF-8, clen of them as __re_cp read it)
+__re_utf8_ok = (sp: *u8, n: int, i: int, clen: int) -> bool:
+    c = int(sp[i])
+    want = 4
+    if c < 0xC0: return false
+    if c < 0xE0: want = 2
+    else if c < 0xF0: want = 3
+    if clen != want or i + clen > n: return false
+    loop k in [1..clen):
+        if sp[i + k] & 0xC0 != 0x80: return false
+    true
+
+# d run forward over s from `from`: where the match it finds ends (-1: none; -2: it gave up),
+# and the last place it was in state 0 at (no match starts before it). first: stop at the first
+# place a match ends (r is in s: no matter which match)
+__re_dfa_run = (d: mut __ReDFA, s: str, from: int, first: bool) -> (int, int):
+    n = len(s)
+    sp = data(s)
+    si = 0
+    p = from
+    e = -1
+    lo = from
+    pre = d.prefix
+    skip = d.cut and not d.any
+    s0 = d.s0
+    s1 = d.s1
+    wide = d.wide
+    tr = data(d.trans)
+    fl = data(d.flags)
+    loop true:
+        if si == 0 and d.cut:
+            # (nothing running: on to where a match can start)
+            if skip:
+                if len(pre) > 0:
+                    p = find(s, pre, p)
+                    if p < 0: return (-1, lo)
+                else:
+                    loop p < n:
+                        b = int(sp[p])
+                        if b >= 128:
+                            if wide: break
+                        else if b < 64:
+                            if (s0 >> b) & 1 != 0: break
+                        else if (s1 >> (b - 64)) & 1 != 0: break
+                        p += 1
+                    if p >= n: return (-1, lo)
+            lo = p
+        f = fl[si]
+        if f & __RE_HAS != 0:
+            e = p
+            if first: return (e, lo)
+        if f & __RE_DEAD != 0 or p >= n: break
+        c = int(sp[p])
+        clen = 1
+        t = -1
+        if c < 128: t = tr[si * 128 + c]
+        else:
+            c, clen = __re_cp(s, p)
+            if not __re_utf8_ok(sp, n, p, clen): return (-2, lo)
+        if t < 0:
+            t = __re_dfa_go(d, si, c)
+            if t < 0: return (-2, lo)
+            tr = data(d.trans)
+            fl = data(d.flags)
+        si = t
+        p += clen
+    (e, lo)
+
+# d (the pattern read from right to left) run back over s from e to lo at the least: the first
+# place a match ending at e starts at (-2: it gave up)
+__re_dfa_back = (d: mut __ReDFA, s: str, e: int, lo: int) -> int:
+    sp = data(s)
+    n = len(s)
+    si = 0
+    p = e
+    best = -1
+    tr = data(d.trans)
+    fl = data(d.flags)
+    loop true:
+        f = fl[si]
+        if f & __RE_HAS != 0: best = p
+        if f & __RE_DEAD != 0 or p <= lo: break
+        q = p - 1
+        c = int(sp[q])
+        clen = 1
+        t = -1
+        if c < 128: t = tr[si * 128 + c]
+        else:
+            loop q > lo and sp[q] & 0xC0 == 0x80 and p - q < 4: q -= 1
+            c, clen = __re_cp(s, q)
+            if q + clen != p or not __re_utf8_ok(sp, n, q, clen): return -2
+        if t < 0:
+            t = __re_dfa_go(d, si, c)
+            if t < 0: return -2
+            tr = data(d.trans)
+            fl = data(d.flags)
+        si = t
+        p = q
+    if best < 0: return -2
+    best
+
+# the first match at or after `from`, into vm.found (false: none): by the DFAs on a long text,
+# by the VM otherwise (or when they give up)
+__re_search = (vm: mut __ReVM, s: str, from: int) -> bool:
+    # (with groups to find, and text every match starts with to skip to, the VM alone does
+    # better: where that text is, a match mostly is)
+    if vm.dfa and not vm.no_dfa and len(s) - from >= __RE_LONG and (vm.nc == 2 or len(vm.prefix) == 0):
+        if vm.fwd.off.len() == 0: vm.fwd = __re_dfa(vm, vm.code, true)
+        e, lo = __re_dfa_run(vm.fwd, s, from, false)
+        if e == -1: return false
+        if e >= 0:
+            if vm.rev.off.len() == 0: vm.rev = __re_dfa(vm, vm.rcode, false)
+            a = __re_dfa_back(vm.rev, s, e, lo)
+            if a >= 0:
+                if vm.nc == 2:
+                    vm.found[0] = a
+                    vm.found[1] = e
+                    return true
+                # (the groups: the VM on that match only)
+                if __re_run(vm, s, a, true, false): return true
+        vm.no_dfa = true
+    __re_run(vm, s, from, false, false)
 
 __re_in = (k: __ReClass, c: int) -> bool:
     i = 0
@@ -290,40 +790,6 @@ __re_fold = (c: int) -> int:
 __re_upper = (c: int) -> int:
     if c >= 'a' and c <= 'z': return c - 32
     c
-
-# a thread at pc, following jumps, splits, saves and assertions to the instructions that read a
-# character (or match), into list k
-__re_add = (r: Regex, s: str, vm: mut __ReVM, k: int, pc: int, pos: int, start: int, caps: int[]):
-    if vm.on[pc] == vm.gens[k]: return
-    vm.on[pc] = vm.gens[k]
-    ins = r.prog[pc]
-    op = ins.op
-    if op == __RE_JMP:
-        __re_add(r, s, vm, k, ins.x, pos, start, caps)
-        return
-    if op == __RE_SPLIT:
-        __re_add(r, s, vm, k, ins.x, pos, start, caps)
-        __re_add(r, s, vm, k, ins.y, pos, start, caps)
-        return
-    if op == __RE_SAVE:
-        c2 = caps
-        c2[ins.x] = pos
-        __re_add(r, s, vm, k, pc + 1, pos, start, c2)
-        return
-    if op == __RE_BOL:
-        if pos == 0 or s[pos - 1] == '\n': __re_add(r, s, vm, k, pc + 1, pos, start, caps)
-        return
-    if op == __RE_EOL:
-        if pos == len(s) or s[pos] == '\n': __re_add(r, s, vm, k, pc + 1, pos, start, caps)
-        return
-    if op == __RE_WORDB or op == __RE_NWORDB:
-        a = pos > 0 and __re_word(int(s[pos - 1]))
-        b = pos < len(s) and __re_word(int(s[pos]))
-        if (a != b) == (op == __RE_WORDB): __re_add(r, s, vm, k, pc + 1, pos, start, caps)
-        return
-    vm.pcs[k].push(pc)
-    vm.starts[k].push(start)
-    vm.caps[k].push(caps)
 
 # (a byte of a word, for \b: every byte of a character past ASCII counts, as \w takes letters
 # of other scripts)
@@ -535,7 +1001,7 @@ __re_class = (p: mut __ReParser) -> int:
     __re_new(p, __ReNode(2, c = p.classes.len() - 1))
 
 # ---------------- the program ----------------
-__re_emit = (p: __ReParser, n: int, prog: mut __ReIns[]):
+__re_emit = (p: mut __ReParser, n: int, prog: mut __ReIns[], rev: bool = false):
     nd = p.nodes[n]
     k = nd.kind
     if k == 0: prog.push(__ReIns(__RE_CHAR, nd.c))
@@ -543,11 +1009,18 @@ __re_emit = (p: __ReParser, n: int, prog: mut __ReIns[]):
     else if k == 2: prog.push(__ReIns(__RE_CLASS, nd.c))
     else if k == 7: prog.push(__ReIns(nd.c))
     else if k == 3:
-        loop kid in nd.kids: __re_emit(p, kid, prog)
+        if rev:
+            # (read from right to left: the parts in the other order, and no groups kept)
+            i = nd.kids.len() - 1
+            loop i >= 0:
+                __re_emit(p, nd.kids[i], prog, rev)
+                i -= 1
+        else:
+            loop kid in nd.kids: __re_emit(p, kid, prog)
     else if k == 6:
-        if nd.c > 0: prog.push(__ReIns(__RE_SAVE, nd.c * 2))
-        __re_emit(p, nd.kids[0], prog)
-        if nd.c > 0: prog.push(__ReIns(__RE_SAVE, nd.c * 2 + 1))
+        if nd.c > 0 and not rev: prog.push(__ReIns(__RE_SAVE, nd.c * 2))
+        __re_emit(p, nd.kids[0], prog, rev)
+        if nd.c > 0 and not rev: prog.push(__ReIns(__RE_SAVE, nd.c * 2 + 1))
     else if k == 4:
         # split L1, next; L1: a; jmp end; next: split L2, ... last: z; end:
         jumps: int[]
@@ -555,20 +1028,20 @@ __re_emit = (p: __ReParser, n: int, prog: mut __ReIns[]):
             if i < nd.kids.len() - 1:
                 sp = prog.len()
                 prog.push(__ReIns(__RE_SPLIT, sp + 1, 0))
-                __re_emit(p, kid, prog)
+                __re_emit(p, kid, prog, rev)
                 jumps.push(prog.len())
                 prog.push(__ReIns(__RE_JMP))
                 prog[sp].y = prog.len()
-            else: __re_emit(p, kid, prog)
+            else: __re_emit(p, kid, prog, rev)
         loop j in jumps: prog[j].x = prog.len()
     else if k == 5:
         sub = nd.kids[0]
-        loop _ in [0..nd.lo): __re_emit(p, sub, prog)
+        loop _ in [0..nd.lo): __re_emit(p, sub, prog, rev)
         if nd.hi < 0:
             # L: split body, end; body; jmp L
             l = prog.len()
             prog.push(__ReIns(__RE_SPLIT))
-            __re_emit(p, sub, prog)
+            __re_emit(p, sub, prog, rev)
             prog.push(__ReIns(__RE_JMP, l))
             __re_order(prog, l, l + 1, prog.len(), nd.greedy)
         else:
@@ -578,7 +1051,7 @@ __re_emit = (p: __ReParser, n: int, prog: mut __ReIns[]):
                 l = prog.len()
                 prog.push(__ReIns(__RE_SPLIT))
                 ends.push(l)
-                __re_emit(p, sub, prog)
+                __re_emit(p, sub, prog, rev)
             loop l in ends: __re_order(prog, l, l + 1, prog.len(), nd.greedy)
 
 # the split at l: to `more` first when greedy, to `done` first when lazy

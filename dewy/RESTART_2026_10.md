@@ -5,6 +5,36 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Regex matching tables and bounded DFAs (2026-10-19)
+
+Ported Sloppy `6d46316`'s regex engine without changing Dewy's syntax or callback
+semantics. It flattens Pike VM state, uses ASCII class bitmaps and prefix/start-set
+skipping, and builds bounded lazy DFAs for long inputs. Captures and fallback
+retain the Pike VM. The pinned library source and upstream fixtures are recorded
+in `core/UPSTREAM.json`; Sloppy's working tree was not modified.
+
+All **6,241 checks pass in 154.83 s**. The focused gate compares 121 deterministic
+cases against independent expectations across native/web and default/release,
+including captures, empty matches, Unicode byte offsets, threshold boundaries
+and a state-limit stress input. Additional cases cover replacements, split,
+search offsets, malformed bytes and invalid patterns.
+
+Seven paired thread-CPU samples for each of seven regex workloads in both build
+modes pass all **14 comparisons**. Long ASCII matching/search/capture workloads
+are **26–40× faster**, line-anchor searches **21–33×**, and the Unicode search
+**2.1–3.4×**. Reused short patterns are **1.9–2.1× faster**; preparing and matching
+a short pattern together is about **1.24× faster**. These are named workloads,
+not a universal regex speedup or a C/Rust parity claim. The maintained
+`tools.sloppy_core.benchmark_regex` harness reproduces their inputs and checksums.
+
+Compiler instruction counts increase only **0.016% / 0.012%** for large
+Dewy default/release builds and **0.0067%** for self-build. Six of twelve matched
+compilation comparisons pass; six remain inconclusive, with no established
+regression. The twelve existing runtime kernels retain their artifacts and
+pass fresh full-size checks. No new whole-stage baseline is accepted, and no
+repeated timing campaign was used to resolve host noise.
+[Raw measurements and validation](audits/2026-10-19/regex-engine.json).
+
 ## Named calls through function values (2026-10-19)
 
 Named arguments now work through stored/returned callbacks, record fields and
