@@ -11704,3 +11704,46 @@ main = () -> int:
         if case == 'ordered':
             assert bad.stdout.splitlines()[:3] == ['0:', '1:', '2:'], bad.stdout + bad.stderr
             assert '3:' not in bad.stdout.splitlines(), bad.stdout + bad.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_encoded_word_buffers(compiler, tmp_path, release):
+    directory = compiler.parent.parent / 'compiler'
+    if not directory.exists():
+        directory = Path(__file__).resolve().parents[2] / 'core/compiler'
+    writer = (directory / 'elf.jo').read_text()
+    helpers = writer[writer.index('put16 ='):writer.index('# the machine')]
+    source = tmp_path / 'encoded-words.jo'
+    source.write_text(helpers + '''
+main = () -> int:
+    words = [0, 1, -1, 0x0123456789ABCDEF, 9223372036854775807, -9223372036854775807 - 1]
+    loop prefix in [0..33):
+        loop value in words:
+            bytes = fill(u8(170), prefix)
+            expected = bytes
+            loop width in [2, 4, 8]:
+                saved = bytes
+                old = bytes.len()
+                if width == 2: put16(bytes, value)
+                else if width == 4: put32(bytes, value)
+                else: put64(bytes, value)
+                assert(saved.len() == old and saved == expected)
+                loop i in [0..width): expected.push(u8((value >> (8 * i)) & 255))
+                assert(bytes == expected)
+            # Repeated growth with no retained snapshots, and an independent
+            # byte-at-a-time oracle. Prefixes exercise every word alignment.
+            loop i in [0..257):
+                word = i * 7919 xor value
+                put64(bytes, word)
+                loop j in [0..8): expected.push(u8((word >> (8 * j)) & 255))
+            assert(bytes == expected)
+    42
+''')
+    binary = tmp_path / 'encoded-words'
+    built = subprocess.run([compiler, 'build', source, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

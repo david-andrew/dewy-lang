@@ -1427,6 +1427,20 @@ identities and every sample remain in
 [the deferred experiment](audits/2026-10-19/masked-checks-experiment.json).
 The accepted compiler remains `94952e82`, whose four platform CI jobs passed.
 
+## Deferred shared-builder word emission
+
+A further word-emission prototype uses the runtime's existing buffer builder
+once per word, avoiding the separate reserve/length/data operations of the
+previous experiment. It covers x86-64, ARM64 and ELF byte writers, keeps explicit
+little-endian byte stores, and passes 384 quick checks after independent C
+bootstrap. Seven matched compilation pairs remain flat: default **1.000×**,
+release **1.010×**, and compiler self-build **1.016×** (inconclusive).
+
+The compiler changes are reverted. Additional 16/32/64-bit buffer tests remain,
+covering unaligned positions, repeated growth, signed limits and retained
+snapshots. No full suite or stage gate was run for this flat prototype.
+[Patch and measurements](audits/2026-10-19/byte-emission-experiment.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

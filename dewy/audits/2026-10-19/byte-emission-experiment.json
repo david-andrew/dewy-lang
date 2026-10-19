@@ -1,0 +1,288 @@
+{
+  "status": "deferred; compiler changes reverted",
+  "scope": "Replace byte-at-a-time x64, ARM64 and ELF word appends with one existing __buf_reserve call per word; explicitly write little-endian bytes and publish length. This differs from the earlier resize/reserve/setlen/data unaligned-store prototypes.",
+  "patch": "diff --git a/core/compiler/arm64.jo b/core/compiler/arm64.jo\nindex eec95bac..59fe0a6f 100644\n--- a/core/compiler/arm64.jo\n+++ b/core/compiler/arm64.jo\n@@ -49,11 +49,7 @@ a_stub_fix: (int, int)[]     # BL to a stub\n a_faddr_fix: (int, int)[]    # ADRP + ADD of a function's address\n a_data_fix: (int, int, int)[]    # ADRP + ADD of rodata (kind 0) or data (kind 1) + offset\n \n-w32 = (x: int):\n-    code.push(u8(x & 255))\n-    code.push(u8((x >> 8) & 255))\n-    code.push(u8((x >> 16) & 255))\n-    code.push(u8((x >> 24) & 255))\n+w32 = (x: int): put32(code, x)\n \n rd32 = (p: int) -> int: int(code[p]) | (int(code[p + 1]) << 8) | (int(code[p + 2]) << 16) | (int(code[p + 3]) << 24)\n wr32 = (p: int, x: int):\ndiff --git a/core/compiler/elf.jo b/core/compiler/elf.jo\nindex 4384153c..7185a9be 100644\n--- a/core/compiler/elf.jo\n+++ b/core/compiler/elf.jo\n@@ -4,15 +4,34 @@ use 'util.jo'\n \n const ELF_BASE = 0x400000\n \n+# Append each encoded word with one uniqueness/growth operation. The runtime\n+# returns the unique object header; fill the new bytes before publishing length.\n put16 = (b: mut u8[], v: int):\n-    b.push(u8(v & 255))\n-    b.push(u8((v >> 8) & 255))\n+    old = len(b)\n+    p = __buf_reserve(b, 2)\n+    p[24 + old + 0] = u8(v & 255)\n+    p[24 + old + 1] = u8((v >> 8) & 255)\n+    (p as *int)[1] = old + 2\n put32 = (b: mut u8[], v: int):\n-    put16(b, v)\n-    put16(b, v >> 16)\n+    old = len(b)\n+    p = __buf_reserve(b, 4)\n+    p[24 + old + 0] = u8(v & 255)\n+    p[24 + old + 1] = u8((v >> 8) & 255)\n+    p[24 + old + 2] = u8((v >> 16) & 255)\n+    p[24 + old + 3] = u8((v >> 24) & 255)\n+    (p as *int)[1] = old + 4\n put64 = (b: mut u8[], v: int):\n-    put32(b, v)\n-    put32(b, v >> 32)\n+    old = len(b)\n+    p = __buf_reserve(b, 8)\n+    p[24 + old + 0] = u8(v & 255)\n+    p[24 + old + 1] = u8((v >> 8) & 255)\n+    p[24 + old + 2] = u8((v >> 16) & 255)\n+    p[24 + old + 3] = u8((v >> 24) & 255)\n+    p[24 + old + 4] = u8((v >> 32) & 255)\n+    p[24 + old + 5] = u8((v >> 40) & 255)\n+    p[24 + old + 6] = u8((v >> 48) & 255)\n+    p[24 + old + 7] = u8((v >> 56) & 255)\n+    (p as *int)[1] = old + 8\n \n # the machine (x86-64; arm64: 183) and the page size segments are aligned to (arm64: 64 KB,\n # the largest a Linux kernel there uses)\ndiff --git a/core/compiler/x64.jo b/core/compiler/x64.jo\nindex ef02a939..78225fae 100644\n--- a/core/compiler/x64.jo\n+++ b/core/compiler/x64.jo\n@@ -31,14 +31,8 @@ data_fix: (int, int, int)[]  # (position of rel32, kind 0=rodata 1=data, offset)\n int_arg_regs = [RDI, RSI, RDX, RCX, R8, R9]\n \n b = (x: int): code.push(u8(x & 255))\n-b32 = (x: int):\n-    b(x)\n-    b(x >> 8)\n-    b(x >> 16)\n-    b(x >> 24)\n-b64 = (x: int):\n-    b32(x)\n-    b32(x >> 32)\n+b32 = (x: int): put32(code, x)\n+b64 = (x: int): put64(code, x)\n patch32 = (pos: int, v: int):\n     code[pos] = u8(v & 255)\n     code[pos + 1] = u8((v >> 8) & 255)\n",
+  "validation": {
+    "independent_C_bootstrap": true,
+    "quick_tests": 384,
+    "seconds": 14.1,
+    "note": "The first quick run found an extraction fixture missing the newly shared put32/put64 helpers. The corrected fixture passed using the same C-bootstrapped binary. No full suite or stage gate was run after the flat pilot.",
+    "retained_tests_on_accepted_compiler": {
+      "passed": 8,
+      "seconds": 2.47,
+      "compiler": "94952e82",
+      "selection": "encoded_word_buffers or emission_words or emission_fixup_bounds"
+    }
+  },
+  "pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "9ea2ba43a80e6009ba94329bae4357ce6cef5b8776202275afea6d718c526858",
+        "compiler_sources_sha256": "3822122120d8307d19a230c6f045772c921b72e426638bc26edc9c254435bc0a",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "412f6c25bde6ec70291687bc5571d46e09df7accc45d041782276c13d7dd37b9",
+        "compiler_sources_sha256": "50e4bc64d77ca53fcd72afd5158d7dc7acbabd7554d95469f80ce6a38aaf5d4e",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "63a70e9f79ae44122fa86e4c6b953dffa53a1591",
+      "working_tree": " M core/compiler/arm64.jo\n M core/compiler/elf.jo\n M core/compiler/x64.jo\n M tests/python_misc/test_sloppy_core.py\n",
+      "diff_sha256": "8cc11b34efbb89376528b92e3f96cc6fdd75a7bda349302a1dccf49fcc79c854",
+      "load_average_start": [
+        10.68994140625,
+        8.17529296875,
+        6.712890625
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792405969422637263/bin/dewy-core",
+          "sha256": "9ea2ba43a80e6009ba94329bae4357ce6cef5b8776202275afea6d718c526858"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792407595272765823/bin/dewy-core",
+          "sha256": "412f6c25bde6ec70291687bc5571d46e09df7accc45d041782276c13d7dd37b9"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/byte-emission-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.6358033290016465,
+              0.6349881859932793,
+              0.6345887850038707,
+              0.6369401669944637,
+              0.3923754229908809,
+              0.36298240699397866,
+              0.3583775300066918
+            ],
+            "candidate": [
+              0.6426607449975563,
+              0.639582720992621,
+              0.6334567259909818,
+              0.5381219920091098,
+              0.35922004500753246,
+              0.36486933700507507,
+              0.358103642007336
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.6345887850038707,
+            "candidate": 0.5381219920091098
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.6248880000000002,
+              0.6237289999999999,
+              0.6227620000000006,
+              0.625478,
+              0.38716900000000004,
+              0.3579410000000001,
+              0.3534080000000004
+            ],
+            "candidate": [
+              0.6302779999999997,
+              0.6266779999999998,
+              0.6208149999999996,
+              0.5285899999999997,
+              0.3540939999999995,
+              0.35965799999999987,
+              0.35324500000000025
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.6227620000000006,
+            "candidate": 0.5285899999999997
+          },
+          "output_bytes": {
+            "candidate": 1987368,
+            "previous": 1987368
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/byte-emission-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.47972989300615154,
+              0.4831156540021766,
+              0.47775450701010413,
+              0.4741516359936213,
+              0.47241383099753875,
+              0.4726456899952609,
+              0.49442969101073686
+            ],
+            "candidate": [
+              0.4885608329932438,
+              0.4844259669916937,
+              0.4769090950139798,
+              0.47950161900371313,
+              0.47967899999639485,
+              0.5247453960037092,
+              0.4824267990043154
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.47775450701010413,
+            "candidate": 0.4824267990043154
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.47355800000000037,
+              0.4765849999999988,
+              0.4717190000000011,
+              0.4682150000000004,
+              0.4667739999999996,
+              0.46687299999999965,
+              0.488121
+            ],
+            "candidate": [
+              0.48203200000000046,
+              0.47826400000000047,
+              0.47108499999999875,
+              0.47312499999999835,
+              0.473685000000001,
+              0.5176280000000021,
+              0.47605699999999995
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.4717190000000011,
+            "candidate": 0.47605699999999995
+          },
+          "output_bytes": {
+            "candidate": 2227072,
+            "previous": 2227072
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.0529794100002619,
+              1.0482774910051376,
+              1.0398861370049417,
+              1.062813348005875,
+              1.0576180829957593,
+              1.043133372993907,
+              1.1113440859917318
+            ],
+            "candidate": [
+              1.0708002489991486,
+              1.078912616998423,
+              1.0383869090001099,
+              1.5895140530046774,
+              1.3608315719902748,
+              1.044846017000964,
+              1.0489967460016487
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.0529794100002619,
+            "candidate": 1.0708002489991486
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.0416320000000012,
+              1.0356980000000018,
+              1.0279589999999976,
+              1.0494270000000026,
+              1.045329000000002,
+              1.0311080000000006,
+              1.0973890000000035
+            ],
+            "candidate": [
+              1.057967,
+              1.0651020000000009,
+              1.0265850000000012,
+              1.5676480000000015,
+              1.3429479999999976,
+              1.0322679999999995,
+              1.0368199999999999
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.0416320000000012,
+            "candidate": 1.057967
+          },
+          "output_bytes": {
+            "candidate": 7150920,
+            "previous": 7150920
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        8.19189453125,
+        7.83642578125,
+        6.6533203125
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 0.9995387767113361,
+        "bootstrap_95_percent_interval": [
+          0.9145721894056588,
+          1.0047968799327256
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 1.010486635413214,
+        "bootstrap_95_percent_interval": [
+          0.9986559795132222,
+          1.0178943233986124
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 1.0156821219010157,
+        "bootstrap_95_percent_interval": [
+          0.9986633708153765,
+          1.2847132338239875
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      }
+    }
+  },
+  "decision": "No useful matched compilation gain: default 0.99954, release 1.01049, self-build 1.01568 (self-build inconclusive). Revert rather than pursue another unmeasured emitter micro-optimization. Retain the extra ELF 16/32/64-bit buffer tests."
+}
