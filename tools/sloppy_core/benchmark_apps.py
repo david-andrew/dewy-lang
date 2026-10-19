@@ -12,6 +12,7 @@ import statistics
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from tools.sloppy_core.benchmark_compile import positive, sample_order
@@ -117,7 +118,8 @@ def execute(binary: Path | list[str | Path], count: int, env: dict) -> tuple[int
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             cc: str, count: int | None = None, clock: str = 'wall', mode: str = 'release',
-            target: str = 'native', node: str = 'node', reuse_identical_artifacts: bool = False) -> dict:
+            target: str = 'native', node: str = 'node', reuse_identical_artifacts: bool = False,
+            on_progress: Callable[[dict], None] | None = None) -> dict:
     if target == 'wasm' and clock != 'wall':
         raise ValueError('WebAssembly benchmarks require --clock wall; the thread CPU clock uses native syscalls')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
@@ -254,6 +256,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             print(name + f' ({clock} kernel): ' + ', '.join(
                 f'{label} {ms:.2f} ms' + (f' (same artifact as {reused[label]})' if label in reused else '')
                 for label, ms in medians.items()), flush=True)
+            if on_progress is not None:
+                on_progress(result)
     result['load_average_end'] = os.getloadavg()
     return result
 

@@ -49,7 +49,8 @@ def sample_order(labels: list[str], sample: int) -> list[str]:
 
 
 def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
-            workers: int, validate: Callable[[str, str, Path], bool] | None = None) -> dict:
+            workers: int, validate: Callable[[str, str, Path], bool] | None = None,
+            on_progress: Callable[[dict], None] | None = None) -> dict:
     # Source generators and CLI validators are also imported by Windows tests;
     # only this POSIX CPU-time benchmark needs resource.getrusage.
     import resource
@@ -124,6 +125,8 @@ def measure(compilers: dict[str, Path], workloads: list[str], samples: int,
             print(name + ': ' + ', '.join(f'{label} {elapsed * 1000:.2f} ms wall / '
                                          f'{cpu_medians[label] * 1000:.2f} ms CPU'
                                          for label, elapsed in medians.items()), flush=True)
+            if on_progress is not None:
+                on_progress(result)
     result['load_average_end'] = os.getloadavg()
     return result
 

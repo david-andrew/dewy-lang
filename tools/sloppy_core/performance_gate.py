@@ -15,6 +15,7 @@ import random
 import statistics
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from tools.sloppy_core import benchmark_apps, benchmark_compile
@@ -113,7 +114,22 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                        'Passing measured budgets does not establish language completeness or universal C parity.']}
 
 
-def measure(reference: Path, previous: Path, candidate: Path, samples: int) -> dict:
+def save_report(path: Path, report: dict) -> None:
+    """Replace a checkpoint atomically; never leave a truncated JSON report."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix=path.name + '.',
+                                         suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(report, indent=2) + '\n')
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def measure(reference: Path, previous: Path, candidate: Path, samples: int,
+            on_progress: Callable[[dict], None] | None = None) -> dict:
     # Keep the generic benchmark analysis importable on non-Linux test hosts.
     from tools.sloppy_core.benchmark_sloppy import generate_dewy
 
@@ -131,10 +147,20 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int) -> d
         compilers['previous'] = previous
         identities['previous'] = prior_identity
     references = [label for label in compilers if label != 'candidate']
-    report = {'reference_stage': pinned, 'toolchains': identities}
+    report = {'reference_stage': pinned, 'toolchains': identities, 'status': 'incomplete'}
+
+    def checkpoint(section: str, result: dict) -> None:
+        # Only called between completed workloads, outside every timed region.
+        # No assessment is published until all measurements and identities pass.
+        report[section] = result
+        if on_progress is not None:
+            on_progress(report)
+
     report['cpu_model'] = next((line.split(':', 1)[1].strip() for line in
                               Path('/proc/cpuinfo').read_text().splitlines()
                               if line.startswith('model name')), '')
+    if on_progress is not None:
+        on_progress(report)
     scratch = ROOT / '__dewycache__/task-tmp'
     scratch.mkdir(parents=True, exist_ok=True)
     saved_workloads = benchmark_compile.WORKLOADS.copy()
@@ -164,13 +190,14 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int) -> d
 
             report['compilation'] = benchmark_compile.measure(compilers, [
                 'throughput-default', 'throughput-release', 'tour-default',
-                'netpong-default', 'dunes-default', 'compiler-reference'], samples, 1, validate)
+                'netpong-default', 'dunes-default', 'compiler-reference'], samples, 1, validate,
+                on_progress=lambda result: checkpoint('compilation', result))
             report['compilation']['validated_outputs'] = checked_outputs
             report['runtime'] = benchmark_apps.measure(compilers, list(benchmark_apps.COUNTS),
                                                        samples, 'cc', clock='thread-cpu', mode='both',
-                                                       reuse_identical_artifacts=True)
-            report['assessment'] = assess(report['compilation'], report['runtime'], references,
-                                           len(source.read_text().splitlines()))
+                                                       reuse_identical_artifacts=True,
+                                                       on_progress=lambda result: checkpoint('runtime', result))
+            lines = len(source.read_text().splitlines())
     finally:
         benchmark_compile.WORKLOADS.clear()
         benchmark_compile.WORKLOADS.update(saved_workloads)
@@ -178,6 +205,8 @@ def measure(reference: Path, previous: Path, candidate: Path, samples: int) -> d
     for label, binary in compilers.items():
         if toolchain_identity(binary) != identities[label]:
             raise ValueError(f'Toolchain changed during the gate: {label}')
+    report['assessment'] = assess(report['compilation'], report['runtime'], references, lines)
+    report['status'] = 'complete'
     return report
 
 
@@ -193,8 +222,9 @@ def main() -> int:
     args = cli.parse_args()
     os.sched_setaffinity(0, {args.cpu})
     report = measure(args.reference.resolve(strict=True), args.previous.resolve(strict=True),
-                     args.candidate.resolve(strict=True), args.samples)
-    args.output.write_text(json.dumps(report, indent=2) + '\n')
+                     args.candidate.resolve(strict=True), args.samples,
+                     on_progress=lambda partial: save_report(args.output, partial))
+    save_report(args.output, report)
     assessment = report['assessment']
     for name, result in assessment['comparisons'].items():
         print(f'{name}: {result["status"]}, paired CPU ratio {result["paired_median_ratio"]:.4f}')

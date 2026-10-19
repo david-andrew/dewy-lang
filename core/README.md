@@ -83,6 +83,13 @@ an earlier run. With three or more measured variants, sampling rotates their
 positions as well as reversing direction, so one compiler is not always in the
 middle of each round.
 
+The output file is checkpointed after each completed workload, outside timed
+regions. An interrupted run keeps its completed samples with `status: incomplete`
+and no assessment. Only a fully measured run with verified toolchain identities
+gets `status: complete`; this means the run finished, not that performance passed.
+Check `assessment.no_regression` and the separate target results. Checkpoints are
+replaced atomically and do not automatically resume or reuse earlier timings.
+
 The report keeps absolute throughput and each runtime/C ratio separate from
 the regression decision. `--require-targets` additionally requires 250k physical
 root lines/s and C-or-better release medians on every measured kernel. That is

@@ -457,6 +457,7 @@ def test_core_benchmark_reuses_only_equivalent_artifacts():
 @pytest.mark.parametrize('bad_duplicate', [False, True])
 def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, bad_duplicate):
     from collections import Counter
+    from copy import deepcopy
 
     from tools.sloppy_core import benchmark_apps as apps
 
@@ -490,12 +491,22 @@ def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, ba
 
     monkeypatch.setattr(apps, 'run', fake_run)
     monkeypatch.setattr(apps, 'execute', fake_execute)
+    completed = []
+
+    def checkpoint(report):
+        completed.append(deepcopy(report))
+
     if bad_duplicate:
         with pytest.raises(RuntimeError, match='checksum|expected'):
-            apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True)
+            apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True,
+                         on_progress=checkpoint)
         assert executed['other', 99] == 1
+        assert completed == []
         return
-    report = apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True)
+    report = apps.measure(compilers, ['arrays'], 7, 'cc', count=99, reuse_identical_artifacts=True,
+                          on_progress=checkpoint)
+    assert len(completed) == 1
+    assert completed[0]['workloads'] == report['workloads']
     workload = report['workloads']['arrays']
     assert workload['timing_reused_from'] == {'other': 'first'}
     assert workload['samples']['other'] == workload['samples']['first']
@@ -504,3 +515,72 @@ def test_core_benchmark_reuse_still_checks_each_binary(tmp_path, monkeypatch, ba
             assert executed[label, count] == 1
     assert executed['first', 99] == executed['c', 99] == 8
     assert executed['other', 99] == 1
+
+
+def test_core_performance_checkpoint_preserves_previous_report_on_failure(tmp_path):
+    from tools.sloppy_core.performance_gate import save_report
+
+    path = tmp_path / 'gate.json'
+    partial = {'status': 'incomplete', 'compilation': {'workloads': {'finished': {}}}}
+    save_report(path, partial)
+    with pytest.raises(TypeError):
+        save_report(path, {'not_serializable': object()})
+    assert json.loads(path.read_text()) == partial
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['gate.json']
+    complete = {**partial, 'status': 'complete', 'assessment': {'no_regression': False}}
+    save_report(path, complete)
+    assert json.loads(path.read_text()) == complete
+
+
+@pytest.mark.skipif(not Path('/proc/cpuinfo').exists(), reason='Linux stage benchmark')
+@pytest.mark.parametrize('failure', ['runtime', 'identity', None])
+def test_core_performance_checkpoint_never_accepts_an_incomplete_gate(tmp_path, monkeypatch, failure):
+    from tools.sloppy_core import performance_gate as gate
+
+    pinned = json.loads(gate.REFERENCE.read_text())
+    identity = {key: pinned[key] for key in ('compiler_sources_sha256', 'library_sha256')}
+    calls = 0
+
+    def toolchain_identity(_binary):
+        nonlocal calls
+        calls += 1
+        return {**identity, 'changed': True} if failure == 'identity' and calls > 3 else identity
+
+    def compilation(*_args, on_progress):
+        result = {'workloads': {'finished': {'cpu_seconds': [1]}}}
+        on_progress(result)
+        return result
+
+    def runtime(*_args, on_progress, **_kwargs):
+        result = {'workloads': {'finished': {'samples': [1]}}}
+        on_progress(result)
+        if failure == 'runtime':
+            raise RuntimeError('interrupted runtime')
+        return result
+
+    monkeypatch.setattr(gate, 'ROOT', tmp_path)
+    monkeypatch.setattr(gate, 'toolchain_identity', toolchain_identity)
+    monkeypatch.setattr(gate.benchmark_compile, 'measure', compilation)
+    monkeypatch.setattr(gate.benchmark_apps, 'measure', runtime)
+    monkeypatch.setattr(gate, 'assess', lambda *_args: {'no_regression': True})
+    path = tmp_path / 'gate.json'
+    compiler = tmp_path / 'bundle/bin/core'
+    workloads = gate.benchmark_compile.WORKLOADS.copy()
+
+    def measure():
+        return gate.measure(compiler, compiler, compiler, 7,
+                            on_progress=lambda report: gate.save_report(path, report))
+
+    if failure:
+        with pytest.raises((RuntimeError, ValueError), match='interrupted|changed'):
+            measure()
+    else:
+        result = measure()
+        assert result['status'] == 'complete'
+        assert result['assessment']['no_regression']
+    partial = json.loads(path.read_text())
+    assert partial['status'] == 'incomplete'
+    assert 'assessment' not in partial
+    assert 'finished' in partial['compilation']['workloads']
+    assert 'finished' in partial['runtime']['workloads']
+    assert gate.benchmark_compile.WORKLOADS == workloads
