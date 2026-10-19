@@ -11875,3 +11875,58 @@ main = ():
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise web integer conversions')
+    values = [-(1 << 63), -4294967297, -2147483649, -65537, -32769,
+              -257, -129, -1, 0, 1, 127, 128, 255, 256, 32767, 32768,
+              65535, 65536, 2147483647, 2147483648, 4294967295, (1 << 63)-1]
+    types = [(sign + str(bits), bits, sign == 'i')
+             for bits in (8, 16, 32, 64) for sign in ('i', 'u')]
+
+    def converted(value, bits, signed):
+        value %= 1 << bits
+        return value - (1 << bits) if signed and value >= 1 << (bits-1) else value
+
+    definitions, calls, expected = [], [], []
+    for src, src_bits, src_signed in types:
+        for dst, dst_bits, dst_signed in types:
+            # A loaded narrow value, a repeated cast, and a changing local all
+            # exercise normalization; unsigned-to-signed at equal width must
+            # still truncate/sign-extend, even when the load was unsigned.
+            name = f'convert_{src}_{dst}'
+            definitions.append(f'@noinline\n{name} = (p: *{src}) -> int:\n'
+                               f'    x = p[0]\n    int({dst}({src}(x)))\n')
+            calls.append(f'        print({name}((&value) as *{src}))')
+    # Runtime order is value, source type, destination type.
+    for value in values:
+        for _, src_bits, src_signed in types:
+            for _, dst_bits, dst_signed in types:
+                x = converted(value, src_bits, src_signed)
+                x = converted(x, dst_bits, dst_signed)
+                expected.append(str(converted(x, 64, True)))
+    source = tmp_path / 'integer-extensions.jo'
+    source.write_text('\n'.join(definitions) +
+                      'main = ():\n    loop value in [' + ', '.join(map(str, values)) + ']:\n' +
+                      '\n'.join(calls) + '\n')
+    binary = tmp_path / 'integer-extensions'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'integer-extensions.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected

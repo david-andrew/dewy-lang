@@ -1,0 +1,650 @@
+{
+  "decision": "Deferred; compiler changes reverted. Static redundant extensions do not establish an end-to-end speedup. No full suite or stage gate run.",
+  "implementation_patch": "diff --git a/core/compiler/opt.jo b/core/compiler/opt.jo\nindex 8bcbfed6..decb3159 100644\n--- a/core/compiler/opt.jo\n+++ b/core/compiler/opt.jo\n@@ -551,6 +551,40 @@ add_fact_false = (c: int): add_fact(c, 0)\n fact_true = (c: int) -> bool: fact_known(c, 1)\n add_fact_true = (c: int): add_fact(c, 1)\n \n+# Signed widths are negative; positive widths describe unsigned values.\n+o_extension_bits = (op: Op) -> int:\n+    match op:\n+        sext8: -8\n+        sext16: -16\n+        sext32: -32\n+        zext8: 8\n+        zext16: 16\n+        zext32: 32\n+        _: 0\n+\n+# The original definition already describes the value's range. Reading it only\n+# for stable values avoids an extra analysis pass or per-register range table.\n+# A load's range survives memory writes; this does not make another load equal.\n+o_value_bits = (v: int, pos: int) -> int:\n+    if not stable(v): return 0\n+    at = int(o_defpos[v])\n+    if at < 0 or at >= pos: return 0\n+    ins = ir.code[at]\n+    match ins.op:\n+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu, feq, fne, flt, fle, fgt, fge, memeq, streq: 1\n+        load:\n+            mode = int(ins.c)\n+            if mode & M_FLOAT != 0: return 0\n+            bits = (mode & 15) * 8\n+            if mode & M_SIGNED != 0: -bits else: bits\n+        _: o_extension_bits(ins.op)\n+\n+o_bits_fit = (source: int, target: int) -> bool:\n+    if source == 0 or target == 0: return false\n+    if source < 0: return target < 0 and source >= target\n+    if target < 0: return source < -target\n+    source <= target\n+\n # simplify one instruction, appending the result to o_out\n o_simplify = (ins0: Ins, pos: int):\n     ins = ins0\n@@ -591,11 +625,6 @@ o_simplify = (ins0: Ins, pos: int):\n             return\n         o_emit(ins)\n         return\n-    # The bounded memory comparison already produces a canonical boolean.\n-    # Inlined bool returns otherwise carry an unnecessary ABI byte extension.\n-    if op == .zext8 and stable(a) and (o_dop[a] == i32(int(Op.memeq)) or o_dop[a] == i32(int(Op.streq))):\n-        o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)\n-        return\n     # unary integer ops\n     if op == .neg or op == .not_ or op == .sext8 or op == .sext16 or op == .sext32 or op == .zext8 or op == .zext16 or op == .zext32:\n         if is_k(a):\n@@ -603,6 +632,10 @@ o_simplify = (ins0: Ins, pos: int):\n             if ok:\n                 o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, v), pos)\n                 return\n+        bits = o_extension_bits(op)\n+        if bits != 0 and o_bits_fit(o_value_bits(a, pos), bits):\n+            o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)\n+            return\n         o_emit(ins)\n         return\n     r = fold(op, 0, 1)\n",
+  "static_diagnostic": {
+    "source": "Accepted compiler scalar release IR from c-codegen-probe (diagnostic static count, not a runtime gain)",
+    "total_extensions": {
+      "zext8": 2991,
+      "sext32": 1951,
+      "sext8": 18,
+      "zext32": 153
+    },
+    "redundant_candidates": {
+      "zext8": 680,
+      "sext32": 81,
+      "zext32": 69,
+      "sext8": 2
+    },
+    "pairs": {
+      "ne -> zext8": 361,
+      "leu -> zext8": 149,
+      "load -> sext32": 72,
+      "zext8 -> zext8": 59,
+      "ges -> zext8": 53,
+      "load -> zext32": 44,
+      "load -> zext8": 34,
+      "zext32 -> zext32": 25,
+      "eq -> zext8": 20,
+      "sext32 -> sext32": 9,
+      "lts -> zext8": 4,
+      "load -> sext8": 2
+    },
+    "functions": {
+      "f_check_expr_2160": 31,
+      "f_check_binary_2426": 30,
+      "f_arg_cost_2310": 22,
+      "f_resolve_fn_call_2322": 22,
+      "f_o_simplify_3187": 19,
+      "f_gen_intrinsic_2813": 19,
+      "f_o_sra_3194": 14,
+      "f_gen_expr_2753": 12,
+      "f_optimize_1752": 11,
+      "f_o_cleanup_3203": 11,
+      "f_gen_for_2770": 11,
+      "f_gen_place_2685": 11,
+      "f_check_assign_2199": 10,
+      "f_check_for_2167": 9,
+      "f_o_licm_3198": 8,
+      "f_check_vardecl_2202": 8,
+      "f_gen_conv_2821": 8,
+      "f_parse_if_1985": 8,
+      "f_desugar_loopx_2014": 7,
+      "f_coerce_2168": 6,
+      "f_dn_lex_2554": 6,
+      "f_check_intrinsic_2408": 6,
+      "f_check_program_1622": 5,
+      "f_wc_conv_1883": 5,
+      "f_check_stmt_2203": 5,
+      "f_gen_array_2828": 5,
+      "f_get_fn_inst_1725": 4,
+      "f_fn_sig_1728": 4,
+      "f_ensure_global_1731": 4,
+      "f_register_decls_1636": 4,
+      "f_soa_inst_2082": 4,
+      "f_check_struct_fields_2125": 4,
+      "f___check_fn_body_2206": 4,
+      "f_can_coerce_2186": 4,
+      "f_conversion_2336": 4,
+      "f_emit_ins_3311": 4,
+      "f_fold_3152": 4,
+      "f_o_if_select_3201": 4,
+      "f_parse_stmt_2029": 4,
+      "f_call_by_name_2341": 4,
+      "f_join_types_2293": 4,
+      "f_check_lambda_body_2212": 4,
+      "f_unify_unions_2064": 4,
+      "f_check_vec_ctor_2411": 4,
+      "f_emit_parallel_3290": 4,
+      "f_gen_lambda_2740": 4,
+      "f_gen_binary_2801": 4,
+      "f_lx_binder_2017": 4,
+      "f_written_int_2421": 4,
+      "f_gen_match_test_2791": 4,
+      "f_dw_type_2245": 4,
+      "f_gen_match_lookup_2795": 4,
+      "f_dw_loop_head_2262": 4,
+      "f_on_hover_3652": 3,
+      "f_on_completion_3671": 3,
+      "f_repl_compile_3445": 3,
+      "f_wc_default_1873": 3,
+      "f_check_doc_3638": 3,
+      "f_type_str_in_2074": 3,
+      "f_resolve_type_2115": 3,
+      "f_helper_eq_2888": 3,
+      "f_helper_hash_2892": 3,
+      "f_loop_prepass_3195": 3,
+      "f_o_emit_3180": 3,
+      "f_loop_versioning_3482": 3,
+      "f_take_lines_3633": 3,
+      "f_lex_1913": 3,
+      "f_fn_value_2431": 3,
+      "f_struct_ctor_2333": 3,
+      "f_analyze_3258": 3,
+      "f_lx_counting_3460": 3,
+      "f_lx_starts_nonneg_3469": 3,
+      "f_match_type_2305": 3,
+      "f_dot_template_2473": 3,
+      "f_dewy_range_value_2451": 3,
+      "f_check_args_untyped_2311": 3,
+      "f_ctx_dependent_2300": 3,
+      "f_compound_value_2182": 3,
+      "f_gen_slice_2824": 3,
+      "f_gen_range_cond_2763": 3,
+      "f_reserve_comprehension_2862": 3,
+      "f_gen_stepped_for_2772": 3,
+      "f_gen_comprehension_reserve_2777": 3,
+      "f_default_arg_2315": 3,
+      "f_gen_json_fields_2818": 3,
+      "f_to_float_3898": 3,
+      "f_dw_expr_2251": 3,
+      "f_sv_expr_3005": 3,
+      "f_sv_float_to_int_3023": 3,
+      "f_compile_1602": 2,
+      "f_lsp_main_1604": 2,
+      "f_on_code_action_3700": 2,
+      "f_on_rename_3662": 2,
+      "f_bind_from_imports_1637": 2,
+      "f_get_struct_inst_1723": 2,
+      "f_word_count_1734": 2,
+      "f_watch_observe_1830": 2,
+      "f_ug_scan_2872": 2,
+      "f_store_type_2664": 2,
+      "f_rename_clash_3663": 2,
+      "f_symbols_in_3686": 2,
+      "f_mk_type_2043": 2,
+      "f_type_eq_2062": 2,
+      "f_subst_2123": 2,
+      "f_ide_finish_1656": 2,
+      "f_inline_call_3213": 2,
+      "f_union_inst_2079": 2,
+      "f_finalize_literal_2291": 2,
+      "f_check_lambda_2430": 2,
+      "f_name_before_eq_2370": 2,
+      "f_dewy_record_type_2331": 2,
+      "f_check_match_2429": 2,
+      "f_unify_2063": 2,
+      "f_dewy_bigint_literal_target_2280": 2,
+      "f_union_target_2284": 2,
+      "f_struct_has_defaults_2326": 2,
+      "f_unused_result_2147": 2,
+      "f_gen_vardecl_2747": 2,
+      "f_o_push_3176": 2,
+      "f_lx_checks_3466": 2,
+      "f_lx_copy_3472": 2,
+      "f_lx_dce_3483": 2,
+      "f_ide_find_name_2505": 2,
+      "f_dewy_slice_args_2461": 2,
+      "f_subst_partial_2308": 2,
+      "f_finish_arg_2312": 2,
+      "f_append_assign_2195": 2,
+      "f_ide_dewy_fn_header_2524": 2,
+      "f_det_scan_2726": 2,
+      "f_hint_operand_3260": 2,
+      "f_gen_constant_floor_2721": 2,
+      "f_e_call_nr_2630": 2,
+      "f_bounded_open_for_2771": 2,
+      "f_gen_slice_bounds_2780": 2,
+      "f_o_holds_3161": 2,
+      "f_lx_defined_in_3459": 2,
+      "f_lx_def_at_3461": 2,
+      "f_lx_vloop_3479": 2,
+      "f___json_value_4076": 2,
+      "f_dw_function_2248": 2,
+      "f_match_union_2307": 2,
+      "f_exact_args_2302": 2,
+      "f_may_write_root_2841": 2,
+      "f_spirv_kernel_3066": 2,
+      "f_flat_slots_2814": 2,
+      "f_gen_fixed_array_2827": 2,
+      "f_fp_scan_2866": 2,
+      "f_dw_param_2247": 2,
+      "f_race_scan_2707": 2,
+      "f_sv_drain_3053": 2,
+      "f_sv_vertex_3060": 2,
+      "f_fw_scan_2847": 2,
+      "f_dw_membership_2260": 2,
+      "f_sv_call_3031": 2,
+      "f_sv_vec_ctor_3029": 2,
+      "f_parse_primary_1956": 2,
+      "f_parse_bracket_1961": 2,
+      "f_main_1551": 1,
+      "f_repl_main_1579": 1,
+      "f_watch_lower_migrate_1870": 1,
+      "f_watch_make_patch_1824": 1,
+      "f_draw_present_1807": 1,
+      "f_macos_bundle_3434": 1,
+      "f_on_highlight_3659": 1,
+      "f_on_signature_3672": 1,
+      "f_on_inlay_3675": 1,
+      "f_on_semantic_3677": 1,
+      "f_new_project_name_1609": 1,
+      "f_warn_1699": 1,
+      "f_check_pushers_first_1721": 1,
+      "f_settle_open_globals_1733": 1,
+      "f_watch_drain_1834": 1,
+      "f_repl_edit_3452": 1,
+      "f_repl_open_3456": 1,
+      "f_e_mov_2601": 1,
+      "f_lower_inst_2876": 1,
+      "f_lower_helper_2880": 1,
+      "f_wd_collect_1867": 1,
+      "f_e_addi_2602": 1,
+      "f_is_import_3549": 1,
+      "f_refers_moved_1829": 1,
+      "f_wk_top_hash_1792": 1,
+      "f_is_alnum_2783": 1,
+      "f_publish_3644": 1,
+      "f_lsp_drain_3601": 1,
+      "f_json_value_3586": 1,
+      "f_path_to_uri_3619": 1,
+      "f_refs_of_3657": 1,
+      "f_sanitize_2128": 1,
+      "f_zonk_1684": 1,
+      "f_ensure_body_2037": 1,
+      "f_lit_default_2204": 1,
+      "f_copy_write_warnings_2208": 1,
+      "f_w32_note_file_1855": 1,
+      "f_repl_completions_3454": 1,
+      "f_env_layout_2734": 1,
+      "f_helper_drop_2881": 1,
+      "f_helper_arrrel_2886": 1,
+      "f_helper_arruniq_2887": 1,
+      "f_helper_envcopy_2900": 1,
+      "f_ir_operands_2623": 1,
+      "f_emit_wins_3568": 1,
+      "f_readonly_global_2116": 1,
+      "f_push_type_params_2124": 1,
+      "f_dewy_classify_spread_2329": 1,
+      "f_fmt_part_2403": 1,
+      "f_member_after_2364": 1,
+      "f_file_ext_after_2366": 1,
+      "f_in_text_call_2368": 1,
+      "f_private_hint_2294": 1,
+      "f_variant_hint_for_2388": 1,
+      "f_check_dotted_2485": 1,
+      "f_check_call_2399": 1,
+      "f_part_spec_2453": 1,
+      "f_array_has_spread_2418": 1,
+      "f_dewy_record_spread_entries_2330": 1,
+      "f_charlike_2423": 1,
+      "f_check_if_2433": 1,
+      "f_check_iflet_2503": 1,
+      "f_check_block_2152": 1,
+      "f_dewy_coerce_bigint_literal_2282": 1,
+      "f_lit_fits_2287": 1,
+      "f_check_value_members_2220": 1,
+      "f_new_local_2134": 1,
+      "f_ide_decl_of_ref_1670": 1,
+      "f_ide_fn_sig_1680": 1,
+      "f_ide_ref_name_1681": 1,
+      "f_arm64_ins_3406": 1,
+      "f_emit_prologue_3291": 1,
+      "f_gen_assign_2751": 1,
+      "f_uq_begin_2757": 1,
+      "f_fixed_loop_begin_2883": 1,
+      "f_fixed_elem_addr_2884": 1,
+      "f_retain_elems_2806": 1,
+      "f_hash_member_2893": 1,
+      "f_inst_mutmask_2704": 1,
+      "f_o_kconst_3156": 1,
+      "f_o_rewrite_3145": 1,
+      "f_remap_3212": 1,
+      "f_lx_vec_plan_3476": 1,
+      "f_f_is_kw_3710": 1,
+      "f_lx_flow_effects_2013": 1,
+      "f_ide_dewy_type_node_2523": 1,
+      "f_stmt_terminates_2149": 1,
+      "f_lx_line_start_1899": 1,
+      "f_lx_close_block_ctx_1901": 1,
+      "f_dewy_spread_source_type_2328": 1,
+      "f_capture_in_2137": 1,
+      "f_check_in_range_2436": 1,
+      "f_narrow_var_2494": 1,
+      "f_occurs_2060": 1,
+      "f_soa_alias_2156": 1,
+      "f_check_place_2172": 1,
+      "f_ide_hint_local_2527": 1,
+      "f_elem_field_assign_2194": 1,
+      "f_soa_loop_2155": 1,
+      "f_unpack_loop_2159": 1,
+      "f_dewy_nested_loop_bindings_2165": 1,
+      "f_dewy_cursor_loop_2163": 1,
+      "f_map_tidy_first_2162": 1,
+      "f_dewy_sequence_loop_2164": 1,
+      "f_ide_sym_decls_2526": 1,
+      "f_ide_variant_text_1678": 1,
+      "f_dn_interpolation_end_2550": 1,
+      "f_lea_add_3299": 1,
+      "f_never_value_2823": 1,
+      "f_gen_positive_mod_2720": 1,
+      "f_gen_closure_call_2732": 1,
+      "f_gen_partial_2743": 1,
+      "f_gen_if_2834": 1,
+      "f_gen_iflet_2835": 1,
+      "f_reg_temp_vreg_2651": 1,
+      "f_new_cell_2674": 1,
+      "f_zero_val_2636": 1,
+      "f_jump_if_false_2761": 1,
+      "f_stable_loop_index_2773": 1,
+      "f_range_facts_begin_2775": 1,
+      "f_lm_change_at_2782": 1,
+      "f_lx_decomp_3462": 1,
+      "f_lx_mat_3464": 1,
+      "f_df_assignment_3728": 1,
+      "f_dn_expr_2571": 1,
+      "f_end_stmt_1995": 1,
+      "f_loop_unpack_many_2027": 1,
+      "f_parse_match_1987": 1,
+      "f_parse_simple_stmt_1994": 1,
+      "f_value_capture_2136": 1,
+      "f_dewy_arithmetic_call_2340": 1,
+      "f_union_dispatch_2379": 1,
+      "f_angle_check_2378": 1,
+      "f_param_in_union_2306": 1,
+      "f_check_dewy_in_range_2435": 1,
+      "f_arg_type_2401": 1,
+      "f_positive_modulus_2715": 1,
+      "f_positive_writes_2719": 1,
+      "f_positive_bound_2716": 1,
+      "f_gen_fmt_struct_2815": 1,
+      "f_gen_vec_ctor_2809": 1,
+      "f_freeze_scalar_2688": 1,
+      "f_const_array_2830": 1,
+      "f_gen_match_switch_2796": 1,
+      "f_nonnegative_range_2857": 1,
+      "f_range_bounds_arrays_2858": 1,
+      "f_fn_writes_direct_2845": 1,
+      "f_lx_inv_made_3463": 1,
+      "f_lx_splat_3478": 1,
+      "f_dw_flow_2266": 1,
+      "f_dn_range_bound_2565": 1,
+      "f_parse_fn_literal_1989": 1,
+      "f_lit_num_2343": 1,
+      "f_json_key_2819": 1,
+      "f_sv_fragment_3061": 1,
+      "f_dw_broadcast_2250": 1,
+      "f_dw_binding_items_2254": 1,
+      "f_ml_first_3069": 1,
+      "f_fr_scan_2851": 1,
+      "f_dn_token_statement_2544": 1,
+      "f_gl_stmt_2927": 1,
+      "f_gl_first_2909": 1,
+      "f_sv_stmt_3006": 1,
+      "f_parse_prefix_1969": 1,
+      "f_ml_stmt_3091": 1,
+      "f_sv_arith_3010": 1,
+      "f_ml_call_3112": 1,
+      "f_parse_postfix_1964": 1,
+      "f_sv_components_3030": 1,
+      "f_sv_cap_3048": 1,
+      "f_is_ident_plain_1950": 1
+    }
+  },
+  "compilation_pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "59336c4ab9e0da2dec80b64e84d13c2128cc22ae5e7d29e9b8e3ceefb6b2aaa7",
+        "compiler_sources_sha256": "97b85b9602ea7fdee4eb4ebf448419e04464d7e5647b2bca1fee662810ffc7d8",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "00d88122652b7e3fd02025cdeec2211da59a45265f66c4250415ce2173bfd0ac",
+        "compiler_sources_sha256": "d632ad787ad8e425844c12f088aed2ae41fa3cc6336d64a484189a33456ba807",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "317fd7df6dfa4eaf51152b50a54f789d829c1c8a",
+      "working_tree": " M core/compiler/opt.jo\n M tests/python_misc/test_sloppy_core.py\n",
+      "diff_sha256": "9f0a528e91ad6742035b73954929826bdbc4f81b0a61b447daa35fb3a64d5bc2",
+      "load_average_start": [
+        5.1552734375,
+        6.62158203125,
+        7.28515625
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792409746787576079/bin/dewy-core",
+          "sha256": "59336c4ab9e0da2dec80b64e84d13c2128cc22ae5e7d29e9b8e3ceefb6b2aaa7"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792410814072613886/bin/dewy-core",
+          "sha256": "00d88122652b7e3fd02025cdeec2211da59a45265f66c4250415ce2173bfd0ac"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/narrowing-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.6388342920108698,
+              0.6337058509961935,
+              0.6254049450071761,
+              0.6335272779979277,
+              0.6391822909936309,
+              0.6238912800035905,
+              0.6271272379963193
+            ],
+            "candidate": [
+              0.6432156169903465,
+              0.638565096000093,
+              0.6334788799867965,
+              0.6582980810053414,
+              0.6267872729949886,
+              0.6088573770102812,
+              0.6395726609916892
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.6335272779979277,
+            "candidate": 0.638565096000093
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.6310359999999999,
+              0.6260540000000003,
+              0.6178060000000002,
+              0.6254879999999996,
+              0.6305429999999995,
+              0.615219,
+              0.6180719999999998
+            ],
+            "candidate": [
+              0.627926,
+              0.6300919999999999,
+              0.6256100000000001,
+              0.6325989999999999,
+              0.6174370000000005,
+              0.5992630000000003,
+              0.6307730000000001
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.6254879999999996,
+            "candidate": 0.627926
+          },
+          "output_bytes": {
+            "candidate": 1987352,
+            "previous": 1987352
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/narrowing-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.8092136580089573,
+              0.8291311270004371,
+              0.8289089530007914,
+              0.8342129130032845,
+              0.8310016969917342,
+              0.8172403570060851,
+              0.8762829570041504
+            ],
+            "candidate": [
+              0.8385879389970796,
+              0.8125924390042201,
+              0.8380278260010527,
+              0.8429134679900017,
+              0.8237233159889001,
+              0.833133247011574,
+              0.8264364109927556
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.8291311270004371,
+            "candidate": 0.833133247011574
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.7985899999999997,
+              0.8192840000000011,
+              0.8183199999999969,
+              0.8237539999999997,
+              0.8204219999999978,
+              0.8063150000000021,
+              0.831958999999999
+            ],
+            "candidate": [
+              0.8276450000000004,
+              0.8016689999999989,
+              0.8276000000000018,
+              0.8313159999999994,
+              0.8128030000000007,
+              0.8210630000000002,
+              0.8151840000000026
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.8192840000000011,
+            "candidate": 0.8210630000000002
+          },
+          "output_bytes": {
+            "candidate": 2227056,
+            "previous": 2227056
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.7143025449913694,
+              1.729623517006985,
+              1.7274157860083506,
+              1.7110894549987279,
+              1.7155342129990458,
+              1.7271507429977646,
+              1.7194292380008847
+            ],
+            "candidate": [
+              1.715448208997259,
+              1.7258361060085008,
+              1.7115909949934576,
+              1.7150916360114934,
+              1.721297391995904,
+              1.739890780998394,
+              1.7068307459994685
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.7194292380008847,
+            "candidate": 1.715448208997259
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.6929819999999993,
+              1.704906999999998,
+              1.7049499999999953,
+              1.6884740000000067,
+              1.6925919999999985,
+              1.704463999999993,
+              1.696592000000002
+            ],
+            "candidate": [
+              1.6936979999999984,
+              1.702720999999999,
+              1.6878880000000018,
+              1.6914719999999925,
+              1.6999300000000062,
+              1.711120000000005,
+              1.6831059999999969
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.696592000000002,
+            "candidate": 1.6936979999999984
+          },
+          "output_bytes": {
+            "candidate": 7159232,
+            "previous": 7150920
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        5.31982421875,
+        6.44580078125,
+        7.189453125
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 1.006449922850105,
+        "bootstrap_95_percent_interval": [
+          0.9792147403111301,
+          1.01263179703661
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 1.0091799250747187,
+        "bootstrap_95_percent_interval": [
+          0.9798367467627654,
+          1.0182906184307599
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 1.0004229223937402,
+        "bootstrap_95_percent_interval": [
+          0.9920511236643782,
+          1.0039050399421825
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      }
+    }
+  },
+  "validation": {
+    "bootstrap_quick": {
+      "passed": 402,
+      "seconds": 9.36,
+      "sha256": "b5363275d07c15c15e7f2493a68752463900cdbde02a6e39ec09614ef8982002"
+    },
+    "candidate_boundary_tests": {
+      "passed": 4,
+      "seconds": 2.79,
+      "sha256": "927b525aef5c03afcef51a258c2767d98d82c059f3bc2d55c4fa1d137e35a490"
+    },
+    "accepted_boundary_tests": {
+      "passed": 4,
+      "seconds": 3.29,
+      "sha256": "9e142f76c03142f9314bbc355cb7ed89ccb142cd7f64cab920cb23d54f73940d"
+    }
+  }
+}

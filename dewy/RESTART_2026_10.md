@@ -15,6 +15,20 @@ The compiler changes are reverted, with the patch and samples retained in
 [`small-integers-experiment.json`](audits/2026-10-19/small-integers-experiment.json).
 The accepted shifted-index stage also passed all platform CI checks.
 
+## Redundant integer extensions: deferred (2026-10-19)
+
+A prototype reused stable IR definitions to remove redundant sign/zero
+extensions of narrow loads, comparisons and already-extended values. A static
+scan found 832 candidates, but seven matched compilation pairs did not show a
+useful gain: candidate/previous CPU ratios were **1.00645 default**, **1.00918
+release** and **1.00042 self-build**. The compiler change is reverted; no full
+suite or stage gate was run. The independent C bootstrap passed **402 quick
+checks**, and four new native/web/default/release boundary tests pass on both
+the prototype and accepted compiler. They cover signed/unsigned conversions at
+8/16/32/64 bits against a Python modular-arithmetic oracle. The patch and raw
+measurements are retained in
+[`narrowing-experiment.json`](audits/2026-10-19/narrowing-experiment.json).
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until
