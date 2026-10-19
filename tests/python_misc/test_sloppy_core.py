@@ -10966,3 +10966,55 @@ main = () -> int:
             assembly = subprocess.check_output([objdump, '-d', f'--disassemble={name}', binary], text=True)
             assert re.search(r'\blea\b', assembly), assembly
             assert not re.search(r'\bimul\b', assembly), assembly
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_integer_select_flags(compiler, tmp_path, release):
+    # Dynamic comparisons prevent constant folding. Zero/large arms check that
+    # operand materialization preserves comparison flags; live results exercise
+    # overlapping registers and spills.
+    rng = random.Random(1906)
+    signed = [-(1 << 63), -(1 << 31), -1, 0, 1, (1 << 31)-1, (1 << 63)-1]
+    unsigned = [0, 1, (1 << 31)-1, 1 << 31, (1 << 63)-1, 1 << 63, (1 << 64)-1]
+    functions, calls, expected = [], [], []
+    operations = [('eq', '==', lambda a, b: a == b), ('ne', '!=', lambda a, b: a != b),
+                  ('lt', '<', lambda a, b: a < b), ('le', '<=', lambda a, b: a <= b),
+                  ('gt', '>', lambda a, b: a > b), ('ge', '>=', lambda a, b: a >= b)]
+    for kind, ty, values in [('signed', 'int', signed), ('unsigned', 'u64', unsigned)]:
+        pairs = [(a, b) for a in values for b in values]
+        for op, symbol, predicate in operations:
+            name = f'{kind}_{op}'
+            functions.append(f'@noinline\n{name} = (a: {ty}, b: {ty}, yes: int, no: int) -> int: if a {symbol} b: yes else: no')
+            for a, b in pairs:
+                yes, no = rng.choice([0, -1, 0x123456789abcdef]), rng.choice([0, 1, -0x123456789abcdef])
+                calls.append(f'    print({name}({a}, {b}, {yes}, {no}))')
+                expected.append(yes if predicate(a, b) else no)
+    functions.append('@noinline\nconstant_arms = (a: int, b: int) -> int: if a < b: 0 else: 0x123456789abcdef')
+    for a, b in [(-1, 0), (0, -1), (0, 0)]:
+        calls.append(f'    print(constant_arms({a}, {b}))')
+        expected.append(0 if a < b else 0x123456789abcdef)
+    params = ', '.join(f'a{i}: int' for i in range(12))
+    total = ' + '.join(f'a{i}' for i in range(12))
+    functions.append(f'@noinline\nsink_selects = ({params}) -> int: {total}')
+    choices = '\n'.join(f'    v{i} = if a{i} < limit: a{(i+1)%12} else: a{(i+2)%12}' for i in range(12))
+    functions.append(f"@noinline\npressure_selects = ({params}, limit: int) -> int:\n{choices}\n    sink_selects({', '.join(f'v{i}' for i in range(12))})")
+    for limit in (-1, 6, 12):
+        calls.append(f"    print(pressure_selects({', '.join(map(str, range(12)))}, {limit}))")
+        expected.append(sum((i+1)%12 if i < limit else (i+2)%12 for i in range(12)))
+    source = tmp_path / 'integer-select.jo'
+    source.write_text('\n'.join(functions) + '\nmain = () -> int:\n' + '\n'.join(calls) + '\n    0\n')
+    binary = tmp_path / 'integer-select'
+    built = subprocess.run([compiler, 'build', source, *(['--release'] if release else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert [int(line) for line in ran.stdout.splitlines()] == expected
+    objdump = shutil.which('objdump')
+    if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
+        for name in ('signed_lt', 'unsigned_gt', 'constant_arms'):
+            assembly = subprocess.check_output([objdump, '-d', f'--disassemble={name}', binary], text=True)
+            assert re.search(r'\bcmov\w*\b', assembly), assembly
+            if name != 'constant_arms':  # constant definitions separate compare/select
+                assert not re.search(r'\bset\w+\b', assembly), assembly

@@ -1649,6 +1649,10 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
 # fused compare + branch: next instruction consumes the flag
 fused_cc = -1
 fuse_skip = -1             # an instruction folded into the branch after it
+sel_fused = -1             # adjacent integer comparison consumed by select
+sel_ca = 0
+sel_cb = 0
+sel_cc = 0
 
 emit_ins = (pos: int, ins: Ins):
     op = ins.op
@@ -1674,6 +1678,14 @@ emit_ins = (pos: int, ins: Ins):
         # fuse with a following if/brif that is the only user
         if pos + 1 < ir.code.len() and v_nuse[d] == 1:
             nx = ir.code[pos + 1]
+            # Compare first at the select, then preserve its flags through
+            # the operand moves. Adapted from Sloppy f9ba5a464f0171b3.
+            if nx.op == .select and int(nx.a) == d and is_icmp(op) and int(nx.b) != d and int(nx.c) != d:
+                sel_fused = pos + 1
+                sel_ca = a
+                sel_cb = bb
+                sel_cc = icc(op)
+                return
             if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
                 if is_icmp(op):
                     cmp_ops(a, bb, true)
@@ -2382,15 +2394,35 @@ emit_ins = (pos: int, ins: Ins):
             emit_epilogue()
         trap: b(0x0F); b(0x0B)
         select:
-            # Integer select: a is the condition, b/c the true/false values.
-            # Load all inputs before writing a potentially overlapping result.
-            ld(RAX, int(ins.c))
-            yes = reg_of(bb, RCX)
-            cond = reg_of(a, RDX)
-            op_rr(0x85, true, cond, cond)
-            rex(true, RAX, 0, yes, false)
-            b(0x0F); b(0x45); modrr(RAX, yes)       # cmovne rax, yes
-            st(d, RAX)
+            # d = a != 0 ? b : c (integers): rax = c; test a; cmovne rax, b
+            cc = CC_NE
+            rb = 0
+            r = 0
+            if sel_fused == pos:
+                # (its compare first: what follows only moves, which keep the flags)
+                sel_fused = -1
+                if vloc[d] == LOC_NONE: return
+                cmp_ops(sel_ca, sel_cb)
+                cc = sel_cc
+                rb = reg_of(bb, RDX)
+                r = dreg(d, RAX)
+                if r == rb: r = RAX
+                ld(r, int(ins.c))
+            else:
+                if vloc[d] == LOC_NONE: return
+                rb = reg_of(bb, RDX)
+                rc = reg_of(a, RCX)
+                r = dreg(d, RAX)
+                if r == rb or r == rc: r = RAX
+                ld(r, int(ins.c))
+                rex(true, rc, 0, rc, false)
+                b(0x85)
+                modrr(rc, rc)
+            rex(true, r, 0, rb, false)
+            b(0x0F)
+            b(0x40 + cc)
+            modrr(r, rb)
+            st(d, r)
 
 # jumps taken when condition `cc` is false (fixup positions appended to fx)
 jfalse = (cc: int, fx: mut int[]):
@@ -2457,6 +2489,7 @@ x64_function = ():
     xctl = []
     fused_cc = -1
     fuse_skip = -1
+    sel_fused = -1
     fold_load = -1
     # (the prologue is the declaration's line, the body's first line comes after it: where
     # debuggers put a breakpoint on the function)

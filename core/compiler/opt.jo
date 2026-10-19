@@ -1429,12 +1429,16 @@ o_if_select = (out: mut Ins[], start: int) -> bool:
             if d == dst or d < 0 or o_ndef[d] != 1: return false
         ir_operands(ins)
         if ir_has_use(dst): return false
-    y = o_tmp()
-    z = o_tmp()
+    # A result copy already names the selected value. Keep that operand
+    # directly rather than introducing two moves before the select; besides
+    # saving vregs this leaves adjacent comparisons available to the emitter.
+    y = if out[yes].op == .mov: int(out[yes].a) else: o_tmp()
+    z = if out[no].op == .mov: int(out[no].a) else: o_tmp()
     replacement: Ins[]
     loop j in [start + 2..n):
         ins = out[j]
         if ins.op == .block or ins.op == .end or j == branch or j == jump: continue
+        if (j == yes or j == no) and ins.op == .mov: continue
         if j == yes: ins.dst = i32(y)
         if j == no: ins.dst = i32(z)
         replacement.push(ins)

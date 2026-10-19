@@ -1183,6 +1183,30 @@ Fresh throughput is about **98k root lines/CPU-second**, below 250k. Host load
 fell during these measurements; the absolute improvement over the preceding
 report is not a compiler speedup. [Validation and all measurements](audits/2026-10-19/scaled-multiply.json).
 
+## Fuse integer comparisons with conditional moves
+
+Sloppy's `f9ba5a4` x86-64 compare/select emission is now adapted to Dewy. The
+optimizer also selects the original operands of copy-only arms, avoiding two
+extra virtual-register moves and exposing adjacent comparisons for fusion.
+Lazy branches retain the existing restriction to cheap, pure integer operations;
+floating-point comparisons retain their separate NaN-aware behavior.
+
+Against the preceding stage, matched CPU ratios are **0.968× / 0.957×** for
+default/release helpers, **0.972×** for default arrays, and **0.910×** for default
+text scanning. Release helpers remain **1.039× C**; this is progress, not C
+parity across the workloads. Compilation is essentially unchanged: large
+default/release ratios are **1.001× / 0.993×**, with fresh default throughput
+around **98k root lines/CPU-second** on this host.
+
+The independent C bootstrap passes **347 quick checks**, and the full suite
+passes **5,974 checks in 181.42 seconds** using two workers. New tests cover all
+six signed/unsigned comparisons at integer boundaries, wide and zero arm values,
+register pressure, and actual fused instruction selection. All **44** performance
+comparisons pass after focused runtime rechecks; every initial and recheck sample
+is retained. Match dispatch and managed parameters retain certified artifacts
+with fresh correctness checks and no new timing claims.
+[Validation, provenance and measurements](audits/2026-10-19/native-select.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

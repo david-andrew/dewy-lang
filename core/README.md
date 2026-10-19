@@ -495,5 +495,6 @@ Build hashes identify provenance; byte-identical executables are not required.
 Imported from Sloppy revision `235e19a271bccad3fe72e36d03264807a632dc1b`, with
 Dewy frontend, editor, CLI and lowering changes. `UPSTREAM.json` records the
 original imported file hashes so the baseline can be compared independently of
-later edits. `LICENSE` and `NOTICE` retain the upstream license and notices;
+later edits; its `followup_ports` list identifies later, selectively adapted
+upstream changes. `LICENSE` and `NOTICE` retain the upstream license and notices;
 `lib/game/assets/OFL.txt` covers the included font. No Sloppy logo is included.
