@@ -1,0 +1,131 @@
+{
+  "decision": "Rejected: direct arithmetic projection saves only 0.10% / 0.072% of whole-build instructions. Keep one established projection path instead of adding a context-readiness traversal for negligible measured benefit. No timing gate or full suite was spent on the rejected experiment.",
+  "validation": "449 quick checks passed in 7.93 s",
+  "instructions": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "4a826801feae17e8367e59f102012d68f3e257da03e51540554743c33208ee33",
+        "compiler_sources_sha256": "d91822c2b1b4deee165eeefdf85528e2094b1b1589fb64c63d02d7a2227d315f",
+        "library_sha256": "f2ad951cce51f4e5bf0ca0ab3d017438bfa7e531e488fa250666cf71702b3492"
+      },
+      "candidate": {
+        "binary_sha256": "9d32bb4a676eec5d7cf1281c7b56746bc32d3a910531a1da6522ea18fbd2d9c7",
+        "compiler_sources_sha256": "840e505d8a04bc2a348dd7b6032c747b8b709f7f019bffb6b5b107a06a99ada4",
+        "library_sha256": "f2ad951cce51f4e5bf0ca0ab3d017438bfa7e531e488fa250666cf71702b3492"
+      }
+    },
+    "status": "complete",
+    "instructions": {
+      "throughput-default": {
+        "previous": [
+          {
+            "instructions": 2496465206,
+            "enabled_ns": 566552526,
+            "running_ns": 566552526
+          },
+          {
+            "instructions": 2496464971,
+            "enabled_ns": 347266333,
+            "running_ns": 347266333
+          },
+          {
+            "instructions": 2496464965,
+            "enabled_ns": 344273308,
+            "running_ns": 344273308
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 2493937725,
+            "enabled_ns": 590631462,
+            "running_ns": 590631462
+          },
+          {
+            "instructions": 2493937612,
+            "enabled_ns": 490020158,
+            "running_ns": 490020158
+          },
+          {
+            "instructions": 2493937455,
+            "enabled_ns": 342589010,
+            "running_ns": 342589010
+          }
+        ]
+      },
+      "throughput-release": {
+        "previous": [
+          {
+            "instructions": 3520144232,
+            "enabled_ns": 450115479,
+            "running_ns": 450115479
+          },
+          {
+            "instructions": 3520144246,
+            "enabled_ns": 461189961,
+            "running_ns": 461189961
+          },
+          {
+            "instructions": 3520144239,
+            "enabled_ns": 456278044,
+            "running_ns": 456278044
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 3517616745,
+            "enabled_ns": 460519378,
+            "running_ns": 460519378
+          },
+          {
+            "instructions": 3517616722,
+            "enabled_ns": 457051123,
+            "running_ns": 457051123
+          },
+          {
+            "instructions": 3517616722,
+            "enabled_ns": 463388202,
+            "running_ns": 463388202
+          }
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          {
+            "instructions": 7224305279,
+            "enabled_ns": 1344635645,
+            "running_ns": 1344635645
+          },
+          {
+            "instructions": 7224304795,
+            "enabled_ns": 1031867236,
+            "running_ns": 1031867236
+          },
+          {
+            "instructions": 7224304977,
+            "enabled_ns": 1049157406,
+            "running_ns": 1049157406
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 7224297436,
+            "enabled_ns": 1389541773,
+            "running_ns": 1389541773
+          },
+          {
+            "instructions": 7224297156,
+            "enabled_ns": 1030478768,
+            "running_ns": 1030478768
+          },
+          {
+            "instructions": 7224297202,
+            "enabled_ns": 1047426454,
+            "running_ns": 1047426454
+          }
+        ]
+      }
+    }
+  },
+  "patch": "diff --git a/core/compiler/dewy_fast.jo b/core/compiler/dewy_fast.jo\nindex 97f913d5..dcc2c569 100644\n--- a/core/compiler/dewy_fast.jo\n+++ b/core/compiler/dewy_fast.jo\n@@ -342,7 +342,34 @@ dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -\n     dewy_syntax.push(DewySyntax(kind, \"\", mkpos(dn_file, offset), children, symbol))\n     id\n \n+# An arithmetic operand has value syntax. Project complete simple operands\n+# once while parsing, instead of allocating another syntax-child buffer and\n+# walking the same arithmetic tree again. Contextual `end` remains deferred\n+# until the enclosing index establishes its axis.\n+dn_value_ready = (id: int) -> bool:\n+    k = dewy_syntax[id].kind\n+    if k == .core_expr or k == .source_integer or k == .source_real or k == .boolean or k == .string: return true\n+    if k == .identifier: return dewy_syntax[id].text != \"end\"\n+    if k == .block and dewy_syntax[id].text == \"():\" and dewy_syntax[id].children.len() == 1: return dn_value_ready(dw_child(id, 0))\n+    if k != .binary: return false\n+    op = dewy_syntax[id].symbol\n+    if op == .dot: return dn_value_ready(dw_child(id, 1)) and dewy_syntax[dw_child(id, 2)].kind == .identifier\n+    if op != .call: return false\n+    if not dn_value_ready(dw_child(id, 1)): return false\n+    args = dw_child(id, 2)\n+    if dewy_syntax[args].kind != .block or dewy_syntax[args].text != \"():\": return false\n+    loop arg in dewy_syntax[args].children:\n+        if not dn_value_ready(arg): return false\n+    true\n+\n dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int:\n+    if kind == .binary and (op == .plus or op == .minus or op == .star) and dn_value_ready(left) and dn_value_ready(right):\n+        pos = dewy_syntax[left].pos\n+        n = mk(.binary, pos)\n+        nodes[n].op = i32(int(if op == .plus: Tok.plus else if op == .minus: Tok.minus else: Tok.star))\n+        nodes[n].a = i32(dw_expr(left))\n+        nodes[n].b = i32(dw_expr(right))\n+        return dn_node(.core_expr, \"\", pos_off(pos), name = i32(n))\n     scalar = dn_token_uninvert(op)\n     sentinel = if scalar != op: 1 else: 0\n     dn_op_node(kind, scalar, pos_off(dewy_syntax[left].pos), [sentinel, left, right])\ndiff --git a/core/compiler/dewy_parse.jo b/core/compiler/dewy_parse.jo\nindex 71a24485..a94b59fb 100644\n--- a/core/compiler/dewy_parse.jo\n+++ b/core/compiler/dewy_parse.jo\n@@ -15,7 +15,7 @@ enum DewyKind:\n     unknown, op, identifier, boolean, metatag, based_string, integer, real,\n     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,\n     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,\n-    operator, postfix, prefix, string, string_chunk, source_integer, source_real\n+    operator, postfix, prefix, string, string_chunk, source_integer, source_real, core_expr\n \n dw_kind_name = (kind: DewyKind) -> str:\n     match kind:\n@@ -48,6 +48,7 @@ dw_kind_name = (kind: DewyKind) -> str:\n         prefix: \"Prefix\"\n         string: \"String\"\n         string_chunk: \"StringChunk\"\n+        core_expr: \"Expression\"\n \n dw_kind_from_name = (name: str) -> DewyKind:\n     match name:\n@@ -593,6 +594,7 @@ dw_broadcast = (op: DewyToken, a: int, b: int, id: int) -> int:\n dw_expr = (id: int) -> int:\n     let id = dw_unwrap(id)\n     k = dewy_syntax[id].kind\n+    if k == .core_expr: return int(dewy_syntax[id].name)\n     text = dewy_syntax[id].text\n     pos = dewy_syntax[id].pos\n     if k == .based_string: return dw_binary(id)\n",
+  "limits": "Hardware instruction counts are not timings. This experiment does not rule out a broader frontend redesign."
+}
