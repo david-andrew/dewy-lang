@@ -243,10 +243,10 @@ a_allocate = ():
     nxt = fill(-1, nv)
     loop v in [0..nv):
         if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
-        if v_last[v] < 0 or (v_nuse[v] == 0 and v >= ir.nparams):
+        if v_live[v].last < 0 or (v_live[v].nuse == 0 and v >= ir.nparams):
             vloc[v] = LOC_NONE
             continue
-        f = v_first[v]
+        f = v_live[v].first
         nxt[v] = head[f]
         head[f] = v
     # (a parameter may keep the register it arrives in)
@@ -271,19 +271,19 @@ a_allocate = ():
             k = 0
             loop k < active.len():
                 u = active[k]
-                if v_last[u] < pos:
+                if v_live[u].last < pos:
                     free[vloc[u]] = true
                     active[k] = active[active.len() - 1]
                     active.pop()
                 else:
-                    if v_last[u] < min_end: min_end = v_last[u]
+                    if v_live[u].last < min_end: min_end = v_live[u].last
                     k += 1
         loop v >= 0:
             s = live_start(v)
             # the registers v may have: 0 any, 1 not an argument register, 2 callee-saved ones
             w = 0
-            if crosses_call(s, v_last[v]): w = 2
-            else if v < ir.nparams or a_call_in(s, v_last[v]): w = 1
+            if crosses_call(s, v_live[v].last): w = 2
+            else if v < ir.nparams or a_call_in(s, v_live[v].last): w = 1
             fp = vtype(v) != VI
             base = 0
             pool = a_int_pool
@@ -291,7 +291,7 @@ a_allocate = ():
                 base = A_V
                 pool = a_fp_pool
             reg = -1
-            if v < ir.nparams and w == 1 and arrive[v] >= 0 and free[arrive[v]] and not a_call_in(s, v_last[v]): reg = arrive[v]
+            if v < ir.nparams and w == 1 and arrive[v] >= 0 and free[arrive[v]] and not a_call_in(s, v_live[v].last): reg = arrive[v]
             loop r in pool:
                 if reg >= 0: break
                 k = a_kind(base + r)
@@ -316,7 +316,7 @@ a_allocate = ():
                 vloc[v] = reg
                 free[reg] = false
                 active.push(v)
-                if v_last[v] < min_end: min_end = v_last[v]
+                if v_live[v].last < min_end: min_end = v_live[v].last
                 if a_kind(reg) == 2 and not used[reg]:
                     used[reg] = true
                     a_saved.push(reg)
@@ -438,7 +438,7 @@ a_layout = ():
     nxt = fill(-1, nv)
     loop v in [0..nv):
         if vloc[v] != LOC_SPILL: continue
-        if v_last[v] < 0:
+        if v_live[v].last < 0:
             vloc[v] = LOC_NONE
             continue
         s = live_start(v) + 1
@@ -452,7 +452,7 @@ a_layout = ():
         k = 0
         loop k < active.len():
             u = active[k]
-            if v_last[u] < s - 1:
+            if v_live[u].last < s - 1:
                 free.push(vspill[u])
                 active[k] = active[active.len() - 1]
                 active.pop()
@@ -834,7 +834,7 @@ a_pend = -1
 a_pend_cc = 0
 
 a_fuses = (v: int, pos: int) -> bool:
-    if v_nuse[v] != 1 or pos + 1 >= ir.code.len(): return false
+    if v_live[v].nuse != 1 or pos + 1 >= ir.code.len(): return false
     n = ir.code[pos + 1]
     if int(n.a) != v: return false
     if n.op == .if_ or n.op == .brif: return true

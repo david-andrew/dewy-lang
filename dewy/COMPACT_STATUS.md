@@ -76,6 +76,15 @@ New front-end or user-facing language design requires David's approval.
   path requires it. All 32 ordinary benchmark artifacts remain unchanged;
   laptop compilation comparisons and 100 fresh fuzz seeds pass.
   [Evidence](audits/2026-10-19/partial-construction-cleanup.json).
+- Register lifetime/cost metadata now shares one record array. All 32 benchmark
+  artifacts are unchanged; all laptop compilation comparisons pass. The gain
+  is modest: roughly 0.7% for compiler rebuilding, with most timings near flat.
+  [Evidence](audits/2026-10-19/register-lifetime-records.json).
+- Two further experiments were reverted promptly: paired SSE string comparisons
+  regressed laptop release runtime about 10%, and transitive effect-summary reuse
+  saved too little compiler work to prioritize. Their unfavorable evidence is
+  retained ([strings](audits/2026-10-19/paired-string-equality.json),
+  [effect analysis](audits/2026-10-19/effect-summary-reuse.json)).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
