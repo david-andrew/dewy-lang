@@ -5942,19 +5942,28 @@ check_if = (n: int, ex: int) -> int:
     c = int(nodes[n].c)
     if is_stmt:
         mark = scope_mark()
+        before_b = locals.len()
         narrow_by(cond, true)
+        after_b = locals.len()
         changes = narrow_changes.len()
         check_block(b, 0, false)
         scope_reset(mark)
+        before_c = 0
+        after_c = 0
         if c != 0:
             first = narrow_restore(changes)
+            before_c = locals.len()
             narrow_by(cond, false)
+            after_c = locals.len()
             check_block(c, 0, false)
             scope_reset(mark)
             narrow_merge(first)
-        # if x is E: return ...   narrows x for the rest of the block
-        if stmt_terminates(b) and (c == 0 or not stmt_terminates(c)): narrow_by(cond, false)
-        else if c != 0 and stmt_terminates(c) and not stmt_terminates(b): narrow_by(cond, true)
+        # Reuse the surviving arm's still-valid facts. Retesting the old
+        # condition here would resurrect facts invalidated by that arm's writes.
+        if stmt_terminates(b) and (c == 0 or not stmt_terminates(c)):
+            if c == 0: narrow_by(cond, false)
+            else: narrow_promote(before_c, after_c)
+        else if c != 0 and stmt_terminates(c) and not stmt_terminates(b): narrow_promote(before_b, after_b)
         return T_VOID
     if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
     mark = scope_mark()
@@ -7012,6 +7021,13 @@ plain_path = (e: int) -> bool:
     if k == .ident: return true
     k == .field and plain_path(int(nodes[e].a))
 
+# Only condition-created aliases escape a guard, never locals declared in an arm.
+narrow_promote = (first: int, limit: int):
+    loop l in [first..limit):
+        if int(locals[l].flags) & (LF_ALIAS | LF_UNNARROWED) != LF_ALIAS: continue
+        nm = int(locals[l].name)
+        if nm != 0: push_scope_sym(nm, new_sym(nm, .local, l, 0))
+
 # where condition c is `holds` (true or false), variables it tests with `is` stand for the member
 narrow_by = (c: int, holds: bool):
     k = nodes[c].kind
@@ -7132,7 +7148,7 @@ path_alias = (n: int) -> int:
     s = lookup(intern(key))
     if s == 0 or syms[s].kind != .local: return -1
     al = int(syms[s].ref)
-    if int(locals[al].owner) != int(ctxs[cx].inst): return -1
+    if int(locals[al].owner) != int(ctxs[cx].inst) or int(locals[al].flags) & LF_UNNARROWED != 0: return -1
     al
 
 narrow_path = (a: int, vi: int, holds: bool):
@@ -7189,17 +7205,29 @@ narrow_some = (tests: int[]):
         narrow_expr(copy_path(a0), sel, nodes[a0].pos, intern(key))
 
 # the path (and paths inside it) may hold another value from here on: forget their narrowing
-path_forget = (key: str):
+path_forget = (key: str, same_type: int = 0):
     if path_narrows == 0 or len(key) == 0: return
     prefix = key + "."
-    found: int[]
     i = sc_names.len() - 1
     floor = int(ctxs[cx].floor)
     loop i >= floor:
         nm = name_of(sc_names[i])
-        if nm == key or starts_with(nm, prefix): found.push(sc_names[i])
+        if nm == key or starts_with(nm, prefix):
+            sy = sc_syms[i]
+            if syms[sy].kind == .local:
+                l = int(syms[sy].ref)
+                if int(locals[l].flags) & LF_ALIAS != 0:
+                    # Replacing a known member with the same member preserves
+                    # its tag, but invalidates any facts about fields inside it.
+                    keep = false
+                    if nm == key and same_type != 0:
+                        t = prune(int(locals[l].type))
+                        keep = type_eq(t, same_type) or (is_union(t) and union_index(t, same_type) >= 0)
+                    if not keep: narrow_invalidate(l)
+                    # Nested paths can use this alias as their root after the
+                    # parent was narrowed, rather than the original path text.
+                    path_forget("#L{l}")
         i -= 1
-    loop nm in found: push_scope_sym(nm, new_sym(nm, .global, -1, 0))
 
 check_iflet = (n: int, ex: int) -> int:
     is_stmt = has_flag(n, NF_STMT)

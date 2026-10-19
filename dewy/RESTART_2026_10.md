@@ -5,6 +5,28 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Keep guard refinements valid after writes (2026-10-19)
+
+The checker no longer re-applies an old condition after its surviving branch
+has invalidated it. For example, `if x is?none {return 0} else {x=none}` now
+correctly rejects a later `x.value`. Guards reuse their surviving, valid
+condition aliases; locals declared inside an arm still stay inside that arm.
+
+Field invalidation now uses the existing branch journal, so writes remain
+visible across nested block boundaries while sibling arms remain independent.
+Replacing a field with the same known member keeps its tag refinement, but
+invalidates facts about nested fields, including paths rooted in prior aliases.
+The change adds no whole-function analysis pass.
+
+An independent C bootstrap and **6,291 checks pass in 200.12 s**, including nine
+new diagnostic cases and six value cases in the native/web, default/release
+batch. Compilation instruction counts increase only **0.008% default /
+0.006% release / 0.003% compiler rebuild**. The paired pilot gives **7 pass /
+5 inconclusive**, with no established regression. All 28 runtime artifact
+comparisons match with fresh checksums. Returning-arm invalidation remains a
+separate follow-up; the accepted performance baseline is unchanged.
+[Before/after programs, validation and performance evidence](audits/2026-10-19/guard-narrowing.json).
+
 ## Reject a word-at-a-time name hash (2026-10-19)
 
 A bounded prototype replaced the compiler interner's byte loop with bounded

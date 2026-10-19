@@ -2302,11 +2302,13 @@ narrow_restore = (mark: int) -> int[]:
     narrow_changes.truncate(mark)
     changed
 
+narrow_invalidate = (l: int):
+    if int(locals[l].flags) & LF_UNNARROWED == 0:
+        locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
+        narrow_changes.push(l)
+
 narrow_merge = (changed: int[]):
-    loop l in changed:
-        if int(locals[l].flags) & LF_UNNARROWED == 0:
-            locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
-            narrow_changes.push(l)
+    loop l in changed: narrow_invalidate(l)
 
 # x = v where x is narrowed (by `is`) and v is not of the narrowed type: x is the whole variable again
 unnarrow_assign = (s: int):
@@ -2325,9 +2327,7 @@ unnarrow_assign = (s: int):
     al = int(locals[l].alias)
     in_place = nodes[al].kind != .conv
     if in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(int(nodes[s].b), rt, int(locals[l].type)): return
-    if int(locals[l].flags) & LF_UNNARROWED == 0:
-        locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
-        narrow_changes.push(l)
+    narrow_invalidate(l)
     nm = int(nodes[lhs].name)
     push_scope_sym(nm, new_sym(nm, .local, u, 0))
 
@@ -2799,7 +2799,7 @@ check_assign = (s: int) -> int:
         nodes[s].b = i32(coerce(last_checked, lt))
         if path_narrows > 0 and nodes[lhs].kind != .ident or path_narrows > 0 and nodes[lhs].aux == i32(int(SK.global)):
             key = path_key(lhs)
-            path_forget(key)
+            path_forget(key, rt)
             # x.f = 5 where x.f is int | str: x.f is an int from here on
             if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0: narrow_expr(copy_path(lhs), [rt], nodes[s].pos, intern(key))
             # x.f = Enemy() where x.f is an Enemy?: it holds one from here on

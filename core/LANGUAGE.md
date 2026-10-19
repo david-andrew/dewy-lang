@@ -1733,7 +1733,9 @@ printl"Length: {size}"
 
 Assigning another type invalidates a narrowed local. Sibling `if` and `match`
 arms are checked independently: an assignment in one arm does not change the
-type assumptions used to check another arm.
+type assumptions used to check another arm. A guard carries forward only
+refinements still valid on its continuing path. Replacing a parent value
+invalidates refinements of its fields, including across block boundaries.
 
 `match` supports typed bindings, literals and `_` as a fallback. A union is
 written `int64|string`; union matches must cover its members or have a fallback.

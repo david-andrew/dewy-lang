@@ -166,6 +166,42 @@ main=()=>{
 if pick(false false)+pick(true false)+pick(false true)+pick(true true) not=?36 return 1
 return if walk(true)=?0 and walk(false)=?8 42 else 2}''',
 
+    'guard-local-field-write': '''Node:type=[value:int64]
+f=(input:Node?):>int64=>{let x=input
+if x is?none {return 0} else {x.value+=1}
+return x.value}
+main=()=>f(Node[41])''',
+    'guard-field-same-type': '''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none {return 0} else {x.child=Node[42]}
+return x.child.value}
+main=()=>f(Box[Node[1]])''',
+    'guard-field-siblings': '''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box change:bool):>int64=>{let x=input
+if x.child is?none return 0
+if change {x.child=none return 1} else {return x.child.value}}
+main=()=>{return if f(Box[Node[42]] false)=?42 and f(Box[Node[42]] true)=?1 42 else 2}''',
+    'guard-unrelated-field': '''Node:type=[value:int64]
+Box:type=[child:Node? other:int64]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none {return 0} else {x.other=9}
+return x.child.value}
+main=()=>f(Box[Node[42] 0])''',
+    'guard-field-preserved-block': '''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none return 0
+{x.child=Node[42]}
+return x.child.value}
+main=()=>f(Box[Node[1]])''',
+    'guard-shadowed-local': '''Node:type=[value:int64]
+f=(input:Node?):>int64=>{let x=input
+if x is?none {return 0} else {let x:Node?=none}
+return x.value}
+main=()=>f(Node[42])''',
+
 }
 
 
@@ -229,6 +265,72 @@ if x is?none return 0
 let ignored=match choice {<0>=>{x=none 10} _=>20}
 return x.value}
 main=()=>{return f(Node[42] 0)}''', 'none'),
+    # local-else
+    ('''Node:type=[value:int64]
+f=(input:Node?):>int64=>{let x=input
+if x is?none {return 0} else {x=none}
+return x.value}
+main=()=>f(Node[42])''', 'may be none'),
+    # local-then
+    ('''Node:type=[value:int64]
+f=(input:Node?):>int64=>{let x=input
+if x is?Node {x=none} else {return 0}
+return x.value}
+main=()=>f(Node[42])''', 'may be none'),
+    # field-else
+    ('''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none {return 0} else {x.child=none}
+return x.child.value}
+main=()=>f(Box[Node[42]])''', 'may be none'),
+    # field-block
+    ('''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none return 0
+{x.child=none}
+return x.child.value}
+main=()=>f(Box[Node[42]])''', 'may be none'),
+    # parent-block
+    ('''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none return 0
+{x=Box[none]}
+return x.child.value}
+main=()=>f(Box[Node[42]])''', 'may be none'),
+    # field-join
+    ('''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box change:bool):>int64=>{let x=input
+if x.child is?none return 0
+if change {x.child=none} else {}
+return x.child.value}
+main=()=>f(Box[Node[42]] true)''', 'may be none'),
+    # nested-parent-block
+    ('''Node:type=[value:int64 next:Node?]
+Box:type=[child:Node?]
+f=(input:Box):>int64=>{let x=input
+if x.child is?none return 0
+if x.child.next is?none return 0
+{x.child=Node[42]}
+return x.child.next.value}
+main=()=>f(Box[Node[1 Node[42]]])''', 'may be none'),
+    # local-union
+    ('''A:type=[value:int64]
+B:type=[text:string]
+f=(input:A|B):>int64=>{let x=input
+if x is?B {return 0} else {x=B["changed"]}
+return x.value}
+main=()=>f(A[42])''', 'has no field'),
+    # branch-local-escape
+    ('''Node:type=[value:int64]
+f=(input:Node?):>int64=>{let x=input
+if x is?none {return 0} else {let hidden=42}
+return hidden}
+main=()=>f(Node[42])''', "unknown name 'hidden'"),
+
 ])
 def test_core_recursive_layout_diagnostics(compiler, tmp_path, source, message):
     path = tmp_path / ('bad.jo' if source.startswith('struct') else 'bad.dewy')
