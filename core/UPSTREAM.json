@@ -291,6 +291,14 @@
         "compiler/lower.jo"
       ],
       "description": "Adapt partial-construction tracking for early returns, without importing new error-propagation syntax. Also adapt break/continue cleanup from 41997586da1d2457d7e87a531ae60711212aaed2, including Dewy labeled exits. Track statements, arrays, records, variants, tuples, fixed arrays and interpolation; additionally cover partial closures, repeated-value evaluation and pending mutable copy-backs. Defer zero initialization until an actual escaping path requires it, preserving ordinary constructor code."
+    },
+    {
+      "revision": "06a297d890c6db0ce8f43668e61fd2ba36556336",
+      "paths": [
+        "lib/core/os.jo",
+        "lib/core/str.jo"
+      ],
+      "description": "Adapt bulk reads directly into the stdin result buffer and incremental File.read_line scanning with __memchr. Preserve existing stdin line buffering and prompt flushing. Copy file-line bytes directly into their result string, and keep the final EOF cursor within the buffer so subsequent read_bytes returns empty. No new APIs or parsing rules. Initialize only the header and terminator when copying known bytes into a new string, avoiding redundant zeroing."
     }
   ]
 }

@@ -85,6 +85,15 @@ New front-end or user-facing language design requires David's approval.
   saved too little compiler work to prioritize. Their unfavorable evidence is
   retained ([strings](audits/2026-10-19/paired-string-equality.json),
   [effect analysis](audits/2026-10-19/effect-summary-reuse.json)).
+- File line reading no longer rescans its accumulated prefix after refills;
+  stdin reads directly into its result buffer, and string copies skip redundant
+  zeroing. On the laptop, release 4MB line reads fall from 82.5 to 3.0 ms,
+  short lines from 14.4 to 7.1 ms, and 8MB stdin from 14.6 to 2.2 ms.
+  A byte read after a final unterminated line now returns empty at EOF.
+  The batch passes 6,437 checks after independent bootstrap and 100 fresh fuzz
+  seeds in five modes. The ordinary checkpoint has 68 passing comparisons and
+  four inconclusive runtime timings, with no established regression.
+  [Evidence and limitations](audits/2026-10-19/buffered-input.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

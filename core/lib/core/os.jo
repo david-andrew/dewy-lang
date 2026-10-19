@@ -227,16 +227,22 @@ open_file = (path: str) -> File?:
 
 # the next line of the file, without its end (none past the last)
 read_line = (f: mut File) -> str?:
+    from = f.pos
     loop true:
-        i = f.pos
-        loop i < f.buf.len() and f.buf[i] != '\n': i += 1
-        if i < f.buf.len() or (f.done and f.pos < f.buf.len()):
+        n = f.buf.len()
+        i = -1
+        if from < n: i = __memchr(data(f.buf), from, n, '\n')
+        if i >= 0 or (f.done and f.pos < n):
+            if i < 0: i = n
+            p = data(f.buf)
             e = i
-            if e > f.pos and f.buf[e - 1] == '\r': e -= 1
-            line = str_from_bytes(f.buf[f.pos..e))
-            f.pos = i + 1
+            if e > f.pos and p[e - 1] == '\r': e -= 1
+            line = __str_from(p + f.pos, e - f.pos)
+            f.pos = min(i + 1, n)
             return line
         if f.done: return none
+        # Refill moves the unread prefix to zero; search only its new suffix.
+        from = n - f.pos
         __file_fill(f)
 
 # up to n more bytes of the file (fewer at its end; none left: empty)
@@ -310,14 +316,18 @@ input_float = (prompt: str = "") -> f64:
 read_stdin = () -> str:
     __out_flush()
     out: u8[]
-    loop i in [__stdin_pos..__stdin_buf.len()): out.push(__stdin_buf[i])
+    if __stdin_pos < __stdin_buf.len():
+        __buf_append_raw(out, data(__stdin_buf) + __stdin_pos, __stdin_buf.len() - __stdin_pos)
     __stdin_buf.clear()
     __stdin_pos = 0
-    chunk = fill(u8(0), 65536)
+    # Read into the growing output buffer, including after a short pipe read.
     loop:
-        r = __read_fd(0, data(chunk), chunk.len())
+        n = out.len()
+        room = max(65536, n)
+        q = __buf_reserve(out, room)
+        r = __read_fd(0, q + 24 + n, room)
         if r <= 0: break
-        loop i in [0..r): out.push(chunk[i])
+        (q as *int)[1] = n + r
     str_from_bytes(out)
 
 read_bytes = (path: str) -> u8[]?:

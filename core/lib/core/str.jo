@@ -239,8 +239,15 @@ __space_byte = (c: u8) -> bool: c == 32 or c == 10 or c == 9 or c == 13
 # a new string of the n bytes at p
 __str_from = (p: *u8, n: int) -> str:
     if n == 0: return ""
-    q = __str_new(n)
+    # Every payload byte is copied below; only the header and terminator
+    # need initialization, rather than zeroing the allocation first.
+    q = __alloc_raw(25 + n)
+    h = q as *int
+    h[0] = 1
+    h[1] = n
+    h[2] = n + 1
     mem_copy(q + 24, p, n)
+    q[24 + n] = 0
     q as str
 
 lines = (s: str) -> str[]:

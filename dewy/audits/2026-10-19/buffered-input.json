@@ -1,0 +1,396 @@
+{
+  "change": "Adapt Sloppy incremental File.read_line scans and bulk stdin reads; copy completed lines directly into strings and skip redundant zeroing before copying string bytes. Preserve stdin line buffering, prompt flushing, byte contents and CR/LF handling.",
+  "correctness_fix": "After a final line without a newline, keep the file cursor at EOF. The preceding compiler panicked on a subsequent read_bytes(1); the candidate returns empty.",
+  "validation": {
+    "focused": "6 passed in 0.50s",
+    "coverage": "Native default/release/debug: empty input, CR/LF, embedded NUL, non-ASCII and arbitrary stdin bytes, 64KB boundaries, long lines, byte reads interspersed with line reads, prefetched stdin tails, and repeated EOF reads.",
+    "quick": "568 passed in 14.38s",
+    "bootstrap": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792450799431310019",
+    "full": "6437 passed in 216.11s (0:03:36)",
+    "fuzz": "100 fresh seeds 1101..1200 pass in five modes (500 executions)."
+  },
+  "performance": {
+    "laptop_io": {
+      "long-line": {
+        "medians_ns": {
+          "reference-default": 121239189,
+          "reference-release": 82649727,
+          "previous-default": 140635831,
+          "previous-release": 82526368,
+          "candidate-default": 2853982,
+          "candidate-release": 2990595,
+          "c": 3292824
+        },
+        "comparisons": {
+          "default": {
+            "reference": {
+              "paired_median_ratio": 0.023646637330159967,
+              "bootstrap_95_percent_interval": [
+                0.023452263544406843,
+                0.023780760848288757
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.0203412928943894,
+              "bootstrap_95_percent_interval": [
+                0.02011610104227938,
+                0.021062227501972387
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 0.8664326802393784,
+              "bootstrap_95_percent_interval": [
+                0.8635851779505981,
+                0.8737567755504164
+              ],
+              "limit": 1.0,
+              "status": "pass"
+            }
+          },
+          "release": {
+            "reference": {
+              "paired_median_ratio": 0.036217230804917754,
+              "bootstrap_95_percent_interval": [
+                0.03618199030036972,
+                0.03635356505492012
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.03628670788201963,
+              "bootstrap_95_percent_interval": [
+                0.035969538099730525,
+                0.036347388574091546
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 0.9061416310493671,
+              "bootstrap_95_percent_interval": [
+                0.9036690572135941,
+                0.908215865773573
+              ],
+              "limit": 1.0,
+              "status": "pass"
+            }
+          }
+        }
+      },
+      "short-lines": {
+        "medians_ns": {
+          "reference-default": 18821755,
+          "reference-release": 14633154,
+          "previous-default": 18964710,
+          "previous-release": 14392471,
+          "candidate-default": 9307392,
+          "candidate-release": 7076836,
+          "c": 3372983
+        },
+        "comparisons": {
+          "default": {
+            "reference": {
+              "paired_median_ratio": 0.4934150933321574,
+              "bootstrap_95_percent_interval": [
+                0.49280209383621987,
+                0.49759013124905166
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.4907742855018611,
+              "bootstrap_95_percent_interval": [
+                0.48804189773532103,
+                0.49437745049273346
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 2.759394873914277,
+              "bootstrap_95_percent_interval": [
+                2.744930770356205,
+                2.7648063485815
+              ],
+              "limit": 1.0,
+              "status": "regression"
+            }
+          },
+          "release": {
+            "reference": {
+              "paired_median_ratio": 0.48357602426596413,
+              "bootstrap_95_percent_interval": [
+                0.48234630842158127,
+                0.48423251747367657
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.4913064615520156,
+              "bootstrap_95_percent_interval": [
+                0.4901912149426769,
+                0.4939257851778009
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 2.0966507500498137,
+              "bootstrap_95_percent_interval": [
+                2.085912739170722,
+                2.1104786785121035
+              ],
+              "limit": 1.0,
+              "status": "regression"
+            }
+          }
+        }
+      },
+      "stdin": {
+        "medians_ns": {
+          "reference-default": 15182764,
+          "reference-release": 14684307,
+          "previous-default": 14618922,
+          "previous-release": 14591960,
+          "candidate-default": 2282215,
+          "candidate-release": 2166855,
+          "c": 4381984
+        },
+        "comparisons": {
+          "default": {
+            "reference": {
+              "paired_median_ratio": 0.15168552594401116,
+              "bootstrap_95_percent_interval": [
+                0.1413105796501634,
+                0.1565531622780318
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.15467475039011827,
+              "bootstrap_95_percent_interval": [
+                0.15141336747609166,
+                0.16011143158369534
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 0.5246670275998975,
+              "bootstrap_95_percent_interval": [
+                0.4955776247021678,
+                0.5331160575959173
+              ],
+              "limit": 1.0,
+              "status": "pass"
+            }
+          },
+          "release": {
+            "reference": {
+              "paired_median_ratio": 0.14417450277045402,
+              "bootstrap_95_percent_interval": [
+                0.14405743076270244,
+                0.15090336206482757
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.1484580259248313,
+              "bootstrap_95_percent_interval": [
+                0.14407159833223226,
+                0.14960199032231114
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "c": {
+              "paired_median_ratio": 0.49090540417388134,
+              "bootstrap_95_percent_interval": [
+                0.4833609643060774,
+                0.5060641397673779
+              ],
+              "limit": 1.0,
+              "status": "pass"
+            }
+          }
+        }
+      },
+      "text-long-line": {
+        "medians_ns": {
+          "reference-default": 157579592,
+          "reference-release": 115321601,
+          "previous-default": 170035385,
+          "previous-release": 114476167,
+          "candidate-default": 33489222,
+          "candidate-release": 37903081,
+          "c": 3401532
+        },
+        "comparisons": {
+          "default": {
+            "reference": {
+              "paired_median_ratio": 0.2125420149583837,
+              "bootstrap_95_percent_interval": [
+                0.21129476690463708,
+                0.21402883343310042
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.19697243606088227,
+              "bootstrap_95_percent_interval": [
+                0.19077341211950116,
+                0.2041788173157803
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            }
+          },
+          "release": {
+            "reference": {
+              "paired_median_ratio": 0.32803395012146397,
+              "bootstrap_95_percent_interval": [
+                0.3272054122800463,
+                0.33980953712561207
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.3303054043153897,
+              "bootstrap_95_percent_interval": [
+                0.32597497270582887,
+                0.3337999376096247
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            }
+          }
+        }
+      },
+      "text-short-lines": {
+        "medians_ns": {
+          "reference-default": 55587105,
+          "reference-release": 50566287,
+          "previous-default": 56268172,
+          "previous-release": 50936252,
+          "candidate-default": 41695572,
+          "candidate-release": 45987784,
+          "c": 3374056
+        },
+        "comparisons": {
+          "default": {
+            "reference": {
+              "paired_median_ratio": 0.7505946669004513,
+              "bootstrap_95_percent_interval": [
+                0.7498160189022419,
+                0.7543623937602808
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.7405548685541814,
+              "bootstrap_95_percent_interval": [
+                0.7397111411286695,
+                0.7452229299363057
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            }
+          },
+          "release": {
+            "reference": {
+              "paired_median_ratio": 0.9085122054984133,
+              "bootstrap_95_percent_interval": [
+                0.9044721774886915,
+                0.9129186904102422
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            },
+            "previous": {
+              "paired_median_ratio": 0.9008672504126334,
+              "bootstrap_95_percent_interval": [
+                0.8994634705356805,
+                0.9065040677597704
+              ],
+              "limit": 1.02,
+              "status": "pass"
+            }
+          }
+        }
+      }
+    },
+    "instructions_vs_previous": {
+      "throughput-default": 1.0002272732344637,
+      "throughput-release": 1.0001679893076538,
+      "tour-default": 1.0004830326544065,
+      "netpong-default": 1.000284423244559,
+      "dunes-default": 1.0002818274014176,
+      "compiler-reference": 1.0001251357190117
+    },
+    "ordinary_checkpoint": {
+      "pass": 68,
+      "inconclusive": 4
+    },
+    "unresolved": {
+      "records/default/reference": {
+        "paired_median_ratio": 0.9841667377263135,
+        "bootstrap_95_percent_interval": [
+          0.8847995245847624,
+          1.0396168451902403
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "records/default/previous": {
+        "paired_median_ratio": 1.056777056346015,
+        "bootstrap_95_percent_interval": [
+          0.9931338763962546,
+          1.0937570846788391
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "records/release/reference": {
+        "paired_median_ratio": 0.9897020570891709,
+        "bootstrap_95_percent_interval": [
+          0.9515332750593981,
+          1.0882793492266967
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "string_equal/default/previous": {
+        "paired_median_ratio": 1.0064983402330931,
+        "bootstrap_95_percent_interval": [
+          1.0022071686587049,
+          1.0207305525829824
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      }
+    },
+    "limits": [
+      "Seven matched samples after warmup, one CPU/emitter, older i5-8350U laptop. Kernels use thread CPU time. Inputs/checksums and exact scripts are retained in the evidence.",
+      "Release 4MB line reading falls from 82.5 to 3.0 ms, short lines from 14.4 to 7.1 ms, 8MB stdin from 14.6 to 2.2 ms. C getline/fread counterparts are 3.3/3.4/4.4 ms respectively. These are specific library workloads, not a general C-parity claim; C getline reuses a mutable line buffer while Dewy returns independent strings.",
+      "An initial prototype regressed release short-line-plus-grapheme-length timing by 4.6%. Adding uninitialized string-copy allocation resolves that on the retained text workload. The initial partial report and failed malformed-UTF8 checksum trial are preserved: the final byte-oriented benchmarks explicitly count bytes, and separate text-length checks preserve grapheme work.",
+      "All 32 maintained benchmark artifacts changed, so the complete runtime campaign was run. All twelve compilation comparisons pass; four runtime comparisons remain inconclusive. No established regression, baseline promotion, threshold change or timing rerun to clear uncertainty."
+    ]
+  },
+  "evidence": {
+    "file": "buffered-input-evidence.json.gz",
+    "sha256": "f6ff6904ccd5d3794a1bbe4010973d8813713106e90f4b4002376d3c32535253",
+    "format": "gzip JSON"
+  }
+}
