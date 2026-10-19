@@ -1052,6 +1052,28 @@ several other kernels also remain slower than C. These are measured intermediate
 gains, not completion of the performance goals.
 [Raw measurements, rejected prototypes and validation](audits/2026-10-19/default-value-borrows.json).
 
+## Deferred compiler experiments, October 19
+
+Reusing register-analysis arrays and rejecting scalar parameter borrows earlier
+did not show a latency improvement, so neither change is retained. The pilot
+did validate the runtime artifact certificate end to end: freshly compiled
+programs passed their checksums and matched the accepted artifacts, allowing
+runtime timing to be skipped without importing historical timing samples.
+[Measurements](audits/2026-10-19/register-workspace-pilot.json).
+
+An x86-64 prototype moves nonreturning bounds-failure paths after the ordinary
+function body. It passes an independent C bootstrap and 300 quick checks,
+including panic arguments under register pressure and correct failure locations.
+All six compilation workloads improve against the preceding compiler, taking
+0.913–0.955 times its CPU time. Managed-parameter calls also improve. However,
+a focused 15-pair experiment confirms text-scanning regressions of about 3.5%
+in default builds and 5.1% in release builds. Consistent 32-byte loop alignment
+increases that regression to about 7%, despite helping release parameter calls.
+Both variants are deferred; neither is an accepted performance stage. The audit
+preserves patches and raw measurements for reconsideration alongside general
+loop improvements. The full suite was not run after the performance failure.
+[Experiments](audits/2026-10-19/cold-panic-experiments.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
