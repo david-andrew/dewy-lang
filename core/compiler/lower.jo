@@ -2946,8 +2946,13 @@ gen_intrinsic = (e: int) -> Val:
         return V(-1, false)
     if id == .panic:
         m = 0
+        # Message construction only runs on the terminating path. Its calls
+        # must not make a checked helper look like it calls on successful paths.
+        was = ir_cold
+        ir_cold = true
         if args.len() > 0: m = gen_borrowed(args[0]).v
         else: m = e_daddr(str_data("panic"))
+        ir_cold = was
         e_call_nr(rt("__panic"), [m], -1)
         return never_after(e)
     if id == .unreachable:

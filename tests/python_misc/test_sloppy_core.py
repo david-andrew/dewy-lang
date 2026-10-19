@@ -12627,3 +12627,39 @@ def test_core_array_swap_bounds(compiler, tmp_path, target, release, values, lef
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode not in (0, 42), (ran.returncode, ran.stdout, ran.stderr)
     assert f'index {bad} out of bounds (length {length})' in ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_swap_checked_helper_inlines(compiler, tmp_path, target):
+    source = tmp_path / 'swap-inline.jo'
+    source.write_text('''@noinline
+swap_probe = (values: mut int[], count: int):
+    loop i in [0..count): values.swap(i & 1, (i + 1) & 1)
+main = () -> int:
+    values = [20, 22]
+    saved = values
+    swap_probe(values, 3)
+    if values != [22, 20] or saved != [20, 22]: return 1
+    42
+''')
+    binary = tmp_path / 'swap-inline'
+    built = subprocess.run([compiler, 'build', source, '--release', '--ir', '--target', target,
+                            '-o', binary], capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_swap_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'swap loop was not emitted'
+    calls = [line for line in probe[0].splitlines() if 'call a=' in line]
+    assert calls and all(' c=0 ' not in line for line in calls), probe[0]
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web checked-helper checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'swap-inline.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)

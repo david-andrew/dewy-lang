@@ -262,6 +262,13 @@
         "lib/core/array.jo"
       ],
       "description": "Array swap checks both indices once and obtains mutable data once, then exchanges values through the detached buffer. Preserve existing value semantics, including managed elements and closure copies; no new library API."
+    },
+    {
+      "revision": "d19f386114ef572ed802714d81072c279d96983c",
+      "paths": [
+        "compiler/lower.jo"
+      ],
+      "description": "Mark calls constructing panic arguments as cold so checked helpers remain eligible for release inlining. Calls still execute in order on the failure path and retain side effects; no native code outlining or alignment-policy change."
     }
   ]
 }
