@@ -161,6 +161,17 @@ lx_bin = (out: mut Ins[], op: Op, a: int, b: int) -> int:
     out.push(Ins(op, VI, i32(d), i32(a), i32(b), 0, 0))
     d
 
+# Form an endpoint plus a constant only when that addition preserves the
+# counter's ordering. Wrapped endpoints cannot prove all intervening indexes
+# safe, even if the wrapped value itself happens to fit the array.
+lx_checked_offset = (out: mut Ins[], value: int, offset: int, signed: bool) -> int:
+    result = lx_bin(out, .add, value, k_vreg(offset))
+    overflow = Op.ltu
+    if signed: overflow = .lts
+    if offset < 0: overflow = if signed: Op.gts else: Op.gtu
+    lx_fail(out, lx_bin(out, overflow, result, value))
+    result
+
 # the instructions of loop [s, e] with branches leaving it pointing one construct further out
 # (`wrap` more: it is about to be wrapped in constructs); the checks are left out, `ren` renames vregs
 lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut Ins[], wrap: int):
@@ -584,6 +595,14 @@ loop_versioning = (vector_only: bool = false):
             out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
             out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
             wrap = 2
+        # The endpoint proof describes a nonempty increasing interval. Keep
+        # the checked loop for a do-first shape whose initial counter is already
+        # at/past its end; its first iteration still has to check its indexes.
+        loop ch in checks:
+            if ch.kind == 0:
+                ge = if L.signed: Op.ges else: Op.geu
+                lx_fail(out, lx_bin(out, ge, L.ctr, L.endv))
+                break
         start_nonneg = lx_starts_nonneg(code, L)
         done_len: int[]
         loop ch in checks:
@@ -599,11 +618,14 @@ loop_versioning = (vector_only: bool = false):
                         kmax = max(kmax, c2.k)
                 if not (start_nonneg and kmin >= 0):
                     lo = L.ctr
-                    if kmin != 0: lo = lx_bin(out, .add, L.ctr, k_vreg(kmin))
+                    if kmin != 0: lo = lx_checked_offset(out, L.ctr, kmin, L.signed)
                     lx_fail(out, lx_bin(out, .lts, lo, k_vreg(0)))
                 hi = L.endv
-                if kmax != 0: hi = lx_bin(out, .add, L.endv, k_vreg(kmax))
-                lx_fail(out, lx_bin(out, .gts, hi, ch.len))
+                if kmax != 0: hi = lx_checked_offset(out, L.endv, kmax, L.signed)
+                # Array lengths are nonnegative. An unsigned comparison also
+                # rejects limits above the signed range instead of reading them
+                # as negative and accidentally accepting an unbounded loop.
+                lx_fail(out, lx_bin(out, .gtu, hi, ch.len))
             else if ch.kind == 1: lx_fail(out, lx_bin(out, .geu, ch.x, ch.len))
             else: lx_fail(out, lx_bin(out, .eq, ch.x, k_vreg(0)))
         # the copy without the checks: values made and used only in the loop get names of their own

@@ -11283,8 +11283,12 @@ score(next)
 score(saved)
 :quit
 '''
+    # macOS commonly supplies a trailing slash; virtual-source lookup must
+    # use the same normalized key as insertion. Exercise it on every host.
+    env = {**os.environ, 'TMPDIR': str(tmp_path) + os.sep,
+           'TMP': str(tmp_path) + os.sep, 'TEMP': str(tmp_path) + os.sep}
     ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
-                         capture_output=True, text=True, timeout=20)
+                         env=env, capture_output=True, text=True, timeout=20)
     assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['42', '121', '42', '43', '42']
 
@@ -11324,3 +11328,95 @@ main = () -> int:
     bad = subprocess.run([*command, 'outside'], capture_output=True, text=True, timeout=10)
     assert bad.returncode not in (0, 42), bad.stdout + bad.stderr
     assert 'out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_loop_endpoint_overflow(compiler, tmp_path, release, target):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise web loop checks')
+    source = tmp_path / 'loop-endpoints.jo'
+    source.write_text('''@noinline
+unsigned_limit = (a: int[], b: int[], stop: u64) -> int:
+    total = 0
+    loop i in [u64(0)..stop):
+        total += a[int(i)] + b[int(i)]
+        if i == 5: return total
+    total
+@noinline
+positive_offset = (a: int[], b: int[], start: int, stop: int) -> int:
+    total = 0
+    loop i in [start..stop):
+        total += a[i + 2] + b[i + 2]
+        if i == start + 3: return total
+    total
+@noinline
+negative_offset = (a: int[], b: int[], start: int, stop: int) -> int:
+    total = 0
+    loop i in [start..stop):
+        total += a[i + (-1)] + b[i + (-1)]
+        if i == start + 3: return total
+    total
+@noinline
+unsigned_wrap = (a: int[], b: int[], start: u64, stop: u64) -> int:
+    total = 0
+    loop i in [start..stop): total += a[int(i + 3)] + b[int(i + 3)]
+    total
+@noinline
+do_first = (a: int[], b: int[], start: int, stop: int) -> int:
+    i = start
+    total = 0
+    loop true:
+        total += a[i] + b[i]
+        i += 1
+        if i < stop: continue
+        break
+    total
+@noinline
+ordered_failure = (a: int[], b: int[], stop: u64) -> int:
+    total = 0
+    loop i in [u64(0)..stop):
+        print("{i}:")
+        total += a[int(i)]
+        print("a:")
+        total += b[int(i)]
+        if i == 3: return total
+    total
+main = () -> int:
+    case = args()[1]
+    if case == "unsigned": return unsigned_limit([1], [2], u64(0xffffffffffffffff))
+    if case == "high": return positive_offset([1, 2, 3], [4, 5, 6], 0, 9223372036854775807)
+    if case == "low": return negative_offset([1], [2], -9223372036854775808, -9223372036854775804)
+    if case == "negative-start": return positive_offset([10, 11], [10, 11], -2, 0)
+    if case == "wrap": return unsigned_wrap([10, 11], [10, 11], u64(0xfffffffffffffffd), u64(0xffffffffffffffff))
+    if case == "do-first": return do_first([1], [2], 1, 0)
+    if case == "empty":
+        a: int[]
+        return 42 + unsigned_limit(a, a, u64(0)) + positive_offset(a, a, 5, 2)
+    if case == "order": return ordered_failure([1, 2], [3], u64(0xffffffffffffffff))
+    99
+''')
+    binary = tmp_path / 'loop-endpoints'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'loop-endpoints.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    for case in ('negative-start', 'wrap', 'empty'):
+        ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 42, (case, ran.stdout, ran.stderr)
+    for case, index in [('unsigned', '1'), ('high', '3'), ('low', '9223372036854775807'), ('do-first', '1'),
+                        ('order', '1')]:
+        ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
+        assert ran.returncode not in (0, 42), (case, ran.stdout, ran.stderr)
+        assert f'index {index} out of bounds' in ran.stdout + ran.stderr, (case, ran.stdout, ran.stderr)
+        if case == 'order':
+            assert (ran.stdout + ran.stderr).startswith('0:\na:\n1:\na:\n'), (ran.stdout, ran.stderr)

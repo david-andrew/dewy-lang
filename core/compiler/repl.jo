@@ -84,7 +84,9 @@ repl_start = () -> str:
     path = "{cache}/repl-{me}.bin"
     when TARGET == "windows":
         path = "{cache}/repl-{me}.exe"
-    main_src = "{cache}/<input>"
+    # read_source looks up virtual text by its normalized path. TMPDIR often
+    # ends in a slash (including on macOS), so normalize the stored key too.
+    main_src = ide_norm("{cache}/<input>")
     ide_texts[main_src] = src
     repl_image = true
     bss_reserve = REPL_DATA_RESERVE

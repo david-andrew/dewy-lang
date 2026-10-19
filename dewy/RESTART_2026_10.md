@@ -1301,6 +1301,33 @@ slightly higher. The prototype is **reverted**, with its patch and measurements
 retained; it did not proceed to independent C bootstrap or a full stage gate.
 [Experiment evidence](audits/2026-10-19/operand-shapes-experiment.json).
 
+## Checked loop endpoints and portable REPL paths
+
+Loop versioning now rejects overflowing endpoint arithmetic before selecting a
+copy with bounds checks removed. Its exclusive upper endpoint is compared to
+the array length as unsigned; a huge unsigned limit no longer looks negative
+and incorrectly passes the proof. The original checked loop remains the fallback,
+including legal wrapped indexes and failures after earlier side effects. Native
+and WebAssembly tests cover both build modes, signed offset overflow, unsigned
+limits, empty ranges, and valid negative starts.
+
+The preceding macOS CI failure was a separate REPL path mismatch: a trailing
+slash in `TMPDIR` produced a virtual-source key different from its normalized
+lookup key. Insertion now uses the same normalization. The regression reproduces
+on Linux as well, and the REPL value-copy test exercises trailing separators on
+every host.
+
+The independent C-bootstrap candidate passes **364 quick checks** and the full
+suite passes **5,991 checks in 139.29 seconds**. Five focused checks pass after
+strengthening the offset cases to exercise the optimizer's actual add patterns.
+All **44** performance comparisons pass; only the small tour compilation needed
+a focused recheck, with its original samples retained. Large default/release
+compile ratios versus the preceding stage are **0.999× / 1.005×**. The fresh
+default throughput measurement is **122k root lines/CPU-second** on this run;
+host conditions differ from the earlier 71k run, so that difference is not a
+compiler speedup. The 250k target and broad C parity remain unmet.
+[Complete validation and measurements](audits/2026-10-19/loop-endpoints.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
