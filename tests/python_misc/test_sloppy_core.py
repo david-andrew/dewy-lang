@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'partial-operator-arithmetic', 'partial-operator-private-capture',
     'conversion-transmute-bit-roundtrip',
     'optimizer-text-case-values',
     'optimizer-read-method-mutable-loop', 'optimizer-read-method-global-loop',
@@ -68,6 +69,16 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'partial-operator-named-argument': 'apply=(f:((value:int64):>int64) value:int64)=>f(value)\nmain=()=>apply(value=21 f=(*2))',
+    'partial-operator-type-query': 'apply=(f:((value:int64|none):>bool) value:int64|none)=>f(value)\nmain=()=>{if not apply((is?int64)42) or apply((isnt?int64)42) return 1\nreturn if apply((isnt?int64)none) 42 else 2}',
+    'partial-operator-interpolation': 'apply=(f:((value:int64):>int64) value:int64)=>f(value)\nmain=()=>{let text="answer={apply((*2)21)}" return if text=?"answer=42" 42 else 1}',
+    'partial-operator-arithmetic': 'apply=(f:((value:int64):>int64) value:int64):>int64=>f(value)\nmain=()=>{if apply((*2+2)20) not=?42 return 1\nif apply((//2)84) not=?42 or apply((^2)3) not=?9 return 2\nif apply((%10)42) not=?2 or apply((*-2) (-21)) not=?42 return 3\nreturn if apply((*apply((*2)3))7)=?42 and (-1)=?-1 42 else 4}',
+    'partial-operator-comparison': 'apply=(f:((value:int64):>bool) value:int64):>bool=>f(value)\nmain=()=>{let limit=10\nif not apply((<?limit)9) or apply((>=?limit)9) return 1\nif not apply((not=?limit)9) or apply((=?limit)9) return 2\nif not apply((in?[9 10])9) or apply((not in?[9 10])9) return 3\nreturn 42}',
+    'partial-operator-private-capture': 'main=()=>{let factor=20\nlet multiply:((value:int64):>int64)=(*factor)\nlet other=multiply factor=3\nreturn if multiply(2)=?40 and other(2)=?40 42 else 1}',
+    'partial-operator-conversion': 'apply=(f:((value:uint64):>float64) value:uint64):>float64=>f(value)\nmain=()=>{return if apply((transmute float64)4607182418800017408)=?1.0 and apply((as float64)42)=?42.0 42 else 1}',
+    'partial-operator-member': 'Point:type=[x:int64 y:int64]\napply=(f:((value:Point):>int64) value:Point):>int64=>f(value)\nmain=()=>{return if apply((.x)Point(42 1))=?42 42 else 1}',
+    'partial-operator-global': 'twice=(*2)\nmain=()=>twice(21)',
+    'partial-operator-evaluation': 'let calls:int64=0\nnext=()=>{calls+=1 2}\nmain=()=>{let multiply:((value:int64):>int64)=(*next())\nif calls not=?0 return 1\nif multiply(20) not=?40 or calls not=?1 return 2\nreturn if multiply(21)=?42 and calls=?2 42 else 3}',
     'conversion-transmute-widths': 'main=()=>{\nlet a:int8=-1 let b:int16=-2 let c:int32=-3 let d:int64=-4\nif (a transmute uint8) not=?255 or (b transmute uint16) not=?65534 return 1\nif (c transmute uint32) not=?4294967293 or (d transmute uint64) not=?18446744073709551612 return 2\nlet x:uint8=128 let y:uint16=32768 let z:uint32=2147483648 let w:uint64=9223372036854775808\nreturn if (x transmute int8)=?-128 and (y transmute int16)=?-32768 and (z transmute int32)=?-2147483648 and (w transmute int64)=?-9223372036854775808 42 else 3\n}',
     'conversion-transmute-floats': 'main=()=>{\nlet one:float32=1.0 let negative:float32=-0.0\nif (one transmute uint32) not=?1065353216 or (negative transmute uint32) not=?2147483648 return 1\nif (1.0 transmute uint64) not=?4607182418800017408 or (-0.0 transmute uint64) not=?9223372036854775808 return 2\nlet f:uint32=1073741824 let d:uint64=4611686018427387904\nreturn if (f transmute float32)=?2.0 and (d transmute float64)=?2.0 and (1.0 as uint64)=?1 42 else 3\n}',
     'conversion-transmute-bit-roundtrip': 'main=()=>{\nlet small:array<uint32>=[0 1 2147483648 2139095040 4286578688 2143363909 4290773281 8388607 8388608 2139095039]\nloop bits in small {let value=bits transmute float32 if (value transmute uint32) not=?bits return 1}\nlet wide:array<uint64>=[0 1 9223372036854775808 9218868437227405312 18442240474082181120 9221140253039434428 18444512289894291659 4503599627370495 4503599627370496 9218868437227405311]\nloop bits in wide {let value=bits transmute float64 if (value transmute uint64) not=?bits return 2}\nreturn 42\n}',
@@ -5792,6 +5803,8 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'partial-operator-missing-context': ('main=()=>{let f=(*2) return 42}', 'partial operator needs a function type'),
+    'partial-operator-missing-operand': ('main=()=>{let f=(* +); return 42}', 'expected an expression'),
     'conversion-transmute-integer-width': ('main=()=>{let x:uint32=42 return x transmute uint64}', 'transmute needs integer or float values of equal width'),
     'conversion-transmute-float-width': ('main=()=>{let x:float32=1.0 return x transmute uint64}', 'transmute needs integer or float values of equal width'),
     'conversion-transmute-literal-width': ('main=()=>1 transmute float32', 'transmute needs integer or float values of equal width'),
@@ -10141,7 +10154,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('lexer-', 'global-array-', 'closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('lexer-', 'global-array-', 'closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'partial-operator-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')

@@ -4837,6 +4837,7 @@ check_lambda = (lam: int, expected: int) -> int:
             pn = name_of(int(nodes[p].name))
             if i == 0 and (pn == "self" or pn == "this"):
                 fatal(nodes[p].pos, "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as `move = (p: mut Player, dt: f64): ...`; `p.move(dt)` calls it")
+            if pn == "$partial": fatal(nodes[p].pos, "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")
             fatal(nodes[p].pos, "cannot infer the type of parameter '{pn}'; add a type annotation")
         if has_flag(p, NF_MUT): mm |= 1 << i
         if et != 0 and int(types[et].mutmask) & (1 << i) != 0:

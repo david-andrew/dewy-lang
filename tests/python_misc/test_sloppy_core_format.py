@@ -59,6 +59,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'partial-operators': 'apply=(f:((value:int64):>int64) x:int64)=>f(x)\nmain=()=>{printl(apply((*2+2)20)) let p:((value:int64):>bool)=(not in? [1 2]) printl(p(3)) return 0}',
     'transmute': 'main=()=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(1.0 transmute uint64) return 0}',
     'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
 let iffy=true and not false

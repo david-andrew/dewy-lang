@@ -351,6 +351,15 @@ Calling a callable saved under `const` uses a temporary copy of its private
 state; explicit shared captures still refer to their shared bindings. Captured
 `const` locals remain read-only inside the closure.
 
+A binary operator with its right operand can be used as a function:
+`(* 2)` doubles its input, `(<? limit)` compares it, and `(.x)` reads a field.
+Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.
+These functions use ordinary private captures and evaluate their bodies when
+called. Pass them to a typed callback parameter or give a local a function type,
+for example `let twice:((value:int64):>int64) = (* 2)`. A module declaration such
+as `twice = (* 2)` can infer its parameter type at calls, like other functions.
+Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
+
 Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
 types are `float32` and `float64`. Ordinary integer literals default to `int64`
 when they fit. Use `as` or a type call such as `uint8(value)` for numeric value

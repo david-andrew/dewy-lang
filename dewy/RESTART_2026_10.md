@@ -5,6 +5,31 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Partial operators restored (2026-10-19)
+
+Parenthesized right operands now form ordinary unary functions: `(* 2)`,
+`(<? limit)`, `(.x)`, `(as float64)` and `(transmute uint64)`. Normal precedence,
+private captures, source evaluation and contextual callback typing apply.
+Spaced inverted comparisons (`not in?`) work too. Prefix operators retain their
+ordinary meanings. Parsing reuses the consumed opening token temporarily as
+the implicit operand, avoiding insertion into the token array and preserving
+the existing expression parser. No backend or closure representation changes.
+
+The **44 focused checks** pass through both native and independent C-bootstrap
+builds; the full suite passes **6,160 checks in 178.11 s**. Coverage includes
+nested partials, interpolation, private captures, source side effects, type
+queries, conversion, module generic inference, named outer arguments and
+formatter round trips. Missing local type context has a user-facing diagnostic.
+
+All twelve existing runtime kernels retain their generated artifacts and pass
+fresh full-size checksum checks. The seven-pair compilation pilot is entirely
+inconclusive under variable host load; it establishes neither a slowdown nor a
+speedup. Three alternating hardware-count pairs show **0.050% / 0.035%** more
+instructions for large default/release builds and essentially no change for
+self-build. These counts do not substitute for timing acceptance. The last
+accepted baseline remains fixed, and there is no repeated sampling campaign.
+[Full validation and performance evidence](audits/2026-10-19/partial-operators.json).
+
 ## Numeric bit reinterpretation (2026-10-19)
 
 `value transmute Type` now supports equal-width machine integers and floats.
