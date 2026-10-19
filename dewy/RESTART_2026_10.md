@@ -1441,6 +1441,27 @@ covering unaligned positions, repeated growth, signed limits and retained
 snapshots. No full suite or stage gate was run for this flat prototype.
 [Patch and measurements](audits/2026-10-19/byte-emission-experiment.json).
 
+## Compiler code-generation quality probe
+
+A scratch C translation of the accepted compiler's scalar register IR establishes
+meaningful code-generation headroom. Seven matched fresh-build pairs put the
+C-optimized host compiler at **0.754×** accepted CPU time for default Dewy builds,
+**0.747×** for release and **0.806×** for fixed compiler self-build. The matching
+scalar-native build gives similar comparisons; retired instructions fall about
+29%. This is useful evidence, but does not reach the 250k target by itself.
+
+The C-built compiler passes 300 selected core quick tests, the language tour and
+fresh generated-program/rebuilt-compiler output checks. Building this diagnostic
+itself takes **219 seconds**, sequentially, with about **259 MiB** peak child RSS.
+The normal native build path remains unchanged. This limited Linux x86-64 C
+translator is a diagnostic, not another supported implementation. Its scope,
+limitations, scripts, identities and measurements are retained in
+[the code-quality probe](audits/2026-10-19/c-codegen-probe.json).
+
+One concrete difference is dispatch: the native emitter jumps into a table of
+jump instructions, whereas C optimization uses compact address tables and bit
+tests. That gives the next native-backend experiment a measured motivation.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
