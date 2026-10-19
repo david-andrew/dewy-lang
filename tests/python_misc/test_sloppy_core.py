@@ -10766,7 +10766,12 @@ def test_core_string_equality_guard_pages(compiler, tmp_path, release):
 
 
 def emission_word_helpers(compiler):
-    implementation = (compiler.parent.parent / 'compiler/x64.jo').read_text()
+    source = compiler.parent.parent / 'compiler/x64.jo'
+    if not source.exists():
+        # Packaged host-smoke compilers omit implementation sources. Those jobs
+        # test the checkout's helpers with the packaged compiler instead.
+        source = Path(__file__).resolve().parents[2] / 'core/compiler/x64.jo'
+    implementation = source.read_text(encoding='utf-8')
     return 'code: u8[]\n' + implementation[implementation.index('b = (x: int):'):
                                             implementation.index('\nrip_kind =')]
 
