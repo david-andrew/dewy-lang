@@ -5,6 +5,32 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Older-laptop pilot and current optimized host (2026-10-19)
+
+The current O3 PGO/LTO compiler passes **6,296 checks in 177.68 s**. Its
+instruction work falls **0.23% default / 0.54% release / 0.96% fixed compiler
+rebuild** against the previous optimized host. All 28 generated-artifact
+comparisons remain equivalent with fresh checksums.
+
+A short pilot on an otherwise idle **Dell Latitude 7490, i5-8350U, 8 GB RAM**
+uses one CPU and emitter, AC power, and its unchanged power policy. The
+44,005-line workload compiles in **217.06 ms wall / 214.86 ms CPU**, about
+**203k / 205k root lines per second**. These are fresh builds with warm
+filesystem caches; library compilation is included in the time. This remains
+below the 250k target.
+
+Six compilation comparisons pass, but the initial release-build comparison
+reports a regression. A bounded follow-up with phase timings and native/host
+variants does not reproduce it; hardware counters decrease in both variants.
+Both results are retained, and the release timing remains unresolved. This
+does **not** promote a new accepted baseline or replace the fixed-reference gate.
+
+Four runtime workloads also expose remaining gaps: records beat the C comparison,
+text costs about **1.06x default / 1.15x release**, managed parameters
+**2.71x / 1.54x**, and branch dispatch **1.20x / 1.18x**. The laptop provides
+useful independent evidence without running the full validation suite there.
+[Raw samples, diagnostic, reproduction scripts and host validation](audits/2026-10-19/older-laptop-pilot.json).
+
 ## Returning arms and definite field assignments (2026-10-19)
 
 A branch that changes a narrowed local or field and then returns no longer
