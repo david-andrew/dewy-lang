@@ -5,6 +5,36 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Optional cross-file compiler-host optimization (2026-10-19)
+
+`build_optimized_host --lto` additionally lets GCC optimize across generated C
+units. Compilation and linking remain sequential; timeouts/interruption kill
+the owned compiler process group, including LTO descendants. The ordinary
+native development build and application compiler modes remain unchanged.
+
+A seven-pair pilot against the same-source C host without LTO measures paired
+CPU ratios **0.951 default**, **0.943 release**, and **0.870 fixed compiler
+rebuild**. Against the last accepted C host these are **0.935**, **0.957**, and
+**0.918**. The default-build intervals remain inconclusive. A separate three-pair
+hardware diagnostic finds **4.3%**, **4.1%**, and **3.6%** fewer retired
+instructions, supporting a real reduction in work without replacing timing.
+
+The experimental host passes **424 quick checks in 11.26 s** and **6,075 full
+checks in 247.27 s**. Maintained build integration passes with and without LTO;
+a separate timeout test confirms that a spawned compiler descendant is stopped.
+All **12 runtime kernels** retain the native/non-LTO generated artifacts except
+exact equal-width source/toolchain paths, and pass fresh boundary/full-size
+checksum checks. This is code-equivalence evidence, not fresh runtime timing.
+
+The optional build took **293 s**, including a **223 s** link, with about
+**357 MiB** peak child RSS. The full host used the recorded experimental builder;
+the maintained option emits the same compile/link flags and is exercised by the
+integration tests. No redundant full-host rebuild was performed just to change
+the driver. This is an optional build choice, **not a new accepted whole-stage
+performance baseline**. The earlier text-case uncertainties remain recorded,
+and the 250k-lines/s and all-kernel C-parity goals remain open.
+[Build provenance, raw pilot, instruction counts, checks and equivalence proof](audits/2026-10-19/host-lto-pilot.json).
+
 ## Text conversion: correctness complete, performance acceptance pending (2026-10-19)
 
 A pinned Sloppy `e5be9225` port changes `upper`/`lower` to make one private copy,

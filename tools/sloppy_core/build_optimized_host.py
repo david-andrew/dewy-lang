@@ -12,6 +12,7 @@ import platform
 import resource
 import shlex
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -26,12 +27,13 @@ FLAGS = ['-O2', '-fno-strict-aliasing', '-ffp-contract=off',
          '-Werror=implicit-function-declaration', '-g1']
 
 
-def compile_c(directory: Path, output: Path, cc: list[str]) -> dict:
+def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False) -> dict:
     """Compile sequentially. Each C job has a time and address-space limit."""
     manifest = json.loads((directory / 'manifest.json').read_text())
     steps = []
     objects = []
     started = time.monotonic()
+    flags = [*FLAGS, *(['-flto=1'] if lto else [])]
     version = subprocess.check_output([*cc, '--version'], text=True).splitlines()[0]
 
     def limits():
@@ -45,25 +47,38 @@ def compile_c(directory: Path, output: Path, cc: list[str]) -> dict:
     def run(command, log, timeout):
         before = time.monotonic()
         with log.open('w') as stream:
-            subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT,
-                           check=True, timeout=timeout, preexec_fn=limits)
+            # LTO starts compiler descendants. A timeout/interruption must stop
+            # the entire owned job before the next sequential unit starts.
+            child = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
+                                     preexec_fn=limits, start_new_session=True)
+            try:
+                status = child.wait(timeout=timeout)
+                if status:
+                    raise subprocess.CalledProcessError(status, command)
+            except BaseException:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()
+                raise
         steps.append({'command': [str(x) for x in command],
                       'seconds': time.monotonic() - before})
 
     for name in [*manifest['units'], 'start.S']:
         src = directory / name
         obj = src.with_suffix('.o')
-        run([*cc, *FLAGS, '-c', src, '-o', obj], src.with_suffix('.log'), 120)
+        run([*cc, *flags, '-c', src, '-o', obj], src.with_suffix('.log'), 120)
         objects.append(obj)
         print(f'{len(objects)}/{len(manifest["units"]) + 1} {name}', flush=True)
-    run([*cc, '-nostartfiles', '-no-pie', *objects, '-lm', '-o', output],
-        directory / 'link.log', 30)
-    return {'compiler': version, 'flags': FLAGS, 'steps': steps,
+    run([*cc, *(flags if lto else []), '-nostartfiles', '-no-pie', *objects, '-lm', '-o', output],
+        directory / 'link.log', 600 if lto else 30)
+    return {'compiler': version, 'flags': flags, 'lto': lto, 'steps': steps,
             'seconds': time.monotonic() - started,
             'peak_child_rss_kib': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss}
 
 
-def build(toolchain: Path, output: Path, cc: list[str]) -> Path:
+def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False) -> Path:
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise ValueError('The optimized compiler-host build currently requires Linux x86-64')
     toolchain = toolchain.resolve(strict=True)
@@ -88,7 +103,7 @@ def build(toolchain: Path, output: Path, cc: list[str]) -> Path:
         subprocess.run(command, env=env, stdout=stdout, stderr=stderr, check=True, timeout=120)
     translation = translate(ir, work / 'c')
     binary = output / 'bin/dewy-core'
-    result = compile_c(work / 'c', binary, cc)
+    result = compile_c(work / 'c', binary, cc, lto=lto)
     if toolchain_identity(seed) != seed_identity:
         raise ValueError('Native source toolchain changed during the host build')
     provenance = {
@@ -113,5 +128,6 @@ if __name__ == '__main__':
     cli.add_argument('toolchain', type=Path, help='native bundle built from the current compiler sources')
     cli.add_argument('--output', type=Path, required=True, help='new standalone bundle directory')
     cli.add_argument('--cc', default=os.environ.get('CC', 'gcc'), help='GCC-compatible C compiler command')
+    cli.add_argument('--lto', action='store_true', help='also optimize across C units at link time (one worker)')
     args = cli.parse_args()
-    print(build(args.toolchain, args.output, shlex.split(args.cc)))
+    print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto))

@@ -37,6 +37,12 @@ C library; running the resulting compiler needs the C library but neither GCC
 nor Python. Programs still use Dewy's native/web backends and their normal
 compilation modes. This is not a C backend for application builds.
 
+Add `--lto` to let GCC optimize across the generated C files as well. It uses
+one link-time compiler worker and can add several minutes to the final link;
+choose a new output directory for each build. Each C job is limited to 4 GiB
+of address space. Timeouts and interruptions stop its compiler descendants.
+This option changes the compiler host, not the application optimization mode.
+
 `HOST_BUILD.json` records the native source-build provenance, actual optimized
 binary hash, exported IR, generated C, build-tool hashes and GCC commands.
 `host-build/` retains the export, sources and logs. The existing package command

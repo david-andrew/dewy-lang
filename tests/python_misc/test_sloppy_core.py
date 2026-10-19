@@ -12039,7 +12039,8 @@ def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
         assert ran.stdout.splitlines() == expected
 
 
-def test_core_optimized_host_scalar_interchange(compiler, tmp_path):
+@pytest.mark.parametrize('lto', [False, True], ids=['separate-units', 'link-time'])
+def test_core_optimized_host_scalar_interchange(compiler, tmp_path, lto):
     """Exercise the maintained exporter, C ABI, raw memory and recovery together."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
         pytest.skip('optional optimized host requires Linux x86-64 and GCC')
@@ -12091,7 +12092,7 @@ main = () -> int: probe(-args().len())
     generated = tmp_path / 'c'
     translate(ir, generated)
     binary = tmp_path / 'host-probe'
-    compile_c(generated, binary, ['gcc'])
+    compile_c(generated, binary, ['gcc'], lto=lto)
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
@@ -12195,3 +12196,57 @@ def test_core_text_case_guard_page(compiler, tmp_path, release):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+def test_core_host_build_timeout_stops_compiler_descendants(tmp_path, monkeypatch):
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+        pytest.skip('optional optimized host requires Linux x86-64')
+    import signal
+    import sys
+    import time
+    from tools.sloppy_core.build_optimized_host import compile_c
+
+    directory = tmp_path / 'generated'
+    directory.mkdir()
+    (directory / 'manifest.json').write_text(json.dumps({'units': ['unit0.c']}))
+    marker = tmp_path / 'descendant.pid'
+    fake_cc = tmp_path / 'fake_cc.py'
+    fake_cc.write_text(f'''import subprocess, sys
+from pathlib import Path
+if '--version' in sys.argv:
+    print('test compiler')
+else:
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+    Path({str(marker)!r}).write_text(str(child.pid))
+    child.wait()
+''')
+    wait = subprocess.Popen.wait
+    groups = []
+
+    def short_compile_deadline(child, timeout=None):
+        if timeout == 120:
+            groups.append(child.pid)
+            timeout = 2
+        return wait(child, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, 'wait', short_compile_deadline)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            compile_c(directory, tmp_path / 'output', [sys.executable, str(fake_cc)], lto=True)
+        assert marker.exists(), 'fake compiler must have started its descendant'
+        pid = int(marker.read_text())
+        # An orphan zombie can remain until init reaps it, but it cannot keep
+        # compiling or holding memory after the failed build job returns.
+        for _ in range(100):
+            stat = Path(f'/proc/{pid}/stat')
+            if not stat.exists() or stat.read_text().split()[2] == 'Z':
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail('compiler descendant survived the build timeout')
+    finally:
+        for group in groups:
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
