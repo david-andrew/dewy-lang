@@ -23,7 +23,7 @@ from tools.sloppy_core.performance_gate import toolchain_identity
 
 HERE = Path(__file__).resolve().parent
 FLAGS = ['-fno-strict-aliasing', '-ffp-contract=off',
-         '-fno-stack-protector', '-fno-pie', '-fno-omit-frame-pointer',
+         '-fno-stack-protector', '-fno-pie',
          '-Werror=implicit-function-declaration', '-g1']
 
 
@@ -57,7 +57,7 @@ def run_command(command, log: Path, timeout: float, *, env=None, expected_status
 
 
 def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False,
-              optimization: int = 2) -> dict:
+              optimization: int = 2, frame_pointers: bool = False) -> dict:
     """Compile sequentially. Each C job has a time and address-space limit."""
     if optimization not in (2, 3):
         raise ValueError('Compiler-host optimization must be 2 or 3')
@@ -65,7 +65,9 @@ def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False
     steps = []
     objects = []
     started = time.monotonic()
-    flags = [f'-O{optimization}', *FLAGS, *(['-flto=1'] if lto else [])]
+    flags = [f'-O{optimization}', *FLAGS,
+             '-fno-omit-frame-pointer' if frame_pointers else '-fomit-frame-pointer',
+             *(['-flto=1'] if lto else [])]
     version = subprocess.check_output([*cc, '--version'], text=True).splitlines()[0]
 
     def run(command, log, timeout):
@@ -85,7 +87,7 @@ def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False
 
 
 def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pgo: bool = False,
-          optimization: int | None = None) -> Path:
+          optimization: int | None = None, frame_pointers: bool = False) -> Path:
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise ValueError('The optimized compiler-host build currently requires Linux x86-64')
     optimization = (3 if pgo else 2) if optimization is None else optimization
@@ -117,14 +119,16 @@ def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pg
     if pgo:
         from tools.sloppy_core.profiled_host import compiler_training, compile_profiled_c
         commands, training_hashes = compiler_training(output, work)
-        result = compile_profiled_c(work / 'c', binary, cc, commands, env, lto=lto, optimization=optimization)
+        result = compile_profiled_c(work / 'c', binary, cc, commands, env, lto=lto,
+                                    optimization=optimization, frame_pointers=frame_pointers)
         translation['units'] = json.loads((work / 'c/manifest.json').read_text())['units']
         current_training = {str(p.relative_to(work)): identity(p)
                             for p in sorted((work / 'training-examples').rglob('*')) if p.is_file()}
         if current_training != training_hashes:
             raise ValueError('Training sources changed during the host build')
     else:
-        result = compile_c(work / 'c', binary, cc, lto=lto, optimization=optimization)
+        result = compile_c(work / 'c', binary, cc, lto=lto,
+                           optimization=optimization, frame_pointers=frame_pointers)
     if toolchain_identity(seed) != seed_identity:
         raise ValueError('Native source toolchain changed during the host build')
     provenance = {
@@ -152,8 +156,10 @@ if __name__ == '__main__':
     cli.add_argument('--cc', default=os.environ.get('CC', 'gcc'), help='GCC-compatible C compiler command')
     cli.add_argument('--pgo', action='store_true', help='train GCC on representative builds, then optimize from fresh profiles (one worker)')
     cli.add_argument('--lto', action='store_true', help='also optimize across C units at link time (one worker)')
+    cli.add_argument('--frame-pointers', action='store_true',
+                     help='retain compiler-host frame chains for sampling profilers (default: omit for speed)')
     cli.add_argument('--optimization', type=int, choices=(2, 3),
                      help='GCC optimization level (default: 3 with PGO, otherwise 2); training and final build use the same level')
     args = cli.parse_args()
     print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto, pgo=args.pgo,
-                optimization=args.optimization))
+                optimization=args.optimization, frame_pointers=args.frame_pointers))

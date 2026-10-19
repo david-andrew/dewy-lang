@@ -36,7 +36,8 @@ def compiler_training(bundle: Path, work: Path) -> tuple[list[list[str]], dict[s
 
 def compile_profiled_c(directory: Path, output: Path, cc: list[str],
                        commands: list[list[str]], env: dict[str, str], *,
-                       expected_status: int = 0, lto: bool = False, optimization: int = 3) -> dict:
+                       expected_status: int = 0, lto: bool = False, optimization: int = 3,
+                       frame_pointers: bool = False) -> dict:
     """Collect fresh freestanding profiles, then build without instrumentation.
 
     Custom startup needs explicit counter registration and dumping. Streaming
@@ -74,7 +75,8 @@ def compile_profiled_c(directory: Path, output: Path, cc: list[str],
 
     generate_flags = [f'-fprofile-generate={profiles}', '-fprofile-info-section=gcov_info',
                       '-DDEWY_PROFILE_GENERATE']
-    instrumented = compile_c(directory, output, [*cc, *generate_flags], lto=lto, optimization=optimization)
+    instrumented = compile_c(directory, output, [*cc, *generate_flags], lto=lto,
+                             optimization=optimization, frame_pointers=frame_pointers)
     generation_logs = work / 'profile-generate-logs'
     generation_logs.mkdir()
     for log in directory.glob('*.log'):
@@ -109,7 +111,8 @@ def compile_profiled_c(directory: Path, output: Path, cc: list[str],
         raise ValueError('Training produced no GCC profile data')
     use_flags = [f'-fprofile-use={profiles}', '-fprofile-correction', '-fprofile-partial-training',
                  '-Werror=coverage-mismatch', '-Werror=missing-profile']
-    result = compile_c(directory, output, [*cc, *use_flags], lto=lto, optimization=optimization)
+    result = compile_c(directory, output, [*cc, *use_flags], lto=lto,
+                       optimization=optimization, frame_pointers=frame_pointers)
     return dict(result, pgo=True, seconds=time.monotonic() - started, profile_use_build=result,
                   profile_generate_flags=generate_flags, profile_use_flags=use_flags,
                   instrumented_build=instrumented, instrumented_binary_sha256=identity(saved),

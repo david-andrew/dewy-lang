@@ -5,6 +5,28 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Omit optimized-host frame pointers (2026-10-19)
+
+The optional GCC host now omits frame pointers, with `--frame-pointers` for
+profilers that need frame chains. Training and final compilation use the same
+setting. Matched O3 PGO/LTO hosts execute **2.12% fewer instructions** for large
+default builds, **1.79% fewer** for release, and **1.42% fewer** for the fixed
+compiler rebuild. Nine paired timing samples give **4 pass / 3 inconclusive**,
+with no established regression. The default workload measures **185.39 ms wall /
+182.71 ms CPU** for 44,005 root lines: roughly **238k / 241k lines/s**, still
+short of the target. This comparison uses the matching pre-recursive compiler
+snapshot; it is not a current-language throughput certification.
+
+All **6,244 applicable checks pass in 180.30 s**, including the maintained build
+API's explicit frame-pointer PGO/LTO option. The cross-host test now rebuilds
+the selected bundle's matching compiler source and runtime rather than mixing
+checkout source with an older bundle library. Fresh checksum executions confirm
+that all twelve existing kernels in both modes have identical generated
+artifacts apart from equal-width bundle paths. GCC rejected attempts to reuse
+relocated profiles, so the measured candidate trained afresh; profile checks
+were not weakened. The fixed reference and accepted baseline remain unchanged.
+[Build provenance, measurements, exclusions and validation](audits/2026-10-19/host-frame-pointers.json).
+
 ## Redirect redundant native jumps (2026-10-19)
 
 The x86-64 emitter now redirects branches whose destination contains only

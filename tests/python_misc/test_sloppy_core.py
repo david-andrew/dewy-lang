@@ -7736,12 +7736,13 @@ loop flag in [true false] {{printl(pick(x y flag))}}
 
 @pytest.mark.parametrize('host', ['windows', 'macos', 'linux-arm64'])
 def test_core_compiler_hosts(compiler, tmp_path, host):
-    root = Path(__file__).resolve().parents[2]
+    # A selected immutable host must rebuild its matching compiler/runtime pair.
+    source = compiler.parent.parent / 'compiler/main.jo'
     binary = tmp_path / ('compiler.exe' if host == 'windows' else 'compiler')
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), SLOPPY_EMIT_WORKERS='1')
-    built = subprocess.run([compiler, 'build', root / 'core/compiler/main.jo', '--target', host,
+    built = subprocess.run([compiler, 'build', source, '--target', host,
                             '-o', binary], env=env, capture_output=True, text=True,
                            timeout=60, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -12091,7 +12092,7 @@ def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
 
 
 @pytest.mark.parametrize('mode', ['separate-units', 'link-time', 'profile-guided', 'profile-guided-lto',
-                                  'profile-guided-o2', 'profile-guided-o2-lto'])
+                                  'profile-guided-o2', 'profile-guided-o2-lto', 'profile-guided-frames-lto'])
 def test_core_optimized_host_scalar_interchange(compiler, tmp_path, mode):
     """Exercise the maintained exporter, C ABI, raw memory and recovery together."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
@@ -12151,16 +12152,19 @@ main = () -> int: probe(-args().len())
         from tools.sloppy_core.profiled_host import compile_profiled_c
         built = compile_profiled_c(generated, binary, ['gcc'], [[str(binary)], [str(binary)]],
                                    dict(os.environ), expected_status=42, lto=mode.endswith('-lto'),
+                                   frame_pointers='-frames' in mode,
                                    **({'optimization': 2} if '-o2' in mode else {}))
         level = '-O2' if '-o2' in mode else '-O3'
         assert level in built['flags']
+        assert ('-fno-omit-frame-pointer' if '-frames' in mode else '-fomit-frame-pointer') in built['flags']
         assert built['instrumented_build']['flags'] == built['flags']
         assert built['profile_data_sha256'] and len(built['training']) == 2
         assert [step['accumulated_runs'] for step in built['training']] == [1, 2]
         assert built['training'][0]['expected_status'] == 42
         profiles_before = {p: p.read_bytes() for p in tmp_path.rglob('*.gcda')}
     else:
-        compile_c(generated, binary, ['gcc'], lto=mode == 'link-time')
+        built = compile_c(generated, binary, ['gcc'], lto=mode == 'link-time')
+        assert '-fomit-frame-pointer' in built['flags']
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
     if profiles_before is not None:

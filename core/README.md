@@ -57,6 +57,11 @@ explicitly. Profiles are always trained afresh at the chosen level: changing
 the level between training and use can change GCC counter layouts. Neither
 option enables fast-math or machine-specific instruction sets.
 
+Optimized hosts omit frame pointers to free an additional register. Use
+`--frame-pointers` when collecting compiler call stacks with a profiler that
+walks frame chains. This setting is identical during PGO training and use;
+function-level debug information remains available with either setting.
+
 PGO can be combined with `--lto`. Each training run must contribute complete
 GCC run summaries; source/profile mismatches and missing profiles are fatal.
 It uses GCC's profile correction for inconsistent memory-operation
