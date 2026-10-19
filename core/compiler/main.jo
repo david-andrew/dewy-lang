@@ -59,6 +59,7 @@ find_lib_dir = () -> str:
     "{d}/lib"
 
 dump = false
+host_ir = false                # scalar IR for the optional optimized compiler-host build
 debug_info = false            # DWARF line tables (sloppy build)
 debug_vars = false            # and where variables are, with their types (sloppy build -g)
 cli_release = false
@@ -191,10 +192,32 @@ emit_now = (finish: bool):
         if not watch_build and not repl_image: fast_inline_into()
         optimize()
         if not watch_build and not repl_image: fast_vectorize()
+    if host_ir:
+        dump_host_ir()
+        return
     if dump: dump_ir()
     if target_wasm: wasm_collect()
     else if target_arm64: arm64_function()
     else: x64_function()
+
+# Versioned build-tool interchange, not a public program backend. Export after
+# the ordinary scalar optimization passes; unknown operations fail in c_host.py.
+dump_host_values = (name: str, values):
+    # Explicit widening also works in the intentionally small C bootstrap.
+    wide: int[]
+    loop x in values: wide.push(int(x))
+    print("{name} {wide}")
+
+dump_host_ir = ():
+    print("FN {ir.fn_index} {ir.nparams} {ir.ret} {ir.noinline}")
+    print("NAME {ir.name}")
+    dump_host_values("VT", ir.vtypes)
+    dump_host_values("KV", ir.kval)
+    dump_host_values("SS", ir.slot_size)
+    dump_host_values("SA", ir.slot_align)
+    dump_host_values("ARGS", ir.args)
+    loop x in ir.code: print("I {x.op} {x.ty} {x.dst} {x.a} {x.b} {x.c} {x.imm}")
+    print("END")
 
 # release builds: optimize everything, inline small functions, optimize callers again, emit
 release_pipeline = ():
@@ -264,7 +287,7 @@ emit_queued = ():
     emit_queue_rel = []
     queue_emit = false
     if not opt_release and not dbg_on: fast_inline_prepare(q)
-    if emit_parallel(q, fin): return
+    if not host_ir and emit_parallel(q, fin): return
     t0 = time()
     loop k in 0.. and f in q:
         ir = f
@@ -339,6 +362,12 @@ compile = (path: str, out0: str) -> str:
     if cli_release: opt_release = true
     if lower_only: opt_release = false
     setup_target()
+    if host_ir:
+        if target_wasm or target_arm64 or target_windows or watch_build or repl_image or lower_only:
+            eprint("--host-ir requires a Linux x86-64 build")
+            exit(2)
+        opt_release = true
+        print("DEWY_HOST_IR 1")
     # (debug information for variables: x86-64 and arm64 Linux, macOS, Windows)
     dbg_on = debug_vars and debug_info and not watch_build and not lower_only and not target_wasm
     out = out0
@@ -383,7 +412,7 @@ compile = (path: str, out0: str) -> str:
     pinit = init_fns[0]
     pinit_lf = roots[0]
     # (vectorized loops ask whether the processor has AVX2: the runtime finds out at start)
-    lx_vec_on = want_cpu_flag
+    lx_vec_on = want_cpu_flag and not host_ir
     if lx_vec_on:
         cs = prelude.get(intern("__cpu_avx2")) ?? 0
         if cs != 0 and syms[cs].kind == .global: global_addr_off(int(syms[cs].ref))
@@ -444,6 +473,11 @@ compile = (path: str, out0: str) -> str:
             prune_emit_queue(roots + [main_lf, main_exit_lf, entry_end_lf])
         emit_queued()
     t2 = time()
+    if host_ir:
+        print("META {data_size} {main_lf} {main_code} {entry_end_lf} {mt_active_off}")
+        dump_host_values("ROOTS", roots)
+        dump_host_values("DATA", rodata)
+        return ""
     ok = false
     size = 0
     if target_wasm:
@@ -636,6 +670,7 @@ main = ():
                 cli_target = a[i + 1]
                 i += 1
             else if x == "--ir": dump = true
+            else if x == "--host-ir": host_ir = true
             else if x == "-g": debug_vars = true
             else if x == "--release": cli_release = true
             else if x == "--time": timing = true
@@ -660,6 +695,7 @@ main = ():
         sl = max(rfind(out, "/"), rfind(out, "\\"))
         if sl > 0: make_dirs(out[..sl))
         made = compile(path, out)
+        if host_ir: return
         if len(made) == 0: exit(1)
         # (where it is, said at a terminal: a script that builds gets no line it did not ask for)
         if is_terminal(): print("made {made}")

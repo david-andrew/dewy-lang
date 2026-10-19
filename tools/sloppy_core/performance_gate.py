@@ -35,9 +35,15 @@ def tree_digest(root: Path) -> str:
 
 def toolchain_identity(binary: Path) -> dict:
     root = binary.parent.parent
-    manifest = json.loads((root / 'build.json').read_text())
+    if (root / 'HOST_BUILD.json').is_file():
+        host = json.loads((root / 'HOST_BUILD.json').read_text())
+        manifest = host['source_build']
+        expected_binary = host['compiler_sha256']
+    else:
+        manifest = json.loads((root / 'build.json').read_text())
+        expected_binary = manifest['core_sha256']
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    if digest != manifest['core_sha256']:
+    if digest != expected_binary:
         raise ValueError(f'Compiler does not match its build manifest: {binary}')
     for directory in ('compiler', 'lib'):
         if not (root / directory).is_dir():

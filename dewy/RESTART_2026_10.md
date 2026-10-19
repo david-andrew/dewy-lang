@@ -5,6 +5,48 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Optional optimized compiler host (2026-10-19)
+
+The compiler can now be built through a maintained scalar-IR-to-C path for
+Linux x86-64 release/toolchain builds. The native compiler-development path
+and native/web application backends remain the defaults. A versioned
+`--host-ir` export disables vectorization only for the program being exported;
+the resulting compiler retains ordinary application vectorization. The C
+translator rejects unsupported operations, preserves `@noinline`, uses defined
+modular integer arithmetic and unaligned memory helpers, and retains frame
+pointers for runtime recovery. Its build is sequential and bounded.
+
+The supported build command and separate bundle layout are in
+[the core guide](../core/README.md#optional-optimized-compiler-host).
+`HOST_BUILD.json` records the actual C binary, native source-build provenance,
+IR, generated sources, tool hashes and GCC commands. Packaging and performance
+identity checks validate that binary and its original compiler/library sources.
+
+The maintained optimized host passes **6,059 full-suite checks in 142.15 s**.
+The native compiler builds through the independent C bootstrap and passes
+**419 quick checks in 9.71 s**. A compiler rebuilt by the optimized host also
+builds and runs the 44,005-line workload with the expected checksum.
+Both host paths pass all **56 fixed/previous performance comparisons**;
+the native path uses one bounded recheck of three uncertain rows, retaining
+all original samples. Its matched medians are essentially flat; Dunes is
+about 0.8% slower, within the existing 2% gate resolution, and also passes the
+cumulative fixed-reference check. That resolution is not a recurring budget.
+
+The optimized host's paired CPU ratios against the preceding native compiler
+are **0.776 default**, **0.757 release**, **0.832 tour**, **0.820 Netpong**,
+**0.816 Dunes** and **0.826 fixed compiler rebuild**. All eleven runtime kernels
+preserve the accepted generated artifacts and pass fresh boundary/full-size
+checks; these certificates do not claim new C-parity timings. Measured fresh
+root throughput is about **163k lines/CPU-second**, still below the 250k target.
+
+Building the optimized host took **213 s** on this busy i7-6700, with about
+**359 MiB** peak child RSS across export/build subprocesses. This cost is
+outside the normal native edit/test loop. The optimized host needs the Linux
+C library and lacks the native compiler's custom source-line backtrace table;
+application debug output remains intact. The earlier diagnostic and the
+maintained build are distinguished in the
+[full audit](audits/2026-10-19/optimized-host.json).
+
 ## Small decimal literals: deferred (2026-10-19)
 
 A source-byte decimal decoder avoided temporary strings for common literals,

@@ -17,6 +17,39 @@ test runner. The Python commands below validate development of the compiler itse
 Use `./tools/dewy test --watch file.dewy` to rerun project tests after edits,
 including changes to imports and embedded assets.
 
+## Optional optimized compiler host
+
+The ordinary native build remains the fast compiler-development path. For a
+release/toolchain build on Linux x86-64, the compiler itself can additionally be
+optimized by GCC:
+
+```sh
+python3 -m tools.core path
+python3 -m tools.sloppy_core.build_optimized_host /path/to/native-toolchain \
+  --output /path/to/new-optimized-toolchain
+```
+
+Pass the bundle directory containing `bin/dewy-core`, `compiler/`, `lib/` and
+`build.json`; the first command prints its compiler path. The new output must
+not exist. This optional step takes minutes, compiles one C unit at a time,
+and does not replace the native development cache. It needs GCC and the Linux
+C library; running the resulting compiler needs the C library but neither GCC
+nor Python. Programs still use Dewy's native/web backends and their normal
+compilation modes. This is not a C backend for application builds.
+
+`HOST_BUILD.json` records the native source-build provenance, actual optimized
+binary hash, exported IR, generated C, build-tool hashes and GCC commands.
+`host-build/` retains the export, sources and logs. The existing package command
+accepts either native or optimized bundles and checks the actual payload hashes.
+Use the explicit optimized compiler path when testing or benchmarking it;
+`tools.core test` deliberately continues to select the native development build.
+Validate a newly built host before packaging it. Performance remains a separate
+gate, including the native development path and generated application code.
+The optimized host retains GCC function-level debug information and readable
+function names. Its own executable does not contain Dewy's custom source-line
+backtrace table; use the native bundle when diagnosing compiler internals.
+Generated applications retain their usual debug and panic information.
+
 ## Work on this checkout
 
 ```sh
@@ -64,7 +97,7 @@ baseline. Compiler binaries and bundled libraries are checked against their
 build manifests before and after the run.
 
 The gate measures default/release compilation of a nontrivial generated Dewy
-program, three application builds and a fixed compiler self-build, then eight
+program, three application builds and a fixed compiler self-build, then eleven
 checked runtime kernels in both modes against C. It uses nine alternating
 samples by default and paired CPU-time ratios. Approximate bootstrap intervals
 distinguish passing results, regressions and inconclusive noise; the latter two

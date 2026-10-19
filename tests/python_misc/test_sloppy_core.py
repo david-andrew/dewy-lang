@@ -12035,3 +12035,60 @@ def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
         ran = subprocess.run([binary, *extra], capture_output=True, text=True, timeout=10)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         assert ran.stdout.splitlines() == expected
+
+
+def test_core_optimized_host_scalar_interchange(compiler, tmp_path):
+    """Exercise the maintained exporter, C ABI, raw memory and recovery together."""
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
+        pytest.skip('optional optimized host requires Linux x86-64 and GCC')
+    from tools.sloppy_core.build_optimized_host import compile_c
+    from tools.sloppy_core.c_host import translate
+
+    source = tmp_path / 'host-probe.jo'
+    source.write_text('''state = 0
+@noinline
+mix = (a: int, b: f64, c: int, d: f64) -> int:
+    a + int(b) * 3 + c * 5 + int(d) * 7
+@noinline
+recover = (p: *u8):
+    state = 17
+    __longjmp(p, 9)
+@noinline
+probe = (n: int) -> int:
+    a = fill(u8(0), 40)
+    p = data(a) + 1
+    (p as *i64)[0] = n
+    assert((p as *i8)[0] == -1)
+    assert((p as *u16)[0] == 65535)
+    assert((p as *i32)[0] == -1)
+    assert(((p as *u64)[0] >> 63) == 1)
+    assert(n >> 65 == -1)
+    assert(u64(n) >> 65 == 9223372036854775807)
+    assert(i8(n + 129) == -128 and u8(n) == 255)
+    assert(mix(2, 3.0, 5, 7.0) == 85)
+    f: (int, f64, int, f64) -> int = mix
+    assert(f(4, 2.0, 6, 8.0) == 96)
+    assert(f64(n) == -1.0)
+    jb = __alloc(192)
+    saved = 1234567
+    code = __setjmp(jb)
+    if code == 0: recover(jb)
+    assert(code == 9 and state == 17 and saved == 1234567)
+    __free(jb)
+    42
+main = () -> int: probe(-args().len())
+''')
+    ir = tmp_path / 'probe.ir'
+    # Forced parallel emission must not interleave the versioned IR stream.
+    env = dict(os.environ, SLOPPY_EMIT_FORCE='1', SLOPPY_EMIT_WORKERS='2')
+    exported = subprocess.run([compiler, 'build', source, '--host-ir'], env=env,
+                              capture_output=True, text=True, timeout=30)
+    assert exported.returncode == 0, exported.stdout + exported.stderr
+    assert not source.with_suffix('').exists(), 'IR export must not emit a native executable'
+    ir.write_text(exported.stdout)
+    generated = tmp_path / 'c'
+    translate(ir, generated)
+    binary = tmp_path / 'host-probe'
+    compile_c(generated, binary, ['gcc'])
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

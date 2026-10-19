@@ -407,7 +407,8 @@ def test_core_performance_gate_does_not_ratchet_or_claim_absolute_target():
 
 
 @pytest.mark.parametrize('change', ['binary', 'modified', 'missing', 'extra'])
-def test_core_performance_gate_rejects_changed_toolchain(tmp_path, change):
+@pytest.mark.parametrize('host_build', [False, True])
+def test_core_performance_gate_rejects_changed_toolchain(tmp_path, change, host_build):
     import hashlib
 
     from tools.sloppy_core.performance_gate import toolchain_identity
@@ -420,8 +421,12 @@ def test_core_performance_gate_rejects_changed_toolchain(tmp_path, change):
         path.parent.mkdir()
         path.write_bytes(b'source')
         sources[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-    (tmp_path / 'build.json').write_text(json.dumps({
-        'core_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'sources_sha256': sources}))
+    manifest = {'core_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'sources_sha256': sources}
+    if host_build:
+        (tmp_path / 'HOST_BUILD.json').write_text(json.dumps({
+            'compiler_sha256': manifest['core_sha256'], 'source_build': manifest}))
+    else:
+        (tmp_path / 'build.json').write_text(json.dumps(manifest))
     toolchain_identity(binary)
     if change == 'binary':
         binary.write_bytes(b'changed')
@@ -736,3 +741,32 @@ def test_core_runtime_certificate_rejects_invalid_previous_stage(runtime_certifi
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError):
         RuntimeCertificate(path, identities)
+
+
+@pytest.mark.parametrize('bad', ['version', 'opcode', 'threads'])
+def test_core_c_host_rejects_unsupported_ir(tmp_path, bad):
+    from tools.sloppy_core.c_host import translate
+    source = tmp_path / 'host.ir'
+    records = '''DEWY_HOST_IR 1
+FN 0 0 -1 false
+NAME main
+VT []
+KV []
+SS []
+SA []
+ARGS []
+I ret -1 -1 -1 -1 -1 0
+END
+META 8 0 false -1 -1
+ROOTS []
+DATA []
+'''
+    if bad == 'version':
+        records = records.replace('DEWY_HOST_IR 1', 'DEWY_HOST_IR 9')
+    elif bad == 'opcode':
+        records = records.replace('I ret ', 'I future_operation ')
+    else:
+        records = records.replace('META 8 0 false -1 -1', 'META 8 0 false -1 8')
+    source.write_text(records)
+    with pytest.raises(ValueError):
+        translate(source, tmp_path / 'c')
