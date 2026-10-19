@@ -803,6 +803,26 @@ gen_index = (n: int) -> int:
         if let v = frozen.get(n): return v
     gen_expr(n).v
 
+# A fixed array covering an unsigned index's entire domain needs no check.
+# Follow only value-preserving integer widenings. Stripping arbitrary casts
+# would miss negative values introduced by signed narrowing (u16 -> i8 -> int).
+fixed_index_domain = (index: int, length: int) -> bool:
+    n = index
+    loop true:
+        t = prune(ntype(n))
+        if types[t].kind != .int_: return false
+        bits = int(types[t].bits)
+        if not types[t].sign and bits < 32: return (1 << bits) <= length
+        if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.int_)): return false
+        inner = int(nodes[n].a)
+        source = prune(ntype(inner))
+        if types[source].kind != .int_: return false
+        from_bits = int(types[source].bits)
+        if bits < from_bits: return false
+        if types[t].sign != types[source].sign and not (types[t].sign and bits > from_bits): return false
+        n = inner
+    false
+
 gen_place = (e: int, write: bool) -> Place:
     k = nodes[e].kind
     if k == .ident:
@@ -904,7 +924,7 @@ gen_place = (e: int, write: bool) -> Place:
             idx = gen_index(ixn)
             n = fixed_len(bt)
             # (a constant index was checked by the compiler)
-            if nodes[ixn].kind != .int_lit and not has_flag(e, NF_INBOUNDS):
+            if nodes[ixn].kind != .int_lit and not has_flag(e, NF_INBOUNDS) and not fixed_index_domain(ixn, n):
                 iff(e_bin(.geu, VI, idx, e_iconst(n)))
                 e_call_nr(rt("__panic_bounds"), [idx, e_iconst(n), e_daddr(loc_data(nodes[e].pos))], -1)
                 endc()

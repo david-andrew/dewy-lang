@@ -12937,3 +12937,84 @@ def test_core_grapheme_lookup_borrows_table(compiler, tmp_path):
     # CALL_IF_SHARED would clone the embedded table for data() on a mutable
     # local. The lookup must borrow its bytes regardless of table size.
     assert not any(re.search(r'\bcall .*\bc=3\b', fn) for fn in functions), '\n'.join(functions)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_fixed_index_unsigned_domain(compiler, tmp_path, release, target):
+    source = tmp_path / 'domains.dewy'
+    source.write_text('''read8=(table:array<uint8 length=256> index:uint8)=>(table[index] as int64)
+read16=(table:array<uint8 length=65536> index:uint16)=>(table[index] as int64)
+read_widen=(table:array<uint8 length=256> index:uint8)=>(table[(index as int16) as int64] as int64)
+read_wrap=(table:array<uint8 length=256> index:int16)=>(table[index as uint8] as int64)
+main=()=>{
+ let small:array<uint8 length=256>=[]
+ loop i in [0..256) {small[i]=i as uint8}
+ let large:array<uint8 length=65536>=[]
+ loop i in [0..65536) {large[i]=i as uint8}
+ loop i in [0..256) {if read8(small i as uint8) not=? i return 1
+ if read_widen(small i as uint8) not=? i return 2}
+ loop i in [0..65536) {if read16(large i as uint16) not=? ((i as uint8) as int64) return 3}
+ if read_wrap(small -1) not=? 255 return 4
+ return 42
+}
+''')
+    binary = tmp_path / 'domains'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web fixed-index checks')
+        flags += ['--target', 'wasm']
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'runner.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('size,ty,index,value', [
+    (255, 'uint8', 'index', '255'),
+    (65535, 'uint16', 'index', '65535'),
+    (256, 'uint16', '(index as int8) as int64', '255'),
+    (256, 'int8', '(index as int16) as int64', '-1'),
+])
+def test_core_fixed_index_domain_keeps_checks(compiler, tmp_path, release, size, ty, index, value):
+    source = tmp_path / 'bounds.dewy'
+    source.write_text(f'''read=(table:array<uint8 length={size}> index:{ty})=>(table[{index}] as int64)
+main=()=>{{let table:array<uint8 length={size}>=[] return read(table {value})}}
+''')
+    binary = tmp_path / 'bounds'
+    built = subprocess.run([compiler, 'build', source, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode != 0 and 'out of bounds' in ran.stderr, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+def test_core_fixed_index_domain_ir(compiler, tmp_path):
+    source = tmp_path / 'lookup.jo'
+    source.write_text('''@noinline
+read = (table: u8[65536], index: u16) -> int: int(table[index])
+main = () -> int:
+    table: u8[65536]
+    read(table, 65535)
+''')
+    built = subprocess.run([compiler, 'build', source, '--ir', '-o', tmp_path / 'lookup'],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    functions = re.findall(r'^fn f_read_[0-9]+[^\n]*\n.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert len(functions) == 1, built.stdout + built.stderr
+    assert ' = load ' in functions[0] and 'call ' not in functions[0], functions[0]

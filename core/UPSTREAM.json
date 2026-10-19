@@ -299,6 +299,13 @@
         "lib/core/str.jo"
       ],
       "description": "Adapt bulk reads directly into the stdin result buffer and incremental File.read_line scanning with __memchr. Preserve existing stdin line buffering and prompt flushing. Copy file-line bytes directly into their result string, and keep the final EOF cursor within the buffer so subsequent read_bytes returns empty. No new APIs or parsing rules. Initialize only the header and terminator when copying known bytes into a new string, avoiding redundant zeroing."
+    },
+    {
+      "revision": "e6f09d7525b94618be8c8f4c11998cfe6feb85b9",
+      "paths": [
+        "compiler/lower.jo"
+      ],
+      "description": "Adapt whole unsigned-domain bounds elimination for fixed arrays. Follow only value-preserving integer conversions, retaining signed-narrowing and undersized-table checks. No inline attribute, parser, diagnostic or other surface changes."
     }
   ]
 }

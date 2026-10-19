@@ -101,6 +101,15 @@ New front-end or user-facing language design requires David's approval.
   comparisons pass. The batch passes 6,455 checks after independent bootstrap
   and 100 fresh fuzz seeds in five modes. Unicode 16 behavior is unchanged.
   [Evidence, including rejected prototypes](audits/2026-10-19/grapheme-pages.json).
+- Fixed-array reads omit bounds checks when the complete unsigned index domain
+  fits, retaining checks through signed narrowing. Exhaustive native/web tests,
+  599 quick checks, artifact comparisons and laptop compilation checks pass.
+  Lookup latency is flat; the 16-bit timing remains inconclusive. This is a
+  smaller-code improvement, not a claimed speedup. Full validation follows at
+  the next compiler batch. [Evidence](audits/2026-10-19/fixed-index-domain.json).
+- Read-only comparison-call facts were tested and reverted: a targeted load
+  disappears, but compiler workloads do not improve. The wider graph pass is
+  deferred. [Evidence](audits/2026-10-19/readonly-comparisons.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
