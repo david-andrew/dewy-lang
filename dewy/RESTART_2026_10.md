@@ -5,6 +5,22 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Store optimizer scope metadata together (2026-10-19)
+
+Scope openness, parent, branch count and export state now occupy one 16-byte
+record array. This replaces four array growth/reset operations and keeps facts
+used together in the same record. Parent IDs use the existing 32-bit scope-ID
+range; optimization decisions are unchanged.
+
+The independent C bootstrap and **6,282 checks pass in 196.08 s**. Beyond the
+stable-value cache, compilation instruction counts improve **0.11% default /
+0.27% release / 0.36% compiler rebuild**. Paired timing gives **8 pass /
+4 inconclusive**, with no established regression. All 28 generated artifact
+comparisons (twelve existing kernels plus recursive tree/list, both modes)
+match, with fresh checksum executions. Optimized-host benefit remains to be
+measured; the fixed reference and accepted baseline are unchanged.
+[Bootstrap, runtime and compilation evidence](audits/2026-10-19/optimizer-scope-records.json).
+
 ## Cache stable-value facts in the optimizer (2026-10-19)
 
 The existing prepass now caches whether a register has one definition preceding

@@ -316,11 +316,14 @@ o_epoch = 0
 o_gen = 0              # memory generation for integer data
 o_genf = 0             # memory generation for float data (distinct unless raw pointers are used)
 o_genh = 0             # memory generation for object headers (refcounts, lengths)
-o_open: bool[]          # by scope serial
+struct OptScope:
+    branches: int
+    parent: i32
+    open: bool
+    export_prefix: bool
+
+o_scope_info: OptScope[] # by scope serial
 o_scopes: int[]         # open scopes, innermost last
-o_parent: int[]
-o_export: bool[]
-o_scope_nbr: int[]
 
 ht_setup = (n: int):
     size = 64
@@ -331,24 +334,18 @@ ht_setup = (n: int):
     o_gen = 0
     o_genf = 1 << 40
     o_genh = 2 << 40
-    o_open.clear()
+    o_scope_info.clear()
     o_scopes.clear()
-    o_parent.clear()
-    o_export.clear()
-    o_scope_nbr.clear()
     o_scope_open()
 
 o_scope_open = (export_prefix: bool = false):
     parent = -1
     if o_scopes.len() > 0: parent = o_scopes[o_scopes.len() - 1]
-    o_parent.push(parent)
-    o_export.push(export_prefix)
-    o_scope_nbr.push(o_nbr)
-    o_open.push(true)
-    o_scopes.push(o_open.len() - 1)
+    o_scope_info.push(OptScope(o_nbr, i32(parent), true, export_prefix))
+    o_scopes.push(o_scope_info.len() - 1)
 
 o_scope_close = ():
-    o_open[o_scopes.pop()] = false
+    o_scope_info[o_scopes.pop()].open = false
 
 ht_slot = (k1: int, k2: int, k3: int) -> int:
     h = (k1 * -7046029254386353131) xor (k2 * -4417276706812531889) xor (k3 * 1609587929392839161)
@@ -361,11 +358,11 @@ ht_slot = (k1: int, k2: int, k3: int) -> int:
 ht_available = (i: int, gen: int, va: int, vb: int) -> int:
     if ht_entries[i].epoch != o_epoch: return -1
     scope = int(ht_entries[i].scope)
-    loop not o_open[scope]:
+    loop not o_scope_info[scope].open:
         # Every exit from this block passes its straight-line prefix. After
         # any earlier branch the value might have been skipped, so discard it.
-        if not o_export[scope] or ht_entries[i].branches != o_scope_nbr[scope]: return -1
-        scope = o_parent[scope]
+        if not o_scope_info[scope].export_prefix or ht_entries[i].branches != o_scope_info[scope].branches: return -1
+        scope = int(o_scope_info[scope].parent)
         if scope < 0: return -1
     if gen >= 0 and ht_entries[i].generation != gen: return -1
     if int(ht_entries[i].version_a) != va or int(ht_entries[i].version_b) != vb: return -1
@@ -568,9 +565,9 @@ fact_known = (c: int, truth: int) -> bool:
     index = c * 2 + truth
     scope = int(o_fact_scope[index])
     if scope < 0: return false
-    loop not o_open[scope]:
-        if not o_export[scope] or o_fact_nbr[index] != o_scope_nbr[scope]: return false
-        scope = o_parent[scope]
+    loop not o_scope_info[scope].open:
+        if not o_scope_info[scope].export_prefix or o_fact_nbr[index] != o_scope_info[scope].branches: return false
+        scope = int(o_scope_info[scope].parent)
         if scope < 0: return false
     true
 
