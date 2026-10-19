@@ -12039,8 +12039,8 @@ def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
         assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.parametrize('lto', [False, True], ids=['separate-units', 'link-time'])
-def test_core_optimized_host_scalar_interchange(compiler, tmp_path, lto):
+@pytest.mark.parametrize('mode', ['separate-units', 'link-time', 'profile-guided', 'profile-guided-lto'])
+def test_core_optimized_host_scalar_interchange(compiler, tmp_path, mode):
     """Exercise the maintained exporter, C ABI, raw memory and recovery together."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
         pytest.skip('optional optimized host requires Linux x86-64 and GCC')
@@ -12092,9 +12092,23 @@ main = () -> int: probe(-args().len())
     generated = tmp_path / 'c'
     translate(ir, generated)
     binary = tmp_path / 'host-probe'
-    compile_c(generated, binary, ['gcc'], lto=lto)
+    profiles_before = None
+    if mode.startswith('profile-guided'):
+        if not shutil.which('gcov-dump'):
+            pytest.skip('GCC profile-guided host requires gcov-dump')
+        from tools.sloppy_core.profiled_host import compile_profiled_c
+        built = compile_profiled_c(generated, binary, ['gcc'], [[str(binary)], [str(binary)]],
+                                   dict(os.environ), expected_status=42, lto=mode.endswith('-lto'))
+        assert built['profile_data_sha256'] and len(built['training']) == 2
+        assert [step['accumulated_runs'] for step in built['training']] == [1, 2]
+        assert built['training'][0]['expected_status'] == 42
+        profiles_before = {p: p.read_bytes() for p in tmp_path.rglob('*.gcda')}
+    else:
+        compile_c(generated, binary, ['gcc'], lto=mode == 'link-time')
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+    if profiles_before is not None:
+        assert profiles_before == {p: p.read_bytes() for p in tmp_path.rglob('*.gcda')}
 
 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

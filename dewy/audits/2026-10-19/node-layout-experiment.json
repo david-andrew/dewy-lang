@@ -1,0 +1,402 @@
+{
+  "status": "deferred; field reorder reverted",
+  "scope": "Group 64-bit Node fields to remove padding (104 to 96 bytes). Named constructors preserve logical fields.",
+  "reason": "424 quick checks pass, but seven paired samples are mixed and retired instruction changes are below 0.02%. No broad stage run or accepted speed claim.",
+  "patch": "diff --git a/core/compiler/ast.jo b/core/compiler/ast.jo\nindex 75c543c1..2825eb4e 100644\n--- a/core/compiler/ast.jo\n+++ b/core/compiler/ast.jo\n@@ -63,11 +63,14 @@ const NF_INDEX_CAPTURED = 268435456 # compound custom-index update already captu\n const NF_EXCL_FIRST = 536870912 # Dewy range excludes its first specified value\n const NF_FLOW_RETURNS = 1073741824 # lowered loop/else block: every source path returns\n \n+# Keep the eight-byte payloads together: no padding between the compact indices.\n struct Node:\n+    pos: int\n+    ival: int\n+    fval: f64\n     kind: NK\n     op: i32\n     flags: i32\n-    pos: int\n     a: i32\n     b: i32\n     c: i32\n@@ -78,8 +81,6 @@ struct Node:\n     nlist2: i32\n     name: i32\n     sval: i32\n-    ival: int\n-    fval: f64\n     type: i32\n     sym: i32\n     aux: i32\n",
+  "quick_log": "Building the compact core from the previous core\u2026\nCompiler ready: /var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792420859691797495/bin/dewy-core\nRunning the quick smoke suite (native/web, default/release).\n........................................................................ [ 16%]\n........................................................................ [ 33%]\n........................................................................ [ 50%]\n........................................................................ [ 67%]\n........................................................................ [ 84%]\n................................................................         [100%]\n424 passed, 5652 deselected in 16.00s\n",
+  "pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "da937d997da8cd8f9cacb9cf6805f5faa0bd75c0ad0239570ec6ee9c471061d0",
+        "compiler_sources_sha256": "67b5a6b86ba38be21cf8fcd8108a31219c4edfccea10469a6f043a44e67bdf76",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      },
+      "candidate": {
+        "binary_sha256": "7801e6561fd5edc8bc932d02b21ea56dbe511215fcad3f4c528406c788e5b307",
+        "compiler_sources_sha256": "b0da58cd078ff72ec3c2fc0b29d0b4f702cdb8840e5a255d4d4e4db063381c72",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "40a9bdc8070b88c4230fc7d5f4c0220a888f4a10",
+      "working_tree": " M core/compiler/ast.jo\n",
+      "diff_sha256": "546e2bd6c7bb4860ac5410a935d45e796fe4469ba453f34570a3d2a9e4e5f6a9",
+      "load_average_start": [
+        6.47998046875,
+        10.03125,
+        11.6923828125
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792415673747283097/bin/dewy-core",
+          "sha256": "da937d997da8cd8f9cacb9cf6805f5faa0bd75c0ad0239570ec6ee9c471061d0"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792420859691797495/bin/dewy-core",
+          "sha256": "7801e6561fd5edc8bc932d02b21ea56dbe511215fcad3f4c528406c788e5b307"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/node-layout-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.3648618209990673,
+              0.3648381730017718,
+              0.38000351199298166,
+              0.43476251800893806,
+              0.36252066199085675,
+              0.3574946879816707,
+              0.35482263000449166
+            ],
+            "candidate": [
+              0.41747810700326227,
+              0.35638480400666595,
+              0.4163968170178123,
+              0.3638071870082058,
+              0.3570811190002132,
+              0.3505008740175981,
+              0.35506003300542943
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.3648381730017718,
+            "candidate": 0.3570811190002132
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.3604280000000001,
+              0.36064399999999963,
+              0.37575400000000003,
+              0.4212300000000003,
+              0.3585559999999996,
+              0.3532559999999998,
+              0.3509529999999992
+            ],
+            "candidate": [
+              0.4047149999999998,
+              0.3520530000000004,
+              0.4114719999999996,
+              0.35909399999999997,
+              0.35307400000000044,
+              0.3467980000000004,
+              0.3511059999999998
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.3604280000000001,
+            "candidate": 0.35307400000000044
+          },
+          "output_bytes": {
+            "candidate": 1987360,
+            "previous": 1987360
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/node-layout-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.4679014610010199,
+              0.46762659400701523,
+              0.46858426500693895,
+              0.5685809440037701,
+              0.47727918199962005,
+              0.4702173719997518,
+              0.4724787359882612
+            ],
+            "candidate": [
+              0.49408952399971895,
+              0.47220715499133803,
+              0.47119019299861975,
+              0.570711153006414,
+              0.647167991992319,
+              0.47765817199251615,
+              0.5281320920039434
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.4702173719997518,
+            "candidate": 0.49408952399971895
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.4631489999999991,
+              0.4629339999999997,
+              0.4637730000000007,
+              0.5615799999999989,
+              0.47202800000000045,
+              0.4654139999999991,
+              0.46743699999999855
+            ],
+            "candidate": [
+              0.4886390000000008,
+              0.46724800000000055,
+              0.46625099999999786,
+              0.5642640000000011,
+              0.6398049999999993,
+              0.4701060000000008,
+              0.4947730000000007
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.4654139999999991,
+            "candidate": 0.4886390000000008
+          },
+          "output_bytes": {
+            "candidate": 2227064,
+            "previous": 2227064
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.0548776639916468,
+              1.1232772929943167,
+              1.1206619139993563,
+              1.1695577920181677,
+              1.5856521420064382,
+              1.732046466000611,
+              1.6607802440121304
+            ],
+            "candidate": [
+              1.0608312120020855,
+              1.077789686009055,
+              1.0928346360160504,
+              1.1297672389773652,
+              1.0846042490156833,
+              1.3975640709977597,
+              1.6799950079875998
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.1695577920181677,
+            "candidate": 1.0928346360160504
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.0456449999999995,
+              1.104232999999999,
+              1.109526999999999,
+              1.158003000000003,
+              1.5483010000000006,
+              1.6887539999999996,
+              1.6330260000000028
+            ],
+            "candidate": [
+              1.0516899999999982,
+              1.0676720000000004,
+              1.0828749999999994,
+              1.0811429999999982,
+              1.0740819999999969,
+              1.3828940000000034,
+              1.6638239999999997
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.158003000000003,
+            "candidate": 1.0811429999999982
+          },
+          "output_bytes": {
+            "candidate": 7150792,
+            "previous": 7150792
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        6.298828125,
+        9.5859375,
+        11.48046875
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 0.9847108959269985,
+        "bootstrap_95_percent_interval": [
+          0.9761787247257704,
+          1.0950568723153966
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 1.010081346929834,
+        "bootstrap_95_percent_interval": [
+          1.005343131230143,
+          1.0584806080819495
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 0.9668901400338529,
+        "bootstrap_95_percent_interval": [
+          0.8188842187790547,
+          1.0057811207436547
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      }
+    }
+  },
+  "instructions": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "da937d997da8cd8f9cacb9cf6805f5faa0bd75c0ad0239570ec6ee9c471061d0",
+        "compiler_sources_sha256": "67b5a6b86ba38be21cf8fcd8108a31219c4edfccea10469a6f043a44e67bdf76",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      },
+      "candidate": {
+        "binary_sha256": "7801e6561fd5edc8bc932d02b21ea56dbe511215fcad3f4c528406c788e5b307",
+        "compiler_sources_sha256": "b0da58cd078ff72ec3c2fc0b29d0b4f702cdb8840e5a255d4d4e4db063381c72",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      }
+    },
+    "status": "complete",
+    "instructions": {
+      "throughput-default": {
+        "previous": [
+          {
+            "instructions": 2494006451,
+            "enabled_ns": 619672098,
+            "running_ns": 619672098
+          },
+          {
+            "instructions": 2494006446,
+            "enabled_ns": 614664510,
+            "running_ns": 614664510
+          },
+          {
+            "instructions": 2494006445,
+            "enabled_ns": 617235620,
+            "running_ns": 617235620
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 2493725677,
+            "enabled_ns": 618560315,
+            "running_ns": 618560315
+          },
+          {
+            "instructions": 2493725675,
+            "enabled_ns": 619059288,
+            "running_ns": 619059288
+          },
+          {
+            "instructions": 2493725664,
+            "enabled_ns": 615206372,
+            "running_ns": 615206372
+          }
+        ]
+      },
+      "throughput-release": {
+        "previous": [
+          {
+            "instructions": 3517681758,
+            "enabled_ns": 802776636,
+            "running_ns": 802776636
+          },
+          {
+            "instructions": 3517681759,
+            "enabled_ns": 805999442,
+            "running_ns": 805999442
+          },
+          {
+            "instructions": 3517681759,
+            "enabled_ns": 803886889,
+            "running_ns": 803886889
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 3517400985,
+            "enabled_ns": 806211889,
+            "running_ns": 806211889
+          },
+          {
+            "instructions": 3517400993,
+            "enabled_ns": 807402059,
+            "running_ns": 807402059
+          },
+          {
+            "instructions": 3517400991,
+            "enabled_ns": 806089043,
+            "running_ns": 806089043
+          }
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          {
+            "instructions": 7223437387,
+            "enabled_ns": 1675361483,
+            "running_ns": 1675361483
+          },
+          {
+            "instructions": 7223437380,
+            "enabled_ns": 1670590914,
+            "running_ns": 1670590914
+          },
+          {
+            "instructions": 7223437385,
+            "enabled_ns": 1674169782,
+            "running_ns": 1674169782
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 7222991620,
+            "enabled_ns": 1674983854,
+            "running_ns": 1674983854
+          },
+          {
+            "instructions": 7222991621,
+            "enabled_ns": 1676237920,
+            "running_ns": 1676237920
+          },
+          {
+            "instructions": 7222991540,
+            "enabled_ns": 1689431679,
+            "running_ns": 1689431679
+          }
+        ]
+      }
+    }
+  }
+}

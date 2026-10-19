@@ -5,6 +5,44 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Profile-guided compiler toolchains (2026-10-19)
+
+The maintained optional host builder now supports `--pgo`, including `--pgo
+--lto`. It snapshots six compiler/native/web training inputs, checks that every
+profile contains the expected accumulated run count, then builds without
+instrumentation. Source mismatches and missing profiles are fatal. Each job is
+sequential, bounded and reaped on failure; the final executable writes no profiles.
+
+The full PGO+LTO host passes **6,078 checks in 146.11 s**. It emits the same
+artifacts as the existing same-source LTO host on all **12 runtime kernels**,
+apart from equal-width compiler paths, and passes fresh boundary/full-size
+checksum checks. Those artifacts also match the earlier native text-case stage
+under its existing path canonicalization. No runtime timings were reused.
+
+Nine rotating matched samples measure **23.7% less CPU time for large default
+builds** versus LTO alone, **13.8% less for Tour**, **14.2% less for Dunes**, and
+**15.9% less for the compiler rebuild**. Release throughput, Netpong native and
+Netpong web intervals versus LTO remain inconclusive despite lower paired
+medians. Against the superseded streaming-PGO prototype, six of seven comparisons
+pass and Netpong remains inconclusive; no comparison establishes a regression.
+The large default-build median is about **185k root lines/CPU-second** on this
+busy machine, below the 250k goal. These are matched workload results, not a
+claim of universal throughput or generated C parity.
+
+The maintained toolchain build took **448 s** (256 s instrumentation build,
+190 s final build) and about **359 MiB** peak child RSS. This is an optional
+release/toolchain build step; ordinary source edits retain the native rebuild
+path. The old `cd07ea34` whole-stage reference remains fixed because earlier
+text-case timing uncertainty is unresolved. [Build provenance, raw pilot,
+full validation and generated-program proof](audits/2026-10-19/host-pgo-lto-pilot.json).
+
+The initial streaming-PGO experiment passed 6,076 checks and showed a strong
+compile-time gain, but review found missing GCC run summaries. It is superseded.
+Explicit registration and GCC's normal dump fixed the summaries and the small
+PGO+LTO crash. The old full stage had twelve passing compilation comparisons,
+fourteen inconclusive runtime comparisons and no definite regression; it was
+not accepted. [Preserved superseded experiment](audits/2026-10-19/host-pgo-stream-experiment.json).
+
 ## Refreshed Sloppy comparison (2026-10-19)
 
 Ten rotating matched samples compare the current Sloppy binary with native and
@@ -51,6 +89,12 @@ validation campaign. No compiler changes from these probes remain.
 [register-array views](audits/2026-10-19/analysis-views-experiment.json), and
 [built-in type resolution](audits/2026-10-19/prune-prefix-experiment.json)
 retain the exact experiments for future work.
+
+The subsequent AST field-order probe removed eight bytes of padding per node
+(104 to 96 bytes), passed 424 quick checks, and kept generated results correct.
+Its seven-pair pilot was mixed (0.985 default, 1.010 release, 0.967 compiler
+rebuild), with less than 0.02% instruction reduction. It is also reverted;
+[patch and measurements](audits/2026-10-19/node-layout-experiment.json) are retained.
 
 ## Optional cross-file compiler-host optimization (2026-10-19)
 

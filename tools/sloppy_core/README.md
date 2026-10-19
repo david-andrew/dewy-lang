@@ -136,8 +136,8 @@ order and retaining independent nested values. Typed empty arrays and generic
 helpers work. Record literals also compose with `[base... field=value]` or
 `[left... right...]`; later entries replace earlier fields, with operands evaluated
 once in source order. Expected record types supply field context, and inferred
-results use ordinary anonymous record shapes. Set spreading and spread call
-arguments remain unsupported.
+results use ordinary anonymous record shapes. Sets also accept spreads from arrays or sets, retaining the first occurrence
+of each member in insertion order. Spread call arguments remain unsupported.
 Record literals such as `[x=20 y=22]` use the expected record type in variables,
 returns, arguments and nested fields, including defaults and optional payloads.
 Without an expected type, their field names and inferred types determine an

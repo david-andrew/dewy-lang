@@ -27,6 +27,35 @@ FLAGS = ['-O2', '-fno-strict-aliasing', '-ffp-contract=off',
          '-Werror=implicit-function-declaration', '-g1']
 
 
+def job_limits():
+    bound = 4 * 1024 ** 3
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    limit = min(bound, hard) if hard != resource.RLIM_INFINITY else bound
+    if soft != resource.RLIM_INFINITY:
+        limit = min(limit, soft)
+    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
+def run_command(command, log: Path, timeout: float, *, env=None, expected_status: int = 0) -> dict:
+    """Bound and reap one compiler or training process and its descendants."""
+    before = time.monotonic()
+    with log.open('w') as stream:
+        child = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
+                                 env=env, preexec_fn=job_limits, start_new_session=True)
+        try:
+            status = child.wait(timeout=timeout)
+            if status != expected_status:
+                raise subprocess.CalledProcessError(status, command)
+        except BaseException:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+            raise
+    return {'command': [str(x) for x in command], 'seconds': time.monotonic() - before}
+
+
 def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False) -> dict:
     """Compile sequentially. Each C job has a time and address-space limit."""
     manifest = json.loads((directory / 'manifest.json').read_text())
@@ -36,34 +65,8 @@ def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False
     flags = [*FLAGS, *(['-flto=1'] if lto else [])]
     version = subprocess.check_output([*cc, '--version'], text=True).splitlines()[0]
 
-    def limits():
-        bound = 4 * 1024 ** 3
-        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        limit = min(bound, hard) if hard != resource.RLIM_INFINITY else bound
-        if soft != resource.RLIM_INFINITY:
-            limit = min(limit, soft)
-        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-
     def run(command, log, timeout):
-        before = time.monotonic()
-        with log.open('w') as stream:
-            # LTO starts compiler descendants. A timeout/interruption must stop
-            # the entire owned job before the next sequential unit starts.
-            child = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
-                                     preexec_fn=limits, start_new_session=True)
-            try:
-                status = child.wait(timeout=timeout)
-                if status:
-                    raise subprocess.CalledProcessError(status, command)
-            except BaseException:
-                try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                child.wait()
-                raise
-        steps.append({'command': [str(x) for x in command],
-                      'seconds': time.monotonic() - before})
+        steps.append(run_command(command, log, timeout))
 
     for name in [*manifest['units'], 'start.S']:
         src = directory / name
@@ -78,7 +81,7 @@ def compile_c(directory: Path, output: Path, cc: list[str], *, lto: bool = False
             'peak_child_rss_kib': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss}
 
 
-def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False) -> Path:
+def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pgo: bool = False) -> Path:
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise ValueError('The optimized compiler-host build currently requires Linux x86-64')
     toolchain = toolchain.resolve(strict=True)
@@ -103,7 +106,18 @@ def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False) ->
         subprocess.run(command, env=env, stdout=stdout, stderr=stderr, check=True, timeout=120)
     translation = translate(ir, work / 'c')
     binary = output / 'bin/dewy-core'
-    result = compile_c(work / 'c', binary, cc, lto=lto)
+    training_hashes = {}
+    if pgo:
+        from tools.sloppy_core.profiled_host import compiler_training, compile_profiled_c
+        commands, training_hashes = compiler_training(output, work)
+        result = compile_profiled_c(work / 'c', binary, cc, commands, env, lto=lto)
+        translation['units'] = json.loads((work / 'c/manifest.json').read_text())['units']
+        current_training = {str(p.relative_to(work)): identity(p)
+                            for p in sorted((work / 'training-examples').rglob('*')) if p.is_file()}
+        if current_training != training_hashes:
+            raise ValueError('Training sources changed during the host build')
+    else:
+        result = compile_c(work / 'c', binary, cc, lto=lto)
     if toolchain_identity(seed) != seed_identity:
         raise ValueError('Native source toolchain changed during the host build')
     provenance = {
@@ -112,8 +126,9 @@ def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False) ->
         'native_seed': seed_identity, 'ir_sha256': identity(ir),
         'export_command': [str(x) for x in command],
         'translation': translation, 'c_build': result,
+        'training_sources_sha256': training_hashes,
         'build_tools_sha256': {name: identity(HERE / name) for name in (
-            'build_optimized_host.py', 'c_host.py', 'c_host_runtime.h', 'c_host_start.S')},
+            'build_optimized_host.py', 'profiled_host.py', 'c_host.py', 'c_host_runtime.h', 'c_host_start.S', 'c_host_profile.c')},
         'generated_sources_sha256': {p.name: identity(p) for p in sorted((work / 'c').iterdir())
                                     if p.suffix in ('.c', '.h', '.S')},
     }
@@ -128,6 +143,7 @@ if __name__ == '__main__':
     cli.add_argument('toolchain', type=Path, help='native bundle built from the current compiler sources')
     cli.add_argument('--output', type=Path, required=True, help='new standalone bundle directory')
     cli.add_argument('--cc', default=os.environ.get('CC', 'gcc'), help='GCC-compatible C compiler command')
+    cli.add_argument('--pgo', action='store_true', help='train GCC on representative builds, then optimize from fresh profiles (one worker)')
     cli.add_argument('--lto', action='store_true', help='also optimize across C units at link time (one worker)')
     args = cli.parse_args()
-    print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto))
+    print(build(args.toolchain, args.output, shlex.split(args.cc), lto=args.lto, pgo=args.pgo))

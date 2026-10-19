@@ -43,6 +43,20 @@ choose a new output directory for each build. Each C job is limited to 4 GiB
 of address space. Timeouts and interruptions stop its compiler descendants.
 This option changes the compiler host, not the application optimization mode.
 
+`--pgo` builds an instrumented GCC host, trains it on a fixed
+set of compiler/native/web application builds, and rebuilds using those fresh
+profiles. The large throughput benchmark, Netpong and Dunes are held out of
+training. Training examples and their relative imports are snapshotted; the
+bundle retains source hashes, commands, logs, profiles and the instrumented
+binary. This requires GCC and its matching `gcov-dump` and takes two sequential
+C builds. The final compiler does not collect profiles.
+
+PGO can be combined with `--lto`. Each training run must contribute complete
+GCC run summaries; source/profile mismatches and missing profiles are fatal.
+It uses GCC's profile correction for inconsistent memory-operation
+frequency counters and normal optimization for functions not exercised by the
+training set. Ordinary native edits/tests still use neither optional build.
+
 `HOST_BUILD.json` records the native source-build provenance, actual optimized
 binary hash, exported IR, generated C, build-tool hashes and GCC commands.
 `host-build/` retains the export, sources and logs. The existing package command
