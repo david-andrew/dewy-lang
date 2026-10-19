@@ -83,6 +83,13 @@ an earlier run. With three or more measured variants, sampling rotates their
 positions as well as reversing direction, so one compiler is not always in the
 middle of each round.
 
+Runtime-to-C ratios also use the median of matched sample ratios, rather than
+dividing separate medians that can move differently as host speed changes.
+`release_kernel_comparisons_to_c` retains their approximate confidence intervals
+against C's 1.0 ratio. The absolute-target summary uses the paired median;
+the C comparison's status describes C parity, separately from stage regressions.
+Unchanged-artifact certificates leave both C ratios and comparisons unmeasured.
+
 The output file is checkpointed after each completed workload, outside timed
 regions. An interrupted run keeps its completed samples with `status: incomplete`
 and no assessment. Only a fully measured run with verified toolchain identities

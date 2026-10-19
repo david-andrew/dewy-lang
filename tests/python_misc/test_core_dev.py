@@ -342,6 +342,32 @@ def test_core_performance_gate_rejects_missing_or_invalid_samples(bad):
         compare_samples([1.0] * 9, bad)
 
 
+def test_core_performance_gate_compares_c_in_matched_rounds():
+    from tools.sloppy_core.performance_gate import assess
+
+    # Separate medians incorrectly suggest 0.55x C; the median paired ratio
+    # is 1.1x. Changes in host speed must not turn a slowdown into C parity.
+    c = [10, 20, 30, 40, 50, 60, 70]
+    candidate = [11, 22, 33, 1000, 55, 6, 7]
+    compilation = {'workloads': {'throughput-default': {'cpu_seconds': {
+        label: [0.1] * 7 for label in ('reference', 'candidate')}}}}
+    samples = {f'{label}-{mode}': [{'kernel_ns': value} for value in candidate]
+               for label in ('reference', 'candidate') for mode in ('default', 'release')}
+    samples['c'] = [{'kernel_ns': value} for value in c]
+    runtime = {'workloads': {'kernel': {'samples': samples}}}
+    result = assess(compilation, runtime, ['reference'], 44005)
+    assert result['no_regression']
+    targets = result['targets']
+    assert targets['release_kernel_ratios_to_c']['kernel'] == pytest.approx(1.1)
+    assert targets['release_kernel_comparisons_to_c']['kernel']['limit'] == 1.0
+    assert targets['all_runtime_targets_measured']
+    assert not targets['at_or_faster_than_c_on_all_kernels']
+    assert not targets['met_on_these_workloads']
+    samples['c'].pop()
+    with pytest.raises(ValueError, match='matched samples'):
+        assess(compilation, runtime, ['reference'], 44005)
+
+
 def test_core_performance_gate_does_not_ratchet_or_claim_absolute_target():
     from tools.sloppy_core.performance_gate import assess
     compilation = {'workloads': {'throughput-default': {'cpu_seconds': {
@@ -654,6 +680,7 @@ def test_core_runtime_certificate_proves_code_without_inventing_timings(runtime_
     assert result['no_regression']
     assert result['comparisons']['runtime/kernel/default/previous']['paired_median_ratio'] is None
     assert result['targets']['release_kernel_ratios_to_c']['kernel'] is None
+    assert result['targets']['release_kernel_comparisons_to_c']['kernel'] is None
     assert not result['targets']['all_runtime_targets_measured']
     assert not result['targets']['met_on_these_workloads']
 

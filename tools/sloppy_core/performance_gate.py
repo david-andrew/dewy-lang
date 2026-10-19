@@ -105,10 +105,13 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
                                                   'paths; all code, layout and other data are byte-identical')
                 comparisons[f'runtime/{name}/{mode}/{reference}'] = comparison
     throughput = lines / statistics.median(compilation['workloads']['throughput-default']['cpu_seconds']['candidate'])
-    c_ratios = {name: (None if workload.get('unchanged_runtime_proof') else
-                      statistics.median(row['kernel_ns'] for row in workload['samples']['candidate-release']) /
-                      statistics.median(row['kernel_ns'] for row in workload['samples']['c']))
-                for name, workload in runtime['workloads'].items()}
+    c_comparisons = {name: (None if workload.get('unchanged_runtime_proof') else
+                           compare_samples([row['kernel_ns'] for row in workload['samples']['c']],
+                                           [row['kernel_ns'] for row in workload['samples']['candidate-release']],
+                                           limit=1.0))
+                     for name, workload in runtime['workloads'].items()}
+    c_ratios = {name: comparison['paired_median_ratio'] if comparison else None
+                for name, comparison in c_comparisons.items()}
     runtime_targets_measured = all(ratio is not None for ratio in c_ratios.values())
     c_parity = runtime_targets_measured and all(ratio <= 1 for ratio in c_ratios.values())
     return {'comparisons': comparisons,
@@ -116,6 +119,7 @@ def assess(compilation: dict, runtime: dict, references: list[str], lines: int,
             'targets': {'fresh_default_root_lines_per_cpu_second': throughput,
                         'compile_goal_lines_per_second': 250000,
                         'release_kernel_ratios_to_c': c_ratios,
+                        'release_kernel_comparisons_to_c': c_comparisons,
                         'all_runtime_targets_measured': runtime_targets_measured,
                         'at_or_faster_than_c_on_all_kernels': c_parity,
                         'met_on_these_workloads': throughput >= 250000 and c_parity},
